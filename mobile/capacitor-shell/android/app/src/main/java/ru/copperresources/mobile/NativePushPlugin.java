@@ -10,6 +10,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import java.lang.ref.WeakReference;
@@ -47,6 +48,10 @@ public class NativePushPlugin extends Plugin {
         String token = storedToken(getContext());
         if (!token.isEmpty()) {
             call.resolve(tokenPayload(token));
+            return;
+        }
+        if (FirebaseApp.getApps(getContext()).isEmpty()) {
+            call.reject("FCM is not configured for this application build");
             return;
         }
         FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {

@@ -29,6 +29,20 @@ test("trip timer formats elapsed time and names the selected destination", () =>
     assert.equal(driverRuntime.tripTimerLabel("СКЛАД 2.1"), "В ПУТИ · СКЛАД 2.1");
 });
 
+test("confirmed manual trip takes its current destination from the fresh server fragment", () => {
+    const projected = driverRuntime.serverTripProjectionContext({
+        dataset: {
+            driverActualDumpPointId: "72",
+            driverActualDumpPointName: "СКЛАД 2.1"
+        }
+    }, {
+        dump_points: [{id: 72, name: "СКЛАД 2.1"}]
+    });
+    assert.equal(projected.payload.dump_point_id, 72);
+    assert.equal(projected.context_snapshot.selected_dump_point_id, 72);
+    assert.equal(projected.context_snapshot.selected_dump_point_name, "СКЛАД 2.1");
+});
+
 test("manual point action distinguishes the next trip from a current trip", () => {
     assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "false", driverActiveTripId: ""}}), "next");
     assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "true", driverActiveTripId: "451"}}), "current");
@@ -157,6 +171,28 @@ test("Driver dump cards keep a three-column matrix and only show name plus trip 
     assert.match(driverCss, /\.is-name-long/);
     assert.equal(driverRuntime.dumpNameSizeClass("ККД"), "is-name-short");
     assert.equal(driverRuntime.dumpNameSizeClass("СКЛАД 2.1 основной север"), "is-name-long");
+});
+
+test("server-assigned dump points never inherit the one-off marker", () => {
+    const classes = new Set(["is-driver-manual-one-off"]);
+    const target = {
+        dataset: {driverManualOneOff: "true"},
+        classList: {
+            toggle(name, enabled) {
+                if (enabled) classes.add(name);
+                else classes.delete(name);
+            }
+        }
+    };
+    driverRuntime.setManualTargetOneOff(target, false);
+    assert.equal(classes.has("is-driver-manual-one-off"), false);
+    assert.equal(Object.hasOwn(target.dataset, "driverManualOneOff"), false);
+    driverRuntime.setManualTargetOneOff(target, true);
+    assert.equal(classes.has("is-driver-manual-one-off"), true);
+    assert.equal(target.dataset.driverManualOneOff, "true");
+
+    const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.match(source, /createManualDumpTarget\([\s\S]*?prototype,\s*point\.one_off === true\s*\)/);
 });
 
 test("Driver opens from the existing manual corner and preserves bottom navigation", () => {

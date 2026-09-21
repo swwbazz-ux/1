@@ -71,6 +71,8 @@ test("Native push keeps a durable token and reports only the field-app identity 
   assert.match(plugin, /@CapacitorPlugin\(name = "NativePush"\)/);
   assert.match(plugin, /getSharedPreferences\(PREFS_NAME, Context\.MODE_PRIVATE\)/);
   assert.match(plugin, /notifyListeners\("pushToken", tokenPayload\(normalizedToken\), true\)/);
+  assert.match(plugin, /FirebaseApp\.getApps\(getContext\(\)\)\.isEmpty\(\)/);
+  assert.match(plugin, /call\.reject\("FCM is not configured for this application build"\)/);
   assert.match(plugin, /\.put\("provider", "fcm"\)/);
   assert.match(plugin, /\.put\("platform", "android"\)/);
   assert.match(plugin, /\.put\("appId", BuildConfig\.APPLICATION_ID\)/);

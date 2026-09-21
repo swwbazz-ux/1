@@ -222,6 +222,23 @@
         return String(point && point.name || snapshot.selected_dump_point_name || "");
     }
 
+    function serverTripProjectionContext(shell, context) {
+        context = clone(context || {});
+        var pointId = positive(shell && shell.dataset && shell.dataset.driverActualDumpPointId)
+            || positive(context.selected_dump_point_id);
+        var pointName = String(
+            shell && shell.dataset && shell.dataset.driverActualDumpPointName
+            || context.selected_dump_point_name
+            || ""
+        );
+        if (pointId) context.selected_dump_point_id = pointId;
+        if (pointName) context.selected_dump_point_name = pointName;
+        return {
+            context_snapshot: context,
+            payload: {dump_point_id: pointId}
+        };
+    }
+
     function renderProjection(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
@@ -252,6 +269,7 @@
         }
         if (serverOrigin === "driver_manual" && serverTripId) {
             var serverContext = readWorkspaceContext();
+            var serverProjectionContext = serverTripProjectionContext(shell, serverContext);
             currentTripProjection = {
                 state: "confirmed",
                 event_id: String(serverContext.event_id || ""),
@@ -259,10 +277,8 @@
                 local_trip_id: receipt && receipt.local_trip_id || String(serverContext.local_trip_id || ""),
                 can_depend_on_prior: !!receipt,
                 occurred_at: serverLoadedAt || serverContext.active_trip_loaded_at,
-                payload: {
-                    dump_point_id: positive(serverContext.selected_dump_point_id)
-                },
-                context_snapshot: serverContext
+                payload: serverProjectionContext.payload,
+                context_snapshot: serverProjectionContext.context_snapshot
             };
             startTripTimer(workspace, projectionPointName(currentTripProjection), Date.parse(currentTripProjection.occurred_at));
             setSourceLocked(workspace, false);
@@ -398,7 +414,18 @@
         return target;
     }
 
-    function createManualDumpTarget(doc, pointId, pointName, prototype) {
+    function setManualTargetOneOff(target, isOneOff) {
+        isOneOff = isOneOff === true;
+        target.classList.toggle("is-driver-manual-one-off", isOneOff);
+        if (isOneOff) {
+            target.dataset.driverManualOneOff = "true";
+        } else {
+            delete target.dataset.driverManualOneOff;
+        }
+        return target;
+    }
+
+    function createManualDumpTarget(doc, pointId, pointName, prototype, isOneOff) {
         var target = prototype ? prototype.cloneNode(true) : doc.createElement("button");
         if (!prototype) {
             target.type = "button";
@@ -406,7 +433,7 @@
             target.innerHTML = '<span class="eo-dashboard-unload-top"><strong></strong><small aria-label="Рейсов: 0">0</small></span>';
         }
         target.classList.remove("is-last-dump", "status-green", "status-red");
-        target.classList.add("status-yellow", "is-driver-manual-one-off");
+        target.classList.add("status-yellow");
         applyDumpNameSize(target, pointName);
         target.removeAttribute("aria-current");
         target.dataset.eoDumpTarget = String(pointId);
@@ -414,7 +441,7 @@
         target.dataset.eoDumpDistance = "";
         target.dataset.eoHasPendingTrucks = "false";
         target.dataset.driverManualDumpTarget = "";
-        target.dataset.driverManualOneOff = "true";
+        setManualTargetOneOff(target, isOneOff !== false);
         target.dataset.driverManualCompletedCount = "0";
         target.dataset.driverManualLastSent = "false";
         target.setAttribute("aria-label", String(pointName || "") + ": рейсов 0");
@@ -463,9 +490,9 @@
                     workspace.ownerDocument || root.document,
                     point.id,
                     point.name,
-                    prototype
+                    prototype,
+                    point.one_off === true
                 );
-                target.classList.remove("is-driver-manual-one-off");
                 target.dataset.eoDumpDistance = String(point.transport_distance_km || "");
                 grid.appendChild(target);
             });
@@ -958,6 +985,8 @@
         closePointChooser: closePointChooser,
         selectManualPoint: selectManualPoint,
         createManualDumpTarget: createManualDumpTarget,
+        setManualTargetOneOff: setManualTargetOneOff,
+        serverTripProjectionContext: serverTripProjectionContext,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
         tripTimerLabel: tripTimerLabel,
