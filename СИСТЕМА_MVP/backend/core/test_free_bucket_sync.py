@@ -1634,7 +1634,6 @@ class FreeBucketPostgreSQLConcurrencyTests(TransactionTestCase):
     """The two-device acceptance race needs real PostgreSQL row locks."""
 
     reset_sequences = True
-    serialized_rollback = True
     create_registered_driver_shift = (
         trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
     )

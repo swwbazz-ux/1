@@ -794,7 +794,9 @@ def mining_master_move_excavator_view(request):
         return JsonResponse(repeated_response)
     lock_production_state()
     excavator = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type', 'model'),
+        Equipment.objects
+        .select_for_update(of=('self',))
+        .select_related('equipment_type', 'model'),
         id=payload.get('excavator_id'),
         equipment_type__name='Экскаватор',
         is_active=True,
@@ -900,7 +902,9 @@ def mining_master_assign_truck_view(request):
 
     if action == 'release_complex':
         excavator = get_object_or_404(
-            Equipment.objects.select_for_update().select_related('equipment_type', 'model'),
+            Equipment.objects
+            .select_for_update(of=('self',))
+            .select_related('equipment_type', 'model'),
             id=payload.get('excavator_id'),
             equipment_type__name='Экскаватор',
             is_active=True,

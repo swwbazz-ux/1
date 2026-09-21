@@ -5,6 +5,14 @@ from django.db import migrations, models
 EXTERNAL_TYPES = ('CONTRACTOR', 'BUSINESS_TRIP', 'EXTERNAL_OTHER')
 
 
+def flush_deferred_constraints(apps, schema_editor):
+    """Keep PostgreSQL DDL clear of pending FK trigger events."""
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute('SET CONSTRAINTS ALL IMMEDIATE')
+
+
 def _effective_end(row):
     values = [value for value in (row.ends_at, row.terminated_at) if value is not None]
     return min(values) if values else None
@@ -188,7 +196,15 @@ class Migration(migrations.Migration):
                 verbose_name='Сотрудник',
             ),
         ),
+        migrations.RunPython(
+            flush_deferred_constraints,
+            flush_deferred_constraints,
+        ),
         migrations.RunPython(forwards, backwards),
+        migrations.RunPython(
+            flush_deferred_constraints,
+            flush_deferred_constraints,
+        ),
         migrations.AlterField(
             model_name='employeebedoccupancy',
             name='resident',

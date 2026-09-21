@@ -48,6 +48,14 @@
     {
       "name": "settlement",
       "tests": "settlement.tests.SettlementMutualRelocationConcurrencyTests settlement.test_control.SettlementControlConcurrencyTests"
+    },
+    {
+      "name": "cross-database-contracts",
+      "tests": "assignments.tests.MiningMasterAssignmentsViewTests.test_mining_master_json_move_excavator_active_creates_placement assignments.tests.MiningMasterAssignmentsViewTests.test_mining_master_json_move_excavator_inactive_disbands_complex assignments.tests.MiningMasterAssignmentsViewTests.test_mining_master_json_release_complex_keeps_excavator_active reports.test_driver_rating_assignment_groups.DriverRatingAssignmentGroupTests reports.test_rating_tv_assignment_data.DriverRatingTvAssignmentDataTests rotations.test_arrival_roster_routing.ArrivalRosterRoutingCommandTests.test_routes_all_five_variants_and_creates_one_complete_batch_atomically settlement.test_arrival_roster_cohort_auto_integration.ArrivalRosterCohortAutoIntegrationTests settlement.tests.M8SettlementApplyTests.test_historical_whole_run_application_is_returned_without_rewrite"
+    },
+    {
+      "name": "migration-portability",
+      "tests": "settlement.tests.EmployeeBedOccupancyCanonicalIntervalMigrationTests settlement.tests.ResidentSubjectTransitionMigrationTests settlement.tests.M5ShiftSourceMigrationTests"
     }
   ]
 }
