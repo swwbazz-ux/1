@@ -14,11 +14,18 @@ from assignments.models import (
     ExcavatorDumpPointSetting,
     ExcavatorPlacement,
     HaulAssignment,
+    HaulAssignmentAction,
 )
 from core.models import OfflineFieldEvent, OfflineFieldEventConflict
 from downtimes.models import DowntimeEvent, DowntimeReason
 from trips import tests as trip_fixtures
-from trips.models import Trip, TripClientAction, TripStatus
+from trips.models import (
+    FreeBucketAcceptance,
+    FreeBucketAcceptanceStatus,
+    Trip,
+    TripClientAction,
+    TripStatus,
+)
 from trips.views import finalize_trip_unloaded
 from references.models import DumpPoint
 
@@ -174,6 +181,45 @@ class OfflineEventSyncTests(TestCase):
         event.update(changes)
         return event
 
+    def driver_free_bucket_manual_event(
+        self,
+        event_id='driver-free-bucket-manual-load-1',
+        sequence=1,
+        *,
+        requested_by=None,
+        requesting_shift=None,
+        accepted_at=None,
+        occurred_at=None,
+    ):
+        from trips.free_bucket import canonical_free_bucket_work_context_snapshot
+
+        event = self.driver_manual_event(
+            event_id,
+            sequence,
+            occurred_at=occurred_at or timezone.now(),
+        )
+        accepted_at = accepted_at or (
+            timezone.datetime.fromisoformat(event['occurred_at']) - timedelta(seconds=1)
+        )
+        acceptance = FreeBucketAcceptance.objects.create(
+            client_acceptance_id=f'acceptance-{event_id}',
+            truck=self.truck,
+            excavator=self.excavator,
+            operator=self.operator,
+            loading_shift=self.shift,
+            requested_by=requested_by,
+            requesting_shift=requesting_shift,
+            status=FreeBucketAcceptanceStatus.ACCEPTED,
+            occurred_at=accepted_at,
+            accepted_at=accepted_at,
+            work_context_snapshot=canonical_free_bucket_work_context_snapshot(self.excavator),
+        )
+        event['context_snapshot']['authority_type'] = 'free_bucket'
+        event['context_snapshot']['free_bucket_acceptance_id'] = acceptance.id
+        event['payload']['assignment_id'] = None
+        event['payload']['free_bucket_acceptance_id'] = acceptance.id
+        return event, acceptance
+
     def test_driver_manual_load_is_durable_deduplicated_and_truthfully_attributed(self):
         event = self.driver_manual_event()
         first = self.sync([event], client=self.driver_client(), role_code='driver').json()['results'][0]
@@ -246,10 +292,234 @@ class OfflineEventSyncTests(TestCase):
         trip = Trip.objects.get()
         self.assertEqual(automatic_result['server_ids']['trip_id'], trip.id)
         self.assertEqual(manual_result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(trip.driver_id, self.driver.id)
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+        self.assertTrue(trip.driver_participation_recorded)
         self.assertEqual(
             set(TripClientAction.objects.filter(trip=trip).values_list('action_type', flat=True)),
             {'driver_manual_loaded', 'truck_loaded'},
         )
+
+    def test_late_driver_manual_load_links_completed_excavator_trip(self):
+        occurred_at = timezone.now() - timedelta(minutes=5)
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=occurred_at - timedelta(minutes=1))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(
+            assigned_at=occurred_at - timedelta(minutes=1),
+        )
+        self.shift.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assignment.refresh_from_db()
+        automatic = self.load_event(
+            'excavator-completed-before-driver',
+            1,
+            occurred_at=occurred_at,
+        )
+        automatic_result = self.sync(
+            [automatic], device_id='excavator-completed-device',
+        ).json()['results'][0]
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        trip = Trip.objects.get(pk=automatic_result['server_ids']['trip_id'])
+        automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
+        completed_at = automatic_at + timedelta(minutes=2)
+        self.assertTrue(finalize_trip_unloaded(
+            trip,
+            driver=self.driver,
+            unloading_shift=self.truck_shift,
+            occurred_at=completed_at,
+        ))
+
+        manual = self.driver_manual_event(
+            'driver-arrived-after-completed-trip',
+            1,
+            occurred_at=automatic_at + timedelta(seconds=1),
+        )
+        result = self.sync(
+            [manual],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-late-completed-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['trip_origin'], 'excavator')
+        self.assertEqual(result['server_ids']['trip_id'], trip.id)
+        self.assertEqual(Trip.objects.count(), 1)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.completed_at, completed_at)
+        self.assertTrue(TripClientAction.objects.filter(
+            trip=trip,
+            action_type='driver_manual_loaded',
+            client_action_id=manual['event_id'],
+        ).exists())
+
+    def test_excavator_first_merge_requires_same_assignment_identity(self):
+        automatic = self.load_event('excavator-assignment-a', 1)
+        automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
+        automatic_result = self.sync(
+            [automatic], device_id='excavator-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+
+        switched_at = automatic_at + timedelta(seconds=1)
+        self.assignment.ended_at = switched_at
+        self.assignment.save(update_fields=['ended_at'])
+        replacement = HaulAssignment.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            assigned_by=self.operator,
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=switched_at,
+        )
+        HaulAssignment.objects.filter(pk=replacement.pk).update(assigned_at=switched_at)
+        replacement.refresh_from_db()
+
+        manual = self.driver_manual_event(
+            'driver-assignment-b',
+            1,
+            occurred_at=switched_at + timedelta(seconds=1),
+        )
+        manual['payload']['assignment_id'] = replacement.id
+        manual['context_snapshot']['assignment_id'] = replacement.id
+        result = self.sync(
+            [manual],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-assignment-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'open_trip_changed')
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertFalse(TripClientAction.objects.filter(
+            action_type='driver_manual_loaded',
+            client_action_id=manual['event_id'],
+        ).exists())
+
+    def test_old_excavator_event_cannot_attach_to_newer_driver_cycle(self):
+        occurred_at = timezone.now() - timedelta(minutes=5)
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=occurred_at - timedelta(minutes=1))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(
+            assigned_at=occurred_at - timedelta(minutes=1),
+        )
+        self.shift.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assignment.refresh_from_db()
+        first_automatic = self.load_event(
+            'excavator-cycle-one',
+            1,
+            occurred_at=occurred_at,
+        )
+        first_at = timezone.datetime.fromisoformat(first_automatic['occurred_at'])
+        first_result = self.sync(
+            [first_automatic], device_id='excavator-cycle-one-device',
+        ).json()['results'][0]
+        self.assertEqual(first_result['status'], 'accepted', first_result)
+        first_trip = Trip.objects.get(pk=first_result['server_ids']['trip_id'])
+        completed_at = first_at + timedelta(minutes=2)
+        self.assertTrue(finalize_trip_unloaded(
+            first_trip,
+            driver=self.driver,
+            unloading_shift=self.truck_shift,
+            occurred_at=completed_at,
+        ))
+
+        manual = self.driver_manual_event(
+            'driver-cycle-two',
+            1,
+            occurred_at=completed_at + timedelta(seconds=1),
+        )
+        manual_result = self.sync(
+            [manual],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-cycle-two-device',
+        ).json()['results'][0]
+        self.assertEqual(manual_result['status'], 'accepted', manual_result)
+        second_trip = Trip.objects.get(pk=manual_result['server_ids']['trip_id'])
+        second_loaded_at = second_trip.loaded_at
+
+        delayed_old = self.load_event(
+            'excavator-old-event-after-new-cycle',
+            1,
+            occurred_at=first_at + timedelta(seconds=1),
+        )
+        delayed_result = self.sync(
+            [delayed_old], device_id='excavator-delayed-old-device',
+        ).json()['results'][0]
+
+        self.assertEqual(delayed_result['status'], 'conflict', delayed_result)
+        self.assertEqual(delayed_result['code'], 'open_trip_changed')
+        self.assertEqual(Trip.objects.count(), 2)
+        second_trip.refresh_from_db()
+        self.assertEqual(second_trip.loaded_at, second_loaded_at)
+        self.assertFalse(TripClientAction.objects.filter(
+            trip=second_trip,
+            action_type='truck_loaded',
+            client_action_id=delayed_old['event_id'],
+        ).exists())
+
+    def test_operator_first_free_bucket_binds_current_driver_on_manual_load(self):
+        event, acceptance = self.driver_free_bucket_manual_event()
+        result = self.sync(
+            [event],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-free-bucket-bind-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.requested_by_id, self.driver.id)
+        self.assertEqual(acceptance.requesting_shift_id, self.truck_shift.id)
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_driver_cannot_consume_free_bucket_owned_by_another_shift(self):
+        event, acceptance = self.driver_free_bucket_manual_event(
+            event_id='driver-free-bucket-foreign-owner',
+            requested_by=self.operator,
+            requesting_shift=self.shift,
+        )
+        result = self.sync(
+            [event],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-free-bucket-owner-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'free_bucket_request_owner_changed')
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertIsNone(acceptance.used_trip_id)
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_driver_free_bucket_load_cannot_predate_acceptance(self):
+        event_at = timezone.now()
+        event, acceptance = self.driver_free_bucket_manual_event(
+            event_id='driver-free-bucket-before-accept',
+            occurred_at=event_at,
+            accepted_at=event_at + timedelta(seconds=1),
+        )
+        result = self.sync(
+            [event],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-free-bucket-time-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'free_bucket_load_before_accept')
+        acceptance.refresh_from_db()
+        self.assertIsNone(acceptance.requested_by_id)
+        self.assertIsNone(acceptance.requesting_shift_id)
+        self.assertEqual(Trip.objects.count(), 0)
 
     def test_driver_manual_load_rejects_changed_context_without_creating_trip(self):
         event = self.driver_manual_event()
@@ -1352,6 +1622,11 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         )
         self.url = reverse('offline_events_sync')
         self.session_cookie = self.client.cookies['sessionid'].value
+        driver_client = Client()
+        driver_session = driver_client.session
+        driver_session['employee_access_id'] = self.driver_access.id
+        driver_session.save()
+        self.driver_session_cookie = driver_client.cookies['sessionid'].value
 
     def event(self, event_id, sequence):
         return {
@@ -1370,18 +1645,31 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
                 'dump_point_id': self.dump_point.id,
                 'rock_type_id': self.rock.id,
                 'manual_control': True,
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'transport_distance_km': '4.20',
             },
         }
 
-    def post_from_thread(self, event, device_id):
+    def driver_event(self, event_id, sequence):
+        return OfflineEventSyncTests.driver_manual_event(self, event_id, sequence)
+
+    def post_from_thread(
+        self,
+        event,
+        device_id,
+        *,
+        role_code='excavator_operator',
+        session_cookie=None,
+    ):
         close_old_connections()
         client = Client()
-        client.cookies['sessionid'] = self.session_cookie
+        client.cookies['sessionid'] = session_cookie or self.session_cookie
         response = client.post(
             self.url,
             data=json.dumps({
                 'protocol_version': 1,
-                'role_code': 'excavator_operator',
+                'role_code': role_code,
                 'device_id': device_id,
                 'events': [event],
             }),
@@ -1406,6 +1694,92 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(Trip.objects.count(), 1)
         self.assertEqual(OfflineFieldEvent.objects.count(), 1)
         self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+
+    def test_same_driver_manual_event_parallel_requests_create_one_trip(self):
+        event = self.driver_event('parallel-driver-same-event', 1)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda _: self.post_from_thread(
+                    event,
+                    'parallel-driver-device-001',
+                    role_code='driver',
+                    session_cookie=self.driver_session_cookie,
+                ),
+                range(2),
+            ))
+
+        self.assertEqual([item[0] for item in results], [200, 200])
+        self.assertEqual(
+            sorted(item[1]['status'] for item in results),
+            ['accepted', 'deduplicated'],
+        )
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(OfflineFieldEvent.objects.count(), 1)
+        self.assertEqual(
+            TripClientAction.objects.filter(
+                trip=trip,
+                action_type='driver_manual_loaded',
+            ).count(),
+            1,
+        )
+
+    def test_driver_and_excavator_parallel_loads_converge_to_one_trip(self):
+        driver_event = self.driver_event('parallel-driver-load', 1)
+        excavator_event = self.event('parallel-excavator-load', 1)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    self.post_from_thread,
+                    driver_event,
+                    'parallel-driver-device-002',
+                    role_code='driver',
+                    session_cookie=self.driver_session_cookie,
+                ),
+                pool.submit(
+                    self.post_from_thread,
+                    excavator_event,
+                    'parallel-excavator-device-002',
+                ),
+            ]
+            results = [future.result() for future in futures]
+
+        trip = Trip.objects.get()
+        diagnostic = {
+            'results': results,
+            'trip': {
+                'excavator_id': trip.excavator_id,
+                'truck_id': trip.truck_id,
+                'dump_point_id': trip.dump_point_id,
+                'rock_type_id': trip.rock_type_id,
+                'loading_horizon': trip.loading_horizon,
+                'loading_block': trip.loading_block,
+                'free_bucket_acceptance_id': getattr(trip, 'free_bucket_acceptance_id', None),
+            },
+            'driver_payload': driver_event['payload'],
+        }
+        self.assertEqual([item[0] for item in results], [200, 200], results)
+        self.assertEqual(
+            [item[1]['status'] for item in results],
+            ['accepted', 'accepted'],
+            diagnostic,
+        )
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(
+            {item[1]['server_ids']['trip_id'] for item in results},
+            {trip.id},
+        )
+        self.assertEqual(
+            set(TripClientAction.objects.filter(trip=trip).values_list('action_type', flat=True)),
+            {'driver_manual_loaded', 'truck_loaded'},
+        )
+        self.assertEqual(
+            set(OfflineFieldEvent.objects.filter(trip=trip).values_list('event_type', flat=True)),
+            {'driver.trip.loaded', 'excavator.trip.loaded'},
+        )
+        self.assertEqual(trip.driver_id, self.driver.id)
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+        self.assertTrue(trip.driver_participation_recorded)
 
     def test_two_devices_racing_for_truck_do_not_create_two_open_trips(self):
         events = [

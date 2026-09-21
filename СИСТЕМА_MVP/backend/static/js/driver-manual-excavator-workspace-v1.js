@@ -9,6 +9,7 @@
     var savingLocal = false;
     var workspaceRequestedOpen = false;
     var workspacePreferenceKnown = false;
+    var automaticTripRefreshKey = "";
 
     function clone(value) {
         return JSON.parse(JSON.stringify(value));
@@ -239,6 +240,21 @@
         };
     }
 
+    function requestAutomaticTripRefresh(receipt) {
+        var tripId = positive(receipt && receipt.server_ids && receipt.server_ids.trip_id);
+        var eventId = String(receipt && receipt.event_id || "");
+        var refreshKey = tripId ? "trip:" + tripId : (eventId ? "event:" + eventId : "");
+        if (!refreshKey || refreshKey === automaticTripRefreshKey) return false;
+        if (!root.AppRealtime || typeof root.AppRealtime.requestReconcile !== "function") return false;
+        var requested = root.AppRealtime.requestReconcile(
+            "driver_manual_automatic_trip_confirmed",
+            Number(receipt && receipt.version || 0)
+        );
+        if (requested === false) return false;
+        automaticTripRefreshKey = refreshKey;
+        return true;
+    }
+
     function renderProjection(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
@@ -290,6 +306,7 @@
             stopTripTimer(workspace);
             setSourceLocked(workspace, true);
             closeWorkspace(workspace, {preserveRequest: false});
+            requestAutomaticTripRefresh(receipt);
             return {state: "automatic", tripId: positive(receipt.server_ids && receipt.server_ids.trip_id)};
         }
         if (!projected && receipt && receipt.trip_origin === "driver_manual") {
@@ -987,6 +1004,7 @@
         createManualDumpTarget: createManualDumpTarget,
         setManualTargetOneOff: setManualTargetOneOff,
         serverTripProjectionContext: serverTripProjectionContext,
+        requestAutomaticTripRefresh: requestAutomaticTripRefresh,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
         tripTimerLabel: tripTimerLabel,

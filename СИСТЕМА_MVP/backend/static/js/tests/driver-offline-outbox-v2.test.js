@@ -94,6 +94,7 @@ test("manual trip confirmation survives restart with the server mapping", async 
         server_received_at: "2026-09-21T01:02:05.000Z",
         server_ids: {trip_id: 451, shift_id: 23},
         trip_origin: "driver_manual",
+        version: 812,
     }))});
     const first = runtime({local, send});
     await first.enqueue(manualLoad());
@@ -103,6 +104,7 @@ test("manual trip confirmation survives restart with the server mapping", async 
     assert.equal(receipt.event_id, "manual-load-1");
     assert.equal(receipt.server_ids.trip_id, 451);
     assert.equal(receipt.trip_origin, "driver_manual");
+    assert.equal(receipt.version, 812);
     assert.equal((await restarted.pending()).length, 0);
 });
 

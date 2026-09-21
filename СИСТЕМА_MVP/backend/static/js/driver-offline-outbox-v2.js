@@ -611,7 +611,8 @@
                             payload: clone(event.payload || {}),
                             context_snapshot: clone(event.context_snapshot || {}),
                             server_ids: clone(result.server_ids || null),
-                            trip_origin: String(result.trip_origin || "driver_manual")
+                            trip_origin: String(result.trip_origin || "driver_manual"),
+                            version: number(result.server_version || result.version)
                         });
                     }
                     if (manualReceiptKey && event.event_type === "driver.trip.unloaded") {

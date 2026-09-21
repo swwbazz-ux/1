@@ -432,9 +432,11 @@ def _process_free_bucket_loaded(access, normalized):
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
     from trips.views import notify_driver_truck_loaded, reconcile_excavator_waiting_for_trucks
 
-    shift = _locked_shift(access, normalized, role_code='excavator_operator')
     payload = normalized['payload']
     truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
+    excavator_id = _positive_int(normalized.get('equipment_id'), field='equipment_id')
+    lock_idempotency_key('trip_load_pair', f'{excavator_id}:{truck_id}')
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
     lock_production_state()
     excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
     acceptance = _resolve_free_bucket_acceptance(access, normalized)
@@ -901,6 +903,78 @@ def _manual_load_matches_trip(trip, payload, *, acceptance=None):
     return trip_acceptance_id is None
 
 
+def _trip_terminal_changed_between(truck_id, *, after, through):
+    """Return whether another trip cycle ended inside the supplied interval."""
+    from trips.models import Trip
+
+    if not after or not through or through <= after:
+        return False
+    return Trip.objects.select_for_update(of=('self',)).filter(truck_id=truck_id).filter(
+        Q(completed_at__gt=after, completed_at__lte=through)
+        | Q(cancelled_at__gt=after, cancelled_at__lte=through)
+        | Q(operationally_closed_at__gt=after, operationally_closed_at__lte=through)
+    ).exists()
+
+
+def _automatic_load_receipt(trip, *, acceptance=None):
+    expected_type = (
+        'excavator.free_bucket.loaded'
+        if acceptance is not None
+        else 'excavator.trip.loaded'
+    )
+    return (
+        OfflineFieldEvent.objects.select_for_update(of=('self',))
+        .filter(
+            trip=trip,
+            event_type=expected_type,
+            status=OfflineFieldEventStatus.ACCEPTED,
+        )
+        .order_by('sequence', 'id')
+        .first()
+    )
+
+
+def _automatic_load_authority_matches(receipt, *, assignment=None, acceptance=None):
+    if acceptance is not None:
+        return bool(receipt)
+    if not receipt or assignment is None:
+        return False
+    return str((receipt.payload or {}).get('assignment_id') or '') == str(assignment.id)
+
+
+def _claim_trip_for_driver_manual_event(trip, *, access, shift, event_id):
+    from trips.models import TripClientAction
+
+    if trip.driver_id not in (None, access.employee_id):
+        _conflict(
+            'driver_manual_owner_changed',
+            'Рейс уже относится к другому водителю.',
+        )
+    if trip.driver_control_shift_id not in (None, shift.id):
+        _conflict(
+            'driver_manual_shift_changed',
+            'Рейс уже относится к другой смене водителя.',
+        )
+    driver_fields = []
+    if trip.driver_id is None:
+        trip.driver = access.employee
+        driver_fields.append('driver')
+    if trip.driver_control_shift_id is None:
+        trip.driver_control_shift = shift
+        driver_fields.append('driver_control_shift')
+    if not trip.driver_participation_recorded:
+        trip.driver_participation_recorded = True
+        driver_fields.append('driver_participation_recorded')
+    if driver_fields:
+        trip.save(update_fields=driver_fields)
+    TripClientAction.objects.create(
+        action_type='driver_manual_loaded',
+        client_action_id=event_id,
+        trip=trip,
+        actor=access.employee,
+    )
+
+
 def _driver_manual_primary_context(*, excavator, payload, context_snapshot):
     from references.models import DumpPoint
     from trips.free_bucket import canonical_free_bucket_work_context_snapshot
@@ -967,10 +1041,11 @@ def _process_driver_loaded(access, normalized):
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
     from trips.views import finalize_trip_unloaded
 
-    shift = _locked_shift(access, normalized, role_code='driver')
     payload = normalized['payload']
     truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
     excavator_id = _positive_int(payload.get('excavator_id'), field='excavator_id')
+    lock_idempotency_key('trip_load_pair', f'{excavator_id}:{truck_id}')
+    shift = _locked_shift(access, normalized, role_code='driver')
     if truck_id != shift.equipment_id:
         _conflict('driver_manual_truck_changed', 'Самосвал не принадлежит текущей смене водителя.')
     if payload.get('manual_control') is not True:
@@ -1031,6 +1106,31 @@ def _process_driver_loaded(access, normalized):
         acceptance = _resolve_free_bucket_acceptance(access, normalized)
         if acceptance.truck_id != truck.id or acceptance.excavator_id != excavator.id:
             _conflict('free_bucket_context_changed', 'Свободный ковш относится к другой технике.')
+        owner_fields_mixed = bool(acceptance.requested_by_id) != bool(acceptance.requesting_shift_id)
+        if owner_fields_mixed:
+            _conflict(
+                'free_bucket_request_owner_changed',
+                'В запросе свободного ковша нарушена связь со сменой водителя.',
+            )
+        if acceptance.requested_by_id and (
+            acceptance.requested_by_id != access.employee_id
+            or acceptance.requesting_shift_id != shift.id
+        ):
+            _conflict(
+                'free_bucket_request_owner_changed',
+                'Запрос свободного ковша принадлежит другой смене водителя.',
+            )
+        if not acceptance.accepted_at:
+            _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
+        if normalized['occurred_at'] < acceptance.accepted_at:
+            _conflict(
+                'free_bucket_load_before_accept',
+                'Время ручной отправки раньше согласования свободного ковша.',
+            )
+        if not acceptance.requested_by_id:
+            acceptance.requested_by = access.employee
+            acceptance.requesting_shift = shift
+            acceptance.save(update_fields=['requested_by', 'requesting_shift'])
         if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
             _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
         if acceptance.status not in (
@@ -1060,7 +1160,7 @@ def _process_driver_loaded(access, normalized):
         _conflict('equipment_downtime_active', 'Ручная отправка невозможна: открыт блокирующий простой.')
 
     open_trip = (
-        Trip.objects.select_for_update()
+        Trip.objects.select_for_update(of=('self',))
         .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
         .select_related('free_bucket_acceptance')
         .first()
@@ -1074,6 +1174,20 @@ def _process_driver_loaded(access, normalized):
             trip=open_trip,
             action_type__in=['truck_loaded', 'free_bucket_loaded'],
         ).exists()
+        automatic_receipt = _automatic_load_receipt(open_trip, acceptance=acceptance)
+        same_cycle = bool(
+            automatic_receipt
+            and not _trip_terminal_changed_between(
+                truck.id,
+                after=min(normalized['occurred_at'], automatic_receipt.occurred_at),
+                through=max(normalized['occurred_at'], automatic_receipt.occurred_at),
+            )
+        )
+        authority_matches = _automatic_load_authority_matches(
+            automatic_receipt,
+            assignment=assignment,
+            acceptance=acceptance,
+        )
         if existing_manual and not automatic:
             previous_loaded_at = open_trip.loaded_at or open_trip.created_at
             if normalized['occurred_at'] <= previous_loaded_at:
@@ -1095,14 +1209,19 @@ def _process_driver_loaded(access, normalized):
                 actor=access.employee,
             )
             open_trip = None
-        elif not automatic or not _manual_load_matches_trip(open_trip, payload, acceptance=acceptance):
+        elif (
+            not automatic
+            or not same_cycle
+            or not authority_matches
+            or not _manual_load_matches_trip(open_trip, payload, acceptance=acceptance)
+        ):
             _conflict('open_trip_changed', 'У самосвала уже есть другой незавершённый рейс.')
         if open_trip:
-            TripClientAction.objects.create(
-                action_type='driver_manual_loaded',
-                client_action_id=normalized['event_id'],
-                trip=open_trip,
-                actor=access.employee,
+            _claim_trip_for_driver_manual_event(
+                open_trip,
+                access=access,
+                shift=shift,
+                event_id=normalized['event_id'],
             )
             state = bump_operational_state(
                 'OfflineFieldEvent:driver_manual_linked', event_type='trip_changed',
@@ -1115,6 +1234,69 @@ def _process_driver_loaded(access, normalized):
                 'trip_origin': 'excavator',
                 'version': state.version,
             }, {'trip': open_trip, 'shift': shift, 'equipment': truck}
+
+    terminal_candidates = list(
+        Trip.objects.select_for_update(of=('self',))
+        .filter(truck=truck, excavator=excavator, created_at__lte=normalized['received_at'])
+        .exclude(status__in=OPEN_TRIP_STATUSES)
+        .filter(
+            Q(completed_at__gte=normalized['occurred_at'], completed_at__lte=normalized['received_at'])
+            | Q(cancelled_at__gte=normalized['occurred_at'], cancelled_at__lte=normalized['received_at'])
+            | Q(
+                operationally_closed_at__gte=normalized['occurred_at'],
+                operationally_closed_at__lte=normalized['received_at'],
+            )
+        )
+        .select_related('free_bucket_acceptance')
+        .order_by('id')
+    )
+    terminal_matches = []
+    for candidate in terminal_candidates:
+        automatic_receipt = _automatic_load_receipt(candidate, acceptance=acceptance)
+        if (
+            _automatic_load_authority_matches(
+                automatic_receipt,
+                assignment=assignment,
+                acceptance=acceptance,
+            )
+            and _manual_load_matches_trip(candidate, payload, acceptance=acceptance)
+        ):
+            terminal_matches.append(candidate)
+    if len(terminal_matches) == 1:
+        terminal_trip = terminal_matches[0]
+        _claim_trip_for_driver_manual_event(
+            terminal_trip,
+            access=access,
+            shift=shift,
+            event_id=normalized['event_id'],
+        )
+        state = bump_operational_state(
+            'OfflineFieldEvent:driver_manual_linked_terminal',
+            event_type='trip_changed',
+            object_type='Trip',
+            object_id=terminal_trip.id,
+            payload={
+                'action': 'driver_manual_linked_terminal',
+                'trip_id': terminal_trip.id,
+                'truck_id': terminal_trip.truck_id,
+                'excavator_id': terminal_trip.excavator_id,
+                'status': terminal_trip.status,
+            },
+        )
+        return {
+            'server_ids': {'trip_id': terminal_trip.id, 'shift_id': shift.id},
+            'trip_origin': 'excavator',
+            'version': state.version,
+        }, {'trip': terminal_trip, 'shift': shift, 'equipment': truck}
+    if terminal_candidates or _trip_terminal_changed_between(
+        truck.id,
+        after=normalized['occurred_at'],
+        through=normalized['received_at'],
+    ):
+        _conflict(
+            'stale_driver_manual_load',
+            'После этой отметки состояние рейса уже изменилось; новый рейс не создан.',
+        )
 
     if acceptance and acceptance.status != FreeBucketAcceptanceStatus.ACCEPTED:
         _conflict('free_bucket_already_loaded', 'Погрузка по свободному ковшу уже выполнена.')
@@ -1188,10 +1370,12 @@ def _process_excavator_loaded(access, normalized):
         reconcile_excavator_waiting_for_trucks,
     )
 
-    shift = _locked_shift(access, normalized, role_code='excavator_operator')
     payload = normalized['payload']
     truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
     assignment_id = _positive_int(payload.get('assignment_id'), field='assignment_id')
+    excavator_id = _positive_int(normalized.get('equipment_id'), field='equipment_id')
+    lock_idempotency_key('trip_load_pair', f'{excavator_id}:{truck_id}')
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
     lock_production_state()
     excavator, truck = lock_trip_participant_equipment(excavator_id=shift.equipment_id, truck_id=truck_id)
     shift.equipment = excavator
@@ -1268,6 +1452,11 @@ def _process_excavator_loaded(access, normalized):
             not expected_id
             and manual_receipt
             and str((manual_receipt.payload or {}).get('assignment_id') or '') == str(assignment.id)
+            and not _trip_terminal_changed_between(
+                truck.id,
+                after=min(normalized['occurred_at'], manual_receipt.occurred_at),
+                through=max(normalized['occurred_at'], manual_receipt.occurred_at),
+            )
             and _manual_load_matches_trip(
                 open_trip,
                 {**payload, 'excavator_id': excavator.id},

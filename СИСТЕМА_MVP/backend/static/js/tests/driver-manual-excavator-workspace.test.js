@@ -43,6 +43,32 @@ test("confirmed manual trip takes its current destination from the fresh server 
     assert.equal(projected.context_snapshot.selected_dump_point_name, "СКЛАД 2.1");
 });
 
+test("an Excavator-owned acknowledgement requests one exact Driver reconciliation", () => {
+    const calls = [];
+    let accepts = false;
+    global.AppRealtime = {
+        requestReconcile(reason, version) {
+            calls.push({reason, version});
+            return accepts;
+        }
+    };
+    const receipt = {
+        event_id: "manual-load-auto-1",
+        trip_origin: "excavator",
+        server_ids: {trip_id: 452},
+        version: 813
+    };
+    assert.equal(driverRuntime.requestAutomaticTripRefresh(receipt), false);
+    accepts = true;
+    assert.equal(driverRuntime.requestAutomaticTripRefresh(receipt), true);
+    assert.equal(driverRuntime.requestAutomaticTripRefresh(receipt), false);
+    assert.deepEqual(calls, [
+        {reason: "driver_manual_automatic_trip_confirmed", version: 813},
+        {reason: "driver_manual_automatic_trip_confirmed", version: 813}
+    ]);
+    delete global.AppRealtime;
+});
+
 test("manual point action distinguishes the next trip from a current trip", () => {
     assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "false", driverActiveTripId: ""}}), "next");
     assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "true", driverActiveTripId: "451"}}), "current");
