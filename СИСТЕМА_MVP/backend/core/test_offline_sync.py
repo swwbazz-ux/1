@@ -1069,7 +1069,6 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
     """Real row/advisory-lock tests; skipped by design on SQLite."""
 
     reset_sequences = True
-    serialized_rollback = True
     create_registered_driver_shift = (
         trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
     )
@@ -1080,6 +1079,13 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         with connection.cursor() as cursor:
             for sql in connection.ops.sequence_reset_sql(no_style(), apps.get_models()):
                 cursor.execute(sql)
+        DowntimeReason.objects.get_or_create(
+            name='Ожидание самосвалов',
+            defaults={
+                'short_label': 'Ожидание самосвалов',
+                'show_for_excavator_operator': True,
+            },
+        )
         trip_fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
         from shifts.models import EmployeeShift
 

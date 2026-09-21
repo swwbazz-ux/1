@@ -3922,6 +3922,7 @@ class EmployeeBedOccupancyCanonicalIntervalMigrationTests(TransactionTestCase):
 
     def setUp(self):
         super().setUp()
+        self.addCleanup(self._restore_latest_migrations)
         self.starts_at = datetime(2026, 8, 1, 8, tzinfo=datetime_timezone.utc)
         self.terminated_at = self.starts_at + timedelta(days=1)
         self.ends_at = self.starts_at + timedelta(days=5)
@@ -3973,10 +3974,9 @@ class EmployeeBedOccupancyCanonicalIntervalMigrationTests(TransactionTestCase):
         executor.migrate([self.migrate_to])
         self.apps = executor.loader.project_state([self.migrate_to]).apps
 
-    def tearDown(self):
+    def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
         executor.migrate(executor.loader.graph.leaf_nodes())
-        super().tearDown()
 
     def test_legacy_columns_are_preserved_and_constraints_removed(self):
         OccupancyAfter = self.apps.get_model('settlement', 'EmployeeBedOccupancy')
@@ -9921,6 +9921,56 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
+    def _write_conflicting_wrapper_type(self, *, wrapper_id):
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        table = ResidentModel._meta.db_table
+        removed_constraint = None
+        if connection.vendor == 'sqlite':
+            with connection.cursor() as cursor:
+                cursor.execute('PRAGMA ignore_check_constraints = ON')
+                try:
+                    cursor.execute(
+                        f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
+                        ['CONTRACTOR', wrapper_id],
+                    )
+                finally:
+                    cursor.execute('PRAGMA ignore_check_constraints = OFF')
+            return None
+        if connection.vendor != 'postgresql':
+            self.skipTest('Инъекция повреждённой карточки поддерживает SQLite и PostgreSQL.')
+
+        removed_constraint = next(
+            constraint
+            for constraint in ResidentModel._meta.constraints
+            if constraint.name == 'settlement_resident_subject_valid'
+        )
+        with connection.schema_editor() as schema_editor:
+            schema_editor.remove_constraint(ResidentModel, removed_constraint)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
+                    ['CONTRACTOR', wrapper_id],
+                )
+        except Exception:
+            with connection.schema_editor() as schema_editor:
+                schema_editor.add_constraint(ResidentModel, removed_constraint)
+            raise
+        return ResidentModel, removed_constraint
+
+    def _restore_wrapper_subject_constraint(self, *, wrapper_id, removed_constraint):
+        ResidentModel = self.old_apps.get_model('settlement', 'SettlementResident')
+        table = ResidentModel._meta.db_table
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
+                ['EMPLOYEE', wrapper_id],
+            )
+        if removed_constraint:
+            model, constraint = removed_constraint
+            with connection.schema_editor() as schema_editor:
+                schema_editor.add_constraint(model, constraint)
+
     def _create_old_subject_rows(self, *, create_wrapper=False):
         EmployeeModel = self.old_apps.get_model('users', 'Employee')
         WatchCompositionModel = self.old_apps.get_model('users', 'WatchComposition')
@@ -10075,33 +10125,26 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
 
     def test_forward_fails_closed_for_conflicting_wrapper(self):
         rows = self._create_old_subject_rows(create_wrapper=True)
-        table = self.old_apps.get_model('settlement', 'SettlementResident')._meta.db_table
-        with connection.cursor() as cursor:
-            cursor.execute('PRAGMA ignore_check_constraints = ON')
-            try:
-                cursor.execute(
-                    f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
-                    ['CONTRACTOR', rows.wrapper.pk],
-                )
-            finally:
-                cursor.execute('PRAGMA ignore_check_constraints = OFF')
-
-        executor = MigrationExecutor(connection)
-        with self.assertRaisesMessage(RuntimeError, 'конфликтует с Employee'):
-            executor.migrate([self.migrate_to])
-
-        executor = MigrationExecutor(connection)
-        self.assertNotIn(self.migrate_to, executor.loader.applied_migrations)
-        apps = executor.loader.project_state([self.migrate_from]).apps
-        self.assertEqual(
-            apps.get_model('settlement', 'EmployeeAccommodationBinding')
-            .objects.get(pk=rows.binding.pk).employee_id,
-            rows.employee.pk,
+        removed_constraint = self._write_conflicting_wrapper_type(
+            wrapper_id=rows.wrapper.pk,
         )
-        with connection.cursor() as cursor:
-            cursor.execute(
-                f'UPDATE "{table}" SET resident_type = %s WHERE id = %s',
-                ['EMPLOYEE', rows.wrapper.pk],
+        try:
+            executor = MigrationExecutor(connection)
+            with self.assertRaisesMessage(RuntimeError, 'конфликтует с Employee'):
+                executor.migrate([self.migrate_to])
+
+            executor = MigrationExecutor(connection)
+            self.assertNotIn(self.migrate_to, executor.loader.applied_migrations)
+            apps = executor.loader.project_state([self.migrate_from]).apps
+            self.assertEqual(
+                apps.get_model('settlement', 'EmployeeAccommodationBinding')
+                .objects.get(pk=rows.binding.pk).employee_id,
+                rows.employee.pk,
+            )
+        finally:
+            self._restore_wrapper_subject_constraint(
+                wrapper_id=rows.wrapper.pk,
+                removed_constraint=removed_constraint,
             )
 
     def test_reverse_restores_internal_employee_subjects(self):
@@ -12123,8 +12166,8 @@ class M8SettlementApplyTests(TestCase):
         with connection.cursor() as cursor:
             cursor.execute(
                 'UPDATE settlement_settlementpreviewapplication '
-                'SET work_shift = NULL, legacy_whole_run = 1 WHERE id = %s',
-                [application.pk],
+                'SET work_shift = NULL, legacy_whole_run = %s WHERE id = %s',
+                [True, application.pk],
             )
 
         historical = self._apply(
