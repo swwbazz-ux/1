@@ -195,13 +195,26 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Checkout exact candidate without credentials
+      - name: Checkout trusted control without credentials
         if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.expected_commit }}
-          path: source
+          ref: ${{ github.ref }}
+          path: control
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Materialize exact candidate after privileged actions
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git -C control fetch --no-tags --depth=1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$EXPECTED_COMMIT"
+          git -C control worktree add --detach ../source "$EXPECTED_COMMIT"
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_COMMIT"
 
       - name: Run targeted QA backend tests after immutable packaging
         if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
