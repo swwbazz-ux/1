@@ -106,6 +106,56 @@ test("direct return resolves the explicitly marked newest truck and submits once
     assert.equal(classes.has("is-return-pending"), false);
 });
 
+test("dump queue keeps an untrusted truck number as text instead of HTML", () => {
+    const source = extractBraceBlock(
+        templateSource,
+        "function queueItemFromBadge",
+        "dump queue item builder"
+    );
+    const created = [];
+    const document = {
+        createElement(tagName) {
+            const node = {
+                tagName,
+                dataset: {},
+                children: [],
+                addEventListener() {},
+                appendChild(child) { this.children.push(child); },
+            };
+            created.push(node);
+            return node;
+        },
+    };
+    const maliciousNumber = '<img src=x onerror="globalThis.compromised=true">';
+    const badge = {
+        dataset: {
+            truckId: "17",
+            tripId: "23",
+            eoTruckNumber: maliciousNumber,
+        },
+        textContent: "fallback",
+    };
+    const dumpTarget = {dataset: {eoDumpTarget: "5"}};
+    const context = {
+        document,
+        truckGreenIcon: "/static/img/truck-green.png",
+        beginQueueDrag() {},
+    };
+
+    vm.runInNewContext(
+        `${source}; this.build = queueItemFromBadge;`,
+        context
+    );
+    const item = context.build(badge, dumpTarget);
+
+    assert.equal(item.children.length, 2);
+    assert.equal(item.children[0].tagName, "img");
+    assert.equal(item.children[1].tagName, "strong");
+    assert.equal(item.children[1].textContent, maliciousNumber);
+    assert.equal(Object.hasOwn(item, "innerHTML"), false);
+    assert.equal(context.compromised, undefined);
+});
+
 test("successful swipe restarts and clears the dump-card rebound", () => {
     const releaseSource = extractBraceBlock(
         templateSource,
