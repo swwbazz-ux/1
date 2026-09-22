@@ -184,6 +184,7 @@
         var pollIntervalId = null;
         var pendingUpdateTimeoutId = null;
         var watchdogIntervalId = null;
+        var lastWatchdogAt = Date.now();
         var wakeTimeoutId = null;
         var authRedirectScheduled = false;
         var pagePaused = false;
@@ -504,6 +505,23 @@
         function inspectRealtimeWatchdog() {
             if (authEnded || !isPageActive()) return;
             var now = Date.now();
+            var watchdogGapMs = now - lastWatchdogAt;
+            lastWatchdogAt = now;
+            if (screen && screen.role === "excavator_operator"
+                    && watchdogGapMs > Math.max(30000, realtimeMaxSilentMs * 2)) {
+                // Android can freeze a visible WebView without delivering visibility/pagehide.
+                // A delayed timer is not network evidence: start a fresh active window and probe.
+                activeSince = now;
+                transportInterrupted = true;
+                cancelCurrentPoll("planned_abort", false);
+                requestForegroundReconcile("watchdog_resume");
+                if (connectionState !== "lost") {
+                    publishRealtimeConnectionState("weak", {reason: "watchdog_resume"});
+                }
+                diagnoseConnection("watchdog_resume", connectionState, connectionState);
+                wakeRealtimeConnection("watchdog_resume", {reconcile: true, reconcileReason: "watchdog_resume"});
+                return;
+            }
             if (realtimePollInFlight && now - realtimeLastPollStartedAt >= realtimePollTimeoutMs) {
                 cancelCurrentPoll("timeout", true);
                 scheduleNextPoll();

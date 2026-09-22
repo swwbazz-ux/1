@@ -279,6 +279,8 @@ test("operational cues stay dynamic when Android shows a heads-up notification",
   const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
   const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const connectionVoiceGate = readFileSync(resolve(javaRoot, "ConnectionVoiceGate.java"), "utf8");
+  const connectionVoiceStability = readFileSync(resolve(javaRoot, "ConnectionVoiceStability.java"), "utf8");
   const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
 
   for (const cue of [
@@ -463,6 +465,8 @@ test("both production profiles package every approved operational voice phrase",
   const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
   const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const connectionVoiceGate = readFileSync(resolve(javaRoot, "ConnectionVoiceGate.java"), "utf8");
+  const connectionVoiceStability = readFileSync(resolve(javaRoot, "ConnectionVoiceStability.java"), "utf8");
   assert.match(plugin, /public void announceOperational\(PluginCall call\)/);
   assert.match(player, /VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
@@ -470,7 +474,13 @@ test("both production profiles package every approved operational voice phrase",
   assert.match(service, /showLatestAssignmentAlert/);
   assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
   assert.match(service, /connectionLossWasAnnounced && !AppVisibility\.isForeground\(\)/);
-  assert.match(service, /shouldAnnounceConnectionLoss && !AppVisibility\.isForeground\(\)/);
+  assert.match(service, /ConnectionVoiceStability\.Action\.LOSS_READY/);
+  assert.match(service, /ConnectionVoiceStability\.Action\.RECOVERY_READY/);
+  assert.match(plugin, /ConnectionVoiceGate\.confirmLoss/);
+  assert.match(plugin, /ConnectionVoiceGate\.confirmRecovery/);
+  assert.match(connectionVoiceGate, /LOSS_COOLDOWN_MS = 5 \* 60_000L/);
+  assert.match(connectionVoiceStability, /LOSS_STABLE_MS = 30_000L/);
+  assert.match(connectionVoiceStability, /RECOVERY_SUCCESS_COUNT = 3/);
 });
 
 test("recorded equipment numbers are packaged and routed through native sequences", () => {

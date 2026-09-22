@@ -33,7 +33,105 @@
     var loadingBuffers = Object.create(null);
     var activeSource = null;
     var lastConnectionState = "";
-    var connectionLossAnnounced = false;
+    var connectionLossStableMs = positiveDatasetNumber("connectionLossStableMs");
+    var connectionRecoveryStableMs = positiveDatasetNumber("connectionRecoveryStableMs");
+    var connectionAlertCooldownMs = positiveDatasetNumber("connectionAlertCooldownMs");
+    var connectionStorageKey = "mobile-operational-sounds:" + profile + ":connection";
+    var connectionIncident = readConnectionIncident();
+    var connectionIncidentOpen = connectionIncident.active;
+    var connectionLossAnnounced = connectionIncident.announced;
+    var lastConnectionLossAnnouncedAt = connectionIncident.lossAt;
+    var connectionLossTimer = null;
+    var connectionRecoveryTimer = null;
+
+    function positiveDatasetNumber(name) {
+        var value = Number(script && script.dataset ? script.dataset[name] : 0);
+        return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    }
+
+    function readConnectionIncident() {
+        var empty = {active: false, announced: false, lossAt: 0};
+        if (!connectionAlertCooldownMs) return empty;
+        try {
+            var stored = JSON.parse(window.localStorage.getItem(connectionStorageKey) || "null");
+            var lossAt = Number(stored && stored.lossAt);
+            if (!Number.isFinite(lossAt) || lossAt <= 0 || Date.now() - lossAt > 6 * 60 * 60 * 1000) {
+                return empty;
+            }
+            return {
+                active: stored.active === true,
+                announced: stored.active === true && stored.announced === true,
+                lossAt: lossAt
+            };
+        } catch (error) {
+            return empty;
+        }
+    }
+
+    function storeConnectionIncident() {
+        if (!connectionAlertCooldownMs) return;
+        try {
+            window.localStorage.setItem(connectionStorageKey, JSON.stringify({
+                active: connectionIncidentOpen,
+                announced: connectionLossAnnounced,
+                lossAt: lastConnectionLossAnnouncedAt
+            }));
+        } catch (error) {
+            // Storage can be unavailable in a locked-down WebView. In-memory gating still works.
+        }
+    }
+
+    function clearConnectionTimer(name) {
+        var timer = name === "loss" ? connectionLossTimer : connectionRecoveryTimer;
+        if (timer === null) return;
+        window.clearTimeout(timer);
+        if (name === "loss") connectionLossTimer = null;
+        else connectionRecoveryTimer = null;
+    }
+
+    function announceConnectionLoss() {
+        connectionLossTimer = null;
+        if (lastConnectionState !== "lost" || connectionIncidentOpen) return;
+        connectionIncidentOpen = true;
+        var now = Date.now();
+        var cooldownActive = connectionAlertCooldownMs > 0 && lastConnectionLossAnnouncedAt > 0
+            && now - lastConnectionLossAnnouncedAt < connectionAlertCooldownMs;
+        connectionLossAnnounced = !cooldownActive;
+        if (connectionLossAnnounced) {
+            lastConnectionLossAnnouncedAt = now;
+            announceOperational({
+                cue: "connection_lost",
+                voice: "voice_connection_lost"
+            });
+        }
+        storeConnectionIncident();
+    }
+
+    function confirmConnectionRecovery() {
+        connectionRecoveryTimer = null;
+        if (lastConnectionState !== "ok") return;
+        var shouldAnnounce = connectionIncidentOpen && connectionLossAnnounced;
+        var nativePlugin = capacitorNativeSoundPlugin();
+        connectionIncidentOpen = false;
+        connectionLossAnnounced = false;
+        storeConnectionIncident();
+        if (shouldAnnounce) {
+            announceOperational({
+                cue: "connection_restored",
+                voice: "voice_connection_restored"
+            });
+        } else if (profile === "excavator" && nativePlugin && typeof nativePlugin.announceOperational === "function") {
+            // A background native heartbeat may have announced the loss while WebView was paused.
+            // Ask the shared native gate to close that incident; it stays silent when none is open.
+            Promise.resolve(nativePlugin.announceOperational({
+                cue: "connection_restored",
+                voice: "voice_connection_restored",
+                cueResolved: false,
+                eventVersion: 0,
+                eventKey: ""
+            })).catch(function () {});
+        }
+    }
 
     var directCueAliases = Object.freeze({
         truck_assigned: "assignment_notice",
@@ -425,18 +523,27 @@
         if (!nextState) return;
         if (nextState === lastConnectionState) return;
         lastConnectionState = nextState;
-        if (nextState === "lost" && !connectionLossAnnounced) {
-            connectionLossAnnounced = true;
-            announceOperational({
-                cue: "connection_lost",
-                voice: "voice_connection_lost"
-            });
-        } else if (connectionLossAnnounced && nextState === "ok") {
-            connectionLossAnnounced = false;
-            announceOperational({
-                cue: "connection_restored",
-                voice: "voice_connection_restored"
-            });
+        if (nextState === "lost") {
+            clearConnectionTimer("recovery");
+            if (connectionIncidentOpen || connectionLossTimer !== null) return;
+            if (connectionLossStableMs > 0) {
+                connectionLossTimer = window.setTimeout(announceConnectionLoss, connectionLossStableMs);
+            } else {
+                announceConnectionLoss();
+            }
+            return;
+        }
+        clearConnectionTimer("loss");
+        if (nextState !== "ok") {
+            clearConnectionTimer("recovery");
+            return;
+        }
+        if (!connectionIncidentOpen && !(profile === "excavator" && capacitorNativeSoundPlugin())) return;
+        if (connectionRecoveryStableMs > 0) {
+            clearConnectionTimer("recovery");
+            connectionRecoveryTimer = window.setTimeout(confirmConnectionRecovery, connectionRecoveryStableMs);
+        } else {
+            confirmConnectionRecovery();
         }
     });
 
