@@ -4,11 +4,14 @@ After=accounting-mvp-excavator-qa.service
 Requires=accounting-mvp-excavator-qa.service
 
 [Service]
-User=deploy
-Group=www-data
+User=accounting-qa
+Group=accounting-qa
 WorkingDirectory=/srv/accounting-mvp-excavator-qa
 EnvironmentFile=/srv/accounting-mvp-excavator-qa/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/srv/accounting-mvp-excavator-qa/.venv/bin/python manage.py run_excavator_qa_simulator
+NoNewPrivileges=true
+PrivateTmp=true
 Restart=always
 RestartSec=3
 

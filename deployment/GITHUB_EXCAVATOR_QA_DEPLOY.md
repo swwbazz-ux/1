@@ -49,6 +49,9 @@ Receiver отклоняет обычные режимы `deploy`, `rollback`, ru
    Только runtime-каталоги `media`, `private_media` и
    `staticfiles` заранее выдаются QA-пользователю. Для nginx сохраняется
    только необходимый traverse/read доступ к этим runtime-каталогам.
+   Пользователь `www-data` добавляется только в группу `accounting-qa` для
+   чтения QA static/media и доступа к socket с umask `0007`; сам
+   `accounting-qa` не включается в `www-data` или production-группы.
 4. Отдельный systemd service приложения и симулятора.
 5. Root-owned policy `/etc/accounting-mvp-excavator-qa/release-policy.json`
    с правами `0600`:
@@ -105,6 +108,13 @@ Workflow: `.github/workflows/qa-backend-deploy.yml`.
 
 - `qa_audit` + подтверждение `QA_AUDIT` — проверяет действующий QA runtime,
   три HTTPS-маршрута, роли, БД, Redis, Firebase, миграции и QA-администратора.
+  При первом bootstrap, когда receiver ещё не создавал `current.json`, успешный
+  результат явно содержит `QA_AUDIT_UNTRACKED_RUNTIME=1` и
+  `deployed_commit=untracked`: runtime и границы проверены, но commit старого
+  стенда ещё не аттестован. После первого `qa_deploy` отсутствие tracked commit
+  больше не допускается как нормальное состояние: receiver сохраняет отдельный
+  root-owned initialized marker и fail-closed отклоняет удалённый, подменённый
+  каталогом или symlink `current.json`.
 - `qa_verify` + `QA_VERIFY` — собирает полный tracked backend выбранного
   commit, проверяет его во временном staging и не меняет файлы/сервисы live-
   контура. Candidate-код выполняется без root, а PostgreSQL-команды проверки
