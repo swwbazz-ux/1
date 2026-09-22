@@ -22,6 +22,7 @@ from shifts.models import (
     PlanCalculationMode,
 )
 from shifts.services import open_driver_shift
+from users.models import EmployeeAccess
 
 from .models import Trip, TripStatus
 from .qa_simulator import (
@@ -40,6 +41,8 @@ class ExcavatorQASimulatorTests(TestCase):
             'EXCAVATOR_QA_PIN': '314159',
             'DRIVER_QA_PHONE': '+7 911 111-11-12',
             'DRIVER_QA_PIN': '271828',
+            'ADMIN_QA_PHONE': '+7 922 222-22-23',
+            'ADMIN_QA_PIN': '161803',
             'EXCAVATOR_QA_TRUCK_COUNT': 3,
             'EXCAVATOR_QA_TRANSIT_SECONDS': 5,
             'EXCAVATOR_QA_PLAN_TRIPS': 20,
@@ -105,6 +108,13 @@ class ExcavatorQASimulatorTests(TestCase):
             '271828',
         )
         self.assertEqual(first.human_driver.phone, '79111111112')
+        admin_access = EmployeeAccess.objects.get(
+            employee__personnel_number='RUSTORE-QA-ADMIN',
+            role__code='admin',
+        )
+        self.assertEqual(admin_access.employee.phone, '79222222223')
+        self.assertEqual(admin_access.access_code, '161803')
+        self.assertEqual(admin_access.status, EmployeeAccess.Status.ACTIVATED)
         self.assertFalse(
             EmployeeShift.objects.filter(
                 employee=first.human_driver,
@@ -148,6 +158,8 @@ class ExcavatorQASimulatorTests(TestCase):
         self.assertIn('ручной самосвал QA-DRIVER-T-01', output)
         self.assertNotIn('79111111112', output)
         self.assertNotIn('271828', output)
+        self.assertNotIn('79222222223', output)
+        self.assertNotIn('161803', output)
 
     def test_tick_waits_for_human_to_open_excavator_shift(self):
         with self.qa_settings():
@@ -425,5 +437,9 @@ class ExcavatorQASimulatorTests(TestCase):
                 prepare_excavator_qa_scenario()
 
         with self.qa_settings(DRIVER_QA_PHONE='+7 900 000-00-03'):
+            with self.assertRaisesMessage(ValueError, 'must differ'):
+                prepare_excavator_qa_scenario()
+
+        with self.qa_settings(ADMIN_QA_PHONE='+7 911 111-11-12'):
             with self.assertRaisesMessage(ValueError, 'must differ'):
                 prepare_excavator_qa_scenario()

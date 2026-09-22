@@ -286,6 +286,15 @@ EXCAVATOR_QA_PIN = os.getenv('EXCAVATOR_QA_PIN', '').strip()
 # приложения работают с одной изолированной QA-базой и одним симулятором.
 DRIVER_QA_PHONE = os.getenv('DRIVER_QA_PHONE', '').strip()
 DRIVER_QA_PIN = os.getenv('DRIVER_QA_PIN', '').strip()
+# Отдельный доступ администратора нужен для QA-монитора и active probe.
+# После reset_excavator_qa он создаётся заново только из защищённого QA .env.
+ADMIN_QA_PHONE = os.getenv('ADMIN_QA_PHONE', '').strip()
+ADMIN_QA_PIN = os.getenv('ADMIN_QA_PIN', '').strip()
+EXCAVATOR_QA_REDIS_DB = os.getenv('EXCAVATOR_QA_REDIS_DB', '').strip()
+EXCAVATOR_QA_FIREBASE_PROJECT_ID = os.getenv(
+    'EXCAVATOR_QA_FIREBASE_PROJECT_ID',
+    '',
+).strip()
 EXCAVATOR_QA_TICK_SECONDS = _env_positive_int('EXCAVATOR_QA_TICK_SECONDS', 2)
 EXCAVATOR_QA_TRANSIT_SECONDS = _env_positive_int('EXCAVATOR_QA_TRANSIT_SECONDS', 12)
 EXCAVATOR_QA_TRUCK_COUNT = _env_positive_int('EXCAVATOR_QA_TRUCK_COUNT', 4)

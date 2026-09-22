@@ -23,6 +23,13 @@ from .live_monitor import (
 from .live_monitor_views import application_session_heartbeat_view
 
 
+QA_ROLE_HOSTS = {
+    'qa-admin.driverform.ru': 'admin',
+    'qa-driver.driverform.ru': 'driver',
+    'qa-excavator.driverform.ru': 'excavator_operator',
+}
+
+
 @override_settings(ALLOWED_HOSTS=['testserver', '.localhost'])
 class LiveMonitorPresenceTests(TestCase):
     def setUp(self):
@@ -468,6 +475,10 @@ class LiveMonitorPresenceTests(TestCase):
         self.assertEqual(connection['installation_short'], 'eeeeeeee')
         self.assertTrue(connection['probe_capable'])
 
+    @override_settings(
+        ALLOWED_HOSTS=list(QA_ROLE_HOSTS),
+        ROLE_APP_HOST_ALIASES=QA_ROLE_HOSTS,
+    )
     @patch('users.native_push.notify_employee_devices', return_value=1)
     def test_admin_probe_is_acknowledged_by_matching_native_heartbeat(self, notify):
         NativePushDevice.objects.create(
@@ -478,7 +489,7 @@ class LiveMonitorPresenceTests(TestCase):
         capability = self.excavator.get(
             reverse('operational_state_version'),
             {'include_events': '0', 'role_app_code': 'excavator'},
-            HTTP_HOST='excavator.localhost',
+            HTTP_HOST='qa-excavator.driverform.ru',
             HTTP_USER_AGENT='CopperResourcesNative/excavator/0.1.29',
             HTTP_X_APP_INSTALLATION_ID='android-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
             HTTP_X_APP_CONNECTION_STATE='ok',
@@ -486,7 +497,8 @@ class LiveMonitorPresenceTests(TestCase):
         )
         self.assertEqual(capability.status_code, 200)
         response = self.admin.post(
-            reverse('system_admin_probe_connection', args=[self.excavator_access.pk])
+            reverse('system_admin_probe_connection', args=[self.excavator_access.pk]),
+            HTTP_HOST='qa-admin.driverform.ru',
         )
         self.assertRedirects(response, reverse('system_admin_live_monitor'))
         probe = connection_probe_summary(
@@ -495,6 +507,29 @@ class LiveMonitorPresenceTests(TestCase):
         )
         self.assertEqual(probe['status'], 'sent')
         notify.assert_called_once()
+
+    @override_settings(
+        ALLOWED_HOSTS=list(QA_ROLE_HOSTS),
+        ROLE_APP_HOST_ALIASES=QA_ROLE_HOSTS,
+    )
+    def test_qa_admin_monitor_is_fail_closed_on_other_role_hosts(self):
+        accepted = self.admin.get(
+            reverse('system_admin_live_monitor'),
+            HTTP_HOST='qa-admin.driverform.ru',
+        )
+        self.assertEqual(accepted.status_code, 200)
+
+        wrong_admin_host = self.admin.get(
+            reverse('system_admin_live_monitor'),
+            HTTP_HOST='qa-driver.driverform.ru',
+        )
+        self.assertNotEqual(wrong_admin_host.status_code, 200)
+
+        wrong_driver = self.driver.get(
+            reverse('system_admin_live_monitor'),
+            HTTP_HOST='qa-admin.driverform.ru',
+        )
+        self.assertNotEqual(wrong_driver.status_code, 200)
 
     @patch('users.native_push.notify_employee_devices', return_value=1)
     def test_probe_ack_after_timeout_is_ignored(self, _notify):

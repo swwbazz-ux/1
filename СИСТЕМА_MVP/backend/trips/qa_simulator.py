@@ -45,6 +45,7 @@ from .trip_creation import create_loaded_waiting_unload_trip
 QA_PREFIX = 'RUSTORE-QA'
 QA_OPERATOR_NUMBER = f'{QA_PREFIX}-EO-01'
 QA_DISPATCHER_NUMBER = f'{QA_PREFIX}-DISPATCHER'
+QA_ADMIN_NUMBER = f'{QA_PREFIX}-ADMIN'
 QA_HUMAN_DRIVER_NUMBER = f'{QA_PREFIX}-DRIVER-HUMAN-01'
 QA_DRIVER_BOT_OPERATOR_NUMBER = f'{QA_PREFIX}-EO-DRIVER-BOT'
 QA_EXCAVATOR_GARAGE = 'QA-EX-01'
@@ -153,8 +154,9 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
     require_excavator_qa_environment()
     phone, pin = _require_credentials('EXCAVATOR_QA')
     driver_phone, driver_pin = _require_credentials('DRIVER_QA')
-    if driver_phone == phone:
-        raise ValueError('DRIVER_QA_PHONE must differ from EXCAVATOR_QA_PHONE.')
+    admin_phone, admin_pin = _require_credentials('ADMIN_QA')
+    if len({phone, driver_phone, admin_phone}) != 3:
+        raise ValueError('EXCAVATOR_QA_PHONE, DRIVER_QA_PHONE and ADMIN_QA_PHONE must differ.')
     truck_count = int(getattr(settings, 'EXCAVATOR_QA_TRUCK_COUNT', 4))
 
     excavator_role, _ = Role.objects.update_or_create(
@@ -168,6 +170,10 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
     dispatcher_role, _ = Role.objects.update_or_create(
         code='dispatcher',
         defaults={'name': 'Диспетчер', 'is_active': True},
+    )
+    admin_role, _ = Role.objects.update_or_create(
+        code='admin',
+        defaults={'name': 'Системный администратор', 'is_active': True},
     )
     excavator_type, _ = EquipmentType.objects.update_or_create(
         name='Экскаватор', defaults={'is_active': True}
@@ -275,6 +281,21 @@ def prepare_excavator_qa_scenario() -> ExcavatorQAScenario:
         role=dispatcher_role,
         defaults={
             'access_code': pin,
+            'status': EmployeeAccess.Status.ACTIVATED,
+            'is_active': True,
+            'activated_at': timezone.now(),
+        },
+    )
+    qa_admin = _active_employee(
+        QA_ADMIN_NUMBER,
+        'Администратор QA-стенда',
+        phone=admin_phone,
+    )
+    EmployeeAccess.objects.update_or_create(
+        employee=qa_admin,
+        role=admin_role,
+        defaults={
+            'access_code': admin_pin,
             'status': EmployeeAccess.Status.ACTIVATED,
             'is_active': True,
             'activated_at': timezone.now(),
