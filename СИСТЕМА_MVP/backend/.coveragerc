@@ -1,0 +1,27 @@
+[run]
+branch = True
+relative_files = True
+source =
+    assignments
+    config
+    core
+    downtimes
+    portal
+    references
+    reports
+    rotations
+    settlement
+    shifts
+    trips
+    users
+omit =
+    */migrations/*
+    */tests.py
+    */test_*.py
+    */tests_*.py
+    */tests/*
+
+[report]
+precision = 2
+show_missing = True
+skip_empty = True

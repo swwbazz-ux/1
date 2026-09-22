@@ -1,0 +1,226 @@
+name: Dependency and Django security reports
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/security-report.yml
+      - СИСТЕМА_MVP/backend/requirements.txt
+      - СИСТЕМА_MVP/backend/requirements-security.txt
+      - СИСТЕМА_MVP/backend/config/**
+      - СИСТЕМА_MVP/backend/tools/security_audit_report.py
+      - СИСТЕМА_MVP/backend/tools/test_security_audit_report.py
+      - mobile/capacitor-shell/package.json
+      - mobile/capacitor-shell/package-lock.json
+  push:
+    branches:
+      - codex/github-production-deploy-20260916
+    paths:
+      - .github/workflows/security-report.yml
+      - СИСТЕМА_MVP/backend/requirements.txt
+      - СИСТЕМА_MVP/backend/requirements-security.txt
+      - СИСТЕМА_MVP/backend/config/**
+      - СИСТЕМА_MVP/backend/tools/security_audit_report.py
+      - СИСТЕМА_MVP/backend/tools/test_security_audit_report.py
+      - mobile/capacitor-shell/package.json
+      - mobile/capacitor-shell/package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-report-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SECURITY_TARGET_SHA: >-
+    ${{ github.event_name == 'pull_request' &&
+    github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  python-dependencies:
+    name: Python dependency audit (report only, not required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SECURITY_TARGET_SHA }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements-security.txt
+
+      - name: Install pinned audit tool
+        working-directory: СИСТЕМА_MVP/backend
+        run: python -m pip install --disable-pip-version-check -r requirements-security.txt
+
+      - name: Audit Python runtime dependencies
+        working-directory: СИСТЕМА_MVP/backend
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-python"
+          set +e
+          python -m pip_audit \
+            -r requirements.txt \
+            --format json \
+            --output "$RUNNER_TEMP/security-python/pip-audit-raw.json" \
+            --strict \
+            --aliases on \
+            --desc off \
+            --progress-spinner off \
+            --timeout 30 \
+            --vulnerability-service pypi \
+            --index-url https://pypi.org/simple
+          audit_exit=$?
+          set -e
+          if [[ "$audit_exit" -ne 0 && "$audit_exit" -ne 1 ]]; then
+            printf 'pip-audit failed with unexpected exit code %s\n' "$audit_exit" >&2
+            exit 2
+          fi
+          audit_version="$(python -m pip_audit --version | awk '{print $2}')"
+          python tools/security_audit_report.py \
+            --target-sha "$SECURITY_TARGET_SHA" \
+            --pip-json "$RUNNER_TEMP/security-python/pip-audit-raw.json" \
+            --pip-audit-version "$audit_version" \
+            --pip-exit-code "$audit_exit" \
+            --json-output "$RUNNER_TEMP/security-python/report.json" \
+            --markdown-output "$RUNNER_TEMP/security-python/summary.md"
+          cat "$RUNNER_TEMP/security-python/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Python security report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-python-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-python/
+          if-no-files-found: error
+          retention-days: 30
+
+  npm-dependencies:
+    name: npm dependency audit (report only, not required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SECURITY_TARGET_SHA }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Set up Python for report validation
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Collect npm production and complete reports
+        working-directory: mobile/capacitor-shell
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-npm"
+          set +e
+          npm audit --package-lock-only --ignore-scripts --omit=dev \
+            --audit-level=low --registry=https://registry.npmjs.org/ --json \
+            > "$RUNNER_TEMP/security-npm/npm-production-raw.json"
+          production_exit=$?
+          npm audit --package-lock-only --ignore-scripts \
+            --audit-level=low --registry=https://registry.npmjs.org/ --json \
+            > "$RUNNER_TEMP/security-npm/npm-all-raw.json"
+          complete_exit=$?
+          set -e
+          if [[ "$production_exit" -gt 1 || "$complete_exit" -gt 1 ]]; then
+            printf 'npm audit failed: production=%s complete=%s\n' \
+              "$production_exit" "$complete_exit" >&2
+            exit 2
+          fi
+          npm_version="$(npm --version)"
+          python ../../СИСТЕМА_MVP/backend/tools/security_audit_report.py \
+            --target-sha "$SECURITY_TARGET_SHA" \
+            --npm-production-json "$RUNNER_TEMP/security-npm/npm-production-raw.json" \
+            --npm-all-json "$RUNNER_TEMP/security-npm/npm-all-raw.json" \
+            --npm-version "$npm_version" \
+            --npm-production-exit-code "$production_exit" \
+            --npm-all-exit-code "$complete_exit" \
+            --json-output "$RUNNER_TEMP/security-npm/report.json" \
+            --markdown-output "$RUNNER_TEMP/security-npm/summary.md"
+          cat "$RUNNER_TEMP/security-npm/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload npm security report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-npm-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-npm/
+          if-no-files-found: error
+          retention-days: 30
+
+  django-deploy-check:
+    name: Django deploy check (report only, not required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DJANGO_SECRET_KEY: ci-only-long-random-looking-key-9f4b2c7d8e1a6f3b5d0c2e7a9f4b6c8d
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,.localhost
+
+    defaults:
+      run:
+        working-directory: СИСТЕМА_MVP/backend
+
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SECURITY_TARGET_SHA }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
+
+      - name: Install runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Run Django deployment checks
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-django"
+          set -o pipefail
+          python manage.py check --deploy 2>&1 \
+            | tee "$RUNNER_TEMP/security-django/django-deploy-check.log"
+          {
+            printf '%s\n' \
+              '## Django deploy check — REPORT ONLY' \
+              '' \
+              'Предупреждения пока не блокируют merge; ошибки выполнения видны красным.' \
+              '' \
+              '```text'
+            sed -n '1,120p' "$RUNNER_TEMP/security-django/django-deploy-check.log"
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Django security report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-django-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/security-django/
+          if-no-files-found: error
+          retention-days: 30
