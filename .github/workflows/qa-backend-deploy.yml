@@ -1,5 +1,7 @@
 name: Isolated QA backend release
 
+# Registration refresh: no runtime behavior change.
+
 on:
   workflow_dispatch:
     inputs:
