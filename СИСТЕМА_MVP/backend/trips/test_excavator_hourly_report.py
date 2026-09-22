@@ -213,4 +213,4 @@ class ExcavatorHourlyReportTests(TestCase):
         work_response = self.client.get(reverse('excavator_work'))
         self.assertContains(work_response, 'data-eo-hourly-report-open')
         self.assertContains(work_response, reverse('excavator_hourly_report'))
-        self.assertContains(work_response, 'excavator-mobile-shell-v250')
+        self.assertContains(work_response, 'excavator-mobile-shell-v251')
