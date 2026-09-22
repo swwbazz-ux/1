@@ -7,6 +7,11 @@
             <i data-driver-manual-primary-point data-driver-manual-primary-point-id="{{ point.id }}" data-driver-manual-primary-point-name="{{ point.name }}" data-driver-manual-primary-point-distance="{{ point.transport_distance_km }}" data-driver-manual-primary-point-count="{{ point.completed_count }}" data-driver-manual-primary-point-last="{% if point.is_last_sent %}true{% else %}false{% endif %}"></i>
         {% endfor %}
     </div>
+    <div data-driver-manual-reroute-points hidden aria-hidden="true">
+        {% for point in driver_manual_workspace.base_event_context.reroute_points %}
+            <i data-driver-manual-reroute-point data-driver-manual-reroute-point-id="{{ point.id }}" data-driver-manual-reroute-point-name="{{ point.name }}"></i>
+        {% endfor %}
+    </div>
     <div class="eo-shell" data-eo-active-tab="trucks" data-driver-manual-eo-shell>
         <header class="eo-topbar" aria-label="Ручное управление погрузкой">
             <button type="button" class="eo-topbar-cell driver-manual-workspace__back" data-driver-manual-close aria-label="Вернуться к стандартному экрану">

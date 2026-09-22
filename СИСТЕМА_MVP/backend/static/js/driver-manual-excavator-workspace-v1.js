@@ -44,6 +44,16 @@
         }
         if (!workspace) return {};
         if (workspace.__driverManualBaseContext) return clone(workspace.__driverManualBaseContext);
+        var reroutePoints = Array.prototype.slice.call(
+            workspace.querySelectorAll("[data-driver-manual-reroute-point]")
+        ).map(function (point) {
+            return {
+                id: positive(point.dataset.driverManualReroutePointId),
+                name: String(point.dataset.driverManualReroutePointName || "")
+            };
+        }).filter(function (point) {
+            return point.id && point.name;
+        });
         if (positive(workspace.dataset.driverManualPrimaryExcavatorId)) {
             var primaryPoints = Array.prototype.slice.call(
                 workspace.querySelectorAll("[data-driver-manual-primary-point]")
@@ -91,7 +101,8 @@
                     primaryPoints.length
                         ? primaryPoints
                         : primaryItem && primaryItem.dump_points || []
-                )
+                ),
+                reroute_points: clone(reroutePoints)
             };
             workspace.__driverManualBaseContext = clone(primaryContext);
             return primaryContext;
@@ -120,7 +131,8 @@
                     transport_distance_km: String(target.dataset.eoDumpDistance || ""),
                     one_off: target.dataset.driverManualOneOff === "true"
                 };
-            }).filter(function (point) { return !!point.id; })
+            }).filter(function (point) { return !!point.id; }),
+            reroute_points: clone(reroutePoints)
         };
         workspace.__driverManualBaseContext = clone(context);
         return context;

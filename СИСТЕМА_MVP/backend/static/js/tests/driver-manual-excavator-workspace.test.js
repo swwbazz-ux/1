@@ -548,6 +548,7 @@ test("the primary context survives a temporary DOM replacement when fragment JSO
             return null;
         },
         querySelectorAll(selector) {
+            if (selector === "[data-driver-manual-reroute-point]") return [];
             assert.equal(selector, "[data-driver-manual-dump-target]");
             return rendered;
         }
@@ -592,6 +593,11 @@ test("a server free-bucket fragment keeps the primary assignment as the cancella
         },
         querySelector() { return null; },
         querySelectorAll(selector) {
+            if (selector === "[data-driver-manual-reroute-point]") return [
+                {dataset: {driverManualReroutePointId: "2", driverManualReroutePointName: "Warehouse"}},
+                {dataset: {driverManualReroutePointId: "3", driverManualReroutePointName: "Crusher"}},
+                {dataset: {driverManualReroutePointId: "9", driverManualReroutePointName: "Road fill"}}
+            ];
             if (selector !== "[data-driver-manual-primary-point]") return [];
             return [
                 {dataset: {driverManualPrimaryPointId: "2", driverManualPrimaryPointName: "Warehouse", driverManualPrimaryPointDistance: "1.00", driverManualPrimaryPointCount: "2", driverManualPrimaryPointLast: "false"}},
@@ -620,6 +626,7 @@ test("a server free-bucket fragment keeps the primary assignment as the cancella
         assert.equal(restored.assignment_id, 71);
         assert.equal(restored.excavator_id, 2);
         assert.deepEqual(restored.dump_points.map(point => point.id), [2, 3]);
+        assert.deepEqual(restored.reroute_points.map(point => point.id), [2, 3, 9]);
         assert.deepEqual(
             restored.dump_points.map(point => [point.completed_count, point.is_last_sent]),
             [[2, false], [1, true]]
