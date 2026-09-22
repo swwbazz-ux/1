@@ -115,6 +115,17 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Install pinned coverage tool
+        id: coverage-tool
+        continue-on-error: true
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --require-hashes \
+            -r requirements-coverage.txt
+          python -c "import coverage; assert coverage.__version__ == '7.16.1'"
+
       - name: Prepare test directories
         run: mkdir -p media/employee_photos artifacts
 
@@ -129,7 +140,89 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python manage.py test --verbosity 1 2>&1 | tee artifacts/django-full-postgresql.log
+          if python -c "import coverage; assert coverage.__version__ == '7.16.1'" \
+            >/dev/null 2>&1; then
+            python -m coverage erase
+            python -m coverage run --rcfile=.coveragerc \
+              manage.py test --verbosity 1 2>&1 \
+              | tee artifacts/django-full-postgresql.log
+          else
+            printf '%s\n' \
+              'Coverage tool is unavailable; running the unchanged test command.' \
+              | tee artifacts/coverage-not-produced.log
+            python manage.py test --verbosity 1 2>&1 \
+              | tee artifacts/django-full-postgresql.log
+          fi
+
+      - name: Build report-only coverage artifacts
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.resolve-revision.outputs.sha }}
+        run: |
+          if ! python -c "import coverage; assert coverage.__version__ == '7.16.1'" \
+            >/dev/null 2>&1 || [[ ! -f .coverage ]]; then
+            printf '%s\n' \
+              '## Python coverage — REPORT NOT PRODUCED' \
+              '' \
+              "- SHA: \`$TARGET_SHA\`" \
+              '- Coverage is report-only and has no fail-under threshold.' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python -m coverage json --rcfile=.coveragerc -o artifacts/coverage.json
+          python -m coverage xml --rcfile=.coveragerc -o artifacts/coverage.xml
+          python -m coverage report --rcfile=.coveragerc \
+            | tee artifacts/coverage.txt
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("artifacts/coverage.json")
+          payload = json.loads(source.read_text(encoding="utf-8"))
+          totals = payload.get("totals")
+          meta = payload.get("meta")
+          files = payload.get("files")
+          if not isinstance(totals, dict) or not isinstance(meta, dict) or not isinstance(files, dict):
+              raise SystemExit("coverage JSON has an unexpected schema")
+          if meta.get("branch_coverage") is not True:
+              raise SystemExit("coverage JSON does not contain branch coverage")
+
+          summary = {
+              "schema": 1,
+              "mode": "report-only",
+              "target_sha": os.environ["TARGET_SHA"],
+              "coverage_version": meta.get("version"),
+              "branch_coverage": True,
+              "measured_files": len(files),
+              "totals": totals,
+          }
+          Path("artifacts/coverage-summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "## Python coverage baseline — REPORT ONLY",
+              "",
+              "Порог отсутствует; этот отчёт не блокирует merge и deploy.",
+              "",
+              f"- SHA: `{summary['target_sha']}`",
+              f"- Coverage.py: `{summary['coverage_version']}`",
+              f"- Measured files: `{summary['measured_files']}`",
+              f"- Statements: `{totals.get('num_statements')}`; missing: `{totals.get('missing_lines')}`",
+              f"- Branches: `{totals.get('num_branches')}`; missing: `{totals.get('missing_branches')}`",
+              f"- Total coverage: `{totals.get('percent_covered_display')}%`",
+              "",
+          ]
+          markdown = "\n".join(lines)
+          Path("artifacts/coverage-summary.md").write_text(markdown, encoding="utf-8")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write(markdown)
+          PY
 
       - name: Run standalone tools contract tests
         shell: bash
@@ -143,7 +236,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-django-${{ needs.resolve-revision.outputs.short_sha }}-logs
-          path: СИСТЕМА_MVP/backend/artifacts/*.log
+          path: |
+            СИСТЕМА_MVP/backend/artifacts/*.log
+            СИСТЕМА_MVP/backend/artifacts/coverage.json
+            СИСТЕМА_MVP/backend/artifacts/coverage.xml
+            СИСТЕМА_MVP/backend/artifacts/coverage.txt
+            СИСТЕМА_MVP/backend/artifacts/coverage-summary.json
+            СИСТЕМА_MVP/backend/artifacts/coverage-summary.md
           if-no-files-found: warn
           retention-days: 14
 
