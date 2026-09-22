@@ -12,13 +12,22 @@ const source = fs.readFileSync(
 function runHeartbeat({
     userAgent = "Mozilla/5.0", nativeApp = false, nativeVersion = "",
     standalone = false, iosStandalone = false, hidden = false, deferred = false,
+    nativeInstallationId = "", nativeIdentityNeverResolves = false,
 } = {}) {
     const requests = [], events = [];
     const listeners = new Map(), timers = new Map();
     let now = 1000000, timerId = 0;
     const document = {
         hidden, cookie: "csrftoken=test-token",
-        body: {dataset: {nativeApp: nativeApp ? "true" : "false", nativeClientVersion: nativeVersion}},
+        body: {dataset: {
+            nativeApp: nativeApp ? "true" : "false",
+            nativeClientVersion: nativeVersion,
+            connectionState: "ok",
+            operationalObservedVersion: "712",
+            operationalAppliedVersion: "711",
+            operationalPendingVersion: "713",
+            operationalStateVersion: "711",
+        }},
         querySelector() {return null;},
         addEventListener(name, handler) {listeners.set(name, handler);},
     };
@@ -40,6 +49,14 @@ function runHeartbeat({
         clearTimeout(id) {timers.delete(id);},
         setTimeout(callback, delay) {timers.set(++timerId, {callback, delay}); return timerId;},
     };
+    if (nativeInstallationId || nativeIdentityNeverResolves) {
+        window.Capacitor = {Plugins: {NativePush: {
+            getInstallationIdentity() {
+                if (nativeIdentityNeverResolves) return new Promise(() => {});
+                return Promise.resolve({installationId: nativeInstallationId});
+            },
+        }}};
+    }
     class FakeDate extends Date {static now() {return now;}}
     const context = {window, document, URLSearchParams, decodeURIComponent, Date: FakeDate};
     const load = () => vm.runInNewContext(source, context);
@@ -61,15 +78,40 @@ function runHeartbeat({
 }
 async function settle() {for (let i = 0; i < 12; i++) await Promise.resolve();}
 
-test("native APK heartbeat reports Android APK and binary version", () => {
-    const {requests} = runHeartbeat({
+test("native APK heartbeat waits for shared Android identity and reports canonical versions", async () => {
+    const r = runHeartbeat({
         userAgent: "Mozilla/5.0 (Linux; Android 14)",
         nativeApp: true,
         nativeVersion: "0.1.18",
+        nativeInstallationId: "android-11111111-2222-3333-4444-555555555555",
     });
+    assert.equal(r.requests.length, 0);
+    r.emit("focus");
+    assert.equal(r.requests.length, 0);
+    await settle();
+    const {requests} = r;
     assert.equal(requests.length, 1);
     assert.equal(requests[0].body.get("client_kind"), "android_apk");
     assert.equal(requests[0].body.get("client_version"), "0.1.18");
+    assert.equal(
+        requests[0].body.get("installation_id"),
+        "android-11111111-2222-3333-4444-555555555555"
+    );
+    assert.equal(requests[0].body.get("connection_state"), "ok");
+    assert.equal(requests[0].body.get("observed_version"), "712");
+    assert.equal(requests[0].body.get("applied_version"), "711");
+    assert.equal(requests[0].body.get("pending_version"), "713");
+    assert.equal(requests[0].body.get("probe_capable"), "1");
+});
+
+test("native identity lookup has a bounded web identity fallback", async () => {
+    const r = runHeartbeat({nativeApp: true, nativeIdentityNeverResolves: true});
+    assert.equal(r.requests.length, 0);
+    r.runTimers(750);
+    await settle();
+    assert.equal(r.requests.length, 1);
+    assert.match(r.requests[0].body.get("installation_id"), /^web-[A-Za-z0-9-]+$/);
+    assert.equal(r.requests[0].body.has("probe_capable"), false);
 });
 
 test("installed Android PWA is distinct from an ordinary browser", () => {
@@ -106,6 +148,24 @@ test("only a fresh authenticated 204 publishes transport success", async () => {
     assert.equal(r.successes()[0].detail.occurredAtMs, 1000000);
     assert.equal(r.window.AppSessionHeartbeat.lastSuccessAtMs, 1000000);
     assert.equal(r.pendingTimers(30000), 1);
+});
+
+test("next presence heartbeat reports the previous authenticated round trip", async () => {
+    const r = runHeartbeat({deferred: true});
+    r.advance(123); r.success(0); await settle();
+    assert.equal(r.window.AppSessionHeartbeat.lastRttMs, 123);
+    r.advance(29877); r.runTimers(29877);
+    assert.equal(r.requests.length, 2);
+    assert.equal(r.requests[1].body.get("rtt_ms"), "123");
+});
+
+test("canonical empty pending version reports a known empty apply queue", async () => {
+    const r = runHeartbeat({deferred: true});
+    r.success(0); await settle();
+    r.document.body.dataset.operationalPendingVersion = "";
+    r.advance(30000); r.runTimers(30000);
+    assert.equal(r.requests.length, 2);
+    assert.equal(r.requests[1].body.get("pending_version"), "0");
 });
 
 for (const [status, redirected] of [[200, false], [204, true], [401, false], [403, false], [503, false]]) {

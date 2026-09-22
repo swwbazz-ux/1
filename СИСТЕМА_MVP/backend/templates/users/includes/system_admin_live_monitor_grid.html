@@ -65,7 +65,41 @@
                             </div>
                         </dl>
 
+                        <dl class="admin-live-connection-facts" data-connection-health="{{ row.presence.connection.health_code }}">
+                            <div class="is-health">
+                                <dt>Канал связи</dt>
+                                <dd><b class="admin-live-connection-health {{ row.presence.connection.health_code }}">{{ row.presence.connection.health_label }}</b></dd>
+                                <small>{{ row.presence.connection.channel_label }}</small>
+                            </div>
+                            <div>
+                                <dt>Последний ответ</dt>
+                                <dd>{% if row.presence.connection.received_at %}{{ row.presence.connection.received_at|date:"H:i:s" }}{% elif row.last_seen_at %}{{ row.last_seen_at|date:"H:i:s" }}{% else %}—{% endif %}</dd>
+                                <small>{% if row.presence.connection.rtt_ms %}{{ row.presence.connection.rtt_ms }} мс{% else %}задержка не измерена{% endif %}</small>
+                            </div>
+                            <div>
+                                <dt>Версия данных</dt>
+                                <dd>{{ row.presence.connection.version_label }}</dd>
+                                <small>{{ row.presence.connection.pending_label }}</small>
+                            </div>
+                            <div>
+                                <dt>Установка</dt>
+                                <dd title="{{ row.presence.connection.installation_id }}">{{ row.presence.connection.installation_short }}</dd>
+                                <small>{{ row.presence.client_badges.0.label|default:"клиент не определён" }}</small>
+                            </div>
+                            <div class="is-probe {{ row.presence.connection.probe.status }}">
+                                <dt>Проверка сервером</dt>
+                                <dd>{{ row.presence.connection.probe.label }}</dd>
+                                <small>{% if row.presence.connection.probe.status == 'acknowledged' %}ответ за {{ row.presence.connection.probe.roundtrip_ms }} мс{% elif row.presence.connection.probe.requested_at %}отправлена {{ row.presence.connection.probe.requested_at|date:"H:i:s" }}{% elif row.can_probe_connection %}готова к запуску{% elif row.has_probe_push %}APK требует обновления{% else %}push не зарегистрирован{% endif %}</small>
+                            </div>
+                        </dl>
+
                         <div class="admin-live-person-actions">
+                            {% if row.can_probe_connection %}
+                                <form method="post" action="{% url 'system_admin_probe_connection' row.access.id %}" class="admin-live-probe-form">
+                                    {% csrf_token %}
+                                    <button type="submit" class="admin-live-action probe">Проверить APK</button>
+                                </form>
+                            {% endif %}
                             {% if row.observe_url %}
                                 <a class="admin-live-action observe" href="{{ row.observe_url }}" target="_blank" rel="noopener">Наблюдать</a>
                             {% endif %}

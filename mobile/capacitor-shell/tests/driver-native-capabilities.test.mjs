@@ -77,6 +77,30 @@ test("Native push keeps a durable token and reports only the field-app identity 
   assert.match(plugin, /\.put\("platform", "android"\)/);
   assert.match(plugin, /\.put\("appId", BuildConfig\.APPLICATION_ID\)/);
   assert.match(plugin, /NativeFieldProfile\.supportsPushAndHaptics\(\)/);
+  assert.match(plugin, /getInstallationIdentity\(PluginCall call\)/);
+  assert.match(plugin, /AppInstallationIdentity\.get\(getContext\(\)\)/);
+});
+
+test("FCM presence challenge is acknowledged only through the authenticated heartbeat", () => {
+  const fcmService = source(javaRoot, "CopperFirebaseMessagingService.java");
+  const connectionService = source(javaRoot, "ConnectivityForegroundService.java");
+  const identity = source(javaRoot, "AppInstallationIdentity.java");
+  const probe = source(javaRoot, "PresenceProbeState.java");
+
+  assert.match(fcmService, /"presence_probe"\.equals\(kind\)/);
+  assert.match(fcmService, /PresenceProbeState\.remember/);
+  assert.match(fcmService, /reconcilePresenceProbe/);
+  assert.match(connectionService, /X-App-Installation-Id/);
+  assert.match(connectionService, /X-App-Observed-Version/);
+  assert.match(connectionService, /X-App-Heartbeat-Rtt-Ms/);
+  assert.match(connectionService, /X-App-Presence-Probe-Capable/);
+  assert.match(connectionService, /X-App-Presence-Probe/);
+  assert.match(connectionService, /requestHeartbeat\(sentPresenceProbeId\)/);
+  assert.match(connectionService, /PresenceProbeState\.clearIfEquals\(this, sentPresenceProbeId\)/);
+  assert.match(identity, /"android-" \+ UUID\.randomUUID\(\)/);
+  assert.match(probe, /MAX_AGE_MS = 2 \* 60_000L/);
+  assert.match(probe, /sentProbeId\.equals\(currentProbeId\)/);
+  assert.doesNotMatch(fcmService, /probe_id.*Log\./);
 });
 
 test("Native haptics are bounded and use the media vibration channel", () => {

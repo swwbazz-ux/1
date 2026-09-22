@@ -34078,6 +34078,87 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
     font-weight: 800;
 }
 
+.admin-live-connection-facts {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 0;
+    padding-top: 9px;
+    border-top: 1px dashed var(--admin-line);
+}
+
+.admin-live-connection-facts > div {
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+}
+
+.admin-live-connection-facts dt,
+.admin-live-connection-facts dd,
+.admin-live-connection-facts small {
+    display: block;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-live-connection-facts dt {
+    color: var(--admin-muted);
+    font-size: 8px;
+    font-weight: 900;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+}
+
+.admin-live-connection-facts dd {
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 900;
+}
+
+.admin-live-connection-facts small {
+    margin-top: 2px;
+    color: var(--admin-muted);
+    font-size: 8px;
+    font-weight: 750;
+}
+
+.admin-live-connection-health.healthy,
+.admin-live-connection-health.syncing,
+.admin-live-connection-facts .is-probe.acknowledged dd {
+    color: var(--admin-green);
+}
+
+.admin-live-connection-health.recovering,
+.admin-live-connection-health.delayed,
+.admin-live-connection-facts .is-probe.sent dd,
+.admin-live-connection-facts .is-probe.sending dd {
+    color: var(--admin-yellow);
+}
+
+.admin-live-connection-health.degraded,
+.admin-live-connection-health.offline,
+.admin-live-connection-facts .is-probe.unavailable dd,
+.admin-live-connection-facts .is-probe.no_response dd {
+    color: var(--admin-red);
+}
+
+.admin-live-probe-form {
+    min-width: 0;
+    margin: 0;
+}
+
+.admin-live-probe-form .admin-live-action.probe {
+    width: 100%;
+    border-color: color-mix(in srgb, var(--admin-cyan) 48%, var(--admin-line));
+    background: color-mix(in srgb, var(--admin-cyan) 10%, var(--admin-panel));
+    color: var(--admin-cyan);
+}
+
 .admin-live-person-actions {
     /* Четыре кнопки в столбик занимали пол-экрана телефона, и до карточки
        следующего человека приходилось долго листать. Раскладываем два на два:
@@ -34259,6 +34340,15 @@ body[data-observer-mode="true"] [data-observer-blocked="true"] {
     }
 
     .admin-live-person-facts div:last-child {
+        grid-column: 1 / -1;
+    }
+
+    .admin-live-connection-facts {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .admin-live-connection-facts > .is-health,
+    .admin-live-connection-facts > .is-probe {
         grid-column: 1 / -1;
     }
 
