@@ -217,7 +217,7 @@ test("both roles render the same dashboard and card includes", () => {
     assert.match(workspace, />ТОЧКА РАЗГРУЗКИ</);
 });
 
-test("manual controls keep three columns and stack actions timer and source with one shared gap", () => {
+test("manual controls use compact action timer and source rows with one shared gap", () => {
     const workspace = read("templates", "includes", "excavator_dashboard_workspace.html");
     const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
     const actionStart = workspace.indexOf('data-driver-manual-action-row');
@@ -241,12 +241,18 @@ test("manual controls keep three columns and stack actions timer and source with
     assert.match(driverCss, /driver-manual-workspace__source-row/);
     assert.match(driverCss, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
-    assert.match(driverCss, /grid-template-rows:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+    assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(76px, 9\.2dvh, 84px\)/);
+    assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
+    assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(118px, 14dvh, 132px\)/);
+    assert.match(driverCss, /grid-template-rows:\s*var\(--driver-manual-action-height\) var\(--driver-manual-timer-height\) minmax\(0, 1fr\)/);
     assert.match(driverCss, /align-content:\s*stretch/);
     assert.match(driverCss, /gap:\s*var\(--driver-manual-workspace-gap\)/);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
+    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*var\(--driver-manual-source-height\);[^}]*transform:\s*none;/s);
+    assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*var\(--driver-manual-action-height\);[^}]*aspect-ratio:\s*auto;/s);
+    assert.match(driverCss, /grid-template-columns:\s*clamp\(38px, 10\.5vw, 44px\) minmax\(0, 1fr\)/);
     assert.doesNotMatch(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/s);
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
 });
