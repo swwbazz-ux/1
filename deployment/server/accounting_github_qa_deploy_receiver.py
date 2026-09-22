@@ -33,6 +33,7 @@ BACKUPS = Path("/var/backups/accounting-mvp-excavator-qa/releases")
 STATE = Path("/var/lib/accounting-github-qa-deploy")
 VERIFICATIONS = STATE / "verified"
 CURRENT = STATE / "current.json"
+INITIALIZED = STATE / "initialized.json"
 LOCK = Path("/run/lock/accounting-github-qa-deploy.lock")
 SERVICE = "accounting-mvp-excavator-qa"
 SIMULATOR_SERVICE = "accounting-mvp-excavator-qa-simulator"
@@ -134,7 +135,12 @@ def assert_qa_boundaries() -> None:
     ):
         if guarded.is_symlink():
             raise ReleaseError(f"QA boundary cannot be a symlink: {guarded}")
-    if STATE.is_symlink() or VERIFICATIONS.is_symlink() or CURRENT.is_symlink():
+    if (
+        STATE.is_symlink()
+        or VERIFICATIONS.is_symlink()
+        or CURRENT.is_symlink()
+        or INITIALIZED.is_symlink()
+    ):
         raise ReleaseError("QA receiver state paths cannot be symlinks")
     production_candidates = [PRODUCTION_APP]
     if PRODUCTION_APP.is_dir():
@@ -1127,6 +1133,7 @@ def restore_files(backup: Path) -> None:
 
 def set_current_release(manifest: dict[str, Any]) -> None:
     write_state(CURRENT, manifest)
+    write_state(INITIALIZED, {"schema": 1, "initialized": True})
 
 
 def load_current_release() -> dict[str, Any]:
@@ -1155,6 +1162,18 @@ def load_current_release() -> dict[str, Any]:
     ):
         raise ReleaseError("QA current release metadata contract is invalid")
     return manifest
+
+
+def current_release_for_audit() -> dict[str, Any] | None:
+    if CURRENT.is_symlink() or INITIALIZED.is_symlink():
+        raise ReleaseError("QA release state cannot be a symlink")
+    if CURRENT.exists():
+        if not CURRENT.is_file():
+            raise ReleaseError("QA current release metadata path is invalid")
+        return load_current_release()
+    if INITIALIZED.exists():
+        raise ReleaseError("QA current release metadata disappeared after initialization")
+    return None
 
 
 def verify_live_manifest(manifest: dict[str, Any]) -> None:
@@ -1338,17 +1357,23 @@ def verify_public_hosts() -> None:
             raise ReleaseError(f"QA public HTTPS readiness failed for {host}")
 
 
-def audit_runtime(manifest: dict[str, Any] | None = None) -> None:
+def audit_runtime(manifest: dict[str, Any] | None = None) -> str | None:
     validate_runtime_boundaries()
     validate_service_identity()
-    selected_manifest = manifest if manifest is not None else load_current_release()
-    verify_live_manifest(selected_manifest)
+    selected_manifest = manifest
+    if selected_manifest is None:
+        selected_manifest = current_release_for_audit()
+    if selected_manifest is not None:
+        verify_live_manifest(selected_manifest)
+    else:
+        print("QA_AUDIT_UNTRACKED_RUNTIME=1")
     if not service_is_active(SERVICE):
         raise ReleaseError("QA application service is not active")
     wait_for_service()
     verify_public_hosts()
     result = django_command(APP, "check_excavator_qa_runtime")
     print(result.stdout, end="")
+    return selected_manifest["commit"] if selected_manifest is not None else None
 
 
 def audit_rollback_runtime() -> None:
@@ -1494,8 +1519,7 @@ def main() -> int:
             fcntl.flock(lock_handle, fcntl.LOCK_EX)
             package_hash = digest(package.read_bytes())
             if mode == "qa_audit":
-                audit_runtime()
-                deployed_commit = load_current_release()["commit"]
+                deployed_commit = audit_runtime() or "untracked"
                 print(
                     f"QA_AUDIT_OK deployed_commit={deployed_commit} "
                     f"request_commit={manifest['commit']} "

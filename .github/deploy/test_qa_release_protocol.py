@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILDER = ROOT / ".github" / "deploy" / "build_qa_release.py"
 RECEIVER = ROOT / "deployment" / "server" / "accounting_github_qa_deploy_receiver.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "qa-backend-deploy.yml"
+QA_SYSTEMD = ROOT / "СИСТЕМА_MVP" / "backend" / "deploy" / "systemd"
 
 
 def load_receiver():
@@ -371,6 +372,52 @@ class QAReleaseProtocolTests(unittest.TestCase):
         finally:
             self.receiver.set_command_deadline(None)
 
+    def test_fresh_audit_does_not_require_current_release_metadata(self):
+        missing_current = self.temp / "missing-current.json"
+        missing_initialized = self.temp / "missing-initialized.json"
+        command_result = mock.Mock(stdout="runtime-ready\n")
+        with (
+            mock.patch.object(self.receiver, "CURRENT", missing_current),
+            mock.patch.object(self.receiver, "INITIALIZED", missing_initialized),
+            mock.patch.object(self.receiver, "validate_runtime_boundaries"),
+            mock.patch.object(self.receiver, "validate_service_identity"),
+            mock.patch.object(self.receiver, "verify_live_manifest") as verify,
+            mock.patch.object(self.receiver, "service_is_active", return_value=True),
+            mock.patch.object(self.receiver, "wait_for_service"),
+            mock.patch.object(self.receiver, "verify_public_hosts"),
+            mock.patch.object(
+                self.receiver, "django_command", return_value=command_result
+            ),
+        ):
+            self.receiver.audit_runtime()
+            verify.assert_not_called()
+
+    def test_audit_rejects_damaged_or_deleted_current_metadata(self):
+        state = self.temp / "damaged-audit-state"
+        state.mkdir(exist_ok=True)
+        current_directory = state / "current.json"
+        current_directory.mkdir(exist_ok=True)
+        initialized = state / "initialized.json"
+        with (
+            mock.patch.object(self.receiver, "CURRENT", current_directory),
+            mock.patch.object(self.receiver, "INITIALIZED", initialized),
+        ):
+            with self.assertRaisesRegex(
+                self.receiver.ReleaseError, "metadata path is invalid"
+            ):
+                self.receiver.current_release_for_audit()
+
+        current_directory.rmdir()
+        initialized.write_text('{"initialized":true}\n', encoding="utf-8")
+        with (
+            mock.patch.object(self.receiver, "CURRENT", current_directory),
+            mock.patch.object(self.receiver, "INITIALIZED", initialized),
+        ):
+            with self.assertRaisesRegex(
+                self.receiver.ReleaseError, "disappeared after initialization"
+            ):
+                self.receiver.current_release_for_audit()
+
     def test_backup_root_rejects_wrong_owner_or_mode(self):
         fake_backup = mock.Mock()
         fake_backup.is_symlink.return_value = False
@@ -495,6 +542,11 @@ class QAReleaseProtocolTests(unittest.TestCase):
         self.assertNotIn("PROD_", text)
         self.assertNotIn("production-deploy", text)
         self.assertNotIn("accounting_github_deploy_receiver.py", text)
+        self.assertIn("  package:\n", text)
+        self.assertIn("  candidate-tests:\n", text)
+        self.assertIn("      - package\n      - candidate-tests\n", text)
+        self.assertGreaterEqual(text.count("persist-credentials: false"), 2)
+        self.assertIn("Materialize exact source without executing it", text)
         self.assertLess(
             text.index("Upload immutable QA package"),
             text.index("Run targeted QA backend tests after immutable packaging"),
@@ -509,6 +561,23 @@ class QAReleaseProtocolTests(unittest.TestCase):
         self.assertIn("PR_SET_NO_NEW_PRIVS", source)
         self.assertIn("as_qa_user=True", source)
         self.assertIn('"static_root": cwd / "staticfiles"', source)
+
+    def test_qa_systemd_units_use_dedicated_identity(self):
+        for name in (
+            "accounting-mvp-excavator-qa.service",
+            "accounting-mvp-excavator-qa-simulator.service",
+        ):
+            with self.subTest(name=name):
+                source = (QA_SYSTEMD / name).read_text(encoding="utf-8")
+                self.assertIn("User=accounting-qa", source)
+                self.assertIn("Group=accounting-qa", source)
+                self.assertIn("NoNewPrivileges=true", source)
+                self.assertNotIn("User=deploy", source)
+                self.assertNotIn("Group=www-data", source)
+        app_source = (
+            QA_SYSTEMD / "accounting-mvp-excavator-qa.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--umask 0007", app_source)
 
     def test_manifest_and_snapshot_tampering_are_rejected(self):
         package, _ = self.build("qa_verify", "tamper-source.tar.gz")
