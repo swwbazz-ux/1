@@ -45,7 +45,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  package-and-test:
+  package:
     if: github.actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -63,12 +63,8 @@ jobs:
         with:
           ref: ${{ github.ref }}
           path: control
-
-      - name: Checkout exact source commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.expected_commit }}
-          path: source
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate protected QA request
         env:
@@ -81,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/codex/github-qa-deploy-20260923"
-          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           case "$MODE:$CONFIRMATION" in
             qa_audit:QA_AUDIT|qa_verify:QA_VERIFY|qa_deploy:QA_DEPLOY_MIGRATIONS|qa_rollback:QA_ROLLBACK) ;;
             *) echo "QA confirmation does not match the selected mode" >&2; exit 2 ;;
@@ -111,6 +107,16 @@ jobs:
           python -m py_compile \
             control/.github/deploy/build_qa_release.py \
             control/deployment/server/accounting_github_qa_deploy_receiver.py
+
+      - name: Materialize exact source without executing it
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          git -C control fetch --no-tags --depth=1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$EXPECTED_COMMIT"
+          git -C control worktree add --detach ../source "$EXPECTED_COMMIT"
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_COMMIT"
 
       - name: Build deterministic QA package
         id: package
@@ -171,6 +177,32 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  candidate-tests:
+    if: github.actor == github.repository_owner
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Set up Python before candidate checkout
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Checkout exact candidate without credentials
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_commit }}
+          path: source
+          persist-credentials: false
+
       - name: Run targeted QA backend tests after immutable packaging
         if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
         working-directory: source
@@ -191,8 +223,14 @@ jobs:
             users.test_live_monitor_presence \
             users.test_native_push
 
+      - name: No candidate execution required for metadata-only mode
+        if: inputs.mode != 'qa_verify' && inputs.mode != 'qa_deploy'
+        run: echo "Candidate Django execution is not required for this mode"
+
   release:
-    needs: package-and-test
+    needs:
+      - package
+      - candidate-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: qa
@@ -204,11 +242,11 @@ jobs:
       - name: Download immutable QA package
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.0
         with:
-          name: ${{ needs.package-and-test.outputs.artifact_name }}
+          name: ${{ needs.package.outputs.artifact_name }}
 
       - name: Verify downloaded package
         env:
-          EXPECTED_PACKAGE_SHA256: ${{ needs.package-and-test.outputs.package_sha256 }}
+          EXPECTED_PACKAGE_SHA256: ${{ needs.package.outputs.package_sha256 }}
         run: |
           set -euo pipefail
           test "$(sha256sum qa-release.tar.gz | cut -d' ' -f1)" = "$EXPECTED_PACKAGE_SHA256"
