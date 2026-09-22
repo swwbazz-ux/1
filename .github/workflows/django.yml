@@ -208,6 +208,79 @@ jobs:
           read -r -a labels <<< "$DJANGO_TEST_LABELS"
           python manage.py test "${labels[@]}"
 
+  ruff-ratchet-report:
+    name: Ruff ratchet (report only, not required)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RATCHET_BASE_SHA: >-
+        ${{ github.event_name == 'pull_request' &&
+        github.event.pull_request.base.sha || github.event.before }}
+      RATCHET_HEAD_SHA: >-
+        ${{ github.event_name == 'pull_request' &&
+        github.event.pull_request.head.sha || github.sha }}
+      RATCHET_DIFF_MODE: >-
+        ${{ github.event_name == 'pull_request' && 'merge-base' || 'direct' }}
+
+    steps:
+      - name: Checkout exact ratchet head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RATCHET_HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements-quality.txt
+
+      - name: Install pinned quality tools
+        run: >-
+          python -m pip install
+          --disable-pip-version-check
+          --no-deps
+          --require-hashes
+          -r СИСТЕМА_MVP/backend/requirements-quality.txt
+
+      - name: Collect report-only Ruff ratchet
+        shell: bash
+        run: |
+          python СИСТЕМА_MVP/backend/tools/quality_diff_gate.py \
+            --base "$RATCHET_BASE_SHA" \
+            --head "$RATCHET_HEAD_SHA" \
+            --diff-mode "$RATCHET_DIFF_MODE" \
+            --event "$GITHUB_EVENT_NAME" \
+            --report-only \
+            --github-annotations \
+            --json-output "$RUNNER_TEMP/ruff-ratchet/report.json" \
+            --markdown-output "$RUNNER_TEMP/ruff-ratchet/summary.md"
+
+      - name: Publish Ruff report summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/ruff-ratchet/summary.md" ]]; then
+            cat "$RUNNER_TEMP/ruff-ratchet/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' \
+              '## Ruff ratchet — REPORT NOT PRODUCED' \
+              'Wrapper or report infrastructure failed.' \
+              'This job is not part of Required quality gate.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Ruff report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ruff-ratchet-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ruff-ratchet/
+          if-no-files-found: warn
+          retention-days: 14
+
   required-quality-gate:
     name: Required quality gate
     if: always()
