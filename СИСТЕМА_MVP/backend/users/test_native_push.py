@@ -3,7 +3,7 @@ import urllib.error
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -190,6 +190,96 @@ class NativePushDeliveryTests(TestCase):
         self.device.refresh_from_db()
         self.assertEqual(self.device.failure_count, 0)
         self.assertIsNotNone(self.device.last_success_at)
+
+    @patch('users.native_push._oauth_access_token', return_value='oauth-token')
+    @patch('users.native_push.urllib.request.urlopen', return_value=_SuccessfulResponse())
+    def test_presence_probe_targets_role_app_and_carries_only_bounded_nonce(self, urlopen, _oauth):
+        NativePushDevice.objects.create(
+            employee=self.employee,
+            provider=NativePushDevice.Provider.FCM,
+            token='other-app-token',
+            platform=NativePushDevice.Platform.ANDROID,
+            app_id='ru.copperresources.excavator',
+        )
+
+        delivered = notify_employee_devices(
+            self.employee,
+            kind='presence_probe',
+            app_ids={'ru.copperresources.driver'},
+            extra_data={'probe_id': 'safe_probe_1234567890'},
+        )
+
+        self.assertEqual(delivered, 1)
+        self.assertEqual(urlopen.call_count, 1)
+        payload = json.loads(urlopen.call_args.args[0].data.decode('utf-8'))
+        self.assertEqual(payload['message']['token'], 'delivery-token')
+        self.assertEqual(payload['message']['data'], {
+            'kind': 'presence_probe',
+            'version': '',
+            'probe_id': 'safe_probe_1234567890',
+        })
+
+    @patch('users.native_push._oauth_access_token', return_value='oauth-token')
+    @patch('users.native_push.urllib.request.urlopen', return_value=_SuccessfulResponse())
+    def test_explicit_empty_app_filter_never_broadcasts_probe(self, urlopen, oauth):
+        delivered = notify_employee_devices(
+            self.employee,
+            kind='presence_probe',
+            app_ids=set(),
+            extra_data={'probe_id': 'safe_probe_1234567890'},
+        )
+
+        self.assertEqual(delivered, 0)
+        oauth.assert_not_called()
+        urlopen.assert_not_called()
+
+    @patch('users.native_push._oauth_access_token', return_value='oauth-token')
+    @patch('users.native_push.urllib.request.urlopen', return_value=_SuccessfulResponse())
+    def test_probe_can_bound_device_fanout_and_provider_timeout(self, urlopen, oauth):
+        NativePushDevice.objects.create(
+            employee=self.employee,
+            provider=NativePushDevice.Provider.FCM,
+            token='older-delivery-token',
+            platform=NativePushDevice.Platform.ANDROID,
+            app_id='ru.copperresources.driver',
+        )
+
+        delivered = notify_employee_devices(
+            self.employee,
+            kind='presence_probe',
+            app_ids={'ru.copperresources.driver'},
+            extra_data={'probe_id': 'safe_probe_1234567890'},
+            max_devices=1,
+            request_timeout_seconds=3,
+        )
+
+        self.assertEqual(delivered, 1)
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(urlopen.call_args.kwargs['timeout'], 3)
+        oauth.assert_called_once_with(ANY, timeout_seconds=3)
+
+    @patch('users.native_push._deliver_fcm', return_value=(False, False))
+    def test_diagnostic_probe_does_not_penalize_token_for_transient_provider_failure(
+        self,
+        deliver,
+    ):
+        self.device.failure_count = 4
+        self.device.save(update_fields=['failure_count'])
+
+        delivered = notify_employee_devices(
+            self.employee,
+            kind='presence_probe',
+            app_ids={'ru.copperresources.driver'},
+            max_devices=2,
+            stop_after_first_success=True,
+            penalize_transient_failures=False,
+        )
+
+        self.assertEqual(delivered, 0)
+        deliver.assert_called_once()
+        self.device.refresh_from_db()
+        self.assertTrue(self.device.is_active)
+        self.assertEqual(self.device.failure_count, 4)
 
     @patch('users.native_push._oauth_access_token', return_value='oauth-token')
     @patch('users.native_push.urllib.request.urlopen')

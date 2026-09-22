@@ -60,6 +60,18 @@ public class NativePushPlugin extends Plugin {
         });
     }
 
+    @PluginMethod
+    public void getInstallationIdentity(PluginCall call) {
+        if (!NativeFieldProfile.supportsPushAndHaptics()) {
+            call.reject("Native application identity is unavailable for this application");
+            return;
+        }
+        call.resolve(new JSObject().put(
+            "installationId",
+            AppInstallationIdentity.get(getContext())
+        ));
+    }
+
     static void publishToken(Context context, String token) {
         if (!NativeFieldProfile.supportsPushAndHaptics() || token == null || token.trim().isEmpty()) {
             return;

@@ -28,6 +28,14 @@ from .active_role import (
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
     ACTIVE_ROLE_SESSION_KEY,
 )
+from .application_connection import (
+    CONNECTION_EVIDENCE_TTL_SECONDS,
+    application_connection_summary,
+    connection_evidence_by_session_keys,
+    connection_evidence_from_request,
+    connection_probe_summaries,
+    record_application_connection_evidence,
+)
 from .models import ActiveApplicationSession, Employee, EmployeeAccess
 from .role_apps import get_role_app, get_role_app_for_path, get_role_app_for_request
 
@@ -54,12 +62,13 @@ APPLICATION_PRESENCE_ONLINE = 'online'
 
 
 def empty_application_presence(*, has_logged_in=False):
+    status_code = (
+        APPLICATION_PRESENCE_OFFLINE
+        if has_logged_in
+        else APPLICATION_PRESENCE_NOT_REGISTERED
+    )
     return {
-        'status_code': (
-            APPLICATION_PRESENCE_OFFLINE
-            if has_logged_in
-            else APPLICATION_PRESENCE_NOT_REGISTERED
-        ),
+        'status_code': status_code,
         'status_label': 'Нет связи' if has_logged_in else 'Не подключался',
         'has_logged_in': bool(has_logged_in),
         'is_online': False,
@@ -68,10 +77,25 @@ def empty_application_presence(*, has_logged_in=False):
         'last_seen_at': None,
         'current_path': '',
         'client_badges': [],
+        'connection': application_connection_summary(
+            [],
+            access_id=0,
+            app_code='',
+            presence_status=status_code,
+        ),
     }
 
 
-def _summarize_application_sessions(sessions, *, now, has_logged_in=False):
+def _summarize_application_sessions(
+    sessions,
+    *,
+    now,
+    has_logged_in=False,
+    access_id=0,
+    app_code='',
+    evidence_by_session_key=None,
+    probe_summary=None,
+):
     sessions = list(sessions)
     summary = empty_application_presence(
         has_logged_in=has_logged_in or bool(sessions),
@@ -128,6 +152,15 @@ def _summarize_application_sessions(sessions, *, now, has_logged_in=False):
         summary['status_code'] = APPLICATION_PRESENCE_RECENT
         summary['status_label'] = 'Недавно'
     summary['client_badges'] = list(client_badges.values())
+    summary['connection'] = application_connection_summary(
+        sessions,
+        access_id=access_id,
+        app_code=app_code,
+        presence_status=summary['status_code'],
+        now=now,
+        evidence_by_session_key=evidence_by_session_key,
+        probe_summary=probe_summary,
+    )
     return summary
 
 
@@ -136,13 +169,20 @@ def application_presence_by_access_ids(access_ids, *, now=None):
     if not access_ids:
         return {}
     now = now or timezone.now()
-    logged_in_access_ids = set(
+    accesses = list(
         EmployeeAccess.objects
-        .filter(pk__in=access_ids, last_login_at__isnull=False)
-        .values_list('pk', flat=True)
+        .select_related('role')
+        .filter(pk__in=access_ids)
     )
+    logged_in_access_ids = {
+        access.pk for access in accesses if access.last_login_at is not None
+    }
+    app_code_by_access = {}
+    for access in accesses:
+        app = get_role_app(access.role.code)
+        app_code_by_access[access.pk] = app.role_code if app else ''
     sessions_by_access = {}
-    sessions = (
+    sessions = list(
         ActiveApplicationSession.objects
         .select_related('access__employee', 'access__role')
         .filter(access_id__in=access_ids)
@@ -150,11 +190,30 @@ def application_presence_by_access_ids(access_ids, *, now=None):
     )
     for session in sessions:
         sessions_by_access.setdefault(session.access_id, []).append(session)
+    evidence_cutoff = now - timedelta(seconds=CONNECTION_EVIDENCE_TTL_SECONDS)
+    evidence_by_session_key = connection_evidence_by_session_keys(
+        session.session_key
+        for session in sessions
+        if session.last_seen_at >= evidence_cutoff
+    )
+    probes = connection_probe_summaries(
+        (
+            (access_id, app_code_by_access.get(access_id, ''))
+            for access_id in access_ids
+        ),
+        now=now,
+    )
     return {
         access_id: _summarize_application_sessions(
             sessions_by_access.get(access_id, []),
             now=now,
             has_logged_in=access_id in logged_in_access_ids,
+            access_id=access_id,
+            app_code=app_code_by_access.get(access_id, ''),
+            evidence_by_session_key=evidence_by_session_key,
+            probe_summary=probes.get(
+                (access_id, app_code_by_access.get(access_id, '')),
+            ),
         )
         for access_id in access_ids
     }
@@ -171,7 +230,7 @@ def application_presence_by_employee_ids(employee_ids, *, now=None):
         .values_list('employee_id', flat=True)
     )
     sessions_by_employee = {}
-    sessions = (
+    sessions = list(
         ActiveApplicationSession.objects
         .select_related('access__employee', 'access__role')
         .filter(access__employee_id__in=employee_ids)
@@ -179,11 +238,38 @@ def application_presence_by_employee_ids(employee_ids, *, now=None):
     )
     for session in sessions:
         sessions_by_employee.setdefault(session.access.employee_id, []).append(session)
+    evidence_cutoff = now - timedelta(seconds=CONNECTION_EVIDENCE_TTL_SECONDS)
+    evidence_by_session_key = connection_evidence_by_session_keys(
+        session.session_key
+        for session in sessions
+        if session.last_seen_at >= evidence_cutoff
+    )
+    pair_by_employee = {
+        employee_id: (
+            sessions_by_employee[employee_id][0].access_id,
+            sessions_by_employee[employee_id][0].app_code,
+        )
+        for employee_id in employee_ids
+        if sessions_by_employee.get(employee_id)
+    }
+    probes = connection_probe_summaries(pair_by_employee.values(), now=now)
     return {
         employee_id: _summarize_application_sessions(
             sessions_by_employee.get(employee_id, []),
             now=now,
             has_logged_in=employee_id in logged_in_employee_ids,
+            access_id=(
+                sessions_by_employee[employee_id][0].access_id
+                if sessions_by_employee.get(employee_id)
+                else 0
+            ),
+            app_code=(
+                sessions_by_employee[employee_id][0].app_code
+                if sessions_by_employee.get(employee_id)
+                else ''
+            ),
+            evidence_by_session_key=evidence_by_session_key,
+            probe_summary=probes.get(pair_by_employee.get(employee_id)),
         )
         for employee_id in employee_ids
     }
@@ -401,6 +487,10 @@ def touch_application_session(
         return False
     if presence_kind not in PRESENCE_KINDS:
         presence_kind = PRESENCE_FOREGROUND
+    connection_evidence = connection_evidence_from_request(
+        request,
+        presence_kind=presence_kind,
+    )
     client_kind = str(client_kind or '').strip()
     if client_kind not in APPLICATION_CLIENT_KINDS:
         client_kind = ''
@@ -417,6 +507,12 @@ def touch_application_session(
             client_version,
         ))
         if cache.get(cache_key) == marker:
+            record_application_connection_evidence(
+                session_key=session_key,
+                access_id=access_id,
+                app_code=app_hint.role_code,
+                evidence=connection_evidence,
+            )
             return True
     access = (
         EmployeeAccess.objects
@@ -447,6 +543,12 @@ def touch_application_session(
         client_version,
     ))
     if cache.get(cache_key) == marker:
+        record_application_connection_evidence(
+            session_key=session_key,
+            access_id=access.pk,
+            app_code=app.role_code,
+            evidence=connection_evidence,
+        )
         return True
     cache.set(
         cache_key,
@@ -474,6 +576,12 @@ def touch_application_session(
     else:
         defaults['foreground_seen_at'] = now
     defaults['path'] = path or app.start_url
+    record_application_connection_evidence(
+        session_key=session_key,
+        access_id=access.pk,
+        app_code=app.role_code,
+        evidence=connection_evidence,
+    )
     ActiveApplicationSession.objects.update_or_create(
         session_key=session_key,
         defaults=defaults,

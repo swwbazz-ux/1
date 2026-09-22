@@ -28,6 +28,7 @@ from .live_monitor_views import (
     system_admin_force_close_shift_view,
     system_admin_force_end_sessions_view,
     system_admin_live_monitor_view,
+    system_admin_probe_connection_view,
 )
 from .start_views import universal_start_view
 from .client_errors import client_error_report_view
@@ -141,6 +142,11 @@ urlpatterns = [
         name='system_admin_registration_dashboard',
     ),
     path('system-admin/live/', system_admin_live_monitor_view, name='system_admin_live_monitor'),
+    path(
+        'system-admin/live/access/<int:access_id>/probe/',
+        system_admin_probe_connection_view,
+        name='system_admin_probe_connection',
+    ),
     path('system-admin/enter/', system_admin_enter_employee_view, name='system_admin_enter_employee'),
     path('system-admin/field-test/', system_admin_field_test_view, name='system_admin_field_test'),
     path(

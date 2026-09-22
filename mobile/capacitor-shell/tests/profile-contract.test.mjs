@@ -672,7 +672,7 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
   assert.match(pendingShiftClose, /field_errors/);
   assert.match(pendingShiftClose, /warnings/);
   assert.match(pendingShiftClose, /markAttention\(Context context, String expectedClientActionId, String responseBody\)/);
-  assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(\)/);
+  assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(sentPresenceProbeId\)/);
   assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?PendingDriverShiftClose\.hasPending\(this\)[\s\S]*?scheduleHeartbeat\(0L\)/);
   assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id[\s\S]*?reading_confirmation_token/);
   assert.match(service, /statusCode == 401 \|\| result\.statusCode == 403[\s\S]*?PendingDriverShiftClose\.markAuthRequired[\s\S]*?FlushResult\.AUTH_REQUIRED/);

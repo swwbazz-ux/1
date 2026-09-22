@@ -48,6 +48,7 @@ public class ConnectivityForegroundService extends Service {
     public static final String ACTION_STOP_CONNECTION = "ru.copperresources.mobile.action.STOP_CONNECTION";
     private static final String ACTION_RECONCILE = "ru.copperresources.mobile.action.RECONCILE_CONNECTION";
     private static final String ACTION_ACTIVE_SHIFT = "ru.copperresources.mobile.action.ACTIVE_SHIFT";
+    private static final String ACTION_PRESENCE_PROBE = "ru.copperresources.mobile.action.PRESENCE_PROBE";
     static final String PREFS_NAME = ConnectionState.PREFS_NAME;
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
     private static final String CONNECTION_LOSS_ANNOUNCED = ConnectionVoiceGate.LOSS_ANNOUNCED_KEY;
@@ -64,6 +65,7 @@ public class ConnectivityForegroundService extends Service {
     private NativeTransportState transport;
     private final HeartbeatSchedule heartbeatSchedule = new HeartbeatSchedule();
     private volatile boolean stopping;
+    private volatile boolean presenceProbeOnly;
     private boolean foregroundStarted;
     private String publishedStatus = "";
 
@@ -77,6 +79,13 @@ public class ConnectivityForegroundService extends Service {
         }
         Intent intent = new Intent(context, ConnectivityForegroundService.class)
             .setAction(ACTION_RECONCILE);
+        startSafely(context, intent);
+    }
+
+    public static void reconcilePresenceProbe(Context context) {
+        if (PresenceProbeState.pending(context, System.currentTimeMillis()).isEmpty()) return;
+        Intent intent = new Intent(context, ConnectivityForegroundService.class)
+            .setAction(ACTION_PRESENCE_PROBE);
         startSafely(context, intent);
     }
 
@@ -128,16 +137,23 @@ public class ConnectivityForegroundService extends Service {
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
-        if (!ConnectionState.isDesired(this) && !PendingDriverShiftClose.hasPending(this)) {
+        boolean normalConnectionRequired = ConnectionState.isDesired(this)
+            || PendingDriverShiftClose.hasPending(this);
+        boolean presenceProbeRequested = ACTION_PRESENCE_PROBE.equals(action)
+            && !PresenceProbeState.pending(this, System.currentTimeMillis()).isEmpty();
+        if (!normalConnectionRequired && !presenceProbeRequested) {
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
-        startAsForeground(currentStatusText());
+        presenceProbeOnly = presenceProbeRequested && !normalConnectionRequired;
+        startAsForeground(
+            presenceProbeOnly ? "Проверка связи с сервером" : currentStatusText()
+        );
         registerNetworkCallback();
         scheduleHeartbeat(0L);
         // Если Android освободил процесс под давлением памяти, он должен
         // восстановить рабочую связь без повторного открытия приложения.
-        return START_STICKY;
+        return presenceProbeOnly ? START_NOT_STICKY : START_STICKY;
     }
 
     @Nullable
@@ -265,7 +281,16 @@ public class ConnectivityForegroundService extends Service {
                 // The durable queue retains its retry. A queue error must not hide a healthy heartbeat.
                 shiftCloseFlush = FlushResult.RETRY;
             }
-            HeartbeatResult result = requestHeartbeat();
+            long heartbeatRequestStartedAt = android.os.SystemClock.elapsedRealtime();
+            String sentPresenceProbeId = PresenceProbeState.pending(
+                this,
+                System.currentTimeMillis()
+            );
+            HeartbeatResult result = requestHeartbeat(sentPresenceProbeId);
+            long heartbeatRttMs = Math.max(
+                0L,
+                android.os.SystemClock.elapsedRealtime() - heartbeatRequestStartedAt
+            );
             if (stopping || Thread.currentThread().isInterrupted()) return;
             if (result.statusCode == 401 || result.statusCode == 403) {
                 recordLocalTransportFailure("authentication_ended");
@@ -296,6 +321,7 @@ public class ConnectivityForegroundService extends Service {
             transport.success(transportSuccessAt, response.optLong("version", 0L));
             ConnectionState.recordAlive(this, transport.lastSuccessAtMs);
             ConnectionState.recordTransport(this, transport);
+            PresenceProbeState.clearIfEquals(this, sentPresenceProbeId);
             if (response.has("background_connection_required")) {
                 boolean connectionRequired = response.optBoolean("background_connection_required", false);
                 String shiftId = response.optString("active_shift_id", "");
@@ -325,6 +351,7 @@ public class ConnectivityForegroundService extends Service {
                 .putInt("last_http_status", result.statusCode)
                 .remove("last_response")
                 .remove("last_error")
+                .putLong("last_heartbeat_rtt_ms", heartbeatRttMs)
                 .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion);
             boolean excavatorProfile = "excavator".equals(BuildConfig.APP_PROFILE_ID);
             if (!excavatorProfile) {
@@ -394,6 +421,16 @@ public class ConnectivityForegroundService extends Service {
             String reason = error instanceof HeartbeatFailure ? ((HeartbeatFailure) error).reason
                 : error instanceof SocketTimeoutException ? "timeout"
                 : error instanceof IOException ? "network_error" : "local_processing";
+            if (presenceProbeOnly) {
+                if ("cookie_timeout".equals(reason) || "local_processing".equals(reason)) {
+                    recordLocalTransportFailure(reason);
+                } else {
+                    transport.failure(System.currentTimeMillis(), reason);
+                    ConnectionState.recordTransport(this, transport);
+                }
+                stopServiceAndRemoveNotification();
+                return;
+            }
             if ("cookie_timeout".equals(reason) || "local_processing".equals(reason)) {
                 recordLocalTransportFailure(reason);
                 publishStatus(transport.failureStatusText(AppVisibility.isForeground()));
@@ -459,7 +496,7 @@ public class ConnectivityForegroundService extends Service {
         HeartbeatFailure(String reason) { super(reason); this.reason = reason; }
     }
 
-    private HeartbeatResult requestHeartbeat() throws Exception {
+    private HeartbeatResult requestHeartbeat(String presenceProbeId) throws Exception {
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         long lastServerVersion = preferences.getLong("last_server_version", 0L);
         Uri.Builder heartbeatUri = Uri.parse(BuildConfig.HEARTBEAT_URL).buildUpon();
@@ -482,6 +519,26 @@ public class ConnectivityForegroundService extends Service {
                 "CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
                     + "/" + BuildConfig.VERSION_NAME
             );
+            connection.setRequestProperty(
+                "X-App-Installation-Id",
+                AppInstallationIdentity.get(this)
+            );
+            connection.setRequestProperty(
+                "X-App-Connection-State",
+                transport == null ? "unknown" : transport.transportState
+            );
+            connection.setRequestProperty(
+                "X-App-Observed-Version",
+                Long.toString(lastServerVersion)
+            );
+            connection.setRequestProperty(
+                "X-App-Heartbeat-Rtt-Ms",
+                Long.toString(preferences.getLong("last_heartbeat_rtt_ms", 0L))
+            );
+            connection.setRequestProperty("X-App-Presence-Probe-Capable", "1");
+            if (!presenceProbeId.isEmpty()) {
+                connection.setRequestProperty("X-App-Presence-Probe", presenceProbeId);
+            }
 
             String cookie = readWebViewCookie();
             if (cookie != null && !cookie.isBlank()) {
