@@ -552,16 +552,20 @@
         context = clone(context || {});
         var pointId = positive(shell && shell.dataset && shell.dataset.driverActualDumpPointId)
             || positive(context.selected_dump_point_id);
+        var assignedPointId = positive(shell && shell.dataset && shell.dataset.driverAssignedDumpPointId)
+            || positive(context.assigned_dump_point_id)
+            || pointId;
         var pointName = String(
             shell && shell.dataset && shell.dataset.driverActualDumpPointName
             || context.selected_dump_point_name
             || ""
         );
         if (pointId) context.selected_dump_point_id = pointId;
+        if (assignedPointId) context.assigned_dump_point_id = assignedPointId;
         if (pointName) context.selected_dump_point_name = pointName;
         return {
             context_snapshot: context,
-            payload: {dump_point_id: pointId}
+            payload: {dump_point_id: pointId, assigned_dump_point_id: assignedPointId}
         };
     }
 
@@ -640,6 +644,12 @@
         }
         if (manualCancelWins(activeCancel, confirmedCancel, projected, serverTripId)) {
             var cancelledPointId = positive(
+                activeCancel.context_snapshot && activeCancel.context_snapshot.assigned_dump_point_id
+            ) || positive(
+                projected && projected.payload && projected.payload.assigned_dump_point_id
+            ) || positive(
+                projected && projected.context_snapshot && projected.context_snapshot.assigned_dump_point_id
+            ) || positive(
                 activeCancel.context_snapshot && activeCancel.context_snapshot.selected_dump_point_id
             ) || positive(projected && projected.payload && projected.payload.dump_point_id);
             updateManualTripCount(
@@ -651,6 +661,7 @@
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, null);
+            restoreStandardTargets(workspace);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             setResult(workspace, queuedCancel ? "cancel-pending" : "cancelled", null, !!queuedCancel);
             if (confirmedCancel) requestManualCancellationRefresh(confirmedCancel);
@@ -695,6 +706,7 @@
             markLastDump(workspace, currentTripProjection.payload.dump_point_id);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, currentTripProjection));
             setResult(workspace, "confirmed", serverTripId, false);
+            updatePointAction(workspace);
             return currentTripProjection;
         }
         if (!projected && receipt && receipt.trip_origin === "excavator") {
@@ -726,6 +738,7 @@
         if (!projected) {
             stopTripTimer(workspace);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
+            updatePointAction(workspace);
             return null;
         }
         var latestPoint = (Array.isArray(events) ? events : [])
@@ -742,10 +755,15 @@
             .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
             .pop();
         if (latestPoint && !isTerminalState(latestPoint.state)) {
+            var assignedPointId = positive(projected.payload && projected.payload.assigned_dump_point_id)
+                || positive(projected.context_snapshot && projected.context_snapshot.assigned_dump_point_id)
+                || positive(projected.payload && projected.payload.dump_point_id);
             projected.payload = Object.assign({}, projected.payload || {}, {
+                assigned_dump_point_id: assignedPointId,
                 dump_point_id: positive(latestPoint.payload && latestPoint.payload.dump_point_id)
             });
             projected.context_snapshot = Object.assign({}, projected.context_snapshot || {}, {
+                assigned_dump_point_id: assignedPointId,
                 selected_dump_point_id: positive(latestPoint.payload && latestPoint.payload.dump_point_id),
                 selected_dump_point_name: String(
                     latestPoint.context_snapshot
@@ -760,6 +778,7 @@
             stopTripTimer(workspace);
             setSourceLocked(workspace, true);
             setResult(workspace, "review", projected.last_error && projected.last_error.message, true);
+            updatePointAction(workspace);
             return projected;
         }
         syncWorkspaceContext(workspace);
@@ -780,6 +799,7 @@
             projected.trip_id || (receipt && receipt.server_ids && receipt.server_ids.trip_id),
             projected.state !== "confirmed"
         );
+        updatePointAction(workspace);
         return projected;
     }
 
@@ -802,14 +822,17 @@
 
     function pointModeForShell(shell) {
         if (currentTripProjection) return "current";
-        return shell && shell.dataset && shell.dataset.driverHasOpenTrip === "true" &&
-            String(shell.dataset.driverActiveTripId || "") ? "current" : "next";
+        return shell && shell.dataset
+            && shell.dataset.driverActiveTripOrigin === "driver_manual"
+            && String(shell.dataset.driverActiveTripId || "")
+            ? "current"
+            : "unavailable";
     }
 
     function pointActionCopy(mode) {
         return mode === "current"
-            ? {label: "ТОЧКА РАЗГРУЗКИ", hint: "Изменить текущую", aria: "Изменить точку разгрузки текущего рейса"}
-            : {label: "ТОЧКА РАЗГРУЗКИ", hint: "Для следующего рейса", aria: "Выбрать точку разгрузки для следующего рейса"};
+            ? {label: "ИЗМЕНИТЬ ТОЧКУ", hint: "Текущий рейс", aria: "Изменить точку разгрузки текущего ручного рейса"}
+            : {label: "ИЗМЕНИТЬ ТОЧКУ", hint: "Сначала создайте рейс", aria: "Изменение точки доступно после создания ручного рейса"};
     }
 
     function updatePointAction(workspace) {
@@ -825,7 +848,29 @@
         if (hint) hint.textContent = copy.hint;
         action.setAttribute("aria-label", copy.aria);
         action.dataset.driverManualPointMode = mode;
+        action.disabled = mode !== "current" || savingLocal
+            || !currentTripProjection || isTerminalState(currentTripProjection.state);
+        action.setAttribute("aria-disabled", action.disabled ? "true" : "false");
         return mode;
+    }
+
+    function manualRerouteCandidates(catalog, standardPoints, currentPointId) {
+        var excluded = Object.create(null);
+        (Array.isArray(standardPoints) ? standardPoints : []).forEach(function (point) {
+            var id = positive(point && point.id);
+            if (id) excluded[String(id)] = true;
+        });
+        currentPointId = positive(currentPointId);
+        if (currentPointId) excluded[String(currentPointId)] = true;
+        var seen = Object.create(null);
+        return (Array.isArray(catalog) ? catalog : []).filter(function (point) {
+            var id = positive(point && point.id);
+            if (!id || excluded[String(id)] || seen[String(id)]) return false;
+            seen[String(id)] = true;
+            return true;
+        }).map(function (point) {
+            return {id: positive(point.id), name: String(point.name || "")};
+        });
     }
 
     function dumpNameSizeClass(name) {
@@ -941,14 +986,87 @@
         return target;
     }
 
+    function standardPointIds(context) {
+        return (Array.isArray(context && context.dump_points) ? context.dump_points : [])
+            .map(function (point) { return positive(point && point.id); })
+            .filter(Boolean);
+    }
+
+    function projectionUsesAlternatePoint(context) {
+        var pointId = positive(
+            currentTripProjection
+            && currentTripProjection.payload
+            && currentTripProjection.payload.dump_point_id
+        );
+        return !!pointId && standardPointIds(context).indexOf(pointId) < 0;
+    }
+
+    function setGridCount(grid, count) {
+        Array.from(grid.classList).forEach(function (name) {
+            if (/^is-count-\d+$/.test(name)) grid.classList.remove(name);
+        });
+        grid.classList.add("is-count-" + String(count));
+        grid.classList.toggle("is-single", count === 1);
+    }
+
+    function showOnlyCurrentAlternateTarget(workspace, pointId, pointName) {
+        var grid = workspace && workspace.querySelector(".eo-dashboard-unload-grid");
+        if (!grid || !pointId) return null;
+        var context = activeContext();
+        var contextKey = manualContextKey(context);
+        if (workspace.dataset.driverManualAlternateOnly !== "true") {
+            rememberWorkspaceTargets(workspace, contextKey);
+        }
+        var selector = '[data-driver-manual-dump-target][data-eo-dump-target="' + String(pointId) + '"]';
+        var target = grid.querySelector(selector);
+        var prototype = target || grid.querySelector("[data-driver-manual-dump-target]");
+        if (!target) {
+            target = createManualDumpTarget(
+                workspace.ownerDocument || root.document,
+                pointId,
+                pointName,
+                prototype,
+                true
+            );
+        }
+        grid.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (item) {
+            if (item !== target) item.remove();
+        });
+        if (target.parentNode !== grid) grid.appendChild(target);
+        target.dataset.driverManualCurrentOnly = "true";
+        setManualTargetOneOff(target, true);
+        workspace.dataset.driverManualAlternateOnly = "true";
+        setGridCount(grid, 1);
+        markLastDump(workspace, pointId);
+        if (currentReturnController) currentReturnController.bindAll();
+        return target;
+    }
+
+    function restoreStandardTargets(workspace) {
+        if (!workspace) return activeContext();
+        workspace.__driverManualContextKey = "__restore_standard_targets__";
+        var context = syncWorkspaceContext(workspace);
+        delete workspace.dataset.driverManualAlternateOnly;
+        return context;
+    }
+
     function ensureCurrentProjectionTarget(workspace) {
         var grid = workspace && workspace.querySelector(".eo-dashboard-unload-grid");
         if (!grid) return null;
+        var context = activeContext();
         var currentPointId = positive(
             currentTripProjection
             && currentTripProjection.payload
             && currentTripProjection.payload.dump_point_id
         );
+        if (currentPointId && projectionUsesAlternatePoint(context)) {
+            return showOnlyCurrentAlternateTarget(
+                workspace,
+                currentPointId,
+                projectionPointName(currentTripProjection) || "ТЕКУЩАЯ ТОЧКА"
+            );
+        }
+        delete workspace.dataset.driverManualAlternateOnly;
         grid.querySelectorAll('[data-driver-manual-current-only="true"]').forEach(function (target) {
             if (!currentPointId || positive(target.dataset.eoDumpTarget) !== currentPointId) target.remove();
         });
@@ -969,7 +1087,9 @@
         if (!workspace) return activeContext();
         var context = activeContext();
         var points = Array.isArray(context.dump_points) ? context.dump_points : [];
-        if (!shouldRebuildWorkspaceContext(workspace, context)) {
+        var showingAlternateOnly = workspace.dataset.driverManualAlternateOnly === "true";
+        var needsAlternateOnly = projectionUsesAlternatePoint(context);
+        if (!shouldRebuildWorkspaceContext(workspace, context) && showingAlternateOnly === needsAlternateOnly) {
             fitSourceTitle(workspace.querySelector("[data-driver-manual-source]"));
             ensureCurrentProjectionTarget(workspace);
             if (currentReturnController) currentReturnController.bindAll();
@@ -977,7 +1097,7 @@
         }
         var previousKey = workspace.__driverManualContextKey;
         var nextKey = manualContextKey(context);
-        rememberWorkspaceTargets(workspace, previousKey);
+        if (!showingAlternateOnly) rememberWorkspaceTargets(workspace, previousKey);
         workspace.__driverManualContextKey = nextKey;
         var source = workspace.querySelector("[data-driver-manual-source]");
         if (source) {
@@ -999,7 +1119,7 @@
         var topRock = workspace.querySelector(".eo-face-rock");
         if (topRock) topRock.textContent = String(context.rock_type_name || "");
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
-        if (grid && points.length) {
+        if (grid && points.length && !needsAlternateOnly) {
             var prototype = grid.querySelector("[data-driver-manual-dump-target]");
             var targets = cachedWorkspaceTargets(workspace, nextKey, points);
             if (!targets) {
@@ -1032,10 +1152,11 @@
             }
             grid.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (target) { target.remove(); });
             targets.forEach(function (target) { grid.appendChild(target); });
-            Array.from(grid.classList).forEach(function (name) {
-                if (/^is-count-\d+$/.test(name)) grid.classList.remove(name);
-            });
-            grid.classList.add("is-count-" + points.length);
+            setGridCount(grid, points.length);
+            delete workspace.dataset.driverManualAlternateOnly;
+        } else if (grid && !points.length && !needsAlternateOnly) {
+            grid.querySelectorAll("[data-driver-manual-dump-target]").forEach(function (target) { target.remove(); });
+            setGridCount(grid, 0);
         }
         ensureCurrentProjectionTarget(workspace);
         if (currentReturnController) currentReturnController.bindAll();
@@ -1129,6 +1250,9 @@
             events: events,
             contextSnapshot: {
                 source: "driver_manual",
+                assigned_dump_point_id: positive(projection.payload && projection.payload.assigned_dump_point_id)
+                    || positive(context.assigned_dump_point_id)
+                    || pointId,
                 selected_dump_point_id: pointId,
                 selected_dump_point_name: String(target && target.dataset.eoDumpName || projectionPointName(projection))
             }
@@ -1183,7 +1307,7 @@
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, positive(projection.payload && projection.payload.dump_point_id));
-            syncWorkspaceContext(workspace);
+            restoreStandardTargets(workspace);
             setSourceLocked(workspace, false);
             setResult(workspace, "complete-pending", null, true);
             updatePointAction(workspace);
@@ -1221,14 +1345,16 @@
             savingLocal = false;
             updateManualTripCount(
                 workspace,
-                positive(projection.payload && projection.payload.dump_point_id),
+                positive(projection.payload && projection.payload.assigned_dump_point_id)
+                    || positive(projection.context_snapshot && projection.context_snapshot.assigned_dump_point_id)
+                    || positive(projection.payload && projection.payload.dump_point_id),
                 -1,
                 "cancel:" + String(saved.event_id || "")
             );
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, null);
-            syncWorkspaceContext(workspace);
+            restoreStandardTargets(workspace);
             setSourceLocked(workspace, false);
             setResult(workspace, "cancel-pending", null, true);
             updatePointAction(workspace);
@@ -1250,6 +1376,18 @@
         if (!workspace || !pointId) return null;
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
         if (!grid) return null;
+        pointId = positive(pointId);
+        var context = activeContext();
+        var isAlternate = standardPointIds(context).indexOf(pointId) < 0;
+        if (isAlternate) {
+            var isolated = showOnlyCurrentAlternateTarget(workspace, pointId, pointName);
+            var isolatedAction = workspace.querySelector("[data-driver-manual-point-open]");
+            if (isolatedAction) {
+                isolatedAction.dataset.driverManualSelectedPointId = String(pointId);
+                isolatedAction.dataset.driverManualSelectedPointName = String(pointName || "");
+            }
+            return isolated;
+        }
         var selector = '[data-driver-manual-dump-target][data-eo-dump-target="' + String(pointId) + '"]';
         var target = grid.querySelector(selector);
         if (!target) {
@@ -1295,7 +1433,7 @@
         if (!workspace) return;
         var shell = workspace.closest("[data-driver-shell]");
         var sheet = shell && shell.querySelector("[data-driver-point-sheet]");
-        if (!sheet || ["next", "current-local"].indexOf(sheet.dataset.driverManualPointMode) < 0) return;
+        if (!sheet || sheet.dataset.driverManualPointMode !== "current-local") return;
         var original = sheet.__driverManualPointOriginal;
         var head = sheet.querySelector(".driver-unload-head");
         var paragraphs = head ? head.querySelectorAll("p") : [];
@@ -1316,6 +1454,15 @@
                 delete button.__driverManualWasDisabled;
             }
         });
+        sheet.querySelectorAll('[data-driver-manual-reroute-generated]').forEach(function (node) {
+            node.remove();
+        });
+        sheet.querySelectorAll(".driver-unload-tile-form").forEach(function (form) {
+            if (form.__driverManualWasHidden !== undefined) {
+                form.hidden = form.__driverManualWasHidden;
+                delete form.__driverManualWasHidden;
+            }
+        });
         delete sheet.dataset.driverManualPointMode;
         sheet.hidden = true;
         if (shell) shell.classList.remove("is-point-sheet-open");
@@ -1326,24 +1473,79 @@
         }
     }
 
+    function appendManualRerouteTile(sheet, point) {
+        var grid = sheet.querySelector(".driver-unload-grid");
+        if (!grid) return null;
+        var doc = sheet.ownerDocument || root.document;
+        var prototype = grid.querySelector(".driver-unload-tile-form");
+        var form = prototype ? prototype.cloneNode(true) : doc.createElement("form");
+        form.removeAttribute("action");
+        form.method = "post";
+        form.hidden = false;
+        form.dataset.driverManualRerouteGenerated = "true";
+        form.classList.add("driver-unload-tile-form");
+        var pointInput = form.querySelector('[name="dump_point"]');
+        if (!pointInput) {
+            pointInput = doc.createElement("input");
+            pointInput.type = "hidden";
+            pointInput.name = "dump_point";
+            form.appendChild(pointInput);
+        }
+        pointInput.value = String(point.id);
+        var button = form.querySelector(".driver-unload-tile");
+        if (!button) {
+            button = doc.createElement("button");
+            button.type = "submit";
+            button.className = "driver-unload-tile";
+            button.innerHTML = '<strong></strong><span class="driver-unload-tile-status" data-driver-point-tile-status></span>';
+            form.appendChild(button);
+        }
+        button.disabled = false;
+        button.classList.remove("is-current");
+        button.removeAttribute("aria-current");
+        button.dataset.driverPointName = String(point.name || "");
+        var title = button.querySelector("strong");
+        if (title) {
+            title.textContent = String(point.name || "");
+            title.classList.toggle("is-long", String(point.name || "").length > 8);
+            title.classList.toggle("is-extra-long", String(point.name || "").length > 15);
+        }
+        var status = button.querySelector("[data-driver-point-tile-status]");
+        if (status) status.textContent = "";
+        grid.appendChild(form);
+        return form;
+    }
+
+    function populateManualRerouteSheet(sheet) {
+        var base = readWorkspaceContext();
+        var catalog = Array.isArray(base.reroute_points) ? base.reroute_points : [];
+        var currentPointId = positive(
+            currentTripProjection && currentTripProjection.payload && currentTripProjection.payload.dump_point_id
+        );
+        var candidates = manualRerouteCandidates(catalog, activeContext().dump_points, currentPointId);
+        sheet.querySelectorAll('[data-driver-manual-reroute-generated]').forEach(function (node) { node.remove(); });
+        sheet.querySelectorAll(".driver-unload-tile-form").forEach(function (form) {
+            form.__driverManualWasHidden = form.hidden;
+            form.hidden = true;
+        });
+        candidates.forEach(function (point) { appendManualRerouteTile(sheet, point); });
+        if (!candidates.length) {
+            var empty = (sheet.ownerDocument || root.document).createElement("p");
+            empty.className = "driver-unload-empty";
+            empty.dataset.driverManualRerouteGenerated = "true";
+            empty.textContent = "Других активных точек разгрузки нет.";
+            var grid = sheet.querySelector(".driver-unload-grid");
+            if (grid) grid.appendChild(empty);
+        }
+        return candidates;
+    }
+
     function openPointChooser(workspace) {
         if (!workspace) return false;
         if (currentController) currentController.cancel();
         var shell = workspace.closest("[data-driver-shell]");
         if (!shell) return false;
-        if (pointModeForShell(shell) === "current") {
-            var serverTripId = positive(shell.dataset.driverActiveTripId)
-                || positive(currentTripProjection && currentTripProjection.trip_id);
-            if (serverTripId) {
-                var canonical = Array.from(shell.querySelectorAll("[data-driver-point-open]")).find(function (control) {
-                    return !control.hasAttribute("data-driver-manual-point-open");
-                });
-                if (canonical && !canonical.disabled) {
-                    canonical.click();
-                    return true;
-                }
-            }
-        }
+        if (pointModeForShell(shell) !== "current" || !currentTripProjection) return false;
         var sheet = shell.querySelector("[data-driver-point-sheet]");
         if (!sheet) return false;
         rememberPointSheet(sheet);
@@ -1351,18 +1553,12 @@
         var paragraphs = head ? head.querySelectorAll("p") : [];
         var title = head && head.querySelector("h2");
         var current = sheet.querySelector(".driver-unload-current");
-        var currentMode = pointModeForShell(shell) === "current";
-        if (title) title.textContent = currentMode ? "Точка текущего рейса" : "Другая точка разгрузки";
-        if (paragraphs[0]) paragraphs[0].textContent = currentMode
-            ? "Выберите новую точку для этого же рейса."
-            : "Выберите разовую точку для следующего ручного рейса.";
+        if (title) title.textContent = "Изменить точку текущего рейса";
+        if (paragraphs[0]) paragraphs[0].textContent = "Выберите другую активную точку из справочника.";
         if (paragraphs[1]) paragraphs[1].hidden = true;
         if (current) current.hidden = true;
-        sheet.querySelectorAll(".driver-unload-tile").forEach(function (button) {
-            button.__driverManualWasDisabled = button.disabled;
-            button.disabled = false;
-        });
-        sheet.dataset.driverManualPointMode = currentMode ? "current-local" : "next";
+        populateManualRerouteSheet(sheet);
+        sheet.dataset.driverManualPointMode = "current-local";
         sheet.hidden = false;
         shell.classList.add("is-point-sheet-open");
         var action = workspace.querySelector("[data-driver-manual-point-open]");
@@ -1565,8 +1761,12 @@
                 events: events
             });
             return outbox.enqueue(change).then(function (saved) {
+                var originalPointId = positive(projection.payload && projection.payload.assigned_dump_point_id)
+                    || positive(projection.context_snapshot && projection.context_snapshot.assigned_dump_point_id)
+                    || positive(projection.payload && projection.payload.dump_point_id);
                 projection.payload = Object.assign({}, projection.payload || {}, {dump_point_id: positive(pointId)});
                 projection.context_snapshot = Object.assign({}, projection.context_snapshot || {}, {
+                    assigned_dump_point_id: originalPointId,
                     selected_dump_point_id: positive(pointId),
                     selected_dump_point_name: String(pointName || "")
                 });
@@ -1631,7 +1831,7 @@
             var pointSheet = event.target && event.target.closest
                 ? event.target.closest("[data-driver-point-sheet]")
                 : null;
-            if (pointSheet && ["next", "current-local"].indexOf(pointSheet.dataset.driverManualPointMode) >= 0) {
+            if (pointSheet && pointSheet.dataset.driverManualPointMode === "current-local") {
                 var pointButton = event.target.closest(".driver-unload-tile");
                 if (pointButton) {
                     event.preventDefault();
@@ -1641,19 +1841,14 @@
                     var pointWorkspace = root.document.querySelector("[data-driver-manual-workspace]");
                     var chosenId = pointInput && pointInput.value;
                     var chosenName = pointButton.dataset.driverPointName;
-                    if (pointSheet.dataset.driverManualPointMode === "current-local") {
-                        pointButton.disabled = true;
-                        enqueueLocalPointChange(pointWorkspace, chosenId, chosenName).then(function () {
-                            selectManualPoint(pointWorkspace, chosenId, chosenName);
-                            closePointChooser(pointWorkspace);
-                        }).catch(function () {
-                            pointButton.disabled = false;
-                            setResult(pointWorkspace, "storage-error", null, true);
-                        });
-                    } else {
+                    pointButton.disabled = true;
+                    enqueueLocalPointChange(pointWorkspace, chosenId, chosenName).then(function () {
                         selectManualPoint(pointWorkspace, chosenId, chosenName);
                         closePointChooser(pointWorkspace);
-                    }
+                    }).catch(function () {
+                        pointButton.disabled = false;
+                        setResult(pointWorkspace, "storage-error", null, true);
+                    });
                     return;
                 }
                 if (event.target.closest("[data-driver-point-close]") || event.target === pointSheet) {
@@ -1714,7 +1909,7 @@
         }
         root.document.addEventListener("keydown", function (event) {
             if (event.key !== "Escape") return;
-            var sheet = root.document.querySelector('[data-driver-point-sheet][data-driver-manual-point-mode="next"]');
+            var sheet = root.document.querySelector('[data-driver-point-sheet][data-driver-manual-point-mode="current-local"]');
             if (!sheet || sheet.hidden) return;
             event.preventDefault();
             closePointChooser(root.document.querySelector("[data-driver-manual-workspace]"));
@@ -1766,6 +1961,10 @@
         buildManualLoadEvent: buildManualLoadEvent,
         pointModeForShell: pointModeForShell,
         pointActionCopy: pointActionCopy,
+        manualRerouteCandidates: manualRerouteCandidates,
+        standardPointIds: standardPointIds,
+        showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
+        restoreStandardTargets: restoreStandardTargets,
         resultText: resultText
     };
     if (typeof root.document !== "undefined") {

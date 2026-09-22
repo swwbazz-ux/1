@@ -2000,7 +2000,11 @@ def _process_driver_dump_point_changed(access, normalized):
         _conflict('dump_point_state_changed', 'Текущая точка разгрузки уже отличается от сохранённого состояния.')
     dump_point_id = _positive_int(normalized['payload'].get('dump_point_id'), field='dump_point_id')
     free_bucket_dump_points = free_bucket_snapshot_dump_points_for_trip(trip)
-    if free_bucket_dump_points is None:
+    is_driver_manual_trip = TripClientAction.objects.select_for_update(of=('self',)).filter(
+        trip=trip,
+        action_type='driver_manual_loaded',
+    ).exists()
+    if is_driver_manual_trip or free_bucket_dump_points is None:
         dump_point = DumpPoint.objects.select_for_update().filter(
             pk=dump_point_id,
             is_active=True,

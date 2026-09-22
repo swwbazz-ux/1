@@ -547,6 +547,51 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
         self.assertEqual(Trip.objects.count(), 1)
 
+    def test_driver_manual_free_bucket_trip_can_reroute_to_active_directory_point(self):
+        loaded, acceptance = self.driver_free_bucket_manual_event(
+            event_id='driver-free-bucket-manual-reroute-load',
+        )
+        loaded_result = self.sync(
+            [loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-free-bucket-reroute-device',
+        ).json()['results'][0]
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        outside_point = DumpPoint.objects.create(name='Подсыпка у бульдозера')
+        changed = {
+            'event_id': 'driver-free-bucket-manual-reroute-point',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': (trip.loaded_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 2,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': outside_point.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+
+        changed_result = self.sync(
+            [changed],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-free-bucket-reroute-device',
+        ).json()['results'][0]
+
+        self.assertEqual(changed_result['status'], 'accepted', changed_result)
+        trip.refresh_from_db()
+        self.assertEqual(trip.assigned_dump_point_id, self.dump_point.id)
+        self.assertEqual(trip.actual_dump_point_id, outside_point.id)
+        self.assertEqual(trip.dump_point_id, outside_point.id)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.used_trip_id, trip.id)
+
     def test_driver_cannot_consume_free_bucket_owned_by_another_shift(self):
         event, acceptance = self.driver_free_bucket_manual_event(
             event_id='driver-free-bucket-foreign-owner',

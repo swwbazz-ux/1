@@ -144,41 +144,35 @@ test("an Excavator-owned acknowledgement requests one exact Driver reconciliatio
     delete global.AppRealtime;
 });
 
-test("manual point action distinguishes the next trip from a current trip", () => {
-    assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "false", driverActiveTripId: ""}}), "next");
-    assert.equal(driverRuntime.pointModeForShell({dataset: {driverHasOpenTrip: "true", driverActiveTripId: "451"}}), "current");
-    assert.deepEqual(driverRuntime.pointActionCopy("next"), {
-        label: "ТОЧКА РАЗГРУЗКИ",
-        hint: "Для следующего рейса",
-        aria: "Выбрать точку разгрузки для следующего рейса"
+test("manual point action is reserved for the current Driver-manual trip", () => {
+    assert.equal(driverRuntime.pointModeForShell({dataset: {driverActiveTripOrigin: "", driverActiveTripId: ""}}), "unavailable");
+    assert.equal(driverRuntime.pointModeForShell({dataset: {driverActiveTripOrigin: "excavator", driverActiveTripId: "451"}}), "unavailable");
+    assert.equal(driverRuntime.pointModeForShell({dataset: {driverActiveTripOrigin: "driver_manual", driverActiveTripId: "451"}}), "current");
+    assert.deepEqual(driverRuntime.pointActionCopy("unavailable"), {
+        label: "ИЗМЕНИТЬ ТОЧКУ",
+        hint: "Сначала создайте рейс",
+        aria: "Изменение точки доступно после создания ручного рейса"
     });
     assert.deepEqual(driverRuntime.pointActionCopy("current"), {
-        label: "ТОЧКА РАЗГРУЗКИ",
-        hint: "Изменить текущую",
-        aria: "Изменить точку разгрузки текущего рейса"
+        label: "ИЗМЕНИТЬ ТОЧКУ",
+        hint: "Текущий рейс",
+        aria: "Изменить точку разгрузки текущего ручного рейса"
     });
 });
 
-test("current-trip point action delegates to the canonical Driver point control", () => {
-    let clicks = 0;
-    const canonical = {
-        disabled: false,
-        hasAttribute(name) { return name === "data-driver-manual-point-open" ? false : false; },
-        click() { clicks += 1; }
-    };
-    const shell = {
-        dataset: {driverHasOpenTrip: "true", driverActiveTripId: "451"},
-        querySelectorAll(selector) {
-            assert.equal(selector, "[data-driver-point-open]");
-            return [canonical];
-        }
-    };
-    const workspace = {closest(selector) {
-        assert.equal(selector, "[data-driver-shell]");
-        return shell;
-    }};
-    assert.equal(driverRuntime.openPointChooser(workspace), true);
-    assert.equal(clicks, 1);
+test("manual reroute directory excludes standard, current and duplicate points", () => {
+    const candidates = driverRuntime.manualRerouteCandidates([
+        {id: 2, name: "ККД"},
+        {id: 3, name: "Отвал"},
+        {id: 4, name: "Подсыпка"},
+        {id: 5, name: "ВКР"},
+        {id: 5, name: "ВКР duplicate"},
+        {id: 6, name: "Бульдозер"}
+    ], [{id: 2}, {id: 3}], 4);
+    assert.deepEqual(candidates, [
+        {id: 5, name: "ВКР"},
+        {id: 6, name: "Бульдозер"}
+    ]);
 });
 
 test("Driver runtime reuses the common outbox without an independent transport or journal", () => {
@@ -229,7 +223,9 @@ test("both roles render the same dashboard and card includes", () => {
     assert.match(workspace, /data-driver-manual-result/);
     assert.doesNotMatch(driver, /mobile-shift-toast/);
     assert.match(workspace, />ОБЫЧНЫЙ РЕЖИМ</);
-    assert.match(workspace, />ТОЧКА РАЗГРУЗКИ</);
+    assert.match(workspace, />ИЗМЕНИТЬ ТОЧКУ</);
+    assert.match(workspace, /data-driver-manual-point-open[^>]*disabled[^>]*aria-disabled="true"/);
+    assert.doesNotMatch(workspace, /Для следующего рейса/);
 });
 
 test("manual controls use compact action timer and source rows with one shared gap", () => {
@@ -244,7 +240,7 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(actionMarkup, /data-driver-manual-close/);
     assert.match(actionMarkup, /data-driver-manual-point-open/);
     assert.match(actionMarkup, />ОБЫЧНЫЙ РЕЖИМ</);
-    assert.match(actionMarkup, />ТОЧКА РАЗГРУЗКИ</);
+    assert.match(actionMarkup, />ИЗМЕНИТЬ ТОЧКУ</);
     assert.doesNotMatch(actionMarkup, /data-driver-manual-source|data-eo-truck-card|draggable=/);
     assert.match(workspace, /eo-truck-card eo-dashboard-truck-card driver-manual-workspace__action driver-manual-workspace__action--return/);
     assert.match(workspace, /eo-truck-card eo-dashboard-truck-card driver-manual-workspace__action driver-manual-workspace__action--point/);

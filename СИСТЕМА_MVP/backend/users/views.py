@@ -280,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v336'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v337'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -5198,6 +5198,10 @@ def driver_shift_view(request):
         {'id': point.id, 'name': str(point)}
         for point in DumpPoint.objects.filter(is_active=True).order_by('name')
     ]
+    # Ручная смена точки относится только к уже созданному ручному рейсу.
+    # Полный активный справочник сохраняем отдельно: обычное окно текущего
+    # рейса может быть ограничено неизменяемым снимком свободного ковша.
+    driver_manual_primary_context['reroute_points'] = list(unload_points)
     active_trip_assigned_dump_point = None
     active_trip_current_dump_point = None
     active_trip_actual_dump_point_id = None
