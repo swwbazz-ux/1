@@ -22,7 +22,7 @@ env:
 jobs:
   test-plan:
     name: Validate test plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       sqlite: ${{ steps.matrix.outputs.sqlite }}
@@ -47,7 +47,7 @@ jobs:
 
   structural-and-contracts:
     name: Structure and executable contracts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     defaults:
@@ -107,7 +107,7 @@ jobs:
   django-sqlite:
     name: SQLite / ${{ matrix.group.name }}
     needs: test-plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     strategy:
@@ -147,7 +147,7 @@ jobs:
   django-postgresql:
     name: PostgreSQL / ${{ matrix.group.name }}
     needs: test-plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     strategy:
@@ -216,7 +216,7 @@ jobs:
       - structural-and-contracts
       - django-sqlite
       - django-postgresql
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
