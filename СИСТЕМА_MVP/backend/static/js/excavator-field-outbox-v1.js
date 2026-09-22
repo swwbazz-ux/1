@@ -44,6 +44,18 @@
             JSON.stringify(canonicalValue(wireEvent(right)));
     }
 
+    function recoverableDeviceClockConflict(event) {
+        if (!event || event.sync_state !== "conflict") return false;
+        return event.last_error_code === "device_clock_ahead"
+            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error || ""));
+    }
+
+    function recoverableDependencyConflict(event) {
+        if (!event || event.sync_state !== "conflict") return false;
+        return event.last_error_code === "dependency_rejected"
+            || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
+    }
+
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
         var sequenceKey = key + ":sequence";
@@ -497,6 +509,7 @@
                     if (status === "conflict" || status === "invalid" || status === "auth_required") {
                         return updateEvent(event.event_id, {
                             sync_state: status,
+                            last_error_code: String(result.code || ""),
                             last_error: String(result.message || result.error || status),
                             next_retry_at: 0
                         }).then(function () {
@@ -555,14 +568,35 @@
         function restore(restoreOptions) {
             restoreOptions = restoreOptions || {};
             return list().then(function (events) {
+                var recoverable = Object.create(null);
+                events.forEach(function (event) {
+                    if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                });
+                var changed = true;
+                while (changed) {
+                    changed = false;
+                    events.forEach(function (event) {
+                        if (
+                            recoverableDependencyConflict(event)
+                            && !recoverable[event.event_id]
+                            && (event.depends_on || []).some(function (dependency) { return recoverable[dependency]; })
+                        ) {
+                            recoverable[event.event_id] = true;
+                            changed = true;
+                        }
+                    });
+                }
                 var chain = Promise.resolve();
                 events.forEach(function (event) {
                     if (
                         event.sync_state === "syncing"
                         || (event.sync_state === "auth_required" && restoreOptions.resumeAuthRequired === true)
+                        || recoverable[event.event_id]
                     ) {
                         event.sync_state = "pending";
                         event.next_retry_at = 0;
+                        event.last_error_code = "";
+                        event.last_error = "";
                     }
                     chain = chain.then(function () { return persist(event); });
                 });

@@ -965,13 +965,143 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.status, TripStatus.CANCELLED)
         self.assertEqual(results[0]['server_ids']['trip_id'], trip.id)
 
-    def test_device_clock_ahead_is_persisted_conflict(self):
-        event = self.load_event(occurred_at=timezone.now() + timedelta(minutes=6))
+    def test_excavator_clock_one_minute_behind_is_accepted_without_adjustment(self):
+        ten_minutes_ago = timezone.now() - timedelta(minutes=10)
+        self.shift.opened_at = ten_minutes_ago
+        self.shift.save(update_fields=['opened_at'])
+        self.truck_shift.opened_at = ten_minutes_ago
+        self.truck_shift.save(update_fields=['opened_at'])
+        self.assignment.assigned_at = ten_minutes_ago
+        self.assignment.save(update_fields=['assigned_at'])
+        device_occurred_at = timezone.now() - timedelta(minutes=1)
+        event = self.load_event(occurred_at=device_occurred_at)
+
         result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertNotIn('device_clock_adjusted', result)
+        receipt = OfflineFieldEvent.objects.get()
+        trip = Trip.objects.get()
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(trip.loaded_at, device_occurred_at)
+        self.assertEqual(trip.load_time_source, 'excavator_device')
+
+    def test_excavator_clock_ahead_uses_server_time_without_blocking_work(self):
+        device_occurred_at = timezone.now() + timedelta(minutes=6)
+        event = self.load_event(occurred_at=device_occurred_at)
+        result = self.sync([event]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['device_clock_adjusted'])
+        receipt = OfflineFieldEvent.objects.get()
+        trip = Trip.objects.get()
+        self.assertEqual(receipt.status, 'accepted')
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(trip.loaded_at, receipt.received_at)
+        self.assertEqual(trip.load_received_at, receipt.received_at)
+        self.assertEqual(trip.load_time_source, 'server_receipt')
+        self.assertEqual(result['device_occurred_at'], device_occurred_at.isoformat())
+        self.assertEqual(result['effective_occurred_at'], receipt.received_at.isoformat())
+
+    def test_legacy_excavator_clock_conflict_replays_same_event_without_duplicate(self):
+        received_at = timezone.now()
+        device_occurred_at = received_at + timedelta(minutes=6)
+        event = self.load_event(event_id='legacy-clock-load', occurred_at=device_occurred_at)
+        normalized = normalize_offline_event(
+            event,
+            role_code='excavator_operator',
+            device_id='device-test-001',
+            received_at=received_at,
+        )
+        OfflineFieldEvent.objects.create(
+            event_id=event['event_id'],
+            event_type=event['event_type'],
+            format_version=event['format_version'],
+            actor=self.operator,
+            access=self.access,
+            role_code='excavator_operator',
+            device_id='device-test-001',
+            sequence=event['sequence'],
+            depends_on=event['depends_on'],
+            occurred_at=device_occurred_at,
+            received_at=received_at,
+            shift=self.shift,
+            equipment=self.excavator,
+            local_trip_id=event['local_trip_id'],
+            context_snapshot=event['context_snapshot'],
+            payload=event['payload'],
+            fingerprint=normalized['fingerprint'],
+            status='conflict',
+            error_code='device_clock_ahead',
+            error_message='Часы устройства заметно опережают сервер. Требуется сверка.',
+        )
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(OfflineFieldEvent.objects.count(), 1)
+        self.assertEqual(Trip.objects.count(), 1)
+        receipt = OfflineFieldEvent.objects.get()
+        self.assertEqual(receipt.status, 'accepted')
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(Trip.objects.get().loaded_at, received_at)
+
+    def test_excavator_downtime_clock_ahead_uses_server_time(self):
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Простой при неверных часах',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        device_occurred_at = timezone.now() + timedelta(minutes=6)
+        event = {
+            'event_id': 'excavator-clock-downtime-start',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': device_occurred_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        receipt = OfflineFieldEvent.objects.get()
+        downtime = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(downtime.started_at, receipt.received_at)
+        self.assertTrue(result['device_clock_adjusted'])
+
+    def test_driver_clock_ahead_remains_a_conflict(self):
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Driver future clock',
+            equipment_type=self.truck_type,
+            show_for_truck_driver=True,
+        )
+        event = {
+            'event_id': 'driver-clock-downtime-start',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': (timezone.now() + timedelta(minutes=6)).isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-clock-device',
+        ).json()['results'][0]
+
         self.assertEqual(result['status'], 'conflict')
         self.assertEqual(result['code'], 'device_clock_ahead')
-        self.assertEqual(OfflineFieldEvent.objects.get().status, 'conflict')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertFalse(DowntimeEvent.objects.filter(reason=reason).exists())
 
     def driver_downtime_event(self, *, event_id, sequence, reason, occurred_at, depends_on=()):
         return {

@@ -1578,6 +1578,10 @@ def _process_excavator_loaded(access, normalized):
         )
     except ValidationError as error:
         _conflict('trip_validation_failed', '; '.join(error.messages))
+    if normalized.get('clock_adjusted'):
+        trip.load_received_at = normalized['received_at']
+        trip.load_time_source = 'server_receipt'
+        trip.save(update_fields=['load_received_at', 'load_time_source'])
     TripClientAction.objects.create(
         action_type='truck_loaded', client_action_id=normalized['event_id'],
         trip=trip, actor=access.employee,

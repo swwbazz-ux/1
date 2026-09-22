@@ -473,6 +473,74 @@ test('a pending event depending on a terminal conflict becomes attention instead
     ]);
 });
 
+test('restart retries a legacy device clock conflict and its dependency chain', async () => {
+    const local = storage();
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => ({
+            ok: true,
+            results: events.map(event => event.event_id === 'clock-first'
+                ? {
+                    event_id: event.event_id,
+                    status: 'conflict',
+                    message: 'Часы устройства заметно опережают сервер. Требуется сверка.',
+                }
+                : {
+                    event_id: event.event_id,
+                    status: 'conflict',
+                    message: 'Предыдущее событие требует сверки или отклонено.',
+                }),
+        }),
+    });
+    const first = loadEvent('clock-first', 1);
+    const second = loadEvent('clock-second', 2);
+    second.depends_on = [first.event_id];
+    await beforeUpdate.queue(first);
+    await beforeUpdate.queue(second);
+    await beforeUpdate.flush();
+    assert.deepEqual((await beforeUpdate.pending()).map(event => event.sync_state), ['conflict', 'conflict']);
+
+    let replayed = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => {
+            replayed = events.map(event => event.event_id);
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await afterUpdate.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        ['clock-first', 'pending'],
+        ['clock-second', 'pending'],
+    ]);
+    await afterUpdate.flush();
+    assert.deepEqual(replayed, ['clock-first', 'clock-second']);
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
+test('restart does not retry an unrelated terminal conflict', async () => {
+    const local = storage();
+    const before = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => ({ok: true, results: events.map(event => ({
+            event_id: event.event_id,
+            status: 'conflict',
+            code: 'assignment_context_changed',
+            message: 'Назначение изменилось.',
+        }))}),
+    });
+    await before.queue(loadEvent('real-conflict'));
+    await before.flush();
+
+    const after = createOutbox({localStorage: local, queueKey: 'access-7', send: async () => ({})});
+    const restored = await after.ready();
+    assert.equal(restored[0].sync_state, 'conflict');
+    assert.equal(restored[0].last_error_code, 'assignment_context_changed');
+});
+
 test('concurrent flush calls share one network request', async () => {
     let release;
     let calls = 0;
