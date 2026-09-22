@@ -16,7 +16,7 @@
         "native_heartbeat", "reconcile_pending", "reconcile_success", "reconcile_error",
         "outbox_pending", "outbox_applied", "resume", "auth_required", "state_change",
         "initial", "transport_success", "transport_recovered", "native_heartbeat_success",
-        "web_heartbeat_success", "fragment_success",
+        "web_heartbeat_success", "fragment_success", "watchdog_resume",
         "dom_applied", "fragment_refresh", "fragment_failed", "custom_handler_missing",
         "custom_refresh_not_applied", "stale_fragment_version", "role_state_apply_failed",
         "offline", "outbox_state", "outbox_drained", "periodic_server_truth", "explicit_reconcile",

@@ -137,6 +137,19 @@ public class NativeSoundPlugin extends Plugin {
             : OperationalCueCatalog.forOperational(requestedCueName, voiceName);
         long eventVersion = readNumericLong(call, "eventVersion");
         String eventKey = call.getString("eventKey", "");
+        boolean excavatorConnectionLoss = "excavator".equals(BuildConfig.APP_PROFILE_ID)
+            && "voice_connection_lost".equals(voiceName);
+        boolean excavatorConnectionRecovery = "excavator".equals(BuildConfig.APP_PROFILE_ID)
+            && "voice_connection_restored".equals(voiceName);
+        long connectionAttemptAt = System.currentTimeMillis();
+        if ((excavatorConnectionLoss && !ConnectionVoiceGate.confirmLoss(getContext(), connectionAttemptAt))
+                || (excavatorConnectionRecovery && !ConnectionVoiceGate.confirmRecovery(getContext()))) {
+            call.resolve(new JSObject()
+                .put("announced", false)
+                .put("reason", OperationalVoiceAnnouncer.REASON_ALREADY_ANNOUNCED)
+                .put("eventVersion", eventVersion));
+            return;
+        }
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
             getContext(),
             cueName,
@@ -147,6 +160,11 @@ public class NativeSoundPlugin extends Plugin {
             "",
             ""
         );
+        if (!result.announced && excavatorConnectionLoss) {
+            ConnectionVoiceGate.rollbackLoss(getContext(), connectionAttemptAt);
+        } else if (!result.announced && excavatorConnectionRecovery) {
+            ConnectionVoiceGate.rollbackRecovery(getContext());
+        }
         call.resolve(new JSObject()
             .put("announced", result.announced)
             .put("reason", result.reason)

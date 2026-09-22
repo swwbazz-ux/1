@@ -212,6 +212,13 @@ test("fifteen active seconds without either successful channel is lost, not inve
  assert.equal(r.snapshot().connectionState,"ok");r.advance(1);r.watchdog();
  assert.equal(r.snapshot().connectionState,"lost");assert.equal(r.snapshot().failures,0);
 });
+test("a long visible WebView timer freeze probes before declaring Excavator connection lost",async()=>{
+ const r=runtime();r.success(0);await settle();r.advance(60000);r.watchdog();
+ assert.equal(r.snapshot().connectionState,"weak");
+ assert.equal(r.snapshot().failures,0);
+ assert.equal(r.events.some(event=>event.reason==="silent_timeout" && event.connected===false),false);
+ r.runTimers(0);assert.equal(r.requests.length,2);
+});
 test("fresh successful native channel prevents false lost from a failing WebView channel",async()=>{
  const r=runtime();r.success(0);await settle();
  r.window.dispatchEvent({type:"native-connection-state",detail:{status:"success",lastSuccessAtMs:1000000,occurredAtMs:1000000}});
