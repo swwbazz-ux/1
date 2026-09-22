@@ -26,7 +26,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           NIGHTLY_WORKFLOW: nightly-quality.yml
-          NIGHTLY_TARGET: codex/github-production-deploy-20260916
         run: |
           set -euo pipefail
 
@@ -63,8 +62,7 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "repos/${GH_REPO}/actions/workflows/${NIGHTLY_WORKFLOW}/dispatches" \
-            -f ref=main \
-            -f "inputs[target_ref]=${NIGHTLY_TARGET}"
+            -f ref=main
 
-          printf 'GitHub missed the primary schedule; watchdog dispatched `%s`.\n' \
-            "$NIGHTLY_TARGET" >> "$GITHUB_STEP_SUMMARY"
+          printf 'GitHub missed the primary schedule; watchdog dispatched the fixed canonical target.\n' \
+            >> "$GITHUB_STEP_SUMMARY"
