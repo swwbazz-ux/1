@@ -45,7 +45,7 @@ env:
 jobs:
   resolve-revision:
     name: Resolve one immutable revision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.revision.outputs.sha }}
@@ -68,7 +68,7 @@ jobs:
   full-django-postgresql:
     name: Full Django suite on PostgreSQL
     needs: resolve-revision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     services:
@@ -150,7 +150,7 @@ jobs:
   all-javascript-contracts:
     name: All JavaScript and mobile contracts
     needs: resolve-revision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -187,7 +187,7 @@ jobs:
   android-debug-builds:
     name: Android debug tests and all profiles
     needs: resolve-revision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
@@ -244,7 +244,7 @@ jobs:
       - full-django-postgresql
       - all-javascript-contracts
       - android-debug-builds
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
