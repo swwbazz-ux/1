@@ -175,11 +175,17 @@ def _deliver_fcm(
         if key and len(key) <= 32 and value and len(value) <= 128:
             data[key] = value
     try:
+        android_config = {'priority': 'high'}
+        if kind == 'presence_probe':
+            android_config.update({
+                'ttl': '90s',
+                'collapse_key': 'presence_probe',
+            })
         body = json.dumps({
             'message': {
                 'token': device.token,
                 'data': data,
-                'android': {'priority': 'high'},
+                'android': android_config,
             },
         }, ensure_ascii=True, separators=(',', ':')).encode('utf-8')
         url = (

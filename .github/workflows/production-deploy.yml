@@ -247,7 +247,7 @@ jobs:
           test "$actual_cert" = "$expected_cert"
 
       - name: Reject non-incrementing APK version
-        if: ${{ inputs.mode == 'publish_apk' }}
+        if: ${{ inputs.mode == 'verify_apk' || inputs.mode == 'publish_apk' }}
         working-directory: mobile/capacitor-shell
         env:
           APK_PROFILE: ${{ inputs.apk_profile }}

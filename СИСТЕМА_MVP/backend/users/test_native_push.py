@@ -218,6 +218,11 @@ class NativePushDeliveryTests(TestCase):
             'version': '',
             'probe_id': 'safe_probe_1234567890',
         })
+        self.assertEqual(payload['message']['android'], {
+            'priority': 'high',
+            'ttl': '90s',
+            'collapse_key': 'presence_probe',
+        })
 
     @patch('users.native_push._oauth_access_token', return_value='oauth-token')
     @patch('users.native_push.urllib.request.urlopen', return_value=_SuccessfulResponse())

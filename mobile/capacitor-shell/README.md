@@ -75,6 +75,9 @@ npm run android:build:excavator-qa
 `excavator_rustore` обязана иметь больший `versionCode` и подключается только к
 production-хосту. В обеих магазинных сборках прямой APK-updater и разрешение
 `REQUEST_INSTALL_PACKAGES` отключены: обновления должны приходить через RuStore.
+Перед отправкой новой версии Экскаваторщика в RuStore необходимо проверить
+максимальный уже опубликованный в кабинете `versionCode`: значение новой
+сборки обязано быть больше него.
 
 ```powershell
 npm run android:release:excavator-rustore-qa
@@ -89,16 +92,16 @@ npm run android:release:excavator-rustore
 - `driver_qa` — отдельное внутреннее приложение `Водитель QA` с package
   `ru.copperresources.driver.qa`; подключается к
   `https://qa-driver.driverform.ru/`, устанавливается рядом с рабочим
-  приложением и имеет версию `1.0.6-qa (7)`;
+  приложением и имеет версию `1.0.8-qa (9)`;
 - `driver_rustore_qa` — модераторская сборка RuStore с рабочим package
-  `ru.copperresources.driver`, QA-хостом и версией `0.1.30-rc (48)`;
+  `ru.copperresources.driver`, QA-хостом и версией `0.1.31-rc (51)`;
 - `driver_rustore` — следующая публичная сборка с тем же package,
-  production-хостом и версией `0.1.30 (49)`.
+  production-хостом и версией `0.1.31 (52)`.
 
 Внутренний `driver_qa` можно держать на телефоне одновременно с рабочим
 Водителем. Две RuStore-сборки одновременно не устанавливаются: у них специально
-одинаковый package и одна релизная подпись, а `versionCode 49` production-сборки
-строго больше модераторского `versionCode 48`. Это позволяет обновить принятую
+одинаковый package и одна релизная подпись, а `versionCode 52` production-сборки
+строго больше модераторского `versionCode 51`. Это позволяет обновить принятую
 QA-сборку штатной магазинной сборкой. Во всех трёх новых профилях отключены
 встроенный APK-updater и разрешение `REQUEST_INSTALL_PACKAGES`. QA-профили
 читают фоновый токен только из отдельной переменной окружения

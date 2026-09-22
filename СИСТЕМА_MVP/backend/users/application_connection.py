@@ -157,6 +157,8 @@ def record_application_connection_evidence(
     if not isinstance(probe, dict) or probe.get('probe_id') != probe_id:
         return
     requested_at = probe.get('requested_at')
+    if requested_at and now - requested_at > CONNECTION_PROBE_TIMEOUT:
+        return
     roundtrip_ms = 0
     if requested_at:
         roundtrip_ms = max(0, int((now - requested_at).total_seconds() * 1000))

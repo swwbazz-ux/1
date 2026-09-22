@@ -496,6 +496,53 @@ class LiveMonitorPresenceTests(TestCase):
         self.assertEqual(probe['status'], 'sent')
         notify.assert_called_once()
 
+    @patch('users.native_push.notify_employee_devices', return_value=1)
+    def test_probe_ack_after_timeout_is_ignored(self, _notify):
+        NativePushDevice.objects.create(
+            employee=self.excavator_access.employee,
+            token='late-ack-token',
+            app_id='ru.copperresources.excavator',
+        )
+        self.excavator.get(
+            reverse('operational_state_version'),
+            {'include_events': '0', 'role_app_code': 'excavator'},
+            HTTP_HOST='excavator.localhost',
+            HTTP_USER_AGENT='CopperResourcesNative/excavator/0.1.29',
+            HTTP_X_APP_INSTALLATION_ID='android-bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+            HTTP_X_APP_CONNECTION_STATE='ok',
+            HTTP_X_APP_PRESENCE_PROBE_CAPABLE='1',
+        )
+        self.admin.post(
+            reverse('system_admin_probe_connection', args=[self.excavator_access.pk])
+        )
+        probe = connection_probe_summary(
+            access_id=self.excavator_access.pk,
+            app_code='excavator_operator',
+        )
+        late_at = probe['requested_at'] + timedelta(seconds=121)
+
+        record_application_connection_evidence(
+            session_key=self.excavator.session.session_key,
+            access_id=self.excavator_access.pk,
+            app_code='excavator_operator',
+            evidence={
+                'present': True,
+                'installation_id': 'android-bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+                'channel': 'background',
+                'connection_state': 'ok',
+                'probe_id': probe['probe_id'],
+                'probe_capable': True,
+            },
+            now=late_at,
+        )
+
+        expired = connection_probe_summary(
+            access_id=self.excavator_access.pk,
+            app_code='excavator_operator',
+            now=late_at,
+        )
+        self.assertEqual(expired['status'], 'no_response')
+
         heartbeat = self.excavator.get(
             reverse('operational_state_version'),
             {'include_events': '0', 'role_app_code': 'excavator'},
