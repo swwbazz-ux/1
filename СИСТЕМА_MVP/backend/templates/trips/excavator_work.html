@@ -1336,7 +1336,13 @@ window.initExcavatorWorkShell = function () {
         item.dataset.tripId = badge.dataset.tripId || "";
         item.dataset.dumpPointId = dumpTarget.dataset.eoDumpTarget || "";
         item.dataset.truckNumber = badge.dataset.eoTruckNumber || badge.textContent.trim();
-        item.innerHTML = '<img src="' + truckGreenIcon + '" alt=""><strong>' + item.dataset.truckNumber + '</strong>';
+        var icon = document.createElement("img");
+        icon.src = truckGreenIcon;
+        icon.alt = "";
+        var number = document.createElement("strong");
+        number.textContent = item.dataset.truckNumber;
+        item.appendChild(icon);
+        item.appendChild(number);
         item.addEventListener("pointerdown", beginQueueDrag);
         return item;
     }
