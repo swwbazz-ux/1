@@ -171,6 +171,7 @@ public class MainActivity extends BridgeActivity {
         if (webView == null || BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT <= 0) {
             return;
         }
+<<<<<<< HEAD
         /* Driver controls already use touch-sized text and targets. Android's
            maximum font scale is otherwise applied by WebView on top of the
            operational layout and can hide buttons. This profile setting pins
@@ -180,6 +181,13 @@ public class MainActivity extends BridgeActivity {
            so the profile percent is passed through as is. Dividing it by the
            system scale once looked like compensation and halved every label on
            a phone set to the largest system font. */
+=======
+        /* Field workstations already provide touch-sized, high-contrast text.
+           Android's very large system font scale is applied by WebView on top
+           of that layout and can hide operational controls.  A profile value
+           pins only this native shell's page text; the phone setting and all
+           other applications remain unchanged. */
+>>>>>>> 5ff3f375 (fix: stabilize excavator UI with large Android fonts)
         webView.getSettings().setTextZoom(BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT);
     }
 
