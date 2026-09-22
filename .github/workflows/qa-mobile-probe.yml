@@ -1,0 +1,193 @@
+name: Isolated QA mobile probe candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: "Full 40-character commit SHA selected for this QA build"
+        required: true
+        type: string
+      confirmation:
+        description: "Type BUILD_QA exactly"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accounting-isolated-qa-build
+  cancel-in-progress: false
+
+jobs:
+  qa-candidate:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    environment: qa
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate QA-only request
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$CONFIRMATION" = "BUILD_QA"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: mobile/capacitor-shell/android/**/*.gradle*
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Install backend dependencies and run QA checks
+        run: |
+          set -euo pipefail
+          python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
+          mkdir -p "СИСТЕМА_MVP/backend/media/employee_photos"
+          cd "СИСТЕМА_MVP/backend"
+          export DJANGO_SECRET_KEY=github-isolated-qa-check
+          export DJANGO_DEBUG=True
+          export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          python manage.py test \
+            core.test_qa_runtime_check \
+            trips.test_excavator_qa_simulator \
+            users.test_qa_role_host \
+            users.test_live_monitor_presence \
+            users.test_native_push
+
+      - name: Build exact-SHA full QA backend snapshot
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          archive="$RUNNER_TEMP/accounting-qa-backend-full.tar.gz"
+          listing="$RUNNER_TEMP/accounting-qa-backend-files.txt"
+          git archive \
+            --format=tar.gz \
+            --output="$archive" \
+            "HEAD:СИСТЕМА_MVP/backend"
+          tar -tzf "$archive" > "$listing"
+          grep -Fxq 'manage.py' "$listing"
+          if grep -Eq '(^|/)(\.env|\.venv|media|private_media|staticfiles|__pycache__)(/|$)' "$listing"; then
+            echo "Unsafe runtime path found in QA backend snapshot" >&2
+            exit 1
+          fi
+          {
+            printf 'commit=%s\n' "${{ github.sha }}"
+            printf 'backend_sha256=%s\n' "$(sha256sum "$archive" | cut -d' ' -f1)"
+          } > "$RUNNER_TEMP/accounting-qa-backend-metadata.txt"
+
+      - name: Prepare and validate isolated QA credentials
+        env:
+          QA_GOOGLE_SERVICES_JSON_B64: ${{ secrets.QA_GOOGLE_SERVICES_JSON_B64 }}
+          QA_FIREBASE_PROJECT_ID: ${{ secrets.QA_FIREBASE_PROJECT_ID }}
+          QA_ANDROID_KEYSTORE_B64: ${{ secrets.QA_ANDROID_KEYSTORE_B64 }}
+          QA_ANDROID_STORE_PASSWORD: ${{ secrets.QA_ANDROID_STORE_PASSWORD }}
+          QA_ANDROID_KEY_ALIAS: ${{ secrets.QA_ANDROID_KEY_ALIAS }}
+          QA_ANDROID_KEY_PASSWORD: ${{ secrets.QA_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python .github/deploy/test_validate_qa_firebase.py
+          umask 077
+          for value in \
+            "$QA_GOOGLE_SERVICES_JSON_B64" \
+            "$QA_FIREBASE_PROJECT_ID" \
+            "$QA_ANDROID_KEYSTORE_B64" \
+            "$QA_ANDROID_STORE_PASSWORD" \
+            "$QA_ANDROID_KEY_ALIAS" \
+            "$QA_ANDROID_KEY_PASSWORD"; do
+            test -n "$value"
+          done
+          printf '%s' "$QA_GOOGLE_SERVICES_JSON_B64" | base64 --decode \
+            > mobile/capacitor-shell/android/app/google-services.json
+          printf '%s' "$QA_ANDROID_KEYSTORE_B64" | base64 --decode \
+            > "$RUNNER_TEMP/copper-qa-release.jks"
+          {
+            printf 'storeFile=%s\n' "$RUNNER_TEMP/copper-qa-release.jks"
+            printf 'storePassword=%s\n' "$QA_ANDROID_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$QA_ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$QA_ANDROID_KEY_PASSWORD"
+          } > "$RUNNER_TEMP/qa-keystore-credentials.txt"
+          python .github/deploy/validate_qa_firebase.py \
+            --google-services mobile/capacitor-shell/android/app/google-services.json \
+            --expected-project-id "$QA_FIREBASE_PROJECT_ID"
+
+      - name: Build signed side-by-side QA APKs
+        working-directory: mobile/capacitor-shell
+        env:
+          COPPER_RELEASE_KEYSTORE_PROPERTIES: ${{ runner.temp }}/qa-keystore-credentials.txt
+          QA_ANDROID_CERT_SHA256: ${{ secrets.QA_ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          test -n "$QA_ANDROID_CERT_SHA256"
+          npm ci
+          npm test
+          chmod +x android/gradlew
+          npm run android:release:driver-qa
+          npm run android:release:excavator-qa
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          expected_cert="$(printf '%s' "$QA_ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          : > dist/qa-build-metadata.txt
+          for profile in driver_qa excavator_qa; do
+            apk="dist/$profile-release.apk"
+            "$apksigner" verify --verbose "$apk"
+            actual_cert="$("$apksigner" verify --print-certs "$apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+            test -n "$actual_cert"
+            test "$actual_cert" = "$expected_cert"
+            package_line="$("$aapt" dump badging "$apk" | sed -n 's/^package: //p' | head -1)"
+            case "$profile:$package_line" in
+              driver_qa:*"name='ru.copperresources.driver.qa'"*) ;;
+              excavator_qa:*"name='ru.copperresources.excavator.qa'"*) ;;
+              *) echo "Unexpected package for $profile" >&2; exit 1 ;;
+            esac
+            printf '%s sha256=%s certificate_sha256=%s %s\n' \
+              "$profile" "$(sha256sum "$apk" | cut -d' ' -f1)" "$actual_cert" "$package_line" \
+              >> dist/qa-build-metadata.txt
+          done
+
+      - name: Upload isolated QA candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: isolated-qa-candidate-${{ github.run_id }}
+          path: |
+            mobile/capacitor-shell/dist/driver_qa-release.apk
+            mobile/capacitor-shell/dist/excavator_qa-release.apk
+            mobile/capacitor-shell/dist/qa-build-metadata.txt
+            ${{ runner.temp }}/accounting-qa-backend-full.tar.gz
+            ${{ runner.temp }}/accounting-qa-backend-metadata.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove temporary QA credentials
+        if: always()
+        run: |
+          rm -f \
+            mobile/capacitor-shell/android/app/google-services.json \
+            "$RUNNER_TEMP/copper-qa-release.jks" \
+            "$RUNNER_TEMP/qa-keystore-credentials.txt"
