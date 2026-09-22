@@ -57,11 +57,26 @@ test("manual trip creation completion and cancellation have distinct durable fee
     assert.equal(driverRuntime.playManualFeedback("completed"), true);
     assert.equal(driverRuntime.playManualFeedback("cancelled"), true);
     assert.deepEqual(haptics.map((item) => item.pattern), [
-        [38, 34, 78], [52, 42, 105], [30, 42, 62]
+        [55, 36, 95], [75, 42, 135], [58, 38, 92]
     ]);
     assert.equal(tones.filter((tone) => tone.kind === "start").length, 4);
     delete global.driverHaptic;
     delete global.ExcavatorDashboardDrag;
+});
+
+test("manual taps target entry and swipe thresholds use strong distinct haptics", () => {
+    const haptics = [];
+    global.driverHaptic = (pattern, amplitude) => haptics.push({pattern, amplitude});
+    for (const kind of ["tap", "target", "returnArmed", "completeArmed"]) {
+        driverRuntime.playGestureHaptic(kind);
+    }
+    assert.deepEqual(haptics, [
+        {pattern: [42], amplitude: 255},
+        {pattern: [48, 28, 48], amplitude: 255},
+        {pattern: [62, 30, 105], amplitude: 255},
+        {pattern: [78, 30, 135], amplitude: 255}
+    ]);
+    delete global.driverHaptic;
 });
 
 test("confirmed cancellation outranks older failed loads but never a newer load", () => {
@@ -241,7 +256,7 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /driver-manual-workspace__source-row/);
     assert.match(driverCss, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
-    assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(76px, 9\.2dvh, 84px\)/);
+    assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(72px, 8\.6dvh, 78px\)/);
     assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
     assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(118px, 14dvh, 132px\)/);
     assert.match(driverCss, /grid-template-rows:\s*var\(--driver-manual-action-height\) var\(--driver-manual-timer-height\) minmax\(0, 1fr\)/);
@@ -252,7 +267,11 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*var\(--driver-manual-source-height\);[^}]*transform:\s*none;/s);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*var\(--driver-manual-action-height\);[^}]*aspect-ratio:\s*auto;/s);
-    assert.match(driverCss, /grid-template-columns:\s*clamp\(38px, 10\.5vw, 44px\) minmax\(0, 1fr\)/);
+    assert.match(driverCss, /grid-template-columns:\s*40px minmax\(0, 1fr\)/);
+    assert.match(driverCss, /font-size:\s*clamp\(11px, 8\.2cqw, 15px\)/);
+    assert.match(driverCss, /driver-manual-workspace__action-copy > em\s*\{[^}]*display:\s*none !important/s);
+    assert.match(driverCss, /driver-manual-workspace__action--return:active\s*\{[^}]*rgba\(106, 255, 121, \.58\)/s);
+    assert.match(driverCss, /driver-manual-workspace__action--point:active\s*\{[^}]*rgba\(139, 226, 255, \.62\)/s);
     assert.doesNotMatch(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*1\s*\/\s*1/s);
     assert.doesNotMatch(driverCss, /\.eo-dashboard-truck-card\s*\{[^}]*grid-template-columns/s);
 });
@@ -355,6 +374,8 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     assert.match(source, /var excavatorShell = workspace\.querySelector\("\[data-driver-manual-eo-shell\]"\)/);
     assert.match(source, /ExcavatorDashboardDrag\.attach\(\{\s*shell: excavatorShell,/s);
     assert.match(source, /ExcavatorDumpReturnSwipe\.attach\(\{\s*shell: excavatorShell,/s);
+    assert.match(source, /onTargetChange:\s*function \(\) \{\s*playGestureHaptic\("target"\)/s);
+    assert.match(source, /onArm:\s*function \(target, direction\)/);
     assert.match(source, /target\.dataset\.eoReturnEnabled === "true"/);
     assert.match(source, /createDriverManualLoadCancelledEvent/);
     assert.match(source, /data-driver-manual-current-only/);

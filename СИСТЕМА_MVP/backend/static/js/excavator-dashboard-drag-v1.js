@@ -336,6 +336,9 @@
                 return;
             }
             var target = findIntersectingTarget(activeDrag, shell, targetSelector);
+            if (target && target !== activeDrag.target) {
+                call("onTargetChange", undefined, activeDrag.card, target, activeDrag);
+            }
             setTarget(target);
             activeDrag.target = target;
         }

@@ -164,7 +164,8 @@
                     startY: event.clientY,
                     deltaX: 0,
                     deltaY: 0,
-                    moved: false
+                    moved: false,
+                    armedDirection: ""
                 };
                 if (target.setPointerCapture) {
                     try { target.setPointerCapture(event.pointerId); } catch (error) {}
@@ -199,12 +200,16 @@
                 target.style.setProperty("--eo-return-swipe-progress", String(progress));
                 updateDumpReturnElastic(target, dumpSwipe);
                 target.classList.add("is-return-swiping");
-                target.classList.toggle("is-return-armed", isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY));
-                target.classList.toggle(
-                    "is-complete-armed",
-                    typeof options.onComplete === "function"
-                        && isDumpCompleteSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY)
-                );
+                var returnArmed = isDumpReturnSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
+                var completeArmed = typeof options.onComplete === "function"
+                    && isDumpCompleteSwipe(dumpSwipe.deltaX, dumpSwipe.deltaY);
+                var armedDirection = returnArmed ? "return" : (completeArmed ? "complete" : "");
+                target.classList.toggle("is-return-armed", returnArmed);
+                target.classList.toggle("is-complete-armed", completeArmed);
+                if (armedDirection && armedDirection !== dumpSwipe.armedDirection && typeof options.onArm === "function") {
+                    options.onArm(target, armedDirection, dumpSwipe, event);
+                }
+                dumpSwipe.armedDirection = armedDirection;
             }
 
             function onPointerUp(event) {

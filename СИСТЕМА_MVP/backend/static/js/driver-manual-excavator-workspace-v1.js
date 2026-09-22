@@ -212,9 +212,9 @@
 
     function playManualFeedback(kind) {
         var patterns = {
-            created: [38, 34, 78],
-            completed: [52, 42, 105],
-            cancelled: [30, 42, 62]
+            created: [55, 36, 95],
+            completed: [75, 42, 135],
+            cancelled: [58, 38, 92]
         };
         if (typeof root.driverHaptic === "function") {
             root.driverHaptic(patterns[kind] || patterns.created, kind === "completed" ? 210 : 180);
@@ -241,6 +241,21 @@
             playManualTone(context, now, 520, 980, .2);
         }
         return true;
+    }
+
+    function playGestureHaptic(kind) {
+        var patterns = {
+            tap: [42],
+            target: [48, 28, 48],
+            returnArmed: [62, 30, 105],
+            completeArmed: [78, 30, 135]
+        };
+        var pattern = patterns[kind] || patterns.tap;
+        if (typeof root.driverHaptic === "function") return root.driverHaptic(pattern, 255);
+        if (root.navigator && typeof root.navigator.vibrate === "function") {
+            try { return root.navigator.vibrate(pattern); } catch (error) {}
+        }
+        return false;
     }
 
     function formatElapsedTime(totalSeconds) {
@@ -1461,6 +1476,9 @@
                 } else if (root.navigator && typeof root.navigator.vibrate === "function") {
                     try { root.navigator.vibrate(pattern); } catch (error) {}
                 }
+            },
+            onTargetChange: function () {
+                playGestureHaptic("target");
             }
         });
         if (root.ExcavatorDumpReturnSwipe) {
@@ -1478,6 +1496,9 @@
                 },
                 onComplete: function (target) {
                     completeManualLoad(workspace, target).catch(function () {});
+                },
+                onArm: function (target, direction) {
+                    playGestureHaptic(direction === "complete" ? "completeArmed" : "returnArmed");
                 }
             });
         }
@@ -1593,6 +1614,7 @@
             if (freeBucket) {
                 event.preventDefault();
                 event.stopPropagation();
+                playGestureHaptic("tap");
                 openFreeBucket(freeBucket.closest("[data-driver-manual-workspace]"));
                 return;
             }
@@ -1602,6 +1624,7 @@
             if (pointOpen) {
                 event.preventDefault();
                 event.stopPropagation();
+                playGestureHaptic("tap");
                 openPointChooser(pointOpen.closest("[data-driver-manual-workspace]"));
                 return;
             }
@@ -1645,7 +1668,10 @@
             if (close) {
                 event.preventDefault();
                 var closeRoot = close.closest("[data-driver-manual-workspace]");
-                if (!savingLocal && !currentTripProjection && !close.disabled) closeWorkspace(closeRoot);
+                if (!savingLocal && !currentTripProjection && !close.disabled) {
+                    playGestureHaptic("tap");
+                    closeWorkspace(closeRoot);
+                }
                 return;
             }
             var tab = event.target && event.target.closest
@@ -1722,6 +1748,7 @@
         requestManualCancellationRefresh: requestManualCancellationRefresh,
         sourceShouldBeLocked: sourceShouldBeLocked,
         playManualFeedback: playManualFeedback,
+        playGestureHaptic: playGestureHaptic,
         dumpNameSizeClass: dumpNameSizeClass,
         formatElapsedTime: formatElapsedTime,
         tripTimerLabel: tripTimerLabel,
