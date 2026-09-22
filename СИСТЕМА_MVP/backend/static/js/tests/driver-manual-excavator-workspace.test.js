@@ -257,7 +257,7 @@ test("Driver manual heading keeps name and two rectangular status controls on on
     assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-widget\s*\{[^}]*display:\s*contents/s);
     assert.match(driverCss, /driver-manual-workspace \.eo-free-bucket-button\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
     assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*height:\s*46px[^}]*border-radius:\s*12px/s);
-    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*border:\s*1px solid rgba\(142, 158, 166, \.48\)/s);
+    assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*border:\s*2px solid rgba\(142, 158, 166, \.48\)/s);
     assert.match(driverCss, /driver-manual-workspace \.eo-dashboard-plan-ring\s*\{[^}]*--eo-dashboard-loop-color:\s*rgba\(74, 222, 128, \.38\)[^}]*--eo-dashboard-loop-glow:\s*rgba\(74, 222, 128, \.26\)/s);
     assert.match(driverCss, /eo-dashboard-plan-ring::before\s*\{[^}]*background:\s*conic-gradient\(from 0deg,[^}]*max\(var\(--eo-dashboard-loop-progress, 0%\), 7%\)/s);
     assert.match(driverCss, /eo-dashboard-plan-ring::before\s*\{[^}]*saturate\(1\.6\)[^}]*brightness\(1\.35\)/s);
