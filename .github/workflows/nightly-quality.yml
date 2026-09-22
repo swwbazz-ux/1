@@ -15,6 +15,7 @@ on:
       - .github/workflows/django.yml
       - .github/workflows/nightly-quality.yml
       - .github/ci/**
+      - СИСТЕМА_MVP/backend/requirements.txt
       - СИСТЕМА_MVP/backend/tools/validate_ci_test_matrix.py
   workflow_dispatch:
     inputs:
