@@ -287,7 +287,13 @@ class EmployeeWatchProfileModelGuardTests(TestCase):
 
 
 class EmployeeWatchProfileGuardMigrationTests(TransactionTestCase):
-    serialized_rollback = True
+    def _restore_latest_migrations(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(self._restore_latest_migrations)
 
     def test_migration_is_schema_only_and_cycles_forward_reverse_forward(self):
         migration_path = (
