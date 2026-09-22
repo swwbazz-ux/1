@@ -2489,7 +2489,13 @@ window.initExcavatorWorkShell = function () {
         item.dataset.truckNumber = badge.dataset.eoTruckNumber || badge.textContent.trim();
         item.dataset.eoOfflineEventId = badge.dataset.eoOfflineEventId || "";
         item.dataset.eoLocalTripId = badge.dataset.eoLocalTripId || "";
-        item.innerHTML = '<img src="' + truckGreenIcon + '" alt=""><strong>' + item.dataset.truckNumber + '</strong>';
+        var icon = document.createElement("img");
+        icon.src = truckGreenIcon;
+        icon.alt = "";
+        var number = document.createElement("strong");
+        number.textContent = item.dataset.truckNumber;
+        item.appendChild(icon);
+        item.appendChild(number);
         item.addEventListener("pointerdown", beginQueueDrag);
         return item;
     }
