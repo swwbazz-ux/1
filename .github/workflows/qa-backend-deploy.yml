@@ -1,0 +1,299 @@
+name: Isolated QA backend release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "QA operation"
+        required: true
+        type: choice
+        options:
+          - qa_audit
+          - qa_verify
+          - qa_deploy
+          - qa_rollback
+      expected_commit:
+        description: "Full 40-character source commit SHA"
+        required: true
+        type: string
+      confirmation:
+        description: "QA_AUDIT, QA_VERIFY, QA_DEPLOY_MIGRATIONS, or QA_ROLLBACK"
+        required: true
+        type: string
+      verified_snapshot_sha256:
+        description: "Snapshot SHA-256 printed by the preceding qa_verify (qa_deploy only)"
+        required: false
+        type: string
+      verification_id:
+        description: "QA_VERIFICATION_ID printed by the preceding qa_verify"
+        required: false
+        type: string
+      migration_plan_sha256:
+        description: "QA_MIGRATION_PLAN_SHA256 printed by the preceding qa_verify"
+        required: false
+        type: string
+      rollback_id:
+        description: "Exact qa-github-...-before backup id (qa_rollback only)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accounting-isolated-qa-backend-release
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      snapshot_sha256: ${{ steps.package.outputs.snapshot_sha256 }}
+      package_sha256: ${{ steps.package.outputs.package_sha256 }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout trusted QA control tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate protected QA request
+        env:
+          MODE: ${{ inputs.mode }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
+          VERIFICATION_ID: ${{ inputs.verification_id }}
+          MIGRATION_PLAN_SHA256: ${{ inputs.migration_plan_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/codex/github-qa-deploy-20260923"
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          case "$MODE:$CONFIRMATION" in
+            qa_audit:QA_AUDIT|qa_verify:QA_VERIFY|qa_deploy:QA_DEPLOY_MIGRATIONS|qa_rollback:QA_ROLLBACK) ;;
+            *) echo "QA confirmation does not match the selected mode" >&2; exit 2 ;;
+          esac
+          if [[ "$MODE" == "qa_rollback" ]]; then
+            [[ "$ROLLBACK_ID" =~ ^qa-github-[0-9]{8}-[0-9]{6}-[0-9a-f]{12}-before$ ]]
+          else
+            test -z "$ROLLBACK_ID"
+          fi
+          if [[ "$MODE" == "qa_deploy" ]]; then
+            [[ "$VERIFICATION_ID" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$MIGRATION_PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          else
+            test -z "$VERIFICATION_ID"
+            test -z "$MIGRATION_PLAN_SHA256"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Run release protocol tests
+        run: |
+          set -euo pipefail
+          python control/.github/deploy/test_qa_release_protocol.py
+          python -m py_compile \
+            control/.github/deploy/build_qa_release.py \
+            control/deployment/server/accounting_github_qa_deploy_receiver.py
+
+      - name: Materialize exact source without executing it
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          git -C control fetch --no-tags --depth=1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$EXPECTED_COMMIT"
+          git -C control worktree add --detach ../source "$EXPECTED_COMMIT"
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_COMMIT"
+
+      - name: Build deterministic QA package
+        id: package
+        env:
+          MODE: ${{ inputs.mode }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
+          VERIFICATION_ID: ${{ inputs.verification_id }}
+          MIGRATION_PLAN_SHA256: ${{ inputs.migration_plan_sha256 }}
+        run: |
+          set -euo pipefail
+          artifact_name="isolated-qa-backend-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          package="$RUNNER_TEMP/qa-release.tar.gz"
+          args=(
+            --root source
+            --output "$package"
+            --commit "$EXPECTED_COMMIT"
+            --mode "$MODE"
+          )
+          if [[ "$MODE" == "qa_rollback" ]]; then
+            args+=(--rollback-id "$ROLLBACK_ID")
+          elif [[ "$MODE" == "qa_deploy" ]]; then
+            args+=(
+              --verification-id "$VERIFICATION_ID"
+              --migration-plan-sha256 "$MIGRATION_PLAN_SHA256"
+            )
+          fi
+          output="$(python control/.github/deploy/build_qa_release.py "${args[@]}")"
+          printf '%s\n' "$output"
+          snapshot="$(printf '%s\n' "$output" | sed -n 's/^QA_SNAPSHOT_SHA256=//p')"
+          package_hash="$(printf '%s\n' "$output" | sed -n 's/^QA_SHA256=//p')"
+          test -n "$package_hash"
+          if [[ "$MODE" == "qa_verify" || "$MODE" == "qa_deploy" ]]; then
+            test -n "$snapshot"
+          else
+            test -z "$snapshot"
+          fi
+          echo "snapshot_sha256=$snapshot" >> "$GITHUB_OUTPUT"
+          echo "package_sha256=$package_hash" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          cp "$package" qa-release.tar.gz
+
+      - name: Enforce verify-before-deploy snapshot
+        if: inputs.mode == 'qa_deploy'
+        env:
+          VERIFIED_SNAPSHOT: ${{ inputs.verified_snapshot_sha256 }}
+          BUILT_SNAPSHOT: ${{ steps.package.outputs.snapshot_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$VERIFIED_SNAPSHOT" =~ ^[0-9a-f]{64}$ ]]
+          test "$VERIFIED_SNAPSHOT" = "$BUILT_SNAPSHOT"
+
+      - name: Upload immutable QA package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: qa-release.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  candidate-tests:
+    if: github.actor == github.repository_owner
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Set up Python before candidate checkout
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Checkout trusted control without credentials
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize exact candidate after privileged actions
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git -C control fetch --no-tags --depth=1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$EXPECTED_COMMIT"
+          git -C control worktree add --detach ../source "$EXPECTED_COMMIT"
+          test "$(git -C source rev-parse HEAD)" = "$EXPECTED_COMMIT"
+
+      - name: Run targeted QA backend tests after immutable packaging
+        if: inputs.mode == 'qa_verify' || inputs.mode == 'qa_deploy'
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
+          mkdir -p "СИСТЕМА_MVP/backend/media/employee_photos"
+          cd "СИСТЕМА_MVP/backend"
+          export DJANGO_SECRET_KEY=github-isolated-qa-release-check
+          export DJANGO_DEBUG=True
+          export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          python manage.py test \
+            core.test_qa_runtime_check \
+            trips.test_excavator_qa_simulator \
+            users.test_qa_role_host \
+            users.test_live_monitor_presence \
+            users.test_native_push
+
+      - name: No candidate execution required for metadata-only mode
+        if: inputs.mode != 'qa_verify' && inputs.mode != 'qa_deploy'
+        run: echo "Candidate Django execution is not required for this mode"
+
+  release:
+    needs:
+      - package
+      - candidate-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: qa
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Download immutable QA package
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v8.0.0
+        with:
+          name: ${{ needs.package.outputs.artifact_name }}
+
+      - name: Verify downloaded package
+        env:
+          EXPECTED_PACKAGE_SHA256: ${{ needs.package.outputs.package_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum qa-release.tar.gz | cut -d' ' -f1)" = "$EXPECTED_PACKAGE_SHA256"
+
+      - name: Configure isolated QA SSH channel
+        env:
+          QA_DEPLOY_KEY: ${{ secrets.QA_DEPLOY_KEY }}
+          QA_KNOWN_HOSTS: ${{ secrets.QA_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$QA_DEPLOY_KEY" > "$HOME/.ssh/qa_deploy_key"
+          printf '%s\n' "$QA_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+
+      - name: Send package to QA-only forced receiver
+        env:
+          QA_DEPLOY_HOST: ${{ secrets.QA_DEPLOY_HOST }}
+          QA_DEPLOY_USER: ${{ secrets.QA_DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$QA_DEPLOY_HOST"
+          test -n "$QA_DEPLOY_USER"
+          ssh \
+            -i "$HOME/.ssh/qa_deploy_key" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking=yes \
+            "$QA_DEPLOY_USER@$QA_DEPLOY_HOST" \
+            < qa-release.tar.gz
+
+      - name: Remove temporary SSH material
+        if: always()
+        run: rm -rf "$HOME/.ssh"
