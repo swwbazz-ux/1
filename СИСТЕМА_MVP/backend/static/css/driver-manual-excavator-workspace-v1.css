@@ -147,9 +147,9 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo-dashboard-plan-ring {
-    --eo-dashboard-loop-color: rgba(74, 222, 128, 1);
-    --eo-dashboard-loop-glow: rgba(74, 222, 128, .6);
-    --eo-dashboard-complete-color: rgba(74, 222, 128, .68);
+    --eo-dashboard-loop-color: rgba(74, 222, 128, .38);
+    --eo-dashboard-loop-glow: rgba(74, 222, 128, .26);
+    --eo-dashboard-complete-color: rgba(74, 222, 128, .3);
     grid-column: 3;
     width: 100% !important;
     height: 46px !important;
@@ -175,16 +175,16 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo
     z-index: 1;
     display: block;
     border-radius: inherit;
-    background: conic-gradient(from 0deg, var(--eo-dashboard-loop-color, #4ade80) 0 max(var(--eo-dashboard-loop-progress, 0%), 7%), transparent max(var(--eo-dashboard-loop-progress, 0%), 7%) 100%);
-    filter: saturate(1.6) brightness(1.35) drop-shadow(0 0 3px var(--eo-dashboard-loop-glow, rgba(74, 222, 128, .48))) drop-shadow(0 0 7px var(--eo-dashboard-loop-glow, rgba(74, 222, 128, .48)));
+    background: conic-gradient(from 0deg, var(--eo-dashboard-loop-color, rgba(74, 222, 128, .38)) 0 max(var(--eo-dashboard-loop-progress, 0%), 7%), transparent max(var(--eo-dashboard-loop-progress, 0%), 7%) 100%);
+    filter: saturate(1.6) brightness(1.35) drop-shadow(0 0 3px var(--eo-dashboard-loop-glow, rgba(74, 222, 128, .26))) drop-shadow(0 0 7px var(--eo-dashboard-loop-glow, rgba(74, 222, 128, .26)));
     opacity: 1;
     pointer-events: none;
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo-dashboard-plan-ring.is-progress-overrun:not(.is-plan-missing)::before {
     background:
-        conic-gradient(from 0deg, var(--eo-dashboard-loop-color, #4ade80) 0 var(--eo-dashboard-loop-progress, 0%), transparent var(--eo-dashboard-loop-progress, 0%) 100%),
-        conic-gradient(from 0deg, var(--eo-dashboard-complete-color, rgba(74, 222, 128, .62)) 0 100%, transparent 0 100%);
+        conic-gradient(from 0deg, var(--eo-dashboard-loop-color, rgba(74, 222, 128, .38)) 0 var(--eo-dashboard-loop-progress, 0%), transparent var(--eo-dashboard-loop-progress, 0%) 100%),
+        conic-gradient(from 0deg, var(--eo-dashboard-complete-color, rgba(74, 222, 128, .3)) 0 100%, transparent 0 100%);
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo-dashboard-plan-ring.is-plan-missing {
