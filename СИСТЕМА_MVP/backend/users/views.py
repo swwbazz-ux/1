@@ -280,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v333'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v334'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
