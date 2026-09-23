@@ -33,3 +33,28 @@ test("drum script parses and installs without touching the DOM", () => {
     vm.runInNewContext(SOURCE, {window: win, document: doc, MutationObserver: win.MutationObserver, console});
     assert.ok(listeners.length >= 1);
 });
+
+/* Барабан 24.09.2026: грани наезжали друг на друга, потому что радиус кольца
+   считался один раз — по ширине грани на первом кадре, когда контейнер ещё без
+   ширины и грань берёт свой нижний предел. Потом просвет чинили долей ширины
+   грани, и он разъезжался вместе с гранью. */
+test("drum ring follows the face width it actually has", () => {
+    assert.match(
+        SOURCE,
+        /geo\.radius = \(liveCardW \+ FACE_GAP\) \/ 2 \/ Math\.tan\(\(geo\.step \/ 2\) \* Math\.PI \/ 180\)/,
+        "радиус приводится к текущей ширине грани при отрисовке"
+    );
+    assert.match(
+        SOURCE,
+        /var radius = \(cardW \+ FACE_GAP\) \/ 2 \/ Math\.tan\(\(step \/ 2\) \* Math\.PI \/ 180\)/,
+        "сборка кольца считает радиус по той же формуле"
+    );
+    assert.doesNotMatch(SOURCE, /\* 1\.22/, "просвет больше не доля ширины грани");
+});
+
+test("drum corridor stays the width of the outline on any screen", () => {
+    const gap = SOURCE.match(/var FACE_GAP = (\d+);/);
+    assert.ok(gap, "просвет между гранями назван одним числом");
+    const px = Number(gap[1]);
+    assert.ok(px >= 6 && px <= 14, `просвет ${px}px: под обводку хватает, но кольцо не разрежено`);
+});
