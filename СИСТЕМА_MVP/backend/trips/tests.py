@@ -75,6 +75,28 @@ from trips.views import (
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 
 
+# Версия оболочки живёт в одном месте — role_apps. Жёстко вписанная строка уже
+# не раз оставляла набор красным после обычного подъёма версии и маскировала
+# настоящие поломки, поэтому тесты берут её оттуда же, откуда её берёт экран.
+EXCAVATOR_SHELL_VERSION = ROLE_APPS_BY_CODE['excavator_operator'].shell_version
+
+
+def excavator_screen_script(*module_names):
+    """Вынесенные модули экрана Экскаваторщика как один источник.
+
+    Часть поведения переехала из инлайна шаблона в отдельные файлы статики,
+    и в HTML-ответе этих строк больше нет. Проверять поведение надо там, где
+    оно теперь живёт, — тем же приёмом, что уже принят для экрана водителя.
+    """
+    sources = []
+    for module_name in module_names:
+        module_path = finders.find(f'js/{module_name}')
+        assert module_path, f'Не найден статический модуль js/{module_name}'
+        with open(module_path, encoding='utf-8') as handle:
+            sources.append(handle.read())
+    return '\n'.join(sources)
+
+
 class DispatcherSharedShiftStartTests(TestCase):
     def setUp(self):
         self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
@@ -1383,14 +1405,20 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/excavator-sw.js')
         self.assertContains(response, 'data-app-service-worker-scope="/excavator/"')
         self.assertNotContains(response, 'navigator.serviceWorker.register("/excavator-sw.js"')
-        self.assertContains(response, 'excavator-mobile-shell-v256')
-        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v256')
+        self.assertContains(response, EXCAVATOR_SHELL_VERSION)
+        self.assertContains(
+            response,
+            f'/static/js/excavator-field-outbox-v1.js?v={EXCAVATOR_SHELL_VERSION}',
+        )
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
         self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
         self.assertContains(response, 'mobile-shift__version')
-        self.assertContains(response, 'Версия 256')
+        self.assertContains(
+            response,
+            f"Версия {EXCAVATOR_SHELL_VERSION.rsplit('-v', 1)[-1]}",
+        )
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
@@ -1493,8 +1521,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'excavator-mobile-shell-v256')
-        self.assertContains(response, '/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v256')
+        self.assertContains(response, EXCAVATOR_SHELL_VERSION)
+        self.assertContains(
+            response,
+            f'/static/js/excavator-field-outbox-v1.js?v={EXCAVATOR_SHELL_VERSION}',
+        )
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '"excavator.trip.loaded"')
@@ -1653,7 +1684,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-truck-detail')
         self.assertContains(response, 'data-eo-truck-detail-id')
         self.assertContains(response, 'openTruckDetailCard')
-        self.assertContains(response, 'truckLongPressTimer')
+        self.assertContains(response, 'excavator-dashboard-drag-v1.js')
+        drag_module = excavator_screen_script('excavator-dashboard-drag-v1.js')
+        self.assertIn('holdTimer', drag_module)
+        self.assertIn('longPressOpened', drag_module)
         self.assertContains(response, 'truck-drag-preview')
         self.assertContains(response, 'data-eo-shift-url')
         self.assertContains(response, 'data-eo-truck-loaded-cancel-url')
@@ -3756,7 +3790,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/javascript; charset=utf-8')
         self.assertEqual(response['Service-Worker-Allowed'], '/excavator/')
-        self.assertIn('excavator-mobile-shell-v256', script)
+        self.assertIn(EXCAVATOR_SHELL_VERSION, script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3832,7 +3866,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('/static/js/mobile-shift-unified-v1.js', script)
         self.assertIn('/static/js/mobile-operational-sounds-v1.js', script)
         self.assertIn(
-            '/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v256',
+            f'/static/js/excavator-field-outbox-v1.js?v={EXCAVATOR_SHELL_VERSION}',
             script,
         )
         self.assertIn('/static/css/excavator-offline-v1.css?v=1', script)
@@ -4358,8 +4392,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         html = response.content.decode('utf-8')
         self.assertEqual(len(re.findall(r'<b[^>]*data-eo-last-sent-truck="true"[^>]*>', html)), 1)
         self.assertEqual(len(re.findall(r'<b[^>]*data-eo-last-sent-truck="false"[^>]*>', html)), 1)
-        self.assertContains(response, 'function isDumpReturnSwipe')
-        self.assertContains(response, 'returnLastTruckFromDump(target)')
+        self.assertContains(response, 'excavator-dump-return-swipe-v1.js')
+        self.assertIn(
+            'function isDumpReturnSwipe',
+            excavator_screen_script('excavator-dump-return-swipe-v1.js'),
+        )
+        # Возврат самосвала теперь вызывается модулем свайпа через onReturn,
+        # а не напрямую из обработчика в шаблоне.
+        self.assertContains(response, 'function returnLastTruckFromDump(dumpTarget)')
+        self.assertContains(response, 'onReturn: returnLastTruckFromDump')
 
     def post_truck_loaded(
         self, *, client_action_id='load-1', truck=None, dump_point=None,
