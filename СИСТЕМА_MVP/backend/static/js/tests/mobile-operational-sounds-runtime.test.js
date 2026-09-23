@@ -418,3 +418,31 @@ test("a mixed Excavator batch keeps the generic assignment cue in its fallback",
         assert.deepEqual(runtime.played, ["assignment_notice"]);
     }
 });
+
+/* Проверка гипотезы 24.09.2026: не сбрасывает ли мигание состояния выдержку
+   перед объявлением потери. Таймер снимается на ЛЮБОМ не-lost состоянии, и на
+   возврате в lost начинается заново — значит дребезг откладывает голос. */
+test("a flapping connection restarts the loss dwell instead of accumulating it", () => {
+    const runtime = createRuntime();
+
+    runtime.connection("lost");
+    runtime.advance(20_000);
+    runtime.connection("weak");     // связь частично отвечает — выдержка снята
+    runtime.advance(1_000);
+    runtime.connection("lost");     // снова потеря — отсчёт начинается с нуля
+    runtime.advance(29_999);
+    assert.deepEqual(runtime.played, [], "первые 30 с после ВОЗВРАТА в потерю голос молчит");
+    runtime.advance(1);
+    assert.deepEqual(
+        runtime.played,
+        ["connection_lost_notice"],
+        "после полных 30 с непрерывной потери голос обязан прозвучать"
+    );
+});
+
+test("an outage that never lets up still announces once the dwell passes", () => {
+    const runtime = createRuntime();
+    runtime.connection("lost");
+    runtime.advance(30_000);
+    assert.deepEqual(runtime.played, ["connection_lost_notice"], "непрерывная потеря объявляется");
+});
