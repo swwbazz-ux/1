@@ -673,3 +673,57 @@ test('confirmation callback observes the already updated queue count', async () 
     await box.flush();
     assert.equal(visibleCount, 0);
 });
+
+/* Часы машиниста 24.09.2026: телефон с отведёнными назад часами писал в базу
+   своё время, а переключение причины простоя и вовсе отклонялось как «раньше
+   начала». Событие, ушедшее сразу после нажатия, помечается для сервера:
+   телефон не мог быть офлайн эти секунды, значит его час просто неверен. */
+test('an event that left at once is marked so the server can use its own receipt', async () => {
+    let received;
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        send: async events => { received = events; return {ok: true, results: events.map(accepted)}; },
+    });
+
+    await box.queue(loadEvent('live-one'));
+    await box.flush();
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0].sent_live, true);
+    // Служебные метки остаются на телефоне и в отпечаток события не входят.
+    assert.equal('created_session' in received[0], false);
+    assert.equal('created_mono' in received[0], false);
+});
+
+test('an event that waited in the queue or survived a reload is not marked live', async () => {
+    const local = storage();
+    const queueKey = 'excavator-field-outbox-v1:access-7';
+    const offline = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async () => { throw new Error('offline'); },
+    });
+    await offline.queue(loadEvent('stale-one'));
+    await offline.flush();
+
+    // Перезагрузка страницы обнуляет отсчёт монотонных часов, поэтому метка
+    // страницы обязана расходиться — иначе пролежавшее событие выглядело бы
+    // только что созданным.
+    const stored = JSON.parse(local.getItem(queueKey));
+    stored[0].created_session = 'page-from-a-previous-load';
+    local.setItem(queueKey, JSON.stringify(stored));
+
+    let received;
+    const reopened = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => { received = events; return {ok: true, results: events.map(accepted)}; },
+    });
+    await reopened.ready();
+    await reopened.retryNow();
+
+    assert.equal(received.length, 1);
+    assert.equal(received[0].event_id, 'stale-one');
+    assert.equal('sent_live' in received[0], false);
+});

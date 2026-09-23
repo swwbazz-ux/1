@@ -18,6 +18,26 @@
             || String(left.event_id || "").localeCompare(String(right.event_id || ""));
     }
 
+    /* Метка этой загрузки страницы и монотонные часы. По ним видно, ушло ли
+       событие сразу после создания или пролежало в очереди. Date.now() для
+       этого не годится: именно его и переставляют вручную, а performance.now()
+       к часам не привязан и назад не идёт. Метка страницы обязательна: после
+       перезагрузки отсчёт performance.now() начинается заново, и без неё
+       пролежавшее событие выглядело бы только что созданным. */
+    var PAGE_SESSION = "page-" + Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
+    var SENT_LIVE_WINDOW_MS = 10000;
+
+    function monotonicNow() {
+        var clock = root && root.performance;
+        return (clock && typeof clock.now === "function") ? clock.now() : NaN;
+    }
+
+    function eventWasSentLive(event) {
+        return event.created_session === PAGE_SESSION
+            && isFinite(Number(event.created_mono))
+            && (monotonicNow() - Number(event.created_mono)) < SENT_LIVE_WINDOW_MS;
+    }
+
     function wireEvent(event) {
         var value = clone(event);
         delete value.sync_state;
@@ -25,6 +45,20 @@
         delete value.next_retry_at;
         delete value.last_error;
         delete value.last_error_code;
+        delete value.created_session;
+        delete value.created_mono;
+        return value;
+    }
+
+    function outgoingEvent(event) {
+        /* Событие, ушедшее сразу после нажатия, сервер применяет по времени
+           своей расписки: телефон не мог быть офлайн эти секунды, значит его
+           час просто неверен, а не действие давнее. Флаг живёт на верхнем
+           уровне, а не в payload: payload входит в отпечаток события, а при
+           повторе очереди флаг обязан смениться — иначе сервер сочтёт повтор
+           другим событием, и действие машиниста потеряется. */
+        var value = wireEvent(event);
+        if (eventWasSentLive(event)) value.sent_live = true;
         return value;
     }
 
@@ -368,7 +402,9 @@
                     sync_state: "pending",
                     attempt_count: Number(event.attempt_count || 0),
                     next_retry_at: Number(event.next_retry_at || 0),
-                    last_error: String(event.last_error || "")
+                    last_error: String(event.last_error || ""),
+                    created_session: PAGE_SESSION,
+                    created_mono: monotonicNow()
                 });
                 return persist(stored).then(function () {
                     storageError = null;
@@ -538,7 +574,7 @@
                             notify(sending, {reason: "sending"});
                             var request;
                             try {
-                                request = options.send(batch.map(wireEvent));
+                                request = options.send(batch.map(outgoingEvent));
                             } catch (error) {
                                 request = Promise.reject(error);
                             }
