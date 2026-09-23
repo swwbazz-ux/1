@@ -627,6 +627,25 @@ def _optional_decimal(value, *, field):
     return parsed
 
 
+def _clock_hint(raw_event, payload, key):
+    """Булев признак от оболочки о достоверности её часов.
+
+    Строки принимаются намеренно: часть клиентских полей доезжает из
+    IndexedDB как текст, и тихо принять "false" за истину здесь дороже,
+    чем разобрать значение строго.
+    """
+    for source in (raw_event, payload):
+        if not isinstance(source, dict):
+            continue
+        value = source.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            return value.strip().lower() in {'1', 'true', 'yes'}
+        return bool(value)
+    return False
+
+
 def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None):
     if not isinstance(raw_event, dict):
         _invalid('invalid_event', 'Событие должно быть JSON-объектом.')
@@ -714,10 +733,26 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     # case the server receipt time is the operational timestamp.
     # Past timestamps are not rewritten globally because they may describe a
     # legitimate offline action and remain significant for event ordering.
+    # Подсказки оболочки о достоверности её собственных часов. Читаются и с
+    # верхнего уровня события, и из payload: клиентская часть общая для обеих
+    # ролей, и жёсткая привязка к одному месту уже расходилась между чатами.
+    # Верхний уровень в fingerprint не входит, поэтому подсказку можно уточнить
+    # при повторной отправке, не сломав идентичность события.
+    sent_live = _clock_hint(raw_event, payload, 'sent_live')
+    clock_unreliable = _clock_hint(raw_event, payload, 'clock_unreliable')
     normalized['device_occurred_at'] = occurred_at
+    normalized['sent_live'] = sent_live
+    normalized['clock_unreliable'] = clock_unreliable
     normalized['clock_adjusted'] = bool(
         role_code in {'driver', 'excavator_operator'}
-        and occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
+        and (
+            occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
+            # Событие ушло сразу после нажатия — расписка сервера и есть его
+            # настоящее время, каким бы ни был сдвиг часов телефона.
+            or sent_live
+            # Оболочка увидела скачок собственных часов и не ручается за них.
+            or clock_unreliable
+        )
     )
     if normalized['clock_adjusted']:
         normalized['occurred_at'] = received_at

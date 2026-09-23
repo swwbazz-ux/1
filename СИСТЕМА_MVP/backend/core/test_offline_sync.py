@@ -965,6 +965,74 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.status, TripStatus.CANCELLED)
         self.assertEqual(results[0]['server_ids']['trip_id'], trip.id)
 
+    def _open_shift_two_hours_ago(self):
+        moment = timezone.now() - timedelta(hours=2)
+        self.shift.opened_at = moment
+        self.shift.save(update_fields=['opened_at'])
+        self.truck_shift.opened_at = moment
+        self.truck_shift.save(update_fields=['opened_at'])
+        self.assignment.assigned_at = moment
+        self.assignment.save(update_fields=['assigned_at'])
+        return moment
+
+    def test_sent_live_event_is_applied_at_the_server_receipt(self):
+        """Событие ушло сразу после нажатия — время сервера и есть настоящее.
+
+        Отстающие часы телефона в пределах смены иначе проходят как есть и
+        записывают погрузку задним числом.
+        """
+        self._open_shift_two_hours_ago()
+        device_time = timezone.now() - timedelta(minutes=30)
+        event = self.load_event(occurred_at=device_time)
+        event['sent_live'] = True
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['device_clock_adjusted'])
+        receipt = OfflineFieldEvent.objects.get()
+        trip = Trip.objects.get()
+        self.assertEqual(receipt.occurred_at, device_time)
+        self.assertEqual(trip.loaded_at, receipt.received_at)
+        self.assertEqual(trip.load_time_source, 'server_receipt')
+
+    def test_clock_unreliable_hint_inside_payload_is_honoured(self):
+        """Подсказка принимается и из payload, и с верхнего уровня события.
+
+        Клиентскую часть пишет другая роль; жёсткая привязка к одному месту
+        уже расходилась между параллельными ветками.
+        """
+        self._open_shift_two_hours_ago()
+        device_time = timezone.now() - timedelta(minutes=30)
+        event = self.load_event(occurred_at=device_time)
+        event['payload'] = dict(event['payload'], clock_unreliable='true')
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['device_clock_adjusted'])
+        receipt = OfflineFieldEvent.objects.get()
+        self.assertEqual(receipt.occurred_at, device_time)
+        self.assertEqual(Trip.objects.get().loaded_at, receipt.received_at)
+
+    def test_offline_event_without_clock_hints_keeps_its_device_time(self):
+        """Без подсказок поведение не меняется: очередь сохраняет хронологию.
+
+        Отложенное офлайн-событие обязано остаться на своём времени, иначе
+        накопленная за смену очередь схлопнется в момент восстановления связи.
+        """
+        self._open_shift_two_hours_ago()
+        device_time = timezone.now() - timedelta(minutes=30)
+        event = self.load_event(occurred_at=device_time)
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertNotIn('device_clock_adjusted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loaded_at, device_time)
+        self.assertEqual(trip.load_time_source, 'excavator_device')
+
     def test_excavator_clock_one_minute_behind_is_accepted_without_adjustment(self):
         ten_minutes_ago = timezone.now() - timedelta(minutes=10)
         self.shift.opened_at = ten_minutes_ago
