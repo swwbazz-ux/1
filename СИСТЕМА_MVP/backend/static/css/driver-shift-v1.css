@@ -636,9 +636,15 @@ body.driver-mobile-screen .driver-work-context-location {
     display: flex;
     align-items: center;
     white-space: nowrap;
+    /* Горизонт и блок пишутся в одну строку, поэтому на узком экране последняя
+       часть уезжала за край карточки вместо того, чтобы подрезаться. */
+    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-work-context-location span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
@@ -3930,6 +3936,9 @@ body.driver-mobile-screen .driver-haptic-level {
     background: rgba(255, 255, 255, 0.03);
     display: grid;
     gap: 8px;
+    /* Элемент сетки по умолчанию не уже своего содержимого, поэтому на узком
+       экране три подписи распирали блок за край панели. */
+    min-width: 0;
 }
 body.driver-mobile-screen .driver-haptic-level__title {
     font-size: 12px;
@@ -3939,10 +3948,14 @@ body.driver-mobile-screen .driver-haptic-level__title {
 }
 body.driver-mobile-screen .driver-haptic-level__options {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
+    min-width: 0;
 }
 body.driver-mobile-screen .driver-haptic-level__options button {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     min-height: 42px;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.14);

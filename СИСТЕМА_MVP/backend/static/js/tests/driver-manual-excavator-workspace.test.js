@@ -255,14 +255,16 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(72px, 8\.6dvh, 78px\)/);
     assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
     assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(118px, 14dvh, 132px\)/);
-    assert.match(driverCss, /grid-template-rows:\s*var\(--driver-manual-action-height\) var\(--driver-manual-timer-height\) minmax\(0, 1fr\)/);
+    // Каждая строка просит свою высоту, но обязана уметь сжаться: иначе на
+    // невысоком экране нижняя строка вылезает из зоны на панель точек.
+    assert.match(driverCss, /grid-template-rows:\s*minmax\(0, var\(--driver-manual-action-height\)\) minmax\(0, var\(--driver-manual-timer-height\)\) minmax\(0, 1fr\)/);
     assert.match(driverCss, /align-content:\s*stretch/);
     assert.match(driverCss, /gap:\s*var\(--driver-manual-workspace-gap\)/);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
-    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*var\(--driver-manual-source-height\);[^}]*transform:\s*none;/s);
-    assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*var\(--driver-manual-action-height\);[^}]*aspect-ratio:\s*auto;/s);
+    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-source-height\), 100%\);[^}]*transform:\s*none;/s);
+    assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-action-height\), 100%\);[^}]*aspect-ratio:\s*auto;/s);
     assert.match(driverCss, /grid-template-columns:\s*40px minmax\(0, 1fr\)/);
     assert.match(driverCss, /font-size:\s*clamp\(11px, 8\.2cqw, 15px\)/);
     assert.match(driverCss, /driver-manual-workspace__action-copy > em\s*\{[^}]*display:\s*none !important/s);
