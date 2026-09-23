@@ -708,6 +708,19 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     normalized['fingerprint'] = hashlib.sha256(
         json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')
     ).hexdigest()
+    # Preserve the exact device value in the immutable receipt/fingerprint for
+    # audit. Driver field actions must nevertheless remain possible when an
+    # Android clock or time zone is far ahead: in that narrow, objectively
+    # detectable case the server receipt time is the operational timestamp.
+    # Past timestamps are not rewritten globally because they may describe a
+    # legitimate offline action and remain significant for event ordering.
+    normalized['device_occurred_at'] = occurred_at
+    normalized['clock_adjusted'] = bool(
+        role_code == 'driver'
+        and occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
+    )
+    if normalized['clock_adjusted']:
+        normalized['occurred_at'] = received_at
     return normalized
 
 
@@ -822,7 +835,20 @@ def _locked_shift(access, normalized, *, role_code):
         _conflict('equipment_context_changed', 'Техника в событии не совпадает со сменой.')
     occurred_at = normalized['occurred_at']
     if occurred_at < shift.opened_at:
-        _conflict('event_before_shift', 'Время события раньше начала смены.')
+        receipt_was_inside_shift = bool(
+            normalized['received_at'] >= shift.opened_at
+            and (shift.closed_at is None or normalized['received_at'] <= shift.closed_at)
+        )
+        if role_code == 'driver' and receipt_was_inside_shift:
+            # A Driver action explicitly bound to this shift cannot have
+            # happened before the shift opened. This is the symmetric clock-
+            # behind/time-zone case: keep the raw receipt value for audit but
+            # use the server instant while the referenced shift is truly open.
+            normalized['occurred_at'] = normalized['received_at']
+            normalized['clock_adjusted'] = True
+            occurred_at = normalized['occurred_at']
+        else:
+            _conflict('event_before_shift', 'Время события раньше начала смены.')
     if shift.closed_at and occurred_at > shift.closed_at:
         _conflict('event_after_shift', 'Время события позже закрытия смены.')
     return shift
@@ -1930,6 +1956,10 @@ def _process_driver_unloaded(access, normalized):
         trip, driver=access.employee, unloading_shift=shift,
         occurred_at=normalized['occurred_at'], late_confirmation=late_confirmation,
     )
+    if normalized.get('clock_adjusted'):
+        trip.unload_received_at = normalized['received_at']
+        trip.unload_time_source = 'server_receipt'
+        trip.save(update_fields=['unload_received_at', 'unload_time_source'])
     TripClientAction.objects.create(
         action_type='trip_unloaded', client_action_id=normalized['event_id'],
         trip=trip, actor=access.employee,
@@ -2347,8 +2377,54 @@ def process_one_offline_event(access, normalized):
                         normalized['event_id'], 'conflict', code='event_id_reused',
                         message='Идентификатор уже использован для другого события.',
                     )
-                if existing.status != OfflineFieldEventStatus.RETRY:
+                device_clock_was_invalid = bool(
+                    existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
+                )
+                dependency_chain_is_ready = False
+                if (
+                    normalized['role_code'] == 'driver'
+                    and existing.status == OfflineFieldEventStatus.CONFLICT
+                    and existing.error_code == 'dependency_rejected'
+                    and existing.depends_on
+                ):
+                    dependency_receipts = list(
+                        OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+                            event_id__in=existing.depends_on,
+                        )
+                    )
+                    dependency_chain_is_ready = bool(
+                        len(dependency_receipts) == len(set(existing.depends_on))
+                        and all(
+                            dependency.actor_id == access.employee_id
+                            and dependency.access_id == access.id
+                            and dependency.role_code == normalized['role_code']
+                            and dependency.device_id == normalized['device_id']
+                            and dependency.sequence < existing.sequence
+                            and dependency.status == OfflineFieldEventStatus.ACCEPTED
+                            for dependency in dependency_receipts
+                        )
+                    )
+                recoverable_clock_conflict = bool(
+                    normalized['role_code'] == 'driver'
+                    and existing.status == OfflineFieldEventStatus.CONFLICT
+                    and (
+                        (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
+                        or dependency_chain_is_ready
+                    )
+                )
+                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_clock_conflict:
                     return _stored_result(existing, deduplicated=True)
+                if recoverable_clock_conflict:
+                    # Reprocess the same immutable event at its original server
+                    # receipt time. The id, sequence, dependencies and raw
+                    # device timestamp stay unchanged, so no duplicate action
+                    # can be created and the dependent queue keeps its order.
+                    normalized['device_occurred_at'] = existing.occurred_at
+                    normalized['received_at'] = existing.received_at
+                    normalized['clock_adjusted'] = device_clock_was_invalid
+                    normalized['occurred_at'] = (
+                        existing.received_at if device_clock_was_invalid else existing.occurred_at
+                    )
                 receipt = existing
                 receipt.status = OfflineFieldEventStatus.PROCESSING
                 receipt.retryable = False
@@ -2381,7 +2457,7 @@ def process_one_offline_event(access, normalized):
                     device_id=normalized['device_id'],
                     sequence=normalized['sequence'],
                     depends_on=normalized['depends_on'],
-                    occurred_at=normalized['occurred_at'],
+                    occurred_at=normalized['device_occurred_at'],
                     received_at=normalized['received_at'],
                     shift_id=_positive_int(normalized['shift_id'], field='shift_id', required=False),
                     equipment_id=_positive_int(normalized['equipment_id'], field='equipment_id', required=False),
@@ -2457,6 +2533,13 @@ def process_one_offline_event(access, normalized):
             receipt.error_message = ''
             result_payload = dict(result_payload or {})
             result_payload.setdefault('server_received_at', receipt.received_at.isoformat())
+            if normalized.get('clock_adjusted'):
+                result_payload.update({
+                    'device_clock_adjusted': True,
+                    'device_occurred_at': normalized['device_occurred_at'].isoformat(),
+                    'effective_occurred_at': normalized['occurred_at'].isoformat(),
+                    'time_source': 'server_receipt',
+                })
             result_payload.setdefault('server_ids', {})['event_receipt_id'] = receipt.id
             receipt.result_payload = result_payload
             for field in ('trip', 'shift', 'equipment', 'downtime_event'):

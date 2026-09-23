@@ -389,6 +389,36 @@ test("a warning survives app restart without retrying the rejected request", asy
     assert.equal(restarted.form.fields.get("reading_confirmation_token").value, "signed-token:1:abc");
 });
 
+test("legacy device-clock attention retries the same shift-close action after update", async () => {
+    const createdAt = Date.parse("2036-09-23T10:00:00.000Z");
+    const pending = JSON.stringify({
+        shiftId: "17",
+        clientActionId: "driver-close-clock-recovery",
+        endFuel: "90",
+        endMileage: "2600",
+        endEngineHours: "712",
+        confirmationToken: "",
+        state: "attention",
+        requiresAttention: true,
+        error: "Часы устройства заметно опережают сервер. Требуется сверка.",
+        attentionMessage: "Часы устройства заметно опережают сервер. Требуется сверка.",
+        createdAt,
+    });
+    const runtime = createRuntime({
+        initialStorage: pending,
+        responses: [jsonResponse(200, {ok: true, status: "applied"})],
+        nativeAvailable: false,
+    });
+
+    const restored = await runtime.window.DriverShiftCloseOutbox.restore(runtime.form);
+
+    assert.equal(restored, true);
+    assert.equal(runtime.fetchCalls.length, 1);
+    assert.equal(runtime.fetchCalls[0].values.client_action_id, "driver-close-clock-recovery");
+    assert.equal(runtime.fetchCalls[0].values.occurred_at, "2036-09-23T10:00:00.000Z");
+    assert.equal(runtime.localStorage.getItem("driver-shift-close-pending:v1"), null);
+});
+
 test("hard HTTP validation stays editable and never enters the offline queue", async () => {
     const runtime = createRuntime({responses: [jsonResponse(422, {
         ok: false,

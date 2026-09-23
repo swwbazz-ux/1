@@ -54,8 +54,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "48",
-    versionName: "0.1.30",
+    versionCode: "53",
+    versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -65,8 +65,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "7",
-    versionName: "1.0.6-qa",
+    versionCode: "10",
+    versionName: "1.0.9-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -76,8 +76,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "49",
-    versionName: "0.1.30",
+    versionCode: "55",
+    versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -87,8 +87,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "48",
-    versionName: "0.1.30-rc",
+    versionCode: "54",
+    versionName: "0.1.32-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -172,6 +172,28 @@ test("profiles remain isolated by URL and application id", () => {
   assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
 });
 
+test("only Driver profiles pin native WebView text zoom to the workstation scale", () => {
+  for (const profileName of ["driver", "driver_qa", "driver_rustore_qa", "driver_rustore"]) {
+    assert.equal(profile(profileName).webViewTextZoomPercent, "100");
+  }
+  for (const profileName of ["excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
+    assert.equal(profile(profileName).webViewTextZoomPercent, undefined);
+  }
+
+  const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
+  const activity = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"),
+    "utf8"
+  );
+  assert.match(gradle, /WEB_VIEW_TEXT_ZOOM_PERCENT/);
+  assert.match(activity, /configureProfileWebViewTextZoom\(webView\)/);
+  assert.match(activity, /getSettings\(\)\.setTextZoom\(BuildConfig\.WEB_VIEW_TEXT_ZOOM_PERCENT\)/);
+  assert.match(
+    activity,
+    /public void onResume\(\)[\s\S]*?configureProfileWebViewTextZoom\(getBridge\(\)\.getWebView\(\)\)/
+  );
+});
+
 test("QA and RuStore variants keep role identity but disable sideload updates", () => {
   for (const role of ["excavator", "driver"]) {
     const qa = profile(`${role}_qa`);
@@ -190,6 +212,9 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
     assert.equal(rustoreQa.applicationId, rustore.applicationId);
     assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
     assert.ok(Number(profile(role).versionCode) <= Number(rustoreQa.versionCode));
+    if (role === "driver") {
+      assert.ok(Number(profile(role).versionCode) < Number(rustoreQa.versionCode));
+    }
     assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(profile(role).versionCode));
   }

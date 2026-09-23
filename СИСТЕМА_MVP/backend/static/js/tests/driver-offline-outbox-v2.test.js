@@ -225,6 +225,98 @@ test("terminal downtime events never replace the authoritative active downtime",
     ]), null);
 });
 
+test("restart recovers only clock conflict and its dependency chain with immutable identity", async () => {
+    const local = storage();
+    const deviceStart = "2036-09-23T10:00:00.000Z";
+    const deviceEnd = "2036-09-23T10:01:00.000Z";
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: event.event_id === "clock-parent" ? "device_clock_ahead" : "dependency_rejected",
+                message: event.event_id === "clock-parent"
+                    ? "Часы устройства опережают сервер"
+                    : "Предыдущее событие требует сверки",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "clock-parent",
+        event_type: "driver.downtime.started",
+        occurred_at: deviceStart,
+        payload: {reason_id: 9},
+    });
+    await rejected.enqueue({
+        event_id: "clock-child",
+        event_type: "driver.downtime.ended",
+        occurred_at: deviceEnd,
+        local_downtime_id: "clock-parent",
+        depends_on: ["clock-parent"],
+        payload: {local_downtime_id: "clock-parent"},
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(structuredClone(batch.events));
+            return {
+                results: batch.events.map(event => ({
+                    event_id: event.event_id,
+                    status: "accepted",
+                    effective_occurred_at: "2026-09-23T00:00:00.000Z",
+                    device_occurred_at: event.occurred_at,
+                    time_source: "server_receipt",
+                })),
+            };
+        },
+    });
+    await restarted.initialize();
+
+    assert.equal(delivered.length, 1);
+    assert.deepEqual(delivered[0].map(event => event.event_id), ["clock-parent", "clock-child"]);
+    assert.deepEqual(delivered[0].map(event => event.sequence), [1, 2]);
+    assert.deepEqual(delivered[0].map(event => event.occurred_at), [deviceStart, deviceEnd]);
+    assert.deepEqual(delivered[0][1].depends_on, ["clock-parent"]);
+    assert.equal((await restarted.pending()).length, 0);
+});
+
+test("restart never retries a real domain conflict", async () => {
+    const local = storage();
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: "equipment_context_changed",
+                message: "Техника в событии не совпадает со сменой",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "real-domain-conflict",
+        event_type: "driver.downtime.started",
+        occurred_at: "2036-09-23T10:00:00.000Z",
+        payload: {reason_id: 9},
+    });
+    await rejected.flush();
+
+    let sends = 0;
+    const restarted = runtime({local, send: async () => { sends += 1; return {results: []}; }});
+    await restarted.initialize();
+
+    const events = await restarted.pending();
+    assert.equal(sends, 0);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].state, "conflict");
+    assert.equal(events[0].last_error.code, "equipment_context_changed");
+});
+
 test("confirmed downtime close receipt survives queue removal and restart", async () => {
     const local = storage();
     const send = async batch => ({

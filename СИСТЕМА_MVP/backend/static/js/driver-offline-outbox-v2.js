@@ -52,6 +52,17 @@
             return JSON.stringify(canonical(left[field])) === JSON.stringify(canonical(right[field]));
         });
     }
+    function errorCode(event) {
+        return String(event && event.last_error && event.last_error.code || "");
+    }
+    function recoverableDeviceClockConflict(event) {
+        if (!event || event.state !== "conflict") return false;
+        return errorCode(event) === "device_clock_ahead"
+            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error && event.last_error.message || ""));
+    }
+    function recoverableDependencyConflict(event) {
+        return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
+    }
     function identityRecord(event) {
         return IMMUTABLE_FIELDS.reduce(function (result, field) {
             result[field] = clone(event[field] === undefined ? null : event[field]);
@@ -701,7 +712,9 @@
                             event_type: event.event_type,
                             shift_id: number(event.shift_id),
                             equipment_id: number(event.equipment_id),
-                            occurred_at: event.occurred_at,
+                            occurred_at: String(result.effective_occurred_at || event.occurred_at),
+                            device_occurred_at: String(result.device_occurred_at || event.occurred_at),
+                            time_source: String(result.time_source || "driver_device"),
                             confirmed_at: String(result.server_received_at || event.updated_at || event.occurred_at),
                             payload: clone(event.payload || {}),
                             projection: clone(
@@ -877,6 +890,47 @@
             }
             return publish();
         }
+        async function resumeRecoverableClockConflicts() {
+            var repo = await repoPromise;
+            // Read the repository directly so a valid old field action is not
+            // purged by the generic 24-hour review cleanup before recovery.
+            var events = (await repo.list()).filter(function (item) {
+                return String(item.access_id) === accessId;
+            }).sort(function (left, right) {
+                return Number(left.sequence || 0) - Number(right.sequence || 0);
+            });
+            var recoverable = Object.create(null);
+            events.forEach(function (event) {
+                if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+            });
+            var changed = true;
+            while (changed) {
+                changed = false;
+                events.forEach(function (event) {
+                    if (
+                        recoverableDependencyConflict(event)
+                        && !recoverable[event.event_id]
+                        && (event.depends_on || []).some(function (dependency) {
+                            return recoverable[String(dependency)];
+                        })
+                    ) {
+                        recoverable[event.event_id] = true;
+                        changed = true;
+                    }
+                });
+            }
+            for (var event of events) {
+                if (!recoverable[event.event_id]) continue;
+                await update(event, {
+                    state: "pending",
+                    attempt_count: 0,
+                    next_retry_at: 0,
+                    last_error: null,
+                    auth_generation: null
+                });
+                drainRequested = true;
+            }
+        }
         function setBindings(bindings) {
             bindings = bindings || {};
             if (Object.prototype.hasOwnProperty.call(bindings, "context")) contextProvider = bindings.context;
@@ -916,6 +970,7 @@
         async function initialize() {
             await migrateLegacyUnload();
             bindLifecycle();
+            await resumeRecoverableClockConflicts();
             await resumeAuthRequired(context().authGeneration);
             await publish();
             return flush();

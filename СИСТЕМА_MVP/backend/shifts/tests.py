@@ -556,6 +556,56 @@ class DriverShiftLifecycleTests(TestCase):
                 client_action_id='same-close',
             )
 
+    def test_driver_close_future_device_clock_uses_server_time_and_stays_idempotent(self):
+        shift = self.open_shift()
+        device_occurred_at = timezone.now() + timedelta(hours=10)
+
+        closed, created = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=self.close_readings(),
+            client_action_id='future-clock-close',
+            occurred_at=device_occurred_at,
+        )
+        repeated, created_again = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=self.close_readings(),
+            client_action_id='future-clock-close',
+            occurred_at=device_occurred_at,
+        )
+
+        action = ShiftClientAction.objects.get(client_action_id='future-clock-close')
+        self.assertTrue(created)
+        self.assertFalse(created_again)
+        self.assertEqual(repeated.pk, closed.pk)
+        self.assertTrue(action.response_payload['device_clock_adjusted'])
+        self.assertEqual(action.response_payload['device_occurred_at'], device_occurred_at.isoformat())
+        self.assertEqual(action.response_payload['effective_occurred_at'], closed.closed_at.isoformat())
+        self.assertEqual(action.response_payload['time_source'], 'server_receipt')
+        self.assertLess(closed.closed_at, device_occurred_at)
+
+    def test_driver_close_one_minute_behind_opening_uses_server_time(self):
+        shift = self.open_shift()
+        shift.opened_at = timezone.now() - timedelta(seconds=10)
+        shift.save(update_fields=['opened_at'])
+        device_occurred_at = timezone.now() - timedelta(minutes=1)
+
+        closed, created = close_driver_shift(
+            shift=shift,
+            employee=self.driver,
+            readings=self.close_readings(),
+            client_action_id='behind-clock-close',
+            occurred_at=device_occurred_at,
+        )
+
+        action = ShiftClientAction.objects.get(client_action_id='behind-clock-close')
+        self.assertTrue(created)
+        self.assertGreaterEqual(closed.closed_at, shift.opened_at)
+        self.assertTrue(action.response_payload['device_clock_adjusted'])
+        self.assertEqual(action.response_payload['device_occurred_at'], device_occurred_at.isoformat())
+        self.assertEqual(action.response_payload['time_source'], 'server_receipt')
+
     def test_open_and_close_emit_realtime_events(self):
         shift = self.open_shift()
         close_driver_shift(

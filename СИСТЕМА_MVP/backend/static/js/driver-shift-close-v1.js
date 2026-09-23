@@ -317,6 +317,7 @@ window.DriverShiftCloseOutbox = (function () {
         return Object.assign({}, payload, {
             state: "attention",
             requiresAttention: true,
+            attentionCode: String(data.code || ""),
             confirmationRequired: data.confirmation_required === true,
             confirmationToken: String(data.confirmation_token || payload.confirmationToken || ""),
             warnings: Array.isArray(data.warnings) ? data.warnings : [],
@@ -324,6 +325,31 @@ window.DriverShiftCloseOutbox = (function () {
             error: String(data.error || "Проверьте показания на конец смены."),
             attentionMessage: String(data.error || "Проверьте показания на конец смены."),
             hasActiveShift: data.has_active_shift !== false
+        });
+    }
+
+    function isRecoverableClockAttention(payload) {
+        if (!payload || (payload.state !== "attention" && !payload.requiresAttention)) return false;
+        if (String(payload.attentionCode || "") === "device_clock_ahead") return true;
+        return /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(
+            String(payload.attentionMessage || payload.error || "")
+        );
+    }
+
+    function resumeClockAttention(form, payload) {
+        payload.state = "queued";
+        payload.requiresAttention = false;
+        payload.attentionCode = "";
+        payload.retryAttempts = 0;
+        payload.nextAttemptAt = 0;
+        return persistQueued(payload).then(function () {
+            if (nativeConnection()) {
+                showPending(form);
+                return true;
+            }
+            if (navigator.onLine !== false) return sendStored(form, payload, {quiet: true});
+            showPending(form);
+            return true;
         });
     }
 
@@ -479,6 +505,9 @@ window.DriverShiftCloseOutbox = (function () {
                 return Promise.resolve(false);
             }
             if (localPending.state === "attention" || localPending.requiresAttention) {
+                if (isRecoverableClockAttention(localPending)) {
+                    return resumeClockAttention(form, localPending);
+                }
                 showAttention(form, localPending);
                 return Promise.resolve(true);
             }
@@ -499,6 +528,9 @@ window.DriverShiftCloseOutbox = (function () {
             var nativePending = state && state.pendingDriverShiftClose;
             if (!nativePending) {
                 if (localPending && (localPending.state === "attention" || localPending.requiresAttention)) {
+                    if (isRecoverableClockAttention(localPending)) {
+                        return resumeClockAttention(form, localPending);
+                    }
                     showAttention(form, localPending);
                     return true;
                 }
@@ -527,6 +559,9 @@ window.DriverShiftCloseOutbox = (function () {
             }
             fillForm(form, pending);
             if (pending.state === "attention" || pending.requiresAttention) {
+                if (isRecoverableClockAttention(pending)) {
+                    return resumeClockAttention(form, pending);
+                }
                 showAttention(form, pending);
                 return true;
             }

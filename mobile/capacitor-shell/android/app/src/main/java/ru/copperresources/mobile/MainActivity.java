@@ -128,6 +128,7 @@ public class MainActivity extends BridgeActivity {
         configurePersistentWebViewCookies();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
+            configureProfileWebViewTextZoom(webView);
             webView.setBackgroundColor(
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)
             );
@@ -162,6 +163,18 @@ public class MainActivity extends BridgeActivity {
         nativeCoverReady = true;
         AppNotifications.createChannels(this);
         requestNotificationPermissionThenBatteryExemption();
+    }
+
+    private void configureProfileWebViewTextZoom(WebView webView) {
+        if (webView == null || BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT <= 0) {
+            return;
+        }
+        /* Driver controls already use touch-sized text and targets. Android's
+           maximum font scale is otherwise applied by WebView on top of the
+           operational layout and can hide buttons. This profile setting pins
+           only this native shell; the phone and other applications are not
+           changed. */
+        webView.getSettings().setTextZoom(BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT);
     }
 
     private void configurePersistentWebViewCookies() {
@@ -213,6 +226,7 @@ public class MainActivity extends BridgeActivity {
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
         }
+        configureProfileWebViewTextZoom(getBridge().getWebView());
         getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(
             "(function(){" +
                 "window.dispatchEvent(new CustomEvent('native-connectivity-resume'));" +
