@@ -15,13 +15,15 @@
 }
 
 html {
-    min-width: 320px;
+    /* Yields to a viewport narrower than the floor instead of pushing the page
+       past its own right edge; see the same correction in driver-shift-v1.css. */
+    min-width: min(320px, 100%);
     min-height: 100%;
     background: var(--catalog-bg);
 }
 
 body.app-catalog-page {
-    min-width: 320px;
+    min-width: min(320px, 100%);
     min-height: 100vh;
     margin: 0;
     color: var(--catalog-text);
