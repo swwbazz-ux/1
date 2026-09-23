@@ -3673,6 +3673,37 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
 
+    def test_excavator_shell_and_precache_share_one_cache_key(self):
+        """Одна версия оболочки во всех активных ресурсах экрана и precache.
+
+        Смешение HTML новой версии с CSS/JS предыдущей уже ломало полевой
+        экран: страница обновлялась, а стили и код оставались из прошлой
+        оболочки. Проверка держит единый cache key и запрещает случайно
+        забытый старый суффикс у активного ресурса.
+        """
+        shell_version = ROLE_APPS_BY_CODE['excavator_operator'].shell_version
+        page = self.client.get(reverse('excavator_work')).content.decode('utf-8')
+        worker = self.client.get(reverse('excavator_service_worker')).content.decode('utf-8')
+        core_assets = worker.split('const CORE_ASSETS = [', 1)[1].split('];', 1)[0]
+
+        for source_name, source in (('excavator_work', page), ('excavator_sw', worker)):
+            found = set(re.findall(r'excavator-mobile-shell-v\d+', source))
+            with self.subTest(source=source_name):
+                self.assertTrue(found, f'{source_name} не содержит версии оболочки')
+                self.assertEqual(found, {shell_version})
+
+        page_assets = set(re.findall(
+            r"(/static/[^\"'>\s]+\?v=excavator-mobile-shell-v\d+)", page,
+        ))
+        self.assertTrue(page_assets, 'На экране нет версионированных ресурсов оболочки')
+        for asset_url in sorted(page_assets):
+            with self.subTest(asset=asset_url):
+                self.assertIn(
+                    f'"{asset_url}"',
+                    core_assets,
+                    f'{asset_url} подключён на экране, но не попал в precache service worker',
+                )
+
     def test_excavator_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('excavator_manifest'))
         manifest = json.loads(response.content.decode('utf-8'))
