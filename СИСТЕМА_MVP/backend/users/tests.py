@@ -507,19 +507,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v352')
+        self.assertContains(response, 'driver-mobile-shell-v350')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v352',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v350',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v352',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v350',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v352',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v350',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -654,7 +654,11 @@ class AccessLoginTests(TestCase):
         self.assertIn('padding: 0 0 max(10px, var(--driver-safe-bottom, 0px))', driver_stylesheet())
         self.assertIn('width: 100%', driver_stylesheet())
         self.assertIn('max-width: none', driver_stylesheet())
-        self.assertIn('min-width: 320px', driver_stylesheet())
+        # Пол ширины обязан уступать экрану: на телефоне с 1080 точками и
+        # плотностью 3.5 видимая ширина 308.6, и жёсткие 320px выносили правый
+        # столбец кнопок за край на каждом экране водителя.
+        self.assertIn('min-width: min(320px, 100%)', driver_stylesheet())
+        self.assertNotIn('min-width: 320px;', driver_stylesheet())
         self.assertNotContains(response, 'width: min(100vw, 430px)')
         self.assertNotContains(response, 'max-width: 430px')
         self.assertNotContains(response, 'margin: 0 auto')
@@ -746,7 +750,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v352', script)
+        self.assertIn('driver-mobile-shell-v350', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3222,12 +3226,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Бл. 55')
         self.assertContains(response, 'data-driver-manual-result')
         self.assertNotContains(response, 'рейс не создан')
-        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v352')
-        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v352')
-        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v352')
-        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v352')
-        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v352')
-        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v350')
+        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v350')
+        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v350')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v350')
+        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v350')
+        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v350')
 
         active_trip = Trip.objects.create(
             truck=truck,
@@ -3869,7 +3873,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v352')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v350')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()
