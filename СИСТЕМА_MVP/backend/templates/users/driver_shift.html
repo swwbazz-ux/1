@@ -33,7 +33,7 @@
 <link rel="stylesheet" href="{% static 'css/driver-manual-excavator-workspace-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v={{ driver_shell_version }}">
 <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v={{ driver_shell_version }}" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v={{ driver_shell_version }}" data-mobile-sound-profile="driver" data-mobile-sound-base="{% static 'audio/driver/' %}" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v={{ driver_shell_version }}" data-mobile-sound-profile="driver" data-mobile-sound-base="{% static 'audio/driver/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
 {% endblock %}
 
 {% block body %}

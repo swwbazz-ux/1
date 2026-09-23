@@ -14,6 +14,10 @@ const EXCAVATOR_TEMPLATE = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "..", "templates", "trips", "excavator_work.html"),
     "utf8"
 );
+const DRIVER_TEMPLATE = fs.readFileSync(
+    path.resolve(__dirname, "..", "..", "..", "templates", "users", "driver_shift.html"),
+    "utf8"
+);
 
 function createStorage(values = new Map()) {
     return {
@@ -142,6 +146,16 @@ test("Excavator template enables the bounded connection voice policy", () => {
     assert.match(EXCAVATOR_TEMPLATE, /data-connection-loss-stable-ms="30000"/);
     assert.match(EXCAVATOR_TEMPLATE, /data-connection-recovery-stable-ms="30000"/);
     assert.match(EXCAVATOR_TEMPLATE, /data-connection-alert-cooldown-ms="300000"/);
+});
+
+/* Водитель 24.09.2026: у него этих порогов не было вовсе, а без них выдержка и
+   пауза равны нулю — «связь потеряна» звучало с первого же неудачного опроса и
+   повторялось без ограничения. В карьере это давало поток ложных оповещений
+   при исправном интернете. */
+test("Driver template enables the same bounded connection voice policy", () => {
+    assert.match(DRIVER_TEMPLATE, /data-connection-loss-stable-ms="30000"/);
+    assert.match(DRIVER_TEMPLATE, /data-connection-recovery-stable-ms="30000"/);
+    assert.match(DRIVER_TEMPLATE, /data-connection-alert-cooldown-ms="300000"/);
 });
 
 test("Excavator connection voice requires sustained loss and sustained recovery", () => {
