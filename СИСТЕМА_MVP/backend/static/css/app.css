@@ -31879,6 +31879,12 @@ body.excavator-operator-screen {
     min-height: 24px;
 }
 
+/* Пока никто не едет, строка номеров ничего не показывает — она не должна
+   занимать высоту, иначе плитка растёт вхолостую вместе с пустым местом. */
+.eo-dashboard-unload-badges:empty {
+    display: none;
+}
+
 .eo-dashboard-unload-badges b {
     display: inline-grid;
     place-items: center;

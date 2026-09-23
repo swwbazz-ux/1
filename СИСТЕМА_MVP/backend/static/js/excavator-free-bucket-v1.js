@@ -434,8 +434,13 @@
         });
         grid.classList.toggle("is-empty", cards.length === 0);
         grid.classList.toggle("is-many", cards.length > 9);
+        // Ряды считаются по числу видимых карточек, как в шаблоне: три
+        // зарезервированных ряда на один-два самосвала сплющивали карточку
+        // до квадрата и оставляли пустую полосу над точками разгрузки.
         grid.classList.toggle("is-rows-4", cards.length > 9);
-        grid.classList.toggle("is-rows-3", cards.length <= 9);
+        grid.classList.toggle("is-rows-3", cards.length > 6 && cards.length <= 9);
+        grid.classList.toggle("is-rows-2", cards.length > 3 && cards.length <= 6);
+        grid.classList.toggle("is-rows-1", cards.length > 0 && cards.length <= 3);
         grid.classList.toggle("is-free-bucket-overflow", cards.length > 12);
         var empty = grid.querySelector(".eo-dashboard-empty");
         if (empty) empty.hidden = cards.length > 0;

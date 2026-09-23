@@ -1661,12 +1661,20 @@ body.excavator-operator-screen .eo-dashboard-truck-grid.is-pair {
     align-content: start !important;
 }
 
+/* Карточка самосвала — вертикальный прямоугольник, а не квадрат: номер, рисунок
+   и подпись состояния перестают тесниться и налезать друг на друга. Поэтому у
+   немногочисленных рядов высота ограничена сверху — иначе один-единственный
+   самосвал растянулся бы на всю рабочую область в узкую башню. */
+body.excavator-operator-screen .eo-dashboard-truck-grid {
+    --eo-truck-row-height: clamp(150px, 25dvh, 205px);
+}
+
 body.excavator-operator-screen .eo-dashboard-truck-grid.is-rows-1 {
-    grid-template-rows: repeat(1, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(1, minmax(0, var(--eo-truck-row-height))) !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-grid.is-rows-2 {
-    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(2, minmax(0, var(--eo-truck-row-height))) !important;
 }
 
 body.excavator-operator-screen .eo-dashboard-truck-grid.is-rows-3 {

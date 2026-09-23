@@ -1771,7 +1771,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'class="eo-event-actions"')
         self.assertIn('Перегон', [card['name'] for card in response.context['downtime_reason_cards']])
         self.assertContains(response, 'data-eo-dump-target')
-        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-3"')
+        # Число рядов идёт от числа карточек: три зарезервированных ряда на один
+        # самосвал сплющивали карточку до квадрата и оставляли пустую полосу.
+        self.assertEqual(len(response.context['truck_cards']), 1)
+        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-1"')
         self.assertContains(response, 'addEventListener("pointerdown"')
         self.assertNotContains(response, 'document.elementFromPoint')
         self.assertContains(response, 'findDumpTargetIntersectingPreview')
