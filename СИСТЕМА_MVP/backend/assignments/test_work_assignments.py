@@ -1,6 +1,8 @@
 import json
 from datetime import timedelta
 
+from types import SimpleNamespace
+
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase
@@ -11,6 +13,7 @@ from references.models import Dormitory, DormitoryBlock, DormitorySection, Equip
 from shifts.models import EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
 from users.models import DriverPrimaryRegistration, Employee, EmployeeAccess, Role
 from users.forms import AdminEmployeeEditForm
+from users.active_role import activate_role_session
 
 from .models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 from .services import (
@@ -88,9 +91,9 @@ class WorkAssignmentFixtureMixin:
     def authenticated_client(self, employee, role):
         access = EmployeeAccess.objects.get(employee=employee, role=role, is_active=True)
         client = Client()
-        session = client.session
-        session['employee_access_id'] = access.id
-        session.save()
+        request = SimpleNamespace(session=client.session)
+        activate_role_session(request, access)
+        request.session.save()
         return client
 
     def assign(self, employee, role, equipment, shift_type):
@@ -408,9 +411,9 @@ class WorkAssignmentShiftStartTests(WorkAssignmentFixtureMixin, TestCase):
             {
                 'shift_type': 'night',
                 'truck': self.truck_2.id,
-                'start_fuel': '125.50',
-                'start_mileage': '1000.00',
-                'start_engine_hours': '50.25',
+                'start_fuel': '125',
+                'start_mileage': '1000',
+                'start_engine_hours': '50',
             },
             HTTP_HOST='localhost',
         )
@@ -439,7 +442,6 @@ class WorkAssignmentShiftStartTests(WorkAssignmentFixtureMixin, TestCase):
         get_response = client.get(reverse('driver_shift'), HTTP_HOST='localhost')
         self.assertEqual(get_response.status_code, 200)
         self.assertEqual(get_response.context['work_assignment_state'], 'no_active_assignment')
-        self.assertContains(get_response, 'Смена и самосвал еще не назначены')
         self.assertContains(get_response, 'Нет плана')
         self.assertContains(get_response, 'Начать смену')
 

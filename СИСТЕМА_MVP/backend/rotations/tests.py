@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from shifts.models import WatchPeriod
@@ -79,6 +80,21 @@ class RotationWorkflowTests(TestCase):
     def _client_for(self, employee, role_code):
         client = Client()
         access = EmployeeAccess.objects.get(employee=employee, role=self.roles[role_code])
+        if role_code == 'timekeeper':
+            response = client.post(
+                reverse('timekeeper_login'),
+                {
+                    'phone': employee.phone,
+                    'access_code': access.access_code,
+                    'device_kind': 'personal',
+                },
+            )
+            self.assertRedirects(
+                response,
+                reverse('rotation_timekeeper_dashboard'),
+                fetch_redirect_response=False,
+            )
+            return client
         session = client.session
         session['employee_access_id'] = access.pk
         session['device_kind'] = 'personal'
@@ -184,7 +200,11 @@ class RotationWorkflowTests(TestCase):
         timekeeper = client.get('/timekeeper/')
         manager = client.get('/site-manager/extensions/')
 
-        self.assertRedirects(timekeeper, '/home/', fetch_redirect_response=False)
+        self.assertRedirects(
+            timekeeper,
+            reverse('timekeeper_login'),
+            fetch_redirect_response=False,
+        )
         self.assertRedirects(manager, '/home/', fetch_redirect_response=False)
 
     def test_deadline_blocks_employee_but_timekeeper_can_record_late_answer(self):
@@ -332,7 +352,11 @@ class RotationWorkflowTests(TestCase):
         denied = self._client_for(self.other_employee, 'driver').get(
             f'/timekeeper/campaigns/{self.cycle.pk}/export.xlsx'
         )
-        self.assertRedirects(denied, '/home/', fetch_redirect_response=False)
+        self.assertRedirects(
+            denied,
+            reverse('timekeeper_login'),
+            fetch_redirect_response=False,
+        )
 
     def test_shared_login_preserves_safe_rotation_next_path(self):
         client = Client()

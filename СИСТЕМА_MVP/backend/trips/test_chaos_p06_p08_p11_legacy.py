@@ -11,7 +11,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, HaulAssignment
-from core.production_time import production_work_date
+from core.production_time import production_work_date_for_shift
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -80,8 +80,9 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             for index in (1, 2)
         ]
         self.rock = RockType.objects.create(
-            name='Руда P06/P08',
+            name='Скальная порода',
             density=Decimal('2.0000'),
+            loosening_factor=Decimal('1.5000'),
         )
         self.dump_point = DumpPoint.objects.create(name='ККД P06/P08')
         self.capacity_rule = TruckCapacityRule.objects.create(
@@ -279,12 +280,15 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.context['active_trip'].pk, expected_trip.pk)
 
-        work_date = production_work_date(self.operator_shift.opened_at)
+        work_date = production_work_date_for_shift(
+            self.operator_shift.opened_at,
+            self.operator_shift.shift_type,
+        )
         analytics = build_shift_analytics(work_date, 'day')
         self.assertEqual(analytics['totals']['loaded_trip_count'], 2)
         self.assertEqual(analytics['totals']['open_trip_count'], 2)
 
-    def test_both_routes_apply_current_references_at_unload_and_then_freeze_fact(self):
+    def test_both_routes_freeze_loading_facts_before_reference_changes(self):
         _json_payload, json_trip = self._post_json_load()
         _html_payload, html_trip = self._post_html_load()
 
@@ -308,8 +312,8 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             trip.refresh_from_db()
             with self.subTest(trip=trip.pk):
                 self.assertEqual(trip.status, TripStatus.COMPLETED)
-                self.assertEqual(trip.volume_m3, Decimal('60.00'))
-                self.assertEqual(trip.tonnage, Decimal('180.00'))
+                self.assertEqual(trip.volume_m3, Decimal('40.00'))
+                self.assertEqual(trip.tonnage, Decimal('80.00'))
 
         self.capacity_rule.volume_m3 = Decimal('70.00')
         self.capacity_rule.save(update_fields=['volume_m3'])
@@ -317,15 +321,18 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
         self.rock.save(update_fields=['density'])
 
         analytics = build_shift_analytics(
-            production_work_date(self.operator_shift.opened_at),
+            production_work_date_for_shift(
+                self.operator_shift.opened_at,
+                self.operator_shift.shift_type,
+            ),
             'day',
         )
-        self.assertEqual(analytics['totals']['volume_m3'], Decimal('120.00'))
-        self.assertEqual(analytics['totals']['tonnage'], Decimal('360.00'))
+        self.assertEqual(analytics['totals']['volume_m3'], Decimal('80.00'))
+        self.assertEqual(analytics['totals']['tonnage'], Decimal('160.00'))
         for trip in (json_trip, html_trip):
             trip.refresh_from_db()
-            self.assertEqual(trip.volume_m3, Decimal('60.00'))
-            self.assertEqual(trip.tonnage, Decimal('180.00'))
+            self.assertEqual(trip.volume_m3, Decimal('40.00'))
+            self.assertEqual(trip.tonnage, Decimal('80.00'))
 
     def test_same_client_action_id_is_idempotent_for_both_routes(self):
         first_json, json_trip = self._post_json_load(action_id='same-json-load')
@@ -394,7 +401,10 @@ class ChaosP06P08LoadingParityRegressionTests(TestCase):
             1,
         )
         analytics = build_shift_analytics(
-            production_work_date(self.operator_shift.opened_at),
+            production_work_date_for_shift(
+                self.operator_shift.opened_at,
+                self.operator_shift.shift_type,
+            ),
             'day',
         )
         self.assertEqual(analytics['totals']['loaded_trip_count'], 1)

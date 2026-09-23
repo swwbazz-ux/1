@@ -217,7 +217,7 @@ class ManualLoadingTests(TestCase):
         self.assertIsNone(trip.driver_control_shift_id)
         self.assertEqual(trip.excavator_id, self.excavator.id)
 
-    def test_manual_dump_badge_expires_from_persisted_trip_without_changing_trip(self):
+    def test_manual_dump_badge_expiry_reconciles_passive_trip(self):
         response = self.send(action='manual-preview-expiry')
         self.assertEqual(response.status_code, 200, response.content)
         trip = Trip.objects.get(pk=response.json()['trip_id'])
@@ -229,18 +229,23 @@ class ManualLoadingTests(TestCase):
         self.assertEqual([row['trip_id'] for row in dump_card['pending_trucks']], [trip.id])
         self.assertEqual(dump_card['pending_trucks'][0]['auto_hide_at'], expected_deadline)
 
-        Trip.objects.filter(pk=trip.pk).update(created_at=timezone.now() - timedelta(minutes=5, seconds=1))
+        expired_created_at = timezone.now() - timedelta(minutes=5, seconds=1)
+        Trip.objects.filter(pk=trip.pk).update(created_at=expired_created_at)
         expired = self.client.get(reverse('excavator_work'))
         dump_card = next(card for card in expired.context['dump_cards'] if card['point'].id == self.dump_point.id)
         self.assertEqual(dump_card['pending_trucks'], [])
-        self.assertEqual(expired.context['active_trips_count'], 1)
+        self.assertEqual(expired.context['active_trips_count'], 0)
         truck_card = next(
             card for card in expired.context['truck_cards']
             if card['assignment'].truck_id == self.truck.id
         )
-        self.assertEqual(truck_card['open_trip_id'], trip.id)
+        self.assertEqual(truck_card['open_trip_id'], '')
         trip.refresh_from_db()
-        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(
+            trip.operationally_closed_at,
+            expired_created_at + timedelta(minutes=5),
+        )
         self.assertIsNone(trip.completed_at)
         self.assertIsNone(trip.unload_received_at)
 

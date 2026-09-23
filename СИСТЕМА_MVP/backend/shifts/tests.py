@@ -898,6 +898,59 @@ class ShiftPlanServiceTests(TestCase):
 
         self.assertEqual(progress['date'], timezone.datetime(2026, 7, 23).date())
 
+    def test_open_shift_progress_counts_trips_at_assigned_shift_boundary(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        rock = RockType.objects.create(name='Скальная порода')
+        dump_point = DumpPoint.objects.create(name='BOUNDARY-DUMP')
+        cases = (
+            ('day', timezone.datetime(2026, 9, 22, 0, 35), timezone.datetime(2026, 9, 22).date()),
+            ('night', timezone.datetime(2026, 9, 23, 10, 0), timezone.datetime(2026, 9, 22).date()),
+        )
+
+        for index, (shift_type, naive_opened_at, expected_date) in enumerate(cases, start=1):
+            with self.subTest(shift_type=shift_type):
+                opened_at = timezone.make_aware(
+                    naive_opened_at,
+                    ZoneInfo('Asia/Vladivostok'),
+                )
+                excavator = Equipment.objects.create(
+                    equipment_type=excavator_type,
+                    garage_number=f'BOUNDARY-EXC-{index}',
+                )
+                truck = Equipment.objects.create(
+                    equipment_type=truck_type,
+                    garage_number=f'BOUNDARY-TRUCK-{index}',
+                )
+                employee = Employee.objects.create(
+                    full_name=f'Машинист границы {index}',
+                )
+                shift = EmployeeShift.objects.create(
+                    employee=employee,
+                    shift_type=shift_type,
+                    equipment=excavator,
+                    opened_at=opened_at,
+                    plan_status='',
+                )
+                Trip.objects.create(
+                    excavator=excavator,
+                    truck=truck,
+                    excavator_operator=employee,
+                    loading_shift=shift,
+                    rock_type=rock,
+                    dump_point=dump_point,
+                    status=TripStatus.LOADED_WAITING_UNLOAD,
+                    volume_m3='40.00',
+                    tonnage='80.00',
+                )
+
+                progress = calculate_open_shift_progress(shift)
+
+                self.assertEqual(progress['date'], expected_date)
+                self.assertEqual(progress['trip_count'], 1)
+                self.assertEqual(progress['volume_m3'], Decimal('40.00'))
+                self.assertEqual(progress['tonnage'], Decimal('80.00'))
+
     def test_truck_progress_reference_shift_fallback_uses_production_date(self):
         truck_type = EquipmentType.objects.create(name='Самосвал')
         excavator_type = EquipmentType.objects.create(name='Экскаватор')

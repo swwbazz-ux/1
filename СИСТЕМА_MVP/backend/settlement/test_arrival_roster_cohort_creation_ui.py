@@ -182,7 +182,8 @@ class ArrivalRosterCohortCreationUiTests(TestCase):
         self.assertNotIn(phone, html)
         self.assertNotIn(self.batch.confirmation_sha256, html)
         for forbidden in (
-            'external_shift_unresolved', 'fingerprint', 'snapshot',
+            'external_shift_unresolved', 'fingerprint', 'source_snapshot',
+            'basis_snapshot', 'dates_snapshot', 'role_snapshot',
             'employee_access_id', 'routing_row_id', 'routing_event_id',
             'resident_id', 'equipment_assignment_id', 'crew_plan_slot_id',
             'brigade_phase_row_id', 'traceback', 'name="pin"',

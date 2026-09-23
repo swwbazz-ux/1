@@ -4,6 +4,14 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def flush_deferred_constraints(apps, schema_editor):
+    """Keep PostgreSQL DDL clear of pending FK trigger events."""
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute('SET CONSTRAINTS ALL IMMEDIATE')
+
+
 def _subject_employee_ids(Binding, Member, using):
     return tuple(sorted({
         *Binding.objects.using(using).exclude(employee_id=None).values_list('employee_id', flat=True),
@@ -175,7 +183,15 @@ class Migration(migrations.Migration):
                 verbose_name='Жилец',
             ),
         ),
+        migrations.RunPython(
+            flush_deferred_constraints,
+            flush_deferred_constraints,
+        ),
         migrations.RunPython(forward_resident_subjects, reverse_employee_subjects),
+        migrations.RunPython(
+            flush_deferred_constraints,
+            flush_deferred_constraints,
+        ),
         migrations.RemoveConstraint(
             model_name='employeeaccommodationbinding',
             name='unique_employee_slot_binding_start',

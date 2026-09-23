@@ -1584,7 +1584,10 @@ def expire_invalid_haul_handoffs(*, now=None, truck_id=None):
     if truck_id:
         queryset = queryset.filter(truck_id=truck_id)
     valid_ids = active_haul_handoffs().values('id')
-    return queryset.exclude(id__in=valid_ids).update(
+    invalid_handoffs = queryset.exclude(id__in=valid_ids)
+    if not invalid_handoffs.exists():
+        return 0
+    return invalid_handoffs.update(
         status=HaulAssignmentHandoffStatus.EXPIRED,
         resolved_at=now,
         resolved_by_trip=None,

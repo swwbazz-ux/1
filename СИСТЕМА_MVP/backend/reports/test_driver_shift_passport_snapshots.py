@@ -637,7 +637,7 @@ class DriverShiftPassportSnapshotTests(TestCase):
         )
         self.assertTrue(trip_source['is_carryover'])
 
-    def test_role_switch_auto_close_enqueues_without_signal_dependency(self):
+    def test_role_switch_keeps_independent_driver_shift_open(self):
         driver_access = EmployeeAccess.objects.create(
             employee=self.driver,
             role=self.driver_role,
@@ -664,17 +664,9 @@ class DriverShiftPassportSnapshotTests(TestCase):
             activate_role_session(request, dispatcher_access)
 
         shift.refresh_from_db()
-        self.assertIsNotNone(shift.closed_at)
-        capture_request = DriverShiftPassportCaptureRequest.objects.get(
-            shift=shift,
-        )
-        self.assertEqual(
-            capture_request.trigger,
-            DriverShiftPassportTrigger.ROLE_SWITCH,
-        )
-        self.assertEqual(
-            capture_request.status,
-            DriverShiftPassportRequestStatus.COMPLETED,
+        self.assertIsNone(shift.closed_at)
+        self.assertFalse(
+            DriverShiftPassportCaptureRequest.objects.filter(shift=shift).exists(),
         )
 
     def test_admin_cannot_edit_closure_fields_directly(self):

@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
 from references.models import Equipment
@@ -39,7 +39,7 @@ from .test_driver_watch_rating import DriverRatingFixtureMixin
 )
 class DriverRatingAssignmentGroupTests(
     DriverRatingFixtureMixin,
-    TestCase,
+    TransactionTestCase,
 ):
     def setUp(self):
         super().setUp()

@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from core.db_locks import lock_idempotency_key
 from core.production_time import (
+    assigned_shift_open_bounds,
     production_day_bounds,
     production_work_date_for_shift,
 )
@@ -1216,11 +1217,11 @@ def equipment_shift_trip_queryset(equipment, date, shift_type):
     if not equipment or not date or not shift_type:
         return Trip.objects.none()
 
-    production_start, production_end = production_day_bounds(date)
+    assigned_start, assigned_end = assigned_shift_open_bounds(date, shift_type)
     shift_filter = {
         'shift_type': shift_type,
-        'opened_at__gte': production_start,
-        'opened_at__lt': production_end,
+        'opened_at__gte': assigned_start,
+        'opened_at__lt': assigned_end,
     }
     if equipment_is_excavator(equipment):
         query = Q(loading_shift__equipment=equipment, **{f'loading_shift__{key}': value for key, value in shift_filter.items()})

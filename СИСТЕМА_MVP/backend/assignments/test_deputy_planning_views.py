@@ -396,7 +396,10 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['Service-Worker-Allowed'], '/deputy-mining-manager/')
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
-        self.assertIn('deputy-mining-manager-desktop-shell-v14', script)
+        self.assertIn(
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v17";',
+            script,
+        )
         self.assertIn('/static/js/role-readonly.js', script)
         self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
         self.assertIn('removeCachedPlanningDocuments()', script)

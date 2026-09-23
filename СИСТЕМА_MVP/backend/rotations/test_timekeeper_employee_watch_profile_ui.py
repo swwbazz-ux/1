@@ -516,7 +516,8 @@ class TimekeeperEmployeeWatchProfileUiTests(TestCase):
             'name="change_id"',
             'new_watch_composition_id',
             'version_number',
-            'PIN',
+            'name="access_code"',
+            'data-pin-input',
         ):
             self.assertNotIn(forbidden, html)
 

@@ -379,9 +379,11 @@ class DriverRatingTvScreenTests(TestCase):
 
         dispatcher_response = self.client.get(reverse('dispatcher_control'))
         self.assertEqual(dispatcher_response.status_code, 200)
+        self.assertContains(dispatcher_response, 'data-role-access-active="false"')
+        self.assertContains(dispatcher_response, 'data-inactive-role-banner')
         self.assertContains(
             dispatcher_response,
-            'Роль неактивна — доступен только просмотр',
+            'Вы вошли с другого устройства — доступен только просмотр',
         )
 
         tv_url = reverse('driver_rating_tv')

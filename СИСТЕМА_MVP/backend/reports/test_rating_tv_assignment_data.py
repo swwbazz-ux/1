@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from core.production_time import production_work_date
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -34,7 +34,7 @@ from .models import RatingPeriod
     DRIVER_RATING_SNAPSHOT_SOFT_STALE_SECONDS=600,
     DRIVER_RATING_SNAPSHOT_HARD_EXPIRE_SECONDS=1800,
 )
-class DriverRatingTvAssignmentDataTests(TestCase):
+class DriverRatingTvAssignmentDataTests(TransactionTestCase):
     def setUp(self):
         super().setUp()
         work_date = production_work_date()

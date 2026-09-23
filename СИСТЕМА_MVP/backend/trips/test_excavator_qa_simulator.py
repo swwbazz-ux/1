@@ -9,7 +9,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, HaulAssignment
-from assignments.services import apply_pending_haul_assignment
+from assignments.services import (
+    apply_pending_haul_assignment,
+    reconcile_due_haul_assignments,
+)
 from core.qa_environment import require_excavator_qa_environment
 from downtimes.models import DowntimeReason
 from shifts.models import (
@@ -280,8 +283,12 @@ class ExcavatorQASimulatorTests(TestCase):
                 HTTP_HOST='localhost',
             )
             assignment.refresh_from_db()
+            pending_after_accept = assignment.status
+            transition_at = assignment.effective_at
+            reconcile_due_haul_assignments(now=transition_at)
+            assignment.refresh_from_db()
             loaded_tick = run_excavator_qa_tick(
-                now=assignment.accepted_at + timedelta(seconds=6)
+                now=assignment.accepted_at + timedelta(seconds=6),
             )
             trip = Trip.objects.get(truck=scenario.human_driver_truck)
             loaded_page = self.client.get(
@@ -298,6 +305,7 @@ class ExcavatorQASimulatorTests(TestCase):
         self.assertEqual(assignment_tick['driver_state'], 'assignment_pending')
         self.assertContains(pending_page, 'ПРИНЯТЬ')
         self.assertEqual(accept_response.status_code, 302)
+        self.assertEqual(pending_after_accept, AssignmentStatus.PENDING)
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
         self.assertEqual(loaded_tick['driver_loaded'], 1)
         self.assertContains(loaded_page, 'ТОЧКА РАЗГРУЗКИ')

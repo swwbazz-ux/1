@@ -1,0 +1,363 @@
+name: Full nightly quality gate
+
+on:
+  push:
+    branches:
+      - codex/github-production-deploy-20260916
+    paths:
+      - .github/workflows/**
+      - .github/ci/**
+      - tools/**
+      - СИСТЕМА_MVP/backend/**
+      - mobile/**
+  pull_request:
+    paths:
+      - .github/workflows/django.yml
+      - .github/workflows/nightly-quality.yml
+      - .github/ci/**
+      - СИСТЕМА_MVP/backend/requirements.txt
+      - СИСТЕМА_MVP/backend/tools/validate_ci_test_matrix.py
+  workflow_dispatch:
+  schedule:
+    - cron: "17 18 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-nightly-quality
+  cancel-in-progress: false
+
+env:
+  QUALITY_TARGET_REF: >-
+    ${{ github.event_name == 'pull_request' && github.sha ||
+    github.event_name == 'push' && github.sha ||
+    'codex/github-production-deploy-20260916' }}
+  DJANGO_SECRET_KEY: ci-secret-key
+  DJANGO_DEBUG: "True"
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,.localhost
+
+jobs:
+  resolve-revision:
+    name: Resolve one immutable revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+      short_sha: ${{ steps.revision.outputs.short_sha }}
+
+    steps:
+      - name: Checkout requested revision once
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.QUALITY_TARGET_REF }}
+          persist-credentials: false
+
+      - name: Export immutable commit SHA
+        id: revision
+        shell: bash
+        run: |
+          sha="$(git rev-parse HEAD)"
+          printf 'sha=%s\nshort_sha=%s\n' "$sha" "${sha:0:12}" >> "$GITHUB_OUTPUT"
+          printf 'Verified commit: `%s`\n' "$sha" >> "$GITHUB_STEP_SUMMARY"
+
+  full-django-postgresql:
+    name: Full Django suite on PostgreSQL
+    needs: resolve-revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: accounting_mvp_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d accounting_mvp_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DJANGO_DB_ENGINE: postgres
+      POSTGRES_DB: accounting_mvp_ci
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: "0"
+
+    defaults:
+      run:
+        working-directory: СИСТЕМА_MVP/backend
+
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-revision.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: СИСТЕМА_MVP/backend/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install pinned coverage tool
+        id: coverage-tool
+        continue-on-error: true
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --require-hashes \
+            -r requirements-coverage.txt
+          python -c "import coverage; assert coverage.__version__ == '7.16.1'"
+
+      - name: Prepare test directories
+        run: mkdir -p media/employee_photos artifacts
+
+      - name: Validate Django project and test plan
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check
+          python tools/validate_ci_test_matrix.py \
+            --manifest ../../.github/ci/django-test-matrix.json
+
+      - name: Run the complete Django test suite sequentially
+        shell: bash
+        run: |
+          set -o pipefail
+          if python -c "import coverage; assert coverage.__version__ == '7.16.1'" \
+            >/dev/null 2>&1; then
+            python -m coverage erase
+            python -m coverage run --rcfile=.coveragerc \
+              manage.py test --verbosity 1 2>&1 \
+              | tee artifacts/django-full-postgresql.log
+          else
+            printf '%s\n' \
+              'Coverage tool is unavailable; running the unchanged test command.' \
+              | tee artifacts/coverage-not-produced.log
+            python manage.py test --verbosity 1 2>&1 \
+              | tee artifacts/django-full-postgresql.log
+          fi
+
+      - name: Build report-only coverage artifacts
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET_SHA: ${{ needs.resolve-revision.outputs.sha }}
+        run: |
+          if ! python -c "import coverage; assert coverage.__version__ == '7.16.1'" \
+            >/dev/null 2>&1 || [[ ! -f .coverage ]]; then
+            printf '%s\n' \
+              '## Python coverage — REPORT NOT PRODUCED' \
+              '' \
+              "- SHA: \`$TARGET_SHA\`" \
+              '- Coverage is report-only and has no fail-under threshold.' \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python -m coverage json --rcfile=.coveragerc -o artifacts/coverage.json
+          python -m coverage xml --rcfile=.coveragerc -o artifacts/coverage.xml
+          python -m coverage report --rcfile=.coveragerc \
+            | tee artifacts/coverage.txt
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("artifacts/coverage.json")
+          payload = json.loads(source.read_text(encoding="utf-8"))
+          totals = payload.get("totals")
+          meta = payload.get("meta")
+          files = payload.get("files")
+          if not isinstance(totals, dict) or not isinstance(meta, dict) or not isinstance(files, dict):
+              raise SystemExit("coverage JSON has an unexpected schema")
+          if meta.get("branch_coverage") is not True:
+              raise SystemExit("coverage JSON does not contain branch coverage")
+
+          summary = {
+              "schema": 1,
+              "mode": "report-only",
+              "target_sha": os.environ["TARGET_SHA"],
+              "coverage_version": meta.get("version"),
+              "branch_coverage": True,
+              "measured_files": len(files),
+              "totals": totals,
+          }
+          Path("artifacts/coverage-summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "## Python coverage baseline — REPORT ONLY",
+              "",
+              "Порог отсутствует; этот отчёт не блокирует merge и deploy.",
+              "",
+              f"- SHA: `{summary['target_sha']}`",
+              f"- Coverage.py: `{summary['coverage_version']}`",
+              f"- Measured files: `{summary['measured_files']}`",
+              f"- Statements: `{totals.get('num_statements')}`; missing: `{totals.get('missing_lines')}`",
+              f"- Branches: `{totals.get('num_branches')}`; missing: `{totals.get('missing_branches')}`",
+              f"- Total coverage: `{totals.get('percent_covered_display')}%`",
+              "",
+          ]
+          markdown = "\n".join(lines)
+          Path("artifacts/coverage-summary.md").write_text(markdown, encoding="utf-8")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as handle:
+              handle.write(markdown)
+          PY
+
+      - name: Run standalone tools contract tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tools -p 'test*.py' 2>&1 \
+            | tee artifacts/django-tools-contracts.log
+
+      - name: Upload Django logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-django-${{ needs.resolve-revision.outputs.short_sha }}-logs
+          path: |
+            СИСТЕМА_MVP/backend/artifacts/*.log
+            СИСТЕМА_MVP/backend/artifacts/coverage.json
+            СИСТЕМА_MVP/backend/artifacts/coverage.xml
+            СИСТЕМА_MVP/backend/artifacts/coverage.txt
+            СИСТЕМА_MVP/backend/artifacts/coverage-summary.json
+            СИСТЕМА_MVP/backend/artifacts/coverage-summary.md
+          if-no-files-found: warn
+          retention-days: 14
+
+  all-javascript-contracts:
+    name: All JavaScript and mobile contracts
+    needs: resolve-revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-revision.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Run all backend JavaScript contracts
+        working-directory: СИСТЕМА_MVP/backend
+        shell: bash
+        run: |
+          mapfile -d '' test_files < <(
+            find static/js/tests -type f -name '*.test.js' -print0 | sort -z
+          )
+          test "${#test_files[@]}" -gt 0
+          node --test "${test_files[@]}"
+
+      - name: Install mobile shell dependencies
+        working-directory: mobile/capacitor-shell
+        run: npm ci --ignore-scripts
+
+      - name: Run all mobile shell contracts
+        working-directory: mobile/capacitor-shell
+        run: npm test
+
+  android-debug-builds:
+    name: Android debug tests and all profiles
+    needs: resolve-revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout requested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-revision.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: mobile/capacitor-shell/android/**/*.gradle*
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Install mobile shell dependencies
+        working-directory: mobile/capacitor-shell
+        run: npm ci --ignore-scripts
+
+      - name: Synchronize Capacitor Android project
+        working-directory: mobile/capacitor-shell
+        run: npm run cap:sync
+
+      - name: Run Android unit tests and build every debug profile
+        working-directory: mobile/capacitor-shell/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon test assembleDebug
+
+      - name: Upload Android test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-android-${{ needs.resolve-revision.outputs.short_sha }}-reports
+          path: |
+            mobile/capacitor-shell/android/app/build/reports/tests/
+            mobile/capacitor-shell/android/app/build/outputs/apk/
+          if-no-files-found: warn
+          retention-days: 7
+
+  nightly-quality-summary:
+    name: Nightly quality summary
+    if: always()
+    needs:
+      - resolve-revision
+      - full-django-postgresql
+      - all-javascript-contracts
+      - android-debug-builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every nightly group to pass
+        env:
+          RESOLVE_RESULT: ${{ needs.resolve-revision.result }}
+          TARGET_SHA: ${{ needs.resolve-revision.outputs.sha }}
+          DJANGO_RESULT: ${{ needs.full-django-postgresql.result }}
+          JAVASCRIPT_RESULT: ${{ needs.all-javascript-contracts.result }}
+          ANDROID_RESULT: ${{ needs.android-debug-builds.result }}
+        run: |
+          printf 'sha=%s\nresolve=%s\ndjango=%s\njavascript=%s\nandroid=%s\n' \
+            "$TARGET_SHA" "$RESOLVE_RESULT" "$DJANGO_RESULT" \
+            "$JAVASCRIPT_RESULT" "$ANDROID_RESULT"
+          test "$RESOLVE_RESULT" = success
+          test "$DJANGO_RESULT" = success
+          test "$JAVASCRIPT_RESULT" = success
+          test "$ANDROID_RESULT" = success

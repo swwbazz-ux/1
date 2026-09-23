@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta
+import hashlib
 import json
 from unittest import mock
 
@@ -73,7 +74,10 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
             confirmed_by_label='Тест routing integration',
             reason='Проверка exact routing provenance.',
         )
-        self.dormitory = Dormitory.objects.create(number=f'RI-{self._testMethodName}')
+        method_suffix = hashlib.sha256(
+            self._testMethodName.encode('utf-8'),
+        ).hexdigest()[:13]
+        self.dormitory = Dormitory.objects.create(number=f'RI-{method_suffix}')
         self.room = PhysicalRoom.objects.create(
             dormitory=self.dormitory,
             floor=1,
@@ -86,7 +90,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
         self.beds = [
             PhysicalBed.objects.create(
                 room=self.room,
-                stable_id=f'RI-{self._testMethodName}-{number}',
+                stable_id=f'RI-{method_suffix}-{number}',
                 block=PhysicalBed.Block.A,
                 position=number,
             )

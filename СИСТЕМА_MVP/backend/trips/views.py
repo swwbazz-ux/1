@@ -975,7 +975,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v255";
+const CACHE_NAME = "excavator-mobile-shell-v256";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -989,24 +989,24 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v255",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v255",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v255",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v255",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v255",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v255",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v255",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v256",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v256",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v256",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v256",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v256",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v256",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v256",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v255",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v255",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v255",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v256",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v256",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v256",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -3896,6 +3896,29 @@ def dispatcher_access_from_request(request):
     )
 
 
+def lock_dispatcher_mutation_access(request, access):
+    """Serialize role activation and re-check a fresh dispatcher generation."""
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    locked_access = (
+        EmployeeAccess.objects
+        .select_for_update(of=('self',))
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(
+            id=access.id,
+            employee_id=access.employee_id,
+            is_active=True,
+        )
+        .first()
+    )
+    if (
+        not locked_access
+        or locked_access.role.code not in {'dispatcher', 'admin', 'manager'}
+        or not role_session_state(request, locked_access)['is_active']
+    ):
+        return None
+    return locked_access
+
+
 def dispatcher_shift_required_response(access):
     if get_active_dispatcher_shift(access):
         return None
@@ -3960,8 +3983,8 @@ def dispatcher_move_excavator_view(request):
     access = dispatcher_access_from_request(request)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -4082,8 +4105,8 @@ def dispatcher_assign_truck_view(request):
     access = dispatcher_access_from_request(request)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -4271,6 +4294,29 @@ def excavator_access_from_request(request, *, require_active_role=True):
     ):
         return None
     return access
+
+
+def lock_excavator_mutation_access(request, access):
+    """Serialize role activation and re-check a fresh access generation."""
+    Employee.objects.select_for_update().get(pk=access.employee_id)
+    locked_access = (
+        EmployeeAccess.objects
+        .select_for_update(of=('self',))
+        .select_related('employee', 'employee__contractor_organization', 'role')
+        .filter(
+            id=access.id,
+            employee_id=access.employee_id,
+            is_active=True,
+        )
+        .first()
+    )
+    if (
+        not locked_access
+        or locked_access.role.code != 'excavator_operator'
+        or not role_session_state(request, locked_access)['is_active']
+    ):
+        return None
+    return locked_access
 
 
 def get_excavator_open_shift(employee):
@@ -5129,7 +5175,7 @@ def notify_driver_truck_loaded(trip):
 
 @require_POST
 def excavator_truck_loaded_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
@@ -5152,8 +5198,8 @@ def excavator_truck_loaded_view(request):
             response_payload['deduplicated'] = True
             return JsonResponse(response_payload)
 
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        access = lock_excavator_mutation_access(request, access)
+        if not access:
             return JsonResponse(
                 {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
                 status=409,
@@ -5359,7 +5405,7 @@ def excavator_truck_loaded_view(request):
 
 @require_POST
 def excavator_truck_loaded_cancel_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
@@ -5389,8 +5435,8 @@ def excavator_truck_loaded_cancel_view(request):
                 'version': get_operational_state_version(),
             })
 
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, access)['is_active']:
+        access = lock_excavator_mutation_access(request, access)
+        if not access:
             return JsonResponse(
                 {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
                 status=409,
@@ -5488,11 +5534,11 @@ def excavator_truck_loaded_cancel_view(request):
 @require_POST
 @transaction.atomic
 def excavator_work_settings_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -5701,7 +5747,7 @@ def get_previous_closed_equipment_shift(equipment):
 @require_POST
 @transaction.atomic
 def excavator_shift_action_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
 
@@ -5731,8 +5777,8 @@ def excavator_shift_action_view(request):
             response_payload['deduplicated'] = True
             return JsonResponse(response_payload)
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {'ok': False, 'error': 'Роль неактивна — доступен только просмотр', 'code': 'inactive_role'},
             status=409,
@@ -5904,6 +5950,11 @@ def excavator_work_view(request):
             shift_action_block_message = work_assignment_error_message(assignment_state)
         elif equipment_open_shift:
             shift_action_block_message = 'Техника занята в другой смене.'
+        elif shift_fuel_limit <= 0:
+            shift_action_block_message = (
+                'Для этого экскаватора не настроена вместимость топливного бака. '
+                'Обратитесь к администратору.'
+            )
         else:
             other_role_shift = find_other_role_open_shift(
                 access.employee,
@@ -5960,8 +6011,8 @@ def excavator_work_view(request):
                     if existing_action:
                         trip = existing_action.trip
                     elif form.is_valid():
-                        Employee.objects.select_for_update().get(pk=access.employee_id)
-                        if not role_session_state(request, access)['is_active']:
+                        access = lock_excavator_mutation_access(request, access)
+                        if not access:
                             raise ValidationError('Роль неактивна — доступен только просмотр')
                         locked_shift = (
                             EmployeeShift.objects
@@ -7132,7 +7183,7 @@ def excavator_work_view(request):
 @require_http_methods(["GET", "POST"])
 @transaction.atomic
 def excavator_downtime_action_view(request):
-    access = excavator_access_from_request(request)
+    access = excavator_access_from_request(request, require_active_role=False)
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     open_shift = get_excavator_open_shift(access.employee)
@@ -7143,8 +7194,8 @@ def excavator_downtime_action_view(request):
     if request.method == 'GET':
         return JsonResponse(excavator_downtime_status_payload(current_excavator, open_shift))
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_excavator_mutation_access(request, access)
+    if not access:
         return JsonResponse(
             {
                 'ok': False,
@@ -7297,8 +7348,8 @@ def dispatcher_close_downtime_view(request, event_id):
             {'ok': False, 'error': 'forbidden'},
             status=403,
         )
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         return dispatcher_downtime_close_response(
             {'ok': False, 'error': 'inactive_role'},
             status=409,
@@ -7468,6 +7519,11 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
 
         with transaction.atomic():
+            access = lock_dispatcher_mutation_access(request, access)
+            if not access:
+                return dispatcher_equipment_detail_error('inactive_role', status=409)
+            if not get_active_dispatcher_shift(access):
+                return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
             state = lock_production_state()
             if state.version != requested_version:
                 return dispatcher_equipment_detail_error('stale_board', status=409)
@@ -7893,8 +7949,8 @@ def dispatcher_toggle_shift_view(request):
             if not access:
                 messages.error(request, 'Активированный доступ Горного диспетчера не найден.')
                 return redirect(redirect_url)
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, session_access)['is_active']:
+        session_access = lock_dispatcher_mutation_access(request, session_access)
+        if not session_access:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         if get_active_dispatcher_shift(access):
@@ -7918,8 +7974,8 @@ def dispatcher_toggle_shift_view(request):
         dispatcher_access = active_access_for_employee_role(access.employee, 'dispatcher')
         if dispatcher_access:
             access = dispatcher_access
-        Employee.objects.select_for_update().get(pk=access.employee_id)
-        if not role_session_state(request, session_access)['is_active']:
+        session_access = lock_dispatcher_mutation_access(request, session_access)
+        if not session_access:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect(redirect_url)
         shift = close_dispatcher_shift(access)
@@ -7969,7 +8025,8 @@ def dispatcher_service_close_shift_view(request, shift_id):
         .order_by('pk')
         .values_list('pk', flat=True)
     )
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
     shift = (
@@ -8090,8 +8147,8 @@ def dispatcher_cancel_assignment_view(request, assignment_id):
 
     if request.method != 'POST':
         return redirect(redirect_url)
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
     shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
@@ -8162,10 +8219,13 @@ def dispatcher_cancel_trip_view(request, trip_id):
         messages.error(request, 'Укажите причину отмены рейса.')
         return redirect(redirect_url)
 
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
+    # Driver unload locks the production state before the trip. Keep the same
+    # order here so concurrent terminal actions cannot deadlock each other.
+    lock_production_state()
     trip = (
         Trip.objects
         .select_for_update(of=('self',))
@@ -8504,8 +8564,8 @@ def dispatcher_manual_trip_view(request, equipment_id):
     except (TypeError, ValueError):
         excavator_id = 0
 
-    list(Employee.objects.select_for_update().filter(pk=access.employee_id).values_list('pk', flat=True))
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
 
@@ -8693,7 +8753,8 @@ def dispatcher_complete_trip_view(request, trip_id):
         .order_by('pk')
         .values_list('pk', flat=True)
     )
-    if not role_session_state(request, access)['is_active']:
+    access = lock_dispatcher_mutation_access(request, access)
+    if not access:
         messages.error(request, 'Роль неактивна — доступен только просмотр.')
         return redirect(redirect_url)
 
@@ -8711,6 +8772,9 @@ def dispatcher_complete_trip_view(request, trip_id):
         messages.error(request, 'Смена по самосвалу изменилась. Повторите служебное завершение.')
         return redirect(redirect_url)
 
+    # Driver unload uses production state -> equipment/shift -> trip. Acquire
+    # the shared state before the trip here as well to preserve lock order.
+    lock_production_state()
     trip = (
         Trip.objects
         .select_for_update(of=('self',))

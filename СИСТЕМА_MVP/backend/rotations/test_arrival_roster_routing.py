@@ -566,12 +566,12 @@ class ArrivalRosterRoutingCommandTests(TestCase):
             'driver', 'excavator_operator',
         ])
         event_types = {
-            row_id: list(
-                ArrivalRosterRoutingEvent._base_manager.filter(routing_row_id=row_id)
+            row.pk: list(
+                ArrivalRosterRoutingEvent._base_manager.filter(routing_row_id=row.pk)
                 .order_by('created_at', 'pk')
                 .values_list('event_type', flat=True)
             )
-            for row_id in rows
+            for row in rows.values()
         }
         self.assertEqual(event_types[rows[absent_review.pk].pk], ['created'])
         self.assertEqual(event_types[rows[external_review.pk].pk], ['created', 'sent_to_clerk'])

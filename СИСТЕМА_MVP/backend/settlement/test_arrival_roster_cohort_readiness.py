@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from datetime import datetime, timedelta
 from unittest import mock
 
 from django.db import connection
@@ -78,7 +79,26 @@ class ArrivalRosterCohortReadinessTests(TestCase):
     _production_employee = (
         routing_fixtures.DeputyArrivalRosterRoutingQueueTests._production_employee
     )
-    _publish_event = routing_fixtures.DeputyArrivalRosterRoutingQueueTests._publish_event
+
+    def _publish_event(self, row):
+        routing_fixtures.DeputyArrivalRosterRoutingQueueTests._publish_event(
+            self,
+            row,
+        )
+        event = ArrivalRosterRoutingEvent._base_manager.get(
+            routing_row=row,
+            event_type=(
+                ArrivalRosterRoutingEvent.EventType.OFFICIAL_ASSIGNMENT_PUBLISHED
+            ),
+        )
+        effective_at = timezone.make_aware(
+            datetime.combine(self.period.starts_on, datetime.min.time()),
+        )
+        EquipmentAssignment._base_manager.filter(
+            pk=event.equipment_assignment_id,
+        ).update(assigned_at=effective_at)
+        event.equipment_assignment.refresh_from_db()
+        return event
 
     def _confirm_calendar(self, *, phases=None, order_number='Приказ T3 readiness № 1'):
         phases = phases or [
@@ -202,20 +222,25 @@ class ArrivalRosterCohortReadinessTests(TestCase):
         composition=None,
         basis_suffix='1',
     ):
-        return create_employee_watch_profile_change_draft(
-            employee_id=employee.pk,
-            effective_watch_period_id=self.period.pk,
-            new_work_schedule_id=(schedule or self.schedule).pk,
-            new_brigade_number=brigade,
-            new_watch_composition_id=(
-                composition or self.period.watch_composition
-            ).pk,
-            basis_kind=EmployeeWatchProfileChange.BasisKind.EMPLOYEE_APPLICATION,
-            basis_number=f'ЗАЯВЛЕНИЕ-READINESS-{basis_suffix}',
-            basis_date=timezone.localdate(),
-            basis='Заявление сотрудника для проверки готовности состава.',
-            actor_access_id=self.timekeeper_access.pk,
-        )
+        change_date = self.period.starts_on - timedelta(days=1)
+        with mock.patch(
+            'rotations.employee_watch_profile_changes.timezone.localdate',
+            return_value=change_date,
+        ):
+            return create_employee_watch_profile_change_draft(
+                employee_id=employee.pk,
+                effective_watch_period_id=self.period.pk,
+                new_work_schedule_id=(schedule or self.schedule).pk,
+                new_brigade_number=brigade,
+                new_watch_composition_id=(
+                    composition or self.period.watch_composition
+                ).pk,
+                basis_kind=EmployeeWatchProfileChange.BasisKind.EMPLOYEE_APPLICATION,
+                basis_number=f'ЗАЯВЛЕНИЕ-READINESS-{basis_suffix}',
+                basis_date=change_date,
+                basis='Заявление сотрудника для проверки готовности состава.',
+                actor_access_id=self.timekeeper_access.pk,
+            )
 
     def _apply_profile_change(self, employee, *, brigade, basis_suffix='1'):
         draft = self._create_profile_draft(
@@ -223,10 +248,15 @@ class ArrivalRosterCohortReadinessTests(TestCase):
             brigade=brigade,
             basis_suffix=basis_suffix,
         )
-        return apply_employee_watch_profile_change(
-            change_id=draft.pk,
-            actor_access_id=self.timekeeper_access.pk,
-        )
+        change_date = self.period.starts_on - timedelta(days=1)
+        with mock.patch(
+            'rotations.employee_watch_profile_changes.timezone.localdate',
+            return_value=change_date,
+        ):
+            return apply_employee_watch_profile_change(
+                change_id=draft.pk,
+                actor_access_id=self.timekeeper_access.pk,
+            )
 
     def test_ready_direct_internal_day_and_night_use_exact_phase_rows(self):
         self._confirm_calendar()
