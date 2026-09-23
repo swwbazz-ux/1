@@ -709,14 +709,14 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')
     ).hexdigest()
     # Preserve the exact device value in the immutable receipt/fingerprint for
-    # audit. Driver field actions must nevertheless remain possible when an
-    # Android clock or time zone is far ahead: in that narrow, objectively
-    # detectable case the server receipt time is the operational timestamp.
+    # audit. Field actions must nevertheless remain possible when an Android
+    # clock or time zone is far ahead: in that narrow, objectively detectable
+    # case the server receipt time is the operational timestamp.
     # Past timestamps are not rewritten globally because they may describe a
     # legitimate offline action and remain significant for event ordering.
     normalized['device_occurred_at'] = occurred_at
     normalized['clock_adjusted'] = bool(
-        role_code == 'driver'
+        role_code in {'driver', 'excavator_operator'}
         and occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
     )
     if normalized['clock_adjusted']:
@@ -2433,12 +2433,31 @@ def process_one_offline_event(access, normalized):
                             for dependency in dependency_receipts
                         )
                     )
+                # A driver recovers a chain whose dependencies all succeeded in
+                # the meantime; an excavator also recovers a dependent event that
+                # carries no skew of its own because the phone resynchronized its
+                # clock between two queued actions and only the parent is ahead.
                 recoverable_clock_conflict = bool(
-                    normalized['role_code'] == 'driver'
-                    and existing.status == OfflineFieldEventStatus.CONFLICT
+                    existing.status == OfflineFieldEventStatus.CONFLICT
                     and (
-                        (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
-                        or dependency_chain_is_ready
+                        (
+                            normalized['role_code'] == 'driver'
+                            and (
+                                (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
+                                or dependency_chain_is_ready
+                            )
+                        )
+                        or (
+                            normalized['role_code'] == 'excavator_operator'
+                            and existing.error_code in {'device_clock_ahead', 'dependency_rejected'}
+                            and (
+                                device_clock_was_invalid
+                                or (
+                                    existing.error_code == 'dependency_rejected'
+                                    and _clock_skewed_dependency_exists(existing)
+                                )
+                            )
+                        )
                     )
                 )
                 if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_clock_conflict:
@@ -2448,11 +2467,16 @@ def process_one_offline_event(access, normalized):
                     # receipt time. The id, sequence, dependencies and raw
                     # device timestamp stay unchanged, so no duplicate action
                     # can be created and the dependent queue keeps its order.
+                    clock_adjusted = (
+                        device_clock_was_invalid
+                        if normalized['role_code'] == 'driver'
+                        else True
+                    )
                     normalized['device_occurred_at'] = existing.occurred_at
                     normalized['received_at'] = existing.received_at
-                    normalized['clock_adjusted'] = device_clock_was_invalid
+                    normalized['clock_adjusted'] = clock_adjusted
                     normalized['occurred_at'] = (
-                        existing.received_at if device_clock_was_invalid else existing.occurred_at
+                        existing.received_at if clock_adjusted else existing.occurred_at
                     )
                 receipt = existing
                 receipt.status = OfflineFieldEventStatus.PROCESSING

@@ -1202,7 +1202,13 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(downtime.started_at, receipt.received_at)
         self.assertTrue(result['device_clock_adjusted'])
 
-    def test_driver_clock_ahead_remains_a_conflict(self):
+    def test_driver_clock_ahead_no_longer_blocks_the_action(self):
+        """A future driver clock is tolerated the same way an excavator's is.
+
+        This case used to be rejected with ``device_clock_ahead``, which stopped
+        a driver whose phone was manually set forward. The device value stays in
+        the receipt for audit while the action runs on server receipt time.
+        """
         self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.truck_shift.save(update_fields=['opened_at'])
         reason = DowntimeReason.objects.create(
@@ -1210,11 +1216,12 @@ class OfflineEventSyncTests(TestCase):
             equipment_type=self.truck_type,
             show_for_truck_driver=True,
         )
+        device_occurred_at = timezone.now() + timedelta(minutes=6)
         event = {
             'event_id': 'driver-clock-downtime-start',
             'event_type': 'driver.downtime.started',
             'format_version': 1,
-            'occurred_at': (timezone.now() + timedelta(minutes=6)).isoformat(),
+            'occurred_at': device_occurred_at.isoformat(),
             'sequence': 1,
             'depends_on': [],
             'shift_id': self.truck_shift.id,
@@ -1226,9 +1233,14 @@ class OfflineEventSyncTests(TestCase):
             [event], client=self.driver_client(), role_code='driver', device_id='driver-clock-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict')
-        self.assertEqual(result['code'], 'device_clock_ahead')
-        self.assertFalse(DowntimeEvent.objects.filter(reason=reason).exists())
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['device_clock_adjusted'])
+        self.assertEqual(result['time_source'], 'server_receipt')
+        receipt = OfflineFieldEvent.objects.get(event_id=event['event_id'])
+        downtime = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(downtime.started_at, receipt.received_at)
+        self.assertEqual(DowntimeEvent.objects.filter(reason=reason).count(), 1)
 
     def driver_downtime_event(self, *, event_id, sequence, reason, occurred_at, depends_on=()):
         return {
