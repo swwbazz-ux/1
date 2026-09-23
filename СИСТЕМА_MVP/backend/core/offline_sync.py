@@ -839,11 +839,15 @@ def _locked_shift(access, normalized, *, role_code):
             normalized['received_at'] >= shift.opened_at
             and (shift.closed_at is None or normalized['received_at'] <= shift.closed_at)
         )
-        if role_code == 'driver' and receipt_was_inside_shift:
-            # A Driver action explicitly bound to this shift cannot have
+        if role_code in {'driver', 'excavator_operator'} and receipt_was_inside_shift:
+            # A field action explicitly bound to this shift cannot have
             # happened before the shift opened. This is the symmetric clock-
             # behind/time-zone case: keep the raw receipt value for audit but
             # use the server instant while the referenced shift is truly open.
+            # Обе полевые роли делят одну очередь и одинаково страдают от
+            # неверного часового пояса; правило "вперёд" выше уже общее, и
+            # ограничение этой ветки одной ролью оставляло машиниста
+            # заблокированным ровно так же, как раньше device_clock_ahead.
             normalized['occurred_at'] = normalized['received_at']
             normalized['clock_adjusted'] = True
             occurred_at = normalized['occurred_at']

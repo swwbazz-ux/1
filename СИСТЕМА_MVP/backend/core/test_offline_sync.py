@@ -1172,6 +1172,68 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(results[1]['code'], 'dependency_rejected')
         self.assertEqual(Trip.objects.count(), 0)
 
+    def test_excavator_wrong_timezone_behind_shift_start_uses_server_time(self):
+        """Часовой пояс может увести время устройства и назад, не только вперёд.
+
+        Действие, привязанное к смене, не может произойти раньше её открытия.
+        Машинист обязан продолжать работу так же, как водитель.
+        """
+        self.shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Экскаватор: часовой пояс назад',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        device_occurred_at = timezone.now() - timedelta(hours=10)
+        event = {
+            'event_id': 'excavator-clock-timezone-behind',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': device_occurred_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['device_clock_adjusted'])
+        receipt = OfflineFieldEvent.objects.get(event_id=event['event_id'])
+        downtime = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(receipt.occurred_at, device_occurred_at)
+        self.assertEqual(downtime.started_at, receipt.received_at)
+
+    def test_excavator_event_before_shift_stays_a_conflict_when_receipt_is_outside(self):
+        """Коррекция не превращается в универсальную отмену проверки смены."""
+        self.shift.opened_at = timezone.now() + timedelta(minutes=30)
+        self.shift.save(update_fields=['opened_at'])
+        reason = DowntimeReason.objects.create(
+            name='Экскаватор: смена ещё не открыта',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        event = {
+            'event_id': 'excavator-before-shift',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': timezone.now().isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'event_before_shift')
+        self.assertFalse(DowntimeEvent.objects.filter(reason=reason).exists())
+
     def test_excavator_downtime_clock_ahead_uses_server_time(self):
         self.shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.shift.save(update_fields=['opened_at'])
