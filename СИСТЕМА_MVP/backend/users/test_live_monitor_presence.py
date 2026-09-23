@@ -476,7 +476,10 @@ class LiveMonitorPresenceTests(TestCase):
         self.assertTrue(connection['probe_capable'])
 
     @override_settings(
-        ALLOWED_HOSTS=list(QA_ROLE_HOSTS),
+        # `testserver` нужен, потому что экран наблюдения открывается общим
+        # помощником без явного адреса. Без него Django отвергает этот запрос
+        # как чужой узел, и тест падает уже после подтверждения пробы.
+        ALLOWED_HOSTS=[*QA_ROLE_HOSTS, 'testserver'],
         ROLE_APP_HOST_ALIASES=QA_ROLE_HOSTS,
     )
     @patch('users.native_push.notify_employee_devices', return_value=1)
@@ -511,7 +514,11 @@ class LiveMonitorPresenceTests(TestCase):
         heartbeat = self.excavator.get(
             reverse('operational_state_version'),
             {'include_events': '0', 'role_app_code': 'excavator'},
-            HTTP_HOST='excavator.localhost',
+            # Тест сам переводит ALLOWED_HOSTS на стендовые адреса QA, поэтому
+            # и пульс должен идти с того же адреса. Со старым excavator.localhost
+            # Django отвергал запрос как чужой узел, и проверка падала на 400,
+            # не дойдя до самой подтверждаемой пробы.
+            HTTP_HOST='qa-excavator.driverform.ru',
             HTTP_USER_AGENT='CopperResourcesNative/excavator/0.1.28',
             HTTP_X_APP_INSTALLATION_ID='android-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
             HTTP_X_APP_CONNECTION_STATE='ok',
