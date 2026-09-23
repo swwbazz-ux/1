@@ -50,21 +50,6 @@ public class NativePushPlugin extends Plugin {
             call.resolve(tokenPayload(token));
             return;
         }
-<<<<<<< HEAD
-        if (FirebaseApp.getApps(getContext()).isEmpty()) {
-            call.reject("FCM is not configured for this application build");
-            return;
-        }
-        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
-            if (!task.isSuccessful() || task.getResult() == null || task.getResult().trim().isEmpty()) {
-                call.reject("FCM token is unavailable");
-                return;
-            }
-            String freshToken = task.getResult().trim();
-            storeToken(getContext(), freshToken);
-            call.resolve(tokenPayload(freshToken));
-        });
-=======
         /* Builds without google-services.json (QA and any profile that never ships a
            Firebase config) leave the default FirebaseApp uninitialized. Touching
            FirebaseMessaging there throws on the plugin thread and kills the process,
@@ -94,7 +79,6 @@ public class NativePushPlugin extends Plugin {
         } catch (Throwable error) {
             return false;
         }
->>>>>>> 99f3c183 (fix(driver): keep QA push safe without Firebase and stop halving text)
     }
 
     static void publishToken(Context context, String token) {
