@@ -254,7 +254,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v257',
+        shell_version='excavator-mobile-shell-v258',
     ),
     RoleApp(
         role_code='mining_master',
