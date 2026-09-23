@@ -6,6 +6,7 @@
 """
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 from django.contrib.messages import get_messages
@@ -34,6 +35,23 @@ def current_period_opened_at(hours_ago=2):
     context = production_shift_context()
     period_start, _ = production_shift_bounds(context.production_date, context.shift_type)
     return context.shift_type, max(period_start, timezone.now() - timedelta(hours=hours_ago))
+
+
+def business_minute_inside_shift(opened_at, minutes_ago=30):
+    """Целая минута не раньше открытия смены и не в будущем.
+
+    Форма ручного рейса принимает `%Y-%m-%dT%H:%M`, то есть секунды
+    отбрасываются, а проверка отклоняет время раньше открытия смены водителя.
+    Смена того же периода открывается не раньше 07:00 или 19:00, поэтому первые
+    полчаса периода «сейчас минус 30 минут» оказывается раньше её открытия, и
+    результат зависел бы от минуты суток, в которую запустили прогон. Нижняя
+    граница поднимается до целой минуты не раньше открытия смены.
+    """
+    earliest = opened_at.replace(second=0, microsecond=0)
+    if earliest < opened_at:
+        earliest += timedelta(minutes=1)
+    stamp = (timezone.now() - timedelta(minutes=minutes_ago)).replace(second=0, microsecond=0)
+    return max(stamp, earliest)
 
 
 class DispatcherManualTripTests(TestCase):
@@ -142,7 +160,7 @@ class DispatcherManualTripTests(TestCase):
         self.assertIn('Отвал 60', logs.first().target_summary)
 
     def test_manual_trip_accepts_explicit_time_in_business_timezone(self):
-        stamp = timezone.now().astimezone(BUSINESS_TZ) - timedelta(minutes=30)
+        stamp = business_minute_inside_shift(self.truck_shift.opened_at).astimezone(BUSINESS_TZ)
         response = self.post_manual_trip(trips_count='1', completed_at=stamp.strftime('%Y-%m-%dT%H:%M'))
 
         self.assertIn('добавлено 1 рейс', self.messages_text(response))
@@ -151,6 +169,52 @@ class DispatcherManualTripTests(TestCase):
             trip.completed_at.astimezone(BUSINESS_TZ).strftime('%Y-%m-%d %H:%M'),
             stamp.strftime('%Y-%m-%d %H:%M'),
         )
+
+    def test_manual_trip_accepts_the_exact_minute_the_driver_shift_opened(self):
+        """Сторож границы: рейс ровно в минуту открытия смены принимается.
+
+        Ночной прогон стартует в произвольную минуту суток, и в первые полчаса
+        производственной смены удобное «сейчас минус 30 минут» попадает раньше
+        её открытия. Этот тест закрепляет саму границу и не зависит от часов
+        машины: смена открыта ровно в начале текущего периода, а рейс отмечен
+        той же минутой.
+        """
+        context = production_shift_context()
+        period_start, _ = production_shift_bounds(context.production_date, context.shift_type)
+        self.truck_shift.shift_type = context.shift_type
+        self.truck_shift.opened_at = period_start
+        self.truck_shift.save(update_fields=['shift_type', 'opened_at'])
+
+        stamp = period_start.astimezone(BUSINESS_TZ)
+        response = self.post_manual_trip(trips_count='1', completed_at=stamp.strftime('%Y-%m-%dT%H:%M'))
+
+        self.assertIn('добавлено 1 рейс', self.messages_text(response))
+        trip = Trip.objects.get(truck=self.truck)
+        self.assertEqual(
+            trip.completed_at.astimezone(BUSINESS_TZ).strftime('%Y-%m-%d %H:%M'),
+            stamp.strftime('%Y-%m-%d %H:%M'),
+        )
+
+    def test_manual_trip_survives_the_first_half_hour_of_the_production_shift(self):
+        """Сторож ночного прогона: первые полчаса смены больше не ломают тест.
+
+        Плановая ночная проверка стартует с опозданием GitHub и попадала в окно
+        сразу после 07:00 или 19:00, где удобное «сейчас минус 30 минут» ещё
+        принадлежит прошлому периоду. Часы заморожены на десятой минуте смены —
+        ровно то состояние, в котором упал запуск 35786052793.
+        """
+        context = production_shift_context()
+        period_start, _ = production_shift_bounds(context.production_date, context.shift_type)
+        self.truck_shift.shift_type = context.shift_type
+        self.truck_shift.opened_at = period_start
+        self.truck_shift.save(update_fields=['shift_type', 'opened_at'])
+
+        with mock.patch('django.utils.timezone.now', return_value=period_start + timedelta(minutes=10)):
+            stamp = business_minute_inside_shift(self.truck_shift.opened_at).astimezone(BUSINESS_TZ)
+            response = self.post_manual_trip(trips_count='1', completed_at=stamp.strftime('%Y-%m-%dT%H:%M'))
+
+        self.assertIn('добавлено 1 рейс', self.messages_text(response))
+        self.assertGreaterEqual(stamp, period_start.astimezone(BUSINESS_TZ))
 
     def test_manual_trip_requires_reason_and_open_driver_shift(self):
         response = self.post_manual_trip(reason='')
