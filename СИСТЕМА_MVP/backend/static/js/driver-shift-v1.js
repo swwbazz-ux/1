@@ -1485,10 +1485,13 @@ window.bindDriverMobileShell = function () {
         payload = payload || {};
         syncDriverReasonTotals(payload);
         var activeReasonId = String(payload.reason_id || "");
-        var calculatedAtMs = Date.parse(payload.calculated_at || "");
-        var syncedAtMs = Number.isFinite(calculatedAtMs)
-            ? Math.min(Date.now(), calculatedAtMs)
-            : Date.now();
+        /* Отсчёт ведётся от собственных часов телефона в момент получения ответа,
+           а не от серверной отметки времени. Сервер присылает уже накопленные
+           секунды; складывать их с разницей «серверное время минус время
+           телефона» нельзя: на телефоне с вручную выставленными часами эта
+           разница и есть сдвиг, и водитель видел трёхчасовой обед вместо
+           десяти минут. В базе при этом всё верно — там время приёма сервером. */
+        var syncedAtMs = Date.now();
         var clock = {
             activeReasonId: activeReasonId,
             baseActiveElapsedSeconds: Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0)),
