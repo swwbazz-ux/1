@@ -64,7 +64,10 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     display: grid !important;
     flex: 1 1 auto !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    grid-template-rows: var(--driver-manual-action-height) var(--driver-manual-timer-height) minmax(0, 1fr) !important;
+    /* Каждая строка просит свою высоту, но может сжаться: иначе нижние пиксельные
+       минимумы складываются и последняя строка вылезает за своё место, наезжая
+       на панель точек разгрузки. Так ручной режим держится на любом экране. */
+    grid-template-rows: minmax(0, var(--driver-manual-action-height)) minmax(0, var(--driver-manual-timer-height)) minmax(0, 1fr) !important;
     align-content: stretch !important;
     width: 100% !important;
     height: 100% !important;
@@ -82,7 +85,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
     grid-row: 1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
-    height: var(--driver-manual-action-height);
+    height: min(var(--driver-manual-action-height), 100%);
     min-width: 0;
     min-height: 0;
     gap: var(--driver-manual-workspace-gap);
@@ -97,7 +100,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__tri
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     width: 100%;
-    height: var(--driver-manual-timer-height);
+    height: min(var(--driver-manual-timer-height), 100%);
     min-width: 0;
     padding: 8px clamp(14px, 4vw, 22px);
     border: 2px solid rgba(158, 173, 181, .72);
@@ -270,7 +273,7 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     align-self: start;
     justify-content: center;
     width: 100%;
-    height: var(--driver-manual-source-height);
+    height: min(var(--driver-manual-source-height), 100%);
     min-width: 0;
     min-height: 0;
     transform: none;
