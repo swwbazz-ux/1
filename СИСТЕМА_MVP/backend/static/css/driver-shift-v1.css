@@ -642,9 +642,10 @@ body.driver-mobile-screen .driver-work-context-location {
 }
 
 body.driver-mobile-screen .driver-work-context-location span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Части строки не ужимаются по отдельности: иначе на обычном экране
+       «ГОРИЗОНТ 75 · БЛОК 52» сокращается там, где место есть. Лишнее подрезает
+       сама строка выше. */
+    flex: 0 0 auto;
     white-space: nowrap;
 }
 

@@ -149,6 +149,13 @@ body.excavator-operator-screen .eo-topbar-cell {
     padding: 0 4px;
 }
 
+/* Последняя ячейка шапки доходит до правого края, где висит индикатор связи,
+   поэтому название породы уходило под кружок. Место под него резервируется
+   общей переменной, а не подобранным под один экран отступом. */
+body.excavator-operator-screen .eo-topbar > .eo-topbar-cell:last-child {
+    padding-right: var(--app-connection-dot-reserve, 40px);
+}
+
 body.excavator-operator-screen .eo-topbar-cell img,
 body.excavator-operator-screen .eo-clock-icon,
 body.excavator-operator-screen .eo-pin-icon {
@@ -1859,6 +1866,12 @@ body.excavator-operator-screen .eo-topbar-cell {
     height: var(--eo-fixed-header-h) !important;
     min-height: var(--eo-fixed-header-h) !important;
     padding: 0 clamp(5px, 1.35vw, 8px) !important;
+}
+
+/* Та же оговорка, что и выше: последняя ячейка упирается в правый край, где
+   лежит индикатор связи, поэтому резерв под него повторяется и здесь. */
+body.excavator-operator-screen .eo-topbar > .eo-topbar-cell:last-child {
+    padding-right: var(--app-connection-dot-reserve, 40px) !important;
 }
 
 body.excavator-operator-screen .eo-topbar-cell img,

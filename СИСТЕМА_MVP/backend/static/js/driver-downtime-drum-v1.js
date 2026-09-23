@@ -190,6 +190,18 @@
             root.clearTimeout(c.__snapTimer);
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
         }
+        /* Радиус задан шириной грани, а ширина — единицами контейнера, поэтому
+           замер при сборке может прийтись на момент, когда контейнер ещё без
+           ширины: тогда грань берёт нижний предел, кольцо выходит тесным, и
+           подросшие грани наезжают друг на друга. Здесь радиус приводится к
+           текущей ширине грани, так что заложенный зазор держится всегда. */
+        var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
+        if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
+            geo.cardW = liveCardW;
+            geo.radius = (liveCardW / 2) / Math.tan((geo.step / 2) * Math.PI / 180) * 1.22;
+            var drumNode = drum();
+            if (drumNode) drumNode.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
+        }
         // Ось барабана строго вертикальна (TILT = 0): грани остаются на одной высоте,
         // боковые не уезжают вверх и не наползают на угловые кнопки круга.
         c.style.transform = "rotateX(" + TILT + "deg) translateZ(" + (-geo.radius).toFixed(1) + "px) rotateY(" + geo.theta.toFixed(3) + "deg)";
