@@ -1029,3 +1029,25 @@ test("terminal review records older than the retention window are purged, fresh 
     await box.flush();
     assert.deepEqual((await box.pending()).map(event => event.event_id), ["fresh-conflict"], "старая запись убрана, свежая осталась");
 });
+
+/* Часы водителя 24.09.2026: телефон с вручную отведёнными назад часами писал в
+   базу своё время — простой «шёл» полчаса в ту же секунду, как его начали, а
+   переключение причины и вовсе отклонялось как «раньше начала». Событие,
+   ушедшее сразу после создания, теперь помечается для сервера: телефон не мог
+   быть офлайн эти секунды, значит его час просто неверен. */
+test("an event sent right away is marked so the server can use its own receipt time", async () => {
+    const sent = [];
+    const box = runtime({send: async (body) => {
+        sent.push(body);
+        return {results: body.events.map((event) => ({event_id: event.event_id, status: "accepted"}))};
+    }});
+    await box.enqueue(manualLoad());
+    await box.flush();
+
+    assert.equal(sent.length, 1);
+    const wire = sent[0].events[0];
+    assert.equal(wire.sent_live, true, "флаг ставится на верхнем уровне события");
+    assert.equal(wire.payload.sent_live, undefined, "в payload флага нет: payload входит в отпечаток события");
+    assert.equal(wire.created_session, undefined, "служебные поля очереди на сервер не уходят");
+    assert.equal(wire.created_mono, undefined);
+});

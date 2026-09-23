@@ -30,6 +30,22 @@
         var parsed = Number(value);
         return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     }
+    /* Метка этой загрузки страницы и монотонные часы. По ним видно, ушло ли
+       событие сразу после создания или пролежало в очереди. Date.now() для
+       этого не годится: именно он и может быть переставлен вручную, а
+       performance.now() к часам не привязан и назад не идёт. */
+    var PAGE_SESSION = "page-" + Math.random().toString(36).slice(2) + "-" + Date.now().toString(36);
+    var SENT_LIVE_WINDOW_MS = 10000;
+    function monotonicNow() {
+        var clock = root && root.performance;
+        return (clock && typeof clock.now === "function") ? clock.now() : NaN;
+    }
+    function eventWasSentLive(event) {
+        return event.created_session === PAGE_SESSION
+            && Number.isFinite(Number(event.created_mono))
+            && (monotonicNow() - Number(event.created_mono)) < SENT_LIVE_WINDOW_MS;
+    }
+
     function randomId(prefix) {
         var uuid = root.crypto && typeof root.crypto.randomUUID === "function"
             ? root.crypto.randomUUID()
@@ -644,6 +660,8 @@
                 next_retry_at: 0,
                 last_error: null,
                 created_at: occurredAt,
+                created_session: PAGE_SESSION,
+                created_mono: monotonicNow(),
                 updated_at: nowIso()
             };
             validateEvent(event);
@@ -825,9 +843,18 @@
                         device_id: due[0].device_id,
                         events: due.map(function (event) {
                             var copy = clone(event);
+                            /* Событие, ушедшее сразу после создания, сервер применяет по
+                               времени своей расписки: телефон не мог быть офлайн эти
+                               секунды, значит его час — это просто неверный час, а не
+                               давнее действие. Флаг ставится на верхнем уровне, а не в
+                               payload: payload входит в отпечаток события, а при повторе
+                               очереди флаг обязан смениться. */
+                            var sentLive = eventWasSentLive(copy);
+                            delete copy.created_session; delete copy.created_mono;
                             delete copy.state; delete copy.attempt_count; delete copy.next_retry_at;
                             delete copy.last_error; delete copy.updated_at;
                             delete copy.auth_generation;
+                            if (sentLive) copy.sent_live = true;
                             return copy;
                         })
                     });
