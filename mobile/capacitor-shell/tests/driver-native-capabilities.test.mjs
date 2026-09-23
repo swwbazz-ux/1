@@ -72,7 +72,11 @@ test("Native push keeps a durable token and reports only the field-app identity 
   assert.match(plugin, /getSharedPreferences\(PREFS_NAME, Context\.MODE_PRIVATE\)/);
   assert.match(plugin, /notifyListeners\("pushToken", tokenPayload\(normalizedToken\), true\)/);
   assert.match(plugin, /FirebaseApp\.getApps\(getContext\(\)\)\.isEmpty\(\)/);
-  assert.match(plugin, /call\.reject\("FCM is not configured for this application build"\)/);
+  // A build that ships no Firebase config answers with an empty envelope. It
+  // used to reach FirebaseMessaging and die on the plugin thread instead.
+  assert.match(plugin, /if \(!firebaseReady\(\)\) \{\s*call\.resolve\(unavailablePayload\(\)\);/);
+  assert.match(plugin, /\.put\("available", false\)/);
+  assert.doesNotMatch(plugin, /call\.reject\("FCM/);
   assert.match(plugin, /\.put\("provider", "fcm"\)/);
   assert.match(plugin, /\.put\("platform", "android"\)/);
   assert.match(plugin, /\.put\("appId", BuildConfig\.APPLICATION_ID\)/);

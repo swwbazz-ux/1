@@ -172,12 +172,14 @@ test("profiles remain isolated by URL and application id", () => {
   assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
 });
 
-test("only Driver profiles pin native WebView text zoom to the workstation scale", () => {
-  for (const profileName of ["driver", "driver_qa", "driver_rustore_qa", "driver_rustore"]) {
+test("every field profile pins native WebView text zoom to the workstation scale", () => {
+  // Both field applications suffered from the phone's largest system font, so
+  // each of their profiles pins the scale the operational layout was built for.
+  for (const profileName of [
+    "driver", "driver_qa", "driver_rustore_qa", "driver_rustore",
+    "excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore",
+  ]) {
     assert.equal(profile(profileName).webViewTextZoomPercent, "100");
-  }
-  for (const profileName of ["excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore"]) {
-    assert.equal(profile(profileName).webViewTextZoomPercent, undefined);
   }
 
   const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
