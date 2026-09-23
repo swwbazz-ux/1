@@ -46,5 +46,12 @@ jobs:
       - name: Django system check
         run: python manage.py check
 
+      # Полный nightly прогоняет группу `tools`, но на ревизии канонической
+      # ветки, поэтому контракты workflow-файлов самой default-ветки там не
+      # проверяются. Этот шаг закрывает пробел: orchestration, watchdog и
+      # уведомитель живут только в `main` и должны иметь свой gate.
+      - name: Run standalone tools contract tests
+        run: python -m unittest discover -s tools -p 'test*.py'
+
       - name: Run user module tests
         run: python manage.py test users
