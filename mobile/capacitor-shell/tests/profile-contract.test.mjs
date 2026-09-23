@@ -65,8 +65,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "10",
-    versionName: "1.0.9-qa",
+    versionCode: "12",
+    versionName: "1.0.11-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -188,6 +188,9 @@ test("only Driver profiles pin native WebView text zoom to the workstation scale
   assert.match(gradle, /WEB_VIEW_TEXT_ZOOM_PERCENT/);
   assert.match(activity, /configureProfileWebViewTextZoom\(webView\)/);
   assert.match(activity, /getSettings\(\)\.setTextZoom\(BuildConfig\.WEB_VIEW_TEXT_ZOOM_PERCENT\)/);
+  assert.doesNotMatch(activity, /compensatedZoom/);
+  assert.match(activity, /onPageStarted\(WebView loadingWebView\)[\s\S]*?configureProfileWebViewTextZoom\(loadingWebView\)/);
+  assert.match(activity, /onPageLoaded\(WebView loadedWebView\)[\s\S]*?configureProfileWebViewTextZoom\(loadedWebView\)/);
   assert.match(
     activity,
     /public void onResume\(\)[\s\S]*?configureProfileWebViewTextZoom\(getBridge\(\)\.getWebView\(\)\)/

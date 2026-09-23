@@ -55,6 +55,7 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageStarted(WebView loadingWebView) {
                 runOnUiThread(() -> {
+                    configureProfileWebViewTextZoom(loadingWebView);
                     if (loadingWebView instanceof NativeImeWebView) {
                         ((NativeImeWebView) loadingWebView).clearNativeImeAction();
                     }
@@ -78,6 +79,7 @@ public class MainActivity extends BridgeActivity {
                 // and the rotated cookies from the successful login redirect.
                 CookieManager.getInstance().flush();
                 runOnUiThread(() -> {
+                    configureProfileWebViewTextZoom(loadedWebView);
                     lastObservedWebView = loadedWebView;
                     lastObservedPageState = PageState.LOADED;
                     if (startupLoadingOverlay != null) {
@@ -174,6 +176,10 @@ public class MainActivity extends BridgeActivity {
            operational layout and can hide buttons. This profile setting pins
            only this native shell; the phone and other applications are not
            changed. */
+        /* setTextZoom already replaces the system font scale WebView would apply,
+           so the profile percent is passed through as is. Dividing it by the
+           system scale once looked like compensation and halved every label on
+           a phone set to the largest system font. */
         webView.getSettings().setTextZoom(BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT);
     }
 
