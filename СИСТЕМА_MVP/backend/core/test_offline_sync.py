@@ -975,6 +975,77 @@ class OfflineEventSyncTests(TestCase):
         self.assignment.save(update_fields=['assigned_at'])
         return moment
 
+    def _excavator_downtime_event(self, *, event_id, sequence, reason, occurred_at, **extra):
+        event = {
+            'event_id': event_id,
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+        event.update(extra)
+        return event
+
+    def _excavator_downtime_reason(self, name):
+        return DowntimeReason.objects.create(
+            name=name,
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+
+    def test_lagging_clock_blocks_a_downtime_reason_switch(self):
+        """Фиксация блокировки: отстающие часы не дают сменить причину простоя.
+
+        Машинист с отведёнными назад часами не может переключить причину
+        вообще — новое время оказывается раньше начала текущего простоя.
+        """
+        self._open_shift_two_hours_ago()
+        first = self._excavator_downtime_reason('Экскаватор: первая причина')
+        second = self._excavator_downtime_reason('Экскаватор: вторая причина')
+        started = self.sync([self._excavator_downtime_event(
+            event_id='eo-downtime-a', sequence=1, reason=first, occurred_at=timezone.now(),
+        )]).json()['results'][0]
+        self.assertEqual(started['status'], 'accepted', started)
+
+        switch = self.sync([self._excavator_downtime_event(
+            event_id='eo-downtime-b', sequence=2, reason=second,
+            occurred_at=timezone.now() - timedelta(minutes=30),
+        )]).json()['results'][0]
+
+        self.assertEqual(switch['status'], 'conflict', switch)
+        self.assertEqual(switch['code'], 'downtime_switch_before_start')
+
+    def test_sent_live_unblocks_a_downtime_reason_switch(self):
+        """Подмена времени идёт до проверок порядка, поэтому лечит блокировку.
+
+        Тот же сценарий с подсказкой оболочки: переключение проходит, а обе
+        записи простоя сходятся на времени расписки сервера — без разрыва.
+        """
+        self._open_shift_two_hours_ago()
+        first = self._excavator_downtime_reason('Экскаватор: первая причина')
+        second = self._excavator_downtime_reason('Экскаватор: вторая причина')
+        self.sync([self._excavator_downtime_event(
+            event_id='eo-live-a', sequence=1, reason=first, occurred_at=timezone.now(),
+        )])
+
+        switch = self.sync([self._excavator_downtime_event(
+            event_id='eo-live-b', sequence=2, reason=second,
+            occurred_at=timezone.now() - timedelta(minutes=30), sent_live=True,
+        )]).json()['results'][0]
+
+        self.assertEqual(switch['status'], 'accepted', switch)
+        self.assertTrue(switch['device_clock_adjusted'])
+        receipt = OfflineFieldEvent.objects.get(event_id='eo-live-b')
+        opened = DowntimeEvent.objects.get(reason=second)
+        closed = DowntimeEvent.objects.get(reason=first)
+        self.assertEqual(opened.started_at, receipt.received_at)
+        self.assertEqual(closed.ended_at, receipt.received_at)
+        self.assertIsNone(opened.ended_at)
+
     def test_sent_live_event_is_applied_at_the_server_receipt(self):
         """Событие ушло сразу после нажатия — время сервера и есть настоящее.
 

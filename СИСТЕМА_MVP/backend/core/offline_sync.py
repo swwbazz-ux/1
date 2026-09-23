@@ -25,6 +25,9 @@ SYNC_FORMAT_VERSION = 1
 MAX_BATCH_SIZE = 100
 MAX_DEPENDENCIES = 32
 MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
+# Потолок измеренного возраста события. Смена длится двенадцать часов, неделя
+# с запасом покрывает телефон, пролежавший без связи, и отсекает мусор.
+MAX_MONOTONIC_AGE_MS = 7 * 24 * 60 * 60 * 1000
 EVENT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
 DEVICE_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$')
 logger = logging.getLogger(__name__)
