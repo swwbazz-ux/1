@@ -1044,7 +1044,11 @@ class FreeBucketServerIntegrationTests(TestCase):
             [point['name'] for point in screen.context['unload_points']],
             [self.dump_point.name, 'Склад из снимка'],
         )
-        self.assertNotContains(screen, outside_point.name)
+        # Чужая точка не должна быть выбираемой карточкой. В разметке она
+        # встречается как запасной контекст ручного рабочего места, который
+        # отдаётся намеренно ради мгновенного возврата после отмены ковша,
+        # поэтому проверяется признак карточки, а не строка по всей странице.
+        self.assertNotContains(screen, f'data-eo-dump-name="{outside_point.name}"')
 
         change_to_saved = self.driver_event(
             'free-snapshot-change-saved',

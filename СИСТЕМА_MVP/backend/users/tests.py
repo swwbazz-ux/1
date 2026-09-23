@@ -332,7 +332,12 @@ class AccessLoginTests(TestCase):
         self.assertIn('Immutable dump', manual_workspace)
         self.assertIn(f'data-driver-manual-excavator-id="{alternate.id}"', manual_workspace)
         self.assertNotIn('Current placement rock', manual_workspace)
-        self.assertNotIn('Current placement dump', manual_workspace)
+        # Точка текущего размещения не должна быть ВЫБИРАЕМОЙ, пока действует
+        # снимок приёмки. В разметке она присутствовать может: рабочее место
+        # намеренно несёт запасной контекст в base_event_context, чтобы после
+        # отмены свободного ковша вернуться в ручной режим сразу, не дожидаясь
+        # ответа сервера. Поэтому проверяется признак карточки, а не строка.
+        self.assertNotIn('data-eo-dump-name="Current placement dump"', manual_workspace)
         dial_zone = html.split('class="driver-work-dial-zone"', 1)[1].split(
             'class="driver-free-bucket-sheet"', 1,
         )[0]
