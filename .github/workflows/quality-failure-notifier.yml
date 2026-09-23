@@ -19,9 +19,18 @@ concurrency:
 jobs:
   notify-owner:
     name: Notify owner about canonical quality failures
+    # `push` приходит из самой канонической ветки и несёт точный проверенный SHA.
+    # `schedule` и `workflow_dispatch` стартуют из default-ветки, но проверяют ту
+    # же фиксированную каноническую ветку, поэтому их результат тоже обязан
+    # доходить до владельца: именно они работают без участия человека.
+    # `pull_request` намеренно исключён: незавершённая ветка не является тревогой.
     if: >-
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'codex/github-production-deploy-20260916'
+      (
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'codex/github-production-deploy-20260916'
+      ) ||
+      github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -33,7 +42,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           REPO_OWNER: ${{ github.repository_owner }}
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
           RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
           RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           ALERT_LABEL: quality-gate-alert
@@ -45,11 +56,45 @@ jobs:
             "repos/${GH_REPO}/git/ref/heads/codex%2Fgithub-production-deploy-20260916" \
             --jq '.object.sha')"
 
-          if [[ "$RUN_HEAD_SHA" != "$current_sha" ]]; then
-            printf 'Ignoring stale run %s for %s; current canonical SHA is %s.\n' \
-              "$RUN_NUMBER" "$RUN_HEAD_SHA" "$current_sha"
-            exit 0
-          fi
+          case "$RUN_EVENT" in
+            push)
+              # Push несёт проверенный SHA напрямую.
+              tested_sha="$RUN_HEAD_SHA"
+              if [[ "$tested_sha" != "$current_sha" ]]; then
+                printf 'Ignoring stale push run %s for %s; current canonical SHA is %s.\n' \
+                  "$RUN_NUMBER" "$tested_sha" "$current_sha"
+                exit 0
+              fi
+              trigger_label='изменение канонической ветки'
+              ;;
+            schedule|workflow_dispatch)
+              # Эти запуски стартуют из default-ветки, поэтому событие несёт SHA
+              # `main`, а не проверенной ревизии. Они всегда разрешают
+              # фиксированную каноническую ветку, значит проверен был её HEAD на
+              # момент старта запуска. Если ветку подвинули уже после старта, за
+              # новый SHA отчитается его собственный push-запуск.
+              tested_sha="$current_sha"
+              head_committed_at="$(gh api \
+                "repos/${GH_REPO}/commits/${current_sha}" \
+                --jq '.commit.committer.date')"
+              if [[ "$(date -u -d "$head_committed_at" +%s)" \
+                    -gt "$(date -u -d "$RUN_STARTED_AT" +%s)" ]]; then
+                printf 'Ignoring superseded %s run %s: canonical moved to %s at %s, after the run started at %s.\n' \
+                  "$RUN_EVENT" "$RUN_NUMBER" "$current_sha" \
+                  "$head_committed_at" "$RUN_STARTED_AT"
+                exit 0
+              fi
+              if [[ "$RUN_EVENT" == 'schedule' ]]; then
+                trigger_label='ночная плановая проверка'
+              else
+                trigger_label='ручной или резервный запуск'
+              fi
+              ;;
+            *)
+              printf 'Unsupported triggering event %s; nothing to report.\n' "$RUN_EVENT"
+              exit 0
+              ;;
+          esac
 
           if ! gh api "repos/${GH_REPO}/labels/${ALERT_LABEL}" >/dev/null 2>&1; then
             gh api \
@@ -77,7 +122,7 @@ jobs:
             if [[ -n "$issue_number" ]]; then
               gh issue close "$issue_number" \
                 --repo "$GH_REPO" \
-                --comment "✅ Проверка №${RUN_NUMBER} успешно прошла на \`${RUN_HEAD_SHA}\`: ${RUN_URL}"
+                --comment "✅ Проверка №${RUN_NUMBER} (${trigger_label}) успешно прошла на \`${tested_sha}\`: ${RUN_URL}"
               printf 'Closed recovered quality alert #%s.\n' "$issue_number" \
                 >> "$GITHUB_STEP_SUMMARY"
             else
@@ -91,7 +136,8 @@ jobs:
           Автоматическая полная проверка канонической ветки завершилась со статусом **${RUN_CONCLUSION}**.
 
           - Запуск: [№${RUN_NUMBER}](${RUN_URL})
-          - Commit: \`${RUN_HEAD_SHA}\`
+          - Повод: ${trigger_label} (\`${RUN_EVENT}\`)
+          - Commit: \`${tested_sha}\`
           - Production автоматически не публиковался.
 
           Нужно открыть запуск, определить точную причину и исправлять её только отдельным проверяемым изменением.
