@@ -43,6 +43,29 @@ class CiWorkflowSecurityContractTests(unittest.TestCase):
         source = workflow_source("django.yml")
         self.assertIn("permissions:\n  contents: read", source)
 
+    def test_notifier_covers_runs_that_nobody_starts_by_hand(self):
+        notifier = WORKFLOWS / "quality-failure-notifier.yml"
+        if not notifier.exists():
+            self.skipTest("This branch does not own the quality failure notifier")
+
+        source = notifier.read_text(encoding="utf-8")
+
+        # Ночная плановая проверка и резервный запуск watchdog работают без
+        # участия человека, поэтому их красный результат обязан дойти до
+        # владельца так же, как результат обычного изменения ветки.
+        self.assertIn("github.event.workflow_run.event == 'push'", source)
+        self.assertIn("github.event.workflow_run.event == 'schedule'", source)
+        self.assertIn("github.event.workflow_run.event == 'workflow_dispatch'", source)
+
+        # Незавершённая ветка в pull request тревогой владельца не является.
+        self.assertNotIn("github.event.workflow_run.event == 'pull_request'", source)
+
+        # Запуски из default-ветки не несут проверенный SHA в самом событии,
+        # поэтому он берётся из канонической ветки, а устаревший результат
+        # отбрасывается по времени старта запуска.
+        self.assertIn(CANONICAL_BRANCH.replace("/", "%2F"), source)
+        self.assertIn("RUN_STARTED_AT", source)
+
     def test_watchdog_cannot_supply_a_target_ref(self):
         watchdog = WORKFLOWS / "nightly-scheduler-watchdog.yml"
         if not watchdog.exists():
