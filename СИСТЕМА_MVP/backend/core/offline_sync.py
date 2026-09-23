@@ -2357,6 +2357,31 @@ def _dependency_state(access, normalized):
             _conflict('dependency_rejected', 'Предыдущее событие требует сверки или отклонено.')
 
 
+def _clock_skewed_dependency_exists(existing):
+    """Признак цепочки именно «часового» конфликта, а не настоящего доменного.
+
+    Телефон может пересинхронизировать часы между двумя действиями очереди
+    (перезапуск, автоматическое время сети).  Тогда родительское событие
+    остаётся с временем в будущем и получает ``device_clock_ahead``, а
+    зависимое сохраняет честное время и падает только по ``dependency_rejected``.
+    Собственный сдвиг у такого события отсутствует, поэтому восстанавливать
+    цепочку нужно по сдвигу её родителя.
+    """
+    if not existing.depends_on:
+        return False
+    dependencies = OfflineFieldEvent.objects.filter(
+        event_id__in=existing.depends_on[:MAX_DEPENDENCIES],
+        actor_id=existing.actor_id,
+        access_id=existing.access_id,
+        role_code=existing.role_code,
+        device_id=existing.device_id,
+    ).only('occurred_at', 'received_at')
+    return any(
+        dependency.occurred_at > dependency.received_at + MAX_FUTURE_CLOCK_SKEW
+        for dependency in dependencies
+    )
+
+
 def process_one_offline_event(access, normalized):
     try:
         with transaction.atomic():

@@ -1045,6 +1045,133 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(receipt.occurred_at, device_occurred_at)
         self.assertEqual(Trip.objects.get().loaded_at, received_at)
 
+    def _store_legacy_conflicted_event(self, event, *, received_at, error_code, error_message):
+        """Recreate a receipt saved by a shell that had no clock recovery."""
+        normalized = normalize_offline_event(
+            event,
+            role_code='excavator_operator',
+            device_id='device-test-001',
+            received_at=received_at,
+        )
+        return OfflineFieldEvent.objects.create(
+            event_id=event['event_id'],
+            event_type=event['event_type'],
+            format_version=event['format_version'],
+            actor=self.operator,
+            access=self.access,
+            role_code='excavator_operator',
+            device_id='device-test-001',
+            sequence=event['sequence'],
+            depends_on=event['depends_on'],
+            occurred_at=timezone.datetime.fromisoformat(event['occurred_at']),
+            received_at=received_at,
+            shift=self.shift,
+            equipment=self.excavator,
+            local_trip_id=event.get('local_trip_id', ''),
+            context_snapshot=event.get('context_snapshot', {}),
+            payload=event['payload'],
+            fingerprint=normalized['fingerprint'],
+            status='conflict',
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    def _open_shift_context_earlier(self, delta):
+        moment = timezone.now() - delta
+        self.shift.opened_at = moment
+        self.shift.save(update_fields=['opened_at'])
+        self.truck_shift.opened_at = moment
+        self.truck_shift.save(update_fields=['opened_at'])
+        self.assignment.assigned_at = moment
+        self.assignment.save(update_fields=['assigned_at'])
+        return moment
+
+    def test_dependency_chain_recovers_when_only_the_parent_clock_was_ahead(self):
+        """The phone may resync its clock between two queued offline actions.
+
+        The dependent event then carries an honest timestamp and is rejected
+        only because its parent was held by ``device_clock_ahead``.  Такая
+        цепочка обязана восстанавливаться целиком, иначе второе действие
+        машиниста теряется навсегда.
+        """
+        self._open_shift_context_earlier(timedelta(minutes=30))
+        received_at = timezone.now() - timedelta(minutes=2)
+        loaded = self.load_event(
+            'chain-load', 1, occurred_at=received_at + timedelta(minutes=40),
+        )
+        cancelled = {
+            'event_id': 'chain-cancel',
+            'event_type': 'excavator.trip.loaded.cancelled',
+            'format_version': 1,
+            'occurred_at': (received_at - timedelta(seconds=30)).isoformat(),
+            'sequence': 2,
+            'depends_on': [loaded['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'local_trip_id': loaded['local_trip_id'],
+            'payload': {'local_trip_id': loaded['local_trip_id']},
+        }
+        self._store_legacy_conflicted_event(
+            loaded,
+            received_at=received_at,
+            error_code='device_clock_ahead',
+            error_message='Часы устройства заметно опережают сервер. Требуется сверка.',
+        )
+        self._store_legacy_conflicted_event(
+            cancelled,
+            received_at=received_at,
+            error_code='dependency_rejected',
+            error_message='Предыдущее событие требует сверки или отклонено.',
+        )
+
+        results = self.sync([loaded, cancelled]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        self.assertEqual(OfflineFieldEvent.objects.count(), 2)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.status, TripStatus.CANCELLED)
+        self.assertEqual(trip.loaded_at, received_at)
+        self.assertEqual(trip.cancelled_at, received_at)
+
+    def test_real_conflict_chain_is_not_reopened_by_clock_recovery(self):
+        """Настоящий доменный конфликт родителя остаётся терминальным."""
+        self._open_shift_context_earlier(timedelta(minutes=30))
+        received_at = timezone.now() - timedelta(minutes=2)
+        loaded = self.load_event(
+            'real-conflict-load', 1, occurred_at=received_at - timedelta(seconds=5),
+        )
+        cancelled = {
+            'event_id': 'real-conflict-cancel',
+            'event_type': 'excavator.trip.loaded.cancelled',
+            'format_version': 1,
+            'occurred_at': (received_at - timedelta(seconds=1)).isoformat(),
+            'sequence': 2,
+            'depends_on': [loaded['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'local_trip_id': loaded['local_trip_id'],
+            'payload': {'local_trip_id': loaded['local_trip_id']},
+        }
+        self._store_legacy_conflicted_event(
+            loaded,
+            received_at=received_at,
+            error_code='open_trip_changed',
+            error_message='Незакрытый рейс самосвала уже изменился.',
+        )
+        self._store_legacy_conflicted_event(
+            cancelled,
+            received_at=received_at,
+            error_code='dependency_rejected',
+            error_message='Предыдущее событие требует сверки или отклонено.',
+        )
+
+        results = self.sync([loaded, cancelled]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['conflict', 'conflict'], results)
+        self.assertEqual(results[0]['code'], 'open_trip_changed')
+        self.assertEqual(results[1]['code'], 'dependency_rejected')
+        self.assertEqual(Trip.objects.count(), 0)
+
     def test_excavator_downtime_clock_ahead_uses_server_time(self):
         self.shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.shift.save(update_fields=['opened_at'])
