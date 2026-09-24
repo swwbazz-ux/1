@@ -1002,3 +1002,36 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card .driver-manual-workspace__swipe-cue {
     right: clamp(26px, 6.6vw, 32px);
 }
+
+/* Пиктограмма источника в ручном режиме водителя: горка руды вместо экскаватора.
+   Карточка общая с экраном экскаваторщика, поэтому шаблон и PNG не трогаем:
+   прячем картинку и рисуем горку маской. Маска красится currentColor, значит
+   статусный цвет карточки (жёлтый/зелёный/красный) сохраняется как был.
+   Селектор длиннее, чем в excavator-work-v55-shift.css, иначе тамошнее
+   display: block !important перебивает скрытие картинки.
+   Размеры берём те же, что у картинки, и с тем же сжатием — карточка не едет. */
+body .driver-manual-workspace .driver-manual-workspace__source-row .eo-dashboard-truck-card.eo-dashboard-truck-card > i > img {
+    display: none !important;
+}
+
+body .driver-manual-workspace .driver-manual-workspace__source-row .eo-dashboard-truck-card.eo-dashboard-truck-card > i::before {
+    content: "";
+    flex: 0 1 auto;
+    width: 50px;
+    height: 33px;
+    min-width: 0;
+    background-color: currentColor;
+    opacity: .92;
+    -webkit-mask-image: var(--driver-manual-ore-pile);
+    mask-image: var(--driver-manual-ore-pile);
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+}
+
+.driver-manual-workspace {
+    --driver-manual-ore-pile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 58 26'%3E%3Cpath d='M2 25 L15.5 5.5 Q18 2 20.5 5.5 L29.5 17.5 L36 9 Q38 6.4 40 9 L56 25 Z'/%3E%3C/svg%3E");
+}
