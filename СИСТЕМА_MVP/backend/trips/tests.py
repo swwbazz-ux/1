@@ -342,7 +342,8 @@ class DispatcherSharedShiftStartTests(TestCase):
             'return Array.isArray(events) && events.length > 0;',
             'markDispatcherLocalAssignmentApplied',
             'dispatcherIncomingRefreshQueueGraceMs',
-            'dispatcherMobileSyncFlushDelayMs = 300',
+            'dispatcherSyncRequestTimeoutMs = 12000',
+            'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
             'type: "assign"',
             'type: "release"',
@@ -363,7 +364,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v131')
+        self.assertContains(response, 'dispatcher-desktop-shell-v132')
         self.assertContains(
             response,
             'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',
@@ -411,9 +412,8 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('include_events", "1"', script)
         self.assertIn('operational-state-refresh-deferred', script)
         self.assertIn('pending_mobile_queue', script)
-        self.assertIn('refreshMobileBoard: true', dispatcher_script)
-        self.assertIn('request.refreshMobileBoard && !freshQueue.length', dispatcher_script)
-        self.assertIn('dispatcherMobileSyncFlushDelayMs', dispatcher_script)
+        self.assertNotIn('refreshMobileBoardFromServer', dispatcher_script)
+        self.assertNotIn('bindMiningMasterMobileScreens', dispatcher_script)
         self.assertNotIn('delayMs : 5000', response.content.decode('utf-8'))
         self.assertIn('operational-state-update-available', script)
         self.assertIn('has-realtime-update', script)

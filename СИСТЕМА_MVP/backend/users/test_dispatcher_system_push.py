@@ -164,7 +164,7 @@ class DispatcherServiceWorkerPushContractTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('dispatcher-desktop-shell-v131', script)
+        self.assertIn('dispatcher-desktop-shell-v132', script)
         self.assertIn('self.addEventListener("push"', script)
         self.assertIn('hasVisibleDispatcherWindow', script)
         self.assertIn('client.visibilityState === "visible"', script)
