@@ -1,6 +1,7 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
 СИСТЕМА_MVP/backend/core/dump_point_names.py
+СИСТЕМА_MVP/backend/core/equipment_numbers.py
 СИСТЕМА_MVP/backend/core/dispatcher_push.py
 СИСТЕМА_MVP/backend/core/models.py
 СИСТЕМА_MVP/backend/core/views.py

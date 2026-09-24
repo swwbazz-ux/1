@@ -4997,6 +4997,7 @@ def excavator_work_settings_from_session(request, current_excavator, form):
 
 
 from core.dump_point_names import dump_name_size_class
+from core.equipment_numbers import is_plain_number
 
 
 def build_excavator_dump_cards(
@@ -6638,6 +6639,7 @@ def excavator_work_view(request):
             'driver_presence_label': participation['label'],
             'open_trip_id': active_trip.pk if active_trip else '',
             'number': equipment_number(assignment.truck),
+            'number_is_plain': is_plain_number(equipment_number(assignment.truck)),
             'equipment_state_code': equipment_state_code,
             'status_key': status_key,
             'status_label': (

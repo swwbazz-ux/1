@@ -3939,31 +3939,37 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-da
 }
 
 /* Область самосвалов занимает столько рядов, сколько карточек, а не три
-   всегда. Высота ряда при этом прежняя, поэтому КАРТОЧКА САМОСВАЛА НЕ
-   МЕНЯЕТСЯ — проверено замером: 118×130 до и после. Меняется только то, что
-   пустые зарезервированные ряды больше не держат середину экрана занятой:
-   освободившееся место уходит точкам разгрузки, которым его не хватало. */
+   всегда: пустые зарезервированные ряды больше не держат середину экрана
+   занятой, освободившееся место уходит точкам разгрузки.
+
+   Высота ряда берётся из желаемой пропорции карточки (правило ниже), а не из
+   подобранного числа. Прежняя постоянная высота clamp(112px, 15.7dvh, 136px)
+   убрана: она задавала рядам точный размер и перебивала любую пропорцию —
+   именно на этом первая попытка вытянуть карточку не дала на телефоне
+   никакого эффекта, оба варианта дали одинаковые 118×124. */
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid {
-    --eo-truck-row-h: clamp(112px, 15.7dvh, 136px);
-    height: auto !important;
+    /* Высота определённая (от своей ячейки), иначе доли 1fr резолвить не от
+       чего и ряды разъезжаются по содержимому. Ограничивает её потолок из
+       желаемой пропорции — правило ниже. */
+    height: 100% !important;
     align-self: start !important;
-    grid-auto-rows: var(--eo-truck-row-h) !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1 {
-    grid-template-rows: repeat(1, var(--eo-truck-row-h)) !important;
+    grid-template-rows: repeat(1, minmax(0, 1fr)) !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 {
-    grid-template-rows: repeat(2, var(--eo-truck-row-h)) !important;
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3 {
-    grid-template-rows: repeat(3, var(--eo-truck-row-h)) !important;
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 {
-    grid-template-rows: repeat(4, var(--eo-truck-row-h)) !important;
+    grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
 }
 
 /* Когда самосвалов много, места на всё не хватает физически: девять карточек
@@ -4035,4 +4041,107 @@ body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboar
 
 body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top small {
     position: static !important;
+}
+
+/* Карточка самосвала вытянута по вертикали. Пользователь посмотрел на бой и
+   сказал: «плитку самосвала из вертикальной прямоугольной сделал более
+   квадратную, а мне больше нравится когда она более прямоугольная по
+   вертикали».
+
+   Ширину менять нечем: три колонки на экран, на его телефоне это 117.8 px.
+   Значит форма задаётся высотой, а высоту ограничивает зона самосвалов. При
+   двенадцати карточках желаемая пропорция физически не помещается: четыре
+   ряда по 147 px это 606 px при 385 доступных. Поэтому пропорция здесь —
+   ЖЕЛАЕМАЯ форма, а не обещание: она держится, пока ряды влезают, и уступает,
+   когда иначе пришлось бы листать.
+
+   Записано формулой, а не пикселями, чтобы то же правило подошло карточке
+   экскаватора у водителя: ширина колонки берётся у самой сетки (cqw — процент
+   её ширины), а не из числа, снятого с одного телефона. */
+/* Опора для cqw — РОДИТЕЛЬ сетки, а не сама сетка. Элемент не может измерять
+   сам себя: container-type делает его опорой для потомков, но не для
+   собственных правил. С опорой на самой сетке 100cqw считался от окна (392
+   вместо 370), и карточка выходила на восемь процентов выше заказанного —
+   поймано замером на телефоне, в браузере это выглядело правдоподобно. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
+    container-type: inline-size;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid {
+    --eo-truck-card-ratio: 1.25;
+    --eo-truck-col-w: calc((100cqw - 2 * var(--eo-truck-grid-gap-x)) / 3);
+    --eo-truck-row-ideal: calc(var(--eo-truck-col-w) * var(--eo-truck-card-ratio));
+}
+
+/* Потолок сетки: либо все ряды в желаемой пропорции, либо вся доступная
+   высота — что меньше. Ряды внутри делят этот потолок поровну, поэтому при
+   тесноте они ужимаются сами, а прокрутки не появляется никогда. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1 {
+    max-height: min(100%, var(--eo-truck-row-ideal)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 {
+    max-height: min(100%, calc(2 * var(--eo-truck-row-ideal) + var(--eo-truck-grid-gap-y))) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3 {
+    max-height: min(100%, calc(3 * var(--eo-truck-row-ideal) + 2 * var(--eo-truck-grid-gap-y))) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-many {
+    max-height: min(100%, calc(4 * var(--eo-truck-row-ideal) + 3 * var(--eo-truck-grid-gap-y))) !important;
+}
+
+/* Ряды всегда делят высоту сетки поровну — и при желаемой пропорции, и при
+   тесноте. Постоянная высота ряда, введённая вместе с плитками, здесь больше
+   не нужна: её работу делает потолок сетки. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-many {
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-self: start !important;
+    /* Высота обязана быть определённой, иначе доли (1fr) резолвить не от
+       чего и ряды разъезжаются по содержимому. Потолок выше уже ограничил
+       коробку желаемой пропорцией, а здесь ряды делят то, что получилось. */
+    height: 100% !important;
+}
+
+/* Номер самосвала уменьшается вместе с карточкой, а не только по ширине.
+   Пользователь на кадре с двенадцатью карточками: «мне не нравится что
+   название крупное а иконка самосвала совсем маленькая». Так и было: при
+   ужатии карточки рисунок сжимался вместе с высотой, а номер оставался 31 px —
+   подгонка по ширине трогает его только когда не влезает.
+
+   Две точки задал он сам по снимку: полная карточка — 31 px (как сейчас),
+   ужатая до 92 px — 14 px («вот такое соотношение мне нравится»). Между ними
+   ровная прямая, ниже 14 не опускаемся: это пол читаемости в кабине.
+
+   Высоту карточки CSS сам по себе не знает, поэтому карточка объявлена опорой
+   для своих потомков (container-type: size), и высота приходит в cqh. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
+    container-type: size;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > strong {
+    /* Две точки задал пользователь по снимкам: карточка 92 px → кегль 14,
+       полная 147 px → 31. Но cqh — это ВНУТРЕННЯЯ высота карточки, без её
+       полей (сверху 24.8, снизу 8.7), поэтому те же точки в единицах cqh это
+       58.5 и 113.5. Наклон прямой между ними 0.309.
+       Поймано замером: с точками по внешней высоте номер при девяти карточках
+       стоял на полу 14 вместо ожидаемых 24.5 — в браузере это выглядело
+       правдоподобно, потому что «мелкий шрифт в тесной карточке» и есть
+       ожидаемый вид. */
+    font-size: clamp(14px, calc(14px + (100cqh - 58.5px) * 0.309), 31px) !important;
+}
+
+/* Номер из одних цифр остаётся крупным всегда: «хотя если там будут только
+   цифры то они могут быть крупными». Две-три цифры и в ужатой карточке не
+   спорят с рисунком, а издали читаются лучше. Уступает такой номер только по
+   ширине — этим занимается подгонка, а не это правило. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-eo-number-plain="1"] > strong {
+    font-size: 31px !important;
 }
