@@ -717,7 +717,7 @@ test("manual context and confirmed timer survive fragment refresh", () => {
     assert.match(driverShiftSource, /DriverManualExcavatorWorkspace\.restoreProjection\(/);
 });
 
-test("отклонённая отметка ручного рейса не держит источник и выход навсегда", () => {
+test("отклонённая отметка ручного рейса разблокирует экран сама, без касаний", () => {
     // Боевой случай: машинист пересохранил забой без изменений (только
     // placement_updated_at сдвинулся), сервер отклонил driver.trip.loaded
     // конфликтом manual_work_context_changed. До этой правки currentTripProjection
@@ -801,20 +801,21 @@ test("отклонённая отметка ручного рейса не де�
 
     driverRuntime.renderProjection(workspace, [rejectedEvent], null);
 
-    // До нажатия «Понятно»: источник заблокирован, выход заблокирован,
-    // «Изменить точку» тоже — это и есть тот самый тупик из боевого инцидента.
-    assert.equal(source.disabled, true, "источник заблокирован сразу после отказа");
-    assert.equal(closeButton.disabled, true, "«Обычный режим» заблокирован сразу после отказа");
-    assert.equal(pointOpen.disabled, true, "«Изменить точку» заблокирована сразу после отказа");
+    // Сразу после отказа, БЕЗ единого касания: источник и «Обычный режим»
+    // уже разблокированы — держать их нечем, currentTripProjection пуст.
+    // «Изменить точку» остаётся недоступна — так и должно быть, активного
+    // рейса нет, это не регрессия. Сообщение об отказе показано.
+    assert.equal(source.disabled, false, "источник не заблокирован ни на миг");
+    assert.equal(closeButton.disabled, false, "«Обычный режим» не заблокирован ни на миг");
     assert.equal(ack.hidden, false, "кнопка «Понятно» показана");
     assert.match(result.textContent, /Отметьте погрузку заново\./);
 
     driverRuntime.dismissRejectedTripProjection(workspace);
 
-    // После «Понятно»: ни источник, ни выход больше не держит отклонённая
-    // запись — ровно то, чего не хватало на бою.
-    assert.equal(source.disabled, false, "источник разблокирован после «Понятно»");
-    assert.equal(closeButton.disabled, false, "«Обычный режим» разблокирован после «Понятно»");
+    // «Понятно» только прячет сообщение — блокировки, которую снимать,
+    // не было вовсе.
+    assert.equal(source.disabled, false, "источник остаётся разблокирован");
+    assert.equal(closeButton.disabled, false, "«Обычный режим» остаётся разблокирован");
     assert.equal(ack.hidden, true, "кнопка «Понятно» спрятана после нажатия");
     assert.equal(result.hidden, true, "сообщение об отказе убрано");
 });
