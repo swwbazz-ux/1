@@ -14,14 +14,41 @@ const SOURCE = fs.readFileSync(
  * вызовов правила вмещения. Настоящее правило живёт в общем модуле и проверено
  * его собственными тестами — здесь проверяется только связка.
  */
+const CARD_CLASS = "eo-dashboard-truck-card";
+
+/**
+ * Подпись на экране: номер в карточке лежит ПРЯМО в кнопке карточки, а подпись
+ * кнопки режима — внутри вложенного span. Цепочка предков хранится от ближнего
+ * к дальнему, как её видит браузер.
+ */
+function createLabel(text, ancestors) {
+    return {
+        textContent: text,
+        clientWidth: 102,
+        clientHeight: 32,
+        dataset: {},
+        ancestors: ancestors || [CARD_CLASS],
+    };
+}
+
+/**
+ * Маленький разборщик выборки: понимает ровно два вида, которые нас и
+ * различают, — прямого потомка карточки и любого вложенного. Нужен, чтобы тест
+ * ломался на самом ПРИЁМЕ, а не на записи строки: сверка строки с эталоном
+ * ничего не доказывает, её поправят вместе с кодом.
+ */
+function matchLabels(selector, labels) {
+    const direct = selector.indexOf(">") >= 0;
+    return labels.filter(function (label) {
+        return direct
+            ? label.ancestors[0] === CARD_CLASS
+            : label.ancestors.indexOf(CARD_CLASS) >= 0;
+    });
+}
+
 function createScreen(numbers) {
     const labels = numbers.map(function (text) {
-        return {
-            textContent: text,
-            clientWidth: 102,
-            clientHeight: 32,
-            dataset: {},
-        };
+        return createLabel(text);
     });
     const calls = [];
     const listeners = {};
@@ -33,8 +60,7 @@ function createScreen(numbers) {
             body: {},
             addEventListener() {},
             querySelectorAll(selector) {
-                assert.equal(selector, ".eo-dashboard-truck-card > strong");
-                return labels;
+                return matchLabels(selector, labels);
             },
         },
         EquipmentLabelFit: {
@@ -149,4 +175,38 @@ test("без общего модуля экран работает как ран
         vm.runInNewContext(SOURCE, {window: root, module: null});
     });
     assert.equal(Object.keys(labels[0].dataset).length, 0);
+});
+
+test("подпись кнопки режима с тем же классом карточки не подгоняется", () => {
+    // Класс карточки висит и на кнопках ручного режима водителя («ОБЫЧНЫЙ
+    // РЕЖИМ», «ИЗМЕНИТЬ ТОЧКУ»), и внутри каждой есть strong. На экране
+    // машиниста этих кнопок сегодня нет, но защита держалась только на этом.
+    // Проверка ломается на самом приёме: верни широкую выборку — и подгонка
+    // найдёт вторую подпись.
+    const labels = [
+        createLabel("Тест 1"),
+        createLabel("ОБЫЧНЫЙ РЕЖИМ", ["driver-manual-workspace__action-copy", CARD_CLASS]),
+    ];
+    const calls = [];
+    const root = {
+        document: {
+            readyState: "complete",
+            body: {},
+            addEventListener() {},
+            querySelectorAll(selector) { return matchLabels(selector, labels); },
+        },
+        EquipmentLabelFit: {
+            fit(element) {
+                calls.push(element.textContent);
+                return {deferred: false, fontPx: 14, wrapped: false, squeezed: 1};
+            },
+        },
+        MutationObserver: function () { this.observe = function () {}; },
+        addEventListener() {},
+        setTimeout(callback) { callback(); return 1; },
+    };
+
+    vm.runInNewContext(SOURCE, {window: root, module: null});
+
+    assert.equal(calls.join(","), "Тест 1");
 });
