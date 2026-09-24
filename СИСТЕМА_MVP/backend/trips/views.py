@@ -975,7 +975,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v260";
+const CACHE_NAME = "excavator-mobile-shell-v261";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -989,24 +989,24 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v260",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v260",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v260",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v260",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v260",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v260",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v260",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v261",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v261",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v261",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v261",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v261",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v261",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v261",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v260",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v260",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v260",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v261",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v261",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v261",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -4994,6 +4994,9 @@ def excavator_work_settings_from_session(request, current_excavator, form):
     }
 
 
+from core.dump_point_names import dump_name_size_class
+
+
 def build_excavator_dump_cards(
     points,
     *,
@@ -5022,6 +5025,7 @@ def build_excavator_dump_cards(
             'is_selected': is_selected,
             'is_persisted': include_all and str(point.id) in persisted_ids,
             'transport_distance_km': distance_values.get(str(point.id), ''),
+            'name_size_class': dump_name_size_class(str(point)),
         })
     return cards
 

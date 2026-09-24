@@ -389,7 +389,9 @@ test("Driver dump cards keep a three-column matrix and only show name plus trip 
     assert.match(dumpCard, /driver-manual-workspace__dump-card/);
     assert.match(dumpCard, /data-driver-manual-completed-count/);
     assert.match(dumpCard, /data-driver-manual-last-sent/);
-    assert.match(dumpCard, /\{% if not driver_manual_dashboard %\}\s*<span class="eo-dashboard-unload-label">Разгружено<\/span>/s);
+    // Подпись строки убрана у машиниста по решению пользователя: при шести
+    // точках она съедала строку, в которой должны быть номера самосвалов.
+    assert.doesNotMatch(dumpCard, /<span class="eo-dashboard-unload-label">/);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\.is-count-1\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\.is-count-2\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);

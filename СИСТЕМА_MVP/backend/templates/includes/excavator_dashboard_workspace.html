@@ -21,7 +21,7 @@
             </div>
         </div>
 
-        <div class="eo-truck-grid eo-dashboard-truck-grid{% if driver_manual_dashboard %} driver-manual-workspace__source-layout{% endif %}{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% else %} is-rows-3{% endif %}" aria-label="{% if driver_manual_dashboard %}Назначенный экскаватор и действия режима{% else %}Самосвалы{% endif %}">
+        <div class="eo-truck-grid eo-dashboard-truck-grid{% if driver_manual_dashboard %} driver-manual-workspace__source-layout{% endif %}{% if not truck_cards %} is-empty{% elif truck_cards|length > 9 %} is-many is-rows-4{% elif truck_cards|length > 6 %} is-rows-3{% elif truck_cards|length > 3 %} is-rows-2{% else %} is-rows-1{% endif %}" aria-label="{% if driver_manual_dashboard %}Назначенный экскаватор и действия режима{% else %}Самосвалы{% endif %}">
             {% if driver_manual_dashboard %}
                 <div class="driver-manual-workspace__action-row" data-driver-manual-action-row role="group" aria-label="Управление ручным режимом">
                     <button class="eo-truck-card eo-dashboard-truck-card driver-manual-workspace__action driver-manual-workspace__action--return" type="button" data-driver-manual-close aria-label="Вернуться в обычный режим с круглой кнопкой">
