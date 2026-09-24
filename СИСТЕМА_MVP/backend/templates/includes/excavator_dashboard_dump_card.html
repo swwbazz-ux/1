@@ -8,14 +8,12 @@
     <span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--complete" aria-hidden="true">ЗАВЕРШИТЬ <b>▼</b></span>
     {% endif %}
     {% if not driver_manual_dashboard %}
-    {% comment %}
-        Плитка несёт только название точки и число отправленных туда рейсов.
-        Номера ниже появляются, лишь пока самосвалы реально едут: прежняя
-        подпись строки и её заглушка занимали место, ничего не сообщая.
-    {% endcomment %}
+    <span class="eo-dashboard-unload-label">Разгружено</span>
     <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
         {% for truck in card.pending_trucks %}
             <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}"{% if truck.auto_hide_at and truck.auto_hide_kind == 'manual' %} data-eo-manual-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.auto_hide_at and truck.auto_hide_kind == 'free_bucket' %} data-eo-free-bucket-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.transition_hide_at %} data-eo-transfer-preview-id="{{ truck.transition_id }}" data-eo-transfer-preview-deadline="{{ truck.transition_hide_at|date:'c' }}"{% endif %}>{{ truck.number }}</b>
+        {% empty %}
+            <b class="is-muted">нет</b>
         {% endfor %}
     </span>
     {% endif %}

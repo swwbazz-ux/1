@@ -196,9 +196,7 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] {
     max-height: var(--eo-app-height, 100dvh) !important;
     max-width: none !important;
     padding-right: var(--eo-work-x) !important;
-    /* Зазор под нижней панелью равен боковому полю экрана: отдельная, более
-       крупная величина визуально отрывала точки разгрузки от подвала. */
-    padding-bottom: calc(var(--eo-fixed-nav-reserve) + var(--eo-work-x)) !important;
+    padding-bottom: calc(var(--eo-fixed-nav-reserve) + var(--eo-work-gap)) !important;
     padding-left: var(--eo-work-x) !important;
 }
 
@@ -269,7 +267,6 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     min-height: 0 !important;
     height: 100% !important;
     max-height: 100% !important;
-    --eo-truck-row-height: clamp(150px, 25dvh, 205px);
     gap: var(--eo-truck-grid-gap-y) var(--eo-truck-grid-gap-x) !important;
     position: relative !important;
     z-index: 1 !important;
@@ -278,34 +275,6 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 {
     grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
-}
-
-/* Ряды по числу карточек. Раньше здесь любое их количество сводилось к трём
-   рядам: один-два самосвала получали треть рабочей области, карточка садилась
-   в квадрат, подпись состояния наезжала на рисунок, а под ней оставалась
-   пустая полоса до точек разгрузки. Высота ряда ограничена сверху, иначе
-   единственный самосвал растянулся бы в узкую башню во весь экран. */
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-single,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-pair {
-    grid-template-rows: repeat(1, minmax(0, var(--eo-truck-row-height))) !important;
-    grid-auto-rows: minmax(0, var(--eo-truck-row-height)) !important;
-    align-content: start !important;
-}
-
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 {
-    grid-template-rows: repeat(2, minmax(0, var(--eo-truck-row-height))) !important;
-    grid-auto-rows: minmax(0, var(--eo-truck-row-height)) !important;
-    align-content: start !important;
-}
-
-/* Содержимое карточки держится вместе. Первый ряд был 1fr и на высокой
-   карточке забирал всю свободную высоту: между рисунком самосвала и номером
-   зияла дыра. Ряды идут по содержимому и центрируются как единый блок. */
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1 .eo-dashboard-truck-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 .eo-dashboard-truck-card {
-    grid-template-rows: auto auto auto !important;
-    align-content: center !important;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
