@@ -786,7 +786,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v132";
+const CACHE_NAME = "dispatcher-desktop-shell-v133";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -796,6 +796,7 @@ const CORE_ASSETS = [
   "/static/js/connection-indicators-v1.js?v=__STATIC_ASSET_RELEASE__",
   "/static/js/role-readonly.js",
   "/static/js/dispatcher-control-v1.js",
+  "/static/js/dispatcher-transport-v1.js",
   "/static/js/dispatcher-sounds-v1.js",
   "/static/css/dispatcher-control-v1.css",
   "/static/favicon.ico",

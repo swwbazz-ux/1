@@ -225,248 +225,29 @@ document.addEventListener("DOMContentLoaded", function () {
             img.src = dispatcherNeutralEquipmentIcon(equipmentType);
         }
     }
-    // 3. Mutations, offline queue and request transport.
-    var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
-    try {
-        // Очередь v1 не содержала версии назначения. Повторять такие команды
-        // после обновления опасно: они могли быть сформированы до более нового
-        // решения диспетчера.
-        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
-        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
-    } catch (error) {}
-    var dispatcherSyncQueueFlushing = false;
-    var dispatcherSyncFlushTimer = null;
-    var dispatcherSyncRequestTimeoutMs = 12000;
-    var dispatcherRefreshRequestTimeoutMs = 12000;
-    var dispatcherRealtimeConnected = true;
-    var dispatcherRealtimeLastSuccessAt = 0;
-    var dispatcherRealtimeLastReason = "";
-    function readDispatcherSyncQueue() {
-        try {
-            return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
-        } catch (error) {
-            return [];
-        }
-    }
-    function writeDispatcherSyncQueue(queue) {
-        try {
-            window.localStorage.setItem(dispatcherSyncQueueKey, JSON.stringify(queue || []));
-        } catch (error) {}
-        updateDispatcherSyncIndicator();
-    }
-    function getDispatcherSyncQueueState() {
-        var queue = readDispatcherSyncQueue();
-        var now = Date.now();
-        var oldestAgeMs = 0;
-        queue.forEach(function (item) {
-            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-            var age = createdAt ? Math.max(0, now - createdAt) : 0;
-            if (!oldestAgeMs || age > oldestAgeMs) oldestAgeMs = age;
-        });
-        return {
-            length: queue.length,
-            oldestAgeMs: oldestAgeMs,
-            isFlushing: dispatcherSyncQueueFlushing,
-            pendingCount: dispatcherSyncPendingCount
-        };
-    }
-    function updateDispatcherSyncIndicator() {
+    // 3. Transport integration and assignment-version helpers.
+    function updateDispatcherSyncIndicator(state) {
         var desktopBoard = document.querySelector(".dispatcher-board");
+        var currentState = state || dispatcherTransport.getDebugState();
         if (desktopBoard) {
-            desktopBoard.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
+            desktopBoard.classList.toggle("is-realtime-stale", !currentState.realtimeConnected);
         }
     }
-    function setDispatcherSyncPending(isPending) {
-        dispatcherSyncPendingCount = Math.max(0, dispatcherSyncPendingCount + (isPending ? 1 : -1));
-        updateDispatcherSyncIndicator();
+    if (typeof window.createDispatcherTransport !== "function") {
+        throw new Error("Dispatcher transport module is not loaded");
     }
-    function dispatcherRoleIsReadonly() {
-        return (
-            typeof window.isAppRoleReadonly === "function"
-            && window.isAppRoleReadonly()
-        );
-    }
-    function dispatcherInactiveRoleError() {
-        var error = new Error("Роль неактивна — доступен только просмотр");
-        error.isServerResponse = true;
-        error.code = "inactive_role";
-        return error;
-    }
-    function enqueueDispatcherSyncRequest(request, delayMs) {
-        if (dispatcherRoleIsReadonly()) {
-            return false;
-        }
-        var queue = readDispatcherSyncQueue();
-        var queuedRequest = Object.assign({
-            id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
-            createdAt: Date.now(),
-            attempts: 0
-        }, request || {});
-        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
-            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
-        }) : -1;
-        if (replaceIndex >= 0) {
-            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
-            queue[replaceIndex] = queuedRequest;
-        } else {
-            queue.push(queuedRequest);
-        }
-        writeDispatcherSyncQueue(queue);
-        scheduleDispatcherSyncFlush(delayMs);
-        return true;
-    }
-    function sendDispatcherSyncRequest(request) {
-        if (dispatcherRoleIsReadonly()) {
-            return Promise.reject(dispatcherInactiveRoleError());
-        }
-        var headers = { "X-CSRFToken": getCsrfToken() };
-        var body = null;
-        var controller = window.AbortController ? new AbortController() : null;
-        var timeoutId = null;
-        if (request.kind === "form") {
-            body = new FormData();
-            Object.keys(request.fields || {}).forEach(function (key) {
-                body.append(key, request.fields[key]);
-            });
-        } else {
-            headers["Content-Type"] = "application/json";
-            body = JSON.stringify(request.data || {});
-        }
-        if (controller) {
-            timeoutId = window.setTimeout(function () {
-                try {
-                    controller.abort();
-                } catch (error) {}
-            }, dispatcherSyncRequestTimeoutMs);
-        }
-        return fetch(request.url, {
-            method: "POST",
-            headers: headers,
-            body: body,
-            credentials: "same-origin",
-            cache: "no-store",
-            signal: controller ? controller.signal : undefined
-        }).then(function (response) {
-            if (!response.ok) {
-                return response.json().catch(function () { return {}; }).then(function (payload) {
-                    var error = new Error(payload.error || "Действие не выполнено.");
-                    error.isServerResponse = true;
-                    error.code = payload.code || "";
-                    error.conflict = Boolean(payload.conflict);
-                    error.status = response.status;
-                    throw error;
-                });
-            }
-            return response.json().catch(function () { return { ok: true }; });
-        }).finally(function () {
-            if (timeoutId) {
-                window.clearTimeout(timeoutId);
-            }
-        });
-    }
-    function dispatcherFetchWithTimeout(url, options, timeoutMs) {
-        var controller = window.AbortController ? new AbortController() : null;
-        var timeoutId = null;
-        var fetchOptions = Object.assign({}, options || {});
-        if (controller) {
-            fetchOptions.signal = controller.signal;
-            timeoutId = window.setTimeout(function () {
-                try {
-                    controller.abort();
-                } catch (error) {}
-            }, timeoutMs || dispatcherRefreshRequestTimeoutMs);
-        }
-        return fetch(url, fetchOptions).finally(function () {
-            if (timeoutId) {
-                window.clearTimeout(timeoutId);
-            }
-        });
-    }
-    function flushDispatcherSyncQueue() {
-        if (dispatcherRoleIsReadonly()) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        if (dispatcherSyncQueueFlushing) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        var queue = readDispatcherSyncQueue();
-        if (!queue.length) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        dispatcherSyncQueueFlushing = true;
-        setDispatcherSyncPending(true);
-        var request = queue[0];
-        request.attempts = (request.attempts || 0) + 1;
-        sendDispatcherSyncRequest(request).then(function () {
-            var freshQueue = readDispatcherSyncQueue();
-            if (freshQueue.length && freshQueue[0].id === request.id) {
-                freshQueue.shift();
-            } else {
-                freshQueue = freshQueue.filter(function (item) {
-                    return item.id !== request.id;
-                });
-            }
-            writeDispatcherSyncQueue(freshQueue);
-        }).catch(function (error) {
-            if (error && error.isServerResponse) {
-                var freshQueue = readDispatcherSyncQueue().filter(function (item) {
-                    return item.id !== request.id;
-                });
-                writeDispatcherSyncQueue(freshQueue);
-                showDispatcherDnDError(error);
-            } else {
-                var retryQueue = readDispatcherSyncQueue();
-                if (retryQueue.length && retryQueue[0].id === request.id) {
-                    retryQueue[0].attempts = request.attempts;
-                    writeDispatcherSyncQueue(retryQueue);
-                }
-            }
-        }).finally(function () {
-            dispatcherSyncQueueFlushing = false;
-            setDispatcherSyncPending(false);
-            if (readDispatcherSyncQueue().length) {
-                window.setTimeout(flushDispatcherSyncQueue, 1200);
-            }
-        });
-    }
-    function scheduleDispatcherSyncFlush(delayMs) {
-        updateDispatcherSyncIndicator();
-        if (dispatcherSyncFlushTimer) {
-            window.clearTimeout(dispatcherSyncFlushTimer);
-        }
-        dispatcherSyncFlushTimer = window.setTimeout(function () {
-            dispatcherSyncFlushTimer = null;
-            flushDispatcherSyncQueue();
-        }, typeof delayMs === "number" ? delayMs : 80);
-    }
-    function dispatcherPost(url, data, options) {
-        if (dispatcherRoleIsReadonly()) {
-            return Promise.reject(dispatcherInactiveRoleError());
-        }
-        var payload = Object.assign({}, data || {});
-        options = options || {};
-        if (!payload.client_action_id) {
-            payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-        }
-        var request = {
-            kind: "json",
-            url: url,
-            data: payload
-        };
-        setDispatcherSyncPending(true);
-        return sendDispatcherSyncRequest(request).catch(function (error) {
-            if (error && error.isServerResponse) throw error;
-            if (options.queueOnNetworkFailure === false) throw error;
-            enqueueDispatcherSyncRequest(request);
-            return { queued: true };
-        }).finally(function () {
-            setDispatcherSyncPending(false);
-        });
-    }
+    var dispatcherTransport = window.createDispatcherTransport({
+        getCsrfToken: getCsrfToken,
+        onServerError: showDispatcherDnDError,
+        onStateChange: updateDispatcherSyncIndicator
+    });
+    var dispatcherSyncQueueKey = dispatcherTransport.queueKey;
+    var readDispatcherSyncQueue = dispatcherTransport.readQueue;
+    var getDispatcherSyncQueueState = dispatcherTransport.getQueueState;
+    var scheduleDispatcherSyncFlush = dispatcherTransport.scheduleFlush;
+    var dispatcherFetchWithTimeout = dispatcherTransport.fetchWithTimeout;
+    var dispatcherRoleIsReadonly = dispatcherTransport.roleIsReadonly;
+    var dispatcherPost = dispatcherTransport.post;
     function haulAssignmentStateId(node) {
         var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
         return /^\d+$/.test(String(value || "")) ? String(value) : "0";
@@ -552,7 +333,8 @@ document.addEventListener("DOMContentLoaded", function () {
         scheduleDispatcherSyncFlush(0);
     }
     function isDispatcherSyncQueueBlockingRefresh() {
-        if (dispatcherSyncQueueFlushing || dispatcherSyncPendingCount > 0) {
+        var syncState = getDispatcherSyncQueueState();
+        if (syncState.isFlushing || syncState.pendingCount > 0) {
             return true;
         }
         var queue = readDispatcherSyncQueue();
@@ -2244,14 +2026,7 @@ document.addEventListener("DOMContentLoaded", function () {
     updateDispatcherSyncIndicator();
     window.addEventListener("online", scheduleDispatcherSyncFlush);
     window.addEventListener("operational-state-connection", function (event) {
-        var detail = event.detail || {};
-        dispatcherRealtimeConnected = detail.connected !== false;
-        dispatcherRealtimeLastReason = detail.reason || "";
-        if (dispatcherRealtimeConnected) {
-            dispatcherRealtimeLastSuccessAt = detail.lastSuccessAt || Date.now();
-            scheduleDispatcherSyncFlush(0);
-        }
-        updateDispatcherSyncIndicator();
+        dispatcherTransport.updateRealtimeConnection(event.detail || {});
     });
     window.addEventListener("storage", function (event) {
         if (event.key === dispatcherSyncQueueKey) updateDispatcherSyncIndicator();
@@ -2260,11 +2035,12 @@ document.addEventListener("DOMContentLoaded", function () {
     window.DispatcherSyncDebug = {
         queueKey: dispatcherSyncQueueKey,
         getState: function () {
+            var transportState = dispatcherTransport.getDebugState();
             return {
-                realtimeConnected: dispatcherRealtimeConnected,
-                realtimeLastSuccessAt: dispatcherRealtimeLastSuccessAt,
-                realtimeLastReason: dispatcherRealtimeLastReason,
-                syncQueue: getDispatcherSyncQueueState(),
+                realtimeConnected: transportState.realtimeConnected,
+                realtimeLastSuccessAt: transportState.realtimeLastSuccessAt,
+                realtimeLastReason: transportState.realtimeLastReason,
+                syncQueue: transportState.syncQueue,
                 appRealtime: window.AppRealtime && typeof window.AppRealtime.getDebugState === "function"
                     ? window.AppRealtime.getDebugState()
                     : null

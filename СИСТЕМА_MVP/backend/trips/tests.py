@@ -305,15 +305,21 @@ class DispatcherSharedShiftStartTests(TestCase):
 
     def test_dispatcher_truck_actions_use_local_dom_update_hook(self):
         response = self.client.get(reverse('dispatcher_control'))
-        dispatcher_script_path = (
+        dispatcher_static = (
             Path(__file__).resolve().parents[1]
             / 'static'
             / 'js'
-            / 'dispatcher-control-v1.js'
         )
-        dispatcher_script = dispatcher_script_path.read_text(encoding='utf-8')
+        dispatcher_script = '\n'.join(
+            (dispatcher_static / name).read_text(encoding='utf-8')
+            for name in (
+                'dispatcher-transport-v1.js',
+                'dispatcher-control-v1.js',
+            )
+        )
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
+        self.assertContains(response, 'js/dispatcher-transport-v1.js')
         self.assertContains(response, 'js/dispatcher-sounds-v1.js')
         self.assertContains(response, 'data-dispatcher-sound-toggle')
         self.assertContains(response, 'data-push-invite')
@@ -342,7 +348,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'return Array.isArray(events) && events.length > 0;',
             'markDispatcherLocalAssignmentApplied',
             'dispatcherIncomingRefreshQueueGraceMs',
-            'dispatcherSyncRequestTimeoutMs = 12000',
+            'DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000',
             'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
             'type: "assign"',
@@ -364,7 +370,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v132')
+        self.assertContains(response, 'dispatcher-desktop-shell-v133')
         self.assertContains(
             response,
             'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',

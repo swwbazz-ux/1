@@ -14,8 +14,17 @@ const DISPATCHER_RUNTIME = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
     "utf8"
 );
+const DISPATCHER_TRANSPORT = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-transport-v1.js"),
+    "utf8"
+);
 const SHARED_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
+    "utf8"
+);
+const TRIPS_VIEWS = fs.readFileSync(path.join(BACKEND, "trips", "views.py"), "utf8");
+const PRODUCTION_MANIFEST = fs.readFileSync(
+    path.resolve(BACKEND, "..", "..", ".github", "deploy", "production-files.txt"),
     "utf8"
 );
 
@@ -47,4 +56,24 @@ test("desktop runtime размечен стабильными функциона
     for (let section = 1; section <= 7; section += 1) {
         assert.match(DISPATCHER_RUNTIME, new RegExp(`// ${section}\\.`));
     }
+});
+
+test("transport загружается перед основным runtime и входит в PWA shell", () => {
+    const transportIndex = SHARED_TEMPLATE.indexOf("dispatcher-transport-v1.js");
+    const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
+
+    assert.ok(transportIndex >= 0, "transport script отсутствует в шаблоне");
+    assert.ok(controlIndex > transportIndex, "transport должен загрузиться до основного runtime");
+    assert.match(DISPATCHER_TRANSPORT, /global\.createDispatcherTransport = createDispatcherTransport;/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
+    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-transport-v1\.js"/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
+});
+
+test("offline queue физически отделена, но сохраняет production-контракт", () => {
+    assert.match(DISPATCHER_TRANSPORT, /mining-master-mobile-sync-queue-v3/);
+    assert.match(DISPATCHER_TRANSPORT, /DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000/);
+    assert.match(DISPATCHER_TRANSPORT, /payload\.client_action_id = "mm-"/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function sendDispatcherSyncRequest/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function enqueueDispatcherSyncRequest/);
 });

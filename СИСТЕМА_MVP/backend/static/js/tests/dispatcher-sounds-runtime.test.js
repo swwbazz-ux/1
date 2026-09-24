@@ -245,9 +245,10 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
         path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
         "utf8"
     );
-    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v132/);
+    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v133/);
+    assert.match(template, /dispatcher-transport-v1\.js[^\n]+dispatcher-desktop-shell-v133/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(views, /dispatcher-desktop-shell-v132/);
+    assert.match(views, /dispatcher-desktop-shell-v133/);
     assert.match(views, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(control, /new CustomEvent\("dispatcher-action-error"/);
     assert.match(css, /@media \(max-width: 1180px\)[\s\S]+?\.dispatcher-command-utility\s*\{[\s\S]+?grid-template-columns:\s*repeat\(5,/);
