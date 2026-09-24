@@ -314,6 +314,8 @@ class DispatcherSharedShiftStartTests(TestCase):
             (dispatcher_static / name).read_text(encoding='utf-8')
             for name in (
                 'dispatcher-transport-v1.js',
+                'dispatcher-detail-v1.js',
+                'dispatcher-board-v1.js',
                 'dispatcher-realtime-v1.js',
                 'dispatcher-control-v1.js',
             )
@@ -321,6 +323,8 @@ class DispatcherSharedShiftStartTests(TestCase):
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
         self.assertContains(response, 'js/dispatcher-transport-v1.js')
+        self.assertContains(response, 'js/dispatcher-detail-v1.js')
+        self.assertContains(response, 'js/dispatcher-board-v1.js')
         self.assertContains(response, 'js/dispatcher-realtime-v1.js')
         self.assertContains(response, 'js/dispatcher-sounds-v1.js')
         self.assertContains(response, 'data-dispatcher-sound-toggle')
@@ -372,7 +376,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v134')
+        self.assertContains(response, 'dispatcher-desktop-shell-v135')
         self.assertContains(
             response,
             'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',

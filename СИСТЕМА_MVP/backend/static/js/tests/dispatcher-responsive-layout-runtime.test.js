@@ -27,7 +27,7 @@ const TEMPLATE = fs.readFileSync(
     "utf8"
 );
 const SCRIPT = fs.readFileSync(
-    path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
+    path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
 );
 const CSS = fs.readFileSync(

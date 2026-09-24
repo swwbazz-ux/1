@@ -19,6 +19,8 @@
 СИСТЕМА_MVP/backend/static/js/dispatcher-hourly-grid-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-control-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-transport-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-detail-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-sounds-v1.js
 СИСТЕМА_MVP/backend/static/js/mobile-operational-sounds-v1.js

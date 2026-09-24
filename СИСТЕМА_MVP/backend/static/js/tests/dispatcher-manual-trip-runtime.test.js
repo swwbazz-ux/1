@@ -15,7 +15,7 @@ const test = require("node:test");
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
 const TEMPLATE = fs.readFileSync(path.join(BACKEND, "templates", "trips", "dispatcher_control.html"), "utf8");
 const CSS = fs.readFileSync(path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"), "utf8");
-const JS = fs.readFileSync(path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"), "utf8");
+const JS = fs.readFileSync(path.join(BACKEND, "static", "js", "dispatcher-detail-v1.js"), "utf8");
 const URLS = fs.readFileSync(path.join(BACKEND, "trips", "urls.py"), "utf8");
 
 const card = TEMPLATE.slice(

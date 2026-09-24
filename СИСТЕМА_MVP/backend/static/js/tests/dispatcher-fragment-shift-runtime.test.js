@@ -7,14 +7,11 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 
-const RUNTIME_SOURCE = fs.readFileSync(
-    path.resolve(
-        __dirname,
-        "..",
-        "dispatcher-control-v1.js"
-    ),
-    "utf8"
-);
+const RUNTIME_SOURCE = [
+    "dispatcher-control-v1.js",
+    "dispatcher-board-v1.js",
+    "dispatcher-detail-v1.js",
+].map((name) => fs.readFileSync(path.resolve(__dirname, "..", name), "utf8")).join("\n");
 const REALTIME_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
@@ -208,6 +205,7 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
     vm.runInNewContext(
         `
         var dispatcherShiftOpen = ${initialShiftOpen ? "true" : "false"};
+        function dispatcherShiftIsOpen() { return dispatcherShiftOpen; }
         var draggedTile = null;
         var board = null;
         var excavatorGarage = null;

@@ -18,6 +18,14 @@ const DISPATCHER_TRANSPORT = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-transport-v1.js"),
     "utf8"
 );
+const DISPATCHER_DETAIL = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-detail-v1.js"),
+    "utf8"
+);
+const DISPATCHER_BOARD = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
+    "utf8"
+);
 const DISPATCHER_REALTIME = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-realtime-v1.js"),
     "utf8"
@@ -33,6 +41,7 @@ const PRODUCTION_MANIFEST = fs.readFileSync(
 );
 
 test("desktop runtime содержит только контур Диспетчера", () => {
+    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
     for (const mobileContract of [
         "function bindMiningMasterMobileScreens()",
         "function refreshMobileBoardFromServer(options)",
@@ -41,7 +50,7 @@ test("desktop runtime содержит только контур Диспетч�
         "miningMasterRealtimeHardLagLimit",
     ]) {
         assert.equal(
-            DISPATCHER_RUNTIME.includes(mobileContract),
+            desktopModules.includes(mobileContract),
             false,
             `мобильный контракт не должен попадать в desktop runtime: ${mobileContract}`
         );
@@ -56,28 +65,43 @@ test("мобильный контур Горного мастера сохран
     assert.match(SHARED_TEMPLATE, /window\.MiningMasterPwaUpdates = \{/);
 });
 
-test("desktop runtime размечен стабильными функциональными секциями", () => {
-    for (let section = 1; section <= 7; section += 1) {
-        assert.match(DISPATCHER_RUNTIME, new RegExp(`// ${section}\\.`));
-    }
+test("карточка и desktop-доска физически отделены от оркестратора", () => {
+    assert.match(DISPATCHER_DETAIL, /function createDispatcherDetail\(options\)/);
+    assert.match(DISPATCHER_DETAIL, /global\.createDispatcherDetail = createDispatcherDetail;/);
+    assert.match(DISPATCHER_DETAIL, /function openEquipmentCard\(cardId, trigger\)/);
+    assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
+    assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
+    assert.match(DISPATCHER_BOARD, /function bindDispatcherDesktopInteractions\(\)/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function openEquipmentCard\(/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function bindDispatcherDesktopInteractions\(/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherDetail\(\{/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoard\(\{/);
 });
 
 test("transport загружается перед основным runtime и входит в PWA shell", () => {
     const transportIndex = SHARED_TEMPLATE.indexOf("dispatcher-transport-v1.js");
+    const detailIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-v1.js");
+    const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
 
     assert.ok(transportIndex >= 0, "transport script отсутствует в шаблоне");
     assert.ok(controlIndex > transportIndex, "transport должен загрузиться до основного runtime");
     assert.match(DISPATCHER_TRANSPORT, /global\.createDispatcherTransport = createDispatcherTransport;/);
-    assert.ok(realtimeIndex > transportIndex, "realtime must load after transport");
+    assert.ok(detailIndex > transportIndex, "detail must load after transport");
+    assert.ok(boardIndex > detailIndex, "board must load after detail");
+    assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherRealtime\(\{/);
     assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-transport-v1\.js"/);
+    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-detail-v1\.js"/);
+    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
 
@@ -96,6 +120,6 @@ test("realtime reconciliation is physically separated behind a narrow callback b
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function reconcileDispatcherDesktopBoard\(/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function refreshDispatcherDesktopBoardFromServer\(/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function applyDispatcherOperationalStateRefresh\(/);
-    assert.match(DISPATCHER_RUNTIME, /bindBoardInteractions: bindDispatcherDesktopInteractions/);
-    assert.match(DISPATCHER_RUNTIME, /refreshBoardIntegrity: refreshDesktopBoardIntegrity/);
+    assert.match(DISPATCHER_RUNTIME, /bindBoardInteractions: dispatcherBoard\.bindInteractions/);
+    assert.match(DISPATCHER_RUNTIME, /refreshBoardIntegrity: dispatcherBoard\.refreshIntegrity/);
 });
