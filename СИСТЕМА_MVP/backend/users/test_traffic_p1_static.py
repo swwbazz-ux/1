@@ -97,6 +97,7 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     )
                     self.assertIn('/static/css/dispatcher-control-v1.css', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-control-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-realtime-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-sounds-v1.js', core_assets.group(1))
                 else:
                     self.assertEqual(

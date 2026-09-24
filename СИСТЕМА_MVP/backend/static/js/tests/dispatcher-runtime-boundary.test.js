@@ -18,6 +18,10 @@ const DISPATCHER_TRANSPORT = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-transport-v1.js"),
     "utf8"
 );
+const DISPATCHER_REALTIME = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-realtime-v1.js"),
+    "utf8"
+);
 const SHARED_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
@@ -60,14 +64,21 @@ test("desktop runtime размечен стабильными функциона
 
 test("transport загружается перед основным runtime и входит в PWA shell", () => {
     const transportIndex = SHARED_TEMPLATE.indexOf("dispatcher-transport-v1.js");
+    const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
 
     assert.ok(transportIndex >= 0, "transport script отсутствует в шаблоне");
     assert.ok(controlIndex > transportIndex, "transport должен загрузиться до основного runtime");
     assert.match(DISPATCHER_TRANSPORT, /global\.createDispatcherTransport = createDispatcherTransport;/);
+    assert.ok(realtimeIndex > transportIndex, "realtime must load after transport");
+    assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
+    assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherRealtime\(\{/);
     assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-transport-v1\.js"/);
+    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
 
 test("offline queue физически отделена, но сохраняет production-контракт", () => {
@@ -76,4 +87,15 @@ test("offline queue физически отделена, но сохраняет
     assert.match(DISPATCHER_TRANSPORT, /payload\.client_action_id = "mm-"/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function sendDispatcherSyncRequest/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function enqueueDispatcherSyncRequest/);
+});
+
+test("realtime reconciliation is physically separated behind a narrow callback boundary", () => {
+    assert.match(DISPATCHER_REALTIME, /function reconcileDispatcherDesktopBoard\(currentBoard, freshBoard\)/);
+    assert.match(DISPATCHER_REALTIME, /function refreshDispatcherDesktopBoardFromServer\(refreshOptions\)/);
+    assert.match(DISPATCHER_REALTIME, /function applyDispatcherOperationalStateRefresh\(context\)/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function reconcileDispatcherDesktopBoard\(/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function refreshDispatcherDesktopBoardFromServer\(/);
+    assert.doesNotMatch(DISPATCHER_RUNTIME, /function applyDispatcherOperationalStateRefresh\(/);
+    assert.match(DISPATCHER_RUNTIME, /bindBoardInteractions: bindDispatcherDesktopInteractions/);
+    assert.match(DISPATCHER_RUNTIME, /refreshBoardIntegrity: refreshDesktopBoardIntegrity/);
 });

@@ -15,6 +15,10 @@ const RUNTIME_SOURCE = fs.readFileSync(
     ),
     "utf8"
 );
+const REALTIME_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
+    "utf8"
+);
 const TEMPLATE_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "..", "..", "templates", "trips", "dispatcher_control.html"),
     "utf8"
@@ -440,15 +444,15 @@ test("ordinary dispatcher error never schedules assignment reconciliation", () =
 
 test("fragment refresh synchronizes shift runtime before replacement and rebind", () => {
     const refreshSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function refreshDispatcherDesktopBoardFromServer(options)",
+        REALTIME_SOURCE,
+        "function refreshDispatcherDesktopBoardFromServer(refreshOptions)",
         "Dispatcher fragment refresh"
     );
     const parseIndex = refreshSource.indexOf("AppOperationalFragment.parseRoot");
-    const syncIndex = refreshSource.indexOf("syncDispatcherShiftRuntime(freshBoard)");
+    const syncIndex = refreshSource.indexOf("options.syncShiftRuntime(freshBoard)");
     const reconcileIndex = refreshSource.indexOf("reconcileDispatcherDesktopBoard(currentBoard, freshBoard)");
     const fallbackIndex = refreshSource.indexOf("currentBoard.replaceWith(freshBoard)");
-    const bindIndex = refreshSource.indexOf("bindDispatcherDesktopInteractions()");
+    const bindIndex = refreshSource.indexOf("options.bindBoardInteractions()");
 
     assert.ok(parseIndex >= 0);
     assert.ok(syncIndex > parseIndex);
@@ -463,7 +467,7 @@ test("fragment refresh synchronizes shift runtime before replacement and rebind"
 
 test("dispatcher fragment reconciliation is keyed by equipment and complex identity", () => {
     const reconcileSource = extractBraceBlock(
-        RUNTIME_SOURCE,
+        REALTIME_SOURCE,
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
         "Dispatcher keyed board reconciliation"
     );
@@ -489,7 +493,7 @@ test("one changed truck replaces only that keyed tile", () => {
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
     ];
     const helpers = helperNames.map((signature) => (
-        extractBraceBlock(RUNTIME_SOURCE, signature, signature)
+        extractBraceBlock(REALTIME_SOURCE, signature, signature)
     )).join("\n");
     function node(markup, dataset = {}) {
         return {

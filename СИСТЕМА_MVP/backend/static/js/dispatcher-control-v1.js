@@ -242,10 +242,7 @@ document.addEventListener("DOMContentLoaded", function () {
         onStateChange: updateDispatcherSyncIndicator
     });
     var dispatcherSyncQueueKey = dispatcherTransport.queueKey;
-    var readDispatcherSyncQueue = dispatcherTransport.readQueue;
-    var getDispatcherSyncQueueState = dispatcherTransport.getQueueState;
     var scheduleDispatcherSyncFlush = dispatcherTransport.scheduleFlush;
-    var dispatcherFetchWithTimeout = dispatcherTransport.fetchWithTimeout;
     var dispatcherRoleIsReadonly = dispatcherTransport.roleIsReadonly;
     var dispatcherPost = dispatcherTransport.post;
     function haulAssignmentStateId(node) {
@@ -294,345 +291,39 @@ document.addEventListener("DOMContentLoaded", function () {
             window.location.reload();
         }, 80);
     }
-    // 4. Realtime fragment reconciliation.
-    var dispatcherRealtimeStorageKey = "operational-state-version";
-    var dispatcherRealtimeLastVersion = readRenderedOperationalStateVersion() || readDispatcherRealtimeVersion();
-    function readRenderedOperationalStateVersion() {
-        var parsed = parseInt(document.body ? document.body.dataset.operationalStateVersion || "0" : "0", 10);
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    // 4. Realtime fragment reconciliation integration.
+    if (typeof window.createDispatcherRealtime !== "function") {
+        throw new Error("Dispatcher realtime module is not loaded");
     }
-    function readDispatcherRealtimeVersion() {
-        try {
-            var raw = window.sessionStorage.getItem(dispatcherRealtimeStorageKey);
-            var parsed = parseInt(raw || "0", 10);
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-        } catch (error) {
-            return 0;
-        }
-    }
-    function storeDispatcherRealtimeVersion(version) {
-        var parsed = parseInt(version || "0", 10);
-        if (!Number.isFinite(parsed) || parsed <= 0) return;
-        dispatcherRealtimeLastVersion = parsed;
-        if (document.body) {
-            document.body.dataset.operationalStateVersion = String(parsed);
-        }
-        try {
-            window.sessionStorage.setItem(dispatcherRealtimeStorageKey, String(parsed));
-        } catch (error) {}
-    }
-    var dispatcherRealtimeHardLagLimit = 150;
-    var dispatcherLocalAssignmentAppliedUntil = 0;
-    var dispatcherIncomingRefreshQueueGraceMs = 15000;
-    var dispatcherSyncQueueWakeThrottleMs = 1500;
-    var dispatcherLastSyncQueueWakeAt = 0;
-    function wakeDispatcherSyncQueueForRefresh() {
-        var now = Date.now();
-        if (now - dispatcherLastSyncQueueWakeAt < dispatcherSyncQueueWakeThrottleMs) return;
-        dispatcherLastSyncQueueWakeAt = now;
-        scheduleDispatcherSyncFlush(0);
-    }
-    function isDispatcherSyncQueueBlockingRefresh() {
-        var syncState = getDispatcherSyncQueueState();
-        if (syncState.isFlushing || syncState.pendingCount > 0) {
-            return true;
-        }
-        var queue = readDispatcherSyncQueue();
-        if (!queue.length) {
-            return false;
-        }
-        wakeDispatcherSyncQueueForRefresh();
-        if (navigator && navigator.onLine === false) {
-            return true;
-        }
-        var now = Date.now();
-        return queue.some(function (item) {
-            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-            return !createdAt || now - createdAt < dispatcherIncomingRefreshQueueGraceMs;
-        });
-    }
-    function isElementRendered(node) {
-        if (!node) return false;
-        var style = window.getComputedStyle(node);
-        if (!style || style.display === "none" || style.visibility === "hidden") return false;
-        return node.getClientRects().length > 0;
-    }
-    function isDispatcherDesktopPage() {
-        return isElementRendered(document.querySelector(".dispatcher-board"));
-    }
-    function markDispatcherLocalAssignmentApplied() {
-        dispatcherLocalAssignmentAppliedUntil = Date.now() + 8000;
-    }
-    function hasDispatcherRelevantEvents(events) {
-        return Array.isArray(events) && events.length > 0;
-    }
-    function canTrustLocalDispatcherAssignmentEvents(events) {
-        if (!Array.isArray(events) || !events.length) return false;
-        if (Date.now() > dispatcherLocalAssignmentAppliedUntil) return false;
-        return events.every(function (event) {
-            return event && event.type === "assignment_changed";
-        });
-    }
-    function isDispatcherOperationalRefreshUnsafe() {
-        if (!isDispatcherDesktopPage()) return false;
-        var active = document.activeElement;
-        var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
-        if (active && (active.isContentEditable || activeTag === "input" || activeTag === "textarea" || activeTag === "select")) {
-            return true;
-        }
-        if (isDispatcherSyncQueueBlockingRefresh()) {
-            return true;
-        }
-        if (document.body.classList.contains("modal-open")) {
-            return true;
-        }
-        if (document.querySelector(".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), .mm-mobile-update-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden])")) {
-            return true;
-        }
-        if (document.querySelector(".dispatcher-dragging, .dispatcher-drop-target, .is-dragging")) {
-            return true;
-        }
-        return false;
-    }
-    function captureDispatcherDesktopState(currentBoard) {
-        var selectors = [
-            ".dispatcher-left",
-            ".dispatcher-excavators",
-            ".dispatcher-complexes",
-            ".dispatcher-zone-grid",
-            ".dispatcher-right",
-            ".dispatcher-trucks"
-        ];
-        var state = {
-            scrollX: window.scrollX || 0,
-            scrollY: window.scrollY || 0,
-            scrolls: {},
-            activeDetailCardId: "",
-            detailScrollTop: 0
-        };
-        selectors.forEach(function (selector) {
-            var node = currentBoard ? currentBoard.querySelector(selector) : document.querySelector(selector);
-            if (!node) return;
-            state.scrolls[selector] = {
-                top: node.scrollTop || 0,
-                left: node.scrollLeft || 0
-            };
-        });
-        if (detailLayer && !detailLayer.hidden) {
-            state.activeDetailCardId = detailLayer.dataset.gdActiveCardId || "";
-            var panel = detailLayer.querySelector(".mm-equipment-detail-panel");
-            state.detailScrollTop = panel ? panel.scrollTop || 0 : 0;
-        }
-        return state;
-    }
-    function restoreDispatcherDesktopState(freshBoard, state) {
-        if (!state) return;
-        Object.keys(state.scrolls || {}).forEach(function (selector) {
-            var node = freshBoard ? freshBoard.querySelector(selector) : document.querySelector(selector);
-            var saved = state.scrolls[selector];
-            if (!node || !saved) return;
-            node.scrollTop = saved.top || 0;
-            node.scrollLeft = saved.left || 0;
-        });
-        window.scrollTo(state.scrollX || 0, state.scrollY || 0);
-        if (state.activeDetailCardId && equipmentCards[String(state.activeDetailCardId || "")]) {
-            openEquipmentCard(state.activeDetailCardId);
-            var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
-            if (panel) panel.scrollTop = state.detailScrollTop || 0;
-        }
-    }
-    function dispatcherNodeMarkup(node) {
-        return node && typeof node.outerHTML === "string" ? node.outerHTML : "";
-    }
-    function dispatcherMarkupFingerprint(markup) {
-        var value = String(markup || "");
-        var hash = 2166136261;
-        for (var index = 0; index < value.length; index += 1) {
-            hash ^= value.charCodeAt(index);
-            hash = Math.imul(hash, 16777619);
-        }
-        return (hash >>> 0).toString(16) + ":" + value.length;
-    }
-    function seedDispatcherServerFingerprint(node) {
-        if (!node) return "";
-        if (!node.__dispatcherServerFingerprint) {
-            node.__dispatcherServerFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(node));
-        }
-        return node.__dispatcherServerFingerprint;
-    }
-    function seedDispatcherBoardFingerprints(boardNode) {
-        if (!boardNode) return;
-        boardNode.querySelectorAll(
-            ".dispatcher-equipment-tile, .dispatcher-complex-card[data-zone-id], .dispatcher-truck-tile[data-equipment-id]"
-        ).forEach(seedDispatcherServerFingerprint);
-    }
-    function dispatcherServerMarkupMatches(currentNode, freshNode) {
-        var currentFingerprint = seedDispatcherServerFingerprint(currentNode);
-        var freshFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(freshNode));
-        freshNode.__dispatcherServerFingerprint = freshFingerprint;
-        return currentFingerprint === freshFingerprint;
-    }
-    function syncDispatcherNodeAttributes(currentNode, freshNode) {
-        if (!currentNode || !freshNode) return false;
-        Array.prototype.slice.call(currentNode.attributes || []).forEach(function (attribute) {
-            if (!freshNode.hasAttribute(attribute.name)) {
-                currentNode.removeAttribute(attribute.name);
+    var dispatcherRealtime = window.createDispatcherRealtime({
+        transport: dispatcherTransport,
+        syncShiftRuntime: syncDispatcherShiftRuntime,
+        getEquipmentCards: function () {
+            return equipmentCards;
+        },
+        setEquipmentCards: function (freshCards) {
+            if (!equipmentCardsNode) return;
+            equipmentCardsNode.textContent = JSON.stringify(freshCards);
+            try {
+                equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
+            } catch (error) {
+                equipmentCards = {};
             }
-        });
-        Array.prototype.slice.call(freshNode.attributes || []).forEach(function (attribute) {
-            currentNode.setAttribute(attribute.name, attribute.value);
-        });
-        return true;
-    }
-    function dispatcherItemKey(node, keyName, index) {
-        if (!node || !node.dataset) return "__position:" + index;
-        return String(node.dataset[keyName] || "__position:" + index);
-    }
-    function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition) {
-        var currentRegion = currentBoard.querySelector(definition.region);
-        var freshRegion = freshBoard.querySelector(definition.region);
-        if (!currentRegion || !freshRegion) return false;
-        var currentItems = Array.prototype.slice.call(currentRegion.querySelectorAll(definition.items));
-        var freshItems = Array.prototype.slice.call(freshRegion.querySelectorAll(definition.items));
-        var currentKeys = currentItems.map(function (node, index) {
-            return dispatcherItemKey(node, definition.key, index);
-        });
-        var freshKeys = freshItems.map(function (node, index) {
-            return dispatcherItemKey(node, definition.key, index);
-        });
-        var keysMatch = currentKeys.length === freshKeys.length
-            && currentKeys.every(function (key, index) {
-                return key === freshKeys[index];
-            });
-        if (!keysMatch) {
-            seedDispatcherBoardFingerprints(freshRegion);
-            currentRegion.replaceWith(freshRegion);
-            return true;
-        }
-        currentItems.forEach(function (currentItem, index) {
-            var freshItem = freshItems[index];
-            if (!dispatcherServerMarkupMatches(currentItem, freshItem)) {
-                currentItem.replaceWith(freshItem);
-            }
-        });
-        syncDispatcherNodeAttributes(currentRegion, freshRegion);
-        return true;
-    }
-    function reconcileDispatcherDesktopBoard(currentBoard, freshBoard) {
-        if (!currentBoard || !freshBoard) return null;
-        var regions = [
-            {
-                region: ".dispatcher-excavators",
-                items: ".dispatcher-equipment-tile",
-                key: "equipmentId"
-            },
-            {
-                region: ".dispatcher-zone-grid",
-                items: ".dispatcher-complex-card[data-zone-id]",
-                key: "zoneId"
-            },
-            {
-                region: ".dispatcher-trucks",
-                items: ".dispatcher-truck-tile[data-equipment-id]",
-                key: "equipmentId"
-            }
-        ];
-        var currentTopbar = currentBoard.querySelector(".dispatcher-topbar");
-        var freshTopbar = freshBoard.querySelector(".dispatcher-topbar");
-        var completeContract = currentTopbar && freshTopbar && regions.every(function (definition) {
-            return currentBoard.querySelector(definition.region)
-                && freshBoard.querySelector(definition.region);
-        });
-        if (!completeContract) return null;
-        var reconciled = regions.every(function (definition) {
-            return reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition);
-        });
-        if (!reconciled) return null;
-        syncDispatcherNodeAttributes(currentBoard, freshBoard);
-        return currentBoard;
-    }
-    function refreshDispatcherDesktopBoardFromServer(options) {
-        options = options || {};
-        if (!isDispatcherDesktopPage()) return Promise.resolve(false);
-        var currentBoard = document.querySelector(".dispatcher-board");
-        var desktopState = captureDispatcherDesktopState(currentBoard);
-        if (!window.AppOperationalFragment) return Promise.resolve(false);
-        return window.AppOperationalFragment.request(
-            "dispatcher",
-            Number(options.version || 0)
-        ).then(function (payload) {
-            if (isDispatcherOperationalRefreshUnsafe()) return false;
-            var freshBoard = window.AppOperationalFragment.parseRoot(
-                payload.html,
-                ".dispatcher-board"
-            );
-            currentBoard = document.querySelector(".dispatcher-board");
-            if (!freshBoard || !currentBoard) return false;
-            syncDispatcherShiftRuntime(freshBoard);
-            if (payload.equipment_cards && equipmentCardsNode) {
-                equipmentCardsNode.textContent = JSON.stringify(payload.equipment_cards);
-                try {
-                    equipmentCards = JSON.parse(equipmentCardsNode.textContent || "{}");
-                } catch (error) {
-                    equipmentCards = {};
-                }
-            }
-            var refreshedBoard = options.forceFullBoard
-                ? null
-                : reconcileDispatcherDesktopBoard(currentBoard, freshBoard);
-            if (!refreshedBoard) {
-                seedDispatcherBoardFingerprints(freshBoard);
-                currentBoard.replaceWith(freshBoard);
-                refreshedBoard = freshBoard;
-            }
-            bindDispatcherDesktopInteractions();
-            if (typeof window.initAppConfirmForms === "function") {
-                window.initAppConfirmForms();
-            }
-            if (typeof window.initDispatcherThemeControls === "function") {
-                window.initDispatcherThemeControls();
-            }
-            if (typeof window.initDispatcherRadialClocks === "function") {
-                window.initDispatcherRadialClocks();
-            }
-            restoreDispatcherDesktopState(refreshedBoard, desktopState);
-            refreshDesktopBoardIntegrity();
-            updateDispatcherSyncIndicator();
-            return true;
-        });
-    }
-    function applyDispatcherOperationalStateRefresh(context) {
-        if (isDispatcherOperationalRefreshUnsafe()) {
-            return Promise.resolve({ deferred: true, reason: "dispatcher_busy" });
-        }
-        var targetVersion = context && context.version;
-        var events = context && context.events;
-        var currentStoredVersion = dispatcherRealtimeLastVersion || readDispatcherRealtimeVersion();
-        var versionGap = targetVersion && currentStoredVersion ? targetVersion - currentStoredVersion : 0;
-        if (context && context.eventsTruncated || versionGap > dispatcherRealtimeHardLagLimit) {
-            return refreshDispatcherDesktopBoardFromServer({ version: targetVersion, forceFullBoard: true }).then(function (applied) {
-                if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
-                storeDispatcherRealtimeVersion(targetVersion);
-                return { applied: true };
-            }).catch(function () {
-                return { deferred: true, reason: "dispatcher_refresh_error" };
-            });
-        }
-        if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
-            storeDispatcherRealtimeVersion(targetVersion);
-            return Promise.resolve({ applied: true });
-        }
-        return refreshDispatcherDesktopBoardFromServer({ version: targetVersion }).then(function (applied) {
-            if (!applied) return { deferred: true, reason: "dispatcher_refresh_failed" };
-            storeDispatcherRealtimeVersion(targetVersion);
-            return { applied: true };
-        }).catch(function () {
-            return { deferred: true, reason: "dispatcher_refresh_error" };
-        });
-    }
+        },
+        getDetailLayer: function () {
+            return detailLayer;
+        },
+        openEquipmentCard: openEquipmentCard,
+        bindBoardInteractions: bindDispatcherDesktopInteractions,
+        refreshBoardIntegrity: refreshDesktopBoardIntegrity,
+        updateSyncIndicator: updateDispatcherSyncIndicator
+    });
+    var markDispatcherLocalAssignmentApplied = dispatcherRealtime.markLocalAssignmentApplied;
+    var isDispatcherOperationalRefreshUnsafe = dispatcherRealtime.isOperationalRefreshUnsafe;
+    var refreshDispatcherDesktopBoardFromServer = dispatcherRealtime.refreshBoardFromServer;
+    var seedDispatcherBoardFingerprints = dispatcherRealtime.seedBoardFingerprints;
     window.applyOperationalStateRefresh = function (context) {
-        if (!isDispatcherDesktopPage()) return false;
-        return applyDispatcherOperationalStateRefresh(context);
+        return dispatcherRealtime.applyOperationalStateRefresh(context);
     };
     var dispatcherNotice = document.querySelector("[data-dispatcher-notice]");
     var dispatcherNoticeMessage = document.querySelector("[data-dispatcher-notice-message]");

@@ -314,12 +314,14 @@ class DispatcherSharedShiftStartTests(TestCase):
             (dispatcher_static / name).read_text(encoding='utf-8')
             for name in (
                 'dispatcher-transport-v1.js',
+                'dispatcher-realtime-v1.js',
                 'dispatcher-control-v1.js',
             )
         )
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
         self.assertContains(response, 'js/dispatcher-transport-v1.js')
+        self.assertContains(response, 'js/dispatcher-realtime-v1.js')
         self.assertContains(response, 'js/dispatcher-sounds-v1.js')
         self.assertContains(response, 'data-dispatcher-sound-toggle')
         self.assertContains(response, 'data-push-invite')
@@ -340,14 +342,14 @@ class DispatcherSharedShiftStartTests(TestCase):
             'function applyDispatcherOperationalStateRefresh',
             'function refreshDispatcherDesktopBoardFromServer',
             'bindDispatcherDesktopInteractions',
-            'window.initAppConfirmForms',
-            'window.initDispatcherThemeControls',
-            'window.initDispatcherRadialClocks',
+            'hostWindow.initAppConfirmForms',
+            'hostWindow.initDispatcherThemeControls',
+            'hostWindow.initDispatcherRadialClocks',
             'eventsTruncated',
             'function hasDispatcherRelevantEvents',
             'return Array.isArray(events) && events.length > 0;',
             'markDispatcherLocalAssignmentApplied',
-            'dispatcherIncomingRefreshQueueGraceMs',
+            'incomingRefreshQueueGraceMs',
             'DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000',
             'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
@@ -370,7 +372,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v133')
+        self.assertContains(response, 'dispatcher-desktop-shell-v134')
         self.assertContains(
             response,
             'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',
