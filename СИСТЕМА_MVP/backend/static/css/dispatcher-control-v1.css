@@ -2344,7 +2344,6 @@ th {
 
 .dispatcher-topbar {
     grid-column: 1 / -1;
-    display: grid;
     grid-template-columns: minmax(260px, 1.45fr) minmax(96px, .52fr) minmax(94px, .5fr) minmax(210px, 1.16fr) minmax(94px, .5fr) minmax(136px, .74fr) minmax(142px, .78fr) minmax(98px, .52fr) minmax(98px, .52fr) minmax(66px, .36fr) minmax(76px, .42fr);
     align-items: stretch;
     background: var(--gd-top);
@@ -2442,8 +2441,6 @@ th {
     width: 30px;
     height: 18px;
     min-height: 0;
-    margin: 0;
-    padding: 0;
     border: 1px solid var(--gd-line);
     border-radius: 3px;
     background: var(--gd-panel-soft);
@@ -2452,7 +2449,6 @@ th {
     font-size: 9px;
     font-weight: 900;
     line-height: 1;
-    cursor: pointer;
 }
 
 .dispatcher-clock strong {
@@ -2762,9 +2758,7 @@ th {
 .balance-minus { color: var(--gd-red); }
 
 .dispatcher-complexes {
-    grid-column: 2;
     grid-row: 2 / 4;
-    display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-rows: repeat(2, minmax(0, 1fr));
     gap: 10px;
@@ -2780,7 +2774,6 @@ th {
     display: grid;
     grid-template-columns: minmax(72px, .72fr) minmax(112px, .92fr) minmax(94px, .78fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 8px;
     min-width: 0;
     padding: clamp(14px, 1vw, 20px) clamp(14px, 1vw, 22px) clamp(46px, 4.7vh, 58px);
     border: 2px solid var(--gd-green);
@@ -3053,7 +3046,6 @@ th {
 }
 
 .dispatcher-complex-card {
-    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto auto;
     gap: clamp(8px, 1vh, 12px);
     padding: clamp(14px, 1vw, 18px) clamp(14px, 1vw, 18px) clamp(38px, 4.6vh, 46px);
@@ -3233,7 +3225,6 @@ th {
 .balance-zero { color: var(--gd-ink); }
 
 .dispatcher-right {
-    grid-column: 3;
     grid-row: 2 / 4;
     display: grid;
     grid-template-rows: 300px 162px;
