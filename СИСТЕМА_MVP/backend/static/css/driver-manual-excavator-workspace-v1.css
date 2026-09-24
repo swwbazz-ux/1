@@ -959,3 +959,46 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dum
         box-shadow: inset 0 0 0 2px rgba(255, 227, 79, .78), 0 0 18px rgba(255, 216, 33, .38) !important;
     }
 }
+
+/* Плитка точки разгрузки 24.09.2026: на четырёх точках сетка давала 3+1, и
+   одинокая четвёртая плитка выходила втрое уже остальных. В такой ширине
+   кружок со счётчиком отнимал место у названия, а название ломалось посреди
+   слова — «Подсыпк / а». Три правки ниже убирают причину, а не следствие. */
+
+/* Четыре точки раскладываются 2x2: все плитки одной ширины, лишней узкой нет. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell]:not(.is-truck-drag-active) .eo-dashboard-unload-grid.is-count-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+/* Счётчик рейсов уходит в угол и перестаёт отнимать ширину у названия:
+   название занимает плитку целиком. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card > .eo-dashboard-unload-top {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 0 !important;
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card > .eo-dashboard-unload-top > small {
+    position: absolute !important;
+    top: clamp(4px, 0.8dvh, 7px) !important;
+    right: clamp(4px, 1.2vw, 7px) !important;
+    z-index: 3 !important;
+    min-width: clamp(20px, 5.4vw, 26px) !important;
+    width: clamp(20px, 5.4vw, 26px) !important;
+    height: clamp(20px, 5.4vw, 26px) !important;
+}
+
+/* Название переносится только по словам. Разрыв посреди слова читается как
+   опечатка, а не как перенос, и именно он делал из плитки кашу. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card > .eo-dashboard-unload-top > strong {
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: manual !important;
+    text-wrap: balance !important;
+}
+
+/* Счётчик встал в правый верхний угол, а подсказки жестов растянуты на всю
+   ширину плитки — их коробки налезали друг на друга. Подсказки уступают углу
+   ровно ширину счётчика: текст остаётся читаемым, перекрытия нет. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__dump-card .driver-manual-workspace__swipe-cue {
+    right: clamp(26px, 6.6vw, 32px);
+}
