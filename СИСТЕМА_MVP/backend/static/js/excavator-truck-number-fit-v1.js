@@ -19,7 +19,7 @@
 
     if (!root || !root.document) return;
 
-    var CARD_LABEL = ".eo-dashboard-truck-card strong";
+    var CARD_LABEL = ".eo-dashboard-truck-card > strong";
     var doc = root.document;
     var pending = null;
 

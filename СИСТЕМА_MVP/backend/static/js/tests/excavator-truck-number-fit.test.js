@@ -33,7 +33,7 @@ function createScreen(numbers) {
             body: {},
             addEventListener() {},
             querySelectorAll(selector) {
-                assert.equal(selector, ".eo-dashboard-truck-card strong");
+                assert.equal(selector, ".eo-dashboard-truck-card > strong");
                 return labels;
             },
         },
