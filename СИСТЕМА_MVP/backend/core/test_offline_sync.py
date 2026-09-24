@@ -644,6 +644,124 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['code'], 'manual_work_context_changed')
         self.assertEqual(Trip.objects.count(), 0)
 
+    def test_driver_manual_load_accepts_old_context_marked_before_placement_change(self):
+        # Боевой случай 25.09: водитель 43 отметил погрузку у ЭКС-4 с
+        # действовавшими тогда настройками забоя. Пользователь штатно сменил
+        # их уже ПОСЛЕ отметки, отметка дошла до сервера, когда там уже другие
+        # настройки — но сама отметка сделана РАНЬШЕ их изменения, поэтому
+        # рейс принимается со СТАРЫМИ настройками (теми, что были на месте
+        # погрузки), а не отклоняется конфликтом.
+        occurred_at = timezone.now() - timedelta(hours=1)
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=occurred_at - timedelta(minutes=1))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(
+            assigned_at=occurred_at - timedelta(minutes=1),
+        )
+        self.shift.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assignment.refresh_from_db()
+        event = self.driver_manual_event(occurred_at=occurred_at)
+
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        placement.loading_block = '99'
+        placement.work_context_updated_at = timezone.now() - timedelta(minutes=1)
+        placement.save(update_fields=['loading_block', 'work_context_updated_at'])
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_block, '4')
+        self.assertEqual(trip.loading_horizon, '125')
+        self.assertEqual(trip.rock_type_id, self.rock.id)
+
+    def test_driver_manual_load_rejects_stale_context_marked_after_placement_change(self):
+        # Симметричный случай: настройки забоя уже поменялись, а отметка
+        # сделана ПОСЛЕ этого момента — телефон прислал устаревшие значения,
+        # а не «те, что действовали на месте погрузки». Это настоящее
+        # устаревание, а не отметка, обогнавшая изменение, и остаётся
+        # конфликтом.
+        occurred_at = timezone.now()
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=occurred_at - timedelta(minutes=30))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(
+            assigned_at=occurred_at - timedelta(minutes=30),
+        )
+        self.shift.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assignment.refresh_from_db()
+        event = self.driver_manual_event(occurred_at=occurred_at)
+
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        placement.loading_block = '99'
+        placement.work_context_updated_at = occurred_at - timedelta(minutes=10)
+        placement.save(update_fields=['loading_block', 'work_context_updated_at'])
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'manual_work_context_changed')
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_driver_manual_load_accepts_context_resaved_with_same_values_before_mark(self):
+        # Пересохранение формы забоя сдвигает placement_updated_at даже без
+        # единого изменившегося значения (save_excavator_work_context ставит
+        # эту метку всегда). Само по себе пересохранение — не конфликт: если
+        # порода, горизонт и блок совпадают, рейс принимается как обычно.
+        event = self.driver_manual_event()
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        placement.work_context_updated_at = timezone.now()
+        placement.save(update_fields=['work_context_updated_at'])
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_block, '4')
+        self.assertEqual(trip.rock_type_id, self.rock.id)
+
+    def test_driver_manual_load_rejects_old_context_with_now_invalid_rock_type(self):
+        # Отметка сделана до изменения настроек, но порода, которая тогда
+        # действовала, с тех пор деактивирована — принимать её нельзя, даже
+        # если по времени отметка «успевала».
+        from references.models import RockType
+
+        occurred_at = timezone.now() - timedelta(hours=1)
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=occurred_at - timedelta(minutes=1))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(
+            assigned_at=occurred_at - timedelta(minutes=1),
+        )
+        self.shift.refresh_from_db()
+        self.truck_shift.refresh_from_db()
+        self.assignment.refresh_from_db()
+        event = self.driver_manual_event(occurred_at=occurred_at)
+
+        retired_rock_id = self.rock.id
+        RockType.objects.filter(pk=retired_rock_id).update(is_active=False)
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        new_rock = RockType.objects.create(name='Новая порода 25.09')
+        placement.work_rock_type = new_rock
+        placement.work_context_updated_at = timezone.now() - timedelta(minutes=1)
+        placement.save(update_fields=['work_rock_type', 'work_context_updated_at'])
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'manual_work_context_changed')
+        self.assertEqual(Trip.objects.count(), 0)
+
     def test_manual_load_rejects_separate_unload_after_point_change(self):
         changed_point = DumpPoint.objects.create(name='ККД ручного рейса')
         loaded = self.driver_manual_event('manual-chain-load', 1)
