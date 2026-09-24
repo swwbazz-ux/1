@@ -70,6 +70,13 @@
         return Number(element.scrollWidth || 0) <= Number(element.clientWidth || 0) + 0.5;
     }
 
+    function fitsSqueezed(element, ratio) {
+        // scaleX — операция отрисовки: scrollWidth её не видит и продолжает
+        // сообщать о переполнении. Спрашивать надо про ту ширину, которая
+        // действительно окажется на экране.
+        return Number(element.scrollWidth || 0) * ratio <= Number(element.clientWidth || 0) + 0.5;
+    }
+
     function boxHasRoom(element) {
         // Коробка подписи бывает двух видов. У машиниста строка под номер
         // фиксированной высоты — тогда всё видно по самой подписи. У водителя
@@ -163,18 +170,21 @@
             wrapped = true;
         }
 
-        // Ступень третья: сжатие. Сначала межбуквенное, затем по горизонтали.
+        // Ступень третья: сжатие. Межбуквенное ставим ДО замера: иначе
+        // считали бы против ширины, которая никогда не отрисуется, и жали
+        // сильнее необходимого.
         setImportant(element, "font-size", MIN_FONT_PX + "px");
-        var needed = Math.max(1, Number(element.scrollWidth || available));
-        var ratio = Math.max(MIN_SQUEEZE, available / needed);
         setImportant(element, "letter-spacing", MIN_LETTER_SPACING_EM + "em");
-        if (!fitsOnOneLine(element) || wrapped) {
+        var needed = Math.max(1, Number(element.scrollWidth || available));
+        var ratio = 1;
+        if (needed > available + 0.5 || wrapped) {
+            ratio = Math.max(MIN_SQUEEZE, available / needed);
             setImportant(element, "transform", "scaleX(" + ratio.toFixed(3) + ")");
             setImportant(element, "transform-origin", "center");
         }
         if (element.classList) element.classList.add("is-label-fit-squeezed");
         var fontPxFinal = MIN_FONT_PX;
-        if (!fitsOnOneLine(element)) {
+        if (!fitsSqueezed(element, ratio)) {
             // Сжатие упёрлось в предел читаемости, а подпись всё ещё шире
             // карточки. Опускаем кегль ниже пола: целая мелкая подпись лучше
             // крупной, но срезанной.
@@ -183,7 +193,7 @@
             while (high - low > FONT_STEP_PX) {
                 var middle = (low + high) / 2;
                 setImportant(element, "font-size", middle + "px");
-                if (fitsOnOneLine(element)) low = middle;
+                if (fitsSqueezed(element, ratio)) low = middle;
                 else high = middle;
             }
             setImportant(element, "font-size", low + "px");

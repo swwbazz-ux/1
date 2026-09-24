@@ -202,10 +202,26 @@ test("когда уступок не осталось, подпись мельч
     withFakeDom(() => {
         // Восемнадцать знаков в 104 px: даже на полу и с предельным сжатием
         // подпись шире карточки. Обрезать нельзя — уходим ниже пола.
-        const label = createLabel({text: "ЭКСКАВАТОР-1234567", width: 104, height: 28});
+        const label = createLabel({text: "ЭКСКАВАТОР-1234567", width: 92, height: 28});
         const result = fitModule.fit(label, {allowWrap: false});
         assert.equal(result.belowFloor, true, "пришлось опуститься ниже пола");
         assert.ok(result.fontPx >= fitModule.LAST_RESORT_FONT_PX, "но не ниже крайней меры");
-        assert.ok(label.scrollWidth <= 104.5, "подпись целиком помещается: " + label.scrollWidth);
+        assert.ok(label.scrollWidth * result.squeezed <= 92.5, "подпись целиком помещается: " + label.scrollWidth * result.squeezed);
+    });
+});
+
+test("сжатия достаточно — кегль ниже пола не опускается", () => {
+    withFakeDom(() => {
+        // Найдено «Упаковкой» числами: scaleX — операция отрисовки, scrollWidth
+        // её не видит, поэтому проверка «влезло?» сообщала о переполнении
+        // всегда, и кегль уходил ниже пола даже там, где сжатия хватало.
+        const label = createLabel({text: "САМОСВАЛ-1234567", width: 100, height: 28});
+        const result = fitModule.fit(label, {allowWrap: false});
+        assert.equal(result.fontPx, fitModule.MIN_FONT_PX, "кегль остался на полу");
+        assert.equal(result.belowFloor, false, "ниже пола не пошли");
+        assert.ok(result.squeezed >= fitModule.MIN_SQUEEZE);
+        const занято = label.scrollWidth * result.squeezed;
+        assert.ok(занято <= 100.5, "подпись помещается: " + занято);
+        assert.ok(занято >= 88, "и занимает коробку, а не жмётся зря: " + занято);
     });
 });
