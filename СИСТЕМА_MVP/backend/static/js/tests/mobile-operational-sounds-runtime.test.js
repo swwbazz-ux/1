@@ -218,6 +218,28 @@ test("Excavator recovery dwell resets on recovering, weak, or renewed lost state
     assert.deepEqual(runtime.played, ["connection_lost_notice", "connection_restored_notice"]);
 });
 
+test("a routine recovering blip does not postpone the restored announcement", () => {
+    // Снято с живого телефона 24.09.2026: после возврата связи состояние
+    // мелькает ok → recovering → ok примерно раз в двадцать секунд. Это
+    // обычная сверка версии, а не обрыв. Пока отсчёт сбрасывался на ней,
+    // возврат связи не озвучивался вообще, происшествие оставалось открытым,
+    // и следующая потеря тоже уходила в тишину.
+    const runtime = createRuntime();
+    runtime.connection("lost");
+    runtime.advance(30_000);
+    assert.deepEqual(runtime.played, ["connection_lost_notice"]);
+    runtime.connection("ok");
+    for (let index = 0; index < 3; index += 1) {
+        runtime.advance(20_000);
+        runtime.connection("recovering");
+        runtime.connection("ok");
+    }
+    assert.deepEqual(
+        runtime.played,
+        ["connection_lost_notice", "connection_restored_notice"]
+    );
+});
+
 test("first confirmed lost state is announced even without an earlier successful response", () => {
     const runtime = createRuntime("driver");
     runtime.connection("lost");

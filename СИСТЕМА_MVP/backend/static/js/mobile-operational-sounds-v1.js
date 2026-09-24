@@ -109,6 +109,13 @@
 
     function confirmConnectionRecovery() {
         connectionRecoveryTimer = null;
+        if (lastConnectionState === "recovering") {
+            // Отсчёт пришёлся ровно на мелькание обычной сверки. Связь при
+            // этом есть: ждём пару секунд и закрываем происшествие, а не
+            // роняем его молча.
+            connectionRecoveryTimer = window.setTimeout(confirmConnectionRecovery, 2000);
+            return;
+        }
         if (lastConnectionState !== "ok") return;
         var shouldAnnounce = connectionIncidentOpen && connectionLossAnnounced;
         var nativePlugin = capacitorNativeSoundPlugin();
@@ -534,13 +541,24 @@
             return;
         }
         clearConnectionTimer("loss");
+        if (nextState === "recovering") {
+            // «recovering» — это не обрыв: сервер отвечает, приложение лишь
+            // догоняет версию. На живом телефоне это мелькает примерно раз в
+            // двадцать секунд, и если сбрасывать на нём отсчёт, окно возврата
+            // не закрывается никогда: возврат связи не озвучивается,
+            // происшествие остаётся открытым, а вместе с ним немеет и
+            // следующая потеря.
+            return;
+        }
         if (nextState !== "ok") {
             clearConnectionTimer("recovery");
             return;
         }
         if (!connectionIncidentOpen && !(profile === "excavator" && capacitorNativeSoundPlugin())) return;
         if (connectionRecoveryStableMs > 0) {
-            clearConnectionTimer("recovery");
+            // Уже идущий отсчёт не перезапускаем, иначе мелькание снова
+            // отодвигало бы окно на каждой сверке.
+            if (connectionRecoveryTimer !== null) return;
             connectionRecoveryTimer = window.setTimeout(confirmConnectionRecovery, connectionRecoveryStableMs);
         } else {
             confirmConnectionRecovery();
