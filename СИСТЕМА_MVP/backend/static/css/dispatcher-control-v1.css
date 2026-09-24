@@ -2943,7 +2943,6 @@ th {
     width: 34%;
     max-width: 190px;
     transform: translateX(-50%);
-    color: var(--gd-ink);
     font-size: clamp(10px, .66vw, 13px);
     font-weight: 800;
     line-height: 1.05;
@@ -2994,9 +2993,7 @@ th {
     grid-column: 3;
     grid-row: 2;
     align-self: center;
-    justify-self: stretch;
     width: clamp(112px, 31%, 148px);
-    width: 100%;
     margin: 0;
 }
 
