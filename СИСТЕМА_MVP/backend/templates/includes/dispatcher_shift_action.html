@@ -86,15 +86,7 @@
             </form>
         </div>
         <script>
-        (function () {
-            var modal = document.querySelector("[data-shared-shift-login-modal]");
-            var openButtons = document.querySelectorAll("[data-shared-shift-login-open]");
-            if (!modal || !openButtons.length) {
-                return;
-            }
-            var cancelButton = modal.querySelector("[data-shared-shift-login-cancel]");
-            var firstInput = modal.querySelector("[data-shared-shift-phone]");
-            var codeInput = modal.querySelector("[data-shared-shift-code]");
+        (function (global) {
             function formatPhone(value) {
                 var digits = String(value || "").replace(/\D/g, "");
                 if (digits.charAt(0) === "8") {
@@ -127,66 +119,82 @@
                 }
                 return result;
             }
-            function normalizeCode() {
-                if (!codeInput) {
-                    return;
+            function initSharedShiftLogin(root) {
+                var scope = root && root.querySelectorAll ? root : document;
+                var modals = scope.querySelectorAll("[data-shared-shift-login-modal]");
+                if (scope.matches && scope.matches("[data-shared-shift-login-modal]")) {
+                    modals = [scope];
                 }
-                codeInput.value = formatAccessCode(codeInput.value);
-            }
-            function normalizePhone() {
-                if (!firstInput) {
-                    return;
-                }
-                firstInput.value = formatPhone(firstInput.value);
-            }
-            function closeModal() {
-                modal.hidden = true;
-            }
-            openButtons.forEach(function (openButton) {
-                openButton.addEventListener("click", function () {
-                    modal.hidden = false;
+                modals.forEach(function (modal) {
+                    var container = modal.parentElement || document;
+                    var openButtons = container.querySelectorAll("[data-shared-shift-login-open]");
+                    var cancelButtons = modal.querySelectorAll("[data-shared-shift-login-cancel]");
+                    var firstInput = modal.querySelector("[data-shared-shift-phone]");
+                    var codeInput = modal.querySelector("[data-shared-shift-code]");
+                    function normalizeCode() {
+                        if (codeInput) codeInput.value = formatAccessCode(codeInput.value);
+                    }
+                    function normalizePhone() {
+                        if (firstInput) firstInput.value = formatPhone(firstInput.value);
+                    }
+                    function closeModal() {
+                        modal.hidden = true;
+                    }
+                    openButtons.forEach(function (openButton) {
+                        if (openButton.dataset.sharedShiftLoginBound === "true") return;
+                        openButton.dataset.sharedShiftLoginBound = "true";
+                        openButton.addEventListener("click", function () {
+                            modal.hidden = false;
+                            normalizePhone();
+                            if (firstInput) {
+                                firstInput.focus();
+                                firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
+                            }
+                        });
+                    });
+                    if (firstInput && firstInput.dataset.sharedShiftLoginBound !== "true") {
+                        firstInput.dataset.sharedShiftLoginBound = "true";
+                        firstInput.addEventListener("input", normalizePhone);
+                        firstInput.addEventListener("focus", normalizePhone);
+                    }
+                    if (codeInput && codeInput.dataset.sharedShiftLoginBound !== "true") {
+                        codeInput.dataset.sharedShiftLoginBound = "true";
+                        codeInput.addEventListener("input", normalizeCode);
+                        codeInput.addEventListener("paste", function (event) {
+                            var clipboard = event.clipboardData || global.clipboardData;
+                            if (!clipboard) return;
+                            event.preventDefault();
+                            codeInput.value = formatAccessCode(clipboard.getData("text"));
+                            normalizeCode();
+                        });
+                    }
+                    cancelButtons.forEach(function (cancelButton) {
+                        if (cancelButton.dataset.sharedShiftLoginBound === "true") return;
+                        cancelButton.dataset.sharedShiftLoginBound = "true";
+                        cancelButton.addEventListener("click", closeModal);
+                    });
+                    if (modal.dataset.sharedShiftLoginBound !== "true") {
+                        modal.dataset.sharedShiftLoginBound = "true";
+                        modal.addEventListener("click", function (event) {
+                            if (event.target === modal) closeModal();
+                        });
+                    }
                     normalizePhone();
-                    if (firstInput) {
-                        firstInput.focus();
-                        firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
-                    }
-                });
-            });
-            if (firstInput) {
-                firstInput.addEventListener("input", normalizePhone);
-                firstInput.addEventListener("focus", normalizePhone);
-                firstInput.addEventListener("keydown", function (event) {
-                    return;
-                });
-                normalizePhone();
-            }
-            if (codeInput) {
-                codeInput.addEventListener("input", normalizeCode);
-                codeInput.addEventListener("paste", function (event) {
-                    var clipboard = event.clipboardData || window.clipboardData;
-                    if (!clipboard) {
-                        return;
-                    }
-                    event.preventDefault();
-                    codeInput.value = formatAccessCode(clipboard.getData("text"));
                     normalizeCode();
                 });
-                normalizeCode();
-            }
-            if (cancelButton) {
-                cancelButton.addEventListener("click", closeModal);
-            }
-            modal.addEventListener("click", function (event) {
-                if (event.target === modal) {
-                    closeModal();
+                if (document.documentElement.dataset.sharedShiftEscapeBound !== "true") {
+                    document.documentElement.dataset.sharedShiftEscapeBound = "true";
+                    document.addEventListener("keydown", function (event) {
+                        if (event.key !== "Escape") return;
+                        document.querySelectorAll("[data-shared-shift-login-modal]").forEach(function (modal) {
+                            if (!modal.hidden) modal.hidden = true;
+                        });
+                    });
                 }
-            });
-            document.addEventListener("keydown", function (event) {
-                if (event.key === "Escape" && !modal.hidden) {
-                    closeModal();
-                }
-            });
-        })();
+            }
+            global.initSharedShiftLogin = initSharedShiftLogin;
+            initSharedShiftLogin(document);
+        })(window);
         </script>
     {% endif %}
 {% endif %}

@@ -335,6 +335,9 @@
                 if (typeof hostWindow.initAppConfirmForms === "function") {
                     hostWindow.initAppConfirmForms();
                 }
+                if (typeof hostWindow.initSharedShiftLogin === "function") {
+                    hostWindow.initSharedShiftLogin(document);
+                }
                 if (typeof hostWindow.initDispatcherThemeControls === "function") {
                     hostWindow.initDispatcherThemeControls();
                 }
