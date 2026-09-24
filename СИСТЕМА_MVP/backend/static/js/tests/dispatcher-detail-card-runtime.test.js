@@ -13,16 +13,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
 const TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
-const CSS = fs.readFileSync(
-    path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-    "utf8"
-);
+const CSS = dispatcherStyleSource();
 const JS = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-detail-v1.js"),
     "utf8"

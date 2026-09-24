@@ -11,16 +11,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
 const TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
-const CSS = fs.readFileSync(
-    path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-    "utf8"
-).replace(/\r\n/g, "\n");
+const CSS = dispatcherStyleSource().replace(/\r\n/g, "\n");
 
 test("точка стоит на гараже экскаваторов, гараже самосвалов, самосвалах комплекса и имени комплекса", () => {
     assert.match(

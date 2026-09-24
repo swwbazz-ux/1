@@ -13,6 +13,10 @@
 СИСТЕМА_MVP/backend/static/css/app.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-hourly-grid-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-control-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-workspace-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-detail-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-adaptive-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-detail-overrides-v1.css
 СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js
 СИСТЕМА_MVP/backend/static/js/client-error-report.js
 СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js
