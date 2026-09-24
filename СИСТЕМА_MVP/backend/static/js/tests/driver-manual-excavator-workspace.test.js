@@ -17,7 +17,7 @@ test("shared drag keeps the Excavator seven-pixel pickup threshold", () => {
 test("Driver reports durable manual-trip states without a false server confirmation", () => {
     assert.equal(driverRuntime.resultText("saving"), "Сохраняем на телефоне…");
     assert.equal(driverRuntime.resultText("confirmed", 451), "Подтверждено · рейс №451");
-    assert.equal(driverRuntime.resultText("review"), "Не принято · нужна сверка");
+    assert.match(driverRuntime.resultText("review"), /Отметьте погрузку заново\.$/);
     assert.equal(driverRuntime.resultText("storage-error"), "Не сохранено · повторите отправку");
 });
 
@@ -236,7 +236,8 @@ test("manual controls use compact action timer and source rows with one shared g
     const sourceStart = workspace.indexOf('data-driver-manual-source-row');
     assert(actionStart > -1 && timerStart > actionStart && sourceStart > timerStart);
     const actionMarkup = workspace.slice(actionStart, sourceStart);
-    assert.equal((actionMarkup.match(/<button\b/g) || []).length, 2);
+    // Две кнопки переключения режима плюс кнопка «Понятно» у отклонённой отметки (скрыта по умолчанию, в строке таймера).
+    assert.equal((actionMarkup.match(/<button\b/g) || []).length, 3);
     assert.match(actionMarkup, /data-driver-manual-close/);
     assert.match(actionMarkup, /data-driver-manual-point-open/);
     assert.match(actionMarkup, />ОБЫЧНЫЙ РЕЖИМ</);
@@ -803,4 +804,106 @@ test("manual context and confirmed timer survive fragment refresh", () => {
     assert.match(driverRuntimeSource, /workspace\.dataset\.driverManualAuthorityType/);
     assert.match(driverRuntimeSource, /restoreProjection\(root\.driverOfflineOutbox, workspace\)/);
     assert.match(driverShiftSource, /DriverManualExcavatorWorkspace\.restoreProjection\(/);
+});
+
+test("отклонённая отметка ручного рейса не держит источник и выход навсегда", () => {
+    // Боевой случай: машинист пересохранил забой без изменений (только
+    // placement_updated_at сдвинулся), сервер отклонил driver.trip.loaded
+    // конфликтом manual_work_context_changed. До этой правки currentTripProjection
+    // оставался заполненным отклонённой записью навсегда — снять было нечем:
+    // активной плитки нет, свайп завершать нечего, а isTerminalState держит
+    // setSourceLocked(true) и setManualExitAvailability() без всякого выхода.
+    function makeNode(overrides) {
+        const dataset = {};
+        const classes = new Set();
+        const children = {};
+        return Object.assign({
+            dataset,
+            hidden: false,
+            disabled: false,
+            textContent: "",
+            title: "",
+            draggable: true,
+            classList: {
+                add(...names) { names.forEach((n) => classes.add(n)); },
+                remove(...names) { names.forEach((n) => classes.delete(n)); },
+                toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
+                contains(name) { return classes.has(name); }
+            },
+            setAttribute(name, value) { this["attr:" + name] = value; },
+            getAttribute(name) { return this["attr:" + name]; },
+            querySelector(selector) { return children[selector] || null; },
+            querySelectorAll() { return []; },
+            __children: children
+        }, overrides || {});
+    }
+
+    const shell = {dataset: {}};
+    const source = makeNode();
+    const result = makeNode();
+    const ack = makeNode();
+    const closeHint = makeNode();
+    const closeButton = makeNode();
+    closeButton.__children.em = closeHint;
+    closeHint.textContent = "Вернуться к круглой кнопке";
+    const pointLabel = makeNode();
+    const pointHint = makeNode();
+    const pointOpen = makeNode();
+    pointOpen.__children["[data-driver-manual-point-label]"] = pointLabel;
+    pointOpen.__children["[data-driver-manual-point-hint]"] = pointHint;
+    const timerLabel = makeNode();
+    const timerState = makeNode();
+    const timerDestination = makeNode();
+    const timerValue = makeNode();
+    const timer = makeNode();
+    timer.__children["[data-driver-manual-trip-timer-label]"] = timerLabel;
+    timer.__children["[data-driver-manual-trip-timer-state]"] = timerState;
+    timer.__children["[data-driver-manual-trip-timer-destination]"] = timerDestination;
+    timer.__children["[data-driver-manual-trip-timer-value]"] = timerValue;
+
+    const workspaceChildren = {
+        "[data-driver-manual-source]": source,
+        "[data-driver-manual-result]": result,
+        "[data-driver-manual-dismiss-rejected]": ack,
+        "[data-driver-manual-point-open]": pointOpen,
+        "[data-driver-manual-trip-timer]": timer
+    };
+    const workspace = {
+        closest() { return shell; },
+        querySelector(selector) { return workspaceChildren[selector] || null; },
+        querySelectorAll(selector) {
+            return selector === "[data-driver-manual-close]" ? [closeButton] : [];
+        }
+    };
+
+    const rejectedEvent = {
+        event_type: "driver.trip.loaded",
+        event_id: "evt-1",
+        local_trip_id: "local-1",
+        state: "conflict",
+        sequence: 1,
+        occurred_at: "2026-09-25T05:10:00.000Z",
+        last_error: {message: "Настройки забоя изменились после сохранения отметки на телефоне."},
+        payload: {dump_point_id: 0},
+        context_snapshot: {}
+    };
+
+    driverRuntime.renderProjection(workspace, [rejectedEvent], null);
+
+    // До нажатия «Понятно»: источник заблокирован, выход заблокирован,
+    // «Изменить точку» тоже — это и есть тот самый тупик из боевого инцидента.
+    assert.equal(source.disabled, true, "источник заблокирован сразу после отказа");
+    assert.equal(closeButton.disabled, true, "«Обычный режим» заблокирован сразу после отказа");
+    assert.equal(pointOpen.disabled, true, "«Изменить точку» заблокирована сразу после отказа");
+    assert.equal(ack.hidden, false, "кнопка «Понятно» показана");
+    assert.match(result.textContent, /Отметьте погрузку заново\./);
+
+    driverRuntime.dismissRejectedTripProjection(workspace);
+
+    // После «Понятно»: ни источник, ни выход больше не держит отклонённая
+    // запись — ровно то, чего не хватало на бою.
+    assert.equal(source.disabled, false, "источник разблокирован после «Понятно»");
+    assert.equal(closeButton.disabled, false, "«Обычный режим» разблокирован после «Понятно»");
+    assert.equal(ack.hidden, true, "кнопка «Понятно» спрятана после нажатия");
+    assert.equal(result.hidden, true, "сообщение об отказе убрано");
 });

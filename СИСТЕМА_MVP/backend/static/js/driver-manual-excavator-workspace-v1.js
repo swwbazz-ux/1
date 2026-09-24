@@ -192,7 +192,10 @@
             ? "РЕЙС ЗАВЕРШЁН НА ТЕЛЕФОНЕ · БЕЗ СЕТИ"
             : "РЕЙС ЗАВЕРШЁН · ОТПРАВЛЯЕМ";
         if (state === "completed") return "РЕЙС ЗАВЕРШЁН";
-        if (state === "review") return String(detail || "Не принято · нужна сверка");
+        if (state === "review") {
+            var reviewMessage = String(detail || "Настройки места погрузки изменились после отметки.");
+            return reviewMessage + " Отметьте погрузку заново.";
+        }
         if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
     }
@@ -562,6 +565,28 @@
         }
     }
 
+    /* Отклонённая отметка (conflict/invalid/auth_required) раньше держала
+       источник и выход из ручного режима НАВСЕГДА: currentTripProjection
+       оставался заполненным записью, которую сервер уже отверг, а снять его
+       было нечем — активной плитки нет, свайп завершать нечего. Кнопка
+       «Понятно» — единственный явный выход: она снимает эту запись с
+       клиентской проекции (в очереди она остаётся как есть, для сверки),
+       и источник с выходом освобождаются тем же путём, что и при обычном
+       завершении рейса. */
+    function toggleRejectedTripAck(workspace, show) {
+        var button = workspace && workspace.querySelector("[data-driver-manual-dismiss-rejected]");
+        if (!button) return;
+        button.hidden = !show;
+    }
+
+    function dismissRejectedTripProjection(workspace) {
+        if (!workspace || !currentTripProjection || !isTerminalState(currentTripProjection.state)) return;
+        currentTripProjection = null;
+        toggleRejectedTripAck(workspace, false);
+        setResult(workspace, "", null, false);
+        setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
+        updatePointAction(workspace);
+    }
     function setSourceLocked(workspace, locked) {
         var source = workspace && workspace.querySelector("[data-driver-manual-source]");
         if (source) {
@@ -772,6 +797,7 @@
         currentTripProjection = projected;
         if (!projected) {
             stopTripTimer(workspace);
+            toggleRejectedTripAck(workspace, false);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             updatePointAction(workspace);
             return null;
@@ -813,6 +839,7 @@
             stopTripTimer(workspace);
             setSourceLocked(workspace, true);
             setResult(workspace, "review", projected.last_error && projected.last_error.message, true);
+            toggleRejectedTripAck(workspace, true);
             updatePointAction(workspace);
             return projected;
         }
@@ -827,6 +854,7 @@
         }
         markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
+        toggleRejectedTripAck(workspace, false);
         setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, projected));
         setResult(
             workspace,
@@ -1849,6 +1877,16 @@
     if (root.document && !root.__driverManualExcavatorWorkspaceDelegated) {
         root.__driverManualExcavatorWorkspaceDelegated = true;
         root.document.addEventListener("click", function (event) {
+            var dismissRejected = event.target && event.target.closest
+                ? event.target.closest("[data-driver-manual-dismiss-rejected]")
+                : null;
+            if (dismissRejected) {
+                event.preventDefault();
+                event.stopPropagation();
+                playGestureHaptic("tap");
+                dismissRejectedTripProjection(dismissRejected.closest("[data-driver-manual-workspace]"));
+                return;
+            }
             var freeBucket = event.target && event.target.closest
                 ? event.target.closest("[data-driver-manual-free-bucket-open]")
                 : null;
@@ -2006,7 +2044,8 @@
         standardPointIds: standardPointIds,
         showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
         restoreStandardTargets: restoreStandardTargets,
-        resultText: resultText
+        resultText: resultText,
+        dismissRejectedTripProjection: dismissRejectedTripProjection
     };
     if (typeof root.document !== "undefined") {
         if (root.document.readyState === "loading") {
