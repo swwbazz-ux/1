@@ -95,8 +95,8 @@ test("Excavator haptics prefer the native media bridge and preserve gesture timi
 });
 
 test("Excavator shell wires native capabilities and routes existing feedback through them", () => {
-    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v261/);
-    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v261/);
+    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v262/);
+    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v262/);
     assert.match(TEMPLATE, /window\.excavatorHaptic\(\[180, 90, 180\], 255\)/);
     assert.match(TEMPLATE, /window\.excavatorHaptic\(70, 220\)/);
     assert.doesNotMatch(TEMPLATE, /navigator\.vibrate/);

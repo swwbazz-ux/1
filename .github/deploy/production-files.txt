@@ -38,6 +38,7 @@
 СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-native-push-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-truck-number-fit-v1.js
 СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
 СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
 СИСТЕМА_MVP/backend/trips/free_bucket.py
