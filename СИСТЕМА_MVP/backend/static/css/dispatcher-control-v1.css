@@ -377,36 +377,22 @@ a {
 }
 
 .dispatcher-shell .shared-shift-login-field {
-    color: var(--gd-muted);
     font-size: 13px;
-    font-weight: 900;
-    text-transform: uppercase;
 }
 
 .dispatcher-shell .shared-shift-device-choice {
-    column-gap: 8px;
-    row-gap: 4px;
     margin-top: 0;
 }
 
 .dispatcher-shell .shared-shift-device-choice legend {
-    color: var(--gd-muted);
     font-size: 13px;
-    font-weight: 900;
-    text-transform: uppercase;
 }
 
 .dispatcher-shell .shared-shift-device-option {
     min-height: 40px;
-    border: 1px solid var(--gd-line);
     border-radius: 5px;
-    background: var(--gd-panel-soft);
-    color: var(--gd-muted);
     font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
     font-size: 15px;
-    font-weight: 900;
-    line-height: 1;
-    text-transform: uppercase;
 }
 
 .dispatcher-shell.dispatcher-day .shared-shift-device-option {
@@ -415,13 +401,10 @@ a {
 
 .dispatcher-shell .shared-shift-device-option:has(input:checked) {
     border-color: color-mix(in srgb, var(--gd-green) 78%, var(--gd-line));
-    background: var(--gd-green-soft);
-    color: var(--gd-green);
 }
 
 .dispatcher-shell .shared-shift-phone-shell {
     border-radius: 5px;
-    background: var(--gd-panel-soft);
 }
 
 .dispatcher-shell.dispatcher-day .shared-shift-phone-shell {
@@ -430,18 +413,12 @@ a {
 
 .dispatcher-shell .shared-shift-login-field input {
     min-height: 54px;
-    border: 1px solid var(--gd-line);
     border-radius: 5px;
-    background: var(--gd-panel-soft);
-    color: var(--gd-ink);
-    font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
     font-size: 22px;
     font-weight: 900;
 }
 
 .dispatcher-shell .shared-shift-login-field input:focus {
-    border-color: var(--gd-green);
-    outline: 0;
     box-shadow: 0 0 0 1px var(--gd-green);
 }
 
