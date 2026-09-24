@@ -34,7 +34,10 @@ const SHARED_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
-const TRIPS_VIEWS = fs.readFileSync(path.join(BACKEND, "trips", "views.py"), "utf8");
+const DISPATCHER_PWA = fs.readFileSync(
+    path.join(BACKEND, "trips", "dispatcher_pwa.py"),
+    "utf8"
+);
 const PRODUCTION_MANIFEST = fs.readFileSync(
     path.resolve(BACKEND, "..", "..", ".github", "deploy", "production-files.txt"),
     "utf8"
@@ -95,10 +98,10 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherRealtime\(\{/);
-    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-transport-v1\.js"/);
-    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-detail-v1\.js"/);
-    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-board-v1\.js"/);
-    assert.match(TRIPS_VIEWS, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-transport-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);

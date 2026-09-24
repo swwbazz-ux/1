@@ -3095,6 +3095,7 @@ test("all role PWA cache prefixes are unique and cleanup stays role-scoped", () 
     const explicitWorkerFiles = [
         path.join(backendRoot, "users", "views.py"),
         path.join(backendRoot, "trips", "views.py"),
+        path.join(backendRoot, "trips", "dispatcher_pwa.py"),
         path.join(backendRoot, "assignments", "views.py"),
         path.join(backendRoot, "assignments", "deputy_views.py"),
     ];

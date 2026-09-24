@@ -237,7 +237,10 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
         path.join(BACKEND, "templates", "includes", "dispatcher_header.html"),
         "utf8"
     );
-    const views = fs.readFileSync(path.join(BACKEND, "trips", "views.py"), "utf8");
+    const dispatcherPwa = fs.readFileSync(
+        path.join(BACKEND, "trips", "dispatcher_pwa.py"),
+        "utf8"
+    );
     const control = fs.readFileSync(
         path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
         "utf8"
@@ -255,8 +258,8 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
     assert.match(template, /dispatcher-board-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
     assert.match(template, /dispatcher-realtime-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(views, /dispatcher-desktop-shell-v143/);
-    assert.match(views, /\/static\/js\/dispatcher-sounds-v1\.js/);
+    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v143/);
+    assert.match(dispatcherPwa, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(control, /new CustomEvent\("dispatcher-action-error"/);
     assert.match(css, /@media \(max-width: 1180px\)[\s\S]+?\.dispatcher-command-utility\s*\{[\s\S]+?grid-template-columns:\s*repeat\(5,/);
 });

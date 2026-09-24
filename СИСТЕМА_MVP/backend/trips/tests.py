@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from assignments.models import (
@@ -476,6 +476,16 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('self.addEventListener("fetch"', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+
+    def test_dispatcher_pwa_routes_are_served_by_isolated_module(self):
+        self.assertEqual(
+            resolve(reverse('dispatcher_manifest')).func.__module__,
+            'trips.dispatcher_pwa',
+        )
+        self.assertEqual(
+            resolve(reverse('dispatcher_service_worker')).func.__module__,
+            'trips.dispatcher_pwa',
+        )
 
     def test_shared_desktop_blocks_direct_start_without_reauth(self):
         response = self.client.post(reverse('dispatcher_toggle_shift'), {'shift_action': 'start'})
