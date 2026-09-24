@@ -350,6 +350,7 @@ const CORE_ASSETS = [
     "/static/css/driver-manual-excavator-workspace-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/excavator-dashboard-drag-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/excavator-dump-return-swipe-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/equipment-label-fit-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-manual-excavator-workspace-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-downtime-drum-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-downtime-drum-v1.js?v={DRIVER_SHELL_VERSION}",

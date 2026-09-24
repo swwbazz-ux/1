@@ -352,26 +352,49 @@
         return renderTripTimer(workspace || currentWorkspace);
     }
 
+    var sourceWidthWatcher = null;
+    var watchedSource = null;
+
+    function watchSourceWidth(source) {
+        // Подпись подгоняется по измеренной ширине, а ширины у скрытой карточки нет:
+        // ручной режим до открытия лежит с hidden, clientWidth равен нулю, и подгонка
+        // выходит вхолостую. Поэтому следим за самой карточкой: как только она
+        // получает ширину — при открытии режима, при повороте, при подмене DOM —
+        // меряем заново. Шрифт подписи на размер карточки не влияет, петли нет.
+        if (!source || typeof root.ResizeObserver !== "function") return null;
+        if (watchedSource === source && sourceWidthWatcher) return sourceWidthWatcher;
+        if (sourceWidthWatcher) sourceWidthWatcher.disconnect();
+        watchedSource = source;
+        sourceWidthWatcher = new root.ResizeObserver(function () {
+            fitSourceTitle(watchedSource);
+        });
+        sourceWidthWatcher.observe(source);
+        return sourceWidthWatcher;
+    }
     function fitSourceTitle(source) {
         var title = source && source.querySelector ? source.querySelector("strong") : null;
         if (!title) return null;
-        title.classList.remove("is-driver-manual-title-wrapped");
+        var shared = root.EquipmentLabelFit;
+        if (shared && typeof shared.fit === "function") {
+            // Правило вмещения общее с карточкой самосвала у машиниста: кегль
+            // вниз до пола, затем сжатие. Переноса нет: номер техники всегда
+            // стоит одной строкой, пробел внутри номера («ТМС 528», «ЭКГ-10
+            // №123») не повод разрывать его надвое. Обрезки нет никогда.
+            var fitted = shared.fit(title, {allowWrap: false});
+            return fitted && fitted.fontPx;
+        }
+        // Запасной путь на случай, если общий модуль не доехал со статикой.
         title.style.removeProperty("font-size");
         var computed = root.getComputedStyle ? root.getComputedStyle(title) : null;
-        var maxSize = Math.max(10, parseFloat(computed && computed.fontSize || "30") || 30);
+        var maxSize = Math.max(14, parseFloat(computed && computed.fontSize || "30") || 30);
         var available = Number(title.clientWidth || 0);
         if (!available) return maxSize;
         title.style.setProperty("font-size", maxSize + "px", "important");
         var natural = Math.max(1, Number(title.scrollWidth || available));
-        var fitted = Math.max(10, Math.min(maxSize, maxSize * available / natural));
+        var fitted = Math.max(14, Math.min(maxSize, maxSize * available / natural));
         title.style.setProperty("font-size", fitted.toFixed(2) + "px", "important");
-        title.classList.toggle(
-            "is-driver-manual-title-wrapped",
-            Number(title.scrollWidth || 0) > Number(title.clientWidth || 0) + 1
-        );
         return fitted;
     }
-
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
         if (!workspace || !positive(pointId) || !delta) return null;
         var key = String(adjustmentId || "");
@@ -1733,6 +1756,9 @@
         updatePointAction(workspace);
         renderTripTimer(workspace);
         setManualExitAvailability(workspace);
+        var openedSource = workspace.querySelector("[data-driver-manual-source]");
+        watchSourceWidth(openedSource);
+        fitSourceTitle(openedSource);
         var source = workspace.querySelector("[data-driver-manual-source]");
         var back = workspace.querySelector("[data-driver-manual-close]");
         if (source || back) (source || back).focus({preventScroll: true});
@@ -1812,6 +1838,9 @@
             shell.classList.add("is-driver-manual-workspace-open");
             root.document.body.classList.add("excavator-operator-screen");
             updatePointAction(workspace);
+            var shownSource = workspace.querySelector("[data-driver-manual-source]");
+            watchSourceWidth(shownSource);
+            fitSourceTitle(shownSource);
         } else if (shell && shell.dataset.driverActiveTripOrigin === "excavator") {
             closeWorkspace(workspace, {preserveRequest: false});
         }
