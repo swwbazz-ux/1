@@ -2,7 +2,7 @@
     <form class="dispatcher-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
         {% csrf_token %}
         {% if not dispatcher_header.shift_form_action %}
-            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <input type="hidden" name="next" value="{{ dispatcher_shift_return_url|default:request.path }}">
         {% endif %}
         {% if not dispatcher_header.shift_is_open and dispatcher_header.other_role_shift_prompt %}
             {# Одна открытая смена на сотрудника: подтверждение в окне закрывает смену другой роли #}

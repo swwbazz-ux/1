@@ -167,6 +167,82 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(shift.workplace_code, 'dispatcher')
         self.assertEqual(shift.opened_by, self.current_dispatcher)
 
+    def test_dispatcher_fragment_shift_form_returns_to_full_page(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            workplace_code='dispatcher',
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.get(
+            reverse('dispatcher_control'),
+            {
+                'truck': '7',
+                '_operational_fragment': 'dispatcher',
+                '_operational_version': '123',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['contract'], 'operational-fragment-v1')
+        self.assertIn('name="next" value="/dispatcher/control/?truck=7"', payload['html'])
+        self.assertNotIn('_operational_fragment', payload['html'])
+        self.assertNotIn('_operational_version', payload['html'])
+
+    def test_dispatcher_shift_action_strips_fragment_parameters_from_next(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        shift = EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            workplace_code='dispatcher',
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {
+                'shift_action': 'end',
+                'next': (
+                    f'{reverse("dispatcher_control")}?truck=7&'
+                    '_operational_fragment=dispatcher&_operational_version=123'
+                ),
+            },
+        )
+
+        shift.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'{reverse("dispatcher_control")}?truck=7')
+        self.assertIsNotNone(shift.closed_at)
+
+    def test_dispatcher_shift_action_rejects_external_next_and_referer(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        for payload, referer in (
+            ({'shift_action': 'unknown', 'next': 'https://attacker.example/collect'}, ''),
+            ({'shift_action': 'unknown', 'next': '//attacker.example/collect'}, ''),
+            ({'shift_action': 'unknown'}, 'https://attacker.example/collect'),
+            ({'shift_action': 'unknown', 'next': '/dispatcher/control/\r\nLocation: https://attacker.example/'}, ''),
+        ):
+            with self.subTest(payload=payload, referer=referer):
+                response = self.client.post(
+                    reverse('dispatcher_toggle_shift'),
+                    payload,
+                    **({'HTTP_REFERER': referer} if referer else {}),
+                )
+
+                self.assertRedirects(response, reverse('dispatcher_control'))
+
     def test_personal_admin_uses_own_dispatcher_access_without_second_pin(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_access = EmployeeAccess.objects.create(

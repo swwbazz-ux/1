@@ -6,6 +6,7 @@ import secrets
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.contrib import messages
@@ -18,6 +19,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import (
@@ -3879,11 +3881,50 @@ def get_dispatcher_control_url(request):
         if value == '':
             value = request.GET.get(key, '').strip()
         if value != '':
-            query_parts.append(f'{key}={value}')
+            query_parts.append((key, value))
     base_url = reverse('dispatcher_control')
     if not query_parts:
         return base_url
-    return f"{base_url}?{'&'.join(query_parts)}"
+    return f'{base_url}?{urlencode(query_parts)}'
+
+
+DISPATCHER_INTERNAL_QUERY_KEYS = {
+    '_operational_fragment',
+    '_operational_version',
+    '_driver_refresh',
+    '_eo_refresh',
+    '_mm_refresh',
+}
+
+
+def get_dispatcher_action_redirect_url(request):
+    """Return a safe full-page target after a dispatcher form action."""
+    for candidate in (
+        request.POST.get('next', ''),
+        request.META.get('HTTP_REFERER', ''),
+    ):
+        candidate = str(candidate or '').strip()
+        if (
+            not candidate
+            or re.search(r'[\x00-\x1f\x7f]', candidate)
+            or not url_has_allowed_host_and_scheme(
+                candidate,
+                allowed_hosts={request.get_host()},
+                require_https=request.is_secure(),
+            )
+        ):
+            continue
+        parts = urlsplit(candidate)
+        query = urlencode(
+            [
+                (key, value)
+                for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                if key not in DISPATCHER_INTERNAL_QUERY_KEYS
+            ],
+            doseq=True,
+        )
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    return get_dispatcher_control_url(request)
 
 
 def dispatcher_access_from_request(request):
@@ -7874,6 +7915,7 @@ def dispatcher_control_view(
             'dispatcher_compat_title': 'Диспетчерский пульт',
             'dispatcher_board_label': 'Горный диспетчер',
             'operational_state_version': operational_state_version,
+            'dispatcher_shift_return_url': get_dispatcher_control_url(request),
             'server_now': timezone.now(),
             'dispatcher_move_excavator_url': reverse('dispatcher_move_excavator'),
             'dispatcher_assign_truck_url': reverse('dispatcher_assign_truck'),
@@ -7935,7 +7977,7 @@ def dispatcher_toggle_shift_view(request):
         return redirect('role_home')
     session_access = access
 
-    redirect_url = request.POST.get('next') or request.META.get('HTTP_REFERER') or reverse('dispatcher_control')
+    redirect_url = get_dispatcher_action_redirect_url(request)
     if request.method != 'POST':
         return redirect(redirect_url)
 
