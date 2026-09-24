@@ -2109,7 +2109,6 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen).is-equipment-se
 
 .complex-truck-tile .dispatcher-plan-loop-badge {
     top: 17px;
-    right: 3px;
 }
 
 .dispatcher-complex-card .complex-title-state h2 .dispatcher-presence-dot {

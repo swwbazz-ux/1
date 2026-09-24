@@ -37,7 +37,7 @@ test("dispatcher CSS audit characterizes the current six-file cascade", () => {
     assert.equal(report.repeatedContextSelectors, 53);
     assert.equal(report.additiveRepeatedSelectors, 17);
     assert.equal(report.exactDuplicateRuleGroups, 0);
-    assert.equal(report.exactRedundantDeclarationCount, 1);
+    assert.equal(report.exactRedundantDeclarationCount, 0);
     assert.equal(report.conflictingPropertyCount, 69);
     assert.equal(report.selectorsWithConflicts, 36);
 });
