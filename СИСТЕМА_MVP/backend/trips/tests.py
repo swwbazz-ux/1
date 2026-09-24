@@ -1771,7 +1771,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'class="eo-event-actions"')
         self.assertIn('Перегон', [card['name'] for card in response.context['downtime_reason_cards']])
         self.assertContains(response, 'data-eo-dump-target')
-        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-3"')
+        # Рядов столько, сколько карточек. Три зарезервированных ряда на один
+        # самосвал держали пустую середину экрана внутри области самосвалов, и
+        # точкам разгрузки её было не отдать — а им её не хватало на номера.
+        self.assertEqual(len(response.context['truck_cards']), 1)
+        self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-1"')
         self.assertContains(response, 'addEventListener("pointerdown"')
         self.assertNotContains(response, 'document.elementFromPoint')
         self.assertContains(response, 'findDumpTargetIntersectingPreview')
@@ -3767,6 +3771,28 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                     core_assets,
                     f'{asset_url} подключён на экране, но не попал в precache service worker',
                 )
+
+    def test_excavator_truck_number_fit_loads_after_shared_label_module(self):
+        """Общее правило вмещения подписи подключено раньше связки экрана.
+
+        Связка зовёт EquipmentLabelFit у каждой карточки самосвала. Если общий
+        модуль окажется ниже по странице или пропадёт совсем, номер молча
+        останется прежнего размера — ровно тот вид, из-за которого «ТЕСТ-1»
+        вылезал за края карточки на бою. Порядок здесь и есть работающая часть
+        правки, поэтому он закреплён проверкой, а не комментарием.
+        """
+        page = self.client.get(reverse('excavator_work')).content.decode('utf-8')
+
+        shared = page.find('equipment-label-fit-v1.js')
+        glue = page.find('excavator-truck-number-fit-v1.js')
+
+        self.assertNotEqual(shared, -1, 'Общий модуль вмещения подписи не подключён к экрану')
+        self.assertNotEqual(glue, -1, 'Связка подгонки номеров самосвалов не подключена к экрану')
+        self.assertLess(
+            shared,
+            glue,
+            'Общий модуль обязан идти раньше связки: иначе подгонка не найдёт правило',
+        )
 
     def test_excavator_manifest_is_installable_pwa_manifest(self):
         response = self.client.get(reverse('excavator_manifest'))

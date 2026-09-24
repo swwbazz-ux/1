@@ -1,5 +1,7 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/core/dump_point_names.py
+СИСТЕМА_MVP/backend/core/equipment_numbers.py
 СИСТЕМА_MVP/backend/core/dispatcher_push.py
 СИСТЕМА_MVP/backend/core/models.py
 СИСТЕМА_MVP/backend/core/views.py
@@ -37,6 +39,7 @@
 СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-native-push-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-truck-number-fit-v1.js
 СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
 СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
 СИСТЕМА_MVP/backend/trips/free_bucket.py
@@ -58,6 +61,7 @@
 СИСТЕМА_MVP/backend/users/urls.py
 СИСТЕМА_MVP/backend/static/css/driver-shift-v1.css
 СИСТЕМА_MVP/backend/static/css/driver-manual-excavator-workspace-v1.css
+СИСТЕМА_MVP/backend/static/css/excavator-work-v55-shift.css
 СИСТЕМА_MVP/backend/static/js/driver-shift-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-fragment-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-gestures-v1.js
@@ -67,6 +71,7 @@
 СИСТЕМА_MVP/backend/static/js/driver-self-heal-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-haptics-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-native-push-v1.js
+СИСТЕМА_MVP/backend/static/js/equipment-label-fit-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-manual-excavator-workspace-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-dashboard-drag-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-dump-return-swipe-v1.js

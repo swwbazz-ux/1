@@ -60,7 +60,13 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     --driver-manual-workspace-gap: clamp(8px, 2.2vw, 12px);
     --driver-manual-action-height: clamp(72px, 8.6dvh, 78px);
     --driver-manual-timer-height: clamp(62px, 7.5dvh, 68px);
-    --driver-manual-source-height: clamp(118px, 14dvh, 132px);
+    /* Высота строки источника должна вмещать карточку желаемой формы целиком:
+       ширина строки на ширину карточки, высота в 1,25 раза больше. Иначе
+       форма держится, но карточка ужимается по ширине, хотя место под ней
+       свободно — на нашем телефоне между источником и точками разгрузки
+       оставалось 132 пустых пикселя. Потолок остаётся: на низком экране
+       карточка уменьшится целиком, сохранив форму. */
+    --driver-manual-source-height: clamp(140px, 18.7dvh, 170px);
     display: grid !important;
     flex: 1 1 auto !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
@@ -288,29 +294,54 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__tri
     text-shadow: 0 0 10px rgba(255, 216, 0, .18);
 }
 
+/* Карточка источника повторяет карточку самосвала у машиниста построением,
+   а не числами. Желаемая форма задана отношением 1 к 1,25 — высота в 1,25
+   раза больше ширины, это число выбрал пользователь. Форма держится, пока
+   карточка влезает: ширину ограничивает и строка, и та высота, которую
+   строка может дать. Когда высоты не хватает, ужимается ширина, а не
+   ломается форма. Поля, рамка и радиус взяты у эталона теми же клампами. */
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card {
-    width: 100% !important;
-    height: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-    aspect-ratio: auto !important;
+    width: min(100%, calc(var(--driver-manual-source-height) / 1.25)) !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    aspect-ratio: 1 / 1.25 !important;
+    padding: clamp(22px, 3.15dvh, 34px) clamp(7px, 1.5vw, 12px) clamp(7px, 1.1dvh, 12px) !important;
+    border: 1px solid rgba(148, 163, 184, .24) !important;
+    border-radius: clamp(12px, 3.4vw, 18px) !important;
 }
 
+
+/* Подпись номера. Обрезки здесь быть не должно: коробку задаём, а вмещает
+   текст общий измеритель (equipment-label-fit-v1.js) — кегль вниз до пола,
+   затем перенос по дефису, если есть вторая строка, затем сжатие. Поэтому
+   ни overflow: hidden, ни text-overflow здесь больше нет: они прятали
+   именно то, что мы обязаны показать. */
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
-    overflow: hidden !important;
     text-align: center !important;
-    text-overflow: clip !important;
-    white-space: nowrap !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: manual !important;
 }
 
-body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong.is-driver-manual-title-wrapped {
-    max-height: 2.05em !important;
+/* Плашка комплекса на карточке источника не нужна: водитель и так знает, к
+   какому комплексу приехал, а длинное название всё равно обрывалось
+   многоточием. Убираем саму плашку, но НЕ трогаем точку связи: она лежит
+   отдельным элементом с абсолютным положением в правом верхнем углу
+   карточки (top 7, right 7, 9x9) и со своим источником состояния, поэтому
+   остаётся на том же месте, того же размера и с той же логикой. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > span {
+    display: none !important;
+}
+/* Перенос разрешён только после дефиса и по пробелу — внутри слова никогда. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong.is-label-fit-wrapped {
     line-height: 1.02 !important;
-    overflow-wrap: anywhere !important;
     white-space: normal !important;
 }
 
