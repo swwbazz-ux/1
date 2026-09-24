@@ -4012,3 +4012,27 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-da
     grid-template-rows: auto !important;
     align-content: center !important;
 }
+
+/* Ряд из трёх точек: счётчик под названием, а не в его строке. Замер на
+   телефоне при трёх точках: плитка 120 px, полей 22, запас под кружок 26 —
+   названию остаётся 72 px в первой строке, а «Подсыпка» на минимальном
+   размере занимает 85. Название целиком уезжало на вторую строку, и кружок
+   оставался висеть один над пустой первой. Уменьшать шрифт некуда: 14 px —
+   пол читаемости. Значит, в узкой плитке кружку не место в строке названия:
+   вертикального запаса там с избытком (плитка выше 200 px), а горизонтального
+   нет совсем. Три точки — единственная раскладка в три колонки, поэтому
+   правило и привязано к is-count-3, а не к ширине. */
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top strong::before {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top small {
+    position: static !important;
+}
