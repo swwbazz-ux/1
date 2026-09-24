@@ -10,6 +10,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import java.lang.ref.WeakReference;
@@ -41,7 +42,7 @@ public class NativePushPlugin extends Plugin {
     @PluginMethod
     public void getToken(PluginCall call) {
         if (!NativeFieldProfile.supportsPushAndHaptics()) {
-            call.reject("Native push is unavailable for this application");
+            call.resolve(unavailablePayload());
             return;
         }
         String token = storedToken(getContext());
@@ -49,15 +50,47 @@ public class NativePushPlugin extends Plugin {
             call.resolve(tokenPayload(token));
             return;
         }
-        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
-            if (!task.isSuccessful() || task.getResult() == null || task.getResult().trim().isEmpty()) {
-                call.reject("FCM token is unavailable");
-                return;
-            }
-            String freshToken = task.getResult().trim();
-            storeToken(getContext(), freshToken);
-            call.resolve(tokenPayload(freshToken));
-        });
+        /* Builds without google-services.json (QA and any profile that never ships a
+           Firebase config) leave the default FirebaseApp uninitialized. Touching
+           FirebaseMessaging there throws on the plugin thread and kills the process,
+           so the absent delivery channel is reported as an ordinary empty envelope. */
+        if (!firebaseReady()) {
+            call.resolve(unavailablePayload());
+            return;
+        }
+        try {
+            FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+                if (!task.isSuccessful() || task.getResult() == null || task.getResult().trim().isEmpty()) {
+                    call.resolve(unavailablePayload());
+                    return;
+                }
+                String freshToken = task.getResult().trim();
+                storeToken(getContext(), freshToken);
+                call.resolve(tokenPayload(freshToken));
+            });
+        } catch (Throwable error) {
+            call.resolve(unavailablePayload());
+        }
+    }
+
+    private boolean firebaseReady() {
+        try {
+            return !FirebaseApp.getApps(getContext()).isEmpty();
+        } catch (Throwable error) {
+            return false;
+        }
+    }
+
+    @PluginMethod
+    public void getInstallationIdentity(PluginCall call) {
+        if (!NativeFieldProfile.supportsPushAndHaptics()) {
+            call.reject("Native application identity is unavailable for this application");
+            return;
+        }
+        call.resolve(new JSObject().put(
+            "installationId",
+            AppInstallationIdentity.get(getContext())
+        ));
     }
 
     static void publishToken(Context context, String token) {
@@ -92,6 +125,16 @@ public class NativePushPlugin extends Plugin {
             .put("provider", "fcm")
             .put("token", token)
             .put("platform", "android")
-            .put("appId", BuildConfig.APPLICATION_ID);
+            .put("appId", BuildConfig.APPLICATION_ID)
+            .put("available", true);
+    }
+
+    private static JSObject unavailablePayload() {
+        return new JSObject()
+            .put("provider", "fcm")
+            .put("token", "")
+            .put("platform", "android")
+            .put("appId", BuildConfig.APPLICATION_ID)
+            .put("available", false);
     }
 }

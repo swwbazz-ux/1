@@ -12,8 +12,73 @@
     var controller = null;
     var pagePaused = document.hidden === true;
     var lastAttemptAt = 0;
-    var state = {lastSuccessAtMs: 0};
+    var requestStartedAt = 0;
+    var identityHydrated = false;
+    var installationId = browserInstallationId();
+    var state = {
+        lastSuccessAtMs: 0,
+        lastRttMs: 0,
+        installationId: installationId,
+        probeCapable: false
+    };
     window.AppSessionHeartbeat = state;
+
+    function validInstallationId(value) {
+        return /^[A-Za-z0-9._:-]{8,96}$/.test(String(value || ""));
+    }
+
+    function generatedInstallationId() {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === "function") {
+                return "web-" + window.crypto.randomUUID();
+            }
+        } catch (error) {}
+        return "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 14);
+    }
+
+    function browserInstallationId() {
+        var key = "copper-application-installation-id-v1";
+        try {
+            var stored = window.localStorage.getItem(key);
+            if (validInstallationId(stored)) return stored;
+            var created = generatedInstallationId();
+            window.localStorage.setItem(key, created);
+            return created;
+        } catch (error) {
+            return generatedInstallationId();
+        }
+    }
+
+    function hydrateNativeInstallationId() {
+        var plugins = window.Capacitor && window.Capacitor.Plugins;
+        var plugin = plugins && plugins.NativePush;
+        if (!plugin || typeof plugin.getInstallationIdentity !== "function") return null;
+        return new Promise(function (resolve) {
+            var finished = false;
+            var fallbackTimer = window.setTimeout(function () {
+                finish(null);
+            }, 750);
+            function finish(result) {
+                if (finished) return;
+                finished = true;
+                window.clearTimeout(fallbackTimer);
+                var nativeId = result && result.installationId;
+                if (validInstallationId(nativeId)) {
+                    installationId = String(nativeId);
+                    state.installationId = installationId;
+                    state.probeCapable = true;
+                }
+                resolve();
+            }
+            try {
+                Promise.resolve(plugin.getInstallationIdentity()).then(finish).catch(function () {
+                    finish(null);
+                });
+            } catch (error) {
+                finish(null);
+            }
+        });
+    }
 
     function cookie(name) {
         var prefix = name + "=";
@@ -89,7 +154,7 @@
     }
 
     function send() {
-        if (!active() || ownerGeneration) return;
+        if (!identityHydrated || !active() || ownerGeneration) return;
         // Focus alone cannot turn the 30-second presence clock into another poll.
         // A real pause/resume resets lastAttemptAt and gets one prompt catch-up.
         if (lastAttemptAt && Date.now() - lastAttemptAt < intervalMs) {
@@ -109,6 +174,23 @@
         body.set("path", window.location.pathname);
         body.set("client_kind", clientKind());
         body.set("client_version", document.body?.dataset.nativeClientVersion || "");
+        body.set("installation_id", installationId);
+        var dataset = document.body?.dataset || {};
+        body.set("connection_state", dataset.connectionState || "unknown");
+        var observedVersion = dataset.operationalObservedVersion;
+        var appliedVersion = dataset.operationalAppliedVersion || dataset.operationalStateVersion;
+        var pendingVersion = dataset.operationalPendingVersion;
+        if (observedVersion !== undefined && observedVersion !== "") {
+            body.set("observed_version", observedVersion);
+        }
+        if (appliedVersion !== undefined && appliedVersion !== "") {
+            body.set("applied_version", appliedVersion);
+        }
+        if (pendingVersion !== undefined) {
+            body.set("pending_version", pendingVersion === "" ? "0" : pendingVersion);
+        }
+        body.set("rtt_ms", String(state.lastRttMs || 0));
+        if (state.probeCapable) body.set("probe_capable", "1");
         var options = {
             method: "POST",
             credentials: "same-origin",
@@ -121,6 +203,7 @@
             body: body.toString()
         };
         if (requestController) options.signal = requestController.signal;
+        requestStartedAt = Date.now();
         timeoutTimer = window.setTimeout(function () {
             if (owner !== ownerGeneration) return;
             cancelOwner("timeout");
@@ -138,6 +221,7 @@
                 return;
             }
             state.lastSuccessAtMs = Date.now();
+            state.lastRttMs = Math.max(0, state.lastSuccessAtMs - requestStartedAt);
             window.dispatchEvent(new window.CustomEvent("web-heartbeat-success", {detail: {
                 source: "application-session-heartbeat", status: 204,
                 occurredAtMs: state.lastSuccessAtMs
@@ -180,5 +264,13 @@
     window.addEventListener("native-connectivity-resume", resume);
     window.addEventListener("offline", pause);
     window.addEventListener("online", resume);
-    send();
+    var nativeIdentityReady = hydrateNativeInstallationId();
+    if (nativeIdentityReady) nativeIdentityReady.then(function () {
+        identityHydrated = true;
+        send();
+    });
+    else {
+        identityHydrated = true;
+        send();
+    }
 })(window, document);

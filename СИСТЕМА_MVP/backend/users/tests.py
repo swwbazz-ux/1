@@ -59,6 +59,9 @@ def driver_stylesheet():
 
 
 DRIVER_SCREEN_SCRIPTS = (
+    'js/excavator-dashboard-drag-v1.js',
+    'js/excavator-dump-return-swipe-v1.js',
+    'js/driver-manual-excavator-workspace-v1.js',
     'js/driver-haptics-v1.js',
     'js/driver-native-push-v1.js',
     'js/driver-shift-fragment-v1.js',
@@ -319,6 +322,22 @@ class AccessLoginTests(TestCase):
         self.assertNotIn('Current placement rock', main_card)
         self.assertNotIn('Current horizon', main_card)
         self.assertNotIn('Current block', main_card)
+        manual_workspace = html.split('<section class="driver-manual-workspace"', 1)[1].split(
+            '<nav class="mm-mobile-bottom-nav driver-bottom-nav"', 1,
+        )[0]
+        self.assertIn('data-driver-manual-free-bucket-open', manual_workspace)
+        self.assertIn('Immutable rock', manual_workspace)
+        self.assertIn('Immutable horizon', manual_workspace)
+        self.assertIn('Immutable block', manual_workspace)
+        self.assertIn('Immutable dump', manual_workspace)
+        self.assertIn(f'data-driver-manual-excavator-id="{alternate.id}"', manual_workspace)
+        self.assertNotIn('Current placement rock', manual_workspace)
+        # Точка текущего размещения не должна быть ВЫБИРАЕМОЙ, пока действует
+        # снимок приёмки. В разметке она присутствовать может: рабочее место
+        # намеренно несёт запасной контекст в base_event_context, чтобы после
+        # отмены свободного ковша вернуться в ручной режим сразу, не дожидаясь
+        # ответа сервера. Поэтому проверяется признак карточки, а не строка.
+        self.assertNotIn('data-eo-dump-name="Current placement dump"', manual_workspace)
         dial_zone = html.split('class="driver-work-dial-zone"', 1)[1].split(
             'class="driver-free-bucket-sheet"', 1,
         )[0]
@@ -493,19 +512,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v299')
+        self.assertContains(response, 'driver-mobile-shell-v352')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v299',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v352',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v299',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v352',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v299',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v352',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -640,7 +659,11 @@ class AccessLoginTests(TestCase):
         self.assertIn('padding: 0 0 max(10px, var(--driver-safe-bottom, 0px))', driver_stylesheet())
         self.assertIn('width: 100%', driver_stylesheet())
         self.assertIn('max-width: none', driver_stylesheet())
-        self.assertIn('min-width: 320px', driver_stylesheet())
+        # Пол ширины обязан уступать экрану: на телефоне с 1080 точками и
+        # плотностью 3.5 видимая ширина 308.6, и жёсткие 320px выносили правый
+        # столбец кнопок за край на каждом экране водителя.
+        self.assertIn('min-width: min(320px, 100%)', driver_stylesheet())
+        self.assertNotIn('min-width: 320px;', driver_stylesheet())
         self.assertNotContains(response, 'width: min(100vw, 430px)')
         self.assertNotContains(response, 'max-width: 430px')
         self.assertNotContains(response, 'margin: 0 auto')
@@ -732,7 +755,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v299', script)
+        self.assertIn('driver-mobile-shell-v352', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3092,6 +3115,202 @@ class AccessLoginTests(TestCase):
         self.assertContains(accepted_response, 'ЭКС-1')
         self.assertNotContains(accepted_response, 'ВЫ НАЗНАЧЕНЫ НА ЭКС-1')
 
+    def test_driver_manual_workspace_reuses_excavator_dashboard_with_primary_context(self):
+        truck = self.create_registered_driver_shift()
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator = Equipment.objects.create(equipment_type=excavator_type, garage_number='ЭКС-91')
+        assignment = HaulAssignment.objects.create(
+            truck=truck,
+            excavator=excavator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now(),
+        )
+        rock = RockType.objects.create(name='Первичная руда')
+        first = DumpPoint.objects.create(name='СКЛАД 2.1')
+        second = DumpPoint.objects.create(name='ККД')
+        alternate = DumpPoint.objects.create(name='ПОДСЫПКА')
+        placement = ExcavatorPlacement.objects.create(
+            excavator=excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=rock,
+            work_dump_point=first,
+            loading_horizon='15',
+            loading_block='55',
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=first,
+            transport_distance_km=Decimal('1.20'),
+            position=0,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=second,
+            transport_distance_km=Decimal('2.40'),
+            position=1,
+        )
+
+        driver_shift = EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True)
+        for point in (first, first, second):
+            Trip.objects.create(
+                truck=truck,
+                excavator=excavator,
+                driver=self.employee,
+                loading_shift=driver_shift,
+                unloading_shift=driver_shift,
+                rock_type=rock,
+                dump_point=point,
+                assigned_dump_point=point,
+                status=TripStatus.COMPLETED,
+                completed_at=timezone.now(),
+            )
+
+        response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-driver-manual-open')
+        self.assertContains(response, 'data-driver-manual-workspace')
+        self.assertContains(response, 'data-driver-manual-free-bucket-open')
+        self.assertContains(response, 'data-driver-manual-action-row', count=1)
+        self.assertEqual(
+            response.content.decode().count(' data-driver-manual-trip-timer role="timer"'),
+            1,
+        )
+        self.assertContains(response, 'data-driver-manual-trip-timer-value', count=1)
+        self.assertContains(response, 'ОЖИДАЕТ ОТПРАВКИ')
+        self.assertContains(response, 'data-driver-manual-source-row', count=1)
+        response_html = response.content.decode()
+        base_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            response_html,
+        )
+        self.assertIsNotNone(base_context_match)
+        base_context = json.loads(base_context_match.group(1))
+        self.assertEqual(base_context['authority_type'], 'assignment')
+        self.assertEqual(base_context['assignment_id'], assignment.id)
+        self.assertEqual(base_context['excavator_id'], excavator.id)
+        self.assertEqual(
+            [point['id'] for point in base_context['dump_points']],
+            [first.id, second.id],
+        )
+        self.assertEqual(
+            [point['completed_count'] for point in base_context['dump_points']],
+            [2, 1],
+        )
+        self.assertEqual(
+            [point['is_last_sent'] for point in base_context['dump_points']],
+            [False, True],
+        )
+        self.assertEqual(
+            [point['id'] for point in base_context['reroute_points']],
+            [second.id, alternate.id, first.id],
+        )
+        self.assertContains(response, '<i data-driver-manual-primary-point ', count=2)
+        self.assertContains(response, '<i data-driver-manual-reroute-point ', count=3)
+        self.assertRegex(
+            response.content.decode(),
+            rf'data-driver-manual-primary-point-id="{second.id}"[^>]*data-driver-manual-primary-point-count="1"[^>]*data-driver-manual-primary-point-last="true"',
+        )
+        self.assertContains(response, 'ОБЫЧНЫЙ РЕЖИМ')
+        self.assertContains(response, 'ИЗМЕНИТЬ ТОЧКУ')
+        self.assertContains(response, 'Сначала создайте рейс')
+        self.assertContains(response, 'data-driver-manual-excavator-id="%s"' % excavator.id)
+        self.assertContains(response, 'data-driver-manual-dump-target', count=2)
+        self.assertRegex(
+            response.content.decode(),
+            rf'data-eo-dump-target="{first.id}"[^>]*data-driver-manual-completed-count="2"[^>]*data-driver-manual-last-sent="false"',
+        )
+        self.assertRegex(
+            response.content.decode(),
+            rf'data-eo-dump-target="{second.id}"[^>]*data-driver-manual-completed-count="1"[^>]*data-driver-manual-last-sent="true"',
+        )
+        self.assertContains(response, 'СКЛАД 2.1')
+        self.assertContains(response, 'ККД')
+        self.assertContains(response, 'Первичная руда')
+        self.assertContains(response, 'Гор. 15')
+        self.assertContains(response, 'Бл. 55')
+        self.assertContains(response, 'data-driver-manual-result')
+        self.assertNotContains(response, 'рейс не создан')
+        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v352')
+        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v352')
+
+        active_trip = Trip.objects.create(
+            truck=truck,
+            excavator=excavator,
+            driver=self.employee,
+            loading_shift=EmployeeShift.objects.get(employee=self.employee, closed_at__isnull=True),
+            rock_type=rock,
+            dump_point=first,
+            assigned_dump_point=first,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        blocked = self.client.get('/driver/', HTTP_HOST='localhost')
+        self.assertNotContains(blocked, 'data-driver-manual-open')
+        self.assertContains(blocked, 'Ручной режим недоступен во время активного рейса')
+
+        TripClientAction.objects.create(
+            trip=active_trip,
+            actor=self.employee,
+            action_type='driver_manual_loaded',
+            client_action_id='driver-manual-render-test',
+        )
+        restored_manual = self.client.get('/driver/', HTTP_HOST='localhost')
+        self.assertContains(restored_manual, 'data-driver-manual-open')
+        self.assertContains(restored_manual, 'data-driver-active-trip-origin="driver_manual"')
+        self.assertContains(restored_manual, f'data-driver-active-trip-id="{active_trip.id}"')
+        self.assertContains(restored_manual, 'data-driver-has-loaded-trip="false"')
+        self.assertRegex(
+            restored_manual.content.decode(),
+            r'<div class="driver-work-dial is-empty[^>]*>',
+        )
+        self.assertNotContains(restored_manual, f'data-driver-trip-id="{active_trip.id}"')
+        self.assertRegex(
+            restored_manual.content.decode(),
+            r'data-driver-hold-button[^>]*disabled aria-disabled="true"',
+        )
+
+        restored_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            restored_manual.content.decode(),
+        )
+        self.assertIsNotNone(restored_context_match)
+        restored_context = json.loads(restored_context_match.group(1))
+        self.assertEqual(
+            [point['completed_count'] for point in restored_context['dump_points']],
+            [3, 1],
+        )
+
+        active_trip.status = TripStatus.CANCELLED
+        active_trip.cancelled_at = timezone.now()
+        active_trip.save(update_fields=['status', 'cancelled_at'])
+        after_cancel = self.client.get('/driver/', HTTP_HOST='localhost')
+        cancelled_context_match = re.search(
+            r'<script id="driver-manual-workspace-base-context-data" type="application/json">(.*?)</script>',
+            after_cancel.content.decode(),
+        )
+        self.assertIsNotNone(cancelled_context_match)
+        cancelled_context = json.loads(cancelled_context_match.group(1))
+        self.assertEqual(
+            [point['completed_count'] for point in cancelled_context['dump_points']],
+            [2, 1],
+        )
+
+    def test_driver_manual_workspace_shows_honest_empty_assignment(self):
+        self.create_registered_driver_shift()
+
+        response = self.client.get('/driver/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-driver-manual-open')
+        self.assertContains(response, 'Нет назначения')
+        self.assertContains(response, 'Экскаватор не назначен')
+        self.assertContains(response, 'Нет точек')
+        self.assertContains(response, 'Нет настроенных точек разгрузки')
+
     def test_driver_receives_dispatcher_assignment_excavator_context_and_loaded_trip_chain(self):
         self.employee.full_name = 'Петров Петр Петрович'
         self.employee.save(update_fields=['full_name'])
@@ -3659,7 +3878,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v299')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v352')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()

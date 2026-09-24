@@ -43,8 +43,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "44",
-    versionName: "0.1.28",
+    versionCode: "46",
+    versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -54,8 +54,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "48",
-    versionName: "0.1.30",
+    versionCode: "53",
+    versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -65,8 +65,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver.qa",
     appName: "Водитель QA",
-    versionCode: "7",
-    versionName: "1.0.6-qa",
+    versionCode: "12",
+    versionName: "1.0.11-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -76,8 +76,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "49",
-    versionName: "0.1.30",
+    versionCode: "55",
+    versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -87,8 +87,8 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "48",
-    versionName: "0.1.30-rc",
+    versionCode: "54",
+    versionName: "0.1.32-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -98,8 +98,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator.qa",
     appName: "Экскаваторщик QA",
-    versionCode: "10",
-    versionName: "1.0.9-qa",
+    versionCode: "12",
+    versionName: "1.0.11-qa",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -109,8 +109,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "45",
-    versionName: "0.1.28",
+    versionCode: "48",
+    versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -120,8 +120,8 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "44",
-    versionName: "0.1.28-rc",
+    versionCode: "47",
+    versionName: "0.1.29-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -172,6 +172,33 @@ test("profiles remain isolated by URL and application id", () => {
   assert.notEqual(excavator.alertChannelId, driver.alertChannelId);
 });
 
+test("every field profile pins native WebView text zoom to the workstation scale", () => {
+  // Both field applications suffered from the phone's largest system font, so
+  // each of their profiles pins the scale the operational layout was built for.
+  for (const profileName of [
+    "driver", "driver_qa", "driver_rustore_qa", "driver_rustore",
+    "excavator", "excavator_qa", "excavator_rustore_qa", "excavator_rustore",
+  ]) {
+    assert.equal(profile(profileName).webViewTextZoomPercent, "100");
+  }
+
+  const gradle = readFileSync(resolve(root, "android", "app", "build.gradle"), "utf8");
+  const activity = readFileSync(
+    resolve(root, "android", "app", "src", "main", "java", "ru", "copperresources", "mobile", "MainActivity.java"),
+    "utf8"
+  );
+  assert.match(gradle, /WEB_VIEW_TEXT_ZOOM_PERCENT/);
+  assert.match(activity, /configureProfileWebViewTextZoom\(webView\)/);
+  assert.match(activity, /getSettings\(\)\.setTextZoom\(BuildConfig\.WEB_VIEW_TEXT_ZOOM_PERCENT\)/);
+  assert.doesNotMatch(activity, /compensatedZoom/);
+  assert.match(activity, /onPageStarted\(WebView loadingWebView\)[\s\S]*?configureProfileWebViewTextZoom\(loadingWebView\)/);
+  assert.match(activity, /onPageLoaded\(WebView loadedWebView\)[\s\S]*?configureProfileWebViewTextZoom\(loadedWebView\)/);
+  assert.match(
+    activity,
+    /public void onResume\(\)[\s\S]*?configureProfileWebViewTextZoom\(getBridge\(\)\.getWebView\(\)\)/
+  );
+});
+
 test("QA and RuStore variants keep role identity but disable sideload updates", () => {
   for (const role of ["excavator", "driver"]) {
     const qa = profile(`${role}_qa`);
@@ -190,6 +217,9 @@ test("QA and RuStore variants keep role identity but disable sideload updates", 
     assert.equal(rustoreQa.applicationId, rustore.applicationId);
     assert.notEqual(rustoreQa.serverUrl, rustore.serverUrl);
     assert.ok(Number(profile(role).versionCode) <= Number(rustoreQa.versionCode));
+    if (role === "driver") {
+      assert.ok(Number(profile(role).versionCode) < Number(rustoreQa.versionCode));
+    }
     assert.ok(Number(rustore.versionCode) > Number(rustoreQa.versionCode));
     assert.ok(Number(rustore.versionCode) > Number(profile(role).versionCode));
   }
@@ -279,6 +309,8 @@ test("operational cues stay dynamic when Android shows a heads-up notification",
   const notifications = readFileSync(resolve(javaRoot, "AppNotifications.java"), "utf8");
   const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const connectionVoiceGate = readFileSync(resolve(javaRoot, "ConnectionVoiceGate.java"), "utf8");
+  const connectionVoiceStability = readFileSync(resolve(javaRoot, "ConnectionVoiceStability.java"), "utf8");
   const plugin = readFileSync(resolve(javaRoot, "NativeSoundPlugin.java"), "utf8");
 
   for (const cue of [
@@ -463,6 +495,8 @@ test("both production profiles package every approved operational voice phrase",
   const player = readFileSync(resolve(javaRoot, "OperationalVoicePlayer.java"), "utf8");
   const announcer = readFileSync(resolve(javaRoot, "OperationalVoiceAnnouncer.java"), "utf8");
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
+  const connectionVoiceGate = readFileSync(resolve(javaRoot, "ConnectionVoiceGate.java"), "utf8");
+  const connectionVoiceStability = readFileSync(resolve(javaRoot, "ConnectionVoiceStability.java"), "utf8");
   assert.match(plugin, /public void announceOperational\(PluginCall call\)/);
   assert.match(player, /VOICE_AFTER_CUE_DELAY_MS/);
   assert.match(player, /AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK/);
@@ -470,7 +504,13 @@ test("both production profiles package every approved operational voice phrase",
   assert.match(service, /showLatestAssignmentAlert/);
   assert.match(service, /CONNECTION_LOSS_ANNOUNCED/);
   assert.match(service, /connectionLossWasAnnounced && !AppVisibility\.isForeground\(\)/);
-  assert.match(service, /shouldAnnounceConnectionLoss && !AppVisibility\.isForeground\(\)/);
+  assert.match(service, /ConnectionVoiceStability\.Action\.LOSS_READY/);
+  assert.match(service, /ConnectionVoiceStability\.Action\.RECOVERY_READY/);
+  assert.match(plugin, /ConnectionVoiceGate\.confirmLoss/);
+  assert.match(plugin, /ConnectionVoiceGate\.confirmRecovery/);
+  assert.match(connectionVoiceGate, /LOSS_COOLDOWN_MS = 5 \* 60_000L/);
+  assert.match(connectionVoiceStability, /LOSS_STABLE_MS = 30_000L/);
+  assert.match(connectionVoiceStability, /RECOVERY_SUCCESS_COUNT = 3/);
 });
 
 test("recorded equipment numbers are packaged and routed through native sequences", () => {
@@ -662,7 +702,7 @@ test("native heartbeat follows the active-shift lifecycle and reports the exact 
   assert.match(pendingShiftClose, /field_errors/);
   assert.match(pendingShiftClose, /warnings/);
   assert.match(pendingShiftClose, /markAttention\(Context context, String expectedClientActionId, String responseBody\)/);
-  assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(\)/);
+  assert.match(service, /runHeartbeat\(\)[\s\S]*?flushPendingDriverShiftClose\(\)[\s\S]*?requestHeartbeat\(sentPresenceProbeId\)/);
   assert.match(service, /onTaskRemoved\(Intent rootIntent\)[\s\S]*?PendingDriverShiftClose\.hasPending\(this\)[\s\S]*?scheduleHeartbeat\(0L\)/);
   assert.match(service, /requestDriverShiftClose[\s\S]*?X-CSRFToken[\s\S]*?client_action_id[\s\S]*?shift_id[\s\S]*?reading_confirmation_token/);
   assert.match(service, /statusCode == 401 \|\| result\.statusCode == 403[\s\S]*?PendingDriverShiftClose\.markAuthRequired[\s\S]*?FlushResult\.AUTH_REQUIRED/);

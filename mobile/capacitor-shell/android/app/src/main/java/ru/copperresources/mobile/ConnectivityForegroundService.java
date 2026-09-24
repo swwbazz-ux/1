@@ -48,14 +48,16 @@ public class ConnectivityForegroundService extends Service {
     public static final String ACTION_STOP_CONNECTION = "ru.copperresources.mobile.action.STOP_CONNECTION";
     private static final String ACTION_RECONCILE = "ru.copperresources.mobile.action.RECONCILE_CONNECTION";
     private static final String ACTION_ACTIVE_SHIFT = "ru.copperresources.mobile.action.ACTIVE_SHIFT";
+    private static final String ACTION_PRESENCE_PROBE = "ru.copperresources.mobile.action.PRESENCE_PROBE";
     static final String PREFS_NAME = ConnectionState.PREFS_NAME;
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
-    private static final String CONNECTION_LOSS_ANNOUNCED = "connection_loss_announced";
+    private static final String CONNECTION_LOSS_ANNOUNCED = ConnectionVoiceGate.LOSS_ANNOUNCED_KEY;
     private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
 
     private final Object scheduleLock = new Object();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ConnectionVoiceStability connectionVoiceStability = new ConnectionVoiceStability();
     private ScheduledExecutorService executor;
     private ScheduledFuture<?> pendingHeartbeat;
     private ConnectivityManager connectivityManager;
@@ -63,6 +65,7 @@ public class ConnectivityForegroundService extends Service {
     private NativeTransportState transport;
     private final HeartbeatSchedule heartbeatSchedule = new HeartbeatSchedule();
     private volatile boolean stopping;
+    private volatile boolean presenceProbeOnly;
     private boolean foregroundStarted;
     private String publishedStatus = "";
 
@@ -76,6 +79,13 @@ public class ConnectivityForegroundService extends Service {
         }
         Intent intent = new Intent(context, ConnectivityForegroundService.class)
             .setAction(ACTION_RECONCILE);
+        startSafely(context, intent);
+    }
+
+    public static void reconcilePresenceProbe(Context context) {
+        if (PresenceProbeState.pending(context, System.currentTimeMillis()).isEmpty()) return;
+        Intent intent = new Intent(context, ConnectivityForegroundService.class)
+            .setAction(ACTION_PRESENCE_PROBE);
         startSafely(context, intent);
     }
 
@@ -127,16 +137,23 @@ public class ConnectivityForegroundService extends Service {
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
-        if (!ConnectionState.isDesired(this) && !PendingDriverShiftClose.hasPending(this)) {
+        boolean normalConnectionRequired = ConnectionState.isDesired(this)
+            || PendingDriverShiftClose.hasPending(this);
+        boolean presenceProbeRequested = ACTION_PRESENCE_PROBE.equals(action)
+            && !PresenceProbeState.pending(this, System.currentTimeMillis()).isEmpty();
+        if (!normalConnectionRequired && !presenceProbeRequested) {
             stopServiceAndRemoveNotification();
             return START_NOT_STICKY;
         }
-        startAsForeground(currentStatusText());
+        presenceProbeOnly = presenceProbeRequested && !normalConnectionRequired;
+        startAsForeground(
+            presenceProbeOnly ? "Проверка связи с сервером" : currentStatusText()
+        );
         registerNetworkCallback();
         scheduleHeartbeat(0L);
         // Если Android освободил процесс под давлением памяти, он должен
         // восстановить рабочую связь без повторного открытия приложения.
-        return START_STICKY;
+        return presenceProbeOnly ? START_NOT_STICKY : START_STICKY;
     }
 
     @Nullable
@@ -264,7 +281,16 @@ public class ConnectivityForegroundService extends Service {
                 // The durable queue retains its retry. A queue error must not hide a healthy heartbeat.
                 shiftCloseFlush = FlushResult.RETRY;
             }
-            HeartbeatResult result = requestHeartbeat();
+            long heartbeatRequestStartedAt = android.os.SystemClock.elapsedRealtime();
+            String sentPresenceProbeId = PresenceProbeState.pending(
+                this,
+                System.currentTimeMillis()
+            );
+            HeartbeatResult result = requestHeartbeat(sentPresenceProbeId);
+            long heartbeatRttMs = Math.max(
+                0L,
+                android.os.SystemClock.elapsedRealtime() - heartbeatRequestStartedAt
+            );
             if (stopping || Thread.currentThread().isInterrupted()) return;
             if (result.statusCode == 401 || result.statusCode == 403) {
                 recordLocalTransportFailure("authentication_ended");
@@ -291,9 +317,11 @@ public class ConnectivityForegroundService extends Service {
             }
             heartbeatSucceeded = true;
             synchronized (scheduleLock) { heartbeatSchedule.responseSucceeded(); }
-            transport.success(System.currentTimeMillis(), response.optLong("version", 0L));
+            long transportSuccessAt = System.currentTimeMillis();
+            transport.success(transportSuccessAt, response.optLong("version", 0L));
             ConnectionState.recordAlive(this, transport.lastSuccessAtMs);
             ConnectionState.recordTransport(this, transport);
+            PresenceProbeState.clearIfEquals(this, sentPresenceProbeId);
             if (response.has("background_connection_required")) {
                 boolean connectionRequired = response.optBoolean("background_connection_required", false);
                 String shiftId = response.optString("active_shift_id", "");
@@ -318,15 +346,38 @@ public class ConnectivityForegroundService extends Service {
             long previousVersion = preferences.getLong("last_server_version", 0L);
             long serverVersion = readServerVersion(result.body);
             boolean relevant = readRelevantFlag(result.body);
-            preferences.edit()
+            SharedPreferences.Editor successEditor = preferences.edit()
                 .putLong("last_transport_success_at", System.currentTimeMillis())
                 .putInt("last_http_status", result.statusCode)
                 .remove("last_response")
                 .remove("last_error")
-                .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion)
-                .putBoolean(CONNECTION_LOSS_ANNOUNCED, false)
-                .apply();
-            if (connectionLossWasAnnounced && !AppVisibility.isForeground()) {
+                .putLong("last_heartbeat_rtt_ms", heartbeatRttMs)
+                .putLong("last_server_version", serverVersion > 0L ? serverVersion : previousVersion);
+            boolean excavatorProfile = "excavator".equals(BuildConfig.APP_PROFILE_ID);
+            if (!excavatorProfile) {
+                successEditor.putBoolean(CONNECTION_LOSS_ANNOUNCED, false);
+            }
+            successEditor.apply();
+            if (excavatorProfile) {
+                ConnectionVoiceStability.Action voiceAction = connectionVoiceStability.onSuccess(
+                    transportSuccessAt,
+                    ConnectionVoiceGate.isLossAnnounced(this)
+                );
+                if (voiceAction == ConnectionVoiceStability.Action.RECOVERY_READY
+                        && !AppVisibility.isForeground()) {
+                    if (ConnectionVoiceGate.confirmRecovery(this)) {
+                        boolean queued = OperationalVoicePlayer.play(
+                            this,
+                            OperationalCueCatalog.CONNECTION_RESTORED,
+                            "voice_connection_restored",
+                            true,
+                            0L
+                        );
+                        if (!queued) ConnectionVoiceGate.rollbackRecovery(this);
+                    }
+                    connectionVoiceStability.markRecoveryHandled();
+                }
+            } else if (connectionLossWasAnnounced && !AppVisibility.isForeground()) {
                 OperationalVoicePlayer.play(
                     this,
                     OperationalCueCatalog.CONNECTION_RESTORED,
@@ -370,31 +421,61 @@ public class ConnectivityForegroundService extends Service {
             String reason = error instanceof HeartbeatFailure ? ((HeartbeatFailure) error).reason
                 : error instanceof SocketTimeoutException ? "timeout"
                 : error instanceof IOException ? "network_error" : "local_processing";
+            if (presenceProbeOnly) {
+                if ("cookie_timeout".equals(reason) || "local_processing".equals(reason)) {
+                    recordLocalTransportFailure(reason);
+                } else {
+                    transport.failure(System.currentTimeMillis(), reason);
+                    ConnectionState.recordTransport(this, transport);
+                }
+                stopServiceAndRemoveNotification();
+                return;
+            }
             if ("cookie_timeout".equals(reason) || "local_processing".equals(reason)) {
                 recordLocalTransportFailure(reason);
                 publishStatus(transport.failureStatusText(AppVisibility.isForeground()));
                 scheduleHeartbeat(2_000L);
                 return;
             }
-            transport.failure(System.currentTimeMillis(), reason);
+            long transportFailureAt = System.currentTimeMillis();
+            transport.failure(transportFailureAt, reason);
             ConnectionState.recordTransport(this, transport);
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            boolean shouldAnnounceConnectionLoss = "lost".equals(transport.transportState)
-                && !preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
+            boolean excavatorProfile = "excavator".equals(BuildConfig.APP_PROFILE_ID);
+            ConnectionVoiceStability.Action voiceAction = excavatorProfile
+                ? connectionVoiceStability.onFailure(transportFailureAt, transport.transportState)
+                : ConnectionVoiceStability.Action.NONE;
+            boolean appForeground = AppVisibility.isForeground();
+            boolean shouldAnnounceConnectionLoss;
+            if (excavatorProfile) {
+                shouldAnnounceConnectionLoss = voiceAction == ConnectionVoiceStability.Action.LOSS_READY
+                    && !appForeground
+                    && ConnectionVoiceGate.confirmLoss(this, transportFailureAt);
+                if (voiceAction == ConnectionVoiceStability.Action.LOSS_READY && !appForeground) {
+                    connectionVoiceStability.markLossHandled();
+                }
+            } else {
+                shouldAnnounceConnectionLoss = "lost".equals(transport.transportState)
+                    && !preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
+            }
             preferences.edit()
                 .putLong("last_failure_at", transport.occurredAtMs)
                 .putString("last_failure_reason", reason)
                 .remove("last_error")
                 .apply();
-            if (shouldAnnounceConnectionLoss && !AppVisibility.isForeground()) {
-                OperationalVoicePlayer.play(
+            if (shouldAnnounceConnectionLoss && !appForeground) {
+                boolean queued = OperationalVoicePlayer.play(
                     this,
                     OperationalCueCatalog.CONNECTION_LOST,
                     "voice_connection_lost",
                     true,
                     0L
                 );
-                preferences.edit().putBoolean(CONNECTION_LOSS_ANNOUNCED, true).apply();
+                if (excavatorProfile) {
+                    if (!queued) ConnectionVoiceGate.rollbackLoss(this, transportFailureAt);
+                } else {
+                    preferences.edit().putBoolean(CONNECTION_LOSS_ANNOUNCED, true).apply();
+                }
             }
             publishStatus(transport.failureStatusText(AppVisibility.isForeground()));
             scheduleHeartbeat(transport.retryDelay(BuildConfig.HEARTBEAT_INTERVAL_MS, MAX_BACKOFF_MS));
@@ -415,7 +496,7 @@ public class ConnectivityForegroundService extends Service {
         HeartbeatFailure(String reason) { super(reason); this.reason = reason; }
     }
 
-    private HeartbeatResult requestHeartbeat() throws Exception {
+    private HeartbeatResult requestHeartbeat(String presenceProbeId) throws Exception {
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         long lastServerVersion = preferences.getLong("last_server_version", 0L);
         Uri.Builder heartbeatUri = Uri.parse(BuildConfig.HEARTBEAT_URL).buildUpon();
@@ -438,6 +519,26 @@ public class ConnectivityForegroundService extends Service {
                 "CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
                     + "/" + BuildConfig.VERSION_NAME
             );
+            connection.setRequestProperty(
+                "X-App-Installation-Id",
+                AppInstallationIdentity.get(this)
+            );
+            connection.setRequestProperty(
+                "X-App-Connection-State",
+                transport == null ? "unknown" : transport.transportState
+            );
+            connection.setRequestProperty(
+                "X-App-Observed-Version",
+                Long.toString(lastServerVersion)
+            );
+            connection.setRequestProperty(
+                "X-App-Heartbeat-Rtt-Ms",
+                Long.toString(preferences.getLong("last_heartbeat_rtt_ms", 0L))
+            );
+            connection.setRequestProperty("X-App-Presence-Probe-Capable", "1");
+            if (!presenceProbeId.isEmpty()) {
+                connection.setRequestProperty("X-App-Presence-Probe", presenceProbeId);
+            }
 
             String cookie = readWebViewCookie();
             if (cookie != null && !cookie.isBlank()) {

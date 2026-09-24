@@ -12,6 +12,7 @@ from shifts.models import EmployeeShift
 from shifts.services import equipment_is_truck
 
 from .active_role import latest_active_role_access
+from .application_connection import begin_application_connection_probe
 from .live_monitor import (
     PRESENCE_FOREGROUND,
     OBSERVER_MODE_CONTROL,
@@ -24,7 +25,8 @@ from .live_monitor import (
     touch_application_session,
 )
 from .context_processors import parse_native_app_marker
-from .models import AdminActionLog, EmployeeAccess
+from .models import AdminActionLog, EmployeeAccess, NativePushDevice
+from .native_push import native_app_ids_for_role
 from .role_apps import ROLE_APPS, get_role_app
 from .views import require_admin_access
 
@@ -106,6 +108,17 @@ def build_live_monitor_context(request, access):
     employee_ids = {shift.employee_id for shift in open_shifts}
     employee_ids.update(session.access.employee_id for session in sessions)
     accesses_by_employee = _active_accesses_for_employees(employee_ids)
+    native_apps_by_employee = defaultdict(set)
+    for employee_id, app_id in (
+        NativePushDevice.objects
+        .filter(
+            is_active=True,
+            provider=NativePushDevice.Provider.FCM,
+            employee_id__in=employee_ids,
+        )
+        .values_list('employee_id', 'app_id')
+    ):
+        native_apps_by_employee[employee_id].add(app_id)
 
     sessions_by_app = defaultdict(list)
     sessions_by_access = defaultdict(list)
@@ -210,10 +223,20 @@ def build_live_monitor_context(request, access):
                     mode=OBSERVER_MODE_CONTROL,
                 )
                 row['can_eject'] = target_access.pk != access.pk
+                row['has_probe_push'] = bool(
+                    native_apps_by_employee.get(target_access.employee_id, set())
+                    & set(native_app_ids_for_role(app.role_code))
+                )
+                row['can_probe_connection'] = bool(
+                    row['has_probe_push']
+                    and presence['connection']['probe_capable']
+                )
             else:
                 row['observe_url'] = ''
                 row['control_url'] = ''
                 row['can_eject'] = False
+                row['has_probe_push'] = False
+                row['can_probe_connection'] = False
             rows.append(row)
         rows.sort(
             key=lambda row: (
@@ -264,6 +287,59 @@ def system_admin_live_monitor_view(request):
         response = render(request, 'users/system_admin_live_monitor.html', context)
     response['Cache-Control'] = 'private, no-store'
     return response
+
+
+@require_POST
+def system_admin_probe_connection_view(request, access_id):
+    actor_access = require_admin_access(request)
+    if not actor_access:
+        return redirect('role_home')
+    target_access = (
+        EmployeeAccess.objects
+        .select_related('employee', 'role')
+        .filter(
+            pk=access_id,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+            employee__is_active=True,
+            role__is_active=True,
+        )
+        .first()
+    )
+    if not target_access or target_access.role.code not in {'driver', 'excavator_operator'}:
+        messages.error(request, 'Полевое приложение для проверки связи не найдено.')
+        return redirect('system_admin_live_monitor')
+    presence = application_presence_by_access_ids([target_access.pk]).get(
+        target_access.pk,
+        empty_application_presence(has_logged_in=True),
+    )
+    if not presence['connection']['probe_capable']:
+        messages.warning(
+            request,
+            'Установленная версия APK ещё не поддерживает адресную проверку связи.',
+        )
+        return redirect('system_admin_live_monitor')
+    probe = begin_application_connection_probe(
+        access=target_access,
+        app_code=target_access.role.code,
+        actor_access=actor_access,
+    )
+    if probe['status'] in {'sending', 'sent'}:
+        messages.success(
+            request,
+            f'Контрольный сигнал отправлен: {target_access.employee}. Ожидаем ответ APK.',
+        )
+    elif probe['status'] == 'acknowledged':
+        messages.success(
+            request,
+            f'APK уже подтвердило связь: {target_access.employee}.',
+        )
+    else:
+        messages.warning(
+            request,
+            f'Контрольный сигнал не отправлен: у {target_access.employee} нет доступного push-канала.',
+        )
+    return redirect('system_admin_live_monitor')
 
 
 @require_POST

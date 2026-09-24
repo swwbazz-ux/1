@@ -4,63 +4,97 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const template = fs.readFileSync(path.join(__dirname, '../../../templates/trips/excavator_work.html'), 'utf8');
+const sharedDragSource = fs.readFileSync(path.join(__dirname, '../excavator-dashboard-drag-v1.js'), 'utf8');
 
 function fixture(manual) {
     const handlers = {}, classes = new Set(), timers = new Map();
-    let timerId = 0, vibrations = 0, pickupTones = 0, audioPrepares = 0, details = 0, sends = 0;
+    let timerId = 0, vibrations = 0, details = 0, sends = 0;
     const delays = [], haptics = [];
+    function classListFor(set) {
+        return {
+            add: (...names) => names.forEach(name => set.add(name)),
+            remove: (...names) => names.forEach(name => set.delete(name)),
+            contains: name => set.has(name),
+            toggle: (name, force) => force ? set.add(name) : set.delete(name),
+        };
+    }
+    function previewNode() {
+        const previewClasses = new Set();
+        return {
+            classList: classListFor(previewClasses), dataset: {},
+            style: {setProperty() {}, transform: ''},
+            querySelectorAll: () => [], appendChild() {}, removeAttribute() {}, setAttribute() {}, remove() {},
+        };
+    }
     const card = {
         disabled: false, style: {},
         dataset: {eoManualAvailable: manual ? '1' : '0', eoTruckInactive: manual ? '1' : '', eoCanLoad: manual ? '0' : '1'},
-        classList: {add: (...names) => names.forEach(n => classes.add(n)), remove: (...names) => names.forEach(n => classes.delete(n)), contains: n => classes.has(n)},
+        classList: classListFor(classes),
         addEventListener: (name, fn) => { handlers[name] = fn; },
         setPointerCapture() {}, releasePointerCapture() {},
         getBoundingClientRect: () => ({left: 0, top: 0, width: 90, height: 90}),
+        cloneNode: () => previewNode(),
+    };
+    const targetClasses = new Set();
+    const target = {
+        dataset: {eoDumpTarget: '9'}, classList: classListFor(targetClasses),
+        getBoundingClientRect: () => ({left: 0, top: 70, right: 120, bottom: 180, width: 120, height: 110}),
+    };
+    const shellClasses = new Set();
+    const shell = {
+        classList: classListFor(shellClasses), addEventListener() {}, removeEventListener() {},
+        querySelectorAll(selector) {
+            if (selector === '[data-eo-truck-card]') return [card];
+            if (selector === '[data-eo-dump-target]') return [target];
+            return [];
+        },
     };
     const context = {
-        activeTruckDrag: null, Math, card,
-        shell: {querySelectorAll: () => [card]},
-        window: {setTimeout: (fn, delay) => {delays.push(delay); timers.set(++timerId, fn); return timerId;}, clearTimeout: id => timers.delete(id)},
+        Math, Number, String, Boolean, Array, Object, card, shell,
+        setTimeout: (fn, delay) => {delays.push(delay); timers.set(++timerId, fn); return timerId;},
+        clearTimeout: id => timers.delete(id),
         navigator: {vibrate: duration => {haptics.push(duration); vibrations++;}},
-        prepareExcavatorPickupAudio: () => {audioPrepares++;},
-        playExcavatorTruckGrabFeedback: () => {haptics.push(70); vibrations++; pickupTones++;},
-        isInactiveTruck: c => c.dataset.eoTruckInactive === '1',
-        isTruckLoadBlocked: c => c.dataset.eoCanLoad === '0',
-        isFreeBucketCancelSwipe: () => false,
-        selectTruck() {}, selectDump() {},
-        openTruckDetailCard: () => {details++; return true;},
-        createTruckDragPreview() {}, removeTruckDragPreview() {}, clearDropReady() {},
-        postTruckLoaded: () => {sends++;}, updateTruckDrag() {},
+        matchMedia: () => ({matches: true}),
+        getComputedStyle: () => ({borderRadius: '12px'}),
+        document: {
+            body: {appendChild() {}},
+            createElement: () => ({className: '', setAttribute() {}}),
+            createElementNS: () => ({}),
+        },
     };
+    context.window = context;
+    context.globalThis = context;
     vm.createContext(context);
-    const canStart = template.indexOf('    function canTruckLoad(card)');
-    vm.runInContext(template.slice(canStart, template.indexOf('    function generateClientActionId', canStart)), context);
-    const finishStart = template.indexOf('    function finishTruckDrag(event)');
-    vm.runInContext(template.slice(finishStart, template.indexOf('    shell.addEventListener("dragstart"', finishStart)), context);
-    const bindStart = template.indexOf('    function bindExcavatorTruckCard(card)');
-    const bindEnd = template.indexOf('    freeBucketController =', bindStart);
-    assert.notEqual(bindStart, -1, 'bindExcavatorTruckCard fixture marker was not found');
-    assert.notEqual(bindEnd, -1, 'bindExcavatorTruckCard fixture end marker was not found');
-    vm.runInContext(template.slice(bindStart, bindEnd), context);
-    context.bindExcavatorTruckCard(card);
+    vm.runInContext(sharedDragSource, context);
+    const canLoad = current => current.dataset.eoCanLoad === '1' || (manual && current.classList.contains('is-picked-up'));
+    const controller = context.ExcavatorDashboardDrag.attach({
+        shell,
+        canDrag: canLoad,
+        isManual: () => manual,
+        isInactive: () => manual,
+        isBlocked: () => false,
+        onOpenDetail: () => {details++; return true;},
+        onDrop: () => {sends++;},
+        haptic: duration => {haptics.push(duration); vibrations++;},
+    });
     function fire(name, extra = {}) {
         handlers[name]({pointerId: 1, button: 0, clientX: 10, clientY: 20, preventDefault() {}, stopPropagation() {}, ...extra});
     }
     function hold() {
         const current = [...timers.values()]; timers.clear(); current.forEach(fn => fn());
     }
-    return {card, classes, context, fire, hold, delays, haptics, counts: () => ({vibrations, pickupTones, audioPrepares, details, sends})};
+    return {card, classes, context, controller, canLoad, fire, hold, delays, haptics, counts: () => ({vibrations, details, sends})};
 }
 
 test('passive pickup needs hold, glows and vibrates without opening a modal', () => {
     const f = fixture(true);
     f.fire('pointerdown');
     assert.equal(f.delays[0], 290);
-    assert.equal(f.context.canTruckLoad(f.card), false);
+    assert.equal(f.canLoad(f.card), false);
     f.hold();
-    assert.equal(f.context.canTruckLoad(f.card), true);
+    assert.equal(f.canLoad(f.card), true);
     assert.equal(f.classes.has('is-picked-up'), true);
-    assert.deepEqual(f.counts(), {vibrations: 1, pickupTones: 1, audioPrepares: 1, details: 0, sends: 0});
+    assert.deepEqual(f.counts(), {vibrations: 1, details: 0, sends: 0});
     assert.deepEqual(f.haptics, [70]);
 });
 
@@ -68,7 +102,7 @@ test('release without sending restores passive icon without changing permissions
     const f = fixture(true);
     f.fire('pointerdown'); f.hold(); f.fire('pointerup');
     assert.equal(f.classes.has('is-picked-up'), false);
-    assert.equal(f.context.canTruckLoad(f.card), false);
+    assert.equal(f.canLoad(f.card), false);
     assert.equal(f.card.dataset.eoCanLoad, '0');
     assert.equal(f.counts().sends, 0);
 });
@@ -79,7 +113,6 @@ test('early release, movement and pointer cancellation cannot dispatch', () => {
         f.fire('pointerdown'); f.fire(action, {clientX: 70}); f.hold();
         assert.equal(f.classes.has('is-picked-up'), false, action);
         assert.equal(f.counts().sends, 0);
-        assert.equal(f.counts().pickupTones, 0, action);
         assert.equal(f.counts().vibrations, 0, action);
     }
 });
@@ -88,17 +121,16 @@ test('active icons respond immediately with no hold requirement', () => {
     const f = fixture(false);
     f.fire('pointerdown');
     assert.equal(f.classes.has('is-picked-up'), true);
-    assert.equal(f.context.canTruckLoad(f.card), true);
-    assert.equal(f.counts().pickupTones, 1);
+    assert.equal(f.canLoad(f.card), true);
     assert.equal(f.counts().vibrations, 1);
     f.fire('pointerup');
     assert.equal(f.classes.has('is-picked-up'), false);
 });
 
 test('pickup tone is local, rising and lasts about 170 ms without using the voice player', () => {
-    const start = template.indexOf('function playExcavatorPickupTone()');
-    const end = template.indexOf('function playExcavatorTruckGrabFeedback()', start);
-    const source = template.slice(start, end);
+    const start = sharedDragSource.indexOf('function playPickupTone()');
+    const end = sharedDragSource.indexOf('function playGrabFeedback', start);
+    const source = sharedDragSource.slice(start, end);
     assert.match(source, /var duration = \.17;/);
     assert.match(source, /frequency\.setValueAtTime\(620/);
     assert.match(source, /frequency\.exponentialRampToValueAtTime\(1120/);
@@ -109,8 +141,8 @@ test('pickup tone is local, rising and lasts about 170 ms without using the voic
 test('held passive icon uses the existing dispatch once when dropped on destination', () => {
     const f = fixture(true);
     f.fire('pointerdown'); f.hold();
-    f.context.activeTruckDrag.started = true;
-    f.context.activeTruckDrag.target = {dataset: {eoDumpTarget: '2'}};
+    f.controller.active().started = true;
+    f.controller.active().target = {dataset: {eoDumpTarget: '2'}};
     f.fire('pointerup');
     assert.equal(f.counts().sends, 1);
     assert.equal(f.classes.has('is-picked-up'), false);
@@ -331,15 +363,12 @@ test('truck loaded outbox event carries exact assignment state and immutable con
     const start = template.indexOf('    function postTruckLoaded(card, dumpTarget)');
     const end = template.indexOf('    function clearDropReady()', start);
     const source = template.slice(start, end);
-    assert.match(source, /assignment_id:\s*isFreeBucketLoad \? "" : \(card\.dataset\.assignmentId \|\| ""\)/);
+    assert.match(source, /assignment_id:\s*isFreeBucketLoad \? "" : \(card\.dataset\.assignmentId/);
     assert.match(source, /event_type:\s*isFreeBucketLoad \? "excavator\.free_bucket\.loaded" : "excavator\.trip\.loaded"/);
     assert.match(source, /format_version:\s*1/);
     assert.match(source, /occurred_at:\s*new Date\(\)\.toISOString\(\)/);
     assert.match(source, /local_trip_id:\s*localTripId/);
-    assert.match(
-        source,
-        /depends_on:\s*\[\s*isFreeBucketLoad[\s\S]*?: \(acceptanceEvent \? acceptanceEvent\.event_id : ""\),\s*previous \? previous\.event_id : ""\s*\]\.filter/
-    );
+    assert.match(source, /depends_on:\s*\[[\s\S]*previous \? previous\.event_id : ""[\s\S]*\.filter/);
     assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
     assert.match(source, /fieldOutbox\.allocateSequence\(legacyExcavatorFieldSequence/);
     assert.match(source, /rock_type_id:/);

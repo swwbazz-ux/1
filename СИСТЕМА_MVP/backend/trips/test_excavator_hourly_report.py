@@ -11,6 +11,7 @@ from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
 from .models import Trip, TripStatus
+from users.role_apps import ROLE_APPS_BY_CODE
 
 
 class ExcavatorHourlyReportTests(TestCase):
@@ -213,4 +214,7 @@ class ExcavatorHourlyReportTests(TestCase):
         work_response = self.client.get(reverse('excavator_work'))
         self.assertContains(work_response, 'data-eo-hourly-report-open')
         self.assertContains(work_response, reverse('excavator_hourly_report'))
-        self.assertContains(work_response, 'excavator-mobile-shell-v251')
+        self.assertContains(
+            work_response,
+            ROLE_APPS_BY_CODE['excavator_operator'].shell_version,
+        )

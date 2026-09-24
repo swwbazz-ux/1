@@ -5,7 +5,12 @@ const path = require('node:path');
 const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
-const template = fs.readFileSync(path.join(backend, 'templates', 'trips', 'excavator_work.html'), 'utf8');
+const template = [
+    'templates/trips/excavator_work.html',
+    'templates/includes/excavator_dashboard_workspace.html',
+    'templates/includes/excavator_dashboard_source_card.html',
+    'templates/includes/excavator_dashboard_dump_card.html',
+].map(file => fs.readFileSync(path.join(backend, file), 'utf8')).join('\n');
 const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
 const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dispatcher-control-v1.js'), 'utf8');
 const dispatcherTemplate = fs.readFileSync(path.join(backend, 'templates', 'trips', 'dispatcher_control.html'), 'utf8');
@@ -16,7 +21,7 @@ test('bucket entry stays beside the existing hourly report ring', () => {
     assert.ok(widget);
     assert.ok(widget[1].indexOf('data-eo-free-bucket-open') < widget[1].indexOf('data-eo-hourly-report-open'));
     assert.equal((template.match(/data-eo-hourly-report-open/g) || []).length, 1);
-    assert.match(template, /data-eo-free-bucket-open aria-label="Свободный ковш"/);
+    assert.match(template, /<button class="eo-free-bucket-button"[\s\S]*?data-eo-free-bucket-open[\s\S]*?aria-label="Свободный ковш"/);
     assert.match(css, /grid-template-columns:\s*46px auto/);
     assert.match(css, /\.eo-free-bucket-button[\s\S]*min-width:\s*46px[\s\S]*min-height:\s*46px/);
 });
@@ -115,8 +120,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v251/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v251/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v260/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v260/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

@@ -25,7 +25,7 @@ from .privacy_consent import (
     PRIVACY_CONSENT_SESSION_KEY,
     PRIVACY_POLICY_VERSION,
 )
-from .role_apps import ROLE_APPS, get_role_app_for_host
+from .role_apps import ROLE_APPS, ROLE_APPS_BY_CODE, get_role_app_for_host
 
 
 ROLE_HOST_SETTINGS = override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
@@ -418,8 +418,8 @@ class RoleAppLoginTests(TestCase):
 
     def test_driver_and_excavator_hosts_render_the_same_combined_login_structure(self):
         cases = (
-            ('driver.localhost', 'Водитель самосвала', 'driver-180.png', 'driver-mobile-shell-v299'),
-            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', 'excavator-mobile-shell-v251'),
+            ('driver.localhost', 'Водитель самосвала', 'driver-180.png', ROLE_APPS_BY_CODE['driver'].shell_version),
+            ('excavator.localhost', 'Машинист экскаватора', 'excavator-180.png', ROLE_APPS_BY_CODE['excavator_operator'].shell_version),
         )
 
         for host, role_name, icon_name, shell_version in cases:

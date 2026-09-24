@@ -301,6 +301,25 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
+    def test_excavator_directory_allows_promoting_driver_request_for_same_excavator(self):
+        other_client, identity = self.other_excavator_identity()
+        selected = self.select_event(excavator=self.other_excavator)
+        selected_result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(selected_result['status'], 'accepted', selected_result)
+
+        payload = other_client.get(
+            reverse('excavator_work'),
+            {'_operational_fragment': 'excavator', '_operational_version': 0},
+        ).json()
+        directory_item = next(
+            item
+            for item in payload['free_bucket_truck_directory']['trucks']
+            if item['id'] == self.truck.id
+        )
+
+        self.assertTrue(directory_item['can_accept_free_bucket'])
+        self.assertEqual(directory_item['availability_label'], 'Запрошен водителем')
+
     def test_excavator_then_driver_maps_same_row_without_moving_acceptance_time(self):
         other_client, identity = self.other_excavator_identity()
         accepted = self.accept_event(event_id='free-accept-before-driver', **identity)
@@ -1025,7 +1044,11 @@ class FreeBucketServerIntegrationTests(TestCase):
             [point['name'] for point in screen.context['unload_points']],
             [self.dump_point.name, 'Склад из снимка'],
         )
-        self.assertNotContains(screen, outside_point.name)
+        # Чужая точка не должна быть выбираемой карточкой. В разметке она
+        # встречается как запасной контекст ручного рабочего места, который
+        # отдаётся намеренно ради мгновенного возврата после отмены ковша,
+        # поэтому проверяется признак карточки, а не строка по всей странице.
+        self.assertNotContains(screen, f'data-eo-dump-name="{outside_point.name}"')
 
         change_to_saved = self.driver_event(
             'free-snapshot-change-saved',

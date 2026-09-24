@@ -18,6 +18,14 @@ public class CopperFirebaseMessagingService extends FirebaseMessagingService {
         if (!NativeFieldProfile.supportsPushAndHaptics()) {
             return;
         }
+        String kind = message.getData().get("kind");
+        if ("presence_probe".equals(kind)) {
+            String probeId = message.getData().get("probe_id");
+            if (PresenceProbeState.remember(this, probeId, System.currentTimeMillis())) {
+                ConnectivityForegroundService.reconcilePresenceProbe(this);
+            }
+            return;
+        }
         ConnectivityForegroundService.reconcileFromForeground(this);
     }
 }

@@ -975,7 +975,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v251";
+const CACHE_NAME = "excavator-mobile-shell-v260";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -989,22 +989,24 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v251",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v251",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v251",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v251",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v251",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v251",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v251",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v260",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v260",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v260",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v260",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v260",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v260",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v260",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v251",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v251",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v251",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v260",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v260",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v260",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -6736,10 +6738,17 @@ def excavator_work_view(request):
         active_trip = free_bucket_active_trip_by_truck_id.get(truck.id)
         downtime = free_bucket_downtime_by_truck_id.get(truck.id)
         acceptance = free_bucket_acceptance_by_truck_id.get(truck.id)
+        requested_for_current_excavator = bool(
+            acceptance
+            and current_excavator
+            and acceptance.status == FreeBucketAcceptanceStatus.REQUESTED
+            and acceptance.excavator_id == current_excavator.id
+        )
         availability_label = (
             'Неактивен' if not truck.is_active
             else 'На разгрузку' if active_trip
             else str(downtime.reason.button_label or downtime.reason) if downtime
+            else 'Запрошен водителем' if requested_for_current_excavator
             else 'Под свободным ковшом' if acceptance
             else 'Доступен'
         )
@@ -6749,7 +6758,11 @@ def excavator_work_view(request):
             'truck_type': truck_type,
             'model': model_name,
             'is_active': bool(truck.is_active),
-            'can_accept_free_bucket': bool(truck.is_active and not active_trip and not acceptance),
+            'can_accept_free_bucket': bool(
+                truck.is_active
+                and not active_trip
+                and (not acceptance or requested_for_current_excavator)
+            ),
             'primary_assignment_label': free_bucket_primary_by_truck_id.get(truck.id, ''),
             'availability_label': availability_label,
         })

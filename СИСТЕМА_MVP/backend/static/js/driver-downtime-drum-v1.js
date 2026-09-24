@@ -19,6 +19,11 @@
     var DROP_TRIGGER = 56; // px вниз, отпускание ниже — завершение простоя
     var DROP_MAX = 64;
     var MIN_FACES = 12;    // барабан всегда полноразмерный, как минимум на 12 граней
+    /* Просвет между соседними гранями: ровно столько, чтобы в него прошла
+       обводка контура, и не больше — иначе кольцо выглядит разреженным.
+       Задан в пикселях, а не долей ширины грани: обводка не растёт вместе с
+       гранью, поэтому и коридор под неё не должен. */
+    var FACE_GAP = 10;
     var TILT = 0;          // барабан смотрит строго в лоб: при наклоне боковые грани поднимаются и заходят на угловые кнопки
     var doc = root.document;
 
@@ -113,8 +118,8 @@
         var n = list.length;
         var step = 360 / n;
         // Радиус чуть больше «касания» соседних граней: между карточками остаётся просвет,
-        // сквозь который проходит обводка контура (множитель 1.22 ≈ зазор в 18% ширины грани).
-        var radius = (cardW / 2) / Math.tan((step / 2) * Math.PI / 180) * 1.22;
+        // сквозь который проходит обводка контура (ширина грани плюс FACE_GAP).
+        var radius = (cardW + FACE_GAP) / 2 / Math.tan((step / 2) * Math.PI / 180);
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
         geo.reasons = reasons;
         geo.signature = drumSignature(c);
@@ -189,6 +194,18 @@
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
+        }
+        /* Радиус задан шириной грани, а ширина — единицами контейнера, поэтому
+           замер при сборке может прийтись на момент, когда контейнер ещё без
+           ширины: тогда грань берёт нижний предел, кольцо выходит тесным, и
+           подросшие грани наезжают друг на друга. Здесь радиус приводится к
+           текущей ширине грани, так что заложенный зазор держится всегда. */
+        var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
+        if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
+            geo.cardW = liveCardW;
+            geo.radius = (liveCardW + FACE_GAP) / 2 / Math.tan((geo.step / 2) * Math.PI / 180);
+            var drumNode = drum();
+            if (drumNode) drumNode.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
         }
         // Ось барабана строго вертикальна (TILT = 0): грани остаются на одной высоте,
         // боковые не уезжают вверх и не наползают на угловые кнопки круга.

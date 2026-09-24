@@ -830,13 +830,24 @@ def close_driver_shift(
         for field, value in readings.items():
             setattr(locked_shift, field, value)
         received_at = timezone.now()
+        device_occurred_at = occurred_at
         closed_at = occurred_at or received_at
+        clock_adjusted = False
         if timezone.is_naive(closed_at):
             raise ValidationError('Время закрытия смены должно содержать часовой пояс.')
-        if closed_at < locked_shift.opened_at:
-            raise ValidationError('Время закрытия смены раньше времени открытия смены.')
         if closed_at > received_at + timedelta(minutes=5):
-            raise ValidationError('Часы устройства заметно опережают сервер. Требуется сверка.')
+            closed_at = received_at
+            clock_adjusted = True
+        if closed_at < locked_shift.opened_at:
+            # A close request for this still-open shift cannot legitimately
+            # precede its opening. If the server receives it while the shift is
+            # open, use the receipt time and retain the device value in the
+            # idempotent action response for audit.
+            if received_at >= locked_shift.opened_at:
+                closed_at = received_at
+                clock_adjusted = True
+            else:
+                raise ValidationError('Время закрытия смены раньше времени открытия смены.')
         locked_shift.closed_at = closed_at
         locked_shift.closed_by = employee
         locked_shift.save(update_fields=[*readings, 'closed_at', 'closed_by'])
@@ -861,6 +872,12 @@ def close_driver_shift(
         response = {
             'ok': True, 'shift_id': locked_shift.pk, 'truck_id': locked_shift.equipment_id, 'driver_id': employee.pk,
             'anomalous_readings_confirmed': bool(warnings),
+            'device_clock_adjusted': clock_adjusted,
+            'device_occurred_at': (
+                device_occurred_at.isoformat() if device_occurred_at else None
+            ),
+            'effective_occurred_at': closed_at.isoformat(),
+            'time_source': 'server_receipt' if clock_adjusted or device_occurred_at is None else 'driver_device',
         }
         ShiftClientAction.objects.create(
             action_type='driver_shift_closed', client_action_id=client_action_id,

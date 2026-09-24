@@ -778,6 +778,10 @@ window.bindDriverMobileShell = function () {
             || shell.dataset.driverDensity
             || "normal";
         syncDriverTabMarkup(shell, tab);
+        if (
+            window.DriverManualExcavatorWorkspace
+            && typeof window.DriverManualExcavatorWorkspace.onTabChange === "function"
+        ) window.DriverManualExcavatorWorkspace.onTabChange(tab);
         if (tab !== "work" && window.driverDomBehindBaseline === true
             && window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
             window.driverForceFragmentApply = true;
@@ -1132,13 +1136,17 @@ window.bindDriverMobileShell = function () {
         if (!current) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         var activeTripId = String(current.dataset.driverActiveTripId || "");
-        var unload = ordered.find(function (event) {
+        var manualTrip = String(current.dataset.driverActiveTripOrigin || "") === "driver_manual";
+        var unload = manualTrip ? null : ordered.find(function (event) {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
             var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
             current.dataset.driverHasOpenTrip = "false";
             current.dataset.driverHasLoadedTrip = "false";
+            current.dataset.driverActiveTripId = "";
+            current.dataset.driverActiveTripOrigin = "";
+            current.dataset.driverActiveTripLoadedAt = "";
             var dial = current.querySelector(".driver-work-dial");
             var button = current.querySelector("[data-driver-hold-button]");
             var dialLabel = current.querySelector("[data-driver-dial-label]");
@@ -1213,6 +1221,15 @@ window.bindDriverMobileShell = function () {
         if (window.DriverFreeBucket && typeof window.DriverFreeBucket.renderProjection === "function") {
             window.DriverFreeBucket.renderProjection(current, ordered);
         }
+        if (
+            window.DriverManualExcavatorWorkspace
+            && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+        ) {
+            window.DriverManualExcavatorWorkspace.restoreProjection(
+                window.driverOfflineOutbox,
+                current.querySelector("[data-driver-manual-workspace]")
+            ).catch(function () {});
+        }
     }
 
     function driverOfflineBindings() {
@@ -1226,6 +1243,13 @@ window.bindDriverMobileShell = function () {
                     window.driverOfflineConfirmationCueScheduled = true;
                     playDriverVoice("action_ok", "voice_trip_finished");
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
+                }
+                if (
+                    event.event_type === "driver.trip.loaded"
+                    && window.DriverManualExcavatorWorkspace
+                    && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+                ) {
+                    window.DriverManualExcavatorWorkspace.restoreProjection(window.driverOfflineOutbox).catch(function () {});
                 }
                 var result = args[1] || {};
                 var isDowntime = event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
@@ -1275,7 +1299,8 @@ window.bindDriverMobileShell = function () {
                 pending: function () { return Promise.resolve([]); },
                 publish: function () { return Promise.resolve([]); },
                 getServerMapping: function () { return Promise.resolve(null); },
-                getDowntimeProjectionReceipt: function () { return Promise.resolve(null); }
+                getDowntimeProjectionReceipt: function () { return Promise.resolve(null); },
+                getManualTripProjectionReceipt: function () { return Promise.resolve(null); }
             };
         }
         if (window.driverOfflineOutbox && window.driverOfflineOutboxAccessId === shell.dataset.driverAccessId) {
@@ -1383,6 +1408,12 @@ window.bindDriverMobileShell = function () {
         });
     }
     restoreDriverConfirmedDowntime(driverOfflineOutbox).catch(function () {});
+    if (
+        window.DriverManualExcavatorWorkspace
+        && typeof window.DriverManualExcavatorWorkspace.restoreProjection === "function"
+    ) {
+        window.DriverManualExcavatorWorkspace.restoreProjection(driverOfflineOutbox).catch(function () {});
+    }
     if (window.DriverFreeBucket && typeof window.DriverFreeBucket.bind === "function") {
         window.DriverFreeBucket.bind({shell: shell, outbox: driverOfflineOutbox});
     }
@@ -1454,10 +1485,13 @@ window.bindDriverMobileShell = function () {
         payload = payload || {};
         syncDriverReasonTotals(payload);
         var activeReasonId = String(payload.reason_id || "");
-        var calculatedAtMs = Date.parse(payload.calculated_at || "");
-        var syncedAtMs = Number.isFinite(calculatedAtMs)
-            ? Math.min(Date.now(), calculatedAtMs)
-            : Date.now();
+        /* Отсчёт ведётся от собственных часов телефона в момент получения ответа,
+           а не от серверной отметки времени. Сервер присылает уже накопленные
+           секунды; складывать их с разницей «серверное время минус время
+           телефона» нельзя: на телефоне с вручную выставленными часами эта
+           разница и есть сдвиг, и водитель видел трёхчасовой обед вместо
+           десяти минут. В базе при этом всё верно — там время приёма сервером. */
+        var syncedAtMs = Date.now();
         var clock = {
             activeReasonId: activeReasonId,
             baseActiveElapsedSeconds: Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0)),

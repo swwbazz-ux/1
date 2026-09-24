@@ -1,0 +1,50 @@
+{% load static %}
+<button
+    class="eo-truck-card eo-dashboard-truck-card{% if card.manual_available %} is-manual-passive{% endif %} status-{{ card.status_key }}{% if open_shift and card.is_selected %} is-selected{% endif %}{% if card.is_inactive %} is-inactive{% endif %}{% if card.is_load_blocked %} is-load-blocked{% endif %}{% if card.transfer %} is-transfer-{{ card.transfer.direction }}{% endif %}{% if card.foreign_free_bucket %} is-free-bucket-remote{% endif %}{% if card.load_block_reason_code == 'driver_shift_not_started' %} is-shift-pending{% endif %}{% if card.load_block_reason_code == 'no_driver' %} is-no-driver{% endif %}{% if card.plan_visual.is_overrun %} is-plan-overrun{% endif %}"
+    type="button"
+    draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
+    style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}; --eo-transfer-progress: 0;"
+    data-eo-truck-card
+    data-eo-manual-available="{% if open_shift and card.manual_available %}1{% else %}0{% endif %}"
+    data-eo-open-trip-id="{{ card.open_trip_id }}"
+    data-eo-dashboard-truck
+    data-assignment-id="{{ card.assignment.id }}"
+    {% if card.transfer %}data-eo-transfer-id="{{ card.transfer.id }}" data-eo-transfer-kind="{{ card.transfer.kind }}" data-eo-transfer-direction="{{ card.transfer.direction }}" data-eo-transfer-created="{{ card.transfer.created_at|date:'c' }}" data-eo-transfer-deadline="{{ card.transfer.deadline|date:'c' }}"{% endif %}
+    data-truck-id="{{ card.assignment.truck.id }}"
+    data-eo-truck-number="{{ card.number }}"
+    data-eo-truck-detail-id="{{ card.detail_card_id }}"
+    data-eo-equipment-state="{{ card.equipment_state_code }}"
+    data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
+    data-eo-handoff-completion="{% if card.is_handoff_completion %}1{% else %}0{% endif %}"
+    {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
+    {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
+    data-eo-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
+    data-plan-percent="{% if card.plan_has_plan %}{{ card.plan_percent }}{% endif %}"
+    data-plan-loop-percent="{% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% endif %}"
+    data-plan-completed-loops="{{ card.plan_visual.completed_loops }}"
+    data-plan-progress-phase="{{ card.plan_visual.phase }}"
+    data-plan-status="{{ card.plan_status|default:'no_plan_group' }}"
+    data-plan-progress-status="{{ card.plan_status_key|default:'empty' }}"
+    {% if card.is_inactive %}data-eo-truck-inactive="1"{% endif %}
+    {% if driver_manual_dashboard %}data-driver-manual-source data-driver-manual-excavator-id="{{ card.equipment_id }}" aria-label="Перетащите экскаватор в точку разгрузки"{% elif not open_shift %}disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% elif card.is_locked %}aria-disabled="true"{% endif %}
+>
+    <b class="eo-driver-presence presence-{{ card.driver_presence_code }}" title="{{ card.driver_presence_label }}" aria-label="{% if driver_manual_dashboard %}Назначение{% else %}Водитель{% endif %}: {{ card.driver_presence_label }}"></b>
+    <i aria-hidden="true"><img src="{% static card.icon %}" alt=""></i>
+    <strong>{{ card.number }}</strong>
+    {% if card.transfer %}
+        <div class="eo-transfer-meta" aria-label="{{ card.transfer.route_label }}">
+            <div class="eo-transfer-meta__route">{{ card.transfer.route_label }}</div>
+            <time class="eo-transfer-meta__time" data-eo-transfer-countdown aria-live="off">--:--</time>
+        </div>
+        <u class="eo-transfer-glow" aria-hidden="true"></u>
+    {% endif %}
+    {% if card.foreign_free_bucket %}
+        <div class="eo-free-bucket-remote-marker" aria-label="Самосвал временно обслуживается {{ card.foreign_free_bucket.label }}">
+            Свободный ковш · {{ card.foreign_free_bucket.label }}
+        </div>
+    {% endif %}
+    <span>{{ card.status_label }}</span>
+    <small>{% if card.plan_has_plan %}{{ card.plan_percent }}%{% else %}{{ card.plan_short_label }}{% endif %}</small>
+    {% if card.plan_visual.has_completed_loops %}<b class="eo-truck-progress-loop" aria-label="Завершено циклов: {{ card.plan_visual.completed_loops }}">×{{ card.plan_visual.completed_loops }}</b>{% endif %}
+    {% if card.target_label %}<em>{{ card.target_label }}</em>{% endif %}
+</button>

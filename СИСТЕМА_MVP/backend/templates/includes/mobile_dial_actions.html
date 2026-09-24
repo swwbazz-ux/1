@@ -22,7 +22,7 @@
         </defs>
     </svg>
 
-    <button class="mobile-dial-action mobile-dial-action--manual" type="button" data-mobile-dial-action="manual" disabled aria-disabled="true" aria-label="Ручной режим — пока недоступен" title="Ручной режим пока недоступен">
+    <button class="mobile-dial-action mobile-dial-action--manual" type="button" data-mobile-dial-action="manual"{% if mobile_dial_manual_enabled %} data-driver-manual-open aria-label="Открыть ручной режим" title="Ручной режим" aria-controls="driver-manual-workspace" aria-expanded="false"{% else %} disabled aria-disabled="true" aria-label="{{ mobile_dial_manual_blocked_reason|default:'Ручной режим пока недоступен' }}" title="{{ mobile_dial_manual_blocked_reason|default:'Ручной режим пока недоступен' }}"{% endif %}>
         <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
             <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
             <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />

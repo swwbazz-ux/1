@@ -4,6 +4,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
     createDriverOfflineOutbox,
+    createDriverManualLoadEvent,
+    createDriverManualLoadCancelledEvent,
+    createDriverManualCompletedEvent,
     createDriverPointChangeEvent,
     createDriverFreeBucketSelectedEvent,
     createDriverFreeBucketCancelledEvent,
@@ -13,6 +16,184 @@ const {
     localRepository,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+test("manual-load cancellation keeps an exact trip reference and the latest dependency", () => {
+    const serverCancel = createDriverManualLoadCancelledEvent({
+        eventId: "manual-cancel-server",
+        tripId: 81,
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-1",
+            event_type: "driver.trip.dump_point_changed",
+            trip_id: 81,
+            sequence: 7,
+            state: "pending",
+        }],
+    });
+    assert.equal(serverCancel.event_type, "driver.trip.loaded.cancelled");
+    assert.equal(serverCancel.trip_id, 81);
+    assert.equal(serverCancel.local_trip_id, null);
+    assert.deepEqual(serverCancel.depends_on, ["point-change-1"]);
+
+    const localCancel = createDriverManualLoadCancelledEvent({
+        eventId: "manual-cancel-local",
+        localTripId: "manual-load-local",
+        loadEventId: "manual-load-local",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-local",
+            event_type: "driver.trip.dump_point_changed",
+            local_trip_id: "manual-load-local",
+            sequence: 8,
+            state: "pending",
+        }],
+    });
+    assert.equal(localCancel.trip_id, null);
+    assert.equal(localCancel.local_trip_id, "manual-load-local");
+    assert.deepEqual(localCancel.depends_on, ["point-change-local", "manual-load-local"]);
+    assert.throws(
+        () => createDriverManualLoadCancelledEvent({tripId: 81, localTripId: "manual-load-local"}),
+        /offline_manual_cancel_identity_invalid/
+    );
+});
+
+test("downward swipe completes the exact local or confirmed manual trip through the existing queue", () => {
+    const confirmed = createDriverManualCompletedEvent({
+        eventId: "manual-end-confirmed",
+        tripId: 81,
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [{
+            event_id: "point-change-confirmed",
+            event_type: "driver.trip.dump_point_changed",
+            trip_id: 81,
+            sequence: 7,
+            state: "pending",
+        }],
+        contextSnapshot: {source: "driver_manual", action: "manual_completed"},
+    });
+    assert.equal(confirmed.event_type, "driver.trip.manual_completed");
+    assert.equal(confirmed.trip_id, 81);
+    assert.equal(confirmed.local_trip_id, null);
+    assert.deepEqual(confirmed.depends_on, ["point-change-confirmed"]);
+    assert.equal(confirmed.payload.manual_control, true);
+
+    const local = createDriverManualCompletedEvent({
+        eventId: "manual-end-local",
+        localTripId: "manual-load-local",
+        loadEventId: "manual-load-local",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        events: [],
+        contextSnapshot: {source: "driver_manual", action: "manual_completed"},
+    });
+    assert.equal(local.trip_id, null);
+    assert.equal(local.local_trip_id, "manual-load-local");
+    assert.deepEqual(local.depends_on, ["manual-load-local"]);
+    assert.throws(
+        () => createDriverManualCompletedEvent({tripId: 81, localTripId: "manual-load-local"}),
+        /offline_manual_complete_identity_invalid/
+    );
+});
+
+function manualLoad(overrides = {}) {
+    return createDriverManualLoadEvent({
+        eventId: "manual-load-1",
+        occurredAt: "2026-09-21T01:02:03.000Z",
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        rockTypeId: 3,
+        assignmentId: 71,
+        placementId: 22,
+        placementUpdatedAt: "2026-09-21T00:00:00Z",
+        loadingHorizon: "15",
+        loadingBlock: "55",
+        transportDistanceKm: "4.2",
+        contextSnapshot: {
+            source: "driver_manual",
+            excavator_id: 9,
+            rock_type_id: 3,
+            dump_points: [{id: 4, name: "СКЛАД 2.1"}],
+            selected_dump_point_id: 4,
+        },
+        ...overrides,
+    });
+}
+
+test("manual load uses stable local identity and an immutable Driver snapshot", async () => {
+    const spec = manualLoad();
+    assert.equal(spec.event_type, "driver.trip.loaded");
+    assert.equal(spec.local_trip_id, spec.event_id);
+    assert.equal(spec.trip_id, null);
+    assert.equal(spec.payload.manual_control, true);
+    assert.equal(spec.payload.assignment_id, 71);
+    assert.equal(spec.payload.free_bucket_acceptance_id, null);
+
+    const box = runtime({send: async () => { throw new Error("offline"); }});
+    const saved = await box.enqueue(spec);
+    spec.context_snapshot.dump_points[0].name = "ПОДМЕНА";
+    assert.equal(saved.context_snapshot.dump_points[0].name, "СКЛАД 2.1");
+    assert.equal(saved.actor_id, 11);
+    assert.equal(saved.role_code, "driver");
+    assert.equal(saved.equipment_id, 58);
+    assert.deepEqual(manualLoad({eventId: "manual-load-2", dependsOn: ["manual-load-1"]}).depends_on, ["manual-load-1"]);
+});
+
+test("manual load rejects missing or ambiguous authority and a foreign truck", async () => {
+    assert.throws(() => manualLoad({assignmentId: null}), /offline_manual_trip_authority_ambiguous/);
+    assert.throws(
+        () => manualLoad({acceptanceId: 91}),
+        /offline_manual_trip_authority_ambiguous/
+    );
+    const box = runtime();
+    await assert.rejects(box.enqueue(manualLoad({truckId: 99})), /offline_manual_trip_truck_mismatch/);
+});
+
+test("point correction can depend on a not-yet-confirmed manual trip", async () => {
+    const box = runtime({send: async () => { throw new Error("offline"); }});
+    const load = await box.enqueue(manualLoad());
+    const point = await box.enqueue(createDriverPointChangeEvent({
+        eventId: "manual-point-1",
+        occurredAt: "2026-09-21T01:03:00.000Z",
+        localTripId: load.local_trip_id,
+        loadEventId: load.event_id,
+        pointId: 5,
+        currentPointId: 4,
+        pointName: "ККД",
+    }));
+    assert.equal(point.trip_id, null);
+    assert.equal(point.local_trip_id, load.local_trip_id);
+    assert.deepEqual(point.depends_on, [load.event_id]);
+});
+
+test("manual trip confirmation survives restart with the server mapping", async () => {
+    const local = storage();
+    const send = async batch => ({results: batch.events.map(event => ({
+        event_id: event.event_id,
+        status: "accepted",
+        server_received_at: "2026-09-21T01:02:05.000Z",
+        server_ids: {trip_id: 451, shift_id: 23},
+        trip_origin: "driver_manual",
+        version: 812,
+    }))});
+    const first = runtime({local, send});
+    await first.enqueue(manualLoad());
+    await first.flush();
+    const restarted = runtime({local, send});
+    const receipt = await restarted.getManualTripProjectionReceipt(23, 58);
+    assert.equal(receipt.event_id, "manual-load-1");
+    assert.equal(receipt.server_ids.trip_id, 451);
+    assert.equal(receipt.trip_origin, "driver_manual");
+    assert.equal(receipt.version, 812);
+    assert.equal((await restarted.pending()).length, 0);
+});
 
 test("terminal downtime events never replace the authoritative active downtime", () => {
     const projection = selectDriverDowntimeProjection([
@@ -42,6 +223,98 @@ test("terminal downtime events never replace the authoritative active downtime",
             payload: {reason_id: 9},
         },
     ]), null);
+});
+
+test("restart recovers only clock conflict and its dependency chain with immutable identity", async () => {
+    const local = storage();
+    const deviceStart = "2036-09-23T10:00:00.000Z";
+    const deviceEnd = "2036-09-23T10:01:00.000Z";
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: event.event_id === "clock-parent" ? "device_clock_ahead" : "dependency_rejected",
+                message: event.event_id === "clock-parent"
+                    ? "Часы устройства опережают сервер"
+                    : "Предыдущее событие требует сверки",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "clock-parent",
+        event_type: "driver.downtime.started",
+        occurred_at: deviceStart,
+        payload: {reason_id: 9},
+    });
+    await rejected.enqueue({
+        event_id: "clock-child",
+        event_type: "driver.downtime.ended",
+        occurred_at: deviceEnd,
+        local_downtime_id: "clock-parent",
+        depends_on: ["clock-parent"],
+        payload: {local_downtime_id: "clock-parent"},
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(structuredClone(batch.events));
+            return {
+                results: batch.events.map(event => ({
+                    event_id: event.event_id,
+                    status: "accepted",
+                    effective_occurred_at: "2026-09-23T00:00:00.000Z",
+                    device_occurred_at: event.occurred_at,
+                    time_source: "server_receipt",
+                })),
+            };
+        },
+    });
+    await restarted.initialize();
+
+    assert.equal(delivered.length, 1);
+    assert.deepEqual(delivered[0].map(event => event.event_id), ["clock-parent", "clock-child"]);
+    assert.deepEqual(delivered[0].map(event => event.sequence), [1, 2]);
+    assert.deepEqual(delivered[0].map(event => event.occurred_at), [deviceStart, deviceEnd]);
+    assert.deepEqual(delivered[0][1].depends_on, ["clock-parent"]);
+    assert.equal((await restarted.pending()).length, 0);
+});
+
+test("restart never retries a real domain conflict", async () => {
+    const local = storage();
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: "equipment_context_changed",
+                message: "Техника в событии не совпадает со сменой",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "real-domain-conflict",
+        event_type: "driver.downtime.started",
+        occurred_at: "2036-09-23T10:00:00.000Z",
+        payload: {reason_id: 9},
+    });
+    await rejected.flush();
+
+    let sends = 0;
+    const restarted = runtime({local, send: async () => { sends += 1; return {results: []}; }});
+    await restarted.initialize();
+
+    const events = await restarted.pending();
+    assert.equal(sends, 0);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].state, "conflict");
+    assert.equal(events[0].last_error.code, "equipment_context_changed");
 });
 
 test("confirmed downtime close receipt survives queue removal and restart", async () => {
@@ -294,6 +567,30 @@ test("parallel gestures receive a stable monotonic order", async () => {
         box.enqueue({event_id: "two", event_type: "driver.trip.dump_point_changed", trip_id: 9, payload: {dump_point_id: 2}}),
     ]);
     assert.deepEqual((await box.pending()).map(event => event.sequence), [1, 2]);
+});
+
+test("replacing Driver access does not reuse a device sequence", async () => {
+    const local = storage();
+    const first = runtime({local, accessId: 7});
+    const firstEvent = await first.enqueue({
+        event_id: "before-access-replacement",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 1},
+    });
+    const second = runtime({local, accessId: 8, context: {
+        actorId: 11,
+        accessId: 8,
+        shiftId: 23,
+        equipmentId: 58,
+        deviceId: "install-uuid-1",
+    }});
+    const secondEvent = await second.enqueue({
+        event_id: "after-access-replacement",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 1},
+    });
+    assert.equal(firstEvent.sequence, 1);
+    assert.equal(secondEvent.sequence, 2);
 });
 
 test("legacy unload queue migrates without changing event identity or fact time", async () => {
@@ -731,4 +1028,26 @@ test("terminal review records older than the retention window are purged, fresh 
     await box.enqueue({event_id: "fresh-conflict", event_type: "driver.downtime.started", payload: {reason_id: 2}});
     await box.flush();
     assert.deepEqual((await box.pending()).map(event => event.event_id), ["fresh-conflict"], "старая запись убрана, свежая осталась");
+});
+
+/* Часы водителя 24.09.2026: телефон с вручную отведёнными назад часами писал в
+   базу своё время — простой «шёл» полчаса в ту же секунду, как его начали, а
+   переключение причины и вовсе отклонялось как «раньше начала». Событие,
+   ушедшее сразу после создания, теперь помечается для сервера: телефон не мог
+   быть офлайн эти секунды, значит его час просто неверен. */
+test("an event sent right away is marked so the server can use its own receipt time", async () => {
+    const sent = [];
+    const box = runtime({send: async (body) => {
+        sent.push(body);
+        return {results: body.events.map((event) => ({event_id: event.event_id, status: "accepted"}))};
+    }});
+    await box.enqueue(manualLoad());
+    await box.flush();
+
+    assert.equal(sent.length, 1);
+    const wire = sent[0].events[0];
+    assert.equal(wire.sent_live, true, "флаг ставится на верхнем уровне события");
+    assert.equal(wire.payload.sent_live, undefined, "в payload флага нет: payload входит в отпечаток события");
+    assert.equal(wire.created_session, undefined, "служебные поля очереди на сервер не уходят");
+    assert.equal(wire.created_mono, undefined);
 });

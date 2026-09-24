@@ -7,6 +7,13 @@ const vm = require("node:vm");
 const backendRoot = path.resolve(__dirname, "..", "..", "..");
 const templatePath = path.join(backendRoot, "templates", "trips", "excavator_work.html");
 const templateSource = fs.readFileSync(templatePath, "utf8");
+const renderedTemplateSource = [
+    templateSource,
+    fs.readFileSync(
+        path.join(backendRoot, "templates", "includes", "excavator_dashboard_workspace.html"),
+        "utf8"
+    ),
+].join("\n");
 const start = templateSource.indexOf("/* EXCAVATOR_VOICE_GUARD_START */");
 const end = templateSource.indexOf("function readExcavatorViewportMetrics", start);
 
@@ -332,7 +339,7 @@ test("legacy string snapshots remain readable after the schema upgrade", () => {
 
 test("the rendered snapshot exposes the exact HaulAssignment id", () => {
     assert.match(
-        templateSource,
+        renderedTemplateSource,
         /data-eo-assignment-snapshot[\s\S]*?data-assignment-id="\{\{ card\.assignment_id \}\}"/
     );
 });

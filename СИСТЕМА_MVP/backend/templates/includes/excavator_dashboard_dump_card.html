@@ -1,0 +1,20 @@
+<button class="eo-unload-card eo-dashboard-unload-card status-{{ card.status_key }}{% if card.is_last_sent %} is-last-dump{% endif %}{% if driver_manual_dashboard %} driver-manual-workspace__dump-card {{ card.name_size_class }}{% endif %}" type="button" data-eo-dump-target="{{ card.point.id }}" data-eo-dump-name="{{ card.name }}" data-eo-dump-distance="{{ card.transport_distance_km }}" data-eo-has-pending-trucks="{% if card.pending_trucks %}true{% else %}false{% endif %}"{% if driver_manual_dashboard %} data-driver-manual-dump-target data-driver-manual-completed-count="{{ card.completed_count|default:0 }}" data-driver-manual-last-sent="{% if card.is_last_sent %}true{% else %}false{% endif %}" aria-label="{{ card.name }}: рейсов {{ card.completed_count|default:0 }}{% if card.is_last_sent %}; последняя использованная точка{% endif %}"{% elif not open_shift %} disabled aria-disabled="true" aria-label="Работа недоступна: сначала начните смену"{% endif %}>
+    <span class="eo-dashboard-unload-top">
+        <strong>{{ card.name }}</strong>
+        <small aria-label="Рейсов: {{ card.completed_count|default:0 }}">{{ card.completed_count|default:0 }}</small>
+    </span>
+    {% if driver_manual_dashboard %}
+    <span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--cancel" aria-hidden="true"><b>▲</b> ОТМЕНИТЬ</span>
+    <span class="driver-manual-workspace__swipe-cue driver-manual-workspace__swipe-cue--complete" aria-hidden="true">ЗАВЕРШИТЬ <b>▼</b></span>
+    {% endif %}
+    {% if not driver_manual_dashboard %}
+    <span class="eo-dashboard-unload-label">Разгружено</span>
+    <span class="eo-dashboard-unload-badges" aria-label="Назначены, не разгружены">
+        {% for truck in card.pending_trucks %}
+            <b class="status-{{ truck.status_key }}{% if truck.is_last_sent %} is-last-sent-truck{% endif %}" data-eo-queue-truck data-truck-id="{{ truck.truck_id }}" data-trip-id="{{ truck.trip_id }}" data-eo-truck-number="{{ truck.number }}" data-eo-last-sent-truck="{% if truck.is_last_sent %}true{% else %}false{% endif %}"{% if truck.auto_hide_at and truck.auto_hide_kind == 'manual' %} data-eo-manual-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.auto_hide_at and truck.auto_hide_kind == 'free_bucket' %} data-eo-free-bucket-preview-expires-at="{{ truck.auto_hide_at|date:'c' }}"{% endif %}{% if truck.transition_hide_at %} data-eo-transfer-preview-id="{{ truck.transition_id }}" data-eo-transfer-preview-deadline="{{ truck.transition_hide_at|date:'c' }}"{% endif %}>{{ truck.number }}</b>
+        {% empty %}
+            <b class="is-muted">нет</b>
+        {% endfor %}
+    </span>
+    {% endif %}
+</button>

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from contextlib import nullcontext
 from decimal import Decimal
 from io import BytesIO
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -27,6 +28,7 @@ from openpyxl import Workbook
 
 from assignments.models import (
     AssignmentStatus,
+    ExcavatorDumpPointSetting,
     ExcavatorPlacement,
     HaulAssignment,
     HaulAssignmentAction,
@@ -40,6 +42,7 @@ from assignments.services import (
     work_assignment_state,
 )
 from core.models import (
+    OfflineFieldEvent,
     OperationalStateEvent,
     OperationalStateVersion,
     bump_operational_state,
@@ -277,7 +280,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v299'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v352'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -339,6 +342,15 @@ const CORE_ASSETS = [
     "/static/js/mobile-dial-actions-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-free-bucket-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-work-v55.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-work-v55-final.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-work-v55-shift.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-manual-loading-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/excavator-free-bucket-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/css/driver-manual-excavator-workspace-v1.css?v={DRIVER_SHELL_VERSION}",
+    "/static/js/excavator-dashboard-drag-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/excavator-dump-return-swipe-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-manual-excavator-workspace-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/driver-downtime-drum-v1.css?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-downtime-drum-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/portal/js/portal-shell-v5.js",
@@ -4433,6 +4445,8 @@ def driver_shift_view(request):
     current_assignment = None
     pending_assignment_action = None
     active_trip = None
+    driver_active_trip_origin = ''
+    driver_manual_trip_event = None
     active_downtime = None
     shift_trips = []
     if current_truck:
@@ -4468,6 +4482,26 @@ def driver_shift_view(request):
             'actual_dump_point',
             'free_bucket_acceptance',
         ).order_by('-created_at').first()
+        if active_trip:
+            active_trip_action_types = set(
+                TripClientAction.objects.filter(trip=active_trip).values_list('action_type', flat=True)
+            )
+            if active_trip_action_types & {'truck_loaded', 'free_bucket_loaded'}:
+                driver_active_trip_origin = 'excavator'
+            elif 'driver_manual_loaded' in active_trip_action_types:
+                driver_active_trip_origin = 'driver_manual'
+                driver_manual_trip_event = (
+                    OfflineFieldEvent.objects
+                    .filter(
+                        trip=active_trip,
+                        event_type='driver.trip.loaded',
+                        status='accepted',
+                    )
+                    .order_by('sequence', 'id')
+                    .first()
+                )
+            else:
+                driver_active_trip_origin = 'excavator'
         active_downtime = (
             DowntimeEvent.objects
             .select_related('reason', 'reason__equipment_state')
@@ -4489,6 +4523,7 @@ def driver_shift_view(request):
             .filter(
                 Q(unloading_shift=report_shift)
                 | Q(loading_shift=report_shift)
+                | Q(driver_control_shift=report_shift)
                 | legacy_driver_trip_filter
             )
             .distinct()
@@ -4594,22 +4629,31 @@ def driver_shift_view(request):
         .first()
         or 0
     )
+    # Ручная «точковка» ведёт собственный цикл погрузка→погрузка. Она не должна
+    # превращать обычный круг Водителя в кнопку разгрузки: круг принадлежит
+    # только фактической погрузке, пришедшей от Машиниста экскаватора.
+    driver_standard_active_trip = (
+        active_trip if driver_active_trip_origin != 'driver_manual' else None
+    )
     driver_status = 'ПУСТОЙ'
     driver_status_class = 'is-empty'
     driver_target_label = '—'
-    driver_trip_context_source = active_trip
-    if active_trip:
+    driver_trip_context_source = driver_standard_active_trip
+    if driver_standard_active_trip:
         driver_status = 'ЗАГРУЖЕН'
         driver_status_class = 'is-loaded'
-        driver_target_label = active_trip.actual_dump_point or active_trip.dump_point
+        driver_target_label = (
+            driver_standard_active_trip.actual_dump_point
+            or driver_standard_active_trip.dump_point
+        )
     elif active_downtime:
         driver_status = active_downtime.reason.button_label
         driver_status_class = 'is-downtime'
 
     driver_has_open_trip = bool(active_trip)
     driver_has_loaded_trip = bool(
-        active_trip
-        and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
+        driver_standard_active_trip
+        and driver_standard_active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
     )
     active_downtime_flow = driver_downtime_flow(
         active_downtime.reason if active_downtime else None
@@ -4641,8 +4685,8 @@ def driver_shift_view(request):
         current_assignment.excavator if current_assignment else None
     )
     driver_work_excavator = (
-        active_trip.excavator
-        if active_trip
+        driver_standard_active_trip.excavator
+        if driver_standard_active_trip
         else driver_free_bucket_acceptance.excavator
         if driver_free_bucket_acceptance
         else current_assignment.excavator
@@ -4693,6 +4737,372 @@ def driver_shift_view(request):
         driver_prefixed_context_value('Блок', getattr(driver_trip_context_source, 'loading_block', '')),
         str(driver_context_rock or '—'),
     ]
+
+    # Ручной экран водителя использует тот же рабочий компонент, что и экран
+    # машиниста экскаватора. Основное назначение не меняется: если водитель
+    # выбрал свободный ковш, рабочая карточка и точки берутся из неизменяемого
+    # снимка этого временного выбора только на одну будущую погрузку.
+    driver_manual_event_context = (
+        dict(driver_manual_trip_event.context_snapshot or {})
+        if driver_manual_trip_event else {}
+    )
+    driver_manual_selection = (
+        driver_free_bucket_state['selection']
+        if driver_free_bucket_state['active'] and driver_free_bucket_state['selection']
+        else None
+    )
+    # The temporary free-bucket context must never replace the primary assignment
+    # snapshot.  The browser needs both contexts at the same time so a durable
+    # local cancellation can return the manual workspace immediately, without
+    # waiting for the next realtime fragment.
+    driver_manual_primary_placement = None
+    driver_manual_primary_dump_points = []
+    if current_assignment:
+        driver_manual_primary_placement = (
+            ExcavatorPlacement.objects
+            .select_related('work_rock_type', 'work_dump_point')
+            .filter(excavator=current_assignment.excavator)
+            .first()
+        )
+        if driver_manual_primary_placement:
+            driver_manual_primary_dump_points = list(
+                ExcavatorDumpPointSetting.objects
+                .filter(
+                    placement=driver_manual_primary_placement,
+                    dump_point__is_active=True,
+                )
+                .select_related('dump_point')
+                .order_by('position', 'id')
+            )
+            if (
+                not driver_manual_primary_dump_points
+                and driver_manual_primary_placement.work_dump_point_id
+                and driver_manual_primary_placement.work_dump_point.is_active
+            ):
+                driver_manual_primary_dump_points = [
+                    SimpleNamespace(
+                        dump_point=driver_manual_primary_placement.work_dump_point,
+                        transport_distance_km=driver_manual_primary_placement.transport_distance_km,
+                    )
+                ]
+    driver_manual_excavator = (
+        active_trip.excavator
+        if driver_active_trip_origin == 'driver_manual' and active_trip else
+        driver_free_bucket_acceptance.excavator
+        if driver_manual_selection and driver_free_bucket_acceptance
+        else current_assignment.excavator
+        if current_assignment else None
+    )
+    driver_manual_card_assignment = current_assignment
+    if driver_manual_trip_event:
+        manual_assignment_id = (driver_manual_trip_event.payload or {}).get('assignment_id')
+        driver_manual_card_assignment = (
+            HaulAssignment.objects.filter(pk=manual_assignment_id).first()
+            if manual_assignment_id else None
+        ) or SimpleNamespace(id='', truck=current_truck)
+    driver_manual_placement = None
+    driver_manual_dump_points = []
+    if driver_manual_trip_event and isinstance(driver_manual_event_context.get('dump_points'), list):
+        driver_manual_dump_points = [
+            {
+                'point': SimpleNamespace(id=point.get('id')),
+                'name': str(point.get('name') or ''),
+                'transport_distance_km': str(point.get('transport_distance_km') or ''),
+            }
+            for point in driver_manual_event_context['dump_points']
+            if isinstance(point, dict) and point.get('id') and point.get('name')
+        ]
+    elif driver_manual_selection:
+        driver_manual_dump_points = [
+            {
+                'point': SimpleNamespace(id=point.get('id')),
+                'name': str(point.get('name') or ''),
+                'transport_distance_km': str(point.get('transport_distance_km') or ''),
+            }
+            for point in driver_manual_selection.get('dump_points', [])
+            if point.get('id') and point.get('name')
+        ]
+    elif current_assignment:
+        driver_manual_placement = driver_manual_primary_placement
+        driver_manual_dump_points = list(driver_manual_primary_dump_points)
+
+    driver_manual_plan_visual = {
+        'loop_progress': 0,
+        'completed_loops': 0,
+        'phase': 'empty',
+        'has_completed_loops': False,
+        'is_overrun': False,
+    }
+    driver_manual_excavator_label = (
+        str(driver_manual_event_context.get('excavator_label') or '')
+        or (driver_manual_selection['label'] if driver_manual_selection else '')
+        or driver_excavator_short_label(driver_manual_excavator)
+    )
+    driver_manual_complex_label = (
+        str(driver_manual_event_context.get('complex_label') or '')
+        or (driver_manual_selection['complex_label'] if driver_manual_selection else '')
+        or driver_complex_label_for_excavator(driver_manual_excavator)
+    )
+    driver_manual_rock_label = (
+        str(driver_manual_event_context.get('rock_type_name') or '')
+        or (driver_manual_selection['rock_type'] if driver_manual_selection else '')
+        or (
+            str(driver_manual_placement.work_rock_type)
+            if driver_manual_placement and driver_manual_placement.work_rock_type_id else ''
+        )
+        or (str(active_trip.rock_type) if driver_active_trip_origin == 'driver_manual' and active_trip else '')
+    )
+    driver_manual_cards = []
+    if driver_manual_card_assignment and driver_manual_excavator:
+        driver_manual_cards.append({
+            'assignment': driver_manual_card_assignment,
+            'equipment_id': driver_manual_excavator.id,
+            'manual_available': False,
+            'driver_presence_code': 'online',
+            'driver_presence_label': 'Назначен водителю',
+            'open_trip_id': '',
+            'number': driver_manual_excavator_label,
+            'equipment_state_code': '',
+            'status_key': 'yellow',
+            'status_label': driver_manual_complex_label,
+            'target_label': driver_manual_rock_label,
+            'is_selected': True,
+            'is_locked': False,
+            'is_inactive': False,
+            'is_load_blocked': False,
+            'can_drag': True,
+            'can_load': True,
+            'is_handoff_completion': False,
+            'transfer': None,
+            'foreign_free_bucket': None,
+            'load_block_reason_code': '',
+            'load_block_reason_label': '',
+            'icon': 'img/equipment/excavator-yellow.png',
+            'plan_has_plan': False,
+            'plan_percent': 0,
+            'plan_visual': driver_manual_plan_visual,
+            'plan_status': 'no_plan_group',
+            'plan_status_key': 'empty',
+            'plan_short_label': (
+                'Свободный ковш'
+                if driver_manual_selection or driver_manual_event_context.get('authority_type') == 'free_bucket'
+                else 'Ручной режим'
+            ),
+        })
+    driver_manual_trip_counts = {}
+    driver_manual_last_dump_point_id = None
+    if driver_manual_excavator:
+        for trip in shift_trips:
+            if trip.status == TripStatus.CANCELLED or trip.excavator_id != driver_manual_excavator.id:
+                continue
+            point_id = trip.assigned_dump_point_id or trip.dump_point_id
+            if not point_id:
+                continue
+            driver_manual_trip_counts[point_id] = driver_manual_trip_counts.get(point_id, 0) + 1
+            driver_manual_last_dump_point_id = point_id
+
+    driver_manual_dump_cards = [
+        {
+            'point': setting['point'] if isinstance(setting, dict) else setting.dump_point,
+            'name': setting['name'] if isinstance(setting, dict) else str(setting.dump_point),
+            'name_size_class': (
+                'is-name-long'
+                if len(setting['name'] if isinstance(setting, dict) else str(setting.dump_point)) > 18 else
+                'is-name-medium'
+                if len(setting['name'] if isinstance(setting, dict) else str(setting.dump_point)) > 10 else
+                'is-name-short'
+            ),
+            'status_key': 'green',
+            'transport_distance_km': (
+                setting['transport_distance_km']
+                if isinstance(setting, dict) else setting.transport_distance_km or ''
+            ),
+            'completed_count': driver_manual_trip_counts.get(
+                (setting['point'] if isinstance(setting, dict) else setting.dump_point).id,
+                0,
+            ),
+            'pending_trucks': [],
+            'is_last_sent': (
+                (setting['point'] if isinstance(setting, dict) else setting.dump_point).id
+                == driver_manual_last_dump_point_id
+            ),
+        }
+        for setting in driver_manual_dump_points
+    ]
+    if not driver_manual_event_context:
+        driver_manual_event_context = {
+            'source': 'driver_manual',
+            'authority_type': 'free_bucket' if driver_manual_selection else 'assignment',
+            'truck_id': current_truck.id if current_truck else None,
+            'excavator_id': driver_manual_excavator.id if driver_manual_excavator else None,
+            'excavator_label': driver_manual_excavator_label,
+            'complex_label': driver_manual_complex_label,
+            'assignment_id': current_assignment.id if current_assignment and not driver_manual_selection else None,
+            'free_bucket_acceptance_id': (
+                driver_free_bucket_acceptance.id if driver_manual_selection and driver_free_bucket_acceptance else None
+            ),
+            'free_bucket_acceptance_local_id': (
+                driver_free_bucket_state.get('acceptance_local_id') if driver_manual_selection else ''
+            ),
+            'placement_id': driver_manual_placement.id if driver_manual_placement else None,
+            'placement_updated_at': (
+                driver_manual_selection.get('placement_updated_at')
+                if driver_manual_selection else
+                driver_manual_placement.work_context_updated_at.isoformat()
+                if driver_manual_placement and driver_manual_placement.work_context_updated_at else None
+            ),
+            'rock_type_id': (
+                driver_manual_selection.get('rock_type_id')
+                if driver_manual_selection else
+                driver_manual_placement.work_rock_type_id if driver_manual_placement else None
+            ),
+            'rock_type_name': driver_manual_rock_label,
+            'loading_horizon': (
+                driver_manual_selection.get('loading_horizon')
+                if driver_manual_selection else
+                driver_manual_placement.loading_horizon if driver_manual_placement else ''
+            ),
+            'loading_block': (
+                driver_manual_selection.get('loading_block')
+                if driver_manual_selection else
+                driver_manual_placement.loading_block if driver_manual_placement else ''
+            ),
+            'dump_points': [
+                {
+                    'id': card['point'].id,
+                    'name': card['name'],
+                    'transport_distance_km': card['transport_distance_km'] or None,
+                }
+                for card in driver_manual_dump_cards
+            ],
+        }
+    if active_trip and driver_active_trip_origin == 'driver_manual':
+        driver_manual_event_context.update({
+            'event_id': driver_manual_trip_event.event_id if driver_manual_trip_event else '',
+            'local_trip_id': driver_manual_trip_event.local_trip_id if driver_manual_trip_event else '',
+            'active_trip_id': active_trip.id,
+            'active_trip_loaded_at': (
+                active_trip.loaded_at.isoformat() if active_trip.loaded_at else active_trip.created_at.isoformat()
+            ),
+            'selected_dump_point_id': active_trip.dump_point_id,
+            'selected_dump_point_name': str(active_trip.dump_point),
+        })
+    driver_manual_primary_trip_counts = {}
+    driver_manual_primary_last_dump_point_id = None
+    if current_assignment:
+        for trip in shift_trips:
+            if trip.status == TripStatus.CANCELLED or trip.excavator_id != current_assignment.excavator_id:
+                continue
+            point_id = trip.assigned_dump_point_id or trip.dump_point_id
+            if not point_id:
+                continue
+            driver_manual_primary_trip_counts[point_id] = (
+                driver_manual_primary_trip_counts.get(point_id, 0) + 1
+            )
+            driver_manual_primary_last_dump_point_id = point_id
+    driver_manual_primary_context = {
+        'source': 'driver_manual',
+        'authority_type': 'assignment',
+        'truck_id': current_truck.id if current_truck else None,
+        'excavator_id': current_assignment.excavator_id if current_assignment else None,
+        'excavator_label': driver_excavator_short_label(
+            current_assignment.excavator if current_assignment else None
+        ),
+        'complex_label': driver_complex_label_for_excavator(
+            current_assignment.excavator if current_assignment else None
+        ),
+        'assignment_id': current_assignment.id if current_assignment else None,
+        'free_bucket_acceptance_id': None,
+        'free_bucket_acceptance_local_id': '',
+        'placement_id': (
+            driver_manual_primary_placement.id
+            if driver_manual_primary_placement else None
+        ),
+        'placement_updated_at': (
+            driver_manual_primary_placement.work_context_updated_at.isoformat()
+            if driver_manual_primary_placement
+            and driver_manual_primary_placement.work_context_updated_at else None
+        ),
+        'rock_type_id': (
+            driver_manual_primary_placement.work_rock_type_id
+            if driver_manual_primary_placement else None
+        ),
+        'rock_type_name': (
+            str(driver_manual_primary_placement.work_rock_type)
+            if driver_manual_primary_placement
+            and driver_manual_primary_placement.work_rock_type_id else ''
+        ),
+        'loading_horizon': (
+            driver_manual_primary_placement.loading_horizon
+            if driver_manual_primary_placement else ''
+        ),
+        'loading_block': (
+            driver_manual_primary_placement.loading_block
+            if driver_manual_primary_placement else ''
+        ),
+        'dump_points': [
+            {
+                'id': setting.dump_point.id,
+                'name': str(setting.dump_point),
+                'transport_distance_km': (
+                    str(setting.transport_distance_km)
+                    if setting.transport_distance_km is not None else ''
+                ),
+                'completed_count': driver_manual_primary_trip_counts.get(
+                    setting.dump_point.id,
+                    0,
+                ),
+                'is_last_sent': (
+                    setting.dump_point.id == driver_manual_primary_last_dump_point_id
+                ),
+                'one_off': False,
+            }
+            for setting in driver_manual_primary_dump_points
+        ],
+    }
+    driver_manual_can_open = bool(
+        open_shift
+        and current_truck
+        and (not active_trip or driver_active_trip_origin == 'driver_manual')
+    )
+    driver_manual_blocked_reason = (
+        'Ручной режим недоступен во время активного рейса'
+        if active_trip and driver_active_trip_origin != 'driver_manual' else
+        'Откройте смену, чтобы использовать ручной режим'
+        if not open_shift else
+        'Сначала выберите самосвал для текущей смены'
+        if not current_truck else
+        ''
+    )
+    driver_manual_workspace = {
+        'can_open': driver_manual_can_open,
+        'blocked_reason': driver_manual_blocked_reason,
+        'excavator_label': driver_manual_excavator_label or 'Ручной режим',
+        'horizon': (
+            driver_manual_event_context.get('loading_horizon')
+            if driver_manual_event_context else
+            driver_manual_selection['loading_horizon']
+            if driver_manual_selection else
+            driver_manual_placement.loading_horizon if driver_manual_placement else ''
+        ),
+        'block': (
+            driver_manual_event_context.get('loading_block')
+            if driver_manual_event_context else
+            driver_manual_selection['loading_block']
+            if driver_manual_selection else
+            driver_manual_placement.loading_block if driver_manual_placement else ''
+        ),
+        'rock_label': driver_manual_rock_label,
+        'cards': driver_manual_cards,
+        'dump_cards': driver_manual_dump_cards,
+        'event_context': driver_manual_event_context,
+        'base_event_context': driver_manual_primary_context,
+        'active_trip_origin': driver_active_trip_origin,
+        'active_trip_id': active_trip.id if active_trip else None,
+        'active_trip_loaded_at': (
+            active_trip.loaded_at.isoformat() if active_trip and active_trip.loaded_at else ''
+        ),
+    }
     if driver_free_bucket_acceptance and driver_free_bucket_state['selection']:
         free_bucket_selection = driver_free_bucket_state['selection']
         driver_excavator_label = free_bucket_selection['label']
@@ -4788,6 +5198,10 @@ def driver_shift_view(request):
         {'id': point.id, 'name': str(point)}
         for point in DumpPoint.objects.filter(is_active=True).order_by('name')
     ]
+    # Ручная смена точки относится только к уже созданному ручному рейсу.
+    # Полный активный справочник сохраняем отдельно: обычное окно текущего
+    # рейса может быть ограничено неизменяемым снимком свободного ковша.
+    driver_manual_primary_context['reroute_points'] = list(unload_points)
     active_trip_assigned_dump_point = None
     active_trip_current_dump_point = None
     active_trip_actual_dump_point_id = None
@@ -4894,7 +5308,7 @@ def driver_shift_view(request):
             'work_assignment_shift_label': work_assignment.work_shift_label if work_assignment else '',
             'work_assignment_equipment': assignment_truck,
             'current_assignment': current_assignment,
-            'active_trip': active_trip,
+            'active_trip': driver_standard_active_trip,
             'form': form,
             'close_form': close_form,
             'close_review': getattr(request, '_driver_close_confirmation', None),
@@ -4956,6 +5370,7 @@ def driver_shift_view(request):
             'driver_excavator_label': driver_excavator_label,
             'driver_complex_label': driver_complex_label,
             'driver_geology_parts': driver_geology_parts,
+            'driver_manual_workspace': driver_manual_workspace,
             'driver_context_parts': driver_context_parts,
             'driver_context_label': driver_context_label,
             'driver_dial_label': driver_dial_label,

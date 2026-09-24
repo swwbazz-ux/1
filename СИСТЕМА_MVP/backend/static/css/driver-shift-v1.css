@@ -89,10 +89,22 @@ body.driver-mobile-screen .driver-shell {
        карточки назначения, барабана (0.42 круга) и меню; барабан — от круга. Так композиция
        одинакова на любом экране, а не зависит от того, что первым упрётся — ширина или высота. */
     --driver-dial-fit: calc((100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - clamp(66px, 8dvh, 100px) - 4 * var(--driver-work-gap) - 58px) / 1.42);
-    --driver-dial-size: clamp(200px, min(92vw, var(--driver-dial-fit)), 520px);
+    /* The lower bound keeps the dial usable, but it is capped again by the width
+       and by the height that is actually left, so a short or narrow screen
+       clips nothing: the floor yields instead of overflowing. */
+    --driver-dial-size: min(
+        max(200px, min(92vw, var(--driver-dial-fit))),
+        92vw,
+        var(--driver-dial-fit)
+    );
     width: 100%;
     max-width: none;
-    min-width: 320px;
+    /* A phone whose CSS viewport is narrower than 320px (1080 physical pixels at
+       a 3.5 device ratio gives 308.6) was pushed past its own right edge by a
+       hard floor, so every screen lost a strip of the right column. The floor
+       still protects the layout where there is room for it, and yields to the
+       viewport where there is not, on any screen size. */
+    min-width: min(320px, 100%);
     height: var(--driver-viewport-h, 100dvh);
     min-height: 0;
     max-height: var(--driver-viewport-h, 100dvh);
@@ -624,9 +636,16 @@ body.driver-mobile-screen .driver-work-context-location {
     display: flex;
     align-items: center;
     white-space: nowrap;
+    /* Горизонт и блок пишутся в одну строку, поэтому на узком экране последняя
+       часть уезжала за край карточки вместо того, чтобы подрезаться. */
+    overflow: hidden;
 }
 
 body.driver-mobile-screen .driver-work-context-location span {
+    /* Части строки не ужимаются по отдельности: иначе на обычном экране
+       «ГОРИЗОНТ 75 · БЛОК 52» сокращается там, где место есть. Лишнее подрезает
+       сама строка выше. */
+    flex: 0 0 auto;
     white-space: nowrap;
 }
 
@@ -3918,6 +3937,9 @@ body.driver-mobile-screen .driver-haptic-level {
     background: rgba(255, 255, 255, 0.03);
     display: grid;
     gap: 8px;
+    /* Элемент сетки по умолчанию не уже своего содержимого, поэтому на узком
+       экране три подписи распирали блок за край панели. */
+    min-width: 0;
 }
 body.driver-mobile-screen .driver-haptic-level__title {
     font-size: 12px;
@@ -3927,10 +3949,14 @@ body.driver-mobile-screen .driver-haptic-level__title {
 }
 body.driver-mobile-screen .driver-haptic-level__options {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
+    min-width: 0;
 }
 body.driver-mobile-screen .driver-haptic-level__options button {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     min-height: 42px;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.14);

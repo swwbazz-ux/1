@@ -55,6 +55,7 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageStarted(WebView loadingWebView) {
                 runOnUiThread(() -> {
+                    configureProfileWebViewTextZoom(loadingWebView);
                     if (loadingWebView instanceof NativeImeWebView) {
                         ((NativeImeWebView) loadingWebView).clearNativeImeAction();
                     }
@@ -78,6 +79,7 @@ public class MainActivity extends BridgeActivity {
                 // and the rotated cookies from the successful login redirect.
                 CookieManager.getInstance().flush();
                 runOnUiThread(() -> {
+                    configureProfileWebViewTextZoom(loadedWebView);
                     lastObservedWebView = loadedWebView;
                     lastObservedPageState = PageState.LOADED;
                     if (startupLoadingOverlay != null) {
@@ -128,6 +130,7 @@ public class MainActivity extends BridgeActivity {
         configurePersistentWebViewCookies();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
+            configureProfileWebViewTextZoom(webView);
             webView.setBackgroundColor(
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)
             );
@@ -162,6 +165,22 @@ public class MainActivity extends BridgeActivity {
         nativeCoverReady = true;
         AppNotifications.createChannels(this);
         requestNotificationPermissionThenBatteryExemption();
+    }
+
+    private void configureProfileWebViewTextZoom(WebView webView) {
+        if (webView == null || BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT <= 0) {
+            return;
+        }
+        /* Field workstations already provide touch-sized, high-contrast text.
+           Android's very large system font scale is applied by WebView on top
+           of that layout and can hide operational controls. A profile value
+           pins only this native shell's page text; the phone setting and all
+           other applications remain unchanged.
+           setTextZoom already replaces the scale WebView would otherwise apply,
+           so the profile percent is passed through as is. Dividing it by the
+           system scale once looked like compensation and halved every label on
+           a phone set to the largest system font. */
+        webView.getSettings().setTextZoom(BuildConfig.WEB_VIEW_TEXT_ZOOM_PERCENT);
     }
 
     private void configurePersistentWebViewCookies() {
@@ -213,6 +232,7 @@ public class MainActivity extends BridgeActivity {
         if (getBridge() == null || getBridge().getWebView() == null) {
             return;
         }
+        configureProfileWebViewTextZoom(getBridge().getWebView());
         getBridge().getWebView().postDelayed(() -> getBridge().getWebView().evaluateJavascript(
             "(function(){" +
                 "window.dispatchEvent(new CustomEvent('native-connectivity-resume'));" +

@@ -7,6 +7,9 @@ const path = require("node:path");
 const BACKEND_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 const DRIVER_SCREEN_SCRIPTS = [
+    "excavator-dashboard-drag-v1.js",
+    "excavator-dump-return-swipe-v1.js",
+    "driver-manual-excavator-workspace-v1.js",
     "driver-haptics-v1.js",
     "driver-native-push-v1.js",
     "driver-shift-fragment-v1.js",
