@@ -122,6 +122,12 @@
         var detailRequestToken = 0;
         var detailRetryAction = null;
 
+        function escapeHtml(value) {
+            return String(value || "").replace(/[&<>"']/g, function (char) {
+                return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[char];
+            });
+        }
+
         function formatDispatcherDowntimeDuration(totalSeconds) {
             totalSeconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
             var hours = Math.floor(totalSeconds / 3600);
