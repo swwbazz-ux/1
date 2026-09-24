@@ -330,6 +330,15 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     hyphens: manual !important;
 }
 
+/* Плашка комплекса на карточке источника не нужна: водитель и так знает, к
+   какому комплексу приехал, а длинное название всё равно обрывалось
+   многоточием. Убираем саму плашку, но НЕ трогаем точку связи: она лежит
+   отдельным элементом с абсолютным положением в правом верхнем углу
+   карточки (top 7, right 7, 9x9) и со своим источником состояния, поэтому
+   остаётся на том же месте, того же размера и с той же логикой. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > span {
+    display: none !important;
+}
 /* Перенос разрешён только после дефиса и по пробелу — внутри слова никогда. */
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row > .eo-dashboard-truck-card > strong.is-label-fit-wrapped {
     line-height: 1.02 !important;
