@@ -701,13 +701,34 @@ test("an active free-bucket trip stays separate from the primary context of the 
     }
 });
 
-test("Driver opens from the existing manual corner and preserves bottom navigation", () => {
+test("manual corner toggles manual mode on the dial and preserves bottom navigation", () => {
     const driver = read("templates", "users", "driver_shift.html");
     const actions = read("templates", "includes", "mobile_dial_actions.html");
-    assert.match(actions, /data-driver-manual-open/);
-    assert.match(actions, /aria-controls="driver-manual-workspace"/);
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.match(actions, /data-driver-dial-manual-toggle aria-label="Ручной режим"/);
+    assert.doesNotMatch(actions, /data-driver-manual-open/);
+    // Скрытая разметка ручного экрана остаётся движком рейса; сам экран не открывается.
     assert.match(driver, /include "includes\/driver_manual_excavator_workspace\.html"/);
+    assert.match(driver, /include "includes\/driver_point_drum\.html"/);
+    assert.match(runtime, /if \(dialHostsManualMode\(\)\) return;/);
     assert.match(driver, /data-driver-bottom-nav/);
+});
+
+test("dial manual mode drives the same manual-trip queue: send, cancel, complete", () => {
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const drum = read("static", "js", "driver-point-drum-v1.js");
+    const shift = read("static", "js", "driver-shift-v1.js");
+    // Свайп точки в круг и бросок самосвала на плитку — одна и та же погрузка.
+    assert.match(runtime, /onDrop: function \(card, target\) \{\s*startManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function startManualLoadAtPoint\([\s\S]*?return startManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function cancelActiveManualLoad\([\s\S]*?return cancelManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function completeActiveManualLoad\([\s\S]*?return completeManualLoad\(workspace, target\);/);
+    assert.match(runtime, /"driver-manual-trip-changed"/);
+    assert.match(drum, /api\.startManualLoadAtPoint\(pointId\)/);
+    assert.match(drum, /api\.cancelActiveManualLoad\(\)/);
+    assert.match(drum, /api\.completeActiveManualLoad\(\)/);
+    // Удержание круга с ручным рейсом не шлёт обычную разгрузку.
+    assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(\);[\s\S]*?return false;/);
 });
 
 test("shared controller remains the only live card binder in both roles", () => {

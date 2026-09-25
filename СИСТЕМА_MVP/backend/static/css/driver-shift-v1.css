@@ -489,13 +489,13 @@ body.driver-mobile-screen .driver-panel[data-driver-tab-panel="downtimes"].is-ac
 body.driver-mobile-screen .driver-work-screen.is-active {
     display: grid;
     grid-template-areas:
-        "context"
+        "pointdrum"
         "dial"
         "drum"
         "assign";
     /* Круг во всю ширину колонки задаёт свою строку сам; всё, что остаётся по высоте,
-       отдаётся барабану простоев (строка drum = 1fr). */
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+       поровну делят барабан точек разгрузки над кругом и барабан простоев под ним. */
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr) auto;
     gap: var(--driver-work-gap);
     justify-items: center;
     align-content: stretch;
@@ -3025,7 +3025,7 @@ body.driver-mobile-screen .driver-panel.is-active {
 }
 
 body.driver-mobile-screen .driver-panel[data-driver-tab-panel="work"].driver-work-screen.is-active {
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr) auto;
     align-content: stretch;
 }
 
@@ -3036,11 +3036,12 @@ body.driver-mobile-screen .driver-work-dial-zone {
     padding-top: 6px;   /* воздух между карточкой назначения и угловыми кнопками */
 }
 
-/* Модуль круга с угловыми кнопками — строго во всю ширину колонки, как карточка назначения
-   над ним. Третий член min() — аварийный: он вступает в силу только на экранах, где после
-   круга барабану не осталось бы даже 86 px; на обычных телефонах круг всегда полной ширины. */
+/* Модуль круга с угловыми кнопками — строго во всю ширину колонки. Третий член min() —
+   аварийный: он вступает в силу только на экранах, где после круга барабанам (точек
+   разгрузки над ним и простоев под ним) не осталось бы даже по 86 px; на обычных
+   телефонах круг всегда полной ширины. */
 body.driver-mobile-screen .driver-work-dial {
-    width: min(100%, 520px, calc(100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - clamp(66px, 8dvh, 100px) - 4 * var(--driver-work-gap) - 86px));
+    width: min(100%, 520px, calc(100dvh - var(--driver-header-total-h) - var(--driver-nav-total-h) - 4 * var(--driver-work-gap) - 2 * 86px));
     height: auto;
     max-width: 100%;
     max-height: none;

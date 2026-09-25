@@ -1901,6 +1901,16 @@ window.bindDriverMobileShell = function () {
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
         function submitDriverUnloadOnce() {
+            /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание
+               завершает его через очередь ручного режима. Возвращаем false — кольцо
+               удержания сбрасывается как после отпускания, а круг гаснет сам, когда
+               движок ручного рейса сообщит о завершении. */
+            if (holdButton.dataset.driverManualDial === "true") {
+                if (!holdButton.disabled && !driverRoleIsReadonly() && window.DriverPointDrum) {
+                    window.DriverPointDrum.completeFromDial();
+                }
+                return false;
+            }
             if (
                 unloadSubmissionPending
                 || holdForm.dataset.driverUnloadSubmitting === "true"
@@ -2012,11 +2022,13 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
-                holdButton.classList.add("is-loaded");
+                // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
+                if (!holdButton.disabled) holdButton.classList.add("is-loaded");
                 // После обычного отпускания подпись и так исходная — подгонка текста
                 // (замеры ширины в цикле) на слабом телефоне стоила заметного кадра.
-                if (dialLabel && readyDialLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== readyDialLabel) {
-                    renderDriverDialLabel(dialLabel, readyDialLabel);
+                var resetLabel = holdButton.dataset.driverManualDialLabel || readyDialLabel;
+                if (dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
+                    renderDriverDialLabel(dialLabel, resetLabel);
                     scheduleDriverDialLabelFit();
                 }
             },

@@ -766,7 +766,36 @@
         }).pop() || null;
     }
 
+    /* Круг и барабан точек на основном экране показывают ручной рейс сами; о каждой
+       смене рейса движок сообщает им одним событием. */
+    function activeManualPointId() {
+        var projection = currentTripProjection;
+        if (!projection || isTerminalState(projection.state)) return "";
+        return String(positive(projection.payload && projection.payload.dump_point_id) || "");
+    }
+
+    function activeManualPointName() {
+        return activeManualPointId() ? projectionPointName(currentTripProjection) : "";
+    }
+
+    function announceManualTrip() {
+        if (typeof root.dispatchEvent !== "function" || typeof root.CustomEvent !== "function") return;
+        root.dispatchEvent(new root.CustomEvent("driver-manual-trip-changed", {
+            detail: {
+                pointId: activeManualPointId(),
+                pointName: activeManualPointName(),
+                saving: savingLocal
+            }
+        }));
+    }
+
     function renderProjection(workspace, events, receipt) {
+        var result = renderProjectionState(workspace, events, receipt);
+        announceManualTrip();
+        return result;
+    }
+
+    function renderProjectionState(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
         var shell = workspace.closest("[data-driver-shell]");
@@ -1505,6 +1534,56 @@
             throw error;
         }).finally(function () {
             target.classList.remove("is-complete-pending");
+            announceManualTrip();
+        });
+    }
+
+    /* Погрузка ручного рейса на выбранную точку: одно и то же событие и для броска
+       самосвала на плитку, и для свайпа точки из барабана в круг основного экрана. */
+    function startManualLoad(workspace, target) {
+        if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return Promise.resolve(false);
+        var outbox = root.driverOfflineOutbox;
+        if (!outbox) {
+            setResult(workspace, "storage-error", null, true);
+            return Promise.resolve(false);
+        }
+        var previousProjection = currentTripProjection;
+        savingLocal = true;
+        setSourceLocked(workspace, true);
+        setResult(workspace, "saving", null, true);
+        return outbox.pending().then(function (events) {
+            return buildManualLoadEvent(workspace, target, events);
+        }).then(function (event) {
+            return outbox.enqueue(event);
+        }).then(function (saved) {
+            savingLocal = false;
+            manualCompletionPendingKey = "";
+            delete workspace.dataset.driverManualLastError;
+            currentTripProjection = saved;
+            updateManualTripCount(
+                workspace,
+                target.dataset.eoDumpTarget,
+                1,
+                "load:" + String(saved.event_id || "")
+            );
+            startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
+            markLastDump(workspace, target.dataset.eoDumpTarget);
+            syncWorkspaceContext(workspace);
+            setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
+            setResult(workspace, "pending", null, true);
+            updatePointAction(workspace);
+            playManualFeedback("created");
+            announceManualTrip();
+            return saved;
+        }).catch(function (error) {
+            savingLocal = false;
+            workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
+            currentTripProjection = previousProjection;
+            if (!previousProjection) stopTripTimer(workspace);
+            setSourceLocked(workspace, sourceShouldBeLocked(false, previousProjection));
+            setResult(workspace, "storage-error", null, true);
+            announceManualTrip();
+            return false;
         });
     }
 
@@ -1553,6 +1632,7 @@
             throw error;
         }).finally(function () {
             target.classList.remove("is-return-pending");
+            announceManualTrip();
         });
     }
 
@@ -1812,46 +1892,7 @@
             isInactive: function () { return false; },
             isBlocked: function () { return false; },
             onDrop: function (card, target) {
-                if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return;
-                var outbox = root.driverOfflineOutbox;
-                if (!outbox) {
-                    setResult(workspace, "storage-error", null, true);
-                    return;
-                }
-                var previousProjection = currentTripProjection;
-                savingLocal = true;
-                setSourceLocked(workspace, true);
-                setResult(workspace, "saving", null, true);
-                outbox.pending().then(function (events) {
-                    return buildManualLoadEvent(workspace, target, events);
-                }).then(function (event) {
-                    return outbox.enqueue(event);
-                }).then(function (saved) {
-                    savingLocal = false;
-                    manualCompletionPendingKey = "";
-                    delete workspace.dataset.driverManualLastError;
-                    currentTripProjection = saved;
-                    updateManualTripCount(
-                        workspace,
-                        target.dataset.eoDumpTarget,
-                        1,
-                        "load:" + String(saved.event_id || "")
-                    );
-                    startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
-                    markLastDump(workspace, target.dataset.eoDumpTarget);
-                    syncWorkspaceContext(workspace);
-                    setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
-                    setResult(workspace, "pending", null, true);
-                    updatePointAction(workspace);
-                    playManualFeedback("created");
-                }).catch(function (error) {
-                    savingLocal = false;
-                    workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
-                    currentTripProjection = previousProjection;
-                    if (!previousProjection) stopTripTimer(workspace);
-                    setSourceLocked(workspace, sourceShouldBeLocked(false, previousProjection));
-                    setResult(workspace, "storage-error", null, true);
-                });
+                startManualLoad(workspace, target);
             },
             haptic: function (pattern, amplitude) {
                 if (typeof root.driverHaptic === "function") {
@@ -1893,10 +1934,57 @@
         return currentController;
     }
 
+    /* Ручной режим переехал на основной экран: барабан точек над циферблатом и сам круг.
+       Этот модуль остаётся движком ручного рейса (очередь событий, проекция рейса,
+       отмена и завершение) и привязан к скрытой разметке, но сам экран больше не
+       показывается. */
+    function dialHostsManualMode() {
+        return !!(root.document && root.document.querySelector("[data-driver-point-drum]"));
+    }
+
+    function dialWorkspace() {
+        var workspace = currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
+        if (workspace && workspace !== currentWorkspace) bindWorkspace(workspace);
+        return workspace;
+    }
+
+    function activeDumpTarget(workspace) {
+        return workspace.querySelector('[data-driver-manual-dump-target][data-eo-return-enabled="true"]')
+            || ensureCurrentProjectionTarget(workspace);
+    }
+
+    function startManualLoadAtPoint(pointId, pointName) {
+        var workspace = dialWorkspace();
+        pointId = positive(pointId);
+        if (!workspace || !pointId) return Promise.resolve(false);
+        var grid = workspace.querySelector(".eo-dashboard-unload-grid");
+        var target = grid && grid.querySelector(
+            '[data-driver-manual-dump-target][data-eo-dump-target="' + String(pointId) + '"]'
+        );
+        if (!target) target = selectManualPoint(workspace, pointId, pointName);
+        if (!target) return Promise.resolve(false);
+        return startManualLoad(workspace, target);
+    }
+
+    function cancelActiveManualLoad() {
+        var workspace = dialWorkspace();
+        var target = workspace && activeDumpTarget(workspace);
+        if (!target) return Promise.resolve(false);
+        return cancelManualLoad(workspace, target);
+    }
+
+    function completeActiveManualLoad() {
+        var workspace = dialWorkspace();
+        var target = workspace && activeDumpTarget(workspace);
+        if (!target) return Promise.resolve(false);
+        return completeManualLoad(workspace, target);
+    }
+
     function openWorkspace(control) {
         var workspace = root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return;
         bindWorkspace(workspace);
+        if (dialHostsManualMode()) return;
         workspaceRequestedOpen = true;
         workspacePreferenceKnown = true;
         workspace.hidden = false;
@@ -1990,6 +2078,7 @@
         }
         if (
             workspaceRequestedOpen
+            && !dialHostsManualMode()
             && shell
             && String(shell.dataset.activeTab || "work") === "work"
             && shell.dataset.driverActiveTripOrigin !== "excavator"
@@ -2176,7 +2265,13 @@
         showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
         restoreStandardTargets: restoreStandardTargets,
         resultText: resultText,
-        dismissRejectedTripProjection: dismissRejectedTripProjection
+        dismissRejectedTripProjection: dismissRejectedTripProjection,
+        startManualLoad: startManualLoad,
+        activeManualPointId: activeManualPointId,
+        activeManualPointName: activeManualPointName,
+        startManualLoadAtPoint: startManualLoadAtPoint,
+        cancelActiveManualLoad: cancelActiveManualLoad,
+        completeActiveManualLoad: completeActiveManualLoad
     };
     if (typeof root.document !== "undefined") {
         if (root.document.readyState === "loading") {

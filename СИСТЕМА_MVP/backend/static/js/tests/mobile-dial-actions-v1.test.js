@@ -14,7 +14,7 @@ test("shared dial component provides three independent accessible slots", () => 
     assert.match(include, /data-mobile-dial-action="manual"/);
     assert.match(include, /data-mobile-dial-action="dump-point"/);
     assert.match(include, /data-mobile-dial-action="free-bucket"/);
-    assert.match(include, /data-driver-manual-open aria-label="Открыть ручной режим"/);
+    assert.match(include, /data-driver-dial-manual-toggle aria-label="Ручной режим"[^>]*aria-pressed="false"/);
     assert.match(include, /mobile_dial_manual_blocked_reason/);
     assert.match(include, /aria-label="Изменить точку разгрузки"/);
     assert.match(include, /aria-label="Свободный ковш"/);

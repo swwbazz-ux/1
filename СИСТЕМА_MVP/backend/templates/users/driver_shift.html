@@ -11,6 +11,7 @@
 <script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
+<script src="{% static 'js/driver-point-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-free-bucket-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v={{ driver_shell_version }}"></script>
@@ -25,6 +26,7 @@
 <link rel="stylesheet" href="{% static 'css/driver-shift-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/mobile-dial-actions-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-downtime-drum-v1.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/driver-point-drum-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-free-bucket-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v={{ driver_shell_version }}">
@@ -81,27 +83,7 @@
     </header>
 
     <section class="driver-panel driver-tab driver-work-screen {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
-        <section class="driver-work-context-card">
-            {% comment %} Заголовок секции убран ради места; значок свободного ковша остался. {% endcomment %}
-            <b class="driver-free-bucket-chip" data-driver-free-bucket-chip{% if not driver_free_bucket_state.active %} hidden{% endif %}{% if driver_free_bucket_state.selection %} title="Свободный ковш · {{ driver_free_bucket_state.selection.label }}"{% endif %}>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</b>
-            <div class="driver-work-context-body">
-                <div class="driver-work-context-machine">
-                    <span>Экскаватор</span>
-                    <strong data-driver-context-excavator>{{ driver_excavator_label }}</strong>
-                    <small>Комплекс <span data-driver-context-complex>{{ driver_complex_label }}</span></small>
-                </div>
-                <div class="driver-work-context-geology">
-                    <span>Место погрузки · порода</span>
-                    <div class="driver-work-context-geology-values">
-                        <div class="driver-work-context-location">
-                            <span data-driver-context-horizon>{{ driver_geology_parts.0 }}</span>
-                            <span data-driver-context-block>{{ driver_geology_parts.1 }}</span>
-                        </div>
-                        <div class="driver-work-context-rock" data-driver-context-rock title="{{ driver_geology_parts.2 }}">{{ driver_geology_parts.2 }}</div>
-                    </div>
-                </div>
-            </div>
-        </section>
+        {% include "includes/driver_point_drum.html" %}
 
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %};" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">

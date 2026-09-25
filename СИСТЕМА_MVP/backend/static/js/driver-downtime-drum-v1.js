@@ -692,6 +692,28 @@
         var yN = cy + Math.sqrt(r * r - half * half);   // линии начинаются точно на кольце
         var y1 = cr.bottom - box.top + pad;
         function p(v) { return Number(v).toFixed(1); }
+        // Над кругом стоит барабан точек разгрузки со своим горлышком вверх: кольцо
+        // рисуется двумя дугами по бокам, с разрывом наверху ровно под его линии
+        // (сами линии рисует driver-point-drum-v1.js от тех же точек кольца).
+        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center");
+        var tr = top ? top.getBoundingClientRect() : null;
+        var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
+        if (halfT && halfT < r) {
+            var xLt = cx - halfT, xRt = cx + halfT;
+            var yT = cy - Math.sqrt(r * r - halfT * halfT);
+            var split = [
+                "M", p(xRt), p(yT),
+                "A", p(r), p(r), "0 0 1", p(xR), p(yN),
+                "L", p(xR), p(y1 - rr),
+                "Q", p(xR), p(y1), p(xR - rr), p(y1),
+                "L", p(xL + rr), p(y1),
+                "Q", p(xL), p(y1), p(xL), p(y1 - rr),
+                "L", p(xL), p(yN),
+                "A", p(r), p(r), "0 0 1", p(xLt), p(yT)
+            ].join(" ");
+            doc.documentElement.style.setProperty("--link-path", 'path("' + split + '")');
+            return;
+        }
         // Одна кривая: от левой точки кольца по большой дуге вправо, вниз по правой линии,
         // по нижней рамке с двумя скруглениями, вверх по левой линии — и замыкание на кольцо.
         var keyhole = [
@@ -735,6 +757,10 @@
         }
         root.setTimeout(function () { render(false); }, 300);
     }
+
+    // Барабан точек разгрузки над кругом просит перерисовать кольцо, когда его грань
+    // встала на место: разрыв под его горлышко зависит от ширины этой грани.
+    root.DriverDowntimeDrum = Object.freeze({ syncLink: syncLinkVars });
 
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", init);
     else init();

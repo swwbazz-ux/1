@@ -1,0 +1,159 @@
+/* Барабан точек разгрузки над циферблатом (вкладка «Работа») — зеркало барабана
+   простоев под ним. Грани, сцена и цилиндр — те же классы и стили
+   (driver-downtime-drum-v1.css): .driver-downtime-drum-stage, .driver-downtime-drum-track,
+   .driver-drum-card. Здесь только отличия: своя строка сетки, стрелка к кругу (вниз),
+   свой контур-горлышко вверх и вид ручного режима.
+   Признак ручного режима живёт на <html> (is-driver-dial-manual): экран водителя
+   периодически подменяется свежей копией с сервера, а корень документа — нет. */
+body.driver-mobile-screen .driver-point-drum {
+    --drum-card-w: clamp(84px, min(40cqw, 100cqh * 1.15), 180px);
+    --drum-card-h: clamp(52px, min(33cqw, 100cqh - 22px), 150px);
+    --drum-radius: 320px;
+    --drum-step: 25.714deg;
+    grid-area: pointdrum;
+    position: relative;
+    width: var(--driver-work-column);
+    justify-self: center;
+    align-self: stretch;
+    min-height: 0;
+    height: 100%;
+    container-type: size;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    align-content: center;
+    overflow: visible;
+    z-index: 11;
+}
+
+/* Стрелка на нижней кромке передней грани — вниз, к кругу: «отправиться на точку». */
+body.driver-mobile-screen .driver-point-drum .driver-drum-card-arrow {
+    top: auto;
+    bottom: 5px;
+    border-bottom: 0;
+    border-top: 8px solid currentColor;
+}
+
+/* Точка уже в круге: стрелка разворачивается вверх — вытянуть её обратно значит отменить. */
+body.driver-mobile-screen .driver-point-drum.is-assigned .driver-drum-card.is-center .driver-drum-card-arrow {
+    border-top: 0;
+    border-bottom: 8px solid currentColor;
+}
+
+/* Обычный режим: точку назначает экскаваторщик, барабан только показывает точки.
+   Через filter, а не opacity: смена opacity у грани внутри preserve-3d пересобирает
+   всю объёмную сцену (см. тот же приём у барабана простоев). */
+body.driver-mobile-screen .driver-point-drum .driver-drum-card {
+    filter: brightness(.5) saturate(.4);
+    cursor: default;
+}
+
+body.driver-mobile-screen .driver-point-drum .driver-drum-card.is-center .driver-drum-card-arrow {
+    opacity: 0;
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-point-drum .driver-drum-card {
+    filter: none;
+    cursor: pointer;
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-point-drum .driver-drum-card.is-center .driver-drum-card-arrow {
+    opacity: .9;
+}
+
+/* Пока точка в круге, барабан зафиксирован: боковые грани притушены. */
+html.is-driver-dial-manual body.driver-mobile-screen .driver-point-drum.is-assigned .driver-drum-card:not(.is-center) {
+    filter: brightness(.45);
+}
+
+body.driver-mobile-screen .driver-point-drum .driver-inline-note {
+    align-self: center;
+    justify-self: center;
+    text-align: center;
+}
+
+/* Контур горлышка вверх: две линии от кольца циферблата к передней грани и рамка над
+   ней. Кольцо целиком рисует контур барабана простоев — с разрывом под это горлышко. */
+body.driver-mobile-screen .driver-point-link {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9;
+    overflow: visible;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-point-link path {
+    d: var(--point-link-path, path(""));
+    fill: none;
+    stroke: rgba(150, 166, 172, .55);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+
+/* --- ручной режим на круге: нежно-синий вместо зелёного --- */
+body.driver-mobile-screen .mobile-dial-action--manual.is-on {
+    --mobile-dial-accent: #68cdf2;
+    --mobile-dial-accent-rgb: 104, 205, 242;
+}
+
+body.driver-mobile-screen .mobile-dial-action--manual.is-on .mobile-dial-action__face {
+    fill: #0f2a36;
+    stroke-opacity: 1;
+    stroke-width: 2.4;
+}
+
+/* Круг без рейса в ручном режиме: кольцо подсвечено синим, чтобы режим был виден всегда. */
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
+    stroke: rgba(104, 205, 242, .62);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-empty::after {
+    border-color: rgba(104, 205, 242, .34);
+}
+
+/* Круг с ручным рейсом: те же слои, что у загруженного круга, только синие. */
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded {
+    --driver-green: #68cdf2;
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
+    box-shadow:
+        0 0 34px rgba(104, 205, 242, .24),
+        inset 0 0 34px rgba(104, 205, 242, .13);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
+    border-color: rgba(104, 205, 242, .34);
+    box-shadow:
+        inset 0 0 28px rgba(104, 205, 242, .08),
+        0 0 28px rgba(104, 205, 242, .14);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-halo {
+    box-shadow: 0 0 0 1px rgba(104, 205, 242, .78), 0 0 48px rgba(104, 205, 242, .34);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-tint {
+    border-color: rgba(104, 205, 242, .78);
+    box-shadow: inset 0 12px 22px rgba(230, 246, 255, .10), inset 0 0 44px rgba(104, 205, 242, .16);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
+    border-top-color: rgba(104, 205, 242, .18);
+    background:
+        linear-gradient(180deg, rgba(150, 222, 255, .08), rgba(14, 40, 54, .22) 48%, rgba(3, 14, 22, .34)),
+        linear-gradient(90deg, transparent, rgba(18, 46, 62, .36) 18%, rgba(18, 46, 62, .36) 82%, transparent);
+    box-shadow:
+        inset 0 1px 0 rgba(200, 238, 255, .12),
+        inset 0 -2px 3px rgba(0, 0, 0, .32),
+        0 5px 12px rgba(0, 0, 0, .20);
+    text-shadow: 0 0 18px rgba(104, 205, 242, .36);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
+    text-shadow:
+        0 -1px 0 rgba(240, 250, 255, .48),
+        0 2px 0 rgba(10, 70, 102, .78);
+}
