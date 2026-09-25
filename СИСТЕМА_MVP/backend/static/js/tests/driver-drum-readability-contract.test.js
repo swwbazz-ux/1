@@ -47,6 +47,32 @@ test("active-downtime timer is not tied to the reason-name tier and reads clearl
     assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*clamp\(14px, calc\(var\(--drum-card-h\) \* 0\.20\), 22px\)/s);
 });
 
+test("dump-point tiles in the change-point sheet match the excavator face-settings card look", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../../css/mobile-dial-actions-v1.css"), "utf8");
+    // Тот же плоский вид, что у .eo-unload-card в mobile-face-unified-v1.css: без
+    // капслока, без прежнего градиента, зелёная рамка вместо свечения на выбранной.
+    assert.match(css, /\.driver-unload-tile\s*\{[^}]*background:\s*rgba\(7, 18, 23, \.96\)/s);
+    assert.match(css, /\.driver-unload-tile\s*\{[^}]*text-transform:\s*none/s);
+    assert.doesNotMatch(css, /\.driver-unload-tile\s*\{[^}]*linear-gradient/s);
+    // app.css задаёт uppercase и свой цвет ПРЯМО на driver-unload-tile strong —
+    // наследование текст-transform/color от родителя это не отменяет, нужно
+    // явно погасить и на самом strong (пойман на телефоне 26.09.2026).
+    assert.match(css, /\.driver-unload-tile strong\s*\{[^}]*text-transform:\s*none/s);
+    assert.match(css, /\.driver-unload-tile strong\s*\{[^}]*color:\s*inherit/s);
+    assert.match(css, /\.driver-unload-tile\.is-current\s*\{[^}]*border-color:\s*#67e854/s);
+    assert.match(css, /\.driver-unload-tile-status\s*\{\s*display:\s*none;/);
+});
+
+test("dial label multiline width stays large — the loaded trip's dump point name is read for the whole trip", () => {
+    const css = fs.readFileSync(path.resolve(__dirname, "../../css/driver-shift-v1.css"), "utf8");
+    // Первая правка узила коробку до 70%/64% ради края круга при коротком сообщении
+    // «РАЗГРУЗКА СОХРАНЕНА» — но та же коробка держит и название точки разгрузки,
+    // которое видно весь рейс, а не секунду. Пересчитано по запасу до края круга:
+    // 85%/80% дают ещё 11–13px запаса и заметно крупнее (пойман на телефоне 26.09.2026).
+    assert.match(css, /\.driver-work-label\.is-two-line\s*\{\s*width:\s*85%;\s*max-width:\s*85%/);
+    assert.match(css, /\.driver-work-label\.is-three-line\s*\{\s*width:\s*80%;\s*max-width:\s*80%/);
+});
+
 test("templates classify labels by character length, matching CSS tiers", () => {
     assert.match(
         DOWNTIME_TEMPLATE,
