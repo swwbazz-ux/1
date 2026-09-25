@@ -159,6 +159,7 @@ def build_dispatcher_header_context(access, request=None):
     context.update({
         'current_time': production_context.local_datetime.strftime('%H:%M'),
         'current_date': production_context.production_date.strftime('%d.%m.%Y'),
+        'clock_date': production_context.local_datetime.strftime('%d.%m.%Y'),
         'shift_label': production_shift_label(effective_shift_type),
         'dispatcher_header_time_range': '07:00-19:00' if effective_shift_type == ShiftType.DAY else '19:00-07:00',
     })
