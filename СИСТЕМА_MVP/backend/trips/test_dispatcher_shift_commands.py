@@ -1,4 +1,4 @@
-"""Граница и поведение команды собственной смены Диспетчера."""
+"""Границы и поведение команд смен Диспетчерского пульта."""
 
 import inspect
 from unittest.mock import patch
@@ -37,6 +37,41 @@ class DispatcherShiftCommandBoundaryTests(SimpleTestCase):
         self.assertNotIn('open_dispatcher_shift', source)
         self.assertNotIn('close_dispatcher_shift', source)
 
+    def test_service_close_url_keeps_public_views_facade(self):
+        match = resolve(reverse('dispatcher_service_close_shift', args=[17]))
+
+        self.assertIs(
+            match.func,
+            trips_views.dispatcher_service_close_shift_view,
+        )
+
+    def test_public_service_close_view_is_thin_shift_command_facade(self):
+        source = inspect.getsource(
+            trips_views.dispatcher_service_close_shift_view,
+        )
+
+        self.assertIn('_execute_dispatcher_service_close_shift(', source)
+        self.assertIn(
+            'lock_mutation_access=lock_dispatcher_mutation_access',
+            source,
+        )
+        self.assertIn(
+            'parse_shift_decimal=parse_excavator_shift_decimal',
+            source,
+        )
+        self.assertIn(
+            'close_kind_normalizer=normalize_service_close_kind',
+            source,
+        )
+        self.assertIn(
+            'finish_shift=finish_service_closed_shift',
+            source,
+        )
+        self.assertIn('action_logger=log_dispatcher_action', source)
+        self.assertNotIn('EmployeeAccess.objects', source)
+        self.assertNotIn('EmployeeShift.objects', source)
+        self.assertNotIn('select_for_update', source)
+
 
 class DispatcherShiftFacadeDelegationTests(TestCase):
     def test_toggle_facade_injects_views_active_role_seam(self):
@@ -56,6 +91,32 @@ class DispatcherShiftFacadeDelegationTests(TestCase):
             shared_start_authenticator=(
                 trips_views.authenticate_dispatcher_shared_shift_start
             ),
+        )
+
+    def test_service_close_facade_injects_views_compatibility_seams(self):
+        request = RequestFactory().post(
+            '/dispatcher/shifts/47/service-close/',
+        )
+        expected = HttpResponse(status=302)
+        with patch.object(
+            trips_views,
+            '_execute_dispatcher_service_close_shift',
+            return_value=expected,
+        ) as execute:
+            response = trips_views.dispatcher_service_close_shift_view(
+                request,
+                47,
+            )
+
+        self.assertIs(response, expected)
+        execute.assert_called_once_with(
+            request,
+            47,
+            lock_mutation_access=trips_views.lock_dispatcher_mutation_access,
+            parse_shift_decimal=trips_views.parse_excavator_shift_decimal,
+            close_kind_normalizer=trips_views.normalize_service_close_kind,
+            finish_shift=trips_views.finish_service_closed_shift,
+            action_logger=trips_views.log_dispatcher_action,
         )
 
 
