@@ -112,6 +112,7 @@ from .dispatcher_assignment_commands import (
 from .dispatcher_dashboard_projection import (
     dispatcher_complex_label,
     dispatcher_complex_number_int,
+    dispatcher_complex_state_code,
     dispatcher_complex_face_label,
     dispatcher_complex_location_parts,
     dispatcher_complex_shift_report as _build_dispatcher_complex_shift_report,
@@ -120,11 +121,14 @@ from .dispatcher_dashboard_projection import (
     dispatcher_employee_for_equipment,
     dispatcher_equipment_card_requested,
     dispatcher_equipment_presence_fields,
+    dispatcher_equipment_state_tuple,
+    dispatcher_excavator_state_code,
     dispatcher_garage_number_int,
     dispatcher_plan_details,
     dispatcher_shift_details,
     dispatcher_status_label,
     dispatcher_tons_from_label,
+    dispatcher_truck_state_code,
 )
 from .dispatcher_downtime_commands import (
     execute_dispatcher_close_downtime as _execute_dispatcher_close_downtime,
@@ -2300,62 +2304,6 @@ def build_dispatcher_dashboard_context(
         )
     equipment_state_map = get_equipment_state_ui_map()
 
-    def equipment_state_for(code):
-        state = equipment_state_ui(equipment_state_map, code)
-        return state['color_group'], state['label'], state['code']
-
-    def complex_equipment_state(excavator, row):
-        if not excavator or not getattr(excavator, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(excavator.id)
-        if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
-        if row.get('pending'):
-            return equipment_state_for('waiting')
-        if row.get('active_trips'):
-            return equipment_state_for('working')
-        if row.get('accepted') or excavator.id in active_excavator_ids:
-            return equipment_state_for('assigned')
-        return equipment_state_for('garage')
-
-    def downtime_state_code_for(equipment_id):
-        downtime = downtime_by_equipment_id.get(equipment_id)
-        if not downtime:
-            return None
-        return downtime_equipment_state_code(downtime)
-
-    def excavator_current_state(excavator):
-        if not getattr(excavator, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(excavator.id)
-        if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
-        if active_trip_by_excavator_id.get(excavator.id):
-            return equipment_state_for('working')
-        if excavator.id in active_excavator_ids:
-            return equipment_state_for('assigned')
-        return equipment_state_for('garage')
-
-    def truck_current_state(truck):
-        if not getattr(truck, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(truck.id)
-        if downtime_state_code:
-            status, label, state_code = equipment_state_for(downtime_state_code)
-            return status, dispatcher_downtime_reason_label(
-                downtime_by_equipment_id.get(truck.id)
-            ) or label, state_code
-        active_trip = active_trip_by_truck_id.get(truck.id)
-        if active_trip:
-            if active_trip.status in OPEN_TRIP_STATUSES:
-                return equipment_state_for('loaded_waiting_unload')
-        assignment = assignment_by_truck_id.get(truck.id)
-        if assignment and assignment.status == AssignmentStatus.PENDING:
-            return equipment_state_for('waiting')
-        if assignment and assignment.status == AssignmentStatus.ACCEPTED:
-            return equipment_state_for('assigned')
-        return equipment_state_for('free')
-
     completed_tons = Decimal('0')
     completed_use_tonnage = False
     if is_mining_master_reporting_period:
@@ -2484,6 +2432,61 @@ def build_dispatcher_dashboard_context(
     )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
+    downtime_state_code_by_equipment_id = {
+        equipment_id: downtime_equipment_state_code(downtime)
+        for equipment_id, downtime in downtime_by_equipment_id.items()
+    }
+    truck_state_code_by_id = {}
+    truck_state_by_id = {}
+    for truck in trucks_list:
+        active_trip = active_trip_by_truck_id.get(truck.id)
+        assignment = assignment_by_truck_id.get(truck.id)
+        state_code = dispatcher_truck_state_code(
+            is_active=getattr(truck, 'is_active', True),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(truck.id) or ''
+            ),
+            has_open_trip=bool(
+                active_trip and active_trip.status in OPEN_TRIP_STATUSES
+            ),
+            has_pending_assignment=bool(
+                assignment and assignment.status == AssignmentStatus.PENDING
+            ),
+            has_accepted_assignment=bool(
+                assignment and assignment.status == AssignmentStatus.ACCEPTED
+            ),
+        )
+        truck_state_code_by_id[truck.id] = state_code
+        status, label, resolved_code = dispatcher_equipment_state_tuple(
+            equipment_state_ui(equipment_state_map, state_code)
+        )
+        if downtime_state_code_by_equipment_id.get(truck.id):
+            label = (
+                dispatcher_downtime_reason_label(
+                    downtime_by_equipment_id.get(truck.id)
+                )
+                or label
+            )
+        truck_state_by_id[truck.id] = status, label, resolved_code
+
+    excavator_state_code_by_id = {}
+    excavator_state_by_id = {}
+    for excavator in excavators_list:
+        state_code = dispatcher_excavator_state_code(
+            is_active=getattr(excavator, 'is_active', True),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(excavator.id) or ''
+            ),
+            has_active_trip=bool(
+                active_trip_by_excavator_id.get(excavator.id)
+            ),
+            is_in_active_zone=excavator.id in active_excavator_ids,
+        )
+        excavator_state_code_by_id[excavator.id] = state_code
+        excavator_state_by_id[excavator.id] = dispatcher_equipment_state_tuple(
+            equipment_state_ui(equipment_state_map, state_code)
+        )
+
     excavator_by_id = {excavator.id: excavator for excavator in excavators_list}
     shown_excavators = sorted(
         [excavator_by_id[equipment_id] for equipment_id in active_excavator_ids if equipment_id in excavator_by_id],
@@ -2515,7 +2518,21 @@ def build_dispatcher_dashboard_context(
         fact = row['volume']
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
-        status_key, status_label, equipment_state_code = complex_equipment_state(excavator, row)
+        complex_state_code = dispatcher_complex_state_code(
+            is_active=bool(excavator and getattr(excavator, 'is_active', True)),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(excavator.id) or ''
+            ),
+            has_pending=bool(row.get('pending')),
+            has_active_trips=bool(row.get('active_trips')),
+            has_accepted=bool(row.get('accepted')),
+            is_in_active_zone=excavator.id in active_excavator_ids,
+        )
+        status_key, status_label, equipment_state_code = (
+            dispatcher_equipment_state_tuple(
+                equipment_state_ui(equipment_state_map, complex_state_code)
+            )
+        )
         status_label = dispatcher_downtime_reason_label(
             downtime_by_equipment_id.get(excavator.id)
         ) or status_label
@@ -2576,7 +2593,9 @@ def build_dispatcher_dashboard_context(
                 if transfer_pending
                 else None
             )
-            truck_status, truck_state_label, truck_state_code = truck_current_state(truck)
+            truck_status, truck_state_label, truck_state_code = (
+                truck_state_by_id[truck.id]
+            )
             truck_volume = volume_by_truck.get(truck_id, Decimal('0'))
             truck_plan = dispatcher_plan_for_equipment(truck)
             truck_rows.append({
@@ -2679,7 +2698,7 @@ def build_dispatcher_dashboard_context(
     excavator_tiles = []
     for index, excavator in enumerate(excavators_list[:12], start=1):
         board_number = dispatcher_garage_number_int(excavator)
-        status, label, equipment_state_code = excavator_current_state(excavator)
+        status, label, equipment_state_code = excavator_state_by_id[excavator.id]
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
         excavator_tiles.append({
@@ -2995,7 +3014,7 @@ def build_dispatcher_dashboard_context(
             continue
         if str(truck_number) in active_complex_truck_names:
             continue
-        status, label, equipment_state_code = truck_current_state(truck)
+        status, label, equipment_state_code = truck_state_by_id[truck.id]
         truck_plan = dispatcher_plan_for_equipment(truck)
         truck_garage_tiles.append({
             'equipment': truck,
@@ -3040,7 +3059,7 @@ def build_dispatcher_dashboard_context(
         truck_number = dispatcher_truck_garage_number(truck, index)
         if truck_number is None:
             continue
-        status, label, equipment_state_code = truck_current_state(truck)
+        status, label, equipment_state_code = truck_state_by_id[truck.id]
         truck_plan = dispatcher_plan_for_equipment(truck)
         mobile_truck_garage_tiles.append({
             'equipment': truck,
@@ -3109,12 +3128,15 @@ def build_dispatcher_dashboard_context(
     reserve_trucks = sum(
         1
         for truck in trucks_list
-        if truck.id not in assigned_truck_ids and truck_current_state(truck)[2] == 'free'
+        if truck.id not in assigned_truck_ids and truck_state_code_by_id[truck.id] == 'free'
     )
     reserve_excavators = sum(
         1
         for excavator in excavators_list
-        if excavator.id not in active_excavator_ids and excavator_current_state(excavator)[2] == 'garage'
+        if (
+            excavator.id not in active_excavator_ids
+            and excavator_state_code_by_id[excavator.id] == 'garage'
+        )
     )
     mobile_shift_report = {
         'completed_trip_count': len(completed_shift_trips),

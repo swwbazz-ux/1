@@ -69,6 +69,22 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
             trips_views.dispatcher_shift_details,
             dispatcher_dashboard_projection.dispatcher_shift_details,
         )
+        self.assertIs(
+            trips_views.dispatcher_equipment_state_tuple,
+            dispatcher_dashboard_projection.dispatcher_equipment_state_tuple,
+        )
+        self.assertIs(
+            trips_views.dispatcher_complex_state_code,
+            dispatcher_dashboard_projection.dispatcher_complex_state_code,
+        )
+        self.assertIs(
+            trips_views.dispatcher_excavator_state_code,
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code,
+        )
+        self.assertIs(
+            trips_views.dispatcher_truck_state_code,
+            dispatcher_dashboard_projection.dispatcher_truck_state_code,
+        )
 
     def test_views_keeps_compatibility_wrapper_for_report_formatters(self):
         source = inspect.getsource(trips_views.dispatcher_complex_shift_report)
@@ -105,6 +121,11 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
         self.assertNotIn('def equipment_card_requested(', source)
         self.assertNotIn('def downtime_reason_label_for(', source)
         self.assertNotIn('def shift_details(', source)
+        self.assertNotIn('def equipment_state_for(', source)
+        self.assertNotIn('def complex_equipment_state(', source)
+        self.assertNotIn('def downtime_state_code_for(', source)
+        self.assertNotIn('def excavator_current_state(', source)
+        self.assertNotIn('def truck_current_state(', source)
 
 
 class DispatcherDashboardProjectionBehaviorTests(SimpleTestCase):
@@ -338,6 +359,159 @@ class DispatcherDashboardProjectionBehaviorTests(SimpleTestCase):
                 format_datetime=str,
             ),
             [],
+        )
+
+    def test_equipment_state_priorities_are_preserved(self):
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_equipment_state_tuple({
+                'color_group': 'red',
+                'label': 'Ремонт',
+                'code': 'breakdown',
+            }),
+            ('red', 'Ремонт', 'breakdown'),
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=False,
+                downtime_state_code='breakdown',
+                has_pending=True,
+                has_active_trips=True,
+                has_accepted=True,
+                is_in_active_zone=True,
+            ),
+            'inactive',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=True,
+                downtime_state_code='breakdown',
+                has_pending=True,
+                has_active_trips=True,
+                has_accepted=True,
+                is_in_active_zone=True,
+            ),
+            'breakdown',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=True,
+                has_pending=True,
+                has_active_trips=True,
+                has_accepted=True,
+                is_in_active_zone=True,
+            ),
+            'waiting',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=True,
+                has_active_trips=True,
+                has_accepted=True,
+                is_in_active_zone=True,
+            ),
+            'working',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=True,
+                has_accepted=True,
+            ),
+            'assigned',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_complex_state_code(
+                is_active=True,
+            ),
+            'garage',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code(
+                is_active=False,
+                downtime_state_code='breakdown',
+                has_active_trip=True,
+                is_in_active_zone=True,
+            ),
+            'inactive',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code(
+                is_active=True,
+                downtime_state_code='breakdown',
+                has_active_trip=True,
+                is_in_active_zone=True,
+            ),
+            'breakdown',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code(
+                is_active=True,
+                has_active_trip=True,
+                is_in_active_zone=True,
+            ),
+            'working',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code(
+                is_active=True,
+                is_in_active_zone=True,
+            ),
+            'assigned',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_excavator_state_code(
+                is_active=True,
+            ),
+            'garage',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=False,
+                downtime_state_code='breakdown',
+                has_open_trip=True,
+                has_pending_assignment=True,
+                has_accepted_assignment=True,
+            ),
+            'inactive',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=True,
+                downtime_state_code='breakdown',
+                has_open_trip=True,
+                has_pending_assignment=True,
+                has_accepted_assignment=True,
+            ),
+            'breakdown',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=True,
+                has_open_trip=True,
+                has_pending_assignment=True,
+                has_accepted_assignment=True,
+            ),
+            'loaded_waiting_unload',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=True,
+                has_pending_assignment=True,
+                has_accepted_assignment=True,
+            ),
+            'waiting',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=True,
+                has_accepted_assignment=True,
+            ),
+            'assigned',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_truck_state_code(
+                is_active=True,
+            ),
+            'free',
         )
 
     def test_complex_labels_and_sort_numbers_are_preserved(self):

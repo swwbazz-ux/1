@@ -63,6 +63,71 @@ def dispatcher_downtime_reason_label(downtime):
     return reason.button_label or reason.name or str(reason)
 
 
+def dispatcher_equipment_state_tuple(state):
+    return state['color_group'], state['label'], state['code']
+
+
+def dispatcher_complex_state_code(
+    *,
+    is_active,
+    downtime_state_code='',
+    has_pending=False,
+    has_active_trips=False,
+    has_accepted=False,
+    is_in_active_zone=False,
+):
+    if not is_active:
+        return 'inactive'
+    if downtime_state_code:
+        return downtime_state_code
+    if has_pending:
+        return 'waiting'
+    if has_active_trips:
+        return 'working'
+    if has_accepted or is_in_active_zone:
+        return 'assigned'
+    return 'garage'
+
+
+def dispatcher_excavator_state_code(
+    *,
+    is_active,
+    downtime_state_code='',
+    has_active_trip=False,
+    is_in_active_zone=False,
+):
+    if not is_active:
+        return 'inactive'
+    if downtime_state_code:
+        return downtime_state_code
+    if has_active_trip:
+        return 'working'
+    if is_in_active_zone:
+        return 'assigned'
+    return 'garage'
+
+
+def dispatcher_truck_state_code(
+    *,
+    is_active,
+    downtime_state_code='',
+    has_open_trip=False,
+    has_pending_assignment=False,
+    has_accepted_assignment=False,
+):
+    if not is_active:
+        return 'inactive'
+    if downtime_state_code:
+        return downtime_state_code
+    if has_open_trip:
+        return 'loaded_waiting_unload'
+    if has_pending_assignment:
+        return 'waiting'
+    if has_accepted_assignment:
+        return 'assigned'
+    return 'free'
+
+
 def dispatcher_shift_details(shift, *, format_datetime):
     if not shift:
         return []
