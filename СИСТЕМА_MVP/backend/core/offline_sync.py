@@ -1045,27 +1045,62 @@ def _claim_trip_for_driver_manual_event(trip, *, access, shift, event_id):
     )
 
 
-def _driver_manual_primary_context(*, excavator, payload, context_snapshot):
-    from references.models import DumpPoint
+def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effective_occurred_at):
+    from assignments.models import ExcavatorPlacement
+    from references.models import DumpPoint, RockType
     from trips.free_bucket import canonical_free_bucket_work_context_snapshot
 
     try:
         authoritative = canonical_free_bucket_work_context_snapshot(excavator)
     except ValidationError as error:
         _conflict('manual_work_context_unavailable', '; '.join(error.messages))
-    checks = (
-        ('placement_id', authoritative.get('placement_id'), payload.get('placement_id')),
-        ('placement_updated_at', authoritative.get('placement_updated_at'), payload.get('placement_updated_at')),
-        ('rock_type_id', authoritative.get('rock_type_id'), payload.get('rock_type_id')),
-        ('loading_horizon', authoritative.get('loading_horizon'), payload.get('loading_horizon')),
-        ('loading_block', authoritative.get('loading_block'), payload.get('loading_block')),
+    if str(authoritative.get('placement_id') or '') != str(payload.get('placement_id') or ''):
+        _conflict(
+            'manual_work_context_changed',
+            'Настройки забоя изменились после сохранения отметки на телефоне.',
+        )
+    # placement_updated_at сознательно не сравнивается напрямую: эта метка
+    # сдвигается ЛЮБЫМ пересохранением формы забоя, даже без единого
+    # изменившегося значения (save_excavator_work_context ставит её всегда).
+    # Боевой случай: водитель 43 отметил погрузку у ЭКС-4, пользователь
+    # штатно пересохранил настройки этого же экскаватора уже ПОСЛЕ отметки —
+    # порода, горизонт и блок совпадали один в один, но строгое сравнение
+    # меток времени всё равно объявило конфликт, и рейс потерялся.
+    context_fields = ('rock_type_id', 'loading_horizon', 'loading_block')
+    context_changed = any(
+        str(authoritative.get(field) or '') != str(payload.get(field) or '')
+        for field in context_fields
     )
-    for field, actual, expected in checks:
-        if str(actual or '') != str(expected or ''):
+    if context_changed:
+        # Настройки забоя ДЕЙСТВИТЕЛЬНО другие. Решение пользователя: смотрим,
+        # когда сама отметка сделана относительно момента изменения. Отметка
+        # раньше изменения — на месте погрузки ещё действовали старые
+        # настройки, и рейс принимается с ними (они и есть настоящая история
+        # погрузки, а не текущий экран). Отметка в момент изменения или позже
+        # — это уже не старые настройки, а устаревшие: телефон прислал то, что
+        # на момент погрузки было неверным, и это настоящий конфликт.
+        placement = ExcavatorPlacement.objects.select_for_update(of=('self',)).filter(
+            pk=authoritative.get('placement_id'),
+        ).first()
+        changed_at = placement.work_context_updated_at if placement else None
+        if changed_at is None or effective_occurred_at >= changed_at:
             _conflict(
                 'manual_work_context_changed',
                 'Настройки забоя изменились после сохранения отметки на телефоне.',
             )
+        rock_type_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
+        rock_type = RockType.objects.filter(pk=rock_type_id, is_active=True).first()
+        if not rock_type:
+            _conflict(
+                'manual_work_context_changed',
+                'Порода из отметки на телефоне больше не существует или неактивна.',
+            )
+        authoritative = {
+            **authoritative,
+            'rock_type_id': rock_type.id,
+            'loading_horizon': str(payload.get('loading_horizon') or '')[:64],
+            'loading_block': str(payload.get('loading_block') or '')[:64],
+        }
     client_points = context_snapshot.get('dump_points')
     if not isinstance(client_points, list):
         _invalid('manual_dump_points_required', 'Не сохранён список точек ручного рейса.')
@@ -1165,6 +1200,7 @@ def _process_driver_loaded(access, normalized):
             excavator=excavator,
             payload=payload,
             context_snapshot=context_snapshot,
+            effective_occurred_at=normalized['occurred_at'],
         )
         rock_type = RockType.objects.filter(pk=authoritative['rock_type_id']).first()
         dump_point = DumpPoint.objects.select_for_update().filter(pk=selected['id']).first()

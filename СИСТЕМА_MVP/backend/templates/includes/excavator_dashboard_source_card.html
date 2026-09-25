@@ -12,6 +12,7 @@
     {% if card.transfer %}data-eo-transfer-id="{{ card.transfer.id }}" data-eo-transfer-kind="{{ card.transfer.kind }}" data-eo-transfer-direction="{{ card.transfer.direction }}" data-eo-transfer-created="{{ card.transfer.created_at|date:'c' }}" data-eo-transfer-deadline="{{ card.transfer.deadline|date:'c' }}"{% endif %}
     data-truck-id="{{ card.assignment.truck.id }}"
     data-eo-truck-number="{{ card.number }}"
+    data-eo-number-plain="{% if card.number_is_plain %}1{% else %}0{% endif %}"
     data-eo-truck-detail-id="{{ card.detail_card_id }}"
     data-eo-equipment-state="{{ card.equipment_state_code }}"
     data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"

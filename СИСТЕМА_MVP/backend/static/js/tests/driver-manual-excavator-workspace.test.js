@@ -326,25 +326,115 @@ test("only the active dump point exposes cancel and complete swipe cues", () => 
     assert.match(source, /is-active-manual-trip", isLast && !!currentTripProjection/);
 });
 
-test("long excavator title is fitted to the real source card width", () => {
-    const classes = new Set();
+// Требование к поведению: подгонка зовётся адресно, на узле карточки
+// источника, и до подписей кнопок не дотягивается. Это правило остаётся
+// верным при любой разметке и меняться не должно.
+test("карточка источника держит форму 1 к 1,25 построением, а не числами", () => {
+    const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    // Число выбрал пользователь: высота в 1,25 раза больше ширины (4:5). Форму
+    // теперь считает коробка-строка от фактической ширины колонки — карточка
+    // внутри неё просто заполняет то, что ей досталось, а не считает форму
+    // ещё раз своей отдельной формулой. Раньше так и разошлись: у строки была
+    // своя высотная переменная, у карточки — свой расчёт, числа однажды
+    // совпали случайно и карточка вышла квадратом.
+    assert.match(
+        driverCss,
+        /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;/s,
+    );
+    assert.match(
+        driverCss,
+        /driver-manual-workspace__source-row > \.eo-dashboard-truck-card\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/s,
+    );
+    // Замеров с одного телефона в правиле быть не должно.
+    assert.doesNotMatch(driverCss, /32\.77px/);
+});
+
+test("подгонка номера зовётся адресно, а не выборкой по классу", () => {
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.doesNotMatch(runtime, /querySelectorAll\([^)]*eo-dashboard-truck-card[^)]*strong/);
+    assert.match(runtime, /fitSourceTitle\(\s*workspace\.querySelector\("\[data-driver-manual-source\]"\)/);
+});
+
+// А это — не требование, а сторож над опасным соседством в разметке.
+// Кнопки «ОБЫЧНЫЙ РЕЖИМ» и «ИЗМЕНИТЬ ТОЧКУ» носят класс карточки техники и
+// содержат strong, хотя карточками не являются. Пока это так, любая выборка
+// по классу карточки будет их цеплять — молча, без падения.
+test("сторож: кнопки режима всё ещё носят класс карточки", () => {
+    const markup = read("templates", "includes", "excavator_dashboard_workspace.html");
+    const опасноеСоседство = /eo-dashboard-truck-card driver-manual-workspace__action/.test(markup);
+    assert.ok(
+        опасноеСоседство,
+        "Кнопки режима больше не носят класс карточки техники — опасное соседство исчезло, "
+        + "и этот сторож стал не нужен. Удалите его осознанно, а не подгоняйте: "
+        + "требование к поведению проверяется отдельным тестом выше.",
+    );
+});
+
+test("плашка комплекса убрана, а точка связи в углу осталась", () => {
+    const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
+    // Пользователь: «Тут плашка необязательна, а вот индикатор сети в углу
+    // карточки нужен чтоб понимать в сети этот экскаватор или нет».
+    assert.match(
+        driverCss,
+        /source-row > \.eo-dashboard-truck-card > span \{\s*display: none !important;/,
+    );
+    // Точка связи живёт отдельным элементом со своим положением — её
+    // правило трогать нельзя, иначе она уедет из угла.
+    assert.doesNotMatch(driverCss, /eo-driver-presence/);
+});
+
+test("подпись экскаватора вмещается общим правилом, а не своим", () => {
+    // Правило вмещения подписи одно на две роли: у водителя номер экскаватора,
+    // у машиниста номер самосвала. Здесь проверяем, что водитель зовёт общий
+    // измеритель, а не считает сам.
+    const calls = [];
+    const previous = globalThis.EquipmentLabelFit;
+    globalThis.EquipmentLabelFit = {
+        MIN_FONT_PX: 14,
+        fit(element, options) {
+            calls.push({element, options});
+            return {deferred: false, fontPx: 18.5, wrapped: false, squeezed: 1};
+        }
+    };
+    const stub = () => ({clientWidth: 100, scrollWidth: 200, classList: {remove() {}, toggle() {}}, style: {removeProperty() {}, setProperty() {}}});
+    const title = stub();
+    const source = {querySelector() { return title; }};
+    try {
+        const fitted = driverRuntime.fitSourceTitle(source);
+        assert.equal(fitted, 18.5);
+        // Номер техники вмещается общим правилом и всегда одной строкой.
+        // Верхняя плашка комплекса живёт по-прежнему, своим многоточием:
+        // трогать её без слова пользователя не стали.
+        assert.deepEqual(calls.map((call) => call.element), [title]);
+        assert.equal(calls[0].options.allowWrap, false);
+    } finally {
+        if (previous) globalThis.EquipmentLabelFit = previous;
+        else delete globalThis.EquipmentLabelFit;
+    }
+});
+
+test("без общего модуля подпись всё равно ужимается и не уходит ниже пола", () => {
+    // Запасной путь: если статика с модулем не доехала, подпись обязана
+    // ужаться сама, а не остаться обрезанной.
+    const previous = globalThis.EquipmentLabelFit;
+    delete globalThis.EquipmentLabelFit;
     const properties = new Map();
     const title = {
         clientWidth: 100,
         scrollWidth: 200,
-        classList: {
-            remove(name) { classes.delete(name); },
-            toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }
-        },
+        classList: {remove() {}, toggle() {}},
         style: {
             removeProperty(name) { properties.delete(name); },
             setProperty(name, value) { properties.set(name, value); }
         }
     };
-    const fitted = driverRuntime.fitSourceTitle({querySelector() { return title; }});
-    assert.equal(fitted, 15);
-    assert.equal(properties.get("font-size"), "15.00px");
-    assert.equal(classes.has("is-driver-manual-title-wrapped"), true);
+    try {
+        const fitted = driverRuntime.fitSourceTitle({querySelector() { return title; }});
+        assert.equal(fitted, 15);
+        assert.equal(properties.get("font-size"), "15.00px");
+    } finally {
+        if (previous) globalThis.EquipmentLabelFit = previous;
+    }
 });
 
 test("manual point counter applies each optimistic load or cancel exactly once", () => {
@@ -405,7 +495,9 @@ test("Driver dump cards keep a three-column matrix and only show name plus trip 
     assert.match(dumpCard, /driver-manual-workspace__dump-card/);
     assert.match(dumpCard, /data-driver-manual-completed-count/);
     assert.match(dumpCard, /data-driver-manual-last-sent/);
-    assert.match(dumpCard, /\{% if not driver_manual_dashboard %\}\s*<span class="eo-dashboard-unload-label">Разгружено<\/span>/s);
+    // Подпись строки убрана у машиниста по решению пользователя: при шести
+    // точках она съедала строку, в которой должны быть номера самосвалов.
+    assert.doesNotMatch(dumpCard, /<span class="eo-dashboard-unload-label">/);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\.is-count-1\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
     assert.match(driverCss, /\.eo-dashboard-unload-grid\.is-count-2\s*\{[^}]*grid-template-columns:\s*repeat\(2,/s);

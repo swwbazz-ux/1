@@ -3791,3 +3791,383 @@ body.excavator-operator-screen .eo-reading-confirmation__actions button:disabled
         min-height: 48px;
     }
 }
+
+/* Название точки разгрузки: не режется нижним краем и не рвётся посреди слова.
+   Пользователь показал это на шести точках: «Склад негабарита» и «Склад
+   окисленной руды» теряли вторую строку. Причин было три, и все три здесь.
+
+   Первая — перенос разрешался в любом месте, поэтому слово рвалось пополам.
+   Вторая — размер не зависел от длины: ступень считается по самому длинному
+   СЛОВУ, а не по длине всей строки, потому что перенос по пробелу мы
+   разрешаем, а внутри слова нет, и в ширину плитки обязано поместиться именно
+   самое длинное неразрывное слово. Ступени приходят с сервера общим для обеих
+   ролей правилом (core/dump_point_names.py), чтобы у машиниста и водителя
+   одна и та же точка выглядела одинаково.
+   Счётчик остаётся в строке названия и ширину у него забирает, но со ступенью
+   размера этого запаса хватает с избытком: самое длинное слово «окисленной»
+   на минимальном размере занимает меньше половины оставшейся ширины. Трогать
+   ради этого раскладку плитки не потребовалось. */
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    overflow-wrap: normal !important;
+    word-break: keep-all !important;
+    hyphens: none !important;
+}
+
+/* Пол в 14 пикселей: ниже название в кабине уже не прочитать мельком. */
+body.excavator-operator-screen .eo-dashboard-unload-card.is-name-medium .eo-dashboard-unload-top strong {
+    font-size: clamp(14px, 3.6vw, 16px) !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashboard-unload-top strong {
+    font-size: clamp(14px, 3.6vw, 17px) !important;
+}
+
+/* На длинных названиях счётчик занимает столько, что «Склад окисленной» уже не
+   помещается в первую строку и название расползается на три. Кружок там
+   компактнее: цифра рейсов короткая, читаемости это не стоит ничего, а
+   названию возвращает ту ширину, из-за которой оно и рвалось. */
+/* Счётчик выходит из строки названия. Во flex-строке он сужал КАЖДУЮ строку
+   названия, а не только первую: «Склад окисленной руды» расползалось на три
+   строки и теряло последнюю. Теперь кружок стоит в своём углу, название
+   занимает всю ширину плитки, а место под кружок резервируется ровно на одну
+   первую строку — пустым обтекаемым блоком той же высоты. */
+body.excavator-operator-screen .eo-dashboard-unload-top {
+    position: relative !important;
+    display: block !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong {
+    display: block;
+    width: 100%;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top strong::before {
+    content: "";
+    float: right;
+    /* Запас ровно под кружок счётчика и небольшой отступ. Шире делать нельзя:
+       в узкой плитке (три точки в ряд) лишние пиксели сталкивают название на
+       вторую строку, и первая остаётся пустой — счётчик висит один. */
+    width: clamp(26px, 6vw, 30px);
+    height: 24px;
+}
+
+/* Кружок счётчика компактнее во всех плитках: в нём одна-две цифры, а ширину
+   он отнимал у названия. Вместе с уменьшенным запасом это те самые семь
+   пикселей, из-за которых «Подсыпка» уезжала под счётчик в узкой плитке. */
+body.excavator-operator-screen .eo-dashboard-unload-top small {
+    min-width: 26px;
+    height: 24px;
+    padding: 0 5px;
+    font-size: 15px;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-top small {
+    position: absolute !important;
+    top: 0;
+    right: 0;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashboard-unload-top small {
+    min-width: 24px;
+    height: 22px;
+    padding: 0 5px;
+    font-size: 14px;
+}
+
+/* «Склад окисленной руды» на минимальном размере требует трёх строк: «Склад
+   окисленной» занимает 155 пикселей при 156 доступных, вместе они не встают
+   ни при каком разумном переносе. Опускать шрифт ниже пола нельзя — в кабине
+   не прочитать. Не хватало пяти пикселей, и берём их у служебной подписи и
+   межстрочного интервала, а не у названия. */
+body.excavator-operator-screen .eo-dashboard-unload-card.is-name-long .eo-dashboard-unload-top strong {
+    line-height: .95 !important;
+}
+
+/* Зона точек разгрузки растёт по содержимому, а не держит постоянную высоту.
+   Замер показал, в чём было дело: при шести точках плитке доставалось 49 px
+   при нужных 48 внутри и 23 px полей — номера самосвалов просто не помещались,
+   и обрезалось самое нужное. Высоту зона берёт из пустой середины экрана:
+   при одном-двух самосвалах над плитками всё равно пусто.
+
+   Нижняя граница у области самосвалов, а не потолок у зоны: так зона не может
+   наехать на карточки, сколько бы точек ни добавили, и правило выражено через
+   то, что защищаем, а не через подобранное число. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-screen {
+    --eo-truck-zone-min-h: clamp(190px, 30dvh, 250px);
+    grid-template-rows: minmax(var(--eo-truck-zone-min-h), 1fr) auto !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-dump-zone {
+    height: auto !important;
+    min-height: var(--eo-mobile-dump-zone-h) !important;
+    max-height: none !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-single {
+    height: 100% !important;
+    /* Ряды растягиваются на всю отведённую высоту. Пока точек мало, плитки
+       остаются полноразмерными — такими, какими их сделал Codex, — и не
+       жмутся к верху, оставляя под собой пустоту. Расти зона начинает только
+       тогда, когда содержимому действительно тесно. */
+    align-content: stretch !important;
+    align-items: stretch !important;
+    grid-auto-rows: auto !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    height: auto !important;
+    min-height: 0 !important;
+}
+
+/* Пустая строка номеров не занимает места: плитка, куда никто не едет,
+   ужимается до одного названия. Заглушка «нет» убрана из разметки — она и
+   делала пустую строку неотличимой от занятой. Проверяем именно отсутствие
+   номеров, а не :empty: внутри строки остаются переносы шаблона, и для :empty
+   она пустой уже не считается. */
+body.excavator-operator-screen .eo-dashboard-unload-badges:not(:has(b)) {
+    display: none !important;
+}
+
+/* Единственный допустимый компромисс: когда самосвалов много и места для всего
+   не остаётся, плитки показывают только название. Номера убираются целиком, а
+   не обрезаются — обрезанный номер хуже, чем его отсутствие. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-unload-badges,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-unload-badges,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-unload-badges {
+    display: none !important;
+}
+
+/* Область самосвалов занимает столько рядов, сколько карточек, а не три
+   всегда: пустые зарезервированные ряды больше не держат середину экрана
+   занятой, освободившееся место уходит точкам разгрузки.
+
+   Высота ряда берётся из желаемой пропорции карточки (правило ниже), а не из
+   подобранного числа. Прежняя постоянная высота clamp(112px, 15.7dvh, 136px)
+   убрана: она задавала рядам точный размер и перебивала любую пропорцию —
+   именно на этом первая попытка вытянуть карточку не дала на телефоне
+   никакого эффекта, оба варианта дали одинаковые 118×124. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid {
+    /* Высота определённая (от своей ячейки), иначе доли 1fr резолвить не от
+       чего и ряды разъезжаются по содержимому. Ограничивает её потолок из
+       желаемой пропорции — правило ниже. */
+    height: 100% !important;
+    align-self: start !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1 {
+    grid-template-rows: repeat(1, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 {
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3 {
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4 {
+    grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
+}
+
+/* Когда самосвалов много, места на всё не хватает физически: девять карточек
+   в три ряда и шесть точек не помещаются на экран одновременно. В этом случае
+   зона точек возвращается к своей постоянной высоте, а область самосвалов
+   снова занимает свой ряд целиком — иначе карточки выходят за отведённое им
+   место и НАЕЗЖАЮТ НА ПЛИТКИ. Проверено на устройстве: без этого правила ряд
+   самосвалов ложился поверх точек разгрузки. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-truck-grid {
+    height: 100% !important;
+    align-self: stretch !important;
+    grid-auto-rows: minmax(0, 1fr) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-truck-grid.is-rows-3 {
+    grid-template-rows: repeat(3, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-truck-grid.is-rows-4 {
+    grid-template-rows: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-dump-zone,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-dump-zone,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-dump-zone {
+    height: var(--eo-mobile-dump-zone-h) !important;
+    min-height: var(--eo-mobile-dump-zone-h) !important;
+    max-height: var(--eo-mobile-dump-zone-h) !important;
+}
+
+/* Плитка без номеров самосвалов центрирует название по высоте. Замер на
+   телефоне при двух точках: плитка вырастала до 156 px, а название оставалось
+   на 28-м пикселе сверху — под ним висела пустота в две трети плитки. Дело не
+   в выравнивании, а в разметке: у плитки четыре ряда «1fr auto auto 1fr», и
+   пустой нижний ряд отжимал название вверх. Когда номеров нет, рядов тоже не
+   нужно четыре — остаётся один, и он центрируется.
+   Считаем по наличию номеров в разметке, а не по видимости: под нагрузкой
+   номера скрыты правилом выше, и такой плитке центрирование нужно ровно так
+   же. */
+body.excavator-operator-screen .eo-dashboard-unload-card:not(:has(.eo-dashboard-unload-badges b)),
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-unload-card,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-unload-card,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-unload-card {
+    grid-template-rows: auto !important;
+    align-content: center !important;
+}
+
+/* Ряд из трёх точек: счётчик под названием, а не в его строке. Замер на
+   телефоне при трёх точках: плитка 120 px, полей 22, запас под кружок 26 —
+   названию остаётся 72 px в первой строке, а «Подсыпка» на минимальном
+   размере занимает 85. Название целиком уезжало на вторую строку, и кружок
+   оставался висеть один над пустой первой. Уменьшать шрифт некуда: 14 px —
+   пол читаемости. Значит, в узкой плитке кружку не место в строке названия:
+   вертикального запаса там с избытком (плитка выше 200 px), а горизонтального
+   нет совсем. Три точки — единственная раскладка в три колонки, поэтому
+   правило и привязано к is-count-3, а не к ширине. */
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 4px !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top strong::before {
+    display: none !important;
+}
+
+body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top small {
+    position: static !important;
+}
+
+/* Карточка самосвала вытянута по вертикали. Пользователь посмотрел на бой и
+   сказал: «плитку самосвала из вертикальной прямоугольной сделал более
+   квадратную, а мне больше нравится когда она более прямоугольная по
+   вертикали».
+
+   Ширину менять нечем: три колонки на экран, на его телефоне это 117.8 px.
+   Значит форма задаётся высотой, а высоту ограничивает зона самосвалов. При
+   двенадцати карточках желаемая пропорция физически не помещается: четыре
+   ряда по 147 px это 606 px при 385 доступных. Поэтому пропорция здесь —
+   ЖЕЛАЕМАЯ форма, а не обещание: она держится, пока ряды влезают, и уступает,
+   когда иначе пришлось бы листать.
+
+   Записано формулой, а не пикселями, чтобы то же правило подошло карточке
+   экскаватора у водителя: ширина колонки берётся у самой сетки (cqw — процент
+   её ширины), а не из числа, снятого с одного телефона. */
+/* Опора для cqw — РОДИТЕЛЬ сетки, а не сама сетка. Элемент не может измерять
+   сам себя: container-type делает его опорой для потомков, но не для
+   собственных правил. С опорой на самой сетке 100cqw считался от окна (392
+   вместо 370), и карточка выходила на восемь процентов выше заказанного —
+   поймано замером на телефоне, в браузере это выглядело правдоподобно. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-main-zone {
+    container-type: inline-size;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid {
+    --eo-truck-card-ratio: 1.25;
+    --eo-truck-col-w: calc((100cqw - 2 * var(--eo-truck-grid-gap-x)) / 3);
+    --eo-truck-row-ideal: calc(var(--eo-truck-col-w) * var(--eo-truck-card-ratio));
+}
+
+/* Потолок сетки: либо все ряды в желаемой пропорции, либо вся доступная
+   высота — что меньше. Ряды внутри делят этот потолок поровну, поэтому при
+   тесноте они ужимаются сами, а прокрутки не появляется никогда. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1 {
+    max-height: min(100%, var(--eo-truck-row-ideal)) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2 {
+    max-height: min(100%, calc(2 * var(--eo-truck-row-ideal) + var(--eo-truck-grid-gap-y))) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3 {
+    max-height: min(100%, calc(3 * var(--eo-truck-row-ideal) + 2 * var(--eo-truck-grid-gap-y))) !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-many {
+    max-height: min(100%, calc(4 * var(--eo-truck-row-ideal) + 3 * var(--eo-truck-grid-gap-y))) !important;
+}
+
+/* Ряды всегда делят высоту сетки поровну — и при желаемой пропорции, и при
+   тесноте. Постоянная высота ряда, введённая вместе с плитками, здесь больше
+   не нужна: её работу делает потолок сетки. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-1,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-2,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-3,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-rows-4,
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-grid.is-many {
+    grid-auto-rows: minmax(0, 1fr) !important;
+    align-self: start !important;
+    /* Высота обязана быть определённой, иначе доли (1fr) резолвить не от
+       чего и ряды разъезжаются по содержимому. Потолок выше уже ограничил
+       коробку желаемой пропорцией, а здесь ряды делят то, что получилось. */
+    height: 100% !important;
+}
+
+/* Номер самосвала уменьшается вместе с карточкой, а не только по ширине.
+   Пользователь на кадре с двенадцатью карточками: «мне не нравится что
+   название крупное а иконка самосвала совсем маленькая». Так и было: при
+   ужатии карточки рисунок сжимался вместе с высотой, а номер оставался 31 px —
+   подгонка по ширине трогает его только когда не влезает.
+
+   Две точки задал он сам по снимку: полная карточка — 31 px (как сейчас),
+   ужатая до 92 px — 14 px («вот такое соотношение мне нравится»). Между ними
+   ровная прямая, ниже 14 не опускаемся: это пол читаемости в кабине.
+
+   Высоту карточки CSS сам по себе не знает, поэтому карточка объявлена опорой
+   для своих потомков (container-type: size), и высота приходит в cqh. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card {
+    container-type: size;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card > strong {
+    /* Две точки задал пользователь по снимкам: карточка 92 px → кегль 14,
+       полная 147 px → 31. Но cqh — это ВНУТРЕННЯЯ высота карточки, без её
+       полей (сверху 24.8, снизу 8.7), поэтому те же точки в единицах cqh это
+       58.5 и 113.5. Наклон прямой между ними 0.309.
+       Поймано замером: с точками по внешней высоте номер при девяти карточках
+       стоял на полу 14 вместо ожидаемых 24.5 — в браузере это выглядело
+       правдоподобно, потому что «мелкий шрифт в тесной карточке» и есть
+       ожидаемый вид. */
+    font-size: clamp(14px, calc(14px + (100cqh - 58.5px) * 0.309), 31px) !important;
+}
+
+/* Номер из одних цифр остаётся крупным всегда: «хотя если там будут только
+   цифры то они могут быть крупными». Две-три цифры и в ужатой карточке не
+   спорят с рисунком, а издали читаются лучше. Уступает такой номер только по
+   ширине — этим занимается подгонка, а не это правило. */
+body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-truck-card[data-eo-number-plain="1"] > strong {
+    font-size: 31px !important;
+}
+
+/* Плашка состояния очереди («Нужна сверка», «Ожидает отправки», «Нет сети»)
+   висит поверх шапки и режет подпись роли пополам — видно на любом снимке за
+   сегодня. Появляется она тогда, когда экран отстал от сервера или накопились
+   неотправленные действия, то есть в самый нервный момент смены, и читать в
+   этот момент приходится обе надписи сразу.
+
+   Место под неё резервируется ТОЛЬКО пока она видна: шапка опускается на её
+   высоту. Саму плашку не двигаем и её логику не трогаем — она остаётся там,
+   где её ищет глаз, и показывается тем же кодом, что и раньше. */
+body.excavator-operator-screen:has(.eo-offline-sync:not([hidden])) .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
+    /* Сдвигаем шапку целиком, а не добавляем ей внутренний отступ: высота у
+       шапки своя, и отступ внутрь просто срезал бы кнопки снизу — проверено на
+       телефоне, обе кнопки обрезало по нижнему краю.
+
+       Размер резерва берётся из ТОЙ ЖЕ величины, которой задана высота самой
+       плашки: min-height 1.65rem при box-sizing: border-box, перенос запрещён
+       (white-space: nowrap), поэтому строка у неё всегда одна, какой бы
+       длинной ни была надпись. Плюс просвет.
+
+       В rem, а не в пикселях, намеренно: если базовый шрифт вырастет, плашка
+       и резерв вырастут вместе. Постоянное число здесь означало бы, что при
+       крупном шрифте подпись снова окажется перерезанной — и увидели бы это
+       только те, кто шрифт увеличил, то есть самые старшие машинисты. */
+    margin-top: calc(1.65rem + 10px) !important;
+}
