@@ -84,4 +84,3 @@
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_workspace.html
 СИСТЕМА_MVP/backend/trips/trip_creation.py
-СИСТЕМА_MVP/backend/trips/migrations/0016_trip_driver_device_load_time.py
