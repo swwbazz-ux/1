@@ -65,6 +65,7 @@
 СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
 СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py
 СИСТЕМА_MVP/backend/trips/dispatcher_topology_commands.py
+СИСТЕМА_MVP/backend/trips/urls.py
 СИСТЕМА_MVP/backend/trips/views.py
 СИСТЕМА_MVP/backend/users/active_role.py
 СИСТЕМА_MVP/backend/users/application_connection.py
