@@ -389,7 +389,13 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     // машиниста, теперь сетка и высота одни и те же в обоих состояниях).
     assert.doesNotMatch(css, /:not\(\.is-truck-drag-active\)/);
     assert.match(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
-    assert.match(css, /\.driver-manual-workspace__dump-card\.is-drop-ready\s*\{[^}]*transform:\s*scale\(1\.14\) !important;/s);
+    // Плитка-цель растёт от нижнего края (вверх и в стороны, не вниз) в
+    // полтора раза — JS (applyDumpMagnetScale) подставляет кегль поменьше
+    // через --driver-manual-magnet-scale, если у экрана не хватает места
+    // по любую сторону, 1.5 здесь только запасное значение по умолчанию.
+    assert.match(css, /\.driver-manual-workspace__dump-card\.is-drop-ready\s*\{[^}]*transform-origin:\s*50% 100% !important;[^}]*transform:\s*scale\(var\(--driver-manual-magnet-scale, 1\.5\)\) !important;/s);
+    assert.match(source, /function applyDumpMagnetScale\(target\)/);
+    assert.match(source, /onTargetChange:\s*function \(card, target\) \{\s*if \(target\) applyDumpMagnetScale\(target\);/s);
     assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
 });
 

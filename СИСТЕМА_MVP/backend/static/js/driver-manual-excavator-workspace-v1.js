@@ -392,6 +392,32 @@
         return fitter.fit(summary, {allowWrap: true});
     }
 
+    var DUMP_MAGNET_SCALE = 1.5;
+
+    /* Плитка-цель при перетаскивании растёт transform: scale от нижнего
+       края (CSS) — вверх и в стороны, никогда вниз. Пользователь: край
+       экрана для этого роста непреодолим ни по одной стороне. transform
+       не участвует в layout, поэтому сам по себе никак не «знает» о
+       границах экрана — меряем реальные отступы плитки до каждого края
+       ДО того, как класс is-drop-ready встанет (то есть по её ещё не
+       увеличенным размерам), и подменяем 1.5 на меньший кегль, если по
+       любую сторону не хватает места. */
+    function applyDumpMagnetScale(target) {
+        if (!target || !target.getBoundingClientRect) return;
+        var rect = target.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        var viewportW = root.innerWidth || 0;
+        var viewportH = root.innerHeight || 0;
+        var growLeft = rect.left;
+        var growRight = viewportW - rect.right;
+        var growTop = rect.top;
+        var scaleFromLeft = 1 + (2 * growLeft) / rect.width;
+        var scaleFromRight = 1 + (2 * growRight) / rect.width;
+        var scaleFromTop = 1 + growTop / rect.height;
+        var safeScale = Math.max(1, Math.min(DUMP_MAGNET_SCALE, scaleFromLeft, scaleFromRight, scaleFromTop));
+        target.style.setProperty("--driver-manual-magnet-scale", safeScale.toFixed(3));
+    }
+
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
         if (!workspace || !positive(pointId) || !delta) return null;
         var key = String(adjustmentId || "");
@@ -1768,6 +1794,9 @@
             sourceSelector: "[data-driver-manual-source]",
             targetSelector: '[data-driver-manual-dump-target]:not([data-driver-manual-current-only="true"])',
             gradientId: "driver-manual-drag-comet-light",
+            onTargetChange: function (card, target) {
+                if (target) applyDumpMagnetScale(target);
+            },
             canDrag: function () {
                 return !sourceShouldBeLocked(savingLocal, currentTripProjection);
             },

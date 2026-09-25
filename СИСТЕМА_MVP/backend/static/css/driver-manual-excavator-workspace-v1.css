@@ -897,12 +897,36 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
    масштабирует её текст вместе с рамкой — отдельно кегль подгонять не
    нужно. excavator-work-v55-shift.css запрещает transform на .is-drop-ready
    через transform: none !important — здесь длиннее и более специфичный
-   селектор, побеждает независимо от порядка подключения файлов. */
+   селектор, побеждает независимо от порядка подключения файлов.
+
+   Пользователь уточнил направление и масштаб: в полтора раза больше
+   исходного, растёт вверх и в стороны, но не вниз — transform-origin у
+   нижнего края (50% 100%) вместо центра, вся прибавка уходит вверх/вбок,
+   нижняя граница плитки остаётся на месте (не наезжает на ряд под ней).
+   Остальные плитки «уступают место»: полноценного грид-рефлоу с четырьмя
+   произвольными позициями делать не стали (кода на порядок больше, а
+   хрупкость на грани каждого количества точек 1–9), вместо этого через
+   :has() они на время подсказки подсаживаются и тускнеют, зрительно
+   отступая перед выросшей целью. :has() в этом файле уже используется
+   (mobile-shift-unified-v1.css, excavator-work-v55-shift.css) — тот же
+   WebView, тот же движок, ничего нового не требуется. */
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card.is-drop-ready {
     position: relative !important;
     z-index: 30 !important;
-    transform: scale(1.14) !important;
+    transform-origin: 50% 100% !important;
+    /* 1.5 — предел по умолчанию; driver-manual-excavator-workspace-v1.js
+       (onTargetChange в attach()) перед показом каждой цели меряет её
+       реальные отступы до краёв экрана и подставляет сюда кегль поменьше,
+       если 1.5 упёрлась бы в край — так плитка никогда не растёт за
+       границу видимой области. */
+    transform: scale(var(--driver-manual-magnet-scale, 1.5)) !important;
     transition: transform 120ms ease-out !important;
+}
+
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid:has(.driver-manual-workspace__dump-card.is-drop-ready) .driver-manual-workspace__dump-card:not(.is-drop-ready) {
+    transform: scale(.9) !important;
+    opacity: .5 !important;
+    transition: transform 120ms ease-out, opacity 120ms ease-out !important;
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .driver-manual-workspace__dump-card {
