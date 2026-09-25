@@ -251,6 +251,11 @@
             message.classList.toggle("is-error", error === true);
         }
 
+        // Плитка — крупный номер экскаватора и, если есть, статус («Выбран»/«Недоступно»).
+        // Горизонт/блок/порода/точка и «Не заполнено: …» больше не показываются (водителю
+        // тут не нужны, только мешали разглядеть номер) — но остаются в data-атрибутах,
+        // их бросок в рейс при выборе экскаватора не отображение. Тот же вид задаёт
+        // сервер в шаблоне (driver_shift.html) — держать оба места в одном виде.
         function tileMarkup(item) {
             var button = document.createElement("button");
             button.type = "button";
@@ -264,24 +269,10 @@
             button.dataset.rockType = item.rock_type;
             button.dataset.dumpPoint = item.dump_point;
             button.dataset.isPrimary = item.is_primary ? "true" : "false";
-            var primary = item.is_primary ? "<em>Основной</em>" : "";
-            button.innerHTML = '<span class="driver-free-bucket-tile-topline"><strong></strong>' + primary + '</span>'
-                + '<span class="driver-free-bucket-tile-place"></span>'
-                + '<span class="driver-free-bucket-tile-meta"></span>'
+            button.innerHTML = '<strong class="driver-free-bucket-tile-number"></strong>'
                 + '<span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status></span>';
-            button.querySelector("strong").textContent = item.label;
-            button.querySelector(".driver-free-bucket-tile-place").textContent = (item.loading_horizon || "Горизонт —") + " · " + (item.loading_block || "Блок —");
-            var dumpPointNames = item.dump_points.map(function (point) { return point.name; }).filter(Boolean);
-            button.querySelector(".driver-free-bucket-tile-meta").textContent = (item.rock_type || "Порода —") + " · " + (dumpPointNames.join(", ") || "Точки —");
+            button.querySelector(".driver-free-bucket-tile-number").textContent = item.label;
             button.querySelector("[data-driver-free-bucket-tile-status]").textContent = tileStatusLabel(item, false, state);
-            if (item.missing_fields.length) {
-                var missing = document.createElement("span");
-                missing.className = "driver-free-bucket-tile-missing";
-                missing.textContent = "Не заполнено: " + item.missing_fields.map(function (field) {
-                    return ({loading_horizon: "горизонт", loading_block: "блок", rock_type: "порода", dump_points: "точки разгрузки", catalog_entry: "снимок настроек"})[field] || field;
-                }).join(", ");
-                button.insertBefore(missing, button.querySelector("[data-driver-free-bucket-tile-status]"));
-            }
             if (item.is_primary || !item.available) {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");

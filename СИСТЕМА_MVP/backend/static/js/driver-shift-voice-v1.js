@@ -331,7 +331,8 @@ function latestDriverDumpPointEvent(context) {
         if (
             !payload
             || event.type !== "trip_changed"
-            || payload.action !== "truck_loaded"
+            // Ручная погрузка (свайп точки в круг) озвучивается так же, как погрузка экскаваторщиком.
+            || (payload.action !== "truck_loaded" && payload.action !== "driver_manual_loaded")
             || (selected && version <= selected.eventVersion)
         ) {
             return;

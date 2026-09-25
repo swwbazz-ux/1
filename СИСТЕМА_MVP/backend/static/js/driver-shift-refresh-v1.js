@@ -115,10 +115,17 @@ window.applyOperationalStateRefresh = function (context) {
             previousDowntimeFlow === "waiting_loading"
             && freshShell.dataset.driverHasLoadedTrip === "true"
         );
+        /* Ручной рейс (свайп точки в круг) признака «гружёный» у экрана не ставит —
+           у него свой признак происхождения. Голос «едем на …» тот же, что у рейса
+           экскаваторщика. */
+        var becameManualLoaded = (
+            oldShell.dataset.driverActiveTripOrigin !== "driver_manual"
+            && freshShell.dataset.driverActiveTripOrigin === "driver_manual"
+        );
         var becameLoaded = (
             oldShell.dataset.driverHasLoadedTrip !== "true"
             && freshShell.dataset.driverHasLoadedTrip === "true"
-        );
+        ) || becameManualLoaded;
         if (movedFromLoadingWaitToWork) {
             activeTab = "work";
         }

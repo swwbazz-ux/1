@@ -83,8 +83,94 @@ def driver_downtime_requires_loaded_trip(reason):
     return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
 
 
+# Когда водитель может включить простой (правила карьера, 26.09.2026):
+# - только на разгруженном самосвале — ожидание погрузки, чистка кузова, ТО, заправка;
+# - только на гружёном — ожидание разгрузки; ожидание разгрузки ККД/СКДР — только
+#   если рейс идёт именно на эту точку;
+# - в любом состоянии — поломка, ремонт, погода, БВР, прочие и остальные причины.
+DRIVER_EMPTY_TRUCK_ONLY_REASON_NAMES = (
+    TRUCK_WAITING_LOADING_REASON_NAME,
+    'Чистка кузова',
+    'ТО',
+    'Заправка',
+)
+DRIVER_EMPTY_TRUCK_ONLY_REASON_KEYS = frozenset(
+    _reason_name_key(name) for name in DRIVER_EMPTY_TRUCK_ONLY_REASON_NAMES
+)
+DRIVER_UNLOAD_WAIT_POINT_KEYS = {
+    _reason_name_key('Ожидание разгрузки ККД'): _reason_name_key('ККД'),
+    _reason_name_key('Ожидание разгрузки СКДР'): _reason_name_key('СКДР'),
+}
+
+DRIVER_EMPTY_TRUCK_REQUIRED_MESSAGE = 'Самосвал уже загружен'
+DRIVER_LOADED_TRIP_REQUIRED_MESSAGE = 'Доступно только после погрузки'
+
+
 def driver_downtime_requires_empty_truck(reason):
-    return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
+    return _reason_name_key(reason) in DRIVER_EMPTY_TRUCK_ONLY_REASON_KEYS
+
+
+def driver_downtime_required_dump_point_key(reason):
+    """Точка, на которую должен идти рейс для этого ожидания разгрузки ('' — любая)."""
+    return DRIVER_UNLOAD_WAIT_POINT_KEYS.get(_reason_name_key(reason), '')
+
+
+def driver_dump_point_matches(dump_point, point_key):
+    if not point_key:
+        return True
+    if not dump_point:
+        return False
+    return _reason_name_key(str(dump_point)) == point_key
+
+
+def driver_downtime_unavailable_message(reason, *, truck_loaded, dump_point=None):
+    """Почему водитель не может начать этот простой сейчас ('' — может)."""
+    if driver_downtime_requires_empty_truck(reason) and truck_loaded:
+        return DRIVER_EMPTY_TRUCK_REQUIRED_MESSAGE
+    if driver_downtime_requires_loaded_trip(reason):
+        if not truck_loaded:
+            return DRIVER_LOADED_TRIP_REQUIRED_MESSAGE
+        point_key = driver_downtime_required_dump_point_key(reason)
+        if not driver_dump_point_matches(dump_point, point_key):
+            return 'Только при рейсе на ' + normalize_reason_name(reason.name).split()[-1]
+    return ''
+
+
+def driver_downtime_start_conflict(reason, truck):
+    """Проверка сервера при старте простоя водителем: (код, текст) или None.
+
+    Вызывать внутри транзакции — открытый рейс блокируется select_for_update.
+    """
+    if not (
+        driver_downtime_requires_empty_truck(reason)
+        or driver_downtime_requires_loaded_trip(reason)
+    ):
+        return None
+    from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
+
+    open_trip = (
+        Trip.objects.select_for_update()
+        .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
+        .select_related('dump_point', 'actual_dump_point')
+        .order_by('-created_at')
+        .first()
+    )
+    loaded = bool(open_trip and open_trip.status == TripStatus.LOADED_WAITING_UNLOAD)
+    if driver_downtime_requires_empty_truck(reason) and open_trip:
+        return (
+            'empty_truck_required',
+            f'{normalize_reason_name(reason.name)} нельзя начать: самосвал уже загружен.',
+        )
+    message = driver_downtime_unavailable_message(
+        reason,
+        truck_loaded=loaded,
+        dump_point=(open_trip.actual_dump_point or open_trip.dump_point) if open_trip else None,
+    )
+    if message == DRIVER_LOADED_TRIP_REQUIRED_MESSAGE:
+        return ('loaded_trip_required', 'Этот простой доступен только после погрузки самосвала.')
+    if message:
+        return ('dump_point_mismatch', message + '.')
+    return None
 
 
 def driver_downtime_opens_work(reason):

@@ -23,6 +23,8 @@ const DRIVER_SCREEN_SCRIPTS = [
 
 const DRIVER_SCREEN_FILES = [
     path.join(BACKEND_ROOT, "templates", "users", "driver_shift.html"),
+    // Барабан точек над кругом (бывшая карточка «экскаватор · место погрузки»).
+    path.join(BACKEND_ROOT, "templates", "includes", "driver_point_drum.html"),
     path.join(BACKEND_ROOT, "static", "css", "driver-shift-v1.css"),
     ...DRIVER_SCREEN_SCRIPTS.map((name) => path.join(BACKEND_ROOT, "static", "js", name)),
 ];

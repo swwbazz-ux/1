@@ -88,7 +88,13 @@ class DriverDowntimeWorkflowTests(TestCase):
                 self.assertTrue(driver_downtime_requires_loaded_trip(reason))
                 self.assertTrue(driver_downtime_opens_work(reason))
 
-        ordinary_reason = DowntimeReason.objects.get(name='Заправка')
+        # Заправка — не рабочий процесс, но включается только на пустом самосвале.
+        refuel = DowntimeReason.objects.get(name='Заправка')
+        self.assertEqual(driver_downtime_flow(refuel), '')
+        self.assertTrue(driver_downtime_requires_empty_truck(refuel))
+        self.assertFalse(driver_downtime_opens_work(refuel))
+
+        ordinary_reason = DowntimeReason.objects.get(name='Поломка')
         self.assertEqual(driver_downtime_flow(ordinary_reason), '')
         self.assertFalse(driver_downtime_requires_empty_truck(ordinary_reason))
         self.assertFalse(driver_downtime_requires_loaded_trip(ordinary_reason))

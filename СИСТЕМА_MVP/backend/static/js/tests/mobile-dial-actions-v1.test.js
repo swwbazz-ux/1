@@ -14,7 +14,7 @@ test("shared dial component provides three independent accessible slots", () => 
     assert.match(include, /data-mobile-dial-action="manual"/);
     assert.match(include, /data-mobile-dial-action="dump-point"/);
     assert.match(include, /data-mobile-dial-action="free-bucket"/);
-    assert.match(include, /data-driver-manual-open aria-label="Открыть ручной режим"/);
+    assert.match(include, /data-driver-dial-manual-toggle aria-label="Ручной режим"[^>]*aria-pressed="false"/);
     assert.match(include, /mobile_dial_manual_blocked_reason/);
     assert.match(include, /aria-label="Изменить точку разгрузки"/);
     assert.match(include, /aria-label="Свободный ковш"/);
@@ -30,7 +30,10 @@ test("shared dial component provides three independent accessible slots", () => 
 test("all three slots stay rendered while unavailable actions are explicitly disabled", () => {
     assert.match(include, /data-mobile-dial-action="manual"\{% if mobile_dial_manual_enabled %\}/);
     assert.match(include, /\{% else %\} disabled aria-disabled="true" aria-label="\{\{ mobile_dial_manual_blocked_reason/);
-    assert.match(include, /data-mobile-dial-action="dump-point"\{% if mobile_dial_dump_point_enabled %\} data-driver-point-open/);
+    // Ручной рейс не проходит по mobile_dial_dump_point_enabled (свой active_trip у него
+    // пустой) — кнопка остаётся доступна и по нему тоже, через движок ручного режима.
+    assert.match(include, /data-mobile-dial-action="dump-point"\{% if driver_manual_workspace\.active_trip_origin == "driver_manual" %\} data-driver-manual-point-open/);
+    assert.match(include, /\{% elif mobile_dial_dump_point_enabled %\} data-driver-point-open/);
     assert.match(include, /\{% else %\} disabled aria-disabled="true" aria-label="Изменить точку разгрузки — доступно только в активном рейсе"/);
     assert.match(include, /data-mobile-dial-action="free-bucket"\{% if mobile_dial_free_bucket_enabled %\}/);
     assert.match(include, /aria-controls="driver-free-bucket-dialog" aria-expanded="false"/);
