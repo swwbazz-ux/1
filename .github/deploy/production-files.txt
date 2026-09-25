@@ -56,6 +56,7 @@
 СИСТЕМА_MVP/backend/trips/models.py
 СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
 СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py
+СИСТЕМА_MVP/backend/trips/dispatcher_trip_commands.py
 СИСТЕМА_MVP/backend/trips/dispatcher_guards.py
 СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py
 СИСТЕМА_MVP/backend/trips/dispatcher_read_model.py
