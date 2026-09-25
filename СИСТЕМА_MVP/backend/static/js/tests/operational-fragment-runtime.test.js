@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -18,10 +19,7 @@ const EXCAVATOR_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
     "utf8"
 ).replace(/\r\n?/g, "\n");
-const DISPATCHER_TEMPLATE_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "trips", "dispatcher_control.html"),
-    "utf8"
-);
+const DISPATCHER_TEMPLATE_SOURCE = dispatcherScreenSource();
 
 const FRAGMENT_CLIENT_START = "/* OPERATIONAL_FRAGMENT_CLIENT_START */";
 const FRAGMENT_CLIENT_END = "/* OPERATIONAL_FRAGMENT_CLIENT_END */";

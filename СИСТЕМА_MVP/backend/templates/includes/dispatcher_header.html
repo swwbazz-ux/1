@@ -7,10 +7,18 @@
         <div class="dispatcher-command-context">
             <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
             <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif dispatcher_header.shift_label %}{{ dispatcher_header.shift_label }}{% elif shift_label %}{{ shift_label }}{% else %}Первая смена{% endif %}</span>
-            <span class="dispatcher-command-date">{% if current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <span class="dispatcher-command-date">{% if dispatcher_header_shift_date %}{{ dispatcher_header_shift_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% elif current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
         {% include "includes/dispatcher_nav.html" %}
+        {% if dispatcher_nav_active == "control" and not mining_master_mobile_enabled %}
+        {# Живой поиск техники: набранный номер подсвечивает машину везде, где она стоит на пульте. Только на пульте смены — на других экранах доски нет. #}
+        <label class="dispatcher-equipment-search" data-dispatcher-equipment-search-box>
+            <svg class="dispatcher-equipment-search-cap" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="2.2"></circle><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path></svg>
+            <input type="search" autocomplete="off" spellcheck="false" maxlength="3" aria-label="Найти технику по номеру" title="Номер техники: начните печатать в любом месте пульта" data-dispatcher-equipment-search>
+            <b class="dispatcher-equipment-search-count" data-dispatcher-equipment-search-count hidden></b>
+        </label>
+        {% endif %}
     </section>
 
     <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
@@ -62,7 +70,7 @@
         <span class="dispatcher-radial-clock-dot" aria-hidden="true"></span>
         <span class="dispatcher-radial-clock-face">
             <strong>{% if current_time %}{{ current_time }}{% elif dispatcher_header.current_time %}{{ dispatcher_header.current_time }}{% else %}{{ dispatcher_dashboard.current_time }}{% endif %}</strong>
-            <span>{% if current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
+            <span>{% if dispatcher_clock_date %}{{ dispatcher_clock_date }}{% elif dispatcher_header.clock_date %}{{ dispatcher_header.clock_date }}{% elif current_date %}{{ current_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <em>{% if dispatcher_clock_caption %}{{ dispatcher_clock_caption }}{% else %}текущее время{% endif %}</em>
         </span>
     </section>

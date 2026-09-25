@@ -6,6 +6,7 @@ from .achievement_views import (
     achievement_prize_image_view,
     achievement_shown_view,
 )
+from .dispatcher_pwa import dispatcher_manifest_view, dispatcher_service_worker_view
 from .views import (
     dispatcher_cancel_assignment_view,
     dispatcher_cancel_trip_view,
@@ -15,9 +16,7 @@ from .views import (
     dispatcher_close_downtime_view,
     dispatcher_equipment_detail_view,
     dispatcher_manual_trip_view,
-    dispatcher_manifest_view,
     dispatcher_move_excavator_view,
-    dispatcher_service_worker_view,
     dispatcher_service_close_shift_view,
     dispatcher_toggle_shift_view,
     driver_change_unload_point_view,

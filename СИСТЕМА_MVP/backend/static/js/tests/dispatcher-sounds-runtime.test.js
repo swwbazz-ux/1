@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
+const {DISPATCHER_STYLE_FILES, dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
 const source = fs.readFileSync(
@@ -228,27 +230,34 @@ test("loading the module twice does not duplicate global listeners", async () =>
 });
 
 test("dispatcher shell wires and precaches the isolated sound module", () => {
-    const template = fs.readFileSync(
-        path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
-        "utf8"
-    );
+    const template = dispatcherScreenSource();
     const header = fs.readFileSync(
         path.join(BACKEND, "templates", "includes", "dispatcher_header.html"),
         "utf8"
     );
-    const views = fs.readFileSync(path.join(BACKEND, "trips", "views.py"), "utf8");
+    const dispatcherPwa = fs.readFileSync(
+        path.join(BACKEND, "trips", "dispatcher_pwa.py"),
+        "utf8"
+    );
     const control = fs.readFileSync(
         path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
         "utf8"
     );
-    const css = fs.readFileSync(
-        path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-        "utf8"
-    );
-    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v131/);
+    const css = dispatcherStyleSource();
+    let previousStyle = -1;
+    for (const file of DISPATCHER_STYLE_FILES) {
+        const currentStyle = template.indexOf(`css/${file}`);
+        assert.ok(currentStyle > previousStyle, `${file} must keep dispatcher cascade order`);
+        previousStyle = currentStyle;
+    }
+    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-transport-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-detail-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-board-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-realtime-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(views, /dispatcher-desktop-shell-v131/);
-    assert.match(views, /\/static\/js\/dispatcher-sounds-v1\.js/);
+    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v144/);
+    assert.match(dispatcherPwa, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(control, /new CustomEvent\("dispatcher-action-error"/);
     assert.match(css, /@media \(max-width: 1180px\)[\s\S]+?\.dispatcher-command-utility\s*\{[\s\S]+?grid-template-columns:\s*repeat\(5,/);
 });

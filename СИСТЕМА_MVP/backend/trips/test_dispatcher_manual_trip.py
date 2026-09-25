@@ -15,10 +15,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
+from core.models import OperationalStateEvent
 from core.production_time import production_shift_bounds, production_shift_context
 from references.models import DumpPoint, Equipment, EquipmentModel, EquipmentType, RockType, TruckCapacityRule
 from shifts.models import EmployeeShift
 from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripStatus
+from trips.trip_creation import TRIP_CAPACITY_UNRESOLVED_MESSAGE
+from trips import views as trips_views
 from trips.views import dispatcher_manual_trip_payload, dispatcher_shift_period_fields
 from users.models import Employee, EmployeeAccess, Role
 
@@ -132,6 +135,12 @@ class DispatcherManualTripTests(TestCase):
     def messages_text(self, response):
         return ' | '.join(str(message) for message in get_messages(response.wsgi_request))
 
+    @staticmethod
+    def manual_events():
+        return OperationalStateEvent.objects.filter(
+            reason='Trip:dispatcher_manual_trip',
+        )
+
     def test_manual_trips_are_created_completed_for_driver_shift_and_logged(self):
         response = self.post_manual_trip()
 
@@ -157,7 +166,24 @@ class DispatcherManualTripTests(TestCase):
         logs = DispatcherActionLog.objects.filter(action_type=DispatcherActionType.MANUAL_TRIP)
         self.assertEqual(logs.count(), 2)
         self.assertEqual(logs.first().actor, self.dispatcher)
+        self.assertEqual({log.reason for log in logs}, {'водитель не отметил разгрузку'})
         self.assertIn('Отвал 60', logs.first().target_summary)
+        event = self.manual_events().get()
+        self.assertEqual(event.event_type, 'trip_changed')
+        self.assertEqual(event.object_type, 'Trip')
+        self.assertEqual(event.object_id, str(trips[-1].id))
+        self.assertEqual(
+            event.payload,
+            {
+                'action': 'dispatcher_manual_trip',
+                'trip_ids': [trip.id for trip in trips],
+                'truck_id': self.truck.id,
+                'excavator_id': self.excavator.id,
+                'assigned_dump_point_id': self.dump_point.id,
+                'actual_dump_point_id': self.dump_point.id,
+                'status': TripStatus.COMPLETED,
+            },
+        )
 
     def test_manual_trip_accepts_explicit_time_in_business_timezone(self):
         stamp = business_minute_inside_shift(self.truck_shift.opened_at).astimezone(BUSINESS_TZ)
@@ -235,6 +261,121 @@ class DispatcherManualTripTests(TestCase):
         response = self.post_manual_trip(excavator_id=self.excavator.id + 100)
         self.assertIn('больше не назначен', self.messages_text(response))
         self.assertFalse(Trip.objects.exists())
+
+    def test_manual_trip_rejects_invalid_count_and_time_format(self):
+        for count in ('0', '11', 'не число'):
+            with self.subTest(count=count):
+                response = self.post_manual_trip(trips_count=count)
+                self.assertIn('Количество рейсов: от 1 до 10.', self.messages_text(response))
+                self.assertFalse(Trip.objects.exists())
+                self.assertFalse(DispatcherActionLog.objects.exists())
+                self.assertFalse(self.manual_events().exists())
+
+        response = self.post_manual_trip(
+            trips_count='1',
+            completed_at='не дата',
+        )
+        self.assertIn('укажите дату и время', self.messages_text(response))
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_manual_trip_requires_active_rock_dump_and_capacity(self):
+        response = self.post_manual_trip(rock_type_id='0', dump_point_id='0')
+        self.assertIn(
+            'Выберите породу и точку разгрузки',
+            self.messages_text(response),
+        )
+        self.assertFalse(Trip.objects.exists())
+
+        TruckCapacityRule.objects.filter(
+            equipment_model=self.truck.model,
+            rock_type=self.rock,
+        ).delete()
+        response = self.post_manual_trip()
+        self.assertIn(TRIP_CAPACITY_UNRESOLVED_MESSAGE, self.messages_text(response))
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(DispatcherActionLog.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_manual_trip_rechecks_active_role_before_locking_truck(self):
+        with mock.patch.object(
+            trips_views,
+            'role_session_state',
+            return_value={'is_active': False},
+        ):
+            response = self.post_manual_trip()
+
+        self.assertIn(
+            'Роль неактивна — доступен только просмотр.',
+            self.messages_text(response),
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(DispatcherActionLog.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_manual_trip_requires_open_dispatcher_shift(self):
+        dispatcher_shift = EmployeeShift.objects.get(
+            employee=self.dispatcher,
+            closed_at__isnull=True,
+        )
+        dispatcher_shift.closed_at = timezone.now()
+        dispatcher_shift.closed_by = self.dispatcher
+        dispatcher_shift.save(update_fields=['closed_at', 'closed_by'])
+
+        response = self.post_manual_trip()
+
+        self.assertIn(
+            'Смена горного диспетчера закрыта. Изменения на пульте недоступны.',
+            self.messages_text(response),
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_manual_trip_get_preserves_filters_without_mutation(self):
+        response = self.client.get(self.url, {'truck': self.truck.garage_number})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response['Location'],
+            f"{reverse('dispatcher_control')}?truck={self.truck.garage_number}",
+        )
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_manager_role_cannot_create_manual_trip(self):
+        manager_role = Role.objects.create(code='manager', name='Руководитель')
+        self.access.role = manager_role
+        self.access.save(update_fields=['role'])
+
+        response = self.post_manual_trip()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], reverse('role_home'))
+        self.assertFalse(Trip.objects.exists())
+        self.assertFalse(DispatcherActionLog.objects.exists())
+        self.assertFalse(self.manual_events().exists())
+
+    def test_completed_manual_trip_cannot_be_cancelled(self):
+        self.post_manual_trip(trips_count='1')
+        trip = Trip.objects.get()
+
+        response = self.client.post(
+            reverse('dispatcher_cancel_trip', args=[trip.id]),
+            {'reason': 'Попытка отменить ручной рейс'},
+        )
+
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertFalse(
+            DispatcherActionLog.objects.filter(
+                trip=trip,
+                action_type=DispatcherActionType.CANCEL_TRIP,
+            ).exists(),
+        )
+        self.assertIn(
+            'Активный рейс для отмены не найден.',
+            self.messages_text(response),
+        )
 
     def test_manual_trip_payload_offers_face_destinations_and_blocks_without_assignment(self):
         placement = ExcavatorPlacement.objects.get(excavator=self.excavator)

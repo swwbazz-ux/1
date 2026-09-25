@@ -30,23 +30,12 @@ from assignments.models import (
     HaulAssignmentHandoff,
 )
 from assignments.services import (
-    HaulAssignmentStateConflict,
     active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
-    projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
     resolve_excavator_load_authority,
-    schedule_haul_assignment,
-    schedule_haul_release,
-    validate_projected_excavator_state,
     work_assignment_state,
-)
-from assignments.command_guards import (
-    ClientActionPayloadConflict,
-    ClientActionRequired,
-    begin_client_action,
-    complete_client_action,
 )
 from core.db_locks import lock_idempotency_key
 from core.models import OperationalStateVersion, bump_operational_state, lock_production_state
@@ -91,10 +80,7 @@ from shifts.services import (
     validate_driver_close_readings,
     validate_excavator_shift_readings,
 )
-from users.access_auth import find_employee_access_by_credentials
-from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
-from users.live_monitor import attach_application_presence
 from .manual_loading import (
     manual_dump_card_expires_at,
     manual_dump_card_is_visible,
@@ -115,21 +101,102 @@ from .free_bucket import (
 )
 from users.active_role import role_session_state
 from users.role_apps import (
-    PUSH_SERVICE_WORKER_JS,
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from users.session_device import get_session_device_kind, set_session_device_kind
-
 from .excavator_hourly_report import build_excavator_hourly_report
-from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
+from .dispatcher_header import build_dispatcher_header_context, get_active_dispatcher_shift
+from .dispatcher_assignment_commands import (
+    execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
+)
+from .dispatcher_dashboard_projection import (
+    dispatcher_complex_label,
+    dispatcher_complex_number_int,
+    dispatcher_complex_state_code,
+    dispatcher_complex_face_label,
+    dispatcher_complex_location_parts,
+    dispatcher_complex_shift_report as _build_dispatcher_complex_shift_report,
+    dispatcher_complex_truck_rows,
+    dispatcher_downtime_reason_label,
+    dispatcher_employee_for_equipment,
+    dispatcher_equipment_card_requested,
+    dispatcher_equipment_presence_fields,
+    dispatcher_equipment_state_tuple,
+    dispatcher_excavator_state_code,
+    dispatcher_garage_number_int,
+    dispatcher_plan_details,
+    dispatcher_shift_details,
+    dispatcher_status_label,
+    dispatcher_tons_from_label,
+    dispatcher_truck_state_code,
+)
+from .dispatcher_downtime_projection import (
+    dispatcher_alert_status_for_color_group,
+    dispatcher_alert_status_for_downtime,
+    dispatcher_downtime_card_payload,
+    dispatcher_downtime_count_label,
+    dispatcher_downtime_report_extras,
+    dispatcher_downtime_row_meta,
+    dispatcher_report_with_downtimes,
+    dispatcher_shift_downtime_rows,
+    downtime_reason_color_group,
+    format_dispatcher_datetime,
+    format_dispatcher_downtime_duration,
+    format_duration_label,
+    normalize_status_color_group,
+)
+from .dispatcher_downtime_commands import (
+    execute_dispatcher_close_downtime as _execute_dispatcher_close_downtime,
+)
+from .dispatcher_equipment_commands import (
+    execute_dispatcher_equipment_settings as _execute_dispatcher_equipment_settings,
+)
+from .dispatcher_guards import (
+    dispatcher_access_from_request,
+    dispatcher_client_action_error,
+    dispatcher_downtime_close_response,
+    dispatcher_equipment_detail_error,
+    dispatcher_json_payload,
+    dispatcher_shift_required_redirect,
+    dispatcher_shift_required_response,
+    get_dispatcher_action_redirect_url,
+    get_dispatcher_control_url,
+    lock_dispatcher_mutation_access as _lock_dispatcher_mutation_access,
+    protect_dispatcher_equipment_detail_response,
+)
+from .dispatcher_read_model import build_dispatcher_control_read_model
+from .dispatcher_shift_commands import (
+    SERVICE_CLOSE_AUTO_EXPIRED,
+    SERVICE_CLOSE_AUTO_NOTE,
+    SERVICE_CLOSE_COORDINATED,
+    SERVICE_CLOSE_KIND_LABELS,
+    SERVICE_CLOSE_NEGLECTED,
+    SERVICE_CLOSE_NEGLECTED_NOTE,
+    authenticate_dispatcher_shared_shift_start,
+    execute_dispatcher_service_close_shift as _execute_dispatcher_service_close_shift,
+    execute_dispatcher_toggle_shift as _execute_dispatcher_toggle_shift,
+    finish_service_closed_shift,
+    normalize_service_close_kind,
+)
+from .dispatcher_trip_commands import (
+    DISPATCHER_MANUAL_TRIP_MAX_COUNT,
+    execute_dispatcher_cancel_trip as _execute_dispatcher_cancel_trip,
+    execute_dispatcher_complete_trip as _execute_dispatcher_complete_trip,
+    execute_dispatcher_manual_trip as _execute_dispatcher_manual_trip,
+    parse_dispatcher_manual_trip_time,
+)
+from .dispatcher_topology_commands import (
+    execute_dispatcher_assign_truck as _execute_dispatcher_assign_truck,
+    execute_dispatcher_move_excavator as _execute_dispatcher_move_excavator,
+    required_assignment_state_id,
+    required_projected_assignment_states,
+)
 from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
     lock_trip_participant_equipment,
-    resolve_required_trip_measurements,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,16 +247,7 @@ def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
     }
 
 
-DISPATCHER_FILTER_KEYS = (
-    'truck',
-    'excavator',
-    'show_active_trips',
-    'show_pending_assignments',
-    'show_accepted_assignments',
-)
-
 DISPATCHER_PLAN_TOTAL_TONS = Decimal('420000')
-EQUIPMENT_STATUS_COLOR_GROUPS = {'gray', 'yellow', 'green', 'blue', 'orange', 'red'}
 DISPATCHER_PLAN_NOT_ASSIGNED = 'plan_not_assigned'
 
 def get_equipment_state_ui_map():
@@ -219,12 +277,6 @@ def equipment_state_ui(states, code):
     return states.get(code) or states['inactive']
 
 
-def normalize_status_color_group(color_group, *, fallback='yellow'):
-    if color_group in EQUIPMENT_STATUS_COLOR_GROUPS:
-        return color_group
-    return fallback
-
-
 def equipment_state_icon_color(color_group):
     if color_group == 'orange':
         return 'yellow'
@@ -239,29 +291,6 @@ def downtime_reason_equipment_state_code(reason):
     return reason.effective_equipment_state_code
 
 
-def downtime_reason_color_group(reason):
-    if not reason:
-        return 'yellow'
-    return normalize_status_color_group(reason.effective_color_group, fallback='yellow')
-
-
-def dispatcher_alert_status_for_color_group(color_group):
-    color_group = normalize_status_color_group(color_group, fallback='yellow')
-    if color_group == 'red':
-        return 'danger'
-    if color_group in {'yellow', 'orange'}:
-        return 'warning'
-    if color_group == 'blue':
-        return 'info'
-    return 'ok'
-
-
-def dispatcher_alert_status_for_downtime(downtime):
-    return dispatcher_alert_status_for_color_group(
-        downtime_reason_color_group(getattr(downtime, 'reason', None))
-    )
-
-
 def downtime_reason_state_ui(states, reason):
     state_ui = dict(equipment_state_ui(states, downtime_reason_equipment_state_code(reason)))
     state_ui['color_group'] = downtime_reason_color_group(reason)
@@ -272,13 +301,6 @@ def downtime_equipment_state_code(downtime):
     if not downtime:
         return ''
     return downtime_reason_equipment_state_code(getattr(downtime, 'reason', None))
-
-
-def format_duration_label(seconds):
-    seconds = max(0, int(seconds or 0))
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    return f'{hours:02d}:{minutes:02d}:{seconds % 60:02d}'
 
 
 def plan_progress_status_key(percent, plan_status=''):
@@ -454,29 +476,6 @@ def downtime_event_payload(event, *, action='', closed=False):
     }
 
 
-def dispatcher_downtime_card_payload(event, *, calculated_at=None):
-    if not event:
-        return {'active': False}
-    calculated_at = calculated_at or timezone.now()
-    started_at = event.started_at or calculated_at
-    elapsed_seconds = max(0, int((calculated_at - started_at).total_seconds()))
-    reason = getattr(event, 'reason', None)
-    return {
-        'active': True,
-        'event_id': event.id,
-        'equipment_id': event.equipment_id,
-        'reason': (
-            reason.button_label
-            if reason
-            else 'Простой'
-        ),
-        'started_at': started_at.isoformat(),
-        'started_at_label': format_dispatcher_datetime(started_at),
-        'elapsed_seconds': elapsed_seconds,
-        'elapsed_label': format_duration_label(elapsed_seconds),
-    }
-
-
 def equipment_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
         return {}
@@ -498,165 +497,6 @@ def equipment_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
         elapsed_seconds = max(0, int((event_end - event.started_at).total_seconds()))
         totals[event.reason_id] = totals.get(event.reason_id, 0) + elapsed_seconds
     return totals
-
-
-DOWNTIME_CARD_MAX_ROWS = 6
-# Ремонт и прочие критические состояния всегда красные — это их смысл на доске.
-DOWNTIME_CARD_CRITICAL_GROUPS = {'red', 'orange'}
-# Остальные причины красим по очереди: ожидания все жёлтые по состоянию техники,
-# и подряд идущие доли сливались в одну ленту.
-DOWNTIME_CARD_PALETTE = ('yellow', 'blue', 'green')
-
-
-def format_dispatcher_downtime_duration(seconds):
-    seconds = max(0, int(seconds or 0))
-    if seconds < 60:
-        return f'{seconds} с'
-    minutes, rest_seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if not hours and minutes < 10:
-        # На коротких простоях минуты слишком грубы: строки не складываются
-        # в итог и всё выглядит как «меньше минуты».
-        return f'{minutes} мин {rest_seconds} с' if rest_seconds else f'{minutes} мин'
-    if not hours:
-        return f'{minutes} мин'
-    if not minutes:
-        return f'{hours} ч'
-    return f'{hours} ч {minutes} мин'
-
-
-def dispatcher_downtime_count_label(count):
-    count = int(count or 0)
-    remainder_100 = count % 100
-    remainder_10 = count % 10
-    if 11 <= remainder_100 <= 14:
-        word = 'событий'
-    elif remainder_10 == 1:
-        word = 'событие'
-    elif 2 <= remainder_10 <= 4:
-        word = 'события'
-    else:
-        word = 'событий'
-    return f'{count} {word}'
-
-
-def dispatcher_shift_downtime_rows(equipment, shift, *, now=None):
-    """Простои техники за её текущую смену, сгруппированные по причине.
-
-    Берём простои, что НАЧАЛИСЬ внутри этой смены, и считаем их до конца
-    простоя, до закрытия смены или до текущего момента — что раньше. Простой,
-    который был открыт ещё до смены и достался ей вместе с техникой (ремонт),
-    считается с момента открытия смены и помечается как переданный.
-
-    Ожидания рабочего процесса границу смены не переходят: их закрывает сама
-    смена, поэтому у сменщика карточка стартует с нуля.
-    """
-    now = now or timezone.now()
-    if not equipment or not shift or not shift.opened_at:
-        return []
-    period_end = min(shift.closed_at or now, now)
-    if period_end <= shift.opened_at:
-        return []
-    events = (
-        DowntimeEvent.objects
-        .filter(equipment=equipment, started_at__lt=period_end)
-        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=shift.opened_at))
-        .select_related('reason', 'reason__equipment_state')
-        .order_by('-started_at')[:400]
-    )
-    grouped = {}
-    for event in events:
-        is_inherited = event.started_at < shift.opened_at
-        count_from = max(event.started_at, shift.opened_at)
-        event_end = min(event.ended_at or period_end, period_end)
-        seconds = max(0, int((event_end - count_from).total_seconds()))
-        reason = getattr(event, 'reason', None)
-        row = grouped.setdefault(event.reason_id or 0, {
-            'label': reason.button_label if reason else 'Простой',
-            'color_group': downtime_reason_color_group(reason),
-            'accent': 'yellow',
-            'seconds': 0,
-            'count': 0,
-            'is_open': False,
-            'is_inherited': False,
-            'last_started_at': None,
-        })
-        row['seconds'] += seconds
-        row['count'] += 1
-        if event.ended_at is None and not shift.closed_at:
-            row['is_open'] = True
-        if is_inherited:
-            row['is_inherited'] = True
-        if row['last_started_at'] is None or event.started_at > row['last_started_at']:
-            row['last_started_at'] = event.started_at
-    rows = sorted(grouped.values(), key=lambda row: row['seconds'], reverse=True)
-    palette_index = 0
-    for row in rows:
-        if row.get('color_group') in DOWNTIME_CARD_CRITICAL_GROUPS:
-            row['accent'] = 'red'
-            continue
-        row['accent'] = DOWNTIME_CARD_PALETTE[palette_index % len(DOWNTIME_CARD_PALETTE)]
-        palette_index += 1
-    return rows
-
-
-def dispatcher_downtime_row_meta(row):
-    parts = [dispatcher_downtime_count_label(row.get('count'))]
-    if row.get('is_inherited'):
-        parts.append('передан со смены')
-    if row.get('is_open'):
-        parts.append('идёт сейчас')
-    elif row.get('last_started_at'):
-        parts.append(f"последний {format_dispatcher_datetime(row['last_started_at'])}")
-    return ' · '.join(parts)
-
-
-def dispatcher_downtime_report_extras(equipment, shift, *, now=None):
-    """Метрики и вкладка простоев текущей смены для карточки техники."""
-    now = now or timezone.now()
-    metrics = []
-    charts = []
-    if not equipment or not shift or not shift.opened_at:
-        return metrics, charts
-    period_end = min(shift.closed_at or now, now)
-    shift_elapsed_seconds = max(0, int((period_end - shift.opened_at).total_seconds()))
-    rows = dispatcher_shift_downtime_rows(equipment, shift, now=now)
-    total_seconds = sum(row['seconds'] for row in rows)
-    if not total_seconds or not shift_elapsed_seconds:
-        return metrics, charts
-    share_percent = min(100, round(total_seconds * 100 / shift_elapsed_seconds))
-    metrics.append({'label': 'Простои', 'value': format_dispatcher_downtime_duration(total_seconds)})
-    metrics.append({'label': 'Доля смены', 'value': f'{share_percent}%'})
-    charts.append({
-        'type': 'donut-list',
-        'title': 'Простои смены',
-        'summary': ' · '.join([
-            f'Всего простоев {format_dispatcher_downtime_duration(total_seconds)}',
-            f'{share_percent}% смены',
-            dispatcher_downtime_count_label(sum(row['count'] for row in rows)),
-        ]),
-        'rows': [
-            {
-                'label': row['label'],
-                'value': format_dispatcher_downtime_duration(row['seconds']),
-                'percent': min(100, round(row['seconds'] * 100 / shift_elapsed_seconds)),
-                'accent': row['accent'],
-                'meta': dispatcher_downtime_row_meta(row),
-            }
-            for row in rows[:DOWNTIME_CARD_MAX_ROWS]
-        ],
-    })
-    return metrics, charts
-
-
-def dispatcher_report_with_downtimes(report, equipment, shift, *, now=None):
-    metrics, charts = dispatcher_downtime_report_extras(equipment, shift, now=now)
-    if not metrics and not charts:
-        return report
-    merged = dict(report or {})
-    merged['metrics'] = list(merged.get('metrics') or []) + metrics
-    merged['charts'] = list(merged.get('charts') or []) + charts
-    return merged
 
 
 def equipment_shift_downtime_seconds(equipment, shift, *, until=None):
@@ -736,197 +576,6 @@ def get_operational_state_version():
         .first()
     )
     return state.version if state else 0
-
-DISPATCHER_MANIFEST = {
-    'id': '/dispatcher/control/',
-    'name': 'Горный диспетчер',
-    'short_name': 'Диспетчер',
-    'description': 'Рабочий экран Горного диспетчера для управления активной сменой, комплексами и техникой.',
-    'start_url': '/dispatcher/control/',
-    'scope': '/dispatcher/',
-    'display': 'standalone',
-    'display_override': ['standalone', 'fullscreen'],
-    'orientation': 'landscape',
-    'background_color': '#07131f',
-    'theme_color': '#07131f',
-    'categories': ['business', 'productivity'],
-    'icons': [
-        {
-            'src': '/static/img/pwa/dispatcher-192.png',
-            'sizes': '192x192',
-            'type': 'image/png',
-            'purpose': 'any',
-        },
-        {
-            'src': '/static/img/pwa/dispatcher-512.png',
-            'sizes': '512x512',
-            'type': 'image/png',
-            'purpose': 'any',
-        },
-        {
-            'src': '/static/img/pwa/dispatcher-maskable-512.png',
-            'sizes': '512x512',
-            'type': 'image/png',
-            'purpose': 'maskable',
-        },
-    ],
-    'shortcuts': [
-        {
-            'name': 'Пульт диспетчера',
-            'short_name': 'Пульт',
-            'url': '/dispatcher/control/',
-            'description': 'Открыть рабочий экран Горного диспетчера.',
-        },
-    ],
-}
-
-DISPATCHER_SERVICE_WORKER_JS = r"""
-const APP_CONTRACT_VERSION = "pwa-contract-v1";
-const ROLE_CODE = "dispatcher";
-const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v131";
-const APP_SHELL_URL = "/dispatcher/control/";
-const MANIFEST_URL = "/dispatcher.webmanifest";
-const CORE_ASSETS = [
-  APP_SHELL_URL,
-  MANIFEST_URL,
-  "/static/js/realtime-client.js?v=__STATIC_ASSET_RELEASE__",
-  "/static/js/connection-indicators-v1.js?v=__STATIC_ASSET_RELEASE__",
-  "/static/js/role-readonly.js",
-  "/static/js/dispatcher-control-v1.js",
-  "/static/js/dispatcher-sounds-v1.js",
-  "/static/css/dispatcher-control-v1.css",
-  "/static/favicon.ico",
-  "/static/img/pwa/dispatcher-180.png",
-  "/static/img/pwa/dispatcher-192.png",
-  "/static/img/pwa/dispatcher-512.png",
-  "/static/img/pwa/dispatcher-maskable-512.png",
-  "/static/img/equipment/excavator-gray.png",
-  "/static/img/equipment/truck-gray.png"
-];
-
-self.addEventListener("install", event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))))
-      .then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener("activate", event => {
-  event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
-  );
-});
-
-async function networkFirst(request, fallbackUrl) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-      }
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
-      new Response("Оффлайн: экран диспетчера еще не сохранен на этом устройстве.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
-}
-
-async function networkOnly(request) {
-  try {
-    return await fetch(request);
-  } catch (error) {
-    return new Response("Сеть недоступна: свежий фрагмент экрана не получен.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
-}
-
-async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Ресурс недоступен без сети.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
-}
-
-self.addEventListener("fetch", event => {
-  const request = event.request;
-  if (request.method !== "GET") return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  if (request.headers.get("X-Requested-With") === "XMLHttpRequest") {
-    event.respondWith(networkOnly(request));
-    return;
-  }
-  if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
-    event.respondWith(networkFirst(request, APP_SHELL_URL));
-    return;
-  }
-  if (url.pathname === MANIFEST_URL) {
-    event.respondWith(networkFirst(request, MANIFEST_URL));
-    return;
-  }
-  if (url.pathname.startsWith("/static/")) {
-    event.respondWith(networkFirstStatic(request));
-  }
-});
-
-self.addEventListener("message", event => {
-  if (!event.data) return;
-  if (event.data.type === "SKIP_WAITING") {
-    self.skipWaiting();
-    return;
-  }
-  if (event.data.type === "GET_VERSION") {
-    const payload = {
-      type: "VERSION",
-      version: CACHE_NAME,
-      appContractVersion: APP_CONTRACT_VERSION,
-      shellVersion: CACHE_NAME,
-      roleCode: ROLE_CODE
-    };
-    if (event.ports && event.ports[0]) {
-      event.ports[0].postMessage(payload);
-    } else if (event.source) {
-      event.source.postMessage(payload);
-    }
-  }
-});
-"""
-
-# Десктопный Пульт имеет свою network-first оболочку, но push-обработчик
-# берёт из общего ролевого контракта, чтобы отметка shown и click-to-focus
-# не расходились с другими PWA.
-DISPATCHER_SERVICE_WORKER_JS = (
-    DISPATCHER_SERVICE_WORKER_JS.rstrip()
-    + '\n\n'
-    + PUSH_SERVICE_WORKER_JS
-    + '\n'
-)
 
 EXCAVATOR_MANIFEST = {
     'id': '/excavator/work/',
@@ -1316,24 +965,10 @@ def format_dispatcher_number(value):
     return f'{value:,}'.replace(',', ' ')
 
 
-def format_dispatcher_datetime(value):
-    if not value:
-        return ''
-    return timezone.localtime(value).strftime('%d.%m %H:%M')
-
-
 def format_dispatcher_decimal(value):
     if value is None:
         return ''
     return f'{value:g}'
-
-
-def dispatcher_manifest_view(request):
-    return role_app_manifest_response(request, 'dispatcher')
-
-
-def dispatcher_service_worker_view(request):
-    return role_app_service_worker_response(request, 'dispatcher', DISPATCHER_SERVICE_WORKER_JS)
 
 
 def excavator_manifest_view(request):
@@ -1358,27 +993,6 @@ def equipment_icon_key(equipment, status='green'):
     if status == 'orange':
         status = 'yellow'
     return f'img/equipment/{prefix}-{status}.png'
-
-
-def authenticate_dispatcher_shared_shift_start(request):
-    phone = request.POST.get('reauth_phone', '').strip()
-    access_code = re.sub(r'\D', '', request.POST.get('reauth_access_code', ''))
-    device_kind = request.POST.get('device_kind', '').strip()
-    if not phone or not access_code:
-        return None, 'Для начала смены на общем компьютере введите телефон и код горного диспетчера.'
-    if phone and not phone.startswith(('+', '7', '8')):
-        phone = f'+7 {phone}'
-
-    access = find_employee_access_by_credentials(phone, access_code, role_code='dispatcher')
-    if not access:
-        return None, 'Телефон или код горного диспетчера указаны неверно.'
-
-    try:
-        access = activate_role_session(request, access)
-    except ValidationError as error:
-        return None, '; '.join(error.messages)
-    set_session_device_kind(request, device_kind)
-    return access, ''
 
 
 def dispatcher_truck_garage_number(truck, fallback_index):
@@ -1936,131 +1550,12 @@ def dispatcher_shift_report_for_equipment(equipment, *, equipment_kind='', shift
         'tables': [],
     }
 
-def dispatcher_complex_truck_rows(card):
-    return list(card.get('truck_rows') or [])
-
-
-def dispatcher_tons_from_label(value):
-    if not value:
-        return Decimal('0')
-    digits = ''.join(char for char in str(value) if char.isdigit())
-    return Decimal(digits or '0')
-
-
-def dispatcher_complex_face_label(card):
-    horizon = card.get('current_horizon') or ''
-    block = card.get('current_block') or ''
-    label = ' / '.join(part for part in [horizon, block] if part and '-' not in part)
-    return label or 'Забой не указан'
-
-
-def dispatcher_complex_location_parts(card):
-    return (card.get('current_horizon') or 'Гор. -', card.get('current_block') or 'Блок -')
-
-
 def dispatcher_complex_shift_report(card):
-    status_key = card.get('status_key') or 'green'
-    assigned = int(card.get('assigned') or 0)
-    need = int(card.get('need') or 0)
-    balance = assigned - need
-    percent = int(card.get('percent') or 0)
-    truck_rows = dispatcher_complex_truck_rows(card)
-    current_truck_rows = [row for row in truck_rows if row['state_key'] == 'current']
-    removed_truck_rows = [row for row in truck_rows if row['state_key'] == 'removed']
-    plan_context = card.get('plan') or {}
-    plan_unit = plan_context.get('unit') or 'т'
-    plan_value = f'{plan_context.get("value_display")} {plan_unit}'.strip() if plan_context.get('value_display') else f'{card.get("plan_tons", "0")} т'
-    fact_value = plan_context.get('fact_plan_label') or f'{card.get("fact_tons", "0")} т'
-    forecast_value = f'{card.get("forecast_tons", "0")} т'
-    if status_key == 'red':
-        problem = 'работа заблокирована'
-        action = 'ремонт / перераспределить самосвалы'
-    elif status_key == 'orange':
-        problem = 'техническое ограничение'
-        action = 'контроль ремонта или ТО'
-    elif status_key == 'yellow':
-        problem = 'ожидает действия'
-        action = 'добавить транспорт'
-    elif status_key == 'blue':
-        problem = 'назначен'
-        action = 'дождаться активной операции'
-    else:
-        problem = 'без отклонений'
-        action = 'контроль нормы'
-
-    def grouped_chart_rows(source_rows, field, meta_field):
-        totals = defaultdict(Decimal)
-        meta = defaultdict(set)
-        for row in source_rows:
-            label = row.get(field) or 'не указано'
-            totals[label] += dispatcher_tons_from_label(row.get('value'))
-            if row.get(meta_field):
-                meta[label].add(row.get(meta_field))
-        sorted_rows = sorted(totals.items(), key=lambda item: item[1], reverse=True)
-        max_value = max((value for _, value in sorted_rows), default=Decimal('0'))
-        accents = ('green', 'blue', 'yellow', 'red')
-        return [
-            {
-                'label': label,
-                'meta': ', '.join(sorted(meta[label])[:3]),
-                'value': f'{format_dispatcher_number(value)} т',
-                'percent': dispatcher_chart_percent(value, max_value) if max_value else 0,
-                'accent': accents[index % len(accents)],
-            }
-            for index, (label, value) in enumerate(sorted_rows)
-        ]
-
-    material_rows = grouped_chart_rows(truck_rows, 'rock', 'target')
-    unload_rows = grouped_chart_rows(truck_rows, 'target', 'rock')
-    return {
-        'metrics': [
-            {'label': 'План', 'value': plan_value},
-            {'label': 'Факт', 'value': fact_value},
-            {'label': 'Самосвалы', 'value': f'{assigned} / {need}'},
-            {'label': 'Работали', 'value': str(len(truck_rows))},
-            {'label': 'Выведены', 'value': str(len(removed_truck_rows))},
-        ],
-        'charts': [
-            {
-                'type': 'bar',
-                'title': 'План / факт',
-                'rows': [
-                    {'label': 'Факт / план', 'meta': plan_context.get('group_name') or 'snapshot смены', 'value': fact_value, 'percent': max(4, percent), 'accent': status_key if status_key in {'green', 'yellow', 'blue', 'orange', 'red', 'gray'} else 'green'},
-                    {'label': 'Прогноз', 'meta': 'ожидаемый итог', 'value': forecast_value, 'percent': min(100, max(4, percent + 8)), 'accent': 'blue'},
-                    {'label': 'План', 'meta': 'сменное задание', 'value': plan_value, 'percent': 100, 'accent': 'green'},
-                ],
-            },
-            {
-                'type': 'donut-list',
-                'title': 'Порода',
-                'rows': material_rows,
-            },
-            {
-                'type': 'donut-list',
-                'title': 'Разгрузка',
-                'rows': unload_rows,
-            },
-            {
-                'type': 'truck-ledger',
-                'title': 'Самосвалы',
-                'rows': truck_rows,
-            },
-            {
-                'type': 'bar',
-                'title': 'Баланс',
-                'rows': [
-                    {'label': 'Назначено', 'meta': 'самосвалы в комплексе', 'value': str(assigned), 'percent': dispatcher_chart_percent(Decimal(assigned), Decimal(max(need, assigned, 1))), 'accent': 'green' if assigned >= need else 'yellow'},
-                    {'label': 'Нужно', 'meta': 'расчетная потребность', 'value': str(need), 'percent': 100, 'accent': 'blue'},
-                    {'label': 'Баланс', 'meta': action, 'value': f'+{balance}' if balance > 0 else str(balance), 'percent': dispatcher_chart_percent(Decimal(abs(balance)), Decimal(max(need, 1))), 'accent': 'red' if balance < 0 else 'green'},
-                ],
-            },
-        ],
-        'tables': [],
-        'problem': problem,
-        'truck_rows': truck_rows,
-        'current_trucks': [row['truck'] for row in current_truck_rows],
-        'removed_trucks': [row['truck'] for row in removed_truck_rows],
-    }
+    return _build_dispatcher_complex_shift_report(
+        card,
+        format_number=format_dispatcher_number,
+        chart_percent=dispatcher_chart_percent,
+    )
 
 
 def dispatcher_shift_reading_label(value):
@@ -2136,9 +1631,6 @@ def dispatcher_shift_period_fields(shift, *, now=None):
         'period_label': period_label,
         'current_period_label': current_period_label,
     }
-
-
-DISPATCHER_MANUAL_TRIP_MAX_COUNT = 10
 
 
 def dispatcher_manual_trip_payload(truck, *, excavator, placement, truck_shift, rock_types, dump_points):
@@ -2483,31 +1975,6 @@ def build_dispatcher_dashboard_context(
         if assignment.equipment_id
     }
 
-    def dispatcher_employee_for_equipment(equipment_id):
-        open_shift = open_shift_by_equipment_id.get(equipment_id)
-        if open_shift:
-            presence = getattr(open_shift, 'application_presence', None) or {}
-            presence_label = presence.get('status_label') or 'Нет связи'
-            return open_shift.employee, f'В смене · {presence_label}'
-        work_assignment = work_assignment_by_equipment_id.get(equipment_id)
-        if work_assignment:
-            return work_assignment.employee, f'Назначен на {work_assignment.get_shift_type_display().lower()}'
-        return None, 'Сотрудник не назначен'
-
-    def equipment_presence_fields(equipment_id):
-        shift = open_shift_by_equipment_id.get(equipment_id)
-        if not shift:
-            return {
-                'has_current_shift': False,
-                'presence_status': '',
-                'presence_label': '',
-            }
-        presence = getattr(shift, 'application_presence', None) or {}
-        return {
-            'has_current_shift': True,
-            'presence_status': presence.get('status_code') or 'not_registered',
-            'presence_label': presence.get('status_label') or 'Не подключался',
-        }
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
@@ -2556,19 +2023,6 @@ def build_dispatcher_dashboard_context(
             plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
         return plan_by_equipment_id[equipment_id]
 
-    def dispatcher_plan_details(plan):
-        if not plan:
-            return []
-        rows = [
-            {'label': 'Статус плана', 'value': plan.get('status_label')},
-            {'label': 'Факт / план', 'value': plan.get('fact_plan_label')},
-        ]
-        if plan.get('has_plan'):
-            rows.insert(1, {'label': 'Выполнение плана', 'value': plan.get('percent_label')})
-        if plan.get('group_name'):
-            rows.append({'label': 'Группа плана', 'value': plan.get('group_name')})
-        return rows
-
     downtime_by_equipment_id = {}
     for downtime in open_downtime_list:
         downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
@@ -2590,12 +2044,6 @@ def build_dispatcher_dashboard_context(
         if equipment_card_ids is None
         else {str(card_id) for card_id in equipment_card_ids}
     )
-
-    def equipment_card_requested(card_id):
-        return (
-            requested_equipment_card_ids is None
-            or str(card_id) in requested_equipment_card_ids
-        )
 
     def dispatcher_card_shift_report(equipment, equipment_kind):
         """Отчёт карточки: рейсы и простои текущей смены самой техники."""
@@ -2648,90 +2096,6 @@ def build_dispatcher_dashboard_context(
             .order_by('-created_at', '-id')[:200]
         )
     equipment_state_map = get_equipment_state_ui_map()
-
-    def equipment_state_for(code):
-        state = equipment_state_ui(equipment_state_map, code)
-        return state['color_group'], state['label'], state['code']
-
-    def complex_equipment_state(excavator, row):
-        if not excavator or not getattr(excavator, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(excavator.id)
-        if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
-        if row.get('pending'):
-            return equipment_state_for('waiting')
-        if row.get('active_trips'):
-            return equipment_state_for('working')
-        if row.get('accepted') or excavator.id in active_excavator_ids:
-            return equipment_state_for('assigned')
-        return equipment_state_for('garage')
-
-    def status_label_for(status, label=''):
-        return label or ''
-
-    def downtime_state_code_for(equipment_id):
-        downtime = downtime_by_equipment_id.get(equipment_id)
-        if not downtime:
-            return None
-        return downtime_equipment_state_code(downtime)
-
-    def downtime_reason_label_for(equipment_id):
-        downtime = downtime_by_equipment_id.get(equipment_id)
-        if not downtime or not getattr(downtime, 'reason', None):
-            return ''
-        return downtime.reason.button_label or downtime.reason.name or str(downtime.reason)
-
-    def excavator_current_state(excavator):
-        if not getattr(excavator, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(excavator.id)
-        if downtime_state_code:
-            return equipment_state_for(downtime_state_code)
-        if active_trip_by_excavator_id.get(excavator.id):
-            return equipment_state_for('working')
-        if excavator.id in active_excavator_ids:
-            return equipment_state_for('assigned')
-        return equipment_state_for('garage')
-
-    def truck_current_state(truck):
-        if not getattr(truck, 'is_active', True):
-            return equipment_state_for('inactive')
-        downtime_state_code = downtime_state_code_for(truck.id)
-        if downtime_state_code:
-            status, label, state_code = equipment_state_for(downtime_state_code)
-            return status, downtime_reason_label_for(truck.id) or label, state_code
-        active_trip = active_trip_by_truck_id.get(truck.id)
-        if active_trip:
-            if active_trip.status in OPEN_TRIP_STATUSES:
-                return equipment_state_for('loaded_waiting_unload')
-        assignment = assignment_by_truck_id.get(truck.id)
-        if assignment and assignment.status == AssignmentStatus.PENDING:
-            return equipment_state_for('waiting')
-        if assignment and assignment.status == AssignmentStatus.ACCEPTED:
-            return equipment_state_for('assigned')
-        return equipment_state_for('free')
-
-    def shift_details(equipment):
-        shift = open_shift_by_equipment_id.get(equipment.id) if equipment else None
-        if not shift:
-            return []
-        presence = getattr(shift, 'application_presence', None) or {}
-        details = [
-            {'label': 'Смена', 'value': shift.get_shift_type_display()},
-            {'label': 'Смена открыта', 'value': format_dispatcher_datetime(shift.opened_at)},
-            {'label': 'Связь', 'value': presence.get('status_label') or 'Не подключался'},
-        ]
-        if presence.get('last_seen_at'):
-            details.append({'label': 'Последняя связь', 'value': format_dispatcher_datetime(presence['last_seen_at'])})
-        client_labels = [
-            badge.get('label')
-            for badge in presence.get('client_badges') or []
-            if badge.get('label')
-        ]
-        if client_labels:
-            details.append({'label': 'Приложение', 'value': ', '.join(dict.fromkeys(client_labels))})
-        return details
 
     completed_tons = Decimal('0')
     completed_use_tonnage = False
@@ -2861,32 +2225,65 @@ def build_dispatcher_dashboard_context(
     )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
-    def garage_number_int(equipment):
-        match = re.search(r'\d+', str(getattr(equipment, 'garage_number', '') or ''))
-        return int(match.group(0)) if match else 9999
+    downtime_state_code_by_equipment_id = {
+        equipment_id: downtime_equipment_state_code(downtime)
+        for equipment_id, downtime in downtime_by_equipment_id.items()
+    }
+    truck_state_code_by_id = {}
+    truck_state_by_id = {}
+    for truck in trucks_list:
+        active_trip = active_trip_by_truck_id.get(truck.id)
+        assignment = assignment_by_truck_id.get(truck.id)
+        state_code = dispatcher_truck_state_code(
+            is_active=getattr(truck, 'is_active', True),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(truck.id) or ''
+            ),
+            has_open_trip=bool(
+                active_trip and active_trip.status in OPEN_TRIP_STATUSES
+            ),
+            has_pending_assignment=bool(
+                assignment and assignment.status == AssignmentStatus.PENDING
+            ),
+            has_accepted_assignment=bool(
+                assignment and assignment.status == AssignmentStatus.ACCEPTED
+            ),
+        )
+        truck_state_code_by_id[truck.id] = state_code
+        status, label, resolved_code = dispatcher_equipment_state_tuple(
+            equipment_state_ui(equipment_state_map, state_code)
+        )
+        if downtime_state_code_by_equipment_id.get(truck.id):
+            label = (
+                dispatcher_downtime_reason_label(
+                    downtime_by_equipment_id.get(truck.id)
+                )
+                or label
+            )
+        truck_state_by_id[truck.id] = status, label, resolved_code
 
-    def dispatcher_complex_label(equipment):
-        """Человекочитаемое и однозначное имя комплекса.
-
-        Обычные номера ``5``/``Э-5``/``ЭКГ-5`` остаются ``K-5``. Маркированный
-        номер вроде ``ТВИ 4`` нельзя сводить к первой цифре: иначе он сливается
-        с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
-        """
-        raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
-        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
-        if ordinary:
-            return f'K-{int(ordinary.group(1))}'
-        slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
-        return f'K-{slug}' if slug else f'K-ID-{equipment.id}'
-
-    def complex_number_int(card):
-        match = re.search(r'\d+', str(card.get('id', '') or ''))
-        return int(match.group(0)) if match else 9999
+    excavator_state_code_by_id = {}
+    excavator_state_by_id = {}
+    for excavator in excavators_list:
+        state_code = dispatcher_excavator_state_code(
+            is_active=getattr(excavator, 'is_active', True),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(excavator.id) or ''
+            ),
+            has_active_trip=bool(
+                active_trip_by_excavator_id.get(excavator.id)
+            ),
+            is_in_active_zone=excavator.id in active_excavator_ids,
+        )
+        excavator_state_code_by_id[excavator.id] = state_code
+        excavator_state_by_id[excavator.id] = dispatcher_equipment_state_tuple(
+            equipment_state_ui(equipment_state_map, state_code)
+        )
 
     excavator_by_id = {excavator.id: excavator for excavator in excavators_list}
     shown_excavators = sorted(
         [excavator_by_id[equipment_id] for equipment_id in active_excavator_ids if equipment_id in excavator_by_id],
-        key=garage_number_int,
+        key=dispatcher_garage_number_int,
     )
 
     trips_by_excavator_id = defaultdict(list)
@@ -2905,7 +2302,7 @@ def build_dispatcher_dashboard_context(
         # настоящей техники, его не трогаем; фильтруем только префикс «ТЕСТ».
         if str(excavator.garage_number or '').strip().upper().startswith('ТЕСТ'):
             continue
-        index = garage_number_int(excavator)
+        index = dispatcher_garage_number_int(excavator)
         complex_label = dispatcher_complex_label(excavator)
         row = by_excavator[excavator.id]
         need = max(len(row['trucks']), row['accepted'] + row['pending'], 0)
@@ -2914,8 +2311,24 @@ def build_dispatcher_dashboard_context(
         fact = row['volume']
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
-        status_key, status_label, equipment_state_code = complex_equipment_state(excavator, row)
-        status_label = downtime_reason_label_for(excavator.id) or status_label
+        complex_state_code = dispatcher_complex_state_code(
+            is_active=bool(excavator and getattr(excavator, 'is_active', True)),
+            downtime_state_code=(
+                downtime_state_code_by_equipment_id.get(excavator.id) or ''
+            ),
+            has_pending=bool(row.get('pending')),
+            has_active_trips=bool(row.get('active_trips')),
+            has_accepted=bool(row.get('accepted')),
+            is_in_active_zone=excavator.id in active_excavator_ids,
+        )
+        status_key, status_label, equipment_state_code = (
+            dispatcher_equipment_state_tuple(
+                equipment_state_ui(equipment_state_map, complex_state_code)
+            )
+        )
+        status_label = dispatcher_downtime_reason_label(
+            downtime_by_equipment_id.get(excavator.id)
+        ) or status_label
 
         complex_trips = trips_by_excavator_id.get(excavator.id, [])
         placement = placement_by_excavator_id.get(excavator.id)
@@ -2955,7 +2368,7 @@ def build_dispatcher_dashboard_context(
             if trip.rock_type:
                 rock_by_truck[trip.truck_id] = str(trip.rock_type)
         truck_by_id = {truck.id: truck for truck in trucks_list}
-        for truck_id in sorted(current_truck_ids, key=lambda item: garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
+        for truck_id in sorted(current_truck_ids, key=lambda item: dispatcher_garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
             truck = truck_by_id.get(truck_id)
             if not truck:
                 continue
@@ -2973,7 +2386,9 @@ def build_dispatcher_dashboard_context(
                 if transfer_pending
                 else None
             )
-            truck_status, truck_state_label, truck_state_code = truck_current_state(truck)
+            truck_status, truck_state_label, truck_state_code = (
+                truck_state_by_id[truck.id]
+            )
             truck_volume = volume_by_truck.get(truck_id, Decimal('0'))
             truck_plan = dispatcher_plan_for_equipment(truck)
             truck_rows.append({
@@ -3018,7 +2433,10 @@ def build_dispatcher_dashboard_context(
                 'free_bucket_expires_at': (
                     free_bucket_marker_by_truck_id.get(truck_id, {}).get('expires_at')
                 ),
-                **equipment_presence_fields(truck.id),
+                **dispatcher_equipment_presence_fields(
+                    truck.id,
+                    open_shift_by_equipment_id,
+                ),
             })
         forecast = fact
         current_rock = (
@@ -3064,13 +2482,16 @@ def build_dispatcher_dashboard_context(
             'current_block': current_block,
             'current_rock': current_rock,
             'active_downtime': dispatcher_downtime_card_payload(active_downtime),
-            **equipment_presence_fields(excavator.id),
+            **dispatcher_equipment_presence_fields(
+                excavator.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     excavator_tiles = []
     for index, excavator in enumerate(excavators_list[:12], start=1):
-        board_number = garage_number_int(excavator)
-        status, label, equipment_state_code = excavator_current_state(excavator)
+        board_number = dispatcher_garage_number_int(excavator)
+        status, label, equipment_state_code = excavator_state_by_id[excavator.id]
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
         excavator_tiles.append({
@@ -3097,7 +2518,10 @@ def build_dispatcher_dashboard_context(
             'icon': equipment_icon_key(excavator, status),
             'card_id': str(excavator.id) if excavator else '',
             'board_number': board_number,
-            **equipment_presence_fields(excavator.id),
+            **dispatcher_equipment_presence_fields(
+                excavator.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     excavator_garage_tiles = []
@@ -3275,7 +2699,7 @@ def build_dispatcher_dashboard_context(
         complex_cards,
         key=lambda card: (
             status_order.get(card['status_key'], 3),
-            complex_number_int(card),
+            dispatcher_complex_number_int(card),
             card.get('id') or '',
         ),
     )
@@ -3383,7 +2807,7 @@ def build_dispatcher_dashboard_context(
             continue
         if str(truck_number) in active_complex_truck_names:
             continue
-        status, label, equipment_state_code = truck_current_state(truck)
+        status, label, equipment_state_code = truck_state_by_id[truck.id]
         truck_plan = dispatcher_plan_for_equipment(truck)
         truck_garage_tiles.append({
             'equipment': truck,
@@ -3413,10 +2837,13 @@ def build_dispatcher_dashboard_context(
             ),
             'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
             'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
-            **equipment_presence_fields(truck.id),
+            **dispatcher_equipment_presence_fields(
+                truck.id,
+                open_shift_by_equipment_id,
+            ),
         })
     mobile_truck_garage_tiles = []
-    mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
+    mobile_truck_sort_source = sorted(trucks_list, key=dispatcher_garage_number_int)
     for index, truck in enumerate(mobile_truck_sort_source, start=1):
         if len(mobile_truck_garage_tiles) >= 52:
             break
@@ -3425,7 +2852,7 @@ def build_dispatcher_dashboard_context(
         truck_number = dispatcher_truck_garage_number(truck, index)
         if truck_number is None:
             continue
-        status, label, equipment_state_code = truck_current_state(truck)
+        status, label, equipment_state_code = truck_state_by_id[truck.id]
         truck_plan = dispatcher_plan_for_equipment(truck)
         mobile_truck_garage_tiles.append({
             'equipment': truck,
@@ -3455,7 +2882,10 @@ def build_dispatcher_dashboard_context(
             ),
             'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
             'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
-            **equipment_presence_fields(truck.id),
+            **dispatcher_equipment_presence_fields(
+                truck.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     completed_shift_percent = (
@@ -3491,12 +2921,15 @@ def build_dispatcher_dashboard_context(
     reserve_trucks = sum(
         1
         for truck in trucks_list
-        if truck.id not in assigned_truck_ids and truck_current_state(truck)[2] == 'free'
+        if truck.id not in assigned_truck_ids and truck_state_code_by_id[truck.id] == 'free'
     )
     reserve_excavators = sum(
         1
         for excavator in excavators_list
-        if excavator.id not in active_excavator_ids and excavator_current_state(excavator)[2] == 'garage'
+        if (
+            excavator.id not in active_excavator_ids
+            and excavator_state_code_by_id[excavator.id] == 'garage'
+        )
     )
     mobile_shift_report = {
         'completed_trip_count': len(completed_shift_trips),
@@ -3518,13 +2951,19 @@ def build_dispatcher_dashboard_context(
         if (
             not equipment
             or not tile.get('card_id')
-            or not equipment_card_requested(tile['card_id'])
+            or not dispatcher_equipment_card_requested(
+                requested_equipment_card_ids,
+                tile['card_id'],
+            )
         ):
             continue
         downtime = downtime_by_equipment_id.get(equipment.id)
         active_trip = active_trip_by_excavator_id.get(equipment.id)
         latest_trip = latest_trip_by_equipment_id.get(equipment.id)
-        details = shift_details(equipment)
+        details = dispatcher_shift_details(
+            open_shift_by_equipment_id.get(equipment.id),
+            format_datetime=format_dispatcher_datetime,
+        )
         details.extend([
             {'label': 'Комплекс', 'value': tile.get('complex')},
         ])
@@ -3543,14 +2982,18 @@ def build_dispatcher_dashboard_context(
                 {'label': 'Простой', 'value': downtime.reason},
                 {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
             ])
-        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+            equipment.id,
+            open_shift_by_equipment_id,
+            work_assignment_by_equipment_id,
+        )
         equipment_cards[str(tile['card_id'])] = build_dispatcher_equipment_card(
             card_id=tile['card_id'],
             equipment=equipment,
             number=tile.get('display_name') or tile.get('name'),
             icon=tile.get('icon'),
             status=tile.get('status'),
-            status_label=status_label_for(tile.get('status'), tile.get('label')),
+            status_label=dispatcher_status_label(tile.get('status'), tile.get('label')),
             zone=tile.get('complex') or 'гараж',
             percent=tile.get('percent', 0),
             employee=equipment_employee,
@@ -3569,11 +3012,17 @@ def build_dispatcher_dashboard_context(
         )
 
     for card in complex_cards:
-        if not equipment_card_requested(card['card_id']):
+        if not dispatcher_equipment_card_requested(
+            requested_equipment_card_ids,
+            card['card_id'],
+        ):
             continue
         complex_report = dispatcher_complex_shift_report(card)
         complex_excavator = card.get('excavator')
-        details = shift_details(complex_excavator) + [
+        details = dispatcher_shift_details(
+            open_shift_by_equipment_id.get(complex_excavator.id),
+            format_datetime=format_dispatcher_datetime,
+        ) + [
             {
                 'label': 'Экскаватор',
                 'value': ' · '.join(part for part in [
@@ -3589,7 +3038,11 @@ def build_dispatcher_dashboard_context(
             details.append({'label': 'Требует внимания', 'value': card.get('status_label') or 'Комплекс остановлен'})
         elif card.get('status_key') == 'blue':
             details.append({'label': 'Требует внимания', 'value': 'Комплекс назначен без активной операции'})
-        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(complex_excavator.id)
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+            complex_excavator.id,
+            open_shift_by_equipment_id,
+            work_assignment_by_equipment_id,
+        )
         equipment_cards[str(card['card_id'])] = build_dispatcher_equipment_card(
             card_id=card['card_id'],
             equipment=complex_excavator,
@@ -3628,13 +3081,30 @@ def build_dispatcher_dashboard_context(
             if (
                 not card_id
                 or card_id in equipment_cards
-                or not equipment_card_requested(card_id)
+                or not dispatcher_equipment_card_requested(
+                    requested_equipment_card_ids,
+                    card_id,
+                )
             ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             downtime = downtime_by_equipment_id.get(equipment.id) if equipment else None
-            status_label = status_label_for(tile.get('status'), tile.get('label'))
-            details = shift_details(equipment) + [
+            if equipment:
+                equipment_employee, employee_presence_label = (
+                    dispatcher_employee_for_equipment(
+                        equipment.id,
+                        open_shift_by_equipment_id,
+                        work_assignment_by_equipment_id,
+                    )
+                )
+            else:
+                equipment_employee = None
+                employee_presence_label = 'Сотрудник не назначен'
+            status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
+            details = dispatcher_shift_details(
+                open_shift_by_equipment_id.get(equipment.id) if equipment else None,
+                format_datetime=format_dispatcher_datetime,
+            ) + [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
                 {'label': 'Комплекс', 'value': complex_card.get('id')},
                 {'label': 'Состояние', 'value': tile.get('label')},
@@ -3655,7 +3125,7 @@ def build_dispatcher_dashboard_context(
                 status_label=status_label,
                 zone=f'{complex_card.get("id")} / в составе',
                 percent=tile.get('percent', 0),
-                employee=dispatcher_employee_for_equipment(equipment.id)[0] if equipment else None,
+                employee=equipment_employee,
                 shift=open_shift_by_equipment_id.get(equipment.id) if equipment else None,
                 manual_trip=dispatcher_manual_trip_payload(
                     equipment,
@@ -3665,10 +3135,7 @@ def build_dispatcher_dashboard_context(
                     rock_types=dispatcher_rock_types,
                     dump_points=dispatcher_dump_points,
                 ) if equipment else None,
-                employee_presence_label=(
-                    dispatcher_employee_for_equipment(equipment.id)[1]
-                    if equipment else 'Сотрудник не назначен'
-                ),
+                employee_presence_label=employee_presence_label,
                 details=details,
                 shift_report=dispatcher_card_shift_report(equipment, 'Самосвал'),
                 plan=tile.get('plan'),
@@ -3680,17 +3147,23 @@ def build_dispatcher_dashboard_context(
         for mobile_tile in mobile_truck_garage_tiles
         if mobile_tile.get('card_id') and str(mobile_tile.get('card_id')) not in equipment_cards
     ]:
-        if not equipment_card_requested(tile.get('card_id')):
+        if not dispatcher_equipment_card_requested(
+            requested_equipment_card_ids,
+            tile.get('card_id'),
+        ):
             continue
         equipment = tile.get('equipment')
-        status_label = status_label_for(tile.get('status'), tile.get('label'))
+        status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
         details = dispatcher_plan_details(tile.get('plan'))
         if equipment:
             downtime = downtime_by_equipment_id.get(equipment.id)
             active_trip = active_trip_by_truck_id.get(equipment.id)
             assignment = assignment_by_truck_id.get(equipment.id)
             latest_trip = latest_trip_by_equipment_id.get(equipment.id)
-            details = shift_details(equipment) + details
+            details = dispatcher_shift_details(
+                open_shift_by_equipment_id.get(equipment.id),
+                format_datetime=format_dispatcher_datetime,
+            ) + details
             if assignment:
                 details.extend([
                     {'label': 'Назначение', 'value': 'принято' if assignment.status == AssignmentStatus.ACCEPTED else 'ожидает'},
@@ -3713,7 +3186,11 @@ def build_dispatcher_dashboard_context(
                     {'label': 'Простой', 'value': downtime.reason},
                     {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
                 ])
-            equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
+            equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+                equipment.id,
+                open_shift_by_equipment_id,
+                work_assignment_by_equipment_id,
+            )
             card = build_dispatcher_equipment_card(
                 card_id=tile['card_id'],
                 equipment=equipment,
@@ -3872,408 +3349,35 @@ def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shif
     )
 
 
-def get_dispatcher_control_url(request):
-    query_parts = []
-    for key in DISPATCHER_FILTER_KEYS:
-        value = request.POST.get(key, '').strip()
-        if value == '':
-            value = request.GET.get(key, '').strip()
-        if value != '':
-            query_parts.append(f'{key}={value}')
-    base_url = reverse('dispatcher_control')
-    if not query_parts:
-        return base_url
-    return f"{base_url}?{'&'.join(query_parts)}"
-
-
-def dispatcher_access_from_request(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return None
-    return (
-        EmployeeAccess.objects
-        .select_related('employee', 'role')
-        .filter(id=access_id, is_active=True, role__code__in={'dispatcher', 'admin', 'manager'})
-        .first()
-    )
-
-
 def lock_dispatcher_mutation_access(request, access):
-    """Serialize role activation and re-check a fresh dispatcher generation."""
-    Employee.objects.select_for_update().get(pk=access.employee_id)
-    locked_access = (
-        EmployeeAccess.objects
-        .select_for_update(of=('self',))
-        .select_related('employee', 'employee__contractor_organization', 'role')
-        .filter(
-            id=access.id,
-            employee_id=access.employee_id,
-            is_active=True,
-        )
-        .first()
+    """Preserve the views patch seam while delegating the guard implementation."""
+    return _lock_dispatcher_mutation_access(
+        request,
+        access,
+        role_session_state_getter=role_session_state,
     )
-    if (
-        not locked_access
-        or locked_access.role.code not in {'dispatcher', 'admin', 'manager'}
-        or not role_session_state(request, locked_access)['is_active']
-    ):
-        return None
-    return locked_access
-
-
-def dispatcher_shift_required_response(access):
-    if get_active_dispatcher_shift(access):
-        return None
-    return JsonResponse(
-        {'ok': False, 'error': 'Смена горного диспетчера закрыта. Изменения на пульте недоступны.'},
-        status=409,
-    )
-
-
-def dispatcher_shift_required_redirect(request, access, redirect_url):
-    if get_active_dispatcher_shift(access):
-        return None
-    messages.error(request, 'Смена горного диспетчера закрыта. Изменения на пульте недоступны.')
-    return redirect(redirect_url)
-
-
-def dispatcher_json_payload(request):
-    try:
-        return json.loads(request.body.decode('utf-8') or '{}')
-    except json.JSONDecodeError:
-        return {}
-
-
-def dispatcher_client_action_error(payload, error, *, code='stale_client'):
-    return JsonResponse(
-        {
-            'ok': False,
-            'error': '; '.join(error.messages) if isinstance(error, ValidationError) else str(error),
-            'code': code,
-            'conflict': True,
-            'client_action_id': str((payload or {}).get('client_action_id') or ''),
-        },
-        status=409,
-    )
-
-
-def required_assignment_state_id(payload):
-    if 'expected_assignment_state_id' not in payload:
-        raise ClientActionRequired(
-            'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.'
-        )
-    try:
-        value = int(payload.get('expected_assignment_state_id'))
-    except (TypeError, ValueError):
-        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
-    if value < 0:
-        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
-    return value
-
-
-def required_projected_assignment_states(payload):
-    if 'expected_assignment_states' not in payload:
-        raise ClientActionRequired(
-            'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
-        )
-    return payload.get('expected_assignment_states')
 
 
 @require_POST
 @transaction.atomic
 def dispatcher_move_excavator_view(request):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': 'Роль неактивна — доступен только просмотр',
-                'code': 'inactive_role',
-            },
-            status=409,
-        )
-    shift_error = dispatcher_shift_required_response(access)
-    if shift_error:
-        return shift_error
-    payload = dispatcher_json_payload(request)
-    try:
-        client_action_id, signature, repeated_response = begin_client_action(
-            employee=access.employee,
-            action_type='dispatcher_move_excavator',
-            payload=payload,
-        )
-    except (ClientActionRequired, ClientActionPayloadConflict) as error:
-        return dispatcher_client_action_error(payload, error)
-    if repeated_response is not None:
-        return JsonResponse(repeated_response)
-    lock_production_state()
-    excavator = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('excavator_id'),
-        equipment_type__name__icontains='Экскаватор',
-        is_active=True,
+    return _execute_dispatcher_move_excavator(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
+        equipment_label=equipment_short_name,
     )
-    zone = payload.get('zone')
-    if zone not in {ExcavatorPlacement.Zone.ACTIVE, ExcavatorPlacement.Zone.INACTIVE}:
-        return JsonResponse({'ok': False, 'error': 'Некорректная зона экскаватора.'}, status=400)
-
-    placement = (
-        ExcavatorPlacement.objects.select_for_update()
-        .filter(excavator=excavator)
-        .first()
-    )
-    actual_zone = placement.zone if placement else ExcavatorPlacement.Zone.INACTIVE
-    expected_zone = str(payload.get('expected_zone') or '').strip()
-    if not expected_zone:
-        return dispatcher_client_action_error(
-            payload,
-            ClientActionRequired('Экран открыт в старой версии. Обновите пульт.'),
-        )
-    if expected_zone != actual_zone:
-        return dispatcher_client_action_error(
-            payload,
-            HaulAssignmentStateConflict(
-                expected_state_id=expected_zone,
-                actual_state_id=actual_zone,
-            ),
-            code='state_conflict',
-        )
-    if not placement:
-        placement = ExcavatorPlacement.objects.create(excavator=excavator)
-
-    scheduled_assignments = []
-    if zone == ExcavatorPlacement.Zone.INACTIVE:
-        try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
-            )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            now = timezone.now()
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
-        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-
-    placement.zone = zone
-    placement.changed_by = access.employee
-    placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
-    if zone == ExcavatorPlacement.Zone.INACTIVE:
-        scheduled = len(scheduled_assignments)
-        summary = f'{equipment_short_name(excavator)} возвращен в гараж, снятие назначений ожидает ({scheduled} самосв.)'
-    else:
-        scheduled = 0
-        summary = f'{equipment_short_name(excavator)} переведен в активную смену'
-
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        target_summary=summary,
-    )
-    response_payload = {
-        'ok': True,
-        'scheduled': scheduled,
-        'assignment_state_ids': {
-            str(item.truck_id): item.id for item in scheduled_assignments
-        },
-        'client_action_id': client_action_id,
-    }
-    complete_client_action(
-        employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
-        action_type='dispatcher_move_excavator',
-        client_action_id=client_action_id,
-        signature=signature,
-        response_payload=response_payload,
-    )
-    return JsonResponse(response_payload)
 
 
 @require_POST
 @transaction.atomic
 def dispatcher_assign_truck_view(request):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': 'Роль неактивна — доступен только просмотр',
-                'code': 'inactive_role',
-            },
-            status=409,
-        )
-    shift_error = dispatcher_shift_required_response(access)
-    if shift_error:
-        return shift_error
-    payload = dispatcher_json_payload(request)
-    action = payload.get('action')
-    now = timezone.now()
-    try:
-        client_action_id, signature, repeated_response = begin_client_action(
-            employee=access.employee,
-            action_type='dispatcher_assign_truck',
-            payload=payload,
-        )
-    except (ClientActionRequired, ClientActionPayloadConflict) as error:
-        return dispatcher_client_action_error(payload, error)
-    if repeated_response is not None:
-        return JsonResponse(repeated_response)
-    lock_production_state()
-
-    if action == 'release_complex':
-        excavator = get_object_or_404(
-            Equipment.objects.select_for_update().select_related('equipment_type'),
-            id=payload.get('excavator_id'),
-            equipment_type__name__icontains='Экскаватор',
-            is_active=True,
-        )
-        try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
-            )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            scheduled_assignments = []
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
-        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-        scheduled = len(scheduled_assignments)
-        log_dispatcher_action(
-            actor=access.employee,
-            action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-            target_summary=f'{equipment_short_name(excavator)}: снятие назначений ожидает ({scheduled})',
-        )
-        response_payload = {
-            'ok': True,
-            'scheduled': scheduled,
-            'assignment_state_ids': {
-                str(item.truck_id): item.id for item in scheduled_assignments
-            },
-            'client_action_id': client_action_id,
-        }
-        complete_client_action(
-            employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
-            action_type='dispatcher_assign_truck',
-            client_action_id=client_action_id,
-            signature=signature,
-            response_payload=response_payload,
-        )
-        return JsonResponse(response_payload)
-
-    truck = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('truck_id'),
-        equipment_type__name__icontains='Самосвал',
-        is_active=True,
+    return _execute_dispatcher_assign_truck(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
+        equipment_label=equipment_short_name,
     )
-    try:
-        expected_state_id = required_assignment_state_id(payload)
-    except ClientActionRequired as error:
-        return dispatcher_client_action_error(payload, error)
-    if action == 'release':
-        try:
-            assignment, created = schedule_haul_release(
-                truck=truck,
-                assigned_by=access.employee,
-                now=now,
-                expected_state_id=expected_state_id,
-            )
-        except HaulAssignmentStateConflict as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-        log_dispatcher_action(
-            actor=access.employee,
-            action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-            target_summary=f'{equipment_short_name(truck)} снят с комплекса и возвращен в гараж',
-        )
-        response_payload = {
-            'ok': True,
-            'assignment_id': assignment.id if assignment else None,
-            'assignment_state_id': assignment.id if assignment else 0,
-            'created': created,
-            'client_action_id': client_action_id,
-        }
-        complete_client_action(
-            employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
-            action_type='dispatcher_assign_truck',
-            client_action_id=client_action_id,
-            signature=signature,
-            response_payload=response_payload,
-        )
-        return JsonResponse(response_payload)
-
-    if action != 'assign':
-        return JsonResponse({'ok': False, 'error': 'Некорректное действие с самосвалом.'}, status=400)
-
-    excavator = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('excavator_id'),
-        equipment_type__name__icontains='Экскаватор',
-        is_active=True,
-    )
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
-    if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
-        placement.zone = ExcavatorPlacement.Zone.ACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
-    try:
-        assignment, created = schedule_haul_assignment(
-            truck=truck,
-            excavator=excavator,
-            assigned_by=access.employee,
-            now=now,
-            expected_state_id=expected_state_id,
-        )
-    except HaulAssignmentStateConflict as error:
-        return dispatcher_client_action_error(payload, error, code='state_conflict')
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        target_summary=f'{equipment_short_name(truck)} назначен под {equipment_short_name(excavator)}',
-        haul_assignment=assignment,
-    )
-    response_payload = {
-        'ok': True,
-        'assignment_id': assignment.id,
-        'assignment_state_id': assignment.id,
-        'created': created,
-        'client_action_id': client_action_id,
-    }
-    complete_client_action(
-        employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
-        action_type='dispatcher_assign_truck',
-        client_action_id=client_action_id,
-        signature=signature,
-        response_payload=response_payload,
-    )
-    return JsonResponse(response_payload)
 
 
 def excavator_access_from_request(request, *, require_active_role=True):
@@ -7319,127 +6423,16 @@ def excavator_downtime_action_view(request):
     response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
     return JsonResponse(response_payload)
 
-def protect_dispatcher_equipment_detail_response(response):
-    response['Cache-Control'] = 'private, no-store, max-age=0'
-    response['Pragma'] = 'no-cache'
-    response['X-Content-Type-Options'] = 'nosniff'
-    response['Vary'] = 'Cookie'
-    return response
-
-
-def dispatcher_equipment_detail_error(code, *, status):
-    return protect_dispatcher_equipment_detail_response(JsonResponse(
-        {
-            'contract': 'dispatcher-equipment-detail-v1',
-            'error': code,
-        },
-        status=status,
-    ))
-
-
-def dispatcher_downtime_close_response(payload, *, status=200):
-    response_payload = {
-        'contract': 'dispatcher-downtime-close-v1',
-        **payload,
-    }
-    return protect_dispatcher_equipment_detail_response(
-        JsonResponse(response_payload, status=status)
-    )
-
-
 @require_POST
 @transaction.atomic
 def dispatcher_close_downtime_view(request, event_id):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'forbidden'},
-            status=403,
-        )
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'inactive_role'},
-            status=409,
-        )
-    if not get_active_dispatcher_shift(access):
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'dispatcher_shift_required'},
-            status=409,
-        )
-
-    payload = dispatcher_json_payload(request)
-    try:
-        requested_version = int(payload.get('state_version', -1))
-    except (TypeError, ValueError):
-        requested_version = -1
-    if requested_version < 0:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'invalid_state_version'},
-            status=400,
-        )
-
-    state = lock_production_state()
-    event = (
-        DowntimeEvent.objects
-        .select_for_update()
-        .select_related('equipment', 'equipment__equipment_type', 'reason')
-        .filter(
-            pk=event_id,
-            equipment__is_active=True,
-            equipment__equipment_type__name__in={'Самосвал', 'Экскаватор'},
-        )
-        .first()
+    return _execute_dispatcher_close_downtime(
+        request,
+        event_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        response_builder=dispatcher_downtime_close_response,
+        event_payload=downtime_event_payload,
     )
-    if not event:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'downtime_not_found'},
-            status=404,
-        )
-    if event.ended_at:
-        response_payload = downtime_event_payload(event, action='dispatcher_downtime_already_closed')
-        response_payload.update({
-            'closed': False,
-            'already_closed': True,
-            'version': state.version,
-        })
-        return dispatcher_downtime_close_response(response_payload)
-    if state.version != requested_version:
-        return dispatcher_downtime_close_response(
-            {
-                'ok': False,
-                'error': 'stale_board',
-                'version': state.version,
-            },
-            status=409,
-        )
-
-    event.ended_at = timezone.now()
-    event.save(update_fields=['ended_at'])
-    state = bump_operational_state(
-        'Dispatcher:downtime_closed',
-        event_type='downtime_changed',
-        object_type='DowntimeEvent',
-        object_id=event.id,
-        payload={
-            'action': 'dispatcher_downtime_closed',
-            'actor_id': access.employee_id,
-            'equipment_id': event.equipment_id,
-            'equipment_type': event.equipment.equipment_type.name,
-            'reason_id': event.reason_id,
-            'source': 'dispatcher_override',
-        },
-    )
-    response_payload = downtime_event_payload(
-        event,
-        action='dispatcher_downtime_closed',
-        closed=True,
-    )
-    response_payload.update({
-        'already_closed': False,
-        'version': state.version,
-    })
-    return dispatcher_downtime_close_response(response_payload)
 
 
 @require_http_methods(['GET', 'POST'])
@@ -7494,100 +6487,21 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         card_key = str(equipment.pk)
 
     if request.method == 'POST':
-        if equipment.equipment_type.name != 'Экскаватор':
-            return dispatcher_equipment_detail_error('settings_not_available', status=400)
-        if not role_session_state(request, access)['is_active']:
-            return dispatcher_equipment_detail_error('inactive_role', status=409)
-        if not get_active_dispatcher_shift(access):
-            return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
-
-        payload = excavator_json_payload(request)
-        try:
-            requested_version = int(payload.get('state_version', -1))
-        except (TypeError, ValueError):
-            requested_version = -1
-        if requested_version < 0:
-            return dispatcher_equipment_detail_error('invalid_state_version', status=400)
-
-        rock_type = RockType.objects.filter(
-            id=payload.get('rock_type_id'),
-            is_active=True,
-        ).first()
-        try:
-            destinations = parse_excavator_destinations(
-                payload,
-                list(DumpPoint.objects.filter(is_active=True).order_by('name')),
-            )
-        except ValueError:
-            return dispatcher_equipment_detail_error('invalid_transport_distance', status=400)
-        if not rock_type or not destinations:
-            return dispatcher_equipment_detail_error('invalid_work_settings', status=400)
-        dump_points = [row['dump_point'] for row in destinations]
-        loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
-        loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
-
-        with transaction.atomic():
-            access = lock_dispatcher_mutation_access(request, access)
-            if not access:
-                return dispatcher_equipment_detail_error('inactive_role', status=409)
-            if not get_active_dispatcher_shift(access):
-                return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
-            state = lock_production_state()
-            if state.version != requested_version:
-                return dispatcher_equipment_detail_error('stale_board', status=409)
-            equipment = (
-                Equipment.objects
-                .select_for_update()
-                .select_related('equipment_type')
-                .get(pk=equipment.pk)
-            )
-            placement = save_excavator_work_context(
-                current_excavator=equipment,
-                actor=access.employee,
-                rock_type=rock_type,
-                dump_points=dump_points,
-                loading_horizon=loading_horizon,
-                loading_block=loading_block,
-                destination_settings=destinations,
-            )
-            state = bump_operational_state(
-                'Dispatcher:excavator_work_settings',
-                event_type='equipment_changed',
-                object_type='Equipment',
-                object_id=equipment.id,
-                payload={
-                    'action': 'dispatcher_excavator_work_settings',
-                    'actor_id': access.employee_id,
-                    'excavator_id': equipment.id,
-                    'rock_type_id': rock_type.id,
-                    'dump_point_ids': [point.id for point in dump_points],
-                    'destinations': [
-                        {
-                            'dump_point_id': row['dump_point'].id,
-                            'transport_distance_km': (
-                                str(row['transport_distance_km'])
-                                if row['transport_distance_km'] is not None
-                                else ''
-                            ),
-                        }
-                        for row in destinations
-                    ],
-                    'loading_horizon': loading_horizon,
-                    'loading_block': loading_block,
-                },
-            )
-        return protect_dispatcher_equipment_detail_response(JsonResponse({
-            'ok': True,
-            'contract': 'dispatcher-equipment-settings-v2',
-            'equipment_id': equipment.id,
-            'version': state.version,
-            'settings': dispatcher_excavator_settings(
-                equipment,
-                placement,
-                rock_types=RockType.objects.filter(is_active=True).order_by('name'),
-                dump_points=DumpPoint.objects.filter(is_active=True).order_by('name'),
-            ),
-        }))
+        return _execute_dispatcher_equipment_settings(
+            request,
+            access,
+            equipment,
+            active_role_state=role_session_state,
+            active_shift_getter=get_active_dispatcher_shift,
+            json_payload=excavator_json_payload,
+            parse_destinations=parse_excavator_destinations,
+            normalize_numeric_setting=normalize_excavator_numeric_setting,
+            lock_mutation_access=lock_dispatcher_mutation_access,
+            error_response=dispatcher_equipment_detail_error,
+            save_work_context=save_excavator_work_context,
+            build_settings=dispatcher_excavator_settings,
+            protect_response=protect_dispatcher_equipment_detail_response,
+        )
 
     return dispatcher_control_view(
         request,
@@ -7638,213 +6552,27 @@ def dispatcher_control_view(
         equipment_detail['state_version_before'] = get_operational_state_version()
         if equipment_detail['state_version_before'] != equipment_detail['state_version']:
             return dispatcher_equipment_detail_error('stale_board', status=409)
-    dispatcher_header = dispatcher_header_override or build_dispatcher_header_context(access, request)
-    dispatcher_shift = dispatcher_header.get('active_shift')
-    reporting_period = (context_overrides or {}).get('mining_master_reporting_period')
-    has_mining_master_reporting_period = bool((reporting_period or {}).get('starts_at'))
-
-    truck_id = request.GET.get('truck', '').strip()
-    excavator_id = request.GET.get('excavator', '').strip()
-    show_active_trips = request.GET.get('show_active_trips', '1') == '1'
-    show_pending_assignments = request.GET.get('show_pending_assignments', '1') == '1'
-    show_accepted_assignments = request.GET.get('show_accepted_assignments', '1') == '1'
-
-    active_trips = (
-        Trip.objects
-        .filter(status__in=OPEN_TRIP_STATUSES)
-        .select_related(
-            'truck',
-            'truck__equipment_type',
-            'excavator',
-            'excavator__equipment_type',
-            'rock_type',
-            'dump_point',
-            'assigned_dump_point',
-            'actual_dump_point',
-            'excavator_operator',
-            'loading_shift',
-        )
-        .order_by('created_at')
+    read_model = build_dispatcher_control_read_model(
+        request,
+        access,
+        dashboard_builder=build_dispatcher_dashboard_context,
+        equipment_shift_is_current=mining_master_equipment_shift_is_current,
+        dispatcher_header_override=dispatcher_header_override,
+        context_overrides=context_overrides,
+        equipment_detail=equipment_detail,
     )
-    if not dispatcher_shift and not has_mining_master_reporting_period:
-        active_trips = active_trips.none()
-    if truck_id:
-        active_trips = active_trips.filter(truck_id=truck_id)
-    if excavator_id:
-        active_trips = active_trips.filter(excavator_id=excavator_id)
-    if not show_active_trips:
-        active_trips = active_trips.none()
-
-    pending_assignments = (
-        HaulAssignment.objects
-        .filter(status=AssignmentStatus.PENDING, ended_at__isnull=True)
-        .select_related(
-            'truck',
-            'truck__equipment_type',
-            'excavator',
-            'excavator__equipment_type',
-            'assigned_by',
-        )
-        .order_by('assigned_at')
-    )
-    if truck_id:
-        pending_assignments = pending_assignments.filter(truck_id=truck_id)
-    if excavator_id:
-        pending_assignments = pending_assignments.filter(excavator_id=excavator_id)
-    if not show_pending_assignments:
-        pending_assignments = pending_assignments.none()
-
-    accepted_assignments = (
-        HaulAssignment.objects
-        .filter(status=AssignmentStatus.ACCEPTED, ended_at__isnull=True)
-        .select_related(
-            'truck',
-            'truck__equipment_type',
-            'excavator',
-            'excavator__equipment_type',
-            'assigned_by',
-        )
-        .order_by('-accepted_at')
-    )
-    if truck_id:
-        accepted_assignments = accepted_assignments.filter(truck_id=truck_id)
-    if excavator_id:
-        accepted_assignments = accepted_assignments.filter(excavator_id=excavator_id)
-    if not show_accepted_assignments:
-        accepted_assignments = accepted_assignments.none()
-
-    production_context = production_shift_context()
-    production_shift_start, production_shift_end = production_shift_bounds(
-        production_context.production_date,
-        production_context.shift_type,
-    )
-    recent_completed_trips = (
-        Trip.objects
-        .filter(
-            status=TripStatus.COMPLETED,
-            completed_at__gte=production_shift_start,
-            completed_at__lt=production_shift_end,
-        )
-        .select_related(
-            'truck',
-            'truck__equipment_type',
-            'excavator',
-            'excavator__equipment_type',
-            'rock_type',
-            'dump_point',
-            'driver',
-        )
-        .order_by('-completed_at')
-    )
-    equipment_work_assignments = list(
-        EquipmentAssignment.objects
-        .filter(
-            status=AssignmentStatus.ACCEPTED,
-            ended_at__isnull=True,
-            shift__isnull=True,
-            shift_type=production_context.shift_type,
-            employee__is_active=True,
-            equipment__is_active=True,
-            role__code__in={'driver', 'excavator_operator'},
-        )
-        .select_related('employee', 'equipment', 'role')
-        .order_by('equipment_id', '-assigned_at', '-id')
-    )
-    if not dispatcher_shift and not has_mining_master_reporting_period:
-        recent_completed_trips = recent_completed_trips.none()
-    if truck_id:
-        recent_completed_trips = recent_completed_trips.filter(truck_id=truck_id)
-    if excavator_id:
-        recent_completed_trips = recent_completed_trips.filter(excavator_id=excavator_id)
-
-    open_shifts = (
-        EmployeeShift.objects
-        .filter(closed_at__isnull=True)
-        .select_related('employee', 'equipment', 'equipment__equipment_type', 'plan_group', 'opened_by')
-        .order_by('opened_at')
-    )
-    if dispatcher_shift:
-        open_shifts = open_shifts.exclude(id=dispatcher_shift.id)
-    if truck_id:
-        open_shifts = open_shifts.filter(equipment_id=truck_id)
-    if excavator_id:
-        open_shifts = open_shifts.filter(equipment_id=excavator_id)
-    open_shifts = list(open_shifts[:120])
-    open_shift_employees = attach_application_presence(
-        shift.employee for shift in open_shifts
-    )
-    presence_by_employee_id = {
-        employee.pk: employee.application_presence
-        for employee in open_shift_employees
-    }
-
-    employee_ids = [shift.employee_id for shift in open_shifts]
-    role_by_employee_id = {
-        access.employee_id: access.role.name
-        for access in (
-            EmployeeAccess.objects
-            .filter(employee_id__in=employee_ids, is_active=True, role__is_active=True)
-            .select_related('role')
-            .order_by('employee_id', 'id')
-        )
-    }
-    for shift in open_shifts:
-        shift.role_name = role_by_employee_id.get(shift.employee_id, '-')
-        shift.application_presence = presence_by_employee_id.get(shift.employee_id)
-        shift.is_dashboard_stale = bool(
-            (context_overrides or {}).get('mining_master_mobile_enabled')
-            and shift.equipment_id
-            and not mining_master_equipment_shift_is_current(shift)
-        )
-
-    trucks = (
-        Equipment.objects
-        .filter(equipment_type__name='Самосвал', is_active=True)
-        .select_related('equipment_type', 'model')
-        .order_by('garage_number')
-    )
-    excavators = (
-        Equipment.objects
-        .filter(equipment_type__name='Экскаватор', is_active=True)
-        .select_related('equipment_type', 'model')
-        .order_by('garage_number')
-    )
-    recent_dispatcher_actions = (
-        DispatcherActionLog.objects
-        .select_related('actor')
-        .order_by('-created_at')[:12]
-    )
-    open_mechanic_downtimes = (
-        DowntimeEvent.objects
-        .filter(ended_at__isnull=True)
-        .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
-        .order_by('started_at')
-    )
-    downtime_equipment_ids = [equipment_id for equipment_id in [truck_id, excavator_id] if equipment_id]
-    if downtime_equipment_ids:
-        open_mechanic_downtimes = open_mechanic_downtimes.filter(equipment_id__in=downtime_equipment_ids)
-    open_mechanic_downtimes_count = open_mechanic_downtimes.count()
-    equipment_card_ids = None
-    if not (context_overrides or {}).get('mining_master_mobile_enabled'):
-        equipment_card_ids = set()
-    if equipment_detail:
-        equipment_card_ids = {equipment_detail['card_key']}
-    dispatcher_dashboard = build_dispatcher_dashboard_context(
-        dispatcher_shift=dispatcher_shift,
-        active_trips=active_trips,
-        pending_assignments=pending_assignments,
-        accepted_assignments=accepted_assignments,
-        recent_completed_trips=recent_completed_trips,
-        open_shifts=open_shifts,
-        open_mechanic_downtimes=open_mechanic_downtimes[:30],
-        trucks=trucks,
-        excavators=excavators,
-        recent_dispatcher_actions=recent_dispatcher_actions,
-        equipment_card_ids=equipment_card_ids,
-        equipment_work_assignments=equipment_work_assignments,
-        reporting_period=reporting_period,
-    )
-
+    dispatcher_header = read_model.dispatcher_header
+    dispatcher_dashboard = read_model.dispatcher_dashboard
+    active_trips = read_model.active_trips
+    pending_assignments = read_model.pending_assignments
+    accepted_assignments = read_model.accepted_assignments
+    recent_completed_trips = read_model.recent_completed_trips
+    open_shifts = read_model.open_shifts
+    open_mechanic_downtimes = read_model.open_mechanic_downtimes
+    open_mechanic_downtimes_count = read_model.open_mechanic_downtimes_count
+    trucks = read_model.trucks
+    excavators = read_model.excavators
+    recent_dispatcher_actions = read_model.recent_dispatcher_actions
     operational_state_version = get_operational_state_version()
     if equipment_detail:
         requested_version = equipment_detail['state_version']
@@ -7874,6 +6602,7 @@ def dispatcher_control_view(
             'dispatcher_compat_title': 'Диспетчерский пульт',
             'dispatcher_board_label': 'Горный диспетчер',
             'operational_state_version': operational_state_version,
+            'dispatcher_shift_return_url': get_dispatcher_control_url(request),
             'server_now': timezone.now(),
             'dispatcher_move_excavator_url': reverse('dispatcher_move_excavator'),
             'dispatcher_assign_truck_url': reverse('dispatcher_assign_truck'),
@@ -7891,20 +6620,8 @@ def dispatcher_control_view(
             'trucks': trucks,
             'excavators': excavators,
             'recent_dispatcher_actions': recent_dispatcher_actions,
-            'filters': {
-                'truck': truck_id,
-                'excavator': excavator_id,
-                'show_active_trips': show_active_trips,
-                'show_pending_assignments': show_pending_assignments,
-                'show_accepted_assignments': show_accepted_assignments,
-            },
-            'dispatcher_filter_items': [
-                ('truck', truck_id),
-                ('excavator', excavator_id),
-                ('show_active_trips', '1' if show_active_trips else '0'),
-                ('show_pending_assignments', '1' if show_pending_assignments else '0'),
-                ('show_accepted_assignments', '1' if show_accepted_assignments else '0'),
-            ],
+            'filters': read_model.filters,
+            'dispatcher_filter_items': read_model.dispatcher_filter_items,
         }
     if context_overrides:
         context.update(context_overrides)
@@ -7927,367 +6644,47 @@ def dispatcher_control_view(
 
 @transaction.atomic
 def dispatcher_toggle_shift_view(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    session_access = access
-
-    redirect_url = request.POST.get('next') or request.META.get('HTTP_REFERER') or reverse('dispatcher_control')
-    if request.method != 'POST':
-        return redirect(redirect_url)
-
-    action = request.POST.get('shift_action')
-    if action == 'start':
-        if get_session_device_kind(request) == 'shared':
-            reauth_access, reauth_error = authenticate_dispatcher_shared_shift_start(request)
-            if reauth_error:
-                messages.error(request, reauth_error)
-                return redirect(redirect_url)
-            access = reauth_access
-            # Повторная авторизация обновляет last_login_at и метку активной
-            # роли в сессии. Проверять загруженный до неё session_access нельзя:
-            # для того же диспетчера он уже содержит устаревшую метку и ложно
-            # переводит только что авторизованную роль в режим просмотра.
-            session_access = access
-        else:
-            access = active_access_for_employee_role(access.employee, 'dispatcher')
-            if not access:
-                messages.error(request, 'Активированный доступ Горного диспетчера не найден.')
-                return redirect(redirect_url)
-        session_access = lock_dispatcher_mutation_access(request, session_access)
-        if not session_access:
-            messages.error(request, 'Роль неактивна — доступен только просмотр.')
-            return redirect(redirect_url)
-        if get_active_dispatcher_shift(access):
-            messages.warning(request, 'Смена горного диспетчера уже открыта.')
-            return redirect(redirect_url)
-        try:
-            shift = open_dispatcher_shift(
-                access,
-                close_other_role_shift=other_role_shift_flag(request.POST),
-            )
-        except ValidationError as error:
-            messages.error(request, '; '.join(error.messages))
-            return redirect(redirect_url)
-        if not shift:
-            messages.warning(request, 'Смена горного диспетчера уже открыта.')
-            return redirect(redirect_url)
-        messages.success(request, 'Смена горного диспетчера открыта.')
-        return redirect(redirect_url)
-
-    if action == 'end':
-        dispatcher_access = active_access_for_employee_role(access.employee, 'dispatcher')
-        if dispatcher_access:
-            access = dispatcher_access
-        session_access = lock_dispatcher_mutation_access(request, session_access)
-        if not session_access:
-            messages.error(request, 'Роль неактивна — доступен только просмотр.')
-            return redirect(redirect_url)
-        shift = close_dispatcher_shift(access)
-        if not shift:
-            messages.warning(request, 'Открытая смена горного диспетчера не найдена.')
-            return redirect(redirect_url)
-        messages.success(request, 'Смена горного диспетчера завершена.')
-        return redirect(redirect_url)
-
-    messages.error(request, 'Неизвестное действие со сменой диспетчера.')
-    return redirect(redirect_url)
+    return _execute_dispatcher_toggle_shift(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        shared_start_authenticator=authenticate_dispatcher_shared_shift_start,
+    )
 
 
 @transaction.atomic
 def dispatcher_service_close_shift_view(request, shift_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    reason = request.POST.get('reason', '').strip()
-    close_kind = normalize_service_close_kind(request.POST.get('close_kind'), reason)
-    if close_kind == SERVICE_CLOSE_COORDINATED and not reason:
-        messages.error(request, 'Укажите причину закрытия смены по согласованию с сотрудником.')
-        return redirect(redirect_url)
-    if not reason:
-        reason = SERVICE_CLOSE_NEGLECTED_NOTE
-
-    shift_reference = (
-        EmployeeShift.objects
-        .filter(id=shift_id, closed_at__isnull=True)
-        .values('employee_id', 'equipment_id')
-        .first()
+    return _execute_dispatcher_service_close_shift(
+        request,
+        shift_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        parse_shift_decimal=parse_excavator_shift_decimal,
+        close_kind_normalizer=normalize_service_close_kind,
+        finish_shift=finish_service_closed_shift,
+        action_logger=log_dispatcher_action,
     )
-    if not shift_reference:
-        messages.error(request, 'Открытая смена для служебного закрытия не найдена.')
-        return redirect(redirect_url)
-    locked_employee_ids = list(
-        Employee.objects
-        .select_for_update()
-        .filter(pk__in={access.employee_id, shift_reference['employee_id']})
-        .order_by('pk')
-        .values_list('pk', flat=True)
-    )
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-    shift = (
-        EmployeeShift.objects
-        .select_for_update(of=('self',))
-        .select_related('employee', 'equipment')
-        .filter(id=shift_id, closed_at__isnull=True)
-        .first()
-    )
-    if not shift:
-        messages.error(request, 'Открытая смена для служебного закрытия не найдена.')
-        return redirect(redirect_url)
-    if shift.employee_id not in locked_employee_ids:
-        messages.error(request, 'Смена сотрудника изменилась. Повторите служебное закрытие.')
-        return redirect(redirect_url)
-    if shift.employee_id == access.employee_id:
-        messages.error(request, 'Собственную смену нужно завершить штатным действием.')
-        return redirect(redirect_url)
-    if shift.equipment_id:
-        locked_equipment = (
-            Equipment.objects.select_for_update(of=('self',))
-            .select_related('equipment_type', 'model')
-            .get(pk=shift.equipment_id)
-        )
-        shift.equipment = locked_equipment
-
-    is_blocking_dispatcher_shift = (
-        access.role.code == 'dispatcher'
-        and EmployeeAccess.objects.filter(
-            employee_id=shift.employee_id,
-            role__code='dispatcher',
-            is_active=True,
-        ).exists()
-        and get_active_dispatcher_shift(access).id == shift.id
-    )
-    if not is_blocking_dispatcher_shift:
-        shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-        if shift_error:
-            return shift_error
-
-    reading_fields = []
-    # Показания необязательны: сотрудник, не закрывший смену, их не сдал, и
-    # требовать их с диспетчера нелогично. Введённые проверяем как раньше.
-    readings_provided = close_kind == SERVICE_CLOSE_COORDINATED and any(
-        str(request.POST.get(key) or '').strip()
-        for key in ('end_fuel', 'end_mileage', 'end_engine_hours')
-    )
-    if shift.equipment_id and not readings_provided:
-        shift.end_fuel = None
-        shift.end_mileage = None
-        shift.end_engine_hours = None
-        reading_fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
-    elif shift.equipment_id:
-        if equipment_is_truck(shift.equipment):
-            try:
-                readings = {
-                    'end_fuel': parse_excavator_shift_decimal(request.POST.get('end_fuel'), 'Топливо'),
-                    'end_mileage': parse_excavator_shift_decimal(request.POST.get('end_mileage'), 'Одометр'),
-                    'end_engine_hours': parse_excavator_shift_decimal(
-                        request.POST.get('end_engine_hours'),
-                        'Моточасы',
-                    ),
-                }
-                validate_driver_close_readings(shift, **readings)
-            except (ValueError, ValidationError) as error:
-                error_messages = getattr(error, 'messages', None) or [str(error)]
-                messages.error(request, '; '.join(error_messages))
-                return redirect(redirect_url)
-            for field, value in readings.items():
-                setattr(shift, field, value)
-            reading_fields = list(readings)
-        else:
-            try:
-                fuel, engine_hours = validate_excavator_shift_readings(
-                    shift.equipment,
-                    request.POST.get('end_fuel'),
-                    request.POST.get('end_engine_hours'),
-                    opening_shift=shift,
-                )
-            except ExcavatorShiftError as error:
-                messages.error(request, error.message)
-                return redirect(redirect_url)
-            shift.end_fuel = fuel
-            shift.end_mileage = None
-            shift.end_engine_hours = engine_hours
-            reading_fields = ['end_fuel', 'end_mileage', 'end_engine_hours']
-
-    finish_service_closed_shift(
-        shift,
-        closed_by=access.employee,
-        close_kind=close_kind,
-        note=reason,
-        reading_fields=reading_fields,
-    )
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
-        shift=shift,
-        target_summary=f'{shift.employee} / {shift.equipment or "-"} / {shift.get_shift_type_display()}',
-        reason=reason,
-    )
-    if close_kind == SERVICE_CLOSE_COORDINATED:
-        messages.success(request, f'Смена сотрудника {shift.employee} закрыта по согласованию с ним.')
-    else:
-        messages.success(request, f'Смена сотрудника {shift.employee} закрыта: сотрудник не закрыл её сам.')
-    return redirect(redirect_url)
 
 
 @transaction.atomic
 def dispatcher_cancel_assignment_view(request, assignment_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-    if shift_error:
-        return shift_error
-    lock_production_state()
-    reason = request.POST.get('reason', '').strip()
-
-    assignment = (
-        HaulAssignment.objects
-        .select_for_update(of=('self',))
-        .select_related('truck', 'excavator')
-        .filter(id=assignment_id, ended_at__isnull=True, status__in={AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED})
-        .first()
+    return _execute_dispatcher_cancel_assignment(
+        request,
+        assignment_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
     )
-    if not assignment:
-        messages.error(request, 'Активное назначение для отмены не найдено.')
-        return redirect(redirect_url)
-
-    if assignment.status == AssignmentStatus.ACCEPTED:
-        try:
-            pending_release, _ = schedule_haul_release(
-                truck=assignment.truck,
-                assigned_by=access.employee,
-                now=timezone.now(),
-                expected_state_id=assignment.id,
-            )
-        except HaulAssignmentStateConflict:
-            messages.error(
-                request,
-                'Назначение уже изменилось. Обновите пульт и повторите действие.',
-            )
-            return redirect(redirect_url)
-        logged_assignment = pending_release or assignment
-    else:
-        assignment.status = AssignmentStatus.CANCELLED
-        assignment.ended_at = timezone.now()
-        assignment.save(update_fields=['status', 'ended_at'])
-        logged_assignment = assignment
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        haul_assignment=logged_assignment,
-        target_summary=f'{assignment.truck} под {assignment.excavator}',
-        reason=reason,
-    )
-    messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
-    return redirect(redirect_url)
 
 
 @transaction.atomic
 def dispatcher_cancel_trip_view(request, trip_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-    if shift_error:
-        return shift_error
-    reason = request.POST.get('reason', '').strip()
-    if not reason:
-        messages.error(request, 'Укажите причину отмены рейса.')
-        return redirect(redirect_url)
-
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-    # Driver unload locks the production state before the trip. Keep the same
-    # order here so concurrent terminal actions cannot deadlock each other.
-    lock_production_state()
-    trip = (
-        Trip.objects
-        .select_for_update(of=('self',))
-        .select_related('truck', 'excavator')
-        .filter(id=trip_id, status__in=OPEN_TRIP_STATUSES)
-        .first()
+    return _execute_dispatcher_cancel_trip(
+        request,
+        trip_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        reconcile_excavator=reconcile_excavator_waiting_for_trucks,
+        action_logger=log_dispatcher_action,
     )
-    if not trip:
-        messages.error(request, 'Активный рейс для отмены не найден.')
-        return redirect(redirect_url)
-
-    trip.status = TripStatus.CANCELLED
-    trip.cancelled_at = timezone.now()
-    trip.save(update_fields=['status', 'cancelled_at'])
-    from trips.free_bucket import close_free_bucket_acceptance_for_trip
-    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
-    reconcile_excavator_waiting_for_trucks(trip.excavator)
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_TRIP,
-        trip=trip,
-        target_summary=f'{trip.truck} -> {trip.dump_point}',
-        reason=reason,
-    )
-    bump_operational_state(
-        'Trip:dispatcher_cancel_trip',
-        event_type='trip_changed',
-        object_type='Trip',
-        object_id=trip.id,
-        payload={
-            'action': 'dispatcher_cancel_trip',
-            'trip_id': trip.id,
-            'truck_id': trip.truck_id,
-            'excavator_id': trip.excavator_id,
-            'status': TripStatus.CANCELLED,
-        },
-    )
-    messages.success(request, f'Рейс {trip.truck} -> {trip.dump_point} отменен.')
-    return redirect(redirect_url)
 
 
-SERVICE_CLOSE_NEGLECTED = 'neglected'
-SERVICE_CLOSE_COORDINATED = 'coordinated'
-SERVICE_CLOSE_AUTO_EXPIRED = 'auto_expired'
-SERVICE_CLOSE_KIND_LABELS = {
-    SERVICE_CLOSE_NEGLECTED: 'Сотрудник не закрыл сам',
-    SERVICE_CLOSE_COORDINATED: 'По согласованию с диспетчером',
-    SERVICE_CLOSE_AUTO_EXPIRED: 'Автоматически через 13 часов',
-}
-SERVICE_CLOSE_NEGLECTED_NOTE = 'Сотрудник не закрыл смену сам и не сообщил диспетчеру.'
-SERVICE_CLOSE_AUTO_NOTE = (
-    'Закрыта автоматически в конце смены: сотрудник не закрыл её сам '
-    'и не сообщил диспетчеру.'
-)
 # Полчаса после конца производственной смены: 19:30 для первой смены и 07:30
 # для второй. Ранние комплексы (06:00-18:00) попадают в ту же отсечку.
 EQUIPMENT_SHIFT_AUTO_CLOSE_GRACE = timedelta(minutes=30)
@@ -8378,59 +6775,6 @@ def shift_auto_close_at(shift):
 equipment_shift_auto_close_at = shift_auto_close_at
 
 
-def normalize_service_close_kind(raw_kind, reason):
-    """Вид закрытия из формы; старые формы без поля — по наличию причины."""
-    kind = str(raw_kind or '').strip()
-    if kind in SERVICE_CLOSE_KIND_LABELS and kind != SERVICE_CLOSE_AUTO_EXPIRED:
-        return kind
-    return SERVICE_CLOSE_COORDINATED if reason else SERVICE_CLOSE_NEGLECTED
-
-
-def finish_service_closed_shift(shift, *, closed_by, close_kind, note, reading_fields=(), now=None):
-    """Общий хвост служебного закрытия: пометки на смене, перенос рейсов, паспорт."""
-    shift.closed_at = now or timezone.now()
-    shift.closed_by = closed_by
-    shift.is_service_closed = True
-    shift.service_close_kind = close_kind
-    shift.service_close_note = str(note or '')[:255]
-    shift.save(update_fields=[
-        *reading_fields,
-        'closed_at',
-        'closed_by',
-        'is_service_closed',
-        'service_close_kind',
-        'service_close_note',
-    ])
-    from trips.free_bucket import cancel_free_bucket_acceptances_for_shift
-    cancel_free_bucket_acceptances_for_shift(shift, cancelled_at=shift.closed_at)
-    if not shift.equipment_id:
-        return
-    # Ожидания рабочего процесса не живут дольше смены; ремонт и прочие
-    # состояния техники остаются и передаются сменщику.
-    from downtimes.driver_workflow import close_workflow_downtimes
-    close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
-    if equipment_is_truck(shift.equipment):
-        Trip.objects.filter(
-            truck=shift.equipment,
-            status__in=OPEN_TRIP_STATUSES,
-        ).update(is_carryover=True)
-        from reports.driver_shift_passport_snapshots import (
-            enqueue_driver_shift_passport_capture,
-        )
-        from reports.models import DriverShiftPassportTrigger
-
-        enqueue_driver_shift_passport_capture(
-            shift=shift,
-            trigger=DriverShiftPassportTrigger.SERVICE_CLOSE,
-            captured_by=closed_by,
-        )
-    else:
-        Trip.objects.filter(
-            loading_shift=shift,
-            status__in=OPEN_TRIP_STATUSES,
-        ).update(is_carryover=True)
-
-
 def auto_close_expired_equipment_shifts(now=None):
     """13 часов с открытия — смена техники закрывается сама как незакрытая сотрудником.
 
@@ -8507,322 +6851,26 @@ def auto_close_expired_equipment_shifts(now=None):
     return closed
 
 
-def parse_dispatcher_manual_trip_time(raw_value, *, now):
-    """datetime-local из формы (часы предприятия) -> aware datetime; пусто -> сейчас."""
-    from datetime import datetime as _datetime
-    from core.production_time import BUSINESS_TIME_ZONE
-    raw = str(raw_value or '').strip()
-    if not raw:
-        return now
-    parsed = None
-    for pattern in ('%Y-%m-%dT%H:%M', '%Y-%m-%dT%H:%M:%S', '%d.%m.%Y %H:%M'):
-        try:
-            parsed = _datetime.strptime(raw, pattern)
-            break
-        except ValueError:
-            continue
-    if parsed is None:
-        raise ValueError('Время рейса: укажите дату и время в формате ДД.ММ.ГГГГ ЧЧ:ММ.')
-    return parsed.replace(tzinfo=BUSINESS_TIME_ZONE)
-
-
 @transaction.atomic
 def dispatcher_manual_trip_view(request, equipment_id):
-    """Ручной рейс диспетчера: сразу выполненный рейс водителю открытой смены.
-
-    Тот же путь, что у служебного завершения: обычная форма из карточки,
-    редирект с сообщением, запись в журнал действий диспетчера и толчок
-    операционного состояния, чтобы пульт и приложения обновились.
-    """
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-    if shift_error:
-        return shift_error
-
-    reason = request.POST.get('reason', '').strip()
-    if not reason:
-        messages.error(request, 'Укажите причину ручного рейса.')
-        return redirect(redirect_url)
-    try:
-        trips_count = int(request.POST.get('trips_count', '1') or 1)
-    except (TypeError, ValueError):
-        trips_count = 0
-    if not 1 <= trips_count <= DISPATCHER_MANUAL_TRIP_MAX_COUNT:
-        messages.error(request, f'Количество рейсов: от 1 до {DISPATCHER_MANUAL_TRIP_MAX_COUNT}.')
-        return redirect(redirect_url)
-    now = timezone.now()
-    try:
-        completed_at = parse_dispatcher_manual_trip_time(request.POST.get('completed_at'), now=now)
-    except ValueError as error:
-        messages.error(request, str(error))
-        return redirect(redirect_url)
-    if completed_at > now + timedelta(minutes=5):
-        messages.error(request, 'Время рейса не может быть в будущем.')
-        return redirect(redirect_url)
-    try:
-        excavator_id = int(request.POST.get('excavator_id', '') or 0)
-    except (TypeError, ValueError):
-        excavator_id = 0
-
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-
-    truck = (
-        Equipment.objects
-        .select_for_update(of=('self',))
-        .select_related('equipment_type', 'model')
-        .filter(pk=equipment_id, is_active=True)
-        .first()
-    )
-    if not truck or not equipment_is_truck(truck):
-        messages.error(request, 'Самосвал для ручного рейса не найден.')
-        return redirect(redirect_url)
-    truck_shift = (
-        EmployeeShift.objects
-        .select_for_update(of=('self',))
-        .select_related('employee')
-        .filter(equipment=truck, closed_at__isnull=True)
-        .order_by('-opened_at')
-        .first()
-    )
-    if not truck_shift:
-        messages.error(request, f'{truck}: нет открытой смены водителя — рейс некому записать.')
-        return redirect(redirect_url)
-    if truck_shift.opened_at and completed_at < truck_shift.opened_at:
-        messages.error(
-            request,
-            f'Время рейса раньше начала смены водителя ({format_dispatcher_datetime(truck_shift.opened_at)}).',
-        )
-        return redirect(redirect_url)
-    assignment = (
-        HaulAssignment.objects
-        .select_related('excavator')
-        .filter(
-            truck=truck,
-            excavator_id=excavator_id,
-            status__in=[AssignmentStatus.ACCEPTED, AssignmentStatus.PENDING],
-            ended_at__isnull=True,
-        )
-        .order_by('-assigned_at')
-        .first()
-    )
-    if not assignment:
-        messages.error(request, f'{truck} больше не назначен на выбранный экскаватор — обновите пульт.')
-        return redirect(redirect_url)
-    excavator = assignment.excavator
-    rock_type = RockType.objects.filter(id=request.POST.get('rock_type_id'), is_active=True).first()
-    dump_point = DumpPoint.objects.filter(id=request.POST.get('dump_point_id'), is_active=True).first()
-    if not rock_type or not dump_point:
-        messages.error(request, 'Выберите породу и точку разгрузки для ручного рейса.')
-        return redirect(redirect_url)
-    try:
-        volume_m3, tonnage = resolve_required_trip_measurements(truck, rock_type)
-    except ValidationError as error:
-        messages.error(request, '; '.join(getattr(error, 'messages', None) or [str(error)]))
-        return redirect(redirect_url)
-
-    placement = (
-        ExcavatorPlacement.objects
-        .select_related('work_dump_point')
-        .filter(excavator=excavator)
-        .first()
-    )
-    transport_distance_km = None
-    if placement:
-        setting = (
-            ExcavatorDumpPointSetting.objects
-            .filter(placement=placement, dump_point=dump_point)
-            .first()
-        )
-        if setting and setting.transport_distance_km is not None:
-            transport_distance_km = setting.transport_distance_km
-        elif placement.work_dump_point_id == dump_point.id:
-            transport_distance_km = placement.transport_distance_km
-    loading_shift = (
-        EmployeeShift.objects
-        .select_related('employee')
-        .filter(equipment=excavator, closed_at__isnull=True)
-        .order_by('-opened_at')
-        .first()
-    )
-    note = f'Добавлен диспетчером вручную: {reason}'[:1000]
-    created = []
-    for index in range(trips_count):
-        trip = Trip.objects.create(
-            excavator=excavator,
-            truck=truck,
-            excavator_operator=getattr(loading_shift, 'employee', None),
-            driver=truck_shift.employee,
-            loading_shift=loading_shift,
-            unloading_shift=truck_shift,
-            rock_type=rock_type,
-            dump_point=dump_point,
-            assigned_dump_point=dump_point,
-            actual_dump_point=dump_point,
-            volume_m3=volume_m3,
-            tonnage=tonnage,
-            loading_horizon=str(getattr(placement, 'loading_horizon', '') or '')[:64],
-            loading_block=str(getattr(placement, 'loading_block', '') or '')[:64],
-            transport_distance_km=transport_distance_km,
-            note=note,
-            status=TripStatus.COMPLETED,
-            completed_at=completed_at - timedelta(seconds=trips_count - 1 - index),
-            is_carryover=bool(loading_shift and loading_shift.shift_type != truck_shift.shift_type),
-        )
-        log_dispatcher_action(
-            actor=access.employee,
-            action_type=DispatcherActionType.MANUAL_TRIP,
-            trip=trip,
-            target_summary=f'{truck} -> {dump_point}',
-            reason=reason,
-        )
-        created.append(trip)
-    bump_operational_state(
-        'Trip:dispatcher_manual_trip',
-        event_type='trip_changed',
-        object_type='Trip',
-        object_id=created[-1].id,
-        payload={
-            'action': 'dispatcher_manual_trip',
-            'trip_ids': [trip.id for trip in created],
-            'truck_id': truck.id,
-            'excavator_id': excavator.id,
-            'assigned_dump_point_id': dump_point.id,
-            'actual_dump_point_id': dump_point.id,
-            'status': TripStatus.COMPLETED,
-        },
-    )
-    count_label = 'рейс' if trips_count == 1 else 'рейса' if trips_count < 5 else 'рейсов'
-    messages.success(
+    return _execute_dispatcher_manual_trip(
         request,
-        f'{truck}: добавлено {trips_count} {count_label} вручную — {dump_point}, {rock_type}, '
-        f'водитель {truck_shift.employee}.',
+        equipment_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        format_datetime=format_dispatcher_datetime,
+        action_logger=log_dispatcher_action,
     )
-    return redirect(redirect_url)
 
 
 @transaction.atomic
 def dispatcher_complete_trip_view(request, trip_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-    if shift_error:
-        return shift_error
-    reason = request.POST.get('reason', '').strip()
-    if not reason:
-        messages.error(
-            request,
-            'Укажите причину служебного завершения рейса.',
-        )
-        return redirect(redirect_url)
-
-    trip_reference = (
-        Trip.objects
-        .select_related('truck', 'excavator', 'loading_shift')
-        .filter(id=trip_id, status__in=OPEN_TRIP_STATUSES)
-        .first()
+    return _execute_dispatcher_complete_trip(
+        request,
+        trip_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        finalize_trip=finalize_trip_unloaded,
+        action_logger=log_dispatcher_action,
     )
-    if not trip_reference:
-        messages.error(request, 'Активный рейс для служебного завершения не найден.')
-        return redirect(redirect_url)
-
-    unloading_employee_id = (
-        EmployeeShift.objects
-        .filter(equipment=trip_reference.truck, closed_at__isnull=True)
-        .order_by('-opened_at')
-        .values_list('employee_id', flat=True)
-        .first()
-    )
-    if not unloading_employee_id:
-        messages.error(request, 'Нельзя служебно завершить рейс: не найдена открытая смена по этому самосвалу.')
-        return redirect(redirect_url)
-    locked_employee_ids = list(
-        Employee.objects
-        .select_for_update()
-        .filter(pk__in={access.employee_id, unloading_employee_id})
-        .order_by('pk')
-        .values_list('pk', flat=True)
-    )
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-
-    unloading_shift = (
-        EmployeeShift.objects
-        .select_for_update()
-        .filter(equipment=trip_reference.truck, closed_at__isnull=True)
-        .order_by('-opened_at')
-        .first()
-    )
-    if not unloading_shift:
-        messages.error(request, 'Нельзя служебно завершить рейс: не найдена открытая смена по этому самосвалу.')
-        return redirect(redirect_url)
-    if unloading_shift.employee_id not in locked_employee_ids:
-        messages.error(request, 'Смена по самосвалу изменилась. Повторите служебное завершение.')
-        return redirect(redirect_url)
-
-    # Driver unload uses production state -> equipment/shift -> trip. Acquire
-    # the shared state before the trip here as well to preserve lock order.
-    lock_production_state()
-    trip = (
-        Trip.objects
-        .select_for_update(of=('self',))
-        .select_related('truck', 'excavator', 'loading_shift')
-        .filter(
-            id=trip_id,
-            truck_id=unloading_shift.equipment_id,
-            status__in=OPEN_TRIP_STATUSES,
-        )
-        .first()
-    )
-    if not trip:
-        messages.error(request, 'Активный рейс уже завершен другим действием.')
-        return redirect(redirect_url)
-
-    finalize_trip_unloaded(trip, driver=unloading_shift.employee, unloading_shift=unloading_shift)
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.COMPLETE_TRIP,
-        trip=trip,
-        target_summary=f'{trip.truck} -> {trip.dump_point}',
-        reason=reason,
-    )
-    bump_operational_state(
-        'Trip:dispatcher_complete_trip',
-        event_type='trip_changed',
-        object_type='Trip',
-        object_id=trip.id,
-        payload={
-            'action': 'dispatcher_complete_trip',
-            'trip_id': trip.id,
-            'truck_id': trip.truck_id,
-            'excavator_id': trip.excavator_id,
-            'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
-            'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
-            'status': TripStatus.COMPLETED,
-        },
-    )
-    messages.success(request, f'Рейс {trip.truck} завершен служебно.')
-    return redirect(redirect_url)
 
 
 def driver_complete_trip_view(request, trip_id):

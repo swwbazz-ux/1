@@ -3,6 +3,7 @@
 
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -23,18 +24,9 @@ const excavatorTemplatePath = path.join(
     "trips",
     "excavator_work.html"
 );
-const miningMasterTemplatePath = path.join(
-    backendRoot,
-    "templates",
-    "trips",
-    "dispatcher_control.html"
-);
 const driverTemplate = driverScreenSource();
 const excavatorTemplate = fs.readFileSync(excavatorTemplatePath, "utf8");
-const miningMasterTemplate = fs.readFileSync(
-    miningMasterTemplatePath,
-    "utf8"
-);
+const miningMasterTemplate = dispatcherScreenSource();
 const excavatorCssPath = path.join(
     backendRoot,
     "static",
@@ -3095,6 +3087,7 @@ test("all role PWA cache prefixes are unique and cleanup stays role-scoped", () 
     const explicitWorkerFiles = [
         path.join(backendRoot, "users", "views.py"),
         path.join(backendRoot, "trips", "views.py"),
+        path.join(backendRoot, "trips", "dispatcher_pwa.py"),
         path.join(backendRoot, "assignments", "views.py"),
         path.join(backendRoot, "assignments", "deputy_views.py"),
     ];

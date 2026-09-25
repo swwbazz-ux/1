@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import ssl
 import subprocess
 import sys
@@ -27,6 +28,10 @@ def load_module(name: str, path: Path):
 
 
 builder = load_module("build_release", Path(__file__).with_name("build_release.py"))
+release_audit = load_module(
+    "audit_release_scope",
+    Path(__file__).with_name("audit_release_scope.py"),
+)
 receiver = load_module(
     "accounting_github_deploy_receiver",
     ROOT / "deployment" / "server" / "accounting_github_deploy_receiver.py",
@@ -34,6 +39,117 @@ receiver = load_module(
 
 
 class ReleaseProtocolTests(unittest.TestCase):
+    def test_production_manifest_paths_are_unique_and_exist(self):
+        production_files = release_audit.read_manifest(ROOT)
+
+        self.assertEqual(len(production_files), len(set(production_files)))
+        self.assertEqual(
+            [path for path in production_files if not (ROOT / path).is_file()],
+            [],
+        )
+
+    def test_dispatcher_shell_and_runtime_assets_are_consistent(self):
+        result = release_audit.validate_dispatcher_shell(
+            ROOT,
+            release_audit.read_manifest(ROOT),
+        )
+
+        self.assertRegex(
+            result["shell_version"],
+            re.compile(r"^dispatcher-desktop-shell-v\d+$"),
+        )
+        self.assertGreaterEqual(result["template_runtime_assets"], 10)
+        self.assertGreaterEqual(result["service_worker_static_assets"], 20)
+
+    def test_release_scope_classifier_keeps_only_server_payload(self):
+        non_production = (
+            ".github/deploy/test_release_protocol.py",
+            "ПРОГРЕСС_ПРОЕКТА/210_ПАСПОРТ.md",
+            "СИСТЕМА_MVP/backend/static/js/tests/dispatcher.test.js",
+            "СИСТЕМА_MVP/backend/trips/test_dispatcher_guards.py",
+            "СИСТЕМА_MVP/backend/trips/tests.py",
+            "СИСТЕМА_MVP/backend/tools/audit_dispatcher_css.cjs",
+        )
+        production = (
+            "СИСТЕМА_MVP/backend/trips/views.py",
+            "СИСТЕМА_MVP/backend/trips/dispatcher_guards.py",
+            "СИСТЕМА_MVP/backend/static/js/dispatcher-control-v1.js",
+            "СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html",
+        )
+
+        for path in non_production:
+            with self.subTest(path=path):
+                self.assertTrue(release_audit.is_non_production_path(path))
+        for path in production:
+            with self.subTest(path=path):
+                self.assertFalse(release_audit.is_non_production_path(path))
+
+    def test_dispatcher_downtime_projection_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/trips/dispatcher_downtime_projection.py"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_canvas_assets_are_packaged_once(self):
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        for expected in (
+            "СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css",
+            "СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js",
+        ):
+            with self.subTest(asset=expected):
+                self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_equipment_detail_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/"
+            "dispatcher_equipment_detail.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_service_lists_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/"
+            "dispatcher_service_lists.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_board_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_board.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_push_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/"
+            "dispatcher_push_invite.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
+    def test_dispatcher_url_routing_is_packaged_once(self):
+        expected = "СИСТЕМА_MVP/backend/trips/urls.py"
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
     def diagnostic_metadata(self):
         return {
             "operation": "trip_accounting_incident_v1",

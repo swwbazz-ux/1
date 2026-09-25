@@ -5,20 +5,19 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 
 
-const RUNTIME_SOURCE = fs.readFileSync(
-    path.resolve(
-        __dirname,
-        "..",
-        "dispatcher-control-v1.js"
-    ),
+const RUNTIME_SOURCE = [
+    "dispatcher-control-v1.js",
+    "dispatcher-board-v1.js",
+    "dispatcher-detail-v1.js",
+].map((name) => fs.readFileSync(path.resolve(__dirname, "..", name), "utf8")).join("\n");
+const REALTIME_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
 );
-const TEMPLATE_SOURCE = fs.readFileSync(
-    path.resolve(__dirname, "..", "..", "..", "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
+const TEMPLATE_SOURCE = dispatcherScreenSource();
 
 
 function extractBraceBlock(source, signature, label) {
@@ -204,6 +203,7 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
     vm.runInNewContext(
         `
         var dispatcherShiftOpen = ${initialShiftOpen ? "true" : "false"};
+        function dispatcherShiftIsOpen() { return dispatcherShiftOpen; }
         var draggedTile = null;
         var board = null;
         var excavatorGarage = null;
@@ -440,15 +440,15 @@ test("ordinary dispatcher error never schedules assignment reconciliation", () =
 
 test("fragment refresh synchronizes shift runtime before replacement and rebind", () => {
     const refreshSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function refreshDispatcherDesktopBoardFromServer(options)",
+        REALTIME_SOURCE,
+        "function refreshDispatcherDesktopBoardFromServer(refreshOptions)",
         "Dispatcher fragment refresh"
     );
     const parseIndex = refreshSource.indexOf("AppOperationalFragment.parseRoot");
-    const syncIndex = refreshSource.indexOf("syncDispatcherShiftRuntime(freshBoard)");
+    const syncIndex = refreshSource.indexOf("options.syncShiftRuntime(freshBoard)");
     const reconcileIndex = refreshSource.indexOf("reconcileDispatcherDesktopBoard(currentBoard, freshBoard)");
     const fallbackIndex = refreshSource.indexOf("currentBoard.replaceWith(freshBoard)");
-    const bindIndex = refreshSource.indexOf("bindDispatcherDesktopInteractions()");
+    const bindIndex = refreshSource.indexOf("options.bindBoardInteractions()");
 
     assert.ok(parseIndex >= 0);
     assert.ok(syncIndex > parseIndex);
@@ -463,7 +463,7 @@ test("fragment refresh synchronizes shift runtime before replacement and rebind"
 
 test("dispatcher fragment reconciliation is keyed by equipment and complex identity", () => {
     const reconcileSource = extractBraceBlock(
-        RUNTIME_SOURCE,
+        REALTIME_SOURCE,
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
         "Dispatcher keyed board reconciliation"
     );
@@ -489,7 +489,7 @@ test("one changed truck replaces only that keyed tile", () => {
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
     ];
     const helpers = helperNames.map((signature) => (
-        extractBraceBlock(RUNTIME_SOURCE, signature, signature)
+        extractBraceBlock(REALTIME_SOURCE, signature, signature)
     )).join("\n");
     function node(markup, dataset = {}) {
         return {

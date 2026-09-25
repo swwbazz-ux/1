@@ -19,14 +19,25 @@ READY_ROLE_CODES = (
     'manager',
 )
 EXPECTED_RELEASE = STATIC_ASSET_RELEASE
+DISPATCHER_STYLE_FILES = (
+    'dispatcher-control-v1.css',
+    'dispatcher-workspace-v1.css',
+    'dispatcher-detail-v1.css',
+    'dispatcher-adaptive-v1.css',
+    'dispatcher-detail-overrides-v1.css',
+    'dispatcher-canvas-v1.css',
+)
 
 
 @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
 class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
     def test_dispatcher_blocking_recovery_keeps_hidden_label_out_of_layout(self):
-        css = (
-            Path(settings.BASE_DIR) / 'static' / 'css' / 'dispatcher-control-v1.css'
-        ).read_text(encoding='utf-8')
+        css = ''.join(
+            (Path(settings.BASE_DIR) / 'static' / 'css' / filename).read_text(
+                encoding='utf-8'
+            )
+            for filename in DISPATCHER_STYLE_FILES
+        )
 
         self.assertIn(
             '.dispatcher-blocking-shift-recovery .visually-hidden',
@@ -95,9 +106,17 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                         f'/static/js/realtime-client.js?v={EXPECTED_RELEASE}',
                         core_assets.group(1),
                     )
-                    self.assertIn('/static/css/dispatcher-control-v1.css', core_assets.group(1))
+                    for stylesheet in DISPATCHER_STYLE_FILES:
+                        self.assertIn(
+                            f'/static/css/{stylesheet}',
+                            core_assets.group(1),
+                        )
                     self.assertIn('/static/js/dispatcher-control-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-detail-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-board-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-realtime-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-sounds-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-canvas-v1.js', core_assets.group(1))
                 else:
                     self.assertEqual(
                         script.count('self.addEventListener("install"'),

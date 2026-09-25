@@ -1,0 +1,18 @@
+<aside
+    class="dispatcher-push-invite"
+    data-push-invite
+    data-shift-key="dispatcher-{{ dispatcher_header.shift_id|default:'control' }}"
+    data-app-name="Диспетчер"
+    hidden
+    aria-live="polite"
+>
+    <div class="dispatcher-push-invite__icon" aria-hidden="true">!</div>
+    <div class="dispatcher-push-invite__copy">
+        <strong data-push-title>Включите системные уведомления</strong>
+        <span data-push-text>Windows сообщит о важном событии, даже если Пульт закрыт.</span>
+    </div>
+    <div class="dispatcher-push-invite__actions" data-push-actions>
+        <button type="button" data-push-enable>Включить</button>
+        <button type="button" data-push-later>Позже</button>
+    </div>
+</aside>

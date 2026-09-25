@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError
 from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
-from django.urls import reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from assignments.models import (
@@ -167,6 +167,82 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertEqual(shift.workplace_code, 'dispatcher')
         self.assertEqual(shift.opened_by, self.current_dispatcher)
 
+    def test_dispatcher_fragment_shift_form_returns_to_full_page(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            workplace_code='dispatcher',
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.get(
+            reverse('dispatcher_control'),
+            {
+                'truck': '7',
+                '_operational_fragment': 'dispatcher',
+                '_operational_version': '123',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['contract'], 'operational-fragment-v1')
+        self.assertIn('name="next" value="/dispatcher/control/?truck=7"', payload['html'])
+        self.assertNotIn('_operational_fragment', payload['html'])
+        self.assertNotIn('_operational_version', payload['html'])
+
+    def test_dispatcher_shift_action_strips_fragment_parameters_from_next(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+        shift = EmployeeShift.objects.create(
+            employee=self.current_dispatcher,
+            workplace_code='dispatcher',
+            shift_type='day',
+            opened_at=timezone.now(),
+            opened_by=self.current_dispatcher,
+        )
+
+        response = self.client.post(
+            reverse('dispatcher_toggle_shift'),
+            {
+                'shift_action': 'end',
+                'next': (
+                    f'{reverse("dispatcher_control")}?truck=7&'
+                    '_operational_fragment=dispatcher&_operational_version=123'
+                ),
+            },
+        )
+
+        shift.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'{reverse("dispatcher_control")}?truck=7')
+        self.assertIsNotNone(shift.closed_at)
+
+    def test_dispatcher_shift_action_rejects_external_next_and_referer(self):
+        session = self.client.session
+        session['device_kind'] = 'personal'
+        session.save()
+
+        for payload, referer in (
+            ({'shift_action': 'unknown', 'next': 'https://attacker.example/collect'}, ''),
+            ({'shift_action': 'unknown', 'next': '//attacker.example/collect'}, ''),
+            ({'shift_action': 'unknown'}, 'https://attacker.example/collect'),
+            ({'shift_action': 'unknown', 'next': '/dispatcher/control/\r\nLocation: https://attacker.example/'}, ''),
+        ):
+            with self.subTest(payload=payload, referer=referer):
+                response = self.client.post(
+                    reverse('dispatcher_toggle_shift'),
+                    payload,
+                    **({'HTTP_REFERER': referer} if referer else {}),
+                )
+
+                self.assertRedirects(response, reverse('dispatcher_control'))
+
     def test_personal_admin_uses_own_dispatcher_access_without_second_pin(self):
         admin_role = Role.objects.create(code='admin', name='Администратор')
         admin_access = EmployeeAccess.objects.create(
@@ -229,15 +305,27 @@ class DispatcherSharedShiftStartTests(TestCase):
 
     def test_dispatcher_truck_actions_use_local_dom_update_hook(self):
         response = self.client.get(reverse('dispatcher_control'))
-        dispatcher_script_path = (
+        dispatcher_static = (
             Path(__file__).resolve().parents[1]
             / 'static'
             / 'js'
-            / 'dispatcher-control-v1.js'
         )
-        dispatcher_script = dispatcher_script_path.read_text(encoding='utf-8')
+        dispatcher_script = '\n'.join(
+            (dispatcher_static / name).read_text(encoding='utf-8')
+            for name in (
+                'dispatcher-transport-v1.js',
+                'dispatcher-detail-v1.js',
+                'dispatcher-board-v1.js',
+                'dispatcher-realtime-v1.js',
+                'dispatcher-control-v1.js',
+            )
+        )
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
+        self.assertContains(response, 'js/dispatcher-transport-v1.js')
+        self.assertContains(response, 'js/dispatcher-detail-v1.js')
+        self.assertContains(response, 'js/dispatcher-board-v1.js')
+        self.assertContains(response, 'js/dispatcher-realtime-v1.js')
         self.assertContains(response, 'js/dispatcher-sounds-v1.js')
         self.assertContains(response, 'data-dispatcher-sound-toggle')
         self.assertContains(response, 'data-push-invite')
@@ -258,15 +346,16 @@ class DispatcherSharedShiftStartTests(TestCase):
             'function applyDispatcherOperationalStateRefresh',
             'function refreshDispatcherDesktopBoardFromServer',
             'bindDispatcherDesktopInteractions',
-            'window.initAppConfirmForms',
-            'window.initDispatcherThemeControls',
-            'window.initDispatcherRadialClocks',
+            'hostWindow.initAppConfirmForms',
+            'hostWindow.initDispatcherThemeControls',
+            'hostWindow.initDispatcherRadialClocks',
             'eventsTruncated',
             'function hasDispatcherRelevantEvents',
             'return Array.isArray(events) && events.length > 0;',
             'markDispatcherLocalAssignmentApplied',
-            'dispatcherIncomingRefreshQueueGraceMs',
-            'dispatcherMobileSyncFlushDelayMs = 300',
+            'incomingRefreshQueueGraceMs',
+            'DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000',
+            'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
             'type: "assign"',
             'type: "release"',
@@ -287,12 +376,24 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v131')
+        self.assertContains(response, 'dispatcher-desktop-shell-v144')
+        for stylesheet in (
+            'dispatcher-control-v1.css',
+            'dispatcher-workspace-v1.css',
+            'dispatcher-detail-v1.css',
+            'dispatcher-adaptive-v1.css',
+            'dispatcher-detail-overrides-v1.css',
+            'dispatcher-canvas-v1.css',
+        ):
+            self.assertContains(
+                response,
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v144',
+            )
+        self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'css/dispatcher-control-v1.css?v=dispatcher-desktop-shell-v130',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v144',
         )
-        self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
         self.assertContains(response, 'data-app-sync-overlay')
@@ -335,9 +436,8 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('include_events", "1"', script)
         self.assertIn('operational-state-refresh-deferred', script)
         self.assertIn('pending_mobile_queue', script)
-        self.assertIn('refreshMobileBoard: true', dispatcher_script)
-        self.assertIn('request.refreshMobileBoard && !freshQueue.length', dispatcher_script)
-        self.assertIn('dispatcherMobileSyncFlushDelayMs', dispatcher_script)
+        self.assertNotIn('refreshMobileBoardFromServer', dispatcher_script)
+        self.assertNotIn('bindMiningMasterMobileScreens', dispatcher_script)
         self.assertNotIn('delayMs : 5000', response.content.decode('utf-8'))
         self.assertIn('operational-state-update-available', script)
         self.assertIn('has-realtime-update', script)
@@ -381,6 +481,16 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('self.addEventListener("fetch"', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+
+    def test_dispatcher_pwa_routes_are_served_by_isolated_module(self):
+        self.assertEqual(
+            resolve(reverse('dispatcher_manifest')).func.__module__,
+            'trips.dispatcher_pwa',
+        )
+        self.assertEqual(
+            resolve(reverse('dispatcher_service_worker')).func.__module__,
+            'trips.dispatcher_pwa',
+        )
 
     def test_shared_desktop_blocks_direct_start_without_reauth(self):
         response = self.client.post(reverse('dispatcher_toggle_shift'), {'shift_action': 'start'})
@@ -1178,6 +1288,26 @@ class DispatcherDowntimeControlTests(TestCase):
         self.assertEqual(response.json()['error'], 'dispatcher_shift_required')
         downtime.refresh_from_db()
         self.assertIsNone(downtime.ended_at)
+
+    def test_inactive_role_blocks_downtime_close_before_mutation(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+
+        with patch(
+            'trips.views.role_session_state',
+            return_value={'is_active': False},
+        ):
+            response = self.close_downtime(downtime)
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'inactive_role')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+        self.assertFalse(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).exists()
+        )
 
     def test_unauthenticated_close_is_forbidden(self):
         downtime = self.create_downtime(self.truck, self.truck_reason)

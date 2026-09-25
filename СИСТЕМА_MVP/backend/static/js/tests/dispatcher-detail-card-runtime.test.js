@@ -13,18 +13,14 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
+const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
-const TEMPLATE = fs.readFileSync(
-    path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
-const CSS = fs.readFileSync(
-    path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-    "utf8"
-);
+const TEMPLATE = dispatcherScreenSource();
+const CSS = dispatcherStyleSource();
 const JS = fs.readFileSync(
-    path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
+    path.join(BACKEND, "static", "js", "dispatcher-detail-v1.js"),
     "utf8"
 );
 const VIEWS = fs.readFileSync(path.join(BACKEND, "trips", "views.py"), "utf8");
@@ -114,7 +110,7 @@ test("скрипт: смена приходит в карточке, форма 
     assert.match(JS, /detailServiceClose\.hidden = !shift\.service_close_url;/);
     assert.match(JS, /detailServiceClose\.setAttribute\("action", shift\.service_close_url\)/);
     assert.match(JS, /detailServiceCloseMileage\.hidden = !shift\.is_truck;/);
-    assert.match(JS, /var closeLocked = dispatcherRoleIsReadonly\(\) \|\| !dispatcherShiftOpen;/);
+    assert.match(JS, /var closeLocked = dispatcherRoleIsReadonly\(\) \|\| !dispatcherShiftIsOpen\(\);/);
     assert.match(JS, /detailServiceCloseNeglect\.disabled = closeLocked;/);
     assert.match(JS, /function renderDetailShiftReadingBounds\(shift\)/);
     assert.match(JS, /hours\.max = String\(Math\.round\(startHours\) \+ 12\);/);

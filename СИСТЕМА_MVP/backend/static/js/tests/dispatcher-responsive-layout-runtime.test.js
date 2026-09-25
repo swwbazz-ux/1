@@ -20,20 +20,16 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
+const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
-const TEMPLATE = fs.readFileSync(
-    path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
+const TEMPLATE = dispatcherScreenSource();
 const SCRIPT = fs.readFileSync(
-    path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
+    path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
 );
-const CSS = fs.readFileSync(
-    path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-    "utf8"
-);
+const CSS = dispatcherStyleSource();
 
 const GAP = 6;
 const MAX = { w: 168, h: 124 };

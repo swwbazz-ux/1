@@ -11,16 +11,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
+const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
-const TEMPLATE = fs.readFileSync(
-    path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
-const CSS = fs.readFileSync(
-    path.join(BACKEND, "static", "css", "dispatcher-control-v1.css"),
-    "utf8"
-).replace(/\r\n/g, "\n");
+const TEMPLATE = dispatcherScreenSource();
+const CSS = dispatcherStyleSource().replace(/\r\n/g, "\n");
 
 test("точка стоит на гараже экскаваторов, гараже самосвалов, самосвалах комплекса и имени комплекса", () => {
     assert.match(
@@ -140,10 +136,9 @@ test("плитка без рейсов не красится: пустая фа�
     /* Сервер не отдаёт фазу, когда факта нет (progress_cycle_visual_context),
        а скрипт обязан снять атрибут, иначе на перерисованной плитке остаётся
        заливка от прошлого обновления. */
-    const JS = fs.readFileSync(
-        path.join(BACKEND, "static", "js", "dispatcher-control-v1.js"),
-        "utf8"
-    );
+    const JS = ["dispatcher-board-v1.js", "dispatcher-detail-v1.js"]
+        .map((name) => fs.readFileSync(path.join(BACKEND, "static", "js", name), "utf8"))
+        .join("\n");
     assert.match(JS, /else tile\.removeAttribute\("data-plan-progress-phase"\);/);
     assert.match(
         CSS,
