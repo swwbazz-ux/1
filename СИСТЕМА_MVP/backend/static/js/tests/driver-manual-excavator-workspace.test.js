@@ -255,7 +255,6 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
     assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(72px, 8\.6dvh, 78px\)/);
     assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
-    assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(118px, 14dvh, 132px\)/);
     // Каждая строка просит свою высоту, но обязана уметь сжаться: иначе на
     // невысоком экране нижняя строка вылезает из зоны на панель точек.
     assert.match(driverCss, /grid-template-rows:\s*minmax\(0, var\(--driver-manual-action-height\)\) minmax\(0, var\(--driver-manual-timer-height\)\) minmax\(0, 1fr\)/);
@@ -264,7 +263,12 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
-    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-source-height\), 100%\);[^}]*transform:\s*none;/s);
+    // Карточка источника (К-1/ЭКС-1) — прямоугольник 4:5 (~1.25), не квадрат:
+    // ширина колонки (треть сетки) и старая высотная клемп-переменная совпали
+    // на тестовом устройстве, карточка выходила ровным квадратом 118×118.
+    // aspect-ratio считает высоту от фактической ширины, не собьётся, даже
+    // если ширина колонки сместится в будущем.
+    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;[^}]*transform:\s*none;/s);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-action-height\), 100%\);[^}]*aspect-ratio:\s*auto;/s);
     assert.match(driverCss, /grid-template-columns:\s*40px minmax\(0, 1fr\)/);
     assert.match(driverCss, /font-size:\s*clamp\(11px, 8\.2cqw, 15px\)/);

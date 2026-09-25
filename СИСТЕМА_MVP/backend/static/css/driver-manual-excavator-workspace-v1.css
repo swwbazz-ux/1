@@ -102,7 +102,6 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
     --driver-manual-workspace-gap: clamp(8px, 2.2vw, 12px);
     --driver-manual-action-height: clamp(72px, 8.6dvh, 78px);
     --driver-manual-timer-height: clamp(62px, 7.5dvh, 68px);
-    --driver-manual-source-height: clamp(118px, 14dvh, 132px);
     display: grid !important;
     flex: 1 1 auto !important;
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
@@ -389,6 +388,14 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__tri
     text-shadow: 0 0 12px rgba(255, 216, 0, .24);
 }
 
+/* Карточка источника (К-1/ЭКС-1) должна быть прямоугольной 4:5 (та же
+   пропорция ~1.25, что утверждена для карточек техники в других местах
+   приложения — shape-125), не квадратной. Раньше высота коробки бралась
+   из --driver-manual-source-height (клемп 118–132px) независимо от
+   ширины — на этом экране ширина (треть сетки) тоже около 118px, оба
+   числа случайно совпали, и карточка выходила ровным квадратом 118×118.
+   aspect-ratio на самой коробке считает высоту ОТ фактической ширины —
+   не собьётся, даже если ширина колонки сместится в будущем. */
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-row {
     display: flex;
     grid-column: 2;
@@ -397,7 +404,9 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__sou
     align-self: start;
     justify-content: center;
     width: 100%;
-    height: min(var(--driver-manual-source-height), 100%);
+    height: auto;
+    max-height: 100%;
+    aspect-ratio: 4 / 5;
     min-width: 0;
     min-height: 0;
     transform: none;
@@ -601,7 +610,6 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__act
     body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__source-layout {
         --driver-manual-action-height: clamp(68px, 10dvh, 72px);
         --driver-manual-timer-height: clamp(60px, 9.4dvh, 66px);
-        --driver-manual-source-height: clamp(112px, 17.5dvh, 122px);
         height: 100% !important;
     }
 
