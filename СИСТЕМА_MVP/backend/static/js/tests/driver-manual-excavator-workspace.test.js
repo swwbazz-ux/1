@@ -255,10 +255,6 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
     assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(72px, 8\.6dvh, 78px\)/);
     assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
-    // Высота строки источника считается той же формулой, что высота ряда
-    // самосвалов у машиниста: карточки двух ролей обязаны считаться
-    // одинаково, иначе одна выходит квадратной, а вторая нет.
-    assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(140px, 18\.7dvh, 170px\)/);
     // Каждая строка просит свою высоту, но обязана уметь сжаться: иначе на
     // невысоком экране нижняя строка вылезает из зоны на панель точек.
     assert.match(driverCss, /grid-template-rows:\s*minmax\(0, var\(--driver-manual-action-height\)\) minmax\(0, var\(--driver-manual-timer-height\)\) minmax\(0, 1fr\)/);
@@ -267,7 +263,12 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
-    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-source-height\), 100%\);[^}]*transform:\s*none;/s);
+    // Карточка источника (К-1/ЭКС-1) — прямоугольник 4:5 (~1.25), не квадрат:
+    // ширина колонки (треть сетки) и старая высотная клемп-переменная совпали
+    // на тестовом устройстве, карточка выходила ровным квадратом 118×118.
+    // aspect-ratio считает высоту от фактической ширины, не собьётся, даже
+    // если ширина колонки сместится в будущем.
+    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;[^}]*transform:\s*none;/s);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-action-height\), 100%\);[^}]*aspect-ratio:\s*auto;/s);
     assert.match(driverCss, /grid-template-columns:\s*40px minmax\(0, 1fr\)/);
     assert.match(driverCss, /font-size:\s*clamp\(11px, 8\.2cqw, 15px\)/);
@@ -330,13 +331,19 @@ test("only the active dump point exposes cancel and complete swipe cues", () => 
 // верным при любой разметке и меняться не должно.
 test("карточка источника держит форму 1 к 1,25 построением, а не числами", () => {
     const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
-    // Число выбрал пользователь: высота в 1,25 раза больше ширины. Держим
-    // его отношением, а размер берём от места, иначе на другом экране
-    // получится другая форма.
-    assert.match(driverCss, /aspect-ratio: 1 \/ 1\.25 !important/);
+    // Число выбрал пользователь: высота в 1,25 раза больше ширины (4:5). Форму
+    // теперь считает коробка-строка от фактической ширины колонки — карточка
+    // внутри неё просто заполняет то, что ей досталось, а не считает форму
+    // ещё раз своей отдельной формулой. Раньше так и разошлись: у строки была
+    // своя высотная переменная, у карточки — свой расчёт, числа однажды
+    // совпали случайно и карточка вышла квадратом.
     assert.match(
         driverCss,
-        /width: min\(100%, calc\(var\(--driver-manual-source-height\) \/ 1\.25\)\) !important/,
+        /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;/s,
+    );
+    assert.match(
+        driverCss,
+        /driver-manual-workspace__source-row > \.eo-dashboard-truck-card\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/s,
     );
     // Замеров с одного телефона в правиле быть не должно.
     assert.doesNotMatch(driverCss, /32\.77px/);
