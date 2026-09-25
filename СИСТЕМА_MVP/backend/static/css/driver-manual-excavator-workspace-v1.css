@@ -249,6 +249,43 @@ body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result] {
 body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result][hidden] {
     display: none !important;
 }
+/* Отклонённая отметка — единственное сообщение здесь, которое реально нужно
+   прочитать целиком: остальные состояния короткие и одной строкой
+   пропадают сами, а это держится (sticky) и раньше обрезалось многоточием
+   на середине фразы. Даём ему перенос и предупреждающий цвет вместо
+   зелёного «подтверждено». */
+body.driver-mobile-screen .driver-manual-workspace [data-driver-manual-result][data-driver-manual-result-state="review"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    color: #ffb648;
+    white-space: normal;
+    text-overflow: clip;
+    text-transform: none;
+}
+
+/* Единственный выход из тупика: без неё источник и выход из ручного режима
+   оставались заблокированы навсегда, потому что снять признак занятости
+   было нечем — активной плитки нет, свайп завершать нечего. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__result-ack {
+    appearance: none;
+    display: block;
+    margin-top: 4px;
+    padding: 3px 10px;
+    border: 1px solid rgba(255, 182, 72, .55);
+    border-radius: 999px;
+    background: rgba(255, 182, 72, .14);
+    color: #ffb648;
+    font-size: clamp(9px, 2.35vw, 11px);
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__result-ack[hidden] {
+    display: none !important;
+}
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > strong {
     color: rgba(225, 235, 239, .72);

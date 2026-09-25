@@ -8,6 +8,8 @@
     var tripTimerInterval = null;
     var currentTripProjection = null;
     var savingLocal = false;
+    var dismissedRejectedManualLoadKey = "";
+    var lastShownRejectedManualLoadKey = "";
     var workspaceRequestedOpen = false;
     var workspacePreferenceKnown = false;
     var automaticTripRefreshKey = "";
@@ -192,7 +194,10 @@
             ? "РЕЙС ЗАВЕРШЁН НА ТЕЛЕФОНЕ · БЕЗ СЕТИ"
             : "РЕЙС ЗАВЕРШЁН · ОТПРАВЛЯЕМ";
         if (state === "completed") return "РЕЙС ЗАВЕРШЁН";
-        if (state === "review") return String(detail || "Не принято · нужна сверка");
+        if (state === "review") {
+            var reviewMessage = String(detail || "Настройки места погрузки изменились после отметки.");
+            return reviewMessage + " Отметьте погрузку заново.";
+        }
         if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
     }
@@ -499,12 +504,42 @@
         return !blocked;
     }
 
+    /* Отклонённая (conflict/invalid/auth_required) отметка НЕ становится
+       текущей проекцией: раньше она попадала сюда наравне с обычной и
+       дальше currentTripProjection держал источник и выход заблокированными
+       навсегда — активной плитки нет, свайп завершать нечего, а снять запись
+       было нечем. Тот же приём уже стоял рядом, в latestManualCancel и
+       completionWins — здесь его просто не было. */
     function manualLoadFromEvents(events) {
+        return (Array.isArray(events) ? events : [])
+            .filter(function (event) {
+                return event && event.event_type === "driver.trip.loaded" && !isTerminalState(event.state);
+            })
+            .slice()
+            .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
+            .pop() || null;
+    }
+
+    /* Тот же самый последний driver.trip.loaded, но БЕЗ фильтра по
+       состоянию — нужен только чтобы показать сообщение об отказе, а не
+       чтобы решать, блокировать ли экран. Если реальный последний load
+       отклонён, а manualLoadFromEvents вернул более раннюю живую запись
+       или ничего — сравнение по sequence отличит «есть свежий отказ,
+       который стоит показать» от «отказ устарел, поверх него уже есть
+       новая попытка». */
+    function latestManualLoadEventIncludingRejected(events) {
         return (Array.isArray(events) ? events : [])
             .filter(function (event) { return event && event.event_type === "driver.trip.loaded"; })
             .slice()
             .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
             .pop() || null;
+    }
+
+    function rejectedManualLoadNotice(events, projected) {
+        var latest = latestManualLoadEventIncludingRejected(events);
+        if (!latest || !isTerminalState(latest.state)) return null;
+        if (projected && Number(projected.sequence || 0) >= Number(latest.sequence || 0)) return null;
+        return latest;
     }
 
     function latestManualCancel(events) {
@@ -562,6 +597,40 @@
         }
     }
 
+    /* Отклонённая отметка (conflict/invalid/auth_required) с 25.09.2026
+       НИКОГДА не блокирует источник и выход — см. manualLoadFromEvents
+       выше: она попросту не становится currentTripProjection, поэтому
+       экран у следующего же водителя разблокирован сам, без единого
+       касания, сразу как только применится свежая разметка (в том числе
+       после перезапуска приложения на новой оболочке — водитель мог быть
+       за рулём и физически не иметь возможности нажимать на экран).
+       «Понятно» здесь — не выход из блокировки (блокировки нет), а просто
+       способ убрать с экрана прочитанное сообщение об отказе. */
+    function toggleRejectedTripAck(workspace, show) {
+        var button = workspace && workspace.querySelector("[data-driver-manual-dismiss-rejected]");
+        if (!button) return;
+        button.hidden = !show;
+    }
+
+    function showRejectedManualLoadNotice(workspace, rejectedEvent) {
+        var key = String(
+            rejectedEvent.event_id || rejectedEvent.local_trip_id || rejectedEvent.occurred_at || ""
+        );
+        if (key && key === dismissedRejectedManualLoadKey) {
+            toggleRejectedTripAck(workspace, false);
+            setResult(workspace, "", null, false);
+            return;
+        }
+        lastShownRejectedManualLoadKey = key;
+        setResult(workspace, "review", rejectedEvent.last_error && rejectedEvent.last_error.message, true);
+        toggleRejectedTripAck(workspace, true);
+    }
+
+    function dismissRejectedTripProjection(workspace) {
+        dismissedRejectedManualLoadKey = lastShownRejectedManualLoadKey;
+        toggleRejectedTripAck(workspace, false);
+        setResult(workspace, "", null, false);
+    }
     function setSourceLocked(workspace, locked) {
         var source = workspace && workspace.querySelector("[data-driver-manual-source]");
         if (source) {
@@ -662,6 +731,7 @@
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, positive(completion.payload && completion.payload.dump_point_id));
+            toggleRejectedTripAck(workspace, false);
             setSourceLocked(workspace, savingLocal);
             setManualExitAvailability(workspace);
             setResult(workspace, "complete-pending", null, true);
@@ -697,6 +767,7 @@
             stopTripTimer(workspace);
             markLastDump(workspace, null);
             restoreStandardTargets(workspace);
+            toggleRejectedTripAck(workspace, false);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             setResult(workspace, queuedCancel ? "cancel-pending" : "cancelled", null, !!queuedCancel);
             if (confirmedCancel) requestManualCancellationRefresh(confirmedCancel);
@@ -772,6 +843,16 @@
         currentTripProjection = projected;
         if (!projected) {
             stopTripTimer(workspace);
+            var rejectedNotice = rejectedManualLoadNotice(events, projected);
+            if (rejectedNotice) {
+                showRejectedManualLoadNotice(workspace, rejectedNotice);
+            } else {
+                toggleRejectedTripAck(workspace, false);
+            }
+            /* Источник и выход разблокируются независимо от того, есть ли
+               сообщение об отказе на экране: currentTripProjection пуст, а
+               значит держать их нечем — ровно так, будто рейса никогда не
+               было. */
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             updatePointAction(workspace);
             return null;
@@ -808,14 +889,11 @@
             });
         }
         var pointName = projectionPointName(projected);
+        // projected здесь никогда не бывает terminal-состояния: отклонённые
+        // записи manualLoadFromEvents отфильтровывает, прежде чем они дойдут
+        // досюда — см. rejectedManualLoadNotice ниже, где отказ только
+        // показывается, но не блокирует.
         projected.can_depend_on_prior = projected.can_depend_on_prior !== false;
-        if (isTerminalState(projected.state)) {
-            stopTripTimer(workspace);
-            setSourceLocked(workspace, true);
-            setResult(workspace, "review", projected.last_error && projected.last_error.message, true);
-            updatePointAction(workspace);
-            return projected;
-        }
         syncWorkspaceContext(workspace);
         if (projected.state !== "confirmed" && !serverTripId) {
             updateManualTripCount(
@@ -827,6 +905,7 @@
         }
         markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
+        toggleRejectedTripAck(workspace, false);
         setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, projected));
         setResult(
             workspace,
@@ -1849,6 +1928,16 @@
     if (root.document && !root.__driverManualExcavatorWorkspaceDelegated) {
         root.__driverManualExcavatorWorkspaceDelegated = true;
         root.document.addEventListener("click", function (event) {
+            var dismissRejected = event.target && event.target.closest
+                ? event.target.closest("[data-driver-manual-dismiss-rejected]")
+                : null;
+            if (dismissRejected) {
+                event.preventDefault();
+                event.stopPropagation();
+                playGestureHaptic("tap");
+                dismissRejectedTripProjection(dismissRejected.closest("[data-driver-manual-workspace]"));
+                return;
+            }
             var freeBucket = event.target && event.target.closest
                 ? event.target.closest("[data-driver-manual-free-bucket-open]")
                 : null;
@@ -2006,7 +2095,8 @@
         standardPointIds: standardPointIds,
         showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
         restoreStandardTargets: restoreStandardTargets,
-        resultText: resultText
+        resultText: resultText,
+        dismissRejectedTripProjection: dismissRejectedTripProjection
     };
     if (typeof root.document !== "undefined") {
         if (root.document.readyState === "loading") {
