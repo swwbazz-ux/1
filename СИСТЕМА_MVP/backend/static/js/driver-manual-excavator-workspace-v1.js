@@ -238,6 +238,15 @@
         } else if (root.navigator && typeof root.navigator.vibrate === "function") {
             try { root.navigator.vibrate(patterns[kind] || patterns.created); } catch (error) {}
         }
+        /* Ручной режим на круге основного экрана звучит как обычная работа водителя:
+           отправка — тот же сигнал, что свайп простоя; «едем на …» и «рейс завершён»
+           приходят голосом по подтверждению сервера, как у рейса экскаваторщика
+           (driver-shift-voice-v1.js, driver-shift-v1.js). */
+        if (dialHostsManualMode()) {
+            if (kind === "created" && typeof root.playDriverSound === "function") root.playDriverSound("action_ok");
+            if (kind === "cancelled" && typeof root.playDriverSound === "function") root.playDriverSound("action_error");
+            return true;
+        }
         var context = root.ExcavatorDashboardDrag
             && typeof root.ExcavatorDashboardDrag.preparePickupAudio === "function"
             ? root.ExcavatorDashboardDrag.preparePickupAudio()

@@ -4254,7 +4254,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '>ПРИЧИНА ПРОСТОЯ</em>')
         self.assertNotContains(response, 'data-driver-unload-one-tap="true"')
 
-    def test_driver_unloading_wait_renders_yellow_one_tap_work_dial(self):
+    def test_driver_unloading_wait_renders_yellow_hold_work_dial(self):
         truck = self.create_registered_driver_shift()
         trip = self.create_driver_trip(truck)
         reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
@@ -4280,7 +4280,9 @@ class AccessLoginTests(TestCase):
             response,
             'driver-work-dial-button is-loaded is-waiting-operation is-waiting-unload',
         )
-        self.assertContains(response, 'data-driver-unload-one-tap="true"')
+        # Разгрузка и в ожидании разгрузки — удержанием со шкалой, не одним касанием.
+        self.assertContains(response, 'data-driver-unload-one-tap="false"')
+        self.assertContains(response, 'Удерживайте 1 секунду.')
         self.assertContains(response, '>ОЖИДАНИЕ ККД</em>')
 
     def test_driver_waiting_loading_is_rejected_after_trip_is_loaded(self):

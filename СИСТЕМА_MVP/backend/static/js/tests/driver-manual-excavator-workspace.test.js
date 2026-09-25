@@ -727,6 +727,17 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     assert.match(drum, /api\.startManualLoadAtPoint\(pointId\)/);
     assert.match(drum, /api\.cancelActiveManualLoad\(\)/);
     assert.match(drum, /api\.completeActiveManualLoad\(\)/);
+    // Звуки как у рейса экскаваторщика: «едем на …» при появлении ручного рейса на экране,
+    // «рейс завершён» по подтверждению, отправка — тот же сигнал, что свайп простоя.
+    const refresh = read("static", "js", "driver-shift-refresh-v1.js");
+    assert.match(refresh, /freshShell\.dataset\.driverActiveTripOrigin === "driver_manual"/);
+    assert.match(shift, /event\.event_type === "driver\.trip\.manual_completed"/);
+    assert.match(runtime, /if \(dialHostsManualMode\(\)\) \{\s*if \(kind === "created"[^\n]*playDriverSound\("action_ok"\)/);
+    // Старые стили под новой разметкой (пойманный на телефоне случай) лечатся сами.
+    assert.match(drum, /function healStaleStyles\(\)[\s\S]*indexOf\("pointdrum"\)/);
+    // Разгрузка всегда удержанием со шкалой, одного касания нет.
+    assert.doesNotMatch(drum, /driverUnloadOneTap = /);
+    assert.match(shift, /holdForm\.dataset\.driverUnloadOneTap = "false";/);
     // Удержание круга с ручным рейсом не шлёт обычную разгрузку.
     assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(\);[\s\S]*?return false;/);
 });

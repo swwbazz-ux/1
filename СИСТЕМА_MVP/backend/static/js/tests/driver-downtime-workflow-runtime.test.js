@@ -400,14 +400,15 @@ test("active downtime reason is a no-op and offline switches keep chronological 
 });
 
 
-test("waiting_unload enables one-tap generic yellow mode and clearing removes it", () => {
+test("waiting_unload enables the yellow mode but keeps hold-to-unload; clearing removes it", () => {
     const runtime = loadWaitingModeRuntime({hasTrip: true});
 
     assert.equal(runtime.apply({
         workflow: "waiting_unload",
         reason_label: "Ожидание ККД",
     }), true);
-    assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "true");
+    // Разгрузка удержанием со шкалой и в ожидании разгрузки.
+    assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "false");
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), true);
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-unload"), true);
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-loading"), false);

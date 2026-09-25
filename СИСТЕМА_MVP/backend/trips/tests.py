@@ -5827,7 +5827,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertTrue(returned_cards['21']['can_drag'])
         self.assertTrue(returned_cards['21']['can_load'])
 
-    def test_waiting_for_unloading_uses_one_tap_and_closes_with_trip(self):
+    def test_waiting_for_unloading_uses_hold_and_closes_with_trip(self):
         driver_client = self.client_class()
         session = driver_client.session
         session['employee_access_id'] = self.driver_access.id
@@ -5860,7 +5860,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                     work_response.context['driver_dial_note'],
                     waiting_reason.button_label.upper(),
                 )
-                self.assertContains(work_response, 'data-driver-unload-one-tap="true"')
+                # Разгрузка и в ожидании разгрузки — удержанием со шкалой (26.09.2026).
+                self.assertContains(work_response, 'data-driver-unload-one-tap="false"')
                 self.assertContains(work_response, 'is-waiting-unload')
 
                 complete_response = driver_client.post(

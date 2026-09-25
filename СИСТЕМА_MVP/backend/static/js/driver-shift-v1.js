@@ -1240,7 +1240,11 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
-                if (event.event_type === "driver.trip.unloaded" && !window.driverOfflineConfirmationCueScheduled) {
+                // Ручной рейс, завершённый на круге, озвучивается так же, как обычная разгрузка.
+                if (
+                    (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
+                    && !window.driverOfflineConfirmationCueScheduled
+                ) {
                     window.driverOfflineConfirmationCueScheduled = true;
                     playDriverVoice("action_ok", "voice_trip_finished");
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
@@ -1578,7 +1582,9 @@ window.bindDriverMobileShell = function () {
         var isUnloadingWait = flow === "waiting_unload";
         var isWaiting = isLoadingWait || isUnloadingWait;
         if (holdForm) {
-            holdForm.dataset.driverUnloadOneTap = isUnloadingWait ? "true" : "false";
+            /* Разгрузка всегда удержанием со шкалой — и в ожидании разгрузки тоже:
+               одно касание срабатывало только при отпускании, без заполнения круга. */
+            holdForm.dataset.driverUnloadOneTap = "false";
         }
         if (workDial) {
             workDial.classList.toggle("is-waiting-operation", isWaiting);
@@ -1902,16 +1908,15 @@ window.bindDriverMobileShell = function () {
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
         function submitDriverUnloadOnce() {
-            /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание
-               завершает его через очередь ручного режима. Возвращаем false — кольцо
-               удержания сбрасывается как после отпускания, а круг гаснет сам, когда
-               движок ручного рейса сообщит о завершении. */
+            /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание или
+               одно касание завершает его через очередь ручного режима; круг гаснет сам,
+               когда движок ручного рейса сообщит о завершении. */
             if (holdButton.dataset.driverManualDial === "true") {
                 if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
                 var started = window.DriverPointDrum.completeFromDial();
-                /* Одно касание в ожидании разгрузки: как у обычного рейса, круг сразу
-                   показывает отправку (удержанию сброса кольца здесь нет). */
-                if (started && holdForm.dataset.driverUnloadOneTap === "true") {
+                /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
+                   иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
+                if (started) {
                     holdButton.classList.remove("is-loaded", "is-holding");
                     holdButton.classList.add("is-pending");
                     if (dialLabel) {

@@ -327,10 +327,8 @@
         return card ? String(card.dataset.driverPointName || "") : "";
     }
 
-    function setOneTap(button, on) {
-        var form = button.closest("[data-driver-hold-form]");
-        var want = on ? "true" : "false";
-        if (form && form.dataset.driverUnloadOneTap !== want) form.dataset.driverUnloadOneTap = want;
+    // Ожидание разгрузки: круг жёлтый, как у обычного рейса; разгрузка — удержанием со шкалой.
+    function setUnloadWait(button, on) {
         if (button.classList.contains("is-waiting-unload") !== !!on) button.classList.toggle("is-waiting-unload", !!on);
     }
 
@@ -347,14 +345,12 @@
                 button.dataset.driverManualPrevLabel = label ? String(label.dataset.driverDialRaw || label.textContent.trim()) : "";
             }
             if (button.dataset.driverManualDialLabel !== name) button.dataset.driverManualDialLabel = name;
-            // Идёт отправка завершения (одно касание): круг показывает «ОТПРАВКА», не трогаем.
+            // Идёт отправка завершения: круг показывает «ОТПРАВКА», не трогаем.
             if (button.classList.contains("is-pending")) return;
             if (button.disabled) button.disabled = false;
             if (button.hasAttribute("aria-disabled")) button.removeAttribute("aria-disabled");
-            // Идёт ожидание разгрузки — как у обычного рейса, хватит одного касания.
-            var oneTap = wrap.classList.contains("is-waiting-unload");
-            setOneTap(button, oneTap);
-            var aria = "Завершить ручной рейс на " + name + (oneTap ? ". Нажмите один раз." : ". Удерживайте 1 секунду.");
+            setUnloadWait(button, wrap.classList.contains("is-waiting-unload"));
+            var aria = "Завершить ручной рейс на " + name + ". Удерживайте 1 секунду.";
             if (button.getAttribute("aria-label") !== aria) button.setAttribute("aria-label", aria);
             if (button.classList.contains("is-empty")) button.classList.remove("is-empty");
             if (!button.classList.contains("is-loaded") && !button.classList.contains("is-holding")) button.classList.add("is-loaded");
@@ -374,7 +370,7 @@
         button.setAttribute("aria-label", "Разгрузка недоступна: нет загруженного рейса");
         button.classList.remove("is-loaded", "is-holding", "is-pending");
         button.classList.add("is-empty");
-        setOneTap(button, false);
+        setUnloadWait(button, false);
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
         setDialLabel(prev);
@@ -595,6 +591,7 @@
         var c = cylinder();
         // Новая копия экрана: грани собираются заново, поворот сохраняется (см. build).
         var fresh = !!(c && geo.built !== c);
+        if (fresh) healStaleStyles();
         if (build()) render(false);
         syncModeControls();
         syncAssigned();
@@ -612,7 +609,40 @@
         if (relevant) refresh();
     });
 
+    /* Разметка с барабаном пришла, а стили экрана остались из кэша от прежней
+       версии (тот же адрес ?v=, пока версия оболочки не поднята): сетка без строки
+       «pointdrum» сжимает экран в узкую колонку. Пойманный на телефоне 26.09.2026
+       случай — лечим сами: один раз перечитываем стили в обход кэша и заново
+       подгоняем экран под окно. */
+    var staleStylesHealed = false;
+    function healStaleStyles() {
+        if (staleStylesHealed || !drum()) return;
+        var screen = q(".driver-work-screen");
+        if (!screen) return;
+        var areas = root.getComputedStyle(screen).gridTemplateAreas || "";
+        if (areas.indexOf("pointdrum") >= 0) return;
+        staleStylesHealed = true;
+        var stamp = String(Date.now());
+        all('link[rel="stylesheet"][href*="/static/css/driver-"]').forEach(function (link) {
+            var fresh = link.cloneNode();
+            fresh.href = link.href + (link.href.indexOf("?") >= 0 ? "&" : "?") + "heal=" + stamp;
+            fresh.addEventListener("load", function () {
+                if (link.parentNode) link.parentNode.removeChild(link);
+                geo.built = null;
+                refresh();
+                if (typeof root.driverScheduleViewportFit === "function") root.driverScheduleViewportFit();
+            }, { once: true });
+            link.parentNode.insertBefore(fresh, link.nextSibling);
+        });
+        if (typeof root.fetch === "function") {
+            try { root.fetch("/client-error/", { method: "POST", credentials: "same-origin", keepalive: true,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ kind: "driver-stale-styles-healed", areas: areas }) }).catch(function () {}); } catch (e) {}
+        }
+    }
+
     function init() {
+        healStaleStyles();
         var s = shell();
         // Незавершённый ручной рейс — ручной режим включён, что бы ни было сохранено.
         var manualTrip = !!(s && s.dataset.driverActiveTripOrigin === "driver_manual");
