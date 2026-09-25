@@ -38,6 +38,10 @@ const DISPATCHER_BOARD_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "includes", "dispatcher_board.html"),
     "utf8"
 );
+const DISPATCHER_SERVICE_LISTS = fs.readFileSync(
+    path.join(BACKEND, "templates", "trips", "includes", "dispatcher_service_lists.html"),
+    "utf8"
+);
 const DISPATCHER_PUSH_INVITE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "includes", "dispatcher_push_invite.html"),
     "utf8"
@@ -93,6 +97,24 @@ test("серверная доска живёт в отдельном упако�
     assert.match(
         PRODUCTION_MANIFEST,
         /templates\/trips\/includes\/dispatcher_board\.html/
+    );
+});
+
+test("скрытые служебные списки живут в отдельном упакованном include", () => {
+    assert.match(
+        SHARED_TEMPLATE,
+        /{% include "trips\/includes\/dispatcher_service_lists\.html" %}/
+    );
+    assert.doesNotMatch(SHARED_TEMPLATE, /class="dispatcher-tools"/);
+    assert.match(DISPATCHER_SERVICE_LISTS, /class="dispatcher-tools"[^>]*hidden/);
+    assert.match(DISPATCHER_SERVICE_LISTS, /class="dispatcher-filters"/);
+    assert.match(DISPATCHER_SERVICE_LISTS, /dispatcher_complete_trip/);
+    assert.match(DISPATCHER_SERVICE_LISTS, /dispatcher_cancel_assignment/);
+    assert.match(DISPATCHER_SERVICE_LISTS, /dispatcher_service_close_shift/);
+    assert.doesNotMatch(DISPATCHER_SERVICE_LISTS, /data-gd-equipment-detail/);
+    assert.match(
+        PRODUCTION_MANIFEST,
+        /templates\/trips\/includes\/dispatcher_service_lists\.html/
     );
 });
 

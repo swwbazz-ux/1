@@ -1,0 +1,243 @@
+    <section class="dispatcher-tools" aria-label="Фильтры и служебные списки" hidden>
+        <div class="dispatcher-tool-head">
+            <div>
+                <h2>Оперативные списки</h2>
+                <p>Фильтры пульта, служебные действия, активные рейсы и отчеты.</p>
+            </div>
+            <div class="dispatcher-tool-actions">
+                <button type="button" class="button-link" data-dispatcher-theme-toggle>День / Ночь</button>
+                <a class="button-link" href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
+                <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет заказчику</a>
+                <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Открыть экран механиков</a>
+                <a class="button-link button-secondary" href="{% url 'downtime_report' %}">Отчет по простоям</a>
+                <a class="button-link button-secondary" href="{% url 'role_home' %}">Назад</a>
+            </div>
+        </div>
+
+        <details class="dispatcher-details" open>
+            <summary>Фильтры пульта</summary>
+            <form method="get" class="dispatcher-filters">
+                <label for="truck">Самосвал
+                    <select id="truck" name="truck">
+                        <option value="">Все</option>
+                        {% for truck in trucks %}
+                            <option value="{{ truck.id }}" {% if filters.truck == truck.id|stringformat:"s" %}selected{% endif %}>{{ truck }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label for="excavator">Экскаватор
+                    <select id="excavator" name="excavator">
+                        <option value="">Все</option>
+                        {% for excavator in excavators %}
+                            <option value="{{ excavator.id }}" {% if filters.excavator == excavator.id|stringformat:"s" %}selected{% endif %}>{{ excavator }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="checkline">
+                    <input type="hidden" name="show_active_trips" value="0">
+                    <input type="checkbox" name="show_active_trips" value="1" {% if filters.show_active_trips %}checked{% endif %}>
+                    Активные рейсы
+                </label>
+                <label class="checkline">
+                    <input type="hidden" name="show_pending_assignments" value="0">
+                    <input type="checkbox" name="show_pending_assignments" value="1" {% if filters.show_pending_assignments %}checked{% endif %}>
+                    Назначения ждут подтверждения
+                </label>
+                <label class="checkline">
+                    <input type="hidden" name="show_accepted_assignments" value="0">
+                    <input type="checkbox" name="show_accepted_assignments" value="1" {% if filters.show_accepted_assignments %}checked{% endif %}>
+                    Принятые назначения в работе
+                </label>
+                <button type="submit">Обновить пульт</button>
+            </form>
+        </details>
+
+        <div class="dispatcher-lists-grid">
+            <section class="dispatcher-list-card">
+                <h2>Активные рейсы</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Создан</th><th>Самосвал</th><th>Экскаватор</th><th>Порода</th><th>Объем</th><th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for trip in active_trips %}
+                                <tr>
+                                    <td>{{ trip.created_at|date:"d.m.Y H:i" }}</td>
+                                    <td>{{ trip.truck }}</td>
+                                    <td>{{ trip.excavator }}</td>
+                                    <td>{{ trip.rock_type }}</td>
+                                    <td>{{ trip.volume_m3|default:"-" }}</td>
+                                    <td>
+                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                            <form method="post" action="{% url 'dispatcher_complete_trip' trip.id %}" class="dispatcher-inline-form">
+                                                {% csrf_token %}
+                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
+                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина служебного завершения">
+                                                <button type="submit">Завершить служебно</button>
+                                            </form>
+                                            <form method="post" action="{% url 'dispatcher_cancel_trip' trip.id %}" class="dispatcher-inline-form">
+                                                {% csrf_token %}
+                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
+                                                <input type="text" name="reason" required aria-required="true" maxlength="255" placeholder="Причина отмены рейса">
+                                                <button type="submit">Отменить</button>
+                                            </form>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="6">Активных рейсов сейчас нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="dispatcher-list-card">
+                <h2>Назначения ждут подтверждения</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead><tr><th>Назначено</th><th>Самосвал</th><th>Экскаватор</th><th>Действие</th></tr></thead>
+                        <tbody>
+                            {% for assignment in pending_assignments %}
+                                <tr>
+                                    <td>{{ assignment.assigned_at|date:"d.m.Y H:i" }}</td>
+                                    <td>{{ assignment.truck }}</td>
+                                    <td>{{ assignment.excavator }}</td>
+                                    <td>
+                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                            <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}" class="dispatcher-inline-form">
+                                                {% csrf_token %}
+                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
+                                                <input type="text" name="reason" placeholder="Причина">
+                                                <button type="submit">Снять</button>
+                                            </form>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="4">Ожидающих подтверждения назначений нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="dispatcher-list-card">
+                <h2>Принятые назначения в работе</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead><tr><th>Принято</th><th>Самосвал</th><th>Экскаватор</th><th>Действие</th></tr></thead>
+                        <tbody>
+                            {% for assignment in accepted_assignments %}
+                                <tr>
+                                    <td>{{ assignment.accepted_at|date:"d.m.Y H:i" }}</td>
+                                    <td>{{ assignment.truck }}</td>
+                                    <td>{{ assignment.excavator }}</td>
+                                    <td>
+                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                            <form method="post" action="{% url 'dispatcher_cancel_assignment' assignment.id %}" class="dispatcher-inline-form">
+                                                {% csrf_token %}
+                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
+                                                <input type="text" name="reason" placeholder="Причина">
+                                                <button type="submit">Снять</button>
+                                            </form>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="4">Принятых назначений в работе сейчас нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="dispatcher-list-card">
+                <h2>Незакрытые смены</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead><tr><th>Открыта</th><th>Сотрудник</th><th>Роль</th><th>Техника</th><th>Действие</th></tr></thead>
+                        <tbody>
+                            {% for shift in open_shifts %}
+                                <tr>
+                                    <td>{{ shift.opened_at|date:"d.m.Y H:i" }}</td>
+                                    <td>
+                                        <strong>{{ shift.employee }}</strong>
+                                        {% include "users/includes/application_presence.html" with presence=shift.application_presence compact=True show_time=True show_apps=True %}
+                                        {% if shift.is_dashboard_stale %}<small class="dispatcher-stale-shift-label">Старая незакрытая смена · на пульте не учитывается</small>{% endif %}
+                                    </td>
+                                    <td>{{ shift.role_name }}</td>
+                                    <td>{{ shift.equipment|default:"-" }}</td>
+                                    <td>
+                                        {% if access.role.code == 'dispatcher' or access.role.code == 'admin' %}
+                                            <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}" class="dispatcher-inline-form">
+                                                {% csrf_token %}
+                                                {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
+                                                <input type="text" name="reason" placeholder="Причина">
+                                                {% if shift.equipment %}
+                                                    <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
+                                                    {% if shift.workplace_code == "driver" %}
+                                                        <input type="number" name="end_mileage" min="0" step="0.01" required placeholder="Одометр на конец">
+                                                    {% endif %}
+                                                    <input type="number" name="end_engine_hours" min="0" step="0.01" required placeholder="Моточасы на конец">
+                                                {% endif %}
+                                                <button type="submit">Закрыть служебно</button>
+                                            </form>
+                                        {% else %}-{% endif %}
+                                    </td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="5">Открытых смен сейчас нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="dispatcher-list-card">
+                <h2>Открытые механические простои</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead><tr><th>Начало</th><th>Техника</th><th>Причина</th><th>Комментарий</th></tr></thead>
+                        <tbody>
+                            {% for downtime in open_mechanic_downtimes %}
+                                <tr>
+                                    <td>{{ downtime.started_at|date:"d.m.Y H:i" }}</td>
+                                    <td>{{ downtime.equipment }}</td>
+                                    <td>{{ downtime.reason }}</td>
+                                    <td>{{ downtime.comment|default:"-" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="4">Открытых механических простоев сейчас нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="dispatcher-list-card">
+                <h2>Последние выполненные рейсы</h2>
+                <div class="dispatcher-table-wrap">
+                    <table>
+                        <thead><tr><th>Выполнен</th><th>Самосвал</th><th>Экскаватор</th><th>Порода</th><th>Объем</th></tr></thead>
+                        <tbody>
+                            {% for trip in recent_completed_trips %}
+                                <tr>
+                                    <td>{{ trip.completed_at|date:"d.m.Y H:i" }}</td>
+                                    <td>{{ trip.truck }}</td>
+                                    <td>{{ trip.excavator }}</td>
+                                    <td>{{ trip.rock_type }}</td>
+                                    <td>{{ trip.volume_m3|default:"-" }}</td>
+                                </tr>
+                            {% empty %}
+                                <tr><td colspan="5">Выполненных рейсов пока нет.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </section>
