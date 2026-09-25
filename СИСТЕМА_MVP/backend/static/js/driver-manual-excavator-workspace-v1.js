@@ -377,19 +377,19 @@
         return fitted;
     }
 
-    /* Название породы в шапке («Окисленная руда») раньше обрезалось
-       многоточием — та же задача, что общий модуль equipment-label-fit-v1.js
-       уже решает для номеров техники и точек разгрузки: кегль вниз, потом
-       (если разрешено) перенос, потом горизонтальное сжатие, и только в
-       крайнем случае — кегль ниже привычного пола. Обрезки при этом не
-       бывает никогда. Строка одна (топбар высотой 42px, второй строке негде
-       встать), поэтому перенос запрещён явно, а не подбором высоты. */
-    function fitFaceRock(workspace) {
-        var rock = workspace && workspace.querySelector ? workspace.querySelector(".eo-face-rock") : null;
-        if (!rock) return null;
+    /* Строка «ЭКС-1 · Гор. 75/Бл. 52 · Окисленная руда» заменяет собой
+       раздел, который раньше был отдельной шапкой (eo-topbar, убрана по
+       просьбе пользователя) — тот же общий модуль equipment-label-fit-v1.js,
+       который уже вмещает номера техники и точки разгрузки без обрезки:
+       кегль вниз, перенос на вторую строку (тут высоты хватает), сжатие,
+       и только в крайнем случае — кегль ниже привычного пола. Обрезки не
+       бывает никогда. */
+    function fitFaceSummary(workspace) {
+        var summary = workspace && workspace.querySelector ? workspace.querySelector("[data-driver-manual-face-summary]") : null;
+        if (!summary) return null;
         var fitter = root.EquipmentLabelFit;
         if (!fitter || typeof fitter.fit !== "function") return null;
-        return fitter.fit(rock, {allowWrap: false});
+        return fitter.fit(summary, {allowWrap: true});
     }
 
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
@@ -1253,15 +1253,14 @@
             if (rock) rock.textContent = String(context.rock_type_name || "");
             fitSourceTitle(source);
         }
-        var topTitle = workspace.querySelector(".driver-manual-workspace__back strong");
-        if (topTitle) topTitle.textContent = String(context.excavator_label || "Ручной режим");
-        var coordinates = workspace.querySelectorAll(".eo-face-coordinates span");
-        if (coordinates[0]) coordinates[0].textContent = "Гор. " + String(context.loading_horizon || "—");
-        if (coordinates[1]) coordinates[1].textContent = "Бл. " + String(context.loading_block || "—");
-        var topRock = workspace.querySelector(".eo-face-rock");
-        if (topRock) {
-            topRock.textContent = String(context.rock_type_name || "");
-            fitFaceRock(workspace);
+        var faceSummary = workspace.querySelector("[data-driver-manual-face-summary]");
+        if (faceSummary) {
+            var faceText = String(context.excavator_label || "—")
+                + " · Гор. " + String(context.loading_horizon || "—")
+                + "/Бл. " + String(context.loading_block || "—")
+                + (context.rock_type_name ? " · " + String(context.rock_type_name) : "");
+            faceSummary.textContent = faceText;
+            fitFaceSummary(workspace);
         }
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
         if (grid && points.length && !needsAlternateOnly) {
@@ -1866,15 +1865,16 @@
         updatePointAction(workspace);
         renderTripTimer(workspace);
         setManualExitAvailability(workspace);
-        /* До этой строки коробка названия породы скрыта (workspace.hidden
-           было true) и имеет нулевую ширину — подгонка кегля, вызванная
-           раньше из syncWorkspaceContext, ничего не считает. Пересчитываем
-           заново теперь, когда ширина уже настоящая; кадром позже — чтобы
-           браузер успел применить только что снятое hidden. */
+        /* До этой строки коробка строки «экскаватор/забой» скрыта
+           (workspace.hidden было true) и имеет нулевую ширину — подгонка
+           кегля, вызванная раньше из syncWorkspaceContext, ничего не
+           считает. Пересчитываем заново теперь, когда ширина уже настоящая;
+           кадром позже — чтобы браузер успел применить только что снятое
+           hidden. */
         if (root.requestAnimationFrame) {
-            root.requestAnimationFrame(function () { fitFaceRock(workspace); });
+            root.requestAnimationFrame(function () { fitFaceSummary(workspace); });
         } else {
-            fitFaceRock(workspace);
+            fitFaceSummary(workspace);
         }
         var source = workspace.querySelector("[data-driver-manual-source]");
         var back = workspace.querySelector("[data-driver-manual-close]");
@@ -2065,7 +2065,7 @@
             });
             root.addEventListener("resize", function () {
                 fitSourceTitle(currentWorkspace && currentWorkspace.querySelector("[data-driver-manual-source]"));
-                fitFaceRock(currentWorkspace);
+                fitFaceSummary(currentWorkspace);
             });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
@@ -2119,7 +2119,7 @@
         markLastDump: markLastDump,
         manualCancelWins: manualCancelWins,
         fitSourceTitle: fitSourceTitle,
-        fitFaceRock: fitFaceRock,
+        fitFaceSummary: fitFaceSummary,
         updateManualTripCount: updateManualTripCount,
         buildManualLoadCancelEvent: buildManualLoadCancelEvent,
         cancelManualLoad: cancelManualLoad,
