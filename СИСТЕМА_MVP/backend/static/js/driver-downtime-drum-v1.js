@@ -302,6 +302,11 @@
             d.classList.toggle("is-active", id !== "");
             d.classList.toggle("is-locked", id !== "");   // барабан зафиксирован, пока идёт простой
         }
+        // Сердцевина круга мигает жёлтым в такт контуру: класс ставится в том же кадре,
+        // что и is-active барабана, — обе анимации стартуют вместе.
+        if (w && w.classList.contains("is-downtime-active") !== (id !== "")) {
+            w.classList.toggle("is-downtime-active", id !== "");
+        }
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
         if (activeIndex >= 0 && !drag && frontIndex(geo.theta) !== activeIndex) rotateTo(activeIndex, true);
@@ -320,11 +325,49 @@
         });
     }
 
+    function truckIsLoaded() {
+        var shell = q("[data-driver-shell]");
+        var hold = q("[data-driver-hold-button]");
+        return !!(
+            (shell && shell.dataset.driverHasOpenTrip === "true")
+            || (hold && hold.dataset.driverManualDial === "true")
+        );
+    }
+
+    function tripPointName() {
+        var api = root.DriverManualExcavatorWorkspace;
+        var name = api && typeof api.activeManualPointName === "function" ? String(api.activeManualPointName() || "") : "";
+        var shell = q("[data-driver-shell]");
+        if (!name && shell) name = shell.dataset.driverActualDumpPointName || shell.dataset.driverAssignedDumpPointName || "";
+        return name.trim().replace(/\s+/g, " ").toLowerCase();
+    }
+
+    function localRefusal(button) {
+        var need = button.dataset.driverDowntimeRequires || "";
+        var loaded = truckIsLoaded();
+        if (need === "empty" && loaded) return "Самосвал уже загружен: этот простой — только на разгруженном";
+        if (need === "loaded" && !loaded) return "Доступно только после погрузки";
+        var point = (button.dataset.driverDowntimePoint || "").toLowerCase();
+        if (need === "loaded" && point && tripPointName() !== point) {
+            return "Только при рейсе на " + point.toUpperCase();
+        }
+        return "";
+    }
+
     function startDowntime(card) {
         var id = card.dataset.driverDrumReasonId;
         var button = q('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + id + '"]');
         if (!button) {
             if (typeof root.showDriverToast === "function") root.showDriverToast("Причина простоя недоступна");
+            return;
+        }
+        // Правила «гружёный / пустой / точка рейса» (downtimes/driver_workflow.py). Сервер
+        // их тоже проверяет и помечает недоступные причины; здесь — для рейса, который
+        // телефон уже показывает, а сервер ещё не получил (ручной рейс в очереди).
+        var refusal = localRefusal(button);
+        if (refusal) {
+            haptic([45, 60, 45]);
+            if (typeof root.showDriverToast === "function") root.showDriverToast(refusal);
             return;
         }
         haptic([35, 45, 70]); click(1.6);   // старт простоя: короткий-длинный
@@ -670,7 +713,28 @@
     // Контур рисует CSS. Здесь только три размера гнезда, и ставятся они на <html> —
     // элемент, который не подменяется при обновлении экрана, поэтому контур переживает
     // любое обновление и не пересчитывается на кадрах вращения.
+    /* Путь пишется, только если он изменился: смена переменной на <html> пересчитывает
+       стили экрана, а сверить строку ничего не стоит. Поэтому контур можно сверять
+       после каждого обновления экрана и любого сдвига — и он не отстаёт от граней. */
+    var lastLinkPath = "";
+    function setLinkPath(path) {
+        if (path === lastLinkPath) return;
+        lastLinkPath = path;
+        doc.documentElement.style.setProperty("--link-path", 'path("' + path + '")');
+    }
+
+    var linkFrame = 0;
+    function scheduleLink() {
+        if (linkFrame) return;
+        linkFrame = root.requestAnimationFrame(function () { linkFrame = 0; syncLinkVars(); });
+    }
+
     function syncLinkVars() {
+        // Грань ещё доезжает на место (анимация фиксации) — контур дорисуют по окончании.
+        var own = cylinder();
+        if (own && own.__snapUntil > Date.now()) return;
+        var topTrack = q("[data-driver-point-drum-track]");
+        if (topTrack && topTrack.__snapUntil > Date.now()) return;
         var w = dial();
         var card = centerCard();
         var link = q("[data-driver-drum-link]");
@@ -692,16 +756,17 @@
         var yN = cy + Math.sqrt(r * r - half * half);   // линии начинаются точно на кольце
         var y1 = cr.bottom - box.top + pad;
         function p(v) { return Number(v).toFixed(1); }
-        // Над кругом стоит барабан точек разгрузки со своим горлышком вверх: кольцо
-        // рисуется двумя дугами по бокам, с разрывом наверху ровно под его линии
-        // (сами линии рисует driver-point-drum-v1.js от тех же точек кольца).
+        // Над кругом стоит барабан точек разгрузки: контур — одна замкнутая кривая на оба
+        // горлышка (верхняя рамка → правая дуга → нижняя рамка → левая дуга → верхняя
+        // рамка), поэтому при простое он мигает целиком, как единый элемент.
         var top = q("[data-driver-point-drum] [data-driver-point-card].is-center");
         var tr = top ? top.getBoundingClientRect() : null;
         var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
         if (halfT && halfT < r) {
             var xLt = cx - halfT, xRt = cx + halfT;
             var yT = cy - Math.sqrt(r * r - halfT * halfT);
-            var split = [
+            var yTop = tr.top - box.top - pad;
+            var both = [
                 "M", p(xRt), p(yT),
                 "A", p(r), p(r), "0 0 1", p(xR), p(yN),
                 "L", p(xR), p(y1 - rr),
@@ -709,9 +774,14 @@
                 "L", p(xL + rr), p(y1),
                 "Q", p(xL), p(y1), p(xL), p(y1 - rr),
                 "L", p(xL), p(yN),
-                "A", p(r), p(r), "0 0 1", p(xLt), p(yT)
+                "A", p(r), p(r), "0 0 1", p(xLt), p(yT),
+                "L", p(xLt), p(yTop + rr),
+                "Q", p(xLt), p(yTop), p(xLt + rr), p(yTop),
+                "L", p(xRt - rr), p(yTop),
+                "Q", p(xRt), p(yTop), p(xRt), p(yTop + rr),
+                "Z"
             ].join(" ");
-            doc.documentElement.style.setProperty("--link-path", 'path("' + split + '")');
+            setLinkPath(both);
             return;
         }
         // Одна кривая: от левой точки кольца по большой дуге вправо, вниз по правой линии,
@@ -725,8 +795,7 @@
             "Q", p(xL), p(y1), p(xL), p(y1 - rr),
             "Z"
         ].join(" ");
-        var root_ = doc.documentElement.style;
-        root_.setProperty("--link-path", 'path("' + keyhole + '")');
+        setLinkPath(keyhole);
     }
 
     // --- состояние активного простоя: та же карточка, что и на вкладке «Простои» ---
@@ -739,6 +808,9 @@
                 || m.target.hasAttribute("data-driver-reason-duration")
             ));
         });
+        // Любая правка экрана может сдвинуть круг и грани без изменения их размера
+        // (ширина колонки, полоса прокрутки): контур сверяется кадром позже.
+        scheduleLink();
         if (!relevant) return;
         if (build()) { syncTotals(); syncActive(); }
     });
@@ -753,8 +825,12 @@
         root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();
-            if (w) new root.ResizeObserver(function () { syncLinkVars(); }).observe(w);
+            var ro = new root.ResizeObserver(function () { scheduleLink(); });
+            if (w) ro.observe(w);
+            // Круг зажат по высоте: при смене ширины экрана он не меняет размер, а сдвигается.
+            ro.observe(doc.body);
         }
+        root.addEventListener("operational-state-refresh-applied", scheduleLink);
         root.setTimeout(function () { render(false); }, 300);
     }
 

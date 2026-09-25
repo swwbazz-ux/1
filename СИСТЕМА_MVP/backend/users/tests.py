@@ -4305,7 +4305,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(
             screen_response,
             'data-driver-unavailable-message="Самосвал уже загружен"',
-            count=1,
+            # Ожидание погрузки, заправка, ТО, чистка кузова — только на пустом самосвале.
+            count=4,
         )
         self.assertEqual(action_response.status_code, 409)
         self.assertEqual(action_response.json()['code'], 'empty_truck_required')
@@ -4337,10 +4338,51 @@ class AccessLoginTests(TestCase):
         self.assertContains(
             screen_response,
             'data-driver-unavailable-message="Самосвал уже загружен"',
-            count=1,
+            # Ожидание погрузки, заправка, ТО, чистка кузова — только на пустом самосвале.
+            count=4,
         )
         self.assertEqual(action_response.status_code, 409)
         self.assertEqual(action_response.json()['code'], 'empty_truck_required')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_point_unloading_wait_requires_trip_to_that_point(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        skdr, _ = DumpPoint.objects.get_or_create(name='СКДР')
+        Trip.objects.filter(pk=trip.pk).update(dump_point=skdr, assigned_dump_point=skdr)
+        reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
+
+        response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'dump_point_mismatch')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+        page = self.client.get('/driver/', HTTP_HOST='localhost')
+        self.assertContains(page, 'data-driver-unavailable-message="Только при рейсе на ККД"')
+
+    def test_driver_empty_only_downtimes_are_blocked_on_loaded_truck(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck)
+        for name in ('Чистка кузова', 'ТО', 'Заправка'):
+            with self.subTest(reason=name):
+                reason = DowntimeReason.objects.get(name=name)
+                response = self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+                    content_type='application/json',
+                    HTTP_HOST='localhost',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], 'empty_truck_required')
         self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
 
     def test_driver_unloading_wait_rejects_legacy_active_trip(self):
@@ -4363,15 +4405,23 @@ class AccessLoginTests(TestCase):
 
     def test_driver_loaded_truck_can_start_each_unloading_wait_flow(self):
         truck = self.create_registered_driver_shift()
-        self.create_driver_trip(truck)
+        trip = self.create_driver_trip(truck)
         unloading_wait_names = (
             'Ожидание разгрузки',
             'Ожидание разгрузки ККД',
             'Ожидание разгрузки СКДР',
         )
+        # Ожидание разгрузки на конкретной точке — только при рейсе на эту точку.
+        point_for_reason = {
+            'Ожидание разгрузки ККД': 'ККД',
+            'Ожидание разгрузки СКДР': 'СКДР',
+        }
 
         for reason in DowntimeReason.objects.filter(name__in=unloading_wait_names).order_by('name'):
             with self.subTest(reason=reason.name):
+                if reason.name in point_for_reason:
+                    point, _ = DumpPoint.objects.get_or_create(name=point_for_reason[reason.name])
+                    Trip.objects.filter(pk=trip.pk).update(dump_point=point, assigned_dump_point=point)
                 response = self.client.post(
                     reverse('driver_downtime_action'),
                     data=json.dumps({

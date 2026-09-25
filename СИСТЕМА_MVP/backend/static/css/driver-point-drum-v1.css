@@ -71,27 +71,6 @@ body.driver-mobile-screen .driver-point-drum .driver-inline-note {
     text-align: center;
 }
 
-/* Контур горлышка вверх: две линии от кольца циферблата к передней грани и рамка над
-   ней. Кольцо целиком рисует контур барабана простоев — с разрывом под это горлышко. */
-body.driver-mobile-screen .driver-point-link {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 9;
-    overflow: visible;
-    pointer-events: none;
-}
-
-body.driver-mobile-screen .driver-point-link path {
-    d: var(--point-link-path, path(""));
-    fill: none;
-    stroke: rgba(150, 166, 172, .55);
-    stroke-width: 2;
-    stroke-linejoin: round;
-    stroke-linecap: round;
-}
-
 /* --- ручной режим на круге: нежно-синий вместо зелёного --- */
 body.driver-mobile-screen .mobile-dial-action--manual.is-on {
     --mobile-dial-accent: #68cdf2;

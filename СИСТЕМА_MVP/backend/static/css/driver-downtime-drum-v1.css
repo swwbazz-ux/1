@@ -399,4 +399,22 @@ body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link-ac
     50% { opacity: 0; }
 }
 
+/* Сердцевина круга при простое вспыхивает жёлтым вместе с контуром (тот же такт,
+   класс ставится в том же кадре). Слой тона готов заранее — мигает только его
+   прозрачность, как и у контура. */
+body.driver-mobile-screen .driver-work-dial.is-downtime-active .driver-work-wait-tint {
+    border: 2px solid rgba(250, 204, 21, .95);
+    background: radial-gradient(circle at 50% 50%, rgba(250, 204, 21, .30) 0%, rgba(250, 204, 21, .44) 62%, rgba(250, 204, 21, .62) 100%);
+    box-shadow: inset 0 0 36px rgba(250, 204, 21, .55), 0 0 26px rgba(250, 204, 21, .45);
+    animation: driver-downtime-blink 1.2s steps(1, end) infinite;
+}
+
+/* Мигание — сигнал состояния, а не украшение: как и контур, работает и при
+   системной настройке «уменьшить анимацию». Перебиваем её общее правило. */
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-dial.is-downtime-active .driver-work-wait-tint {
+        animation: driver-downtime-blink 1.2s steps(1, end) infinite;
+    }
+}
+
 

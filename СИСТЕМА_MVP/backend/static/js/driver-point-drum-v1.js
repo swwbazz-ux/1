@@ -205,8 +205,10 @@
         if (!c || !geo.n) return;
         c.classList.toggle("is-snapping", !!snapping);
         if (snapping) {
+            // Пока грань доезжает, контур не сверяется (driver-downtime-drum-v1.js).
+            c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
-            c.__snapTimer = root.setTimeout(syncLink, 370);
+            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLink(); }, 370);
         }
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
@@ -256,48 +258,35 @@
         return el;
     }
 
+    // Контур целиком (кольцо и оба горлышка) — одна кривая барабана простоев: она же
+    // мигает при простое. Верхнее горлышко зависит от ширины передней грани этого
+    // барабана, поэтому после её сдвига контур пересчитывается.
     function syncLink() {
-        var w = dial();
-        var card = centerCard();
-        var link = q("[data-driver-point-link]");
-        if (!w || !card || !link) return;
-        var screen = screenOf(link);
-        if (!screen) return;
-        var dr = w.getBoundingClientRect();
-        var cr = card.getBoundingClientRect();
-        var box = screen.getBoundingClientRect();
-        if (!dr.width || !cr.width) return;
-        var pad = 5, rr = 10;
-        var half = cr.width / 2 + pad;
-        // Тот же радиус кольца, что у контура барабана простоев: линии встают точно на него.
-        var r = dr.width * 0.4975;
-        if (half >= r) return;
-        var cx = dr.left + dr.width / 2 - box.left, cy = dr.top + dr.height / 2 - box.top;
-        var xL = cx - half, xR = cx + half;
-        var yN = cy - Math.sqrt(r * r - half * half);
-        var y1 = cr.top - box.top - pad;
-        function p(v) { return Number(v).toFixed(1); }
-        var neck = [
-            "M", p(xL), p(yN),
-            "L", p(xL), p(y1 + rr),
-            "Q", p(xL), p(y1), p(xL + rr), p(y1),
-            "L", p(xR - rr), p(y1),
-            "Q", p(xR), p(y1), p(xR), p(y1 + rr),
-            "L", p(xR), p(yN)
-        ].join(" ");
-        doc.documentElement.style.setProperty("--point-link-path", 'path("' + neck + '")');
-        // Кольцо рисует контур барабана простоев — пусть оставит разрыв под это горлышко.
         if (root.DriverDowntimeDrum && typeof root.DriverDowntimeDrum.syncLink === "function") {
             root.DriverDowntimeDrum.syncLink();
         }
     }
 
     // --- действия ручного рейса: их выполняет движок ручного режима ---
+    function blockingDowntime() {
+        var active = q("[data-driver-downtime-drum] .driver-drum-card.is-active-downtime");
+        if (!active) return false;
+        var reason = q('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + active.dataset.driverDrumReasonId + '"]');
+        return !(reason && reason.dataset.driverDowntimeFlow === "waiting_loading");
+    }
+
     function sendToPoint(card) {
         var api = engine();
         var pointId = card.dataset.driverPointId;
         if (!api || typeof api.startManualLoadAtPoint !== "function") {
             toast("Ручной режим недоступен: обновите экран");
+            return;
+        }
+        // «Ожидание погрузки» погрузку не держит — сервер закроет его вместе с погрузкой.
+        // Любой другой простой (обед, ремонт) погрузку не пускает.
+        if (blockingDowntime()) {
+            haptic([45, 60, 45]);
+            toast("Сначала завершите простой");
             return;
         }
         haptic([35, 45, 70]); click(1.6);
@@ -338,6 +327,13 @@
         return card ? String(card.dataset.driverPointName || "") : "";
     }
 
+    function setOneTap(button, on) {
+        var form = button.closest("[data-driver-hold-form]");
+        var want = on ? "true" : "false";
+        if (form && form.dataset.driverUnloadOneTap !== want) form.dataset.driverUnloadOneTap = want;
+        if (button.classList.contains("is-waiting-unload") !== !!on) button.classList.toggle("is-waiting-unload", !!on);
+    }
+
     function syncDial() {
         var button = holdButton();
         var wrap = dial();
@@ -351,9 +347,14 @@
                 button.dataset.driverManualPrevLabel = label ? String(label.dataset.driverDialRaw || label.textContent.trim()) : "";
             }
             if (button.dataset.driverManualDialLabel !== name) button.dataset.driverManualDialLabel = name;
+            // Идёт отправка завершения (одно касание): круг показывает «ОТПРАВКА», не трогаем.
+            if (button.classList.contains("is-pending")) return;
             if (button.disabled) button.disabled = false;
             if (button.hasAttribute("aria-disabled")) button.removeAttribute("aria-disabled");
-            var aria = "Завершить ручной рейс на " + name + ". Удерживайте 1 секунду.";
+            // Идёт ожидание разгрузки — как у обычного рейса, хватит одного касания.
+            var oneTap = wrap.classList.contains("is-waiting-unload");
+            setOneTap(button, oneTap);
+            var aria = "Завершить ручной рейс на " + name + (oneTap ? ". Нажмите один раз." : ". Удерживайте 1 секунду.");
             if (button.getAttribute("aria-label") !== aria) button.setAttribute("aria-label", aria);
             if (button.classList.contains("is-empty")) button.classList.remove("is-empty");
             if (!button.classList.contains("is-loaded") && !button.classList.contains("is-holding")) button.classList.add("is-loaded");
@@ -373,6 +374,7 @@
         button.setAttribute("aria-label", "Разгрузка недоступна: нет загруженного рейса");
         button.classList.remove("is-loaded", "is-holding", "is-pending");
         button.classList.add("is-empty");
+        setOneTap(button, false);
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
         setDialLabel(prev);
@@ -385,10 +387,16 @@
             toast("Ручной режим недоступен: обновите экран");
             return false;
         }
+        function undoPending() {
+            var button = holdButton();
+            if (button) button.classList.remove("is-pending");
+            refresh();
+        }
         api.completeActiveManualLoad().then(function (saved) {
-            if (!saved) toast("Рейс ещё сохраняется, повторите удержание");
+            if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); }
         }).catch(function () {
             toast("Не удалось сохранить завершение рейса на телефоне");
+            undoPending();
         });
         return true;
     }

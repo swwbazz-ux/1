@@ -56,6 +56,9 @@ from downtimes.driver_workflow import (
     driver_downtime_opens_work,
     driver_downtime_requires_empty_truck,
     driver_downtime_requires_loaded_trip,
+    driver_downtime_required_dump_point_key,
+    driver_downtime_start_conflict,
+    driver_downtime_unavailable_message,
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -4665,8 +4668,13 @@ def driver_shift_view(request):
         not driver_has_open_trip
         and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
     )
+    # Ожидание разгрузки идёт и у ручного рейса: круг водителя (driver-point-drum-v1.js)
+    # тогда тоже завершает рейс одним касанием.
     driver_unloading_wait_active = bool(
-        driver_has_loaded_trip
+        (
+            driver_has_loaded_trip
+            or (active_trip and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD)
+        )
         and active_downtime_flow == DRIVER_DOWNTIME_FLOW_WAITING_UNLOAD
     )
 
@@ -5176,6 +5184,12 @@ def driver_shift_view(request):
         open_shift,
         until=downtime_calculated_at,
     )
+    driver_downtime_truck_loaded = bool(
+        active_trip and active_trip.status == TripStatus.LOADED_WAITING_UNLOAD
+    )
+    driver_downtime_dump_point = (
+        (active_trip.actual_dump_point or active_trip.dump_point) if active_trip else None
+    )
     for reason in downtime_reasons:
         reason.driver_in_drum = (not driver_quick_reason_ids) or reason.id in driver_quick_reason_ids
         reason.driver_workflow = driver_downtime_flow(reason)
@@ -5187,11 +5201,16 @@ def driver_shift_view(request):
             reason.driver_total_seconds
             or (active_downtime and active_downtime.reason_id == reason.id)
         )
-        reason.driver_unavailable_message = ''
-        if reason.driver_requires_loaded_trip and not driver_has_loaded_trip:
-            reason.driver_unavailable_message = 'Доступно только после погрузки'
-        elif reason.driver_requires_empty_truck and driver_has_open_trip:
+        # Доступность по правилам driver_workflow. Гружёный — по любому открытому
+        # рейсу, включая ручной (у него active_trip есть, а обычного круга нет).
+        reason.driver_unavailable_message = driver_downtime_unavailable_message(
+            reason,
+            truck_loaded=driver_downtime_truck_loaded,
+            dump_point=driver_downtime_dump_point,
+        )
+        if reason.driver_requires_empty_truck and driver_has_open_trip:
             reason.driver_unavailable_message = 'Самосвал уже загружен'
+        reason.driver_dump_point_key = driver_downtime_required_dump_point_key(reason)
     # Полный серверный справочник активных точек должен остаться доступен и
     # после offline-перезапуска; срез первых десяти скрывал допустимые точки.
     unload_points = [
@@ -5818,56 +5837,22 @@ def driver_downtime_action_view(request):
         messages.error(request, 'Причина простоя не найдена.')
         return redirect(f'{reverse("driver_work")}?tab=downtimes')
     workflow = driver_downtime_flow(reason)
-    if driver_downtime_requires_empty_truck(reason):
-        open_trip = (
-            Trip.objects
-            .select_for_update()
-            .filter(
-                truck=open_shift.equipment,
-                status__in=OPEN_TRIP_STATUSES,
+    # Гружёный / пустой самосвал и точка рейса — общие правила driver_workflow.
+    start_conflict = driver_downtime_start_conflict(reason, open_shift.equipment)
+    if start_conflict:
+        code, error = start_conflict
+        if wants_json:
+            return JsonResponse(
+                {
+                    'ok': False,
+                    'error': error,
+                    'code': code,
+                    'workflow': workflow,
+                },
+                status=409,
             )
-            .order_by('-created_at')
-            .first()
-        )
-        if open_trip:
-            error = 'Ожидание погрузки нельзя начать: самосвал уже загружен.'
-            if wants_json:
-                return JsonResponse(
-                    {
-                        'ok': False,
-                        'error': error,
-                        'code': 'empty_truck_required',
-                        'workflow': workflow,
-                    },
-                    status=409,
-                )
-            messages.error(request, error)
-            return redirect(f'{reverse("driver_work")}?tab=downtimes')
-    if driver_downtime_requires_loaded_trip(reason):
-        loaded_trip = (
-            Trip.objects
-            .select_for_update()
-            .filter(
-                truck=open_shift.equipment,
-                status=TripStatus.LOADED_WAITING_UNLOAD,
-            )
-            .order_by('-created_at')
-            .first()
-        )
-        if not loaded_trip:
-            error = 'Этот простой доступен только после погрузки самосвала.'
-            if wants_json:
-                return JsonResponse(
-                    {
-                        'ok': False,
-                        'error': error,
-                        'code': 'loaded_trip_required',
-                        'workflow': workflow,
-                    },
-                    status=409,
-                )
-            messages.error(request, error)
-            return redirect(f'{reverse("driver_work")}?tab=downtimes')
+        messages.error(request, error)
+        return redirect(f'{reverse("driver_work")}?tab=downtimes')
     active_event = (
         DowntimeEvent.objects
         .select_for_update(of=('self',))

@@ -74,7 +74,8 @@ window.bindDriverMobileShell = function () {
             /* Грани барабана простоев повёрнуты в 3D: по замерам они выходят за экран, хотя
                сцена их обрезает. Считать это переполнением нельзя — из-за него весь экран
                водителя жил в плотности «tight», а при каждом простое дёргался на 2 px. */
-            if (node.closest && node.closest("[data-driver-downtime-drum]")) return false;
+            // То же для барабана точек разгрузки над кругом.
+            if (node.closest && node.closest("[data-driver-downtime-drum], [data-driver-point-drum]")) return false;
             var rect = node.getBoundingClientRect();
             return (
                 node.scrollHeight > node.clientHeight + 1
@@ -1906,8 +1907,18 @@ window.bindDriverMobileShell = function () {
                удержания сбрасывается как после отпускания, а круг гаснет сам, когда
                движок ручного рейса сообщит о завершении. */
             if (holdButton.dataset.driverManualDial === "true") {
-                if (!holdButton.disabled && !driverRoleIsReadonly() && window.DriverPointDrum) {
-                    window.DriverPointDrum.completeFromDial();
+                if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
+                var started = window.DriverPointDrum.completeFromDial();
+                /* Одно касание в ожидании разгрузки: как у обычного рейса, круг сразу
+                   показывает отправку (удержанию сброса кольца здесь нет). */
+                if (started && holdForm.dataset.driverUnloadOneTap === "true") {
+                    holdButton.classList.remove("is-loaded", "is-holding");
+                    holdButton.classList.add("is-pending");
+                    if (dialLabel) {
+                        renderDriverDialLabel(dialLabel, holdButton.dataset.driverPendingLabel || "ОТПРАВКА");
+                        scheduleDriverDialLabelFit();
+                    }
+                    return true;
                 }
                 return false;
             }
