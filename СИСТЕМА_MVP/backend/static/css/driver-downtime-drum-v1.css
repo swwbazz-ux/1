@@ -94,7 +94,6 @@ body.driver-mobile-screen .driver-drum-card {
     background: transparent;
     color: #8fa0a6;
     font-weight: 900;
-    font-size: clamp(12px, calc(var(--drum-card-h) * 0.13), 18px);
     line-height: 1.12;
     text-transform: uppercase;
     text-align: center;
@@ -177,11 +176,44 @@ body.driver-mobile-screen .driver-drum-card-body {
     gap: 4px;
     transform: translateZ(3px);
     text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
+    /* Сетка без явной ширины сжимает ряд под собственное содержимое: и грид-ряд, и
+       подпись в нём брали ширину не от карточки, а от своего же текста — перенос
+       слов ломался посередине слова («ПОДСЫПК» / «А»), хотя места в карточке
+       хватало. Процентная ширина (100%) здесь не решает: внутри 3D-трансформа и
+       контейнерного запроса она молча резолвится не от карточки, а к ~40% от неё —
+       нужна ширина в абсолютных единицах, отсюда вычет отступов через calc, а не %
+       (пойман и проверен на телефоне 26.09.2026). */
+    width: calc(var(--drum-card-w) - 20px);
+}
+
+/* Кегль подписи — по длине текста, а не по одной формуле на всех: карточка на телефоне
+   заметно шире, чем нужно короткому слову вроде «ККД», и старая формула (13% высоты,
+   потолок 18px) держала его нечитаемо мелким. Порог — по числу символов, тот же приём,
+   что и у карточек точки в ручном режиме (dumpNameSizeClass в
+   driver-manual-excavator-workspace-v1.js): «короткая» без класса, «средняя»/«длинная» —
+   классом из шаблона (driver_downtime_drum.html, driver_point_drum.html). */
+body.driver-mobile-screen .driver-drum-card-label {
+    /* Своя ширина по той же причине и тем же способом, что у .driver-drum-card-body выше. */
+    width: calc(var(--drum-card-w) - 20px);
+    font-size: clamp(12px, calc(var(--drum-card-h) * 0.28), 32px);
+}
+
+body.driver-mobile-screen .driver-drum-card-label.is-drum-label-medium {
+    font-size: clamp(12px, calc(var(--drum-card-h) * 0.20), 24px);
+}
+
+body.driver-mobile-screen .driver-drum-card-label.is-drum-label-long {
+    font-size: clamp(11px, calc(var(--drum-card-h) * 0.13), 18px);
 }
 
 body.driver-mobile-screen .driver-drum-card-total {
+    /* Таймер — всегда короткая цифровая строка («00:14:08», «12ч 30м»), она не рискует
+       переносом, в отличие от подписи причины, поэтому кегль не зависит от длины
+       названия причины — только от высоты карточки. Раньше был не крупнее подписи
+       у длинных причин (≤18px даже на крупной карточке) — таймер активного простоя
+       читался хуже самой подписи, хотя место в карточке для него было. */
     margin-top: 2px;
-    font-size: clamp(12px, calc(var(--drum-card-h) * 0.15), 19px);
+    font-size: clamp(14px, calc(var(--drum-card-h) * 0.20), 22px);
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     letter-spacing: .03em;

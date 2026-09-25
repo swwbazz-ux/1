@@ -17,7 +17,7 @@
                     <span class="driver-drum-card-face" aria-hidden="true"></span>
                     <span class="driver-drum-card-arrow" aria-hidden="true"></span>
                     <span class="driver-drum-card-body">
-                        <span class="driver-drum-card-label">{{ point.name }}</span>
+                        <span class="driver-drum-card-label{% if point.name|length > 14 %} is-drum-label-long{% elif point.name|length > 6 %} is-drum-label-medium{% endif %}">{{ point.name }}</span>
                     </span>
                 </button>
             {% empty %}

@@ -183,11 +183,13 @@
                 </div>
                 <div class="driver-free-bucket-grid" data-driver-free-bucket-grid>
                     {% for excavator in driver_free_bucket_catalog.excavators %}
+                        {% comment %} Плитка — просто крупный номер экскаватора: горизонт/блок/порода/точка
+                           и «Не заполнено: …» убраны (водителю они тут не нужны, только мешали
+                           разглядеть сам номер). Статус («Выбран»/«Недоступно») остаётся — это не
+                           справка, а состояние самой плитки. Данные горизонта и т.п. остаются в
+                           data-атрибутах: их бросок в рейс при выборе экскаватора не отображение. {% endcomment %}
                         <button class="driver-free-bucket-tile{% if driver_free_bucket_state.selection.id == excavator.id %} is-current{% endif %}" type="button" data-driver-free-bucket-option data-excavator-id="{{ excavator.id }}" data-excavator-label="{{ excavator.label }}" data-complex-label="{{ excavator.complex_label }}" data-loading-horizon="{{ excavator.loading_horizon }}" data-loading-block="{{ excavator.loading_block }}" data-rock-type="{{ excavator.rock_type }}" data-dump-point="{{ excavator.dump_point }}" data-is-primary="{% if excavator.is_primary %}true{% else %}false{% endif %}"{% if excavator.is_primary or not excavator.available %} disabled aria-disabled="true"{% endif %}{% if driver_free_bucket_state.selection.id == excavator.id %} aria-current="true"{% endif %}>
-                            <span class="driver-free-bucket-tile-topline"><strong>{{ excavator.label }}</strong>{% if excavator.is_primary %}<em>Основной</em>{% endif %}</span>
-                            <span class="driver-free-bucket-tile-place">{{ excavator.loading_horizon|default:"Горизонт —" }} · {{ excavator.loading_block|default:"Блок —" }}</span>
-                            <span class="driver-free-bucket-tile-meta">{{ excavator.rock_type|default:"Порода —" }} · {{ excavator.dump_point|default:"Точка —" }}</span>
-                            {% if excavator.missing_fields %}<span class="driver-free-bucket-tile-missing">Не заполнено: {% if 'loading_horizon' in excavator.missing_fields %}горизонт{% endif %}{% if 'loading_block' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields %}, {% endif %}блок{% endif %}{% if 'rock_type' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields or 'loading_block' in excavator.missing_fields %}, {% endif %}порода{% endif %}{% if 'dump_points' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields or 'loading_block' in excavator.missing_fields or 'rock_type' in excavator.missing_fields %}, {% endif %}точки разгрузки{% endif %}</span>{% endif %}
+                            <strong class="driver-free-bucket-tile-number">{{ excavator.label }}</strong>
                             <span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status>{% if driver_free_bucket_state.selection.id == excavator.id %}Выбран{% elif not excavator.available %}Недоступно{% endif %}</span>
                         </button>
                     {% empty %}

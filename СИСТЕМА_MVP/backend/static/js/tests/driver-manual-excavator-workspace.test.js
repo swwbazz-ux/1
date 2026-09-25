@@ -745,6 +745,30 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(\);[\s\S]*?return false;/);
 });
 
+test("dump point corner button reroutes a manual trip to a point outside the drum", () => {
+    const actions = read("templates", "includes", "mobile_dial_actions.html");
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    // Ручной рейс не проходит по mobile_dial_dump_point_enabled (свой active_trip у него
+    // пустой): кнопка доступна и тогда, но открывает окно через движок ручного режима,
+    // а не обычный путь driver-shift-v1.js (кнопка стояла неактивной, пойман 26.09.2026).
+    assert.match(
+        actions,
+        /data-mobile-dial-action="dump-point"\{% if driver_manual_workspace\.active_trip_origin == "driver_manual" %\} data-driver-manual-point-open/
+    );
+    // Кнопка стоит в углу круга, вне скрытого экрана ручного режима: у делегированного
+    // обработчика нет [data-driver-manual-workspace]-предка для .closest(), поэтому он
+    // обязан падать на currentWorkspace/документ, а не на null.
+    assert.match(
+        runtime,
+        /openPointChooser\(\s*pointOpen\.closest\("\[data-driver-manual-workspace\]"\)\s*\|\|\s*currentWorkspace\s*\|\|\s*root\.document\.querySelector\("\[data-driver-manual-workspace\]"\)\s*\)/
+    );
+    // Окно показывает точки, которых нет в барабане этого экскаватора (manualRerouteCandidates
+    // исключает и стандартный набор, и уже назначенную точку), не весь общий справочник.
+    assert.match(runtime, /function manualRerouteCandidates\(catalog, standardPoints, currentPointId\)/);
+    assert.match(runtime, /function populateManualRerouteSheet\(sheet\)/);
+    assert.match(runtime, /candidates\.forEach\(function \(point\) \{ appendManualRerouteTile\(sheet, point\); \}\);/);
+});
+
 test("shared controller remains the only live card binder in both roles", () => {
     const excavator = read("templates", "trips", "excavator_work.html");
     const driverRuntimeSource = read("static", "js", "driver-manual-excavator-workspace-v1.js");

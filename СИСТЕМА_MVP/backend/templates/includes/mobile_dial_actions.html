@@ -33,7 +33,12 @@
         </svg>
     </button>
 
-    <button class="mobile-dial-action mobile-dial-action--dump-point" type="button" data-mobile-dial-action="dump-point"{% if mobile_dial_dump_point_enabled %} data-driver-point-open aria-label="Изменить точку разгрузки" title="Изменить точку разгрузки" aria-haspopup="dialog" aria-controls="driver-unload-dialog" aria-expanded="false"{% else %} disabled aria-disabled="true" aria-label="Изменить точку разгрузки — доступно только в активном рейсе" title="Точка разгрузки доступна только в активном рейсе"{% endif %}>
+    {% comment %} Ручной рейс не проходит по mobile_dial_dump_point_enabled (active_trip у него
+       пустой — рейс живёт в очереди телефона, не в серверном active_trip): кнопка остаётся
+       доступна и по нему тоже, только открывает окно через движок ручного режима
+       (data-driver-manual-point-open, driver-manual-excavator-workspace-v1.js), а не обычным
+       путём. Признак — driver_manual_workspace.active_trip_origin, см. users/views.py. {% endcomment %}
+    <button class="mobile-dial-action mobile-dial-action--dump-point" type="button" data-mobile-dial-action="dump-point"{% if driver_manual_workspace.active_trip_origin == "driver_manual" %} data-driver-manual-point-open aria-label="Изменить точку разгрузки" title="Изменить точку разгрузки" aria-haspopup="dialog" aria-controls="driver-unload-dialog" aria-expanded="false"{% elif mobile_dial_dump_point_enabled %} data-driver-point-open aria-label="Изменить точку разгрузки" title="Изменить точку разгрузки" aria-haspopup="dialog" aria-controls="driver-unload-dialog" aria-expanded="false"{% else %} disabled aria-disabled="true" aria-label="Изменить точку разгрузки — доступно только в активном рейсе" title="Точка разгрузки доступна только в активном рейсе"{% endif %}>
         <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
             <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
             <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />

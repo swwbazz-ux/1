@@ -2149,7 +2149,14 @@
                 event.preventDefault();
                 event.stopPropagation();
                 playGestureHaptic("tap");
-                openPointChooser(pointOpen.closest("[data-driver-manual-workspace]"));
+                /* На основном экране кнопка стоит в углу круга (mobile_dial_actions.html), не
+                   внутри скрытого экрана ручного режима — своего [data-driver-manual-workspace]
+                   у неё нет, engine ищется как обычно (currentWorkspace / документ). */
+                openPointChooser(
+                    pointOpen.closest("[data-driver-manual-workspace]")
+                    || currentWorkspace
+                    || root.document.querySelector("[data-driver-manual-workspace]")
+                );
                 return;
             }
             var pointSheet = event.target && event.target.closest
