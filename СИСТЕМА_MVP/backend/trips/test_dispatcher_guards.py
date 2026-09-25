@@ -22,11 +22,14 @@ class DispatcherGuardContractTests(SimpleTestCase):
         for name in (
             'dispatcher_access_from_request',
             'dispatcher_client_action_error',
+            'dispatcher_downtime_close_response',
+            'dispatcher_equipment_detail_error',
             'dispatcher_json_payload',
             'dispatcher_shift_required_redirect',
             'dispatcher_shift_required_response',
             'get_dispatcher_action_redirect_url',
             'get_dispatcher_control_url',
+            'protect_dispatcher_equipment_detail_response',
         ):
             self.assertIs(
                 getattr(trips_views, name),
@@ -140,6 +143,41 @@ class DispatcherGuardContractTests(SimpleTestCase):
             [str(message) for message in get_messages(request)],
             [expected_error],
         )
+
+    def test_detail_and_downtime_responses_keep_contract_and_no_cache_headers(self):
+        detail_error = dispatcher_guards.dispatcher_equipment_detail_error(
+            'forbidden',
+            status=403,
+        )
+        downtime_response = dispatcher_guards.dispatcher_downtime_close_response(
+            {'ok': True, 'closed': True},
+        )
+
+        self.assertEqual(detail_error.status_code, 403)
+        self.assertEqual(
+            json.loads(detail_error.content),
+            {
+                'contract': 'dispatcher-equipment-detail-v1',
+                'error': 'forbidden',
+            },
+        )
+        self.assertEqual(
+            json.loads(downtime_response.content),
+            {
+                'contract': 'dispatcher-downtime-close-v1',
+                'ok': True,
+                'closed': True,
+            },
+        )
+        for response in (detail_error, downtime_response):
+            with self.subTest(contract=json.loads(response.content)['contract']):
+                self.assertEqual(
+                    response['Cache-Control'],
+                    'private, no-store, max-age=0',
+                )
+                self.assertEqual(response['Pragma'], 'no-cache')
+                self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
+                self.assertEqual(response['Vary'], 'Cookie')
 
 
 class DispatcherGuardDatabaseTests(TestCase):

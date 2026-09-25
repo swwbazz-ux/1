@@ -154,12 +154,15 @@ from .dispatcher_equipment_commands import (
 from .dispatcher_guards import (
     dispatcher_access_from_request,
     dispatcher_client_action_error,
+    dispatcher_downtime_close_response,
+    dispatcher_equipment_detail_error,
     dispatcher_json_payload,
     dispatcher_shift_required_redirect,
     dispatcher_shift_required_response,
     get_dispatcher_action_redirect_url,
     get_dispatcher_control_url,
     lock_dispatcher_mutation_access as _lock_dispatcher_mutation_access,
+    protect_dispatcher_equipment_detail_response,
 )
 from .dispatcher_read_model import build_dispatcher_control_read_model
 from .dispatcher_shift_commands import (
@@ -6419,34 +6422,6 @@ def excavator_downtime_action_view(request):
     )
     response_payload.update(excavator_downtime_totals_payload(current_excavator, open_shift))
     return JsonResponse(response_payload)
-
-def protect_dispatcher_equipment_detail_response(response):
-    response['Cache-Control'] = 'private, no-store, max-age=0'
-    response['Pragma'] = 'no-cache'
-    response['X-Content-Type-Options'] = 'nosniff'
-    response['Vary'] = 'Cookie'
-    return response
-
-
-def dispatcher_equipment_detail_error(code, *, status):
-    return protect_dispatcher_equipment_detail_response(JsonResponse(
-        {
-            'contract': 'dispatcher-equipment-detail-v1',
-            'error': code,
-        },
-        status=status,
-    ))
-
-
-def dispatcher_downtime_close_response(payload, *, status=200):
-    response_payload = {
-        'contract': 'dispatcher-downtime-close-v1',
-        **payload,
-    }
-    return protect_dispatcher_equipment_detail_response(
-        JsonResponse(response_payload, status=status)
-    )
-
 
 @require_POST
 @transaction.atomic

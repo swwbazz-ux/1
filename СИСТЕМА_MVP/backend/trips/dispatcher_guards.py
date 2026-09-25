@@ -155,3 +155,31 @@ def dispatcher_client_action_error(payload, error, *, code='stale_client'):
         },
         status=409,
     )
+
+
+def protect_dispatcher_equipment_detail_response(response):
+    response['Cache-Control'] = 'private, no-store, max-age=0'
+    response['Pragma'] = 'no-cache'
+    response['X-Content-Type-Options'] = 'nosniff'
+    response['Vary'] = 'Cookie'
+    return response
+
+
+def dispatcher_equipment_detail_error(code, *, status):
+    return protect_dispatcher_equipment_detail_response(JsonResponse(
+        {
+            'contract': 'dispatcher-equipment-detail-v1',
+            'error': code,
+        },
+        status=status,
+    ))
+
+
+def dispatcher_downtime_close_response(payload, *, status=200):
+    response_payload = {
+        'contract': 'dispatcher-downtime-close-v1',
+        **payload,
+    }
+    return protect_dispatcher_equipment_detail_response(
+        JsonResponse(response_payload, status=status)
+    )
