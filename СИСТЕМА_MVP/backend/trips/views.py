@@ -80,8 +80,6 @@ from shifts.services import (
     validate_driver_close_readings,
     validate_excavator_shift_readings,
 )
-from users.access_auth import find_employee_access_by_credentials
-from users.active_role import activate_role_session, active_access_for_employee_role
 from users.models import Employee, EmployeeAccess
 from .manual_loading import (
     manual_dump_card_expires_at,
@@ -106,10 +104,8 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from users.session_device import get_session_device_kind, set_session_device_kind
-
 from .excavator_hourly_report import build_excavator_hourly_report
-from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
+from .dispatcher_header import build_dispatcher_header_context, get_active_dispatcher_shift
 from .dispatcher_assignment_commands import (
     execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
 )
@@ -127,6 +123,10 @@ from .dispatcher_guards import (
     lock_dispatcher_mutation_access as _lock_dispatcher_mutation_access,
 )
 from .dispatcher_read_model import build_dispatcher_control_read_model
+from .dispatcher_shift_commands import (
+    authenticate_dispatcher_shared_shift_start,
+    execute_dispatcher_toggle_shift as _execute_dispatcher_toggle_shift,
+)
 from .dispatcher_trip_commands import (
     DISPATCHER_MANUAL_TRIP_MAX_COUNT,
     execute_dispatcher_cancel_trip as _execute_dispatcher_cancel_trip,
@@ -1167,27 +1167,6 @@ def equipment_icon_key(equipment, status='green'):
     if status == 'orange':
         status = 'yellow'
     return f'img/equipment/{prefix}-{status}.png'
-
-
-def authenticate_dispatcher_shared_shift_start(request):
-    phone = request.POST.get('reauth_phone', '').strip()
-    access_code = re.sub(r'\D', '', request.POST.get('reauth_access_code', ''))
-    device_kind = request.POST.get('device_kind', '').strip()
-    if not phone or not access_code:
-        return None, 'Для начала смены на общем компьютере введите телефон и код горного диспетчера.'
-    if phone and not phone.startswith(('+', '7', '8')):
-        phone = f'+7 {phone}'
-
-    access = find_employee_access_by_credentials(phone, access_code, role_code='dispatcher')
-    if not access:
-        return None, 'Телефон или код горного диспетчера указаны неверно.'
-
-    try:
-        access = activate_role_session(request, access)
-    except ValidationError as error:
-        return None, '; '.join(error.messages)
-    set_session_device_kind(request, device_kind)
-    return access, ''
 
 
 def dispatcher_truck_garage_number(truck, fallback_index):
@@ -7080,74 +7059,11 @@ def dispatcher_control_view(
 
 @transaction.atomic
 def dispatcher_toggle_shift_view(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    session_access = access
-
-    redirect_url = get_dispatcher_action_redirect_url(request)
-    if request.method != 'POST':
-        return redirect(redirect_url)
-
-    action = request.POST.get('shift_action')
-    if action == 'start':
-        if get_session_device_kind(request) == 'shared':
-            reauth_access, reauth_error = authenticate_dispatcher_shared_shift_start(request)
-            if reauth_error:
-                messages.error(request, reauth_error)
-                return redirect(redirect_url)
-            access = reauth_access
-            # Повторная авторизация обновляет last_login_at и метку активной
-            # роли в сессии. Проверять загруженный до неё session_access нельзя:
-            # для того же диспетчера он уже содержит устаревшую метку и ложно
-            # переводит только что авторизованную роль в режим просмотра.
-            session_access = access
-        else:
-            access = active_access_for_employee_role(access.employee, 'dispatcher')
-            if not access:
-                messages.error(request, 'Активированный доступ Горного диспетчера не найден.')
-                return redirect(redirect_url)
-        session_access = lock_dispatcher_mutation_access(request, session_access)
-        if not session_access:
-            messages.error(request, 'Роль неактивна — доступен только просмотр.')
-            return redirect(redirect_url)
-        if get_active_dispatcher_shift(access):
-            messages.warning(request, 'Смена горного диспетчера уже открыта.')
-            return redirect(redirect_url)
-        try:
-            shift = open_dispatcher_shift(
-                access,
-                close_other_role_shift=other_role_shift_flag(request.POST),
-            )
-        except ValidationError as error:
-            messages.error(request, '; '.join(error.messages))
-            return redirect(redirect_url)
-        if not shift:
-            messages.warning(request, 'Смена горного диспетчера уже открыта.')
-            return redirect(redirect_url)
-        messages.success(request, 'Смена горного диспетчера открыта.')
-        return redirect(redirect_url)
-
-    if action == 'end':
-        dispatcher_access = active_access_for_employee_role(access.employee, 'dispatcher')
-        if dispatcher_access:
-            access = dispatcher_access
-        session_access = lock_dispatcher_mutation_access(request, session_access)
-        if not session_access:
-            messages.error(request, 'Роль неактивна — доступен только просмотр.')
-            return redirect(redirect_url)
-        shift = close_dispatcher_shift(access)
-        if not shift:
-            messages.warning(request, 'Открытая смена горного диспетчера не найдена.')
-            return redirect(redirect_url)
-        messages.success(request, 'Смена горного диспетчера завершена.')
-        return redirect(redirect_url)
-
-    messages.error(request, 'Неизвестное действие со сменой диспетчера.')
-    return redirect(redirect_url)
+    return _execute_dispatcher_toggle_shift(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        shared_start_authenticator=authenticate_dispatcher_shared_shift_start,
+    )
 
 
 @transaction.atomic
