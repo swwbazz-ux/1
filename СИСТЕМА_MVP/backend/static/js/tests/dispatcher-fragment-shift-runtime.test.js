@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 
 
 const RUNTIME_SOURCE = [
@@ -16,10 +17,7 @@ const REALTIME_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
 );
-const TEMPLATE_SOURCE = fs.readFileSync(
-    path.resolve(__dirname, "..", "..", "..", "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
+const TEMPLATE_SOURCE = dispatcherScreenSource();
 
 
 function extractBraceBlock(source, signature, label) {

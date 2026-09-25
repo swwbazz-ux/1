@@ -6,16 +6,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 
 const backendRoot = path.resolve(__dirname, "../../..");
 const excavatorTemplate = fs.readFileSync(
     path.join(backendRoot, "templates", "trips", "excavator_work.html"),
     "utf8"
 );
-const miningMasterTemplate = fs.readFileSync(
-    path.join(backendRoot, "templates", "trips", "dispatcher_control.html"),
-    "utf8"
-);
+const miningMasterTemplate = dispatcherScreenSource();
 
 class EventTargetStub {
     constructor() {

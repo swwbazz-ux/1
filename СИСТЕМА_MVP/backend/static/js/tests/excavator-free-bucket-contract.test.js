@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
+const {dispatcherScreenSource} = require('./dispatcher-screen-source');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
 const template = [
@@ -13,7 +14,7 @@ const template = [
 ].map(file => fs.readFileSync(path.join(backend, file), 'utf8')).join('\n');
 const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
 const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dispatcher-control-v1.js'), 'utf8');
-const dispatcherTemplate = fs.readFileSync(path.join(backend, 'templates', 'trips', 'dispatcher_control.html'), 'utf8');
+const dispatcherTemplate = dispatcherScreenSource();
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-free-bucket-v1.css'), 'utf8');
 
 test('bucket entry stays beside the existing hourly report ring', () => {

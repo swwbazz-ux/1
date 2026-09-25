@@ -34,6 +34,10 @@ const SHARED_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
+const DISPATCHER_BOARD_TEMPLATE = fs.readFileSync(
+    path.join(BACKEND, "templates", "trips", "includes", "dispatcher_board.html"),
+    "utf8"
+);
 const DISPATCHER_PUSH_INVITE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "includes", "dispatcher_push_invite.html"),
     "utf8"
@@ -70,6 +74,26 @@ test("мобильный контур Горного мастера сохран
     assert.match(SHARED_TEMPLATE, /function bindMiningMasterMobileScreens\(\)/);
     assert.match(SHARED_TEMPLATE, /function refreshMobileBoardFromServer\(options\)/);
     assert.match(SHARED_TEMPLATE, /window\.MiningMasterPwaUpdates = \{/);
+});
+
+test("серверная доска живёт в отдельном упакованном include", () => {
+    assert.match(
+        SHARED_TEMPLATE,
+        /{% include "trips\/includes\/dispatcher_board\.html" %}/
+    );
+    assert.doesNotMatch(SHARED_TEMPLATE, /<section class="dispatcher-board/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /^{% load static %}/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /<section class="dispatcher-board/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /includes\/dispatcher_header\.html/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /data-dispatcher-excavator-garage/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /data-dispatcher-drop="complex"/);
+    assert.match(DISPATCHER_BOARD_TEMPLATE, /data-dispatcher-drop="truck-garage"/);
+    assert.doesNotMatch(DISPATCHER_BOARD_TEMPLATE, /class="mm-mobile-shell/);
+    assert.doesNotMatch(DISPATCHER_BOARD_TEMPLATE, /data-mm-mobile-/);
+    assert.match(
+        PRODUCTION_MANIFEST,
+        /templates\/trips\/includes\/dispatcher_board\.html/
+    );
 });
 
 test("desktop-приглашение уведомлений живёт в отдельном упакованном include", () => {

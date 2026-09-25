@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const {DISPATCHER_STYLE_FILES, dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
@@ -229,10 +230,7 @@ test("loading the module twice does not duplicate global listeners", async () =>
 });
 
 test("dispatcher shell wires and precaches the isolated sound module", () => {
-    const template = fs.readFileSync(
-        path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
-        "utf8"
-    );
+    const template = dispatcherScreenSource();
     const header = fs.readFileSync(
         path.join(BACKEND, "templates", "includes", "dispatcher_header.html"),
         "utf8"
