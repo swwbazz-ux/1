@@ -255,10 +255,6 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /--driver-manual-workspace-gap:\s*clamp\(/);
     assert.match(driverCss, /--driver-manual-action-height:\s*clamp\(72px, 8\.6dvh, 78px\)/);
     assert.match(driverCss, /--driver-manual-timer-height:\s*clamp\(62px, 7\.5dvh, 68px\)/);
-    // Высота строки источника считается той же формулой, что высота ряда
-    // самосвалов у машиниста: карточки двух ролей обязаны считаться
-    // одинаково, иначе одна выходит квадратной, а вторая нет.
-    assert.match(driverCss, /--driver-manual-source-height:\s*clamp\(140px, 18\.7dvh, 170px\)/);
     // Каждая строка просит свою высоту, но обязана уметь сжаться: иначе на
     // невысоком экране нижняя строка вылезает из зоны на панель точек.
     assert.match(driverCss, /grid-template-rows:\s*minmax\(0, var\(--driver-manual-action-height\)\) minmax\(0, var\(--driver-manual-timer-height\)\) minmax\(0, 1fr\)/);
@@ -267,7 +263,12 @@ test("manual controls use compact action timer and source rows with one shared g
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*1;/s);
     assert.match(driverCss, /driver-manual-workspace__trip-timer\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-row:\s*2;/s);
     assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*grid-column:\s*2;[^}]*grid-row:\s*3;/s);
-    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-source-height\), 100%\);[^}]*transform:\s*none;/s);
+    // Карточка источника (К-1/ЭКС-1) — прямоугольник 4:5 (~1.25), не квадрат:
+    // ширина колонки (треть сетки) и старая высотная клемп-переменная совпали
+    // на тестовом устройстве, карточка выходила ровным квадратом 118×118.
+    // aspect-ratio считает высоту от фактической ширины, не собьётся, даже
+    // если ширина колонки сместится в будущем.
+    assert.match(driverCss, /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;[^}]*transform:\s*none;/s);
     assert.match(driverCss, /driver-manual-workspace__action-row\s*\{[^}]*height:\s*min\(var\(--driver-manual-action-height\), 100%\);[^}]*aspect-ratio:\s*auto;/s);
     assert.match(driverCss, /grid-template-columns:\s*40px minmax\(0, 1fr\)/);
     assert.match(driverCss, /font-size:\s*clamp\(11px, 8\.2cqw, 15px\)/);
@@ -330,13 +331,19 @@ test("only the active dump point exposes cancel and complete swipe cues", () => 
 // верным при любой разметке и меняться не должно.
 test("карточка источника держит форму 1 к 1,25 построением, а не числами", () => {
     const driverCss = read("static", "css", "driver-manual-excavator-workspace-v1.css");
-    // Число выбрал пользователь: высота в 1,25 раза больше ширины. Держим
-    // его отношением, а размер берём от места, иначе на другом экране
-    // получится другая форма.
-    assert.match(driverCss, /aspect-ratio: 1 \/ 1\.25 !important/);
+    // Число выбрал пользователь: высота в 1,25 раза больше ширины (4:5). Форму
+    // теперь считает коробка-строка от фактической ширины колонки — карточка
+    // внутри неё просто заполняет то, что ей досталось, а не считает форму
+    // ещё раз своей отдельной формулой. Раньше так и разошлись: у строки была
+    // своя высотная переменная, у карточки — свой расчёт, числа однажды
+    // совпали случайно и карточка вышла квадратом.
     assert.match(
         driverCss,
-        /width: min\(100%, calc\(var\(--driver-manual-source-height\) \/ 1\.25\)\) !important/,
+        /driver-manual-workspace__source-row\s*\{[^}]*aspect-ratio:\s*4 \/ 5;/s,
+    );
+    assert.match(
+        driverCss,
+        /driver-manual-workspace__source-row > \.eo-dashboard-truck-card\s*\{[^}]*width:\s*100% !important;[^}]*height:\s*100% !important;/s,
     );
     // Замеров с одного телефона в правиле быть не должно.
     assert.doesNotMatch(driverCss, /32\.77px/);
@@ -907,4 +914,124 @@ test("отклонённая отметка ручного рейса разбл
     assert.equal(closeButton.disabled, false, "«Обычный режим» остаётся разблокирован");
     assert.equal(ack.hidden, true, "кнопка «Понятно» спрятана после нажатия");
     assert.equal(result.hidden, true, "сообщение об отказе убрано");
+});
+
+test("отклонённая смена точки разгрузки не проходит молча", () => {
+    // Найдено при разборе боевого инцидента: сервер отклоняет
+    // driver.trip.dump_point_changed по своим причинам (точка деактивирована,
+    // рейс уже не редактируется, точку уже меняли позже) — забой здесь не
+    // проверяется вовсе, путь отдельный от погрузки. Клиент тихо оставлял
+    // прежнюю точку в payload/context_snapshot и ничего не говорил водителю:
+    // тот выбирал новую точку, думал, что сменил, а на деле осталась старая.
+    function makeNode(overrides) {
+        const dataset = {};
+        const classes = new Set();
+        const children = {};
+        return Object.assign({
+            dataset,
+            hidden: false,
+            disabled: false,
+            textContent: "",
+            title: "",
+            draggable: true,
+            classList: {
+                add(...names) { names.forEach((n) => classes.add(n)); },
+                remove(...names) { names.forEach((n) => classes.delete(n)); },
+                toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
+                contains(name) { return classes.has(name); }
+            },
+            setAttribute(name, value) { this["attr:" + name] = value; },
+            getAttribute(name) { return this["attr:" + name]; },
+            querySelector(selector) { return children[selector] || null; },
+            querySelectorAll() { return []; },
+            __children: children
+        }, overrides || {});
+    }
+
+    const shell = {dataset: {}};
+    const source = makeNode();
+    const result = makeNode();
+    const ack = makeNode();
+    const pointNotice = makeNode();
+    const closeHint = makeNode();
+    const closeButton = makeNode();
+    closeButton.__children.em = closeHint;
+    const pointLabel = makeNode();
+    const pointHint = makeNode();
+    const pointOpen = makeNode();
+    pointOpen.__children["[data-driver-manual-point-label]"] = pointLabel;
+    pointOpen.__children["[data-driver-manual-point-hint]"] = pointHint;
+    const timerLabel = makeNode();
+    const timerState = makeNode();
+    const timerDestination = makeNode();
+    const timerValue = makeNode();
+    const timer = makeNode();
+    timer.__children["[data-driver-manual-trip-timer-label]"] = timerLabel;
+    timer.__children["[data-driver-manual-trip-timer-state]"] = timerState;
+    timer.__children["[data-driver-manual-trip-timer-destination]"] = timerDestination;
+    timer.__children["[data-driver-manual-trip-timer-value]"] = timerValue;
+
+    const workspaceChildren = {
+        "[data-driver-manual-source]": source,
+        "[data-driver-manual-result]": result,
+        "[data-driver-manual-dismiss-rejected]": ack,
+        "[data-driver-manual-point-notice]": pointNotice,
+        "[data-driver-manual-point-open]": pointOpen,
+        "[data-driver-manual-trip-timer]": timer
+    };
+    const workspace = {
+        dataset: {},
+        closest() { return shell; },
+        querySelector(selector) { return workspaceChildren[selector] || null; },
+        querySelectorAll(selector) {
+            return selector === "[data-driver-manual-close]" ? [closeButton] : [];
+        }
+    };
+
+    const loadEvent = {
+        event_type: "driver.trip.loaded",
+        event_id: "load-incident",
+        local_trip_id: "local-load-incident",
+        state: "pending",
+        sequence: 1,
+        occurred_at: "2026-09-25T09:00:00.000Z",
+        payload: {dump_point_id: 5, assigned_dump_point_id: 5},
+        context_snapshot: {selected_dump_point_id: 5, selected_dump_point_name: "ККД"}
+    };
+
+    // Контрольный прогон: тот же рейс, без попытки сменить точку — чтобы
+    // сравнить, не добавляет ли отклонённая смена НОВУЮ блокировку сверх той,
+    // что и так даёт активный рейс.
+    driverRuntime.renderProjection(workspace, [loadEvent], null);
+    const lockedByTripAlone = source.disabled;
+
+    source.disabled = false; // сбрасываем стаб перед вторым прогоном
+
+    const rejectedPointChange = {
+        event_type: "driver.trip.dump_point_changed",
+        event_id: "point-incident",
+        local_trip_id: "local-load-incident",
+        state: "conflict",
+        sequence: 2,
+        occurred_at: "2026-09-25T09:01:00.000Z",
+        last_error: {message: "Точка разгрузки больше недоступна."},
+        payload: {dump_point_id: 9},
+        context_snapshot: {selected_dump_point_name: "Отвал"}
+    };
+
+    const projected = driverRuntime.renderProjection(workspace, [loadEvent, rejectedPointChange], null);
+
+    // Блокировка не меняется отклонённой сменой точки — её и так даёт активный
+    // рейс, точка тут ни при чём.
+    assert.equal(source.disabled, lockedByTripAlone, "отклонённая смена точки не добавляет блокировку сверх той, что уже даёт активный рейс");
+    // Прежняя точка осталась в проекции — выбор не применился.
+    assert.equal(projected.payload.dump_point_id, 5, "точка осталась прежней: 9 не применилось");
+    // И это видно на экране.
+    assert.equal(pointNotice.hidden, false, "уведомление о несостоявшейся смене показано");
+    assert.match(pointNotice.textContent, /Точка разгрузки больше недоступна\./);
+    assert.match(pointNotice.textContent, /Выберите точку снова\./);
+
+    // Успешный рендер заводит интервал таймера рейса (setInterval) — иначе
+    // он тикает вечно и держит процесс живым уже после конца теста.
+    driverRuntime.stopTripTimer(workspace);
 });

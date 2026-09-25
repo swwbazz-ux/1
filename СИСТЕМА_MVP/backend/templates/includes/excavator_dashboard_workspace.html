@@ -3,8 +3,23 @@
     <div class="eo-dashboard-main-zone">
         <div class="eo-dashboard-head">
             <div class="eo-dashboard-driver-card">
-                <span>{% if driver_manual_dashboard %}Водитель самосвала{% else %}Машинист экскаватора{% endif %}</span>
-                <strong>{{ dashboard_operator_name|default:access.employee.full_name|default:"-" }}</strong>
+                {% if driver_manual_dashboard %}
+                    {% comment %} Сам водитель уже виден в настоящей шапке сверху
+                       (driver_shift.html:68-69) — здесь дублировать имя не нужно,
+                       вместо него показываем, с каким экскаватором и забоем
+                       сейчас работает ручной режим (было в убранной шапке eo-topbar).
+                       Служебной подписи над строкой нет — по референсу пользователя
+                       (user-reference-layout.png) сразу жирная строка, без "Работаете с". {% endcomment %}
+                    {% comment %} Пользователь попросил разбить на две строки, а не
+                       тянуть одной длинной — перенос настоящим <br>, а не
+                       word-wrap: подгонка (fitFaceSummary) держит текст в
+                       nowrap для замера ширины, и только явный <br> у неё
+                       ломает строку принудительно, независимо от кегля. {% endcomment %}
+                    <strong class="driver-manual-workspace__face-summary" data-driver-manual-face-summary title="{{ dashboard_face_excavator|default:'—' }} · Горизонт {{ dashboard_face_horizon|default:'—' }} / Блок {{ dashboard_face_block|default:'—' }}{% if dashboard_face_rock %} · Порода: {{ dashboard_face_rock }}{% endif %}">{{ dashboard_face_excavator|default:"—" }} · Гор. {{ dashboard_face_horizon|default:"—" }}/Бл. {{ dashboard_face_block|default:"—" }}{% if dashboard_face_rock %}<br>{{ dashboard_face_rock }}{% endif %}</strong>
+                {% else %}
+                    <span>Машинист экскаватора</span>
+                    <strong>{{ dashboard_operator_name|default:access.employee.full_name|default:"-" }}</strong>
+                {% endif %}
             </div>
             <div class="eo-dashboard-plan-widget">
                 <button class="eo-free-bucket-button" type="button"{% if driver_manual_dashboard %} data-driver-manual-free-bucket-open aria-controls="driver-free-bucket-dialog"{% else %} data-eo-free-bucket-open{% endif %} aria-haspopup="dialog" aria-label="Свободный ковш" title="Свободный ковш"{% if driver_manual_dashboard %}{% if not driver_manual_free_bucket_enabled %} disabled aria-disabled="true"{% endif %}{% elif not open_shift %} disabled aria-disabled="true"{% endif %}>

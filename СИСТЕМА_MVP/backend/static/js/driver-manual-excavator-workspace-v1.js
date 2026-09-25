@@ -400,6 +400,22 @@
         title.style.setProperty("font-size", fitted.toFixed(2) + "px", "important");
         return fitted;
     }
+
+    /* Строка «ЭКС-1 · Гор. 75/Бл. 52 · Окисленная руда» заменяет собой
+       раздел, который раньше был отдельной шапкой (eo-topbar, убрана по
+       просьбе пользователя) — тот же общий модуль equipment-label-fit-v1.js,
+       который уже вмещает номера техники и точки разгрузки без обрезки:
+       кегль вниз, перенос на вторую строку (тут высоты хватает), сжатие,
+       и только в крайнем случае — кегль ниже привычного пола. Обрезки не
+       бывает никогда. */
+    function fitFaceSummary(workspace) {
+        var summary = workspace && workspace.querySelector ? workspace.querySelector("[data-driver-manual-face-summary]") : null;
+        if (!summary) return null;
+        var fitter = root.EquipmentLabelFit;
+        if (!fitter || typeof fitter.fit !== "function") return null;
+        return fitter.fit(summary, {allowWrap: true});
+    }
+
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
         if (!workspace || !positive(pointId) || !delta) return null;
         var key = String(adjustmentId || "");
@@ -631,6 +647,37 @@
         toggleRejectedTripAck(workspace, false);
         setResult(workspace, "", null, false);
     }
+    /* Смена точки разгрузки в ручном режиме отклоняется по своим причинам
+       (точка деактивирована, рейс уже не редактируется, точку уже меняли
+       позже) — сервер тут забой не проверяет вовсе, путь отдельный от
+       погрузки. Блокировки здесь и не было (источник и выход держит только
+       currentTripProjection погрузки, не эта запись) — не хватало только
+       того, чтобы водитель узнал, что выбор не применился. Короткое
+       сообщение само пропадает через несколько секунд: держать его на
+       экране постоянно незачем, кнопка «Понятно» тут не нужна.
+       lastShownRejectedDumpPointKey не даёт заново показывать ту же самую
+       запись на каждом повторном рендере (проекция перерисовывается часто,
+       событие в очереди остаётся тем же). */
+    var lastShownRejectedDumpPointKey = "";
+    function showRejectedDumpPointChangeNotice(workspace, rejectedEvent) {
+        var notice = workspace && workspace.querySelector("[data-driver-manual-point-notice]");
+        if (!notice) return;
+        var key = String(
+            rejectedEvent.event_id || rejectedEvent.local_trip_id || rejectedEvent.occurred_at || ""
+        );
+        if (key && key === lastShownRejectedDumpPointKey) return;
+        lastShownRejectedDumpPointKey = key;
+        var reason = String(
+            (rejectedEvent.last_error && rejectedEvent.last_error.message) || "Точка не изменена."
+        );
+        notice.textContent = reason + " Выберите точку снова.";
+        notice.hidden = false;
+        root.clearTimeout(notice.__driverManualPointNoticeTimer);
+        notice.__driverManualPointNoticeTimer = root.setTimeout(function () {
+            notice.hidden = true;
+        }, 4200);
+    }
+
     function setSourceLocked(workspace, locked) {
         var source = workspace && workspace.querySelector("[data-driver-manual-source]");
         if (source) {
@@ -887,6 +934,11 @@
                     || ""
                 )
             });
+        } else if (latestPoint && isTerminalState(latestPoint.state)) {
+            // Выбор не применился: прежняя точка в payload/context_snapshot
+            // остаётся как есть — это и есть правильное поведение, просто
+            // теперь водитель об этом узнаёт, а не молчит вместе с экраном.
+            showRejectedDumpPointChangeNotice(workspace, latestPoint);
         }
         var pointName = projectionPointName(projected);
         // projected здесь никогда не бывает terminal-состояния: отклонённые
@@ -1225,13 +1277,21 @@
             if (rock) rock.textContent = String(context.rock_type_name || "");
             fitSourceTitle(source);
         }
-        var topTitle = workspace.querySelector(".driver-manual-workspace__back strong");
-        if (topTitle) topTitle.textContent = String(context.excavator_label || "Ручной режим");
-        var coordinates = workspace.querySelectorAll(".eo-face-coordinates span");
-        if (coordinates[0]) coordinates[0].textContent = "Гор. " + String(context.loading_horizon || "—");
-        if (coordinates[1]) coordinates[1].textContent = "Бл. " + String(context.loading_block || "—");
-        var topRock = workspace.querySelector(".eo-face-rock");
-        if (topRock) topRock.textContent = String(context.rock_type_name || "");
+        var faceSummary = workspace.querySelector("[data-driver-manual-face-summary]");
+        if (faceSummary) {
+            var faceDoc = workspace.ownerDocument || root.document;
+            var faceLine1 = String(context.excavator_label || "—")
+                + " · Гор. " + String(context.loading_horizon || "—")
+                + "/Бл. " + String(context.loading_block || "—");
+            var faceRockLine = context.rock_type_name ? String(context.rock_type_name) : "";
+            faceSummary.textContent = "";
+            faceSummary.appendChild(faceDoc.createTextNode(faceLine1));
+            if (faceRockLine) {
+                faceSummary.appendChild(faceDoc.createElement("br"));
+                faceSummary.appendChild(faceDoc.createTextNode(faceRockLine));
+            }
+            fitFaceSummary(workspace);
+        }
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
         if (grid && points.length && !needsAlternateOnly) {
             var prototype = grid.querySelector("[data-driver-manual-dump-target]");
@@ -1838,6 +1898,17 @@
         var openedSource = workspace.querySelector("[data-driver-manual-source]");
         watchSourceWidth(openedSource);
         fitSourceTitle(openedSource);
+        /* До этой строки коробка строки «экскаватор/забой» скрыта
+           (workspace.hidden было true) и имеет нулевую ширину — подгонка
+           кегля, вызванная раньше из syncWorkspaceContext, ничего не
+           считает. Пересчитываем заново теперь, когда ширина уже настоящая;
+           кадром позже — чтобы браузер успел применить только что снятое
+           hidden. */
+        if (root.requestAnimationFrame) {
+            root.requestAnimationFrame(function () { fitFaceSummary(workspace); });
+        } else {
+            fitFaceSummary(workspace);
+        }
         var source = workspace.querySelector("[data-driver-manual-source]");
         var back = workspace.querySelector("[data-driver-manual-close]");
         if (source || back) (source || back).focus({preventScroll: true});
@@ -2030,6 +2101,7 @@
             });
             root.addEventListener("resize", function () {
                 fitSourceTitle(currentWorkspace && currentWorkspace.querySelector("[data-driver-manual-source]"));
+                fitFaceSummary(currentWorkspace);
             });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
@@ -2083,6 +2155,7 @@
         markLastDump: markLastDump,
         manualCancelWins: manualCancelWins,
         fitSourceTitle: fitSourceTitle,
+        fitFaceSummary: fitFaceSummary,
         updateManualTripCount: updateManualTripCount,
         buildManualLoadCancelEvent: buildManualLoadCancelEvent,
         cancelManualLoad: cancelManualLoad,

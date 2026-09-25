@@ -73,6 +73,7 @@
 СИСТЕМА_MVP/backend/static/js/driver-native-push-v1.js
 СИСТЕМА_MVP/backend/static/js/equipment-label-fit-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-manual-excavator-workspace-v1.js
+СИСТЕМА_MVP/backend/static/js/equipment-label-fit-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-dashboard-drag-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-dump-return-swipe-v1.js
 СИСТЕМА_MVP/backend/templates/includes/driver_manual_excavator_workspace.html
