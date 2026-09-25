@@ -36,6 +36,13 @@ class DispatcherTripCommandBoundaryTests(SimpleTestCase):
 
         self.assertIs(match.func, trips_views.dispatcher_complete_trip_view)
 
+    def test_manual_url_keeps_public_views_facade(self):
+        match = resolve(
+            reverse('dispatcher_manual_trip', kwargs={'equipment_id': 17}),
+        )
+
+        self.assertIs(match.func, trips_views.dispatcher_manual_trip_view)
+
     def test_public_cancel_view_is_thin_trip_command_facade(self):
         source = inspect.getsource(trips_views.dispatcher_cancel_trip_view)
 
@@ -58,6 +65,18 @@ class DispatcherTripCommandBoundaryTests(SimpleTestCase):
         self.assertNotIn('Trip.objects', source)
         self.assertNotIn('EmployeeShift.objects', source)
         self.assertNotIn('lock_production_state', source)
+        self.assertNotIn('bump_operational_state', source)
+
+    def test_public_manual_view_is_thin_trip_command_facade(self):
+        source = inspect.getsource(trips_views.dispatcher_manual_trip_view)
+
+        self.assertIn('_execute_dispatcher_manual_trip(', source)
+        self.assertIn('lock_mutation_access=lock_dispatcher_mutation_access', source)
+        self.assertIn('format_datetime=format_dispatcher_datetime', source)
+        self.assertIn('action_logger=log_dispatcher_action', source)
+        self.assertNotIn('Trip.objects', source)
+        self.assertNotIn('Equipment.objects', source)
+        self.assertNotIn('EmployeeShift.objects', source)
         self.assertNotIn('bump_operational_state', source)
 
 
@@ -97,6 +116,28 @@ class DispatcherTripFacadeDelegationTests(TestCase):
             17,
             lock_mutation_access=trips_views.lock_dispatcher_mutation_access,
             finalize_trip=trips_views.finalize_trip_unloaded,
+            action_logger=trips_views.log_dispatcher_action,
+        )
+
+    def test_manual_facade_injects_views_patch_seams(self):
+        request = RequestFactory().post('/dispatcher/trucks/17/manual-trip/')
+        expected = HttpResponse(status=302)
+        with patch.object(
+            trips_views,
+            '_execute_dispatcher_manual_trip',
+            return_value=expected,
+        ) as execute:
+            response = trips_views.dispatcher_manual_trip_view(
+                request,
+                equipment_id=17,
+            )
+
+        self.assertIs(response, expected)
+        execute.assert_called_once_with(
+            request,
+            17,
+            lock_mutation_access=trips_views.lock_dispatcher_mutation_access,
+            format_datetime=trips_views.format_dispatcher_datetime,
             action_logger=trips_views.log_dispatcher_action,
         )
 
