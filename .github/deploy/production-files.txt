@@ -39,6 +39,7 @@
 СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_service_lists.html
 СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_equipment_detail.html
 СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_push_invite.html
+СИСТЕМА_MVP/backend/templates/includes/dispatcher_header.html
 СИСТЕМА_MVP/backend/templates/includes/dispatcher_shift_action.html
 СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
 СИСТЕМА_MVP/backend/templates/users/driver_shift.html
