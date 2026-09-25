@@ -921,6 +921,14 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .
        границу видимой области. */
     transform: scale(var(--driver-manual-magnet-scale, 1.5)) !important;
     transition: transform 120ms ease-out !important;
+    /* excavator-work-v55-shift.css рисует вокруг цели мягкое свечение
+       (box-shadow blur 24px) — оно рисуется ЗА пределами рамки плитки и
+       не входит в её getBoundingClientRect, так что JS его не видел:
+       сама плитка укладывалась в край экрана, а свечение всё равно
+       вылезало за него мягким пятном. Сужаем свечение здесь и резервируем
+       под него ровно столько же (DUMP_MAGNET_EDGE_MARGIN в JS), чтобы
+       граница экрана была непреодолима и для рамки, и для подсветки. */
+    box-shadow: inset 0 0 0 2px rgba(255, 214, 41, .58), 0 0 8px rgba(255, 214, 41, .3) !important;
 }
 
 body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell[data-driver-manual-eo-shell] .eo-dashboard-unload-grid:has(.driver-manual-workspace__dump-card.is-drop-ready) .driver-manual-workspace__dump-card:not(.is-drop-ready) {

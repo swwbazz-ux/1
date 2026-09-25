@@ -393,24 +393,32 @@
     }
 
     var DUMP_MAGNET_SCALE = 1.5;
+    /* .is-drop-ready в driver-manual-excavator-workspace-v1.css рисует вокруг
+       плитки свечение (box-shadow blur 8px) — оно не входит в
+       getBoundingClientRect (тень всегда рисуется за пределами рамки), так
+       что без этого запаса рамка укладывалась бы в край экрана, а мягкое
+       жёлтое пятно вокруг нёе всё равно вылезало бы за него. Запас должен
+       совпадать с blur-радиусом того box-shadow. */
+    var DUMP_MAGNET_GLOW_MARGIN = 8;
 
     /* Плитка-цель при перетаскивании растёт transform: scale от нижнего
        края (CSS) — вверх и в стороны, никогда вниз. Пользователь: край
-       экрана для этого роста непреодолим ни по одной стороне. transform
-       не участвует в layout, поэтому сам по себе никак не «знает» о
-       границах экрана — меряем реальные отступы плитки до каждого края
-       ДО того, как класс is-drop-ready встанет (то есть по её ещё не
-       увеличенным размерам), и подменяем 1.5 на меньший кегль, если по
-       любую сторону не хватает места. */
+       экрана для этого роста непреодолим ни по одной стороне, включая
+       подсветку вокруг плитки, не только её рамку. transform не участвует
+       в layout, поэтому сам по себе никак не «знает» о границах экрана —
+       меряем реальные отступы плитки до каждого края ДО того, как класс
+       is-drop-ready встанет (то есть по её ещё не увеличенным размерам),
+       и подменяем 1.5 на меньший кегль, если по любую сторону не хватает
+       места для плитки и её свечения. */
     function applyDumpMagnetScale(target) {
         if (!target || !target.getBoundingClientRect) return;
         var rect = target.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
         var viewportW = root.innerWidth || 0;
         var viewportH = root.innerHeight || 0;
-        var growLeft = rect.left;
-        var growRight = viewportW - rect.right;
-        var growTop = rect.top;
+        var growLeft = rect.left - DUMP_MAGNET_GLOW_MARGIN;
+        var growRight = (viewportW - DUMP_MAGNET_GLOW_MARGIN) - rect.right;
+        var growTop = rect.top - DUMP_MAGNET_GLOW_MARGIN;
         var scaleFromLeft = 1 + (2 * growLeft) / rect.width;
         var scaleFromRight = 1 + (2 * growRight) / rect.width;
         var scaleFromTop = 1 + growTop / rect.height;
