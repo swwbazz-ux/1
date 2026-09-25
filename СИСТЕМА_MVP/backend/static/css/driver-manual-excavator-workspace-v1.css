@@ -30,6 +30,22 @@ body.driver-mobile-screen .driver-manual-workspace > .eo-shell {
     margin: 0 !important;
 }
 
+/* --eo-fixed-header-reserve/--eo-fixed-header-gap (excavator-work-v55.css) —
+   отступ под ПРИБИТЫЙ .eo-topbar экскаваторщика, которого в ручном режиме
+   водителя больше нет вообще (снят целиком). Сама переменная переопределена
+   только ниже — .eo-dashboard-screen (excavator-work-v55-shift.css:203-214)
+   всё ещё вычисляет свою высоту как --eo-app-height МИНУС этот резерв: тот
+   же промежуток, что чинили над шапкой, только у плиток точек разгрузки —
+   их зона (grid-template-rows: 1fr .38fr) отсчитывает свою высоту от этой,
+   заниженной без причины, общей высоты, и оседает выше положенного, оставляя
+   пустое место под собой перед нижней навигацией. Зануляем у источника —
+   так поправится сразу и .eo-dashboard-screen, и всё остальное, что вообще
+   на неё когда-либо сошлётся, а не только то место, что уже нашли. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace {
+    --eo-fixed-header-reserve: 0px;
+    --eo-fixed-header-gap: 0px;
+}
+
 /* excavator-work-v55.css резервирует .eo-shell отступ сверху размером с
    ПРИБИТЫЙ .eo-topbar экскаваторщика (--eo-fixed-header-reserve, это же
    safe-area устройства + высота шапки) — у машиниста топбар лежит поверх
