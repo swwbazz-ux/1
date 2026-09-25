@@ -1,0 +1,29 @@
+{% comment %}
+Барабан точек разгрузки над циферблатом на вкладке «Работа» — зеркало барабана простоев
+под ним: те же грани на вертикальном цилиндре (стили .driver-drum-card), только жест
+идёт вниз, в круг. Точки — те, что назначены экскаватору, с которым работает водитель
+(event_context.dump_points; при свободном ковше — точки выбранного экскаватора,
+иначе base_event_context.dump_points). Барабан работает в ручном режиме: свайп передней
+грани вниз в круг отправляет самосвал на эту точку, вверх — отменяет. В обычном режиме
+точку назначает экскаваторщик, барабан притушен. Логика: static/js/driver-point-drum-v1.js.
+{% endcomment %}
+<div class="driver-point-drum" data-driver-point-drum role="group" aria-label="Барабан точек разгрузки: в ручном режиме проведите влево или вправо, чтобы выбрать точку, и вниз на круг, чтобы отправиться на неё">
+    <b class="driver-free-bucket-chip" data-driver-free-bucket-chip{% if not driver_free_bucket_state.active %} hidden{% endif %}{% if driver_free_bucket_state.selection %} title="Свободный ковш · {{ driver_free_bucket_state.selection.label }}"{% endif %}>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</b>
+    <div class="driver-downtime-drum-stage">
+        <div class="driver-downtime-drum-track" data-driver-point-drum-track>
+            {% with drum_points=driver_manual_workspace.event_context.dump_points|default:driver_manual_workspace.base_event_context.dump_points %}
+            {% for point in drum_points %}
+                <button class="driver-drum-card" type="button" data-driver-point-card data-driver-point-id="{{ point.id }}" data-driver-point-name="{{ point.name }}" aria-label="Точка разгрузки: {{ point.name }}. Проведите вниз на круг, чтобы отправиться на неё">
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
+                    <span class="driver-drum-card-arrow" aria-hidden="true"></span>
+                    <span class="driver-drum-card-body">
+                        <span class="driver-drum-card-label{% if point.name|length > 14 %} is-drum-label-long{% elif point.name|length > 6 %} is-drum-label-medium{% endif %}">{{ point.name }}</span>
+                    </span>
+                </button>
+            {% empty %}
+                <div class="driver-inline-note">Экскаватору не назначены точки разгрузки.</div>
+            {% endfor %}
+            {% endwith %}
+        </div>
+    </div>
+</div>

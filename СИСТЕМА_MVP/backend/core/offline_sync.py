@@ -1139,12 +1139,13 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
 def _process_driver_loaded(access, normalized):
     """Create or attach one Driver manual-load event to the common Trip row."""
     from assignments.models import HaulAssignment, HaulAssignmentAction
+    from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from references.models import DumpPoint, RockType
     from trips.free_bucket import resolve_free_bucket_load_context
     from trips.models import FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip, TripClientAction
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
-    from trips.views import finalize_trip_unloaded
+    from trips.views import finalize_trip_unloaded, truck_waiting_loading_downtime
 
     payload = normalized['payload']
     truck_id = _positive_int(payload.get('truck_id'), field='truck_id')
@@ -1262,7 +1263,12 @@ def _process_driver_loaded(access, normalized):
         DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
         .filter(equipment=excavator, ended_at__isnull=True).order_by('id')
     )
-    if truck_downtime or any(item.reason.is_critical for item in excavator_downtimes):
+    # «Ожидание погрузки» — не препятствие, а ровно то, что погрузка завершает: ручная
+    # отправка его закрывает (ниже), как и погрузка экскаваторщиком.
+    if (
+        (truck_downtime and not truck_waiting_loading_downtime(truck_downtime))
+        or any(item.reason.is_critical for item in excavator_downtimes)
+    ):
         _conflict('equipment_downtime_active', 'Ручная отправка невозможна: открыт блокирующий простой.')
 
     open_trip = (
@@ -1442,6 +1448,7 @@ def _process_driver_loaded(access, normalized):
         trip=trip,
         actor=access.employee,
     )
+    close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
     if acceptance:
         acceptance.status = FreeBucketAcceptanceStatus.USED
         acceptance.used_at = normalized['occurred_at']
@@ -1450,9 +1457,14 @@ def _process_driver_loaded(access, normalized):
     state = bump_operational_state(
         'OfflineFieldEvent:driver_trip_loaded', event_type='trip_changed',
         object_type='Trip', object_id=trip.id,
+        # Название точки — для голоса «едем на …» на телефоне водителя, как у погрузки
+        # экскаваторщиком (driver-shift-voice-v1.js).
         payload={'action': 'driver_manual_loaded', 'trip_id': trip.id,
                  'truck_id': trip.truck_id, 'excavator_id': trip.excavator_id,
-                 'dump_point_id': trip.dump_point_id, 'status': trip.status},
+                 'dump_point_id': trip.dump_point_id,
+                 'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
+                 'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
+                 'status': trip.status},
     )
     return {
         'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
@@ -1863,6 +1875,9 @@ def _process_driver_loaded_cancelled(access, normalized):
     trip.cancelled_at = normalized['occurred_at']
     trip.save(update_fields=['status', 'cancelled_at'])
     close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
+    # Рейс отменён — самосвал пустой: ожидание разгрузки больше не к чему.
+    from downtimes.driver_workflow import close_truck_unloading_wait_downtimes
+    close_truck_unloading_wait_downtimes(trip.truck, ended_at=trip.cancelled_at)
     TripClientAction.objects.create(
         action_type='driver_manual_loaded_cancel',
         client_action_id=normalized['event_id'],
@@ -2164,12 +2179,8 @@ def _process_driver_dump_point_changed(access, normalized):
 
 
 def _process_downtime(access, normalized, *, role_code, close):
-    from downtimes.driver_workflow import (
-        driver_downtime_requires_empty_truck,
-        driver_downtime_requires_loaded_trip,
-    )
+    from downtimes.driver_workflow import driver_downtime_start_conflict
     from downtimes.models import DowntimeEvent, DowntimeReason
-    from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
 
     shift = _locked_shift(access, normalized, role_code=role_code)
     lock_production_state()
@@ -2218,14 +2229,14 @@ def _process_downtime(access, normalized, *, role_code, close):
         reason = DowntimeReason.for_workplace(workplace, equipment.equipment_type).filter(pk=reason_id).first()
         if not reason:
             _conflict('downtime_reason_changed', 'Причина простоя больше недоступна.')
-        if role_code == 'driver' and driver_downtime_requires_empty_truck(reason):
-            if Trip.objects.select_for_update().filter(truck=equipment, status__in=OPEN_TRIP_STATUSES).exists():
-                _conflict('empty_truck_required', 'Ожидание погрузки нельзя начать: самосвал уже загружен.')
-        if role_code == 'driver' and driver_downtime_requires_loaded_trip(reason):
-            if not Trip.objects.select_for_update().filter(
-                truck=equipment, status=TripStatus.LOADED_WAITING_UNLOAD,
-            ).exists():
-                _conflict('loaded_trip_required', 'Этот простой доступен только после погрузки.')
+        if role_code == 'driver':
+            # Гружёный / пустой самосвал и точка рейса — общие правила driver_workflow.
+            start_conflict = driver_downtime_start_conflict(reason, equipment)
+            if start_conflict:
+                code, message = start_conflict
+                if code == 'loaded_trip_required':
+                    message = 'Этот простой доступен только после погрузки.'
+                _conflict(code, message)
         open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
             equipment=equipment, ended_at__isnull=True,
         ).order_by('-started_at', '-id').first()

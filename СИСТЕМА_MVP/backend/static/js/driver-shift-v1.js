@@ -74,7 +74,8 @@ window.bindDriverMobileShell = function () {
             /* Грани барабана простоев повёрнуты в 3D: по замерам они выходят за экран, хотя
                сцена их обрезает. Считать это переполнением нельзя — из-за него весь экран
                водителя жил в плотности «tight», а при каждом простое дёргался на 2 px. */
-            if (node.closest && node.closest("[data-driver-downtime-drum]")) return false;
+            // То же для барабана точек разгрузки над кругом.
+            if (node.closest && node.closest("[data-driver-downtime-drum], [data-driver-point-drum]")) return false;
             var rect = node.getBoundingClientRect();
             return (
                 node.scrollHeight > node.clientHeight + 1
@@ -715,6 +716,14 @@ window.bindDriverMobileShell = function () {
         });
     }
     window.scheduleDriverDialLabelFit = scheduleDriverDialLabelFit;
+    /* Синхронный вариант — для мест, где смена текста и подгонка кегля обязаны попасть
+       в один и тот же кадр: обычный scheduleDriverDialLabelFit считает через
+       requestAnimationFrame, и браузер успевает нарисовать один кадр новым текстом
+       ещё старым (слишком крупным) кеглем — на телефоне это была вспышка вылезающей
+       за круг подписи при «РАЗГРУЗКА СОХРАНЕНА» (пойман 26.09.2026). */
+    window.fitDriverDialLabelNow = function (label) {
+        fitDriverDialLabel(label || shell.querySelector("[data-driver-dial-label]"), true);
+    };
     if (window.driverDialLabelResizeObserver) {
         window.driverDialLabelResizeObserver.disconnect();
     }
@@ -1239,7 +1248,11 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
-                if (event.event_type === "driver.trip.unloaded" && !window.driverOfflineConfirmationCueScheduled) {
+                // Ручной рейс, завершённый на круге, озвучивается так же, как обычная разгрузка.
+                if (
+                    (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
+                    && !window.driverOfflineConfirmationCueScheduled
+                ) {
                     window.driverOfflineConfirmationCueScheduled = true;
                     playDriverVoice("action_ok", "voice_trip_finished");
                     window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
@@ -1577,7 +1590,9 @@ window.bindDriverMobileShell = function () {
         var isUnloadingWait = flow === "waiting_unload";
         var isWaiting = isLoadingWait || isUnloadingWait;
         if (holdForm) {
-            holdForm.dataset.driverUnloadOneTap = isUnloadingWait ? "true" : "false";
+            /* Разгрузка всегда удержанием со шкалой — и в ожидании разгрузки тоже:
+               одно касание срабатывало только при отпускании, без заполнения круга. */
+            holdForm.dataset.driverUnloadOneTap = "false";
         }
         if (workDial) {
             workDial.classList.toggle("is-waiting-operation", isWaiting);
@@ -1901,6 +1916,25 @@ window.bindDriverMobileShell = function () {
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
         function submitDriverUnloadOnce() {
+            /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание или
+               одно касание завершает его через очередь ручного режима; круг гаснет сам,
+               когда движок ручного рейса сообщит о завершении. */
+            if (holdButton.dataset.driverManualDial === "true") {
+                if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
+                var started = window.DriverPointDrum.completeFromDial();
+                /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
+                   иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
+                if (started) {
+                    holdButton.classList.remove("is-loaded", "is-holding");
+                    holdButton.classList.add("is-pending");
+                    if (dialLabel) {
+                        renderDriverDialLabel(dialLabel, holdButton.dataset.driverPendingLabel || "ОТПРАВКА");
+                        scheduleDriverDialLabelFit();
+                    }
+                    return true;
+                }
+                return false;
+            }
             if (
                 unloadSubmissionPending
                 || holdForm.dataset.driverUnloadSubmitting === "true"
@@ -2000,23 +2034,25 @@ window.bindDriverMobileShell = function () {
             }, totalMs / HOLD_SEGMENTS);
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
-            /* Разгрузка повторяется десятки раз за смену: ровно секунда — достаточно,
+            /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
                чтобы случайное касание не отправило рейс, и не утомляет за смену. */
-            holdMs: 1000,
+            holdMs: 500,
             onStart: function () {
                 holdButton.classList.add("is-holding");
-                startHoldSegmentFeedback(1000);
+                startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
                 driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
-                holdButton.classList.add("is-loaded");
+                // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
+                if (!holdButton.disabled) holdButton.classList.add("is-loaded");
                 // После обычного отпускания подпись и так исходная — подгонка текста
                 // (замеры ширины в цикле) на слабом телефоне стоила заметного кадра.
-                if (dialLabel && readyDialLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== readyDialLabel) {
-                    renderDriverDialLabel(dialLabel, readyDialLabel);
+                var resetLabel = holdButton.dataset.driverManualDialLabel || readyDialLabel;
+                if (dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
+                    renderDriverDialLabel(dialLabel, resetLabel);
                     scheduleDriverDialLabelFit();
                 }
             },

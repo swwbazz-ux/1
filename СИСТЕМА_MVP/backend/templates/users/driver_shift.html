@@ -11,6 +11,7 @@
 <script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
+<script src="{% static 'js/driver-point-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-free-bucket-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v={{ driver_shell_version }}"></script>
@@ -25,6 +26,7 @@
 <link rel="stylesheet" href="{% static 'css/driver-shift-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/mobile-dial-actions-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-downtime-drum-v1.css' %}?v={{ driver_shell_version }}">
+<link rel="stylesheet" href="{% static 'css/driver-point-drum-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/driver-free-bucket-v1.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v={{ driver_shell_version }}">
 <link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v={{ driver_shell_version }}">
@@ -81,39 +83,19 @@
     </header>
 
     <section class="driver-panel driver-tab driver-work-screen {% if active_tab == 'work' %}is-active{% endif %}" data-driver-tab-panel="work">
-        <section class="driver-work-context-card">
-            {% comment %} Заголовок секции убран ради места; значок свободного ковша остался. {% endcomment %}
-            <b class="driver-free-bucket-chip" data-driver-free-bucket-chip{% if not driver_free_bucket_state.active %} hidden{% endif %}{% if driver_free_bucket_state.selection %} title="Свободный ковш · {{ driver_free_bucket_state.selection.label }}"{% endif %}>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</b>
-            <div class="driver-work-context-body">
-                <div class="driver-work-context-machine">
-                    <span>Экскаватор</span>
-                    <strong data-driver-context-excavator>{{ driver_excavator_label }}</strong>
-                    <small>Комплекс <span data-driver-context-complex>{{ driver_complex_label }}</span></small>
-                </div>
-                <div class="driver-work-context-geology">
-                    <span>Место погрузки · порода</span>
-                    <div class="driver-work-context-geology-values">
-                        <div class="driver-work-context-location">
-                            <span data-driver-context-horizon>{{ driver_geology_parts.0 }}</span>
-                            <span data-driver-context-block>{{ driver_geology_parts.1 }}</span>
-                        </div>
-                        <div class="driver-work-context-rock" data-driver-context-rock title="{{ driver_geology_parts.2 }}">{{ driver_geology_parts.2 }}</div>
-                    </div>
-                </div>
-            </div>
-        </section>
+        {% include "includes/driver_point_drum.html" %}
 
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %};" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
                 {% include "includes/mobile_dial_actions.html" with mobile_dial_manual_enabled=driver_manual_workspace.can_open mobile_dial_manual_blocked_reason=driver_manual_workspace.blocked_reason mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck %}
-                <form method="post"{% if active_trip %} action="{% url 'driver_complete_trip' active_trip.id %}"{% endif %} class="driver-work-dial-form" data-driver-hold-form{% if active_trip %} data-driver-trip-id="{{ active_trip.id }}"{% endif %} data-driver-unload-one-tap="{% if active_trip and driver_unloading_wait_active %}true{% else %}false{% endif %}">
+                <form method="post"{% if active_trip %} action="{% url 'driver_complete_trip' active_trip.id %}"{% endif %} class="driver-work-dial-form" data-driver-hold-form{% if active_trip %} data-driver-trip-id="{{ active_trip.id }}"{% endif %} data-driver-unload-one-tap="false">
                     {% csrf_token %}
                     <input type="hidden" name="client_action_id" value="" data-driver-client-action>
                     {% comment %} Круг устроен одинаково в обоих состояниях: без рейса та же кнопка просто
                        выключена. Пока состояния различались разметкой (форма против блока), разгрузка
                        меняла структуру экрана, и обновить его послойно было нельзя — приходилось
                        пересобирать весь экран, а это 0,7 с замирания на телефоне. {% endcomment %}
-                    <button class="driver-work-dial-button {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if active_trip and driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not active_trip and driver_loading_wait_active %} is-waiting-loading{% endif %}" type="{% if active_trip %}submit{% else %}button{% endif %}" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА"{% if not active_trip %} disabled aria-disabled="true"{% endif %} aria-label="{% if active_trip %}Подтвердить разгрузку. {% if driver_unloading_wait_active %}Нажмите один раз.{% else %}Удерживайте 1 секунду.{% endif %}{% else %}Разгрузка недоступна: нет загруженного рейса{% endif %}">
+                    <button class="driver-work-dial-button {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if active_trip and driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not active_trip and driver_loading_wait_active %} is-waiting-loading{% endif %}" type="{% if active_trip %}submit{% else %}button{% endif %}" data-driver-work-dial-control data-driver-hold-button data-driver-pending-label="ОТПРАВКА"{% if not active_trip %} disabled aria-disabled="true"{% endif %} aria-label="{% if active_trip %}Подтвердить разгрузку. Удерживайте 1 секунду.{% else %}Разгрузка недоступна: нет загруженного рейса{% endif %}">
                             <svg class="driver-work-dial-svg" viewBox="0 0 100 100" aria-hidden="true">
                                 <circle class="driver-work-track" cx="50" cy="50" r="45" pathLength="100"></circle>
                                 <circle class="driver-work-progress" cx="50" cy="50" r="45" pathLength="100"></circle>
@@ -201,11 +183,13 @@
                 </div>
                 <div class="driver-free-bucket-grid" data-driver-free-bucket-grid>
                     {% for excavator in driver_free_bucket_catalog.excavators %}
+                        {% comment %} Плитка — просто крупный номер экскаватора: горизонт/блок/порода/точка
+                           и «Не заполнено: …» убраны (водителю они тут не нужны, только мешали
+                           разглядеть сам номер). Статус («Выбран»/«Недоступно») остаётся — это не
+                           справка, а состояние самой плитки. Данные горизонта и т.п. остаются в
+                           data-атрибутах: их бросок в рейс при выборе экскаватора не отображение. {% endcomment %}
                         <button class="driver-free-bucket-tile{% if driver_free_bucket_state.selection.id == excavator.id %} is-current{% endif %}" type="button" data-driver-free-bucket-option data-excavator-id="{{ excavator.id }}" data-excavator-label="{{ excavator.label }}" data-complex-label="{{ excavator.complex_label }}" data-loading-horizon="{{ excavator.loading_horizon }}" data-loading-block="{{ excavator.loading_block }}" data-rock-type="{{ excavator.rock_type }}" data-dump-point="{{ excavator.dump_point }}" data-is-primary="{% if excavator.is_primary %}true{% else %}false{% endif %}"{% if excavator.is_primary or not excavator.available %} disabled aria-disabled="true"{% endif %}{% if driver_free_bucket_state.selection.id == excavator.id %} aria-current="true"{% endif %}>
-                            <span class="driver-free-bucket-tile-topline"><strong>{{ excavator.label }}</strong>{% if excavator.is_primary %}<em>Основной</em>{% endif %}</span>
-                            <span class="driver-free-bucket-tile-place">{{ excavator.loading_horizon|default:"Горизонт —" }} · {{ excavator.loading_block|default:"Блок —" }}</span>
-                            <span class="driver-free-bucket-tile-meta">{{ excavator.rock_type|default:"Порода —" }} · {{ excavator.dump_point|default:"Точка —" }}</span>
-                            {% if excavator.missing_fields %}<span class="driver-free-bucket-tile-missing">Не заполнено: {% if 'loading_horizon' in excavator.missing_fields %}горизонт{% endif %}{% if 'loading_block' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields %}, {% endif %}блок{% endif %}{% if 'rock_type' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields or 'loading_block' in excavator.missing_fields %}, {% endif %}порода{% endif %}{% if 'dump_points' in excavator.missing_fields %}{% if 'loading_horizon' in excavator.missing_fields or 'loading_block' in excavator.missing_fields or 'rock_type' in excavator.missing_fields %}, {% endif %}точки разгрузки{% endif %}</span>{% endif %}
+                            <strong class="driver-free-bucket-tile-number">{{ excavator.label }}</strong>
                             <span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status>{% if driver_free_bucket_state.selection.id == excavator.id %}Выбран{% elif not excavator.available %}Недоступно{% endif %}</span>
                         </button>
                     {% empty %}
@@ -292,7 +276,7 @@
                 <form method="post" action="{% url 'driver_downtime_action' %}" data-driver-downtime-reason-id="{{ reason.id }}">
                     {% csrf_token %}
                     <input type="hidden" name="reason_id" value="{{ reason.id }}">
-                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_is_used %} is-used{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-reason="{{ reason }}" data-driver-reason-label="{{ reason.button_label }}" data-driver-reason-seconds="{{ reason.driver_total_seconds }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% elif reason.driver_is_used %} aria-label="Начать простой: {{ reason.button_label }}. За смену: {{ reason.driver_total_label }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
+                    <button class="driver-downtime-hold status-{{ reason.effective_color_group }}{% if active_downtime and active_downtime.reason_id == reason.id %} is-selected{% endif %}{% if reason.driver_is_used %} is-used{% endif %}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-downtime-reason-button data-driver-downtime-reason-id="{{ reason.id }}" data-driver-downtime-flow="{{ reason.driver_workflow }}" data-driver-downtime-requires="{% if reason.driver_requires_empty_truck %}empty{% elif reason.driver_requires_loaded_trip %}loaded{% endif %}" data-driver-downtime-point="{{ reason.driver_dump_point_key }}" data-driver-reason="{{ reason }}" data-driver-reason-label="{{ reason.button_label }}" data-driver-reason-seconds="{{ reason.driver_total_seconds }}" data-driver-status-key="{{ reason.effective_color_group }}"{% if reason.driver_unavailable_message %} aria-disabled="true" data-driver-unavailable-message="{{ reason.driver_unavailable_message }}" aria-label="{{ reason.button_label }}. {{ reason.driver_unavailable_message }}"{% elif reason.driver_is_used %} aria-label="Начать простой: {{ reason.button_label }}. За смену: {{ reason.driver_total_label }}"{% else %} aria-label="Начать простой: {{ reason.button_label }}"{% endif %}>
                         <span class="driver-downtime-reason-label" data-driver-reason-label>{{ reason.button_label }}</span>
                         <span class="driver-downtime-reason-duration" data-driver-reason-duration{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
                     </button>

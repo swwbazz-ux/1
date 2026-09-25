@@ -312,16 +312,14 @@ class AccessLoginTests(TestCase):
 
         response = self.client.get('/driver/', HTTP_HOST='localhost')
         html = response.content.decode('utf-8')
-        main_card = html.split('class="driver-work-context-card"', 1)[1].split('class="driver-work-dial-zone"', 1)[0]
-        self.assertIn('Immutable rock', main_card)
-        self.assertIn('Immutable horizon', main_card)
-        self.assertIn('Immutable block', main_card)
+        # Над кругом теперь барабан точек; значок свободного ковша переехал в него,
+        # а порода и забой видны на скрытом экране ручного режима (проверка ниже).
+        main_card = html.split('data-driver-point-drum', 1)[1].split('class="driver-work-dial-zone"', 1)[0]
         compact_label = f'Свободный ковш · {state["selection"]["label"]}'
         self.assertIn('data-driver-free-bucket-chip', main_card)
         self.assertIn(compact_label, main_card)
+        self.assertIn('data-driver-point-name="Immutable dump"', main_card)
         self.assertNotIn('Current placement rock', main_card)
-        self.assertNotIn('Current horizon', main_card)
-        self.assertNotIn('Current block', main_card)
         manual_workspace = html.split('<section class="driver-manual-workspace"', 1)[1].split(
             '<nav class="mm-mobile-bottom-nav driver-bottom-nav"', 1,
         )[0]
@@ -565,25 +563,17 @@ class AccessLoginTests(TestCase):
         # Круг — строго во всю ширину колонки; ограничение по высоте только аварийное.
         self.assertIn('width: min(100%, 520px, calc(100dvh', driver_stylesheet())
         self.assertIn('grid-template-areas:', driver_stylesheet())
-        self.assertIn('"context"', driver_stylesheet())
+        self.assertIn('"pointdrum"', driver_stylesheet())
         self.assertIn('"dial"', driver_stylesheet())
         self.assertIn('"drum"', driver_stylesheet())
         self.assertIn('"assign"', driver_script())
-        # Остаток высоты отдан барабану: его строка 1fr, круг задаёт свою строку сам.
-        self.assertIn('grid-template-rows: auto auto minmax(0, 1fr) auto', driver_stylesheet())
+        # Над кругом барабан точек, под ним барабан простоев: остаток высоты делят поровну.
+        self.assertIn('grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr) auto', driver_stylesheet())
         self.assertIn('gap: var(--driver-work-gap)', driver_stylesheet())
-        self.assertContains(response, 'class="driver-work-context-card"')
+        self.assertNotContains(response, 'class="driver-work-context-card"')
+        self.assertContains(response, 'data-driver-point-drum')
         self.assertIn('--driver-work-column: min(100%, 720px)', driver_stylesheet())
-        # Заголовок секции убран ради места на экране; значок свободного ковша остался.
-        self.assertNotContains(response, 'class="driver-work-context-heading"')
         self.assertContains(response, 'data-driver-free-bucket-chip')
-        self.assertContains(response, 'class="driver-work-context-machine"')
-        self.assertContains(response, 'class="driver-work-context-geology"')
-        self.assertContains(response, 'class="driver-work-context-geology-values"')
-        self.assertContains(response, 'Место погрузки · порода')
-        self.assertContains(response, 'class="driver-work-context-location"')
-        self.assertContains(response, 'class="driver-work-context-rock"')
-        self.assertContains(response, 'Комплекс')
         self.assertNotContains(response, 'function enhanceDriverContextLine()')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'data-driver-dial-label')
@@ -3088,7 +3078,7 @@ class AccessLoginTests(TestCase):
         assignment = HaulAssignment.objects.create(truck=truck, excavator=excavator)
 
         shift_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
-        self.assertContains(shift_response, 'driver-work-context-card')
+        self.assertContains(shift_response, 'data-driver-point-drum')
         self.assertContains(shift_response, 'ВЫ НАЗНАЧЕНЫ НА ЭКС-1')
         self.assertContains(shift_response, 'ПРИНЯТЬ')
         self.assertContains(shift_response, 'НА ЗАГРУЗКУ')
@@ -3168,7 +3158,7 @@ class AccessLoginTests(TestCase):
         response = self.client.get('/driver/', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-driver-manual-open')
+        self.assertContains(response, 'data-driver-dial-manual-toggle')
         self.assertContains(response, 'data-driver-manual-workspace')
         self.assertContains(response, 'data-driver-manual-free-bucket-open')
         self.assertContains(response, 'data-driver-manual-action-row', count=1)
@@ -3249,7 +3239,7 @@ class AccessLoginTests(TestCase):
             status=TripStatus.LOADED_WAITING_UNLOAD,
         )
         blocked = self.client.get('/driver/', HTTP_HOST='localhost')
-        self.assertNotContains(blocked, 'data-driver-manual-open')
+        self.assertNotContains(blocked, 'data-driver-dial-manual-toggle')
         self.assertContains(blocked, 'Ручной режим недоступен во время активного рейса')
 
         TripClientAction.objects.create(
@@ -3259,7 +3249,7 @@ class AccessLoginTests(TestCase):
             client_action_id='driver-manual-render-test',
         )
         restored_manual = self.client.get('/driver/', HTTP_HOST='localhost')
-        self.assertContains(restored_manual, 'data-driver-manual-open')
+        self.assertContains(restored_manual, 'data-driver-dial-manual-toggle')
         self.assertContains(restored_manual, 'data-driver-active-trip-origin="driver_manual"')
         self.assertContains(restored_manual, f'data-driver-active-trip-id="{active_trip.id}"')
         self.assertContains(restored_manual, 'data-driver-has-loaded-trip="false"')
@@ -3305,7 +3295,7 @@ class AccessLoginTests(TestCase):
         response = self.client.get('/driver/', HTTP_HOST='localhost')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-driver-manual-open')
+        self.assertContains(response, 'data-driver-dial-manual-toggle')
         self.assertContains(response, 'Нет назначения')
         self.assertContains(response, 'Экскаватор не назначен')
         self.assertContains(response, 'Нет точек')
@@ -3440,11 +3430,10 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(settings_response.status_code, 200)
         self.assertContains(context_driver_response, 'ЭКС-1')
-        self.assertContains(context_driver_response, 'data-driver-context-complex')
         self.assertEqual(context_driver_response.context['driver_complex_label'], 'К-1')
-        self.assertContains(context_driver_response, 'Горизонт 75')
-        self.assertContains(context_driver_response, 'Блок 52')
-        self.assertContains(context_driver_response, 'Скальная порода')
+        # Над кругом — барабан точек, назначенных экскаватору (горизонт и порода теперь
+        # только на скрытом экране ручного режима).
+        self.assertContains(context_driver_response, f'data-driver-point-id="{dump_point.id}"')
         self.assertContains(context_driver_response, 'driver-work-dial-button is-empty')
 
         load_response = operator_client.post(
@@ -3474,11 +3463,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(loaded_driver_response, 'ТОЧКА РАЗГРУЗКИ')
         self.assertContains(loaded_driver_response, 'driver-work-dial-button is-loaded')
         self.assertContains(loaded_driver_response, 'ЭКС-1')
-        self.assertContains(loaded_driver_response, 'data-driver-context-complex')
         self.assertEqual(loaded_driver_response.context['driver_complex_label'], 'К-1')
-        self.assertContains(loaded_driver_response, 'Горизонт 75')
-        self.assertContains(loaded_driver_response, 'Блок 52')
-        self.assertContains(loaded_driver_response, 'Скальная порода')
+        self.assertContains(loaded_driver_response, f'data-driver-point-id="{dump_point.id}"')
 
         complete_response = self.client.post(
             f'/driver/trip/{trip.id}/complete/',
@@ -3496,11 +3482,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(empty_driver_response, 'НА ЗАГРУЗКУ')
         self.assertContains(empty_driver_response, 'driver-work-dial-button is-empty')
         self.assertContains(empty_driver_response, 'ЭКС-1')
-        self.assertContains(empty_driver_response, 'data-driver-context-complex')
         self.assertEqual(empty_driver_response.context['driver_complex_label'], 'К-1')
-        self.assertContains(empty_driver_response, 'Горизонт 75')
-        self.assertContains(empty_driver_response, 'Блок 52')
-        self.assertContains(empty_driver_response, 'Скальная порода')
+        self.assertContains(empty_driver_response, f'data-driver-point-id="{dump_point.id}"')
         self.assertTrue(
             OperationalStateEvent.objects.filter(
                 event_type='assignment_changed',
@@ -3645,8 +3628,6 @@ class AccessLoginTests(TestCase):
 
         driver_shift_response = driver_client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(driver_shift_response, 'ККД')
-        self.assertContains(driver_shift_response, 'Горизонт 75')
-        self.assertContains(driver_shift_response, 'Блок 52')
         self.assertContains(driver_shift_response, 'ТОЧКА РАЗГРУЗКИ')
         self.assertContains(driver_shift_response, 'Изменить точку разгрузки')
         self.assertNotContains(driver_shift_response, 'Активный рейс')
@@ -4273,7 +4254,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, '>ПРИЧИНА ПРОСТОЯ</em>')
         self.assertNotContains(response, 'data-driver-unload-one-tap="true"')
 
-    def test_driver_unloading_wait_renders_yellow_one_tap_work_dial(self):
+    def test_driver_unloading_wait_renders_yellow_hold_work_dial(self):
         truck = self.create_registered_driver_shift()
         trip = self.create_driver_trip(truck)
         reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
@@ -4299,7 +4280,9 @@ class AccessLoginTests(TestCase):
             response,
             'driver-work-dial-button is-loaded is-waiting-operation is-waiting-unload',
         )
-        self.assertContains(response, 'data-driver-unload-one-tap="true"')
+        # Разгрузка и в ожидании разгрузки — удержанием со шкалой, не одним касанием.
+        self.assertContains(response, 'data-driver-unload-one-tap="false"')
+        self.assertContains(response, 'Удерживайте 1 секунду.')
         self.assertContains(response, '>ОЖИДАНИЕ ККД</em>')
 
     def test_driver_waiting_loading_is_rejected_after_trip_is_loaded(self):
@@ -4324,7 +4307,8 @@ class AccessLoginTests(TestCase):
         self.assertContains(
             screen_response,
             'data-driver-unavailable-message="Самосвал уже загружен"',
-            count=1,
+            # Ожидание погрузки, заправка, ТО, чистка кузова — только на пустом самосвале.
+            count=4,
         )
         self.assertEqual(action_response.status_code, 409)
         self.assertEqual(action_response.json()['code'], 'empty_truck_required')
@@ -4356,10 +4340,51 @@ class AccessLoginTests(TestCase):
         self.assertContains(
             screen_response,
             'data-driver-unavailable-message="Самосвал уже загружен"',
-            count=1,
+            # Ожидание погрузки, заправка, ТО, чистка кузова — только на пустом самосвале.
+            count=4,
         )
         self.assertEqual(action_response.status_code, 409)
         self.assertEqual(action_response.json()['code'], 'empty_truck_required')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+
+    def test_driver_point_unloading_wait_requires_trip_to_that_point(self):
+        truck = self.create_registered_driver_shift()
+        trip = self.create_driver_trip(truck)
+        skdr, _ = DumpPoint.objects.get_or_create(name='СКДР')
+        Trip.objects.filter(pk=trip.pk).update(dump_point=skdr, assigned_dump_point=skdr)
+        reason = DowntimeReason.objects.get(name='Ожидание разгрузки ККД')
+
+        response = self.client.post(
+            reverse('driver_downtime_action'),
+            data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+            content_type='application/json',
+            HTTP_HOST='localhost',
+            HTTP_ACCEPT='application/json',
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'dump_point_mismatch')
+        self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
+        page = self.client.get('/driver/', HTTP_HOST='localhost')
+        self.assertContains(page, 'data-driver-unavailable-message="Только при рейсе на ККД"')
+
+    def test_driver_empty_only_downtimes_are_blocked_on_loaded_truck(self):
+        truck = self.create_registered_driver_shift()
+        self.create_driver_trip(truck)
+        for name in ('Чистка кузова', 'ТО', 'Заправка'):
+            with self.subTest(reason=name):
+                reason = DowntimeReason.objects.get(name=name)
+                response = self.client.post(
+                    reverse('driver_downtime_action'),
+                    data=json.dumps({'action': 'start', 'reason_id': reason.id}),
+                    content_type='application/json',
+                    HTTP_HOST='localhost',
+                    HTTP_ACCEPT='application/json',
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['code'], 'empty_truck_required')
         self.assertFalse(DowntimeEvent.objects.filter(equipment=truck).exists())
 
     def test_driver_unloading_wait_rejects_legacy_active_trip(self):
@@ -4382,15 +4407,23 @@ class AccessLoginTests(TestCase):
 
     def test_driver_loaded_truck_can_start_each_unloading_wait_flow(self):
         truck = self.create_registered_driver_shift()
-        self.create_driver_trip(truck)
+        trip = self.create_driver_trip(truck)
         unloading_wait_names = (
             'Ожидание разгрузки',
             'Ожидание разгрузки ККД',
             'Ожидание разгрузки СКДР',
         )
+        # Ожидание разгрузки на конкретной точке — только при рейсе на эту точку.
+        point_for_reason = {
+            'Ожидание разгрузки ККД': 'ККД',
+            'Ожидание разгрузки СКДР': 'СКДР',
+        }
 
         for reason in DowntimeReason.objects.filter(name__in=unloading_wait_names).order_by('name'):
             with self.subTest(reason=reason.name):
+                if reason.name in point_for_reason:
+                    point, _ = DumpPoint.objects.get_or_create(name=point_for_reason[reason.name])
+                    Trip.objects.filter(pk=trip.pk).update(dump_point=point, assigned_dump_point=point)
                 response = self.client.post(
                     reverse('driver_downtime_action'),
                     data=json.dumps({

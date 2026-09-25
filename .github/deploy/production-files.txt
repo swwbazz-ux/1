@@ -1,5 +1,6 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/downtimes/driver_workflow.py
 СИСТЕМА_MVP/backend/core/dump_point_names.py
 СИСТЕМА_MVP/backend/core/equipment_numbers.py
 СИСТЕМА_MVP/backend/core/dispatcher_push.py
@@ -53,6 +54,9 @@
 СИСТЕМА_MVP/backend/templates/includes/driver_downtime_drum.html
 СИСТЕМА_MVP/backend/static/css/driver-downtime-drum-v1.css
 СИСТЕМА_MVP/backend/static/js/driver-downtime-drum-v1.js
+СИСТЕМА_MVP/backend/templates/includes/driver_point_drum.html
+СИСТЕМА_MVP/backend/static/css/driver-point-drum-v1.css
+СИСТЕМА_MVP/backend/static/js/driver-point-drum-v1.js
 СИСТЕМА_MVP/backend/users/models.py
 СИСТЕМА_MVP/backend/users/middleware.py
 СИСТЕМА_MVP/backend/users/native_push.py

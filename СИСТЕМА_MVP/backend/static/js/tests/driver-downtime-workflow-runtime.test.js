@@ -313,10 +313,12 @@ test("all three unloading waits use one semantic workflow and template availabil
         DRIVER_TEMPLATE_SOURCE,
         /data-driver-unavailable-message="\{\{ reason\.driver_unavailable_message \}\}"/
     );
+    // Гружёный — по любому открытому рейсу, включая ручной; правила — в driver_workflow.
     assert.match(
         DRIVER_VIEWS_SOURCE,
-        /reason\.driver_requires_loaded_trip and not driver_has_loaded_trip:[\s\S]*Доступно только после погрузки/
+        /reason\.driver_unavailable_message = driver_downtime_unavailable_message\(\s*reason,\s*truck_loaded=driver_downtime_truck_loaded,/
     );
+    assert.match(DRIVER_WORKFLOW_SOURCE, /DRIVER_LOADED_TRIP_REQUIRED_MESSAGE = 'Доступно только после погрузки'/);
     assert.match(
         DRIVER_VIEWS_SOURCE,
         /reason\.driver_requires_empty_truck and driver_has_open_trip:[\s\S]*Самосвал уже загружен/
@@ -398,14 +400,15 @@ test("active downtime reason is a no-op and offline switches keep chronological 
 });
 
 
-test("waiting_unload enables one-tap generic yellow mode and clearing removes it", () => {
+test("waiting_unload enables the yellow mode but keeps hold-to-unload; clearing removes it", () => {
     const runtime = loadWaitingModeRuntime({hasTrip: true});
 
     assert.equal(runtime.apply({
         workflow: "waiting_unload",
         reason_label: "Ожидание ККД",
     }), true);
-    assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "true");
+    // Разгрузка удержанием со шкалой и в ожидании разгрузки.
+    assert.equal(runtime.holdForm.dataset.driverUnloadOneTap, "false");
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-operation"), true);
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-unload"), true);
     assert.equal(runtime.workDialControl.classList.contains("is-waiting-loading"), false);

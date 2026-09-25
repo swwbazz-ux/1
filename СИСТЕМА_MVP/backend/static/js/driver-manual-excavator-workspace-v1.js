@@ -238,6 +238,17 @@
         } else if (root.navigator && typeof root.navigator.vibrate === "function") {
             try { root.navigator.vibrate(patterns[kind] || patterns.created); } catch (error) {}
         }
+        /* Ручной режим на круге основного экрана звучит как обычная работа водителя:
+           жест уже подал свой тональный сигнал (driver-point-drum-v1.js, тот же click,
+           что у свайпа простоя); «едем на …» и «рейс завершён» приходят голосом по
+           подтверждению сервера, как у рейса экскаваторщика (driver-shift-voice-v1.js,
+           driver-shift-v1.js) — эти два звука шли подряд и звучали двойным сигналом
+           перед голосом, поэтому здесь для отправки звук больше не дублируется.
+           У отмены голосового подтверждения нет — свой сигнал ей нужен. */
+        if (dialHostsManualMode()) {
+            if (kind === "cancelled" && typeof root.playDriverSound === "function") root.playDriverSound("action_error");
+            return true;
+        }
         var context = root.ExcavatorDashboardDrag
             && typeof root.ExcavatorDashboardDrag.preparePickupAudio === "function"
             ? root.ExcavatorDashboardDrag.preparePickupAudio()
@@ -414,6 +425,40 @@
         var fitter = root.EquipmentLabelFit;
         if (!fitter || typeof fitter.fit !== "function") return null;
         return fitter.fit(summary, {allowWrap: true});
+    }
+
+    var DUMP_MAGNET_SCALE = 1.5;
+    /* .is-drop-ready в driver-manual-excavator-workspace-v1.css рисует вокруг
+       плитки свечение (box-shadow blur 8px) — оно не входит в
+       getBoundingClientRect (тень всегда рисуется за пределами рамки), так
+       что без этого запаса рамка укладывалась бы в край экрана, а мягкое
+       жёлтое пятно вокруг нёе всё равно вылезало бы за него. Запас должен
+       совпадать с blur-радиусом того box-shadow. */
+    var DUMP_MAGNET_GLOW_MARGIN = 8;
+
+    /* Плитка-цель при перетаскивании растёт transform: scale от нижнего
+       края (CSS) — вверх и в стороны, никогда вниз. Пользователь: край
+       экрана для этого роста непреодолим ни по одной стороне, включая
+       подсветку вокруг плитки, не только её рамку. transform не участвует
+       в layout, поэтому сам по себе никак не «знает» о границах экрана —
+       меряем реальные отступы плитки до каждого края ДО того, как класс
+       is-drop-ready встанет (то есть по её ещё не увеличенным размерам),
+       и подменяем 1.5 на меньший кегль, если по любую сторону не хватает
+       места для плитки и её свечения. */
+    function applyDumpMagnetScale(target) {
+        if (!target || !target.getBoundingClientRect) return;
+        var rect = target.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        var viewportW = root.innerWidth || 0;
+        var viewportH = root.innerHeight || 0;
+        var growLeft = rect.left - DUMP_MAGNET_GLOW_MARGIN;
+        var growRight = (viewportW - DUMP_MAGNET_GLOW_MARGIN) - rect.right;
+        var growTop = rect.top - DUMP_MAGNET_GLOW_MARGIN;
+        var scaleFromLeft = 1 + (2 * growLeft) / rect.width;
+        var scaleFromRight = 1 + (2 * growRight) / rect.width;
+        var scaleFromTop = 1 + growTop / rect.height;
+        var safeScale = Math.max(1, Math.min(DUMP_MAGNET_SCALE, scaleFromLeft, scaleFromRight, scaleFromTop));
+        target.style.setProperty("--driver-manual-magnet-scale", safeScale.toFixed(3));
     }
 
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
@@ -756,7 +801,36 @@
         }).pop() || null;
     }
 
+    /* Круг и барабан точек на основном экране показывают ручной рейс сами; о каждой
+       смене рейса движок сообщает им одним событием. */
+    function activeManualPointId() {
+        var projection = currentTripProjection;
+        if (!projection || isTerminalState(projection.state)) return "";
+        return String(positive(projection.payload && projection.payload.dump_point_id) || "");
+    }
+
+    function activeManualPointName() {
+        return activeManualPointId() ? projectionPointName(currentTripProjection) : "";
+    }
+
+    function announceManualTrip() {
+        if (typeof root.dispatchEvent !== "function" || typeof root.CustomEvent !== "function") return;
+        root.dispatchEvent(new root.CustomEvent("driver-manual-trip-changed", {
+            detail: {
+                pointId: activeManualPointId(),
+                pointName: activeManualPointName(),
+                saving: savingLocal
+            }
+        }));
+    }
+
     function renderProjection(workspace, events, receipt) {
+        var result = renderProjectionState(workspace, events, receipt);
+        announceManualTrip();
+        return result;
+    }
+
+    function renderProjectionState(workspace, events, receipt) {
         workspace = workspace || currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return null;
         var shell = workspace.closest("[data-driver-shell]");
@@ -870,9 +944,25 @@
             requestAutomaticTripRefresh(receipt);
             return {state: "automatic", tripId: positive(receipt.server_ids && receipt.server_ids.trip_id)};
         }
+        /* Запись «погрузка подтверждена» живёт в памяти телефона и после того, как рейс
+           завершён. Если экран сервера новее этой погрузки, а рейса с её номером на нём
+           нет — рейс уже закрыт, «воскрешать» его нельзя: водитель застревал с рейсом-
+           призраком, которого сервер не принимает (пойман на телефоне 26.09.2026). */
+        var receiptTripId = positive(receipt && receipt.server_ids && receipt.server_ids.trip_id);
+        var screenVersion = Number(root.document && root.document.body
+            && root.document.body.dataset.operationalStateVersion || 0);
+        var receiptVersion = Number(receipt && receipt.version || 0);
+        var receiptTripClosed = Boolean(
+            receiptTripId
+            && serverTripId !== receiptTripId
+            && screenVersion > 0
+            && receiptVersion > 0
+            && screenVersion > receiptVersion
+        );
         if (
             !projected
             && receipt
+            && !receiptTripClosed
             && receipt.event_type === "driver.trip.loaded"
             && receipt.trip_origin === "driver_manual"
         ) {
@@ -1495,6 +1585,56 @@
             throw error;
         }).finally(function () {
             target.classList.remove("is-complete-pending");
+            announceManualTrip();
+        });
+    }
+
+    /* Погрузка ручного рейса на выбранную точку: одно и то же событие и для броска
+       самосвала на плитку, и для свайпа точки из барабана в круг основного экрана. */
+    function startManualLoad(workspace, target) {
+        if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return Promise.resolve(false);
+        var outbox = root.driverOfflineOutbox;
+        if (!outbox) {
+            setResult(workspace, "storage-error", null, true);
+            return Promise.resolve(false);
+        }
+        var previousProjection = currentTripProjection;
+        savingLocal = true;
+        setSourceLocked(workspace, true);
+        setResult(workspace, "saving", null, true);
+        return outbox.pending().then(function (events) {
+            return buildManualLoadEvent(workspace, target, events);
+        }).then(function (event) {
+            return outbox.enqueue(event);
+        }).then(function (saved) {
+            savingLocal = false;
+            manualCompletionPendingKey = "";
+            delete workspace.dataset.driverManualLastError;
+            currentTripProjection = saved;
+            updateManualTripCount(
+                workspace,
+                target.dataset.eoDumpTarget,
+                1,
+                "load:" + String(saved.event_id || "")
+            );
+            startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
+            markLastDump(workspace, target.dataset.eoDumpTarget);
+            syncWorkspaceContext(workspace);
+            setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
+            setResult(workspace, "pending", null, true);
+            updatePointAction(workspace);
+            playManualFeedback("created");
+            announceManualTrip();
+            return saved;
+        }).catch(function (error) {
+            savingLocal = false;
+            workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
+            currentTripProjection = previousProjection;
+            if (!previousProjection) stopTripTimer(workspace);
+            setSourceLocked(workspace, sourceShouldBeLocked(false, previousProjection));
+            setResult(workspace, "storage-error", null, true);
+            announceManualTrip();
+            return false;
         });
     }
 
@@ -1543,6 +1683,7 @@
             throw error;
         }).finally(function () {
             target.classList.remove("is-return-pending");
+            announceManualTrip();
         });
     }
 
@@ -1792,6 +1933,9 @@
             sourceSelector: "[data-driver-manual-source]",
             targetSelector: '[data-driver-manual-dump-target]:not([data-driver-manual-current-only="true"])',
             gradientId: "driver-manual-drag-comet-light",
+            onTargetChange: function (card, target) {
+                if (target) applyDumpMagnetScale(target);
+            },
             canDrag: function () {
                 return !sourceShouldBeLocked(savingLocal, currentTripProjection);
             },
@@ -1799,46 +1943,7 @@
             isInactive: function () { return false; },
             isBlocked: function () { return false; },
             onDrop: function (card, target) {
-                if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return;
-                var outbox = root.driverOfflineOutbox;
-                if (!outbox) {
-                    setResult(workspace, "storage-error", null, true);
-                    return;
-                }
-                var previousProjection = currentTripProjection;
-                savingLocal = true;
-                setSourceLocked(workspace, true);
-                setResult(workspace, "saving", null, true);
-                outbox.pending().then(function (events) {
-                    return buildManualLoadEvent(workspace, target, events);
-                }).then(function (event) {
-                    return outbox.enqueue(event);
-                }).then(function (saved) {
-                    savingLocal = false;
-                    manualCompletionPendingKey = "";
-                    delete workspace.dataset.driverManualLastError;
-                    currentTripProjection = saved;
-                    updateManualTripCount(
-                        workspace,
-                        target.dataset.eoDumpTarget,
-                        1,
-                        "load:" + String(saved.event_id || "")
-                    );
-                    startTripTimer(workspace, target.dataset.eoDumpName, Date.parse(saved.occurred_at));
-                    markLastDump(workspace, target.dataset.eoDumpTarget);
-                    syncWorkspaceContext(workspace);
-                    setSourceLocked(workspace, sourceShouldBeLocked(false, saved));
-                    setResult(workspace, "pending", null, true);
-                    updatePointAction(workspace);
-                    playManualFeedback("created");
-                }).catch(function (error) {
-                    savingLocal = false;
-                    workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
-                    currentTripProjection = previousProjection;
-                    if (!previousProjection) stopTripTimer(workspace);
-                    setSourceLocked(workspace, sourceShouldBeLocked(false, previousProjection));
-                    setResult(workspace, "storage-error", null, true);
-                });
+                startManualLoad(workspace, target);
             },
             haptic: function (pattern, amplitude) {
                 if (typeof root.driverHaptic === "function") {
@@ -1880,10 +1985,57 @@
         return currentController;
     }
 
+    /* Ручной режим переехал на основной экран: барабан точек над циферблатом и сам круг.
+       Этот модуль остаётся движком ручного рейса (очередь событий, проекция рейса,
+       отмена и завершение) и привязан к скрытой разметке, но сам экран больше не
+       показывается. */
+    function dialHostsManualMode() {
+        return !!(root.document && root.document.querySelector("[data-driver-point-drum]"));
+    }
+
+    function dialWorkspace() {
+        var workspace = currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
+        if (workspace && workspace !== currentWorkspace) bindWorkspace(workspace);
+        return workspace;
+    }
+
+    function activeDumpTarget(workspace) {
+        return workspace.querySelector('[data-driver-manual-dump-target][data-eo-return-enabled="true"]')
+            || ensureCurrentProjectionTarget(workspace);
+    }
+
+    function startManualLoadAtPoint(pointId, pointName) {
+        var workspace = dialWorkspace();
+        pointId = positive(pointId);
+        if (!workspace || !pointId) return Promise.resolve(false);
+        var grid = workspace.querySelector(".eo-dashboard-unload-grid");
+        var target = grid && grid.querySelector(
+            '[data-driver-manual-dump-target][data-eo-dump-target="' + String(pointId) + '"]'
+        );
+        if (!target) target = selectManualPoint(workspace, pointId, pointName);
+        if (!target) return Promise.resolve(false);
+        return startManualLoad(workspace, target);
+    }
+
+    function cancelActiveManualLoad() {
+        var workspace = dialWorkspace();
+        var target = workspace && activeDumpTarget(workspace);
+        if (!target) return Promise.resolve(false);
+        return cancelManualLoad(workspace, target);
+    }
+
+    function completeActiveManualLoad() {
+        var workspace = dialWorkspace();
+        var target = workspace && activeDumpTarget(workspace);
+        if (!target) return Promise.resolve(false);
+        return completeManualLoad(workspace, target);
+    }
+
     function openWorkspace(control) {
         var workspace = root.document.querySelector("[data-driver-manual-workspace]");
         if (!workspace) return;
         bindWorkspace(workspace);
+        if (dialHostsManualMode()) return;
         workspaceRequestedOpen = true;
         workspacePreferenceKnown = true;
         workspace.hidden = false;
@@ -1980,6 +2132,7 @@
         }
         if (
             workspaceRequestedOpen
+            && !dialHostsManualMode()
             && shell
             && String(shell.dataset.activeTab || "work") === "work"
             && shell.dataset.driverActiveTripOrigin !== "excavator"
@@ -2026,7 +2179,14 @@
                 event.preventDefault();
                 event.stopPropagation();
                 playGestureHaptic("tap");
-                openPointChooser(pointOpen.closest("[data-driver-manual-workspace]"));
+                /* На основном экране кнопка стоит в углу круга (mobile_dial_actions.html), не
+                   внутри скрытого экрана ручного режима — своего [data-driver-manual-workspace]
+                   у неё нет, engine ищется как обычно (currentWorkspace / документ). */
+                openPointChooser(
+                    pointOpen.closest("[data-driver-manual-workspace]")
+                    || currentWorkspace
+                    || root.document.querySelector("[data-driver-manual-workspace]")
+                );
                 return;
             }
             var pointSheet = event.target && event.target.closest
@@ -2169,7 +2329,13 @@
         showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
         restoreStandardTargets: restoreStandardTargets,
         resultText: resultText,
-        dismissRejectedTripProjection: dismissRejectedTripProjection
+        dismissRejectedTripProjection: dismissRejectedTripProjection,
+        startManualLoad: startManualLoad,
+        activeManualPointId: activeManualPointId,
+        activeManualPointName: activeManualPointName,
+        startManualLoadAtPoint: startManualLoadAtPoint,
+        cancelActiveManualLoad: cancelActiveManualLoad,
+        completeActiveManualLoad: completeActiveManualLoad
     };
     if (typeof root.document !== "undefined") {
         if (root.document.readyState === "loading") {

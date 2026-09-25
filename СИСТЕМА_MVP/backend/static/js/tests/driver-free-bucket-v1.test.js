@@ -317,3 +317,21 @@ test("free-bucket projection keeps the dial label short and renders a compact mo
     assert.match(source, /target\.focus\(\{ preventScroll: true \}\)/);
     assert.match(template, /window\.scheduleDriverDialLabelFit = scheduleDriverDialLabelFit/);
 });
+
+test("free-bucket tiles show only the excavator number and status, no place/rock/point text", () => {
+    const source = fs.readFileSync(path.join(__dirname, "../driver-free-bucket-v1.js"), "utf8");
+    const styles = fs.readFileSync(path.join(__dirname, "../../css/driver-free-bucket-v1.css"), "utf8");
+    const template = driverScreenSource();
+    // Горизонт/блок/порода/точка и «Не заполнено: …» мешали разглядеть сам номер —
+    // убраны из отображения (26.09.2026), но остаются в data-атрибутах для выбора.
+    assert.match(template, /<strong class="driver-free-bucket-tile-number">\{\{ excavator\.label \}\}<\/strong>/);
+    assert.doesNotMatch(template, /driver-free-bucket-tile-place/);
+    assert.doesNotMatch(template, /driver-free-bucket-tile-meta/);
+    assert.doesNotMatch(template, /driver-free-bucket-tile-missing/);
+    assert.match(template, /data-loading-horizon="\{\{ excavator\.loading_horizon \}\}"/);
+    assert.match(source, /'<strong class="driver-free-bucket-tile-number"><\/strong>'/);
+    assert.doesNotMatch(source, /driver-free-bucket-tile-place/);
+    assert.doesNotMatch(source, /driver-free-bucket-tile-meta/);
+    assert.doesNotMatch(source, /driver-free-bucket-tile-missing/);
+    assert.match(styles, /\.driver-free-bucket-tile-number\s*\{/);
+});

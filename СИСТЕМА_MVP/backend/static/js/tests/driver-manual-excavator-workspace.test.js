@@ -473,8 +473,19 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     assert.match(source, /createDriverManualLoadCancelledEvent/);
     assert.match(source, /data-driver-manual-current-only/);
     assert.match(source, /targetSelector: '\[data-driver-manual-dump-target\]:not\(\[data-driver-manual-current-only="true"\]\)'/);
-    assert.match(css, /:not\(\.is-truck-drag-active\) \.driver-manual-workspace__dump-card\s*\{\s*height:\s*100% !important;/s);
-    assert.doesNotMatch(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
+    // Точки разгрузки остаются горизонтальной сеткой всегда, включая
+    // перетаскивание — высота плитки больше не выключается на время
+    // .is-truck-drag-active (раньше уступала место сжатому флекс-ряду
+    // машиниста, теперь сетка и высота одни и те же в обоих состояниях).
+    assert.doesNotMatch(css, /:not\(\.is-truck-drag-active\)/);
+    assert.match(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
+    // Плитка-цель растёт от нижнего края (вверх и в стороны, не вниз) в
+    // полтора раза — JS (applyDumpMagnetScale) подставляет кегль поменьше
+    // через --driver-manual-magnet-scale, если у экрана не хватает места
+    // по любую сторону, 1.5 здесь только запасное значение по умолчанию.
+    assert.match(css, /\.driver-manual-workspace__dump-card\.is-drop-ready\s*\{[^}]*transform-origin:\s*50% 100% !important;[^}]*transform:\s*scale\(var\(--driver-manual-magnet-scale, 1\.5\)\) !important;/s);
+    assert.match(source, /function applyDumpMagnetScale\(target\)/);
+    assert.match(source, /onTargetChange:\s*function \(card, target\) \{\s*if \(target\) applyDumpMagnetScale\(target\);/s);
     assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
 });
 
@@ -782,13 +793,72 @@ test("an active free-bucket trip stays separate from the primary context of the 
     }
 });
 
-test("Driver opens from the existing manual corner and preserves bottom navigation", () => {
+test("manual corner toggles manual mode on the dial and preserves bottom navigation", () => {
     const driver = read("templates", "users", "driver_shift.html");
     const actions = read("templates", "includes", "mobile_dial_actions.html");
-    assert.match(actions, /data-driver-manual-open/);
-    assert.match(actions, /aria-controls="driver-manual-workspace"/);
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.match(actions, /data-driver-dial-manual-toggle aria-label="Ручной режим"/);
+    assert.doesNotMatch(actions, /data-driver-manual-open/);
+    // Скрытая разметка ручного экрана остаётся движком рейса; сам экран не открывается.
     assert.match(driver, /include "includes\/driver_manual_excavator_workspace\.html"/);
+    assert.match(driver, /include "includes\/driver_point_drum\.html"/);
+    assert.match(runtime, /if \(dialHostsManualMode\(\)\) return;/);
     assert.match(driver, /data-driver-bottom-nav/);
+});
+
+test("dial manual mode drives the same manual-trip queue: send, cancel, complete", () => {
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const drum = read("static", "js", "driver-point-drum-v1.js");
+    const shift = read("static", "js", "driver-shift-v1.js");
+    // Свайп точки в круг и бросок самосвала на плитку — одна и та же погрузка.
+    assert.match(runtime, /onDrop: function \(card, target\) \{\s*startManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function startManualLoadAtPoint\([\s\S]*?return startManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function cancelActiveManualLoad\([\s\S]*?return cancelManualLoad\(workspace, target\);/);
+    assert.match(runtime, /function completeActiveManualLoad\([\s\S]*?return completeManualLoad\(workspace, target\);/);
+    assert.match(runtime, /"driver-manual-trip-changed"/);
+    assert.match(drum, /api\.startManualLoadAtPoint\(pointId\)/);
+    assert.match(drum, /api\.cancelActiveManualLoad\(\)/);
+    assert.match(drum, /api\.completeActiveManualLoad\(\)/);
+    // Звуки как у рейса экскаваторщика: «едем на …» при появлении ручного рейса на экране,
+    // «рейс завершён» по подтверждению, отправка — тот же сигнал, что свайп простоя.
+    const refresh = read("static", "js", "driver-shift-refresh-v1.js");
+    assert.match(refresh, /freshShell\.dataset\.driverActiveTripOrigin === "driver_manual"/);
+    assert.match(shift, /event\.event_type === "driver\.trip\.manual_completed"/);
+    // Отправка не дублирует звук: тональный сигнал даёт жест, голос и его тон — сервер
+    // по подтверждению (иначе перед голосом звучал двойной сигнал, поймано 26.09.2026).
+    assert.doesNotMatch(runtime, /kind === "created" && typeof root\.playDriverSound/);
+    assert.match(runtime, /if \(dialHostsManualMode\(\)\) \{\s*if \(kind === "cancelled"[^\n]*playDriverSound\("action_error"\)/);
+    // Старые стили под новой разметкой (пойманный на телефоне случай) лечатся сами.
+    assert.match(drum, /function healStaleStyles\(\)[\s\S]*indexOf\("pointdrum"\)/);
+    // Разгрузка всегда удержанием со шкалой, одного касания нет.
+    assert.doesNotMatch(drum, /driverUnloadOneTap = /);
+    assert.match(shift, /holdForm\.dataset\.driverUnloadOneTap = "false";/);
+    // Удержание круга с ручным рейсом не шлёт обычную разгрузку.
+    assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(\);[\s\S]*?return false;/);
+});
+
+test("dump point corner button reroutes a manual trip to a point outside the drum", () => {
+    const actions = read("templates", "includes", "mobile_dial_actions.html");
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    // Ручной рейс не проходит по mobile_dial_dump_point_enabled (свой active_trip у него
+    // пустой): кнопка доступна и тогда, но открывает окно через движок ручного режима,
+    // а не обычный путь driver-shift-v1.js (кнопка стояла неактивной, пойман 26.09.2026).
+    assert.match(
+        actions,
+        /data-mobile-dial-action="dump-point"\{% if driver_manual_workspace\.active_trip_origin == "driver_manual" %\} data-driver-manual-point-open/
+    );
+    // Кнопка стоит в углу круга, вне скрытого экрана ручного режима: у делегированного
+    // обработчика нет [data-driver-manual-workspace]-предка для .closest(), поэтому он
+    // обязан падать на currentWorkspace/документ, а не на null.
+    assert.match(
+        runtime,
+        /openPointChooser\(\s*pointOpen\.closest\("\[data-driver-manual-workspace\]"\)\s*\|\|\s*currentWorkspace\s*\|\|\s*root\.document\.querySelector\("\[data-driver-manual-workspace\]"\)\s*\)/
+    );
+    // Окно показывает точки, которых нет в барабане этого экскаватора (manualRerouteCandidates
+    // исключает и стандартный набор, и уже назначенную точку), не весь общий справочник.
+    assert.match(runtime, /function manualRerouteCandidates\(catalog, standardPoints, currentPointId\)/);
+    assert.match(runtime, /function populateManualRerouteSheet\(sheet\)/);
+    assert.match(runtime, /candidates\.forEach\(function \(point\) \{ appendManualRerouteTile\(sheet, point\); \}\);/);
 });
 
 test("shared controller remains the only live card binder in both roles", () => {
