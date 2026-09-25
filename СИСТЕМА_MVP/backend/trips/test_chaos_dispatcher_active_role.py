@@ -1,6 +1,7 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from importlib import import_module
 from threading import Event
 from types import SimpleNamespace
 from unittest import skipUnless
@@ -396,15 +397,15 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
         self,
         action_callable,
         *,
+        pause_module='trips.views',
         pause_function='get_dispatcher_control_url',
         expected_status=302,
     ):
         access_loaded = Event()
         activation_committed = Event()
 
-        from trips import views as trips_views
-
-        original_boundary = getattr(trips_views, pause_function)
+        pause_owner = import_module(pause_module)
+        original_boundary = getattr(pause_owner, pause_function)
 
         def paused_after_access(*args, **kwargs):
             result = original_boundary(*args, **kwargs)
@@ -436,7 +437,7 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
 
         with (
             patch(
-                f'trips.views.{pause_function}',
+                f'{pause_module}.{pause_function}',
                 new=paused_after_access,
             ),
             ThreadPoolExecutor(max_workers=2) as executor,
@@ -491,7 +492,10 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                 HTTP_HOST='localhost',
             )
 
-        self.run_repeat_activation_wins(action)
+        self.run_repeat_activation_wins(
+            action,
+            pause_module='trips.dispatcher_shift_commands',
+        )
 
         self.target_shift.refresh_from_db()
         self.assertIsNone(self.target_shift.closed_at)
@@ -512,7 +516,10 @@ class DispatcherActiveRolePostgreSQLConcurrencyTests(TransactionTestCase):
                 HTTP_HOST='localhost',
             )
 
-        self.run_repeat_activation_wins(action)
+        self.run_repeat_activation_wins(
+            action,
+            pause_module='trips.dispatcher_assignment_commands',
+        )
 
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.status, AssignmentStatus.PENDING)
