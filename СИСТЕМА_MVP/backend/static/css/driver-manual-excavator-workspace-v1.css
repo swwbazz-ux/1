@@ -4,22 +4,57 @@ body.driver-mobile-screen .driver-manual-workspace[hidden] {
     display: none !important;
 }
 
+/* Верх освобождён под настоящую шапку водителя (.driver-header, 116 по
+   z-index, всегда рисуется поверх): рабочая область начинается ниже её,
+   а не с самого верха экрана, и на ровно столько же ниже её высота. */
 body.driver-mobile-screen .driver-manual-workspace {
     position: fixed;
-    inset: 0;
+    top: var(--driver-header-total-h, 0px);
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 80;
     width: 100%;
-    height: var(--driver-viewport-h, 100dvh);
+    height: calc(var(--driver-viewport-h, 100dvh) - var(--driver-header-total-h, 0px));
     min-height: 0;
     overflow: hidden;
     background: #02080b;
 }
 
-body.driver-mobile-screen .driver-manual-workspace > .eo-shell {
-    --eo-app-height: var(--driver-viewport-h, 100dvh);
+/* Здесь и была вторая шапка: excavator-work-v55.css «прибивает» .eo-topbar
+   к самому верху ЭКРАНА (position: fixed; top: 0 !important) для роли
+   экскаваторщика — а ручной режим водителя наследует это правило, потому
+   что тоже носит класс body.excavator-operator-screen (чтобы переиспользовать
+   готовую вёрстку карточек). Сдвинуть top не помогло бы: это всё равно
+   осталась бы вторая ФИКСИРОВАННАЯ полоса, просто ниже. Возвращаем этому
+   ряду обычное поведение — он снова просто первая строка сетки .eo-shell,
+   как и была бы без экскаваторного правила, и подчиняется общей высоте
+   .eo-shell, а не отдельно себе присвоенной. Специфичность (два класса на
+   body) побеждает правило из excavator-work-v55.css независимо от порядка
+   подключения файлов. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo-topbar {
+    position: relative !important;
+    z-index: auto !important;
+    top: auto !important;
+    right: auto !important;
+    left: auto !important;
     width: 100% !important;
     max-width: none !important;
-    height: var(--driver-viewport-h, 100dvh) !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 1px solid var(--eo-line-soft) !important;
+    border-radius: 7px !important;
+    background: rgba(10, 16, 20, .88) !important;
+    box-shadow: inset 0 0 18px rgba(255, 255, 255, .035) !important;
+}
+body.driver-mobile-screen .driver-manual-workspace > .eo-shell {
+    --eo-app-height: calc(var(--driver-viewport-h, 100dvh) - var(--driver-header-total-h, 0px));
+    width: 100% !important;
+    max-width: none !important;
+    height: calc(var(--driver-viewport-h, 100dvh) - var(--driver-header-total-h, 0px)) !important;
     min-height: 0 !important;
     margin: 0 !important;
 }
@@ -28,7 +63,14 @@ body.driver-mobile-screen .driver-shell.is-driver-manual-workspace-open {
     padding: 0;
 }
 
-body.driver-mobile-screen .driver-shell.is-driver-manual-workspace-open > .driver-header,
+/* Пользователь: «чтоб на ручном экране была та же самая шапка как и в
+   остальных экранах водителя». .driver-header больше не прячем — это тот
+   же элемент, что виден на «Работа/Смена/Простои/Путёвка», физически он
+   всегда в DOM (driver_shift.html), z-index у него 116 против 80 у
+   .driver-manual-workspace, поэтому он и так рисуется поверх без
+   дополнительных правок — его нужно было только перестать скрывать и
+   освободить ему место сверху (ниже). .driver-panel и .driver-toast
+   по-прежнему прячем: это содержимое ДРУГИХ вкладок, ему тут не место. */
 body.driver-mobile-screen .driver-shell.is-driver-manual-workspace-open > .driver-panel,
 body.driver-mobile-screen .driver-shell.is-driver-manual-workspace-open > .driver-toast {
     visibility: hidden;
