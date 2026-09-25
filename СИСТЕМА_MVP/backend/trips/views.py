@@ -116,8 +116,13 @@ from .dispatcher_dashboard_projection import (
     dispatcher_complex_location_parts,
     dispatcher_complex_shift_report as _build_dispatcher_complex_shift_report,
     dispatcher_complex_truck_rows,
+    dispatcher_downtime_reason_label,
+    dispatcher_employee_for_equipment,
+    dispatcher_equipment_card_requested,
+    dispatcher_equipment_presence_fields,
     dispatcher_garage_number_int,
     dispatcher_plan_details,
+    dispatcher_shift_details,
     dispatcher_status_label,
     dispatcher_tons_from_label,
 )
@@ -2173,31 +2178,6 @@ def build_dispatcher_dashboard_context(
         if assignment.equipment_id
     }
 
-    def dispatcher_employee_for_equipment(equipment_id):
-        open_shift = open_shift_by_equipment_id.get(equipment_id)
-        if open_shift:
-            presence = getattr(open_shift, 'application_presence', None) or {}
-            presence_label = presence.get('status_label') or 'Нет связи'
-            return open_shift.employee, f'В смене · {presence_label}'
-        work_assignment = work_assignment_by_equipment_id.get(equipment_id)
-        if work_assignment:
-            return work_assignment.employee, f'Назначен на {work_assignment.get_shift_type_display().lower()}'
-        return None, 'Сотрудник не назначен'
-
-    def equipment_presence_fields(equipment_id):
-        shift = open_shift_by_equipment_id.get(equipment_id)
-        if not shift:
-            return {
-                'has_current_shift': False,
-                'presence_status': '',
-                'presence_label': '',
-            }
-        presence = getattr(shift, 'application_presence', None) or {}
-        return {
-            'has_current_shift': True,
-            'presence_status': presence.get('status_code') or 'not_registered',
-            'presence_label': presence.get('status_label') or 'Не подключался',
-        }
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
@@ -2267,12 +2247,6 @@ def build_dispatcher_dashboard_context(
         if equipment_card_ids is None
         else {str(card_id) for card_id in equipment_card_ids}
     )
-
-    def equipment_card_requested(card_id):
-        return (
-            requested_equipment_card_ids is None
-            or str(card_id) in requested_equipment_card_ids
-        )
 
     def dispatcher_card_shift_report(equipment, equipment_kind):
         """Отчёт карточки: рейсы и простои текущей смены самой техники."""
@@ -2350,12 +2324,6 @@ def build_dispatcher_dashboard_context(
             return None
         return downtime_equipment_state_code(downtime)
 
-    def downtime_reason_label_for(equipment_id):
-        downtime = downtime_by_equipment_id.get(equipment_id)
-        if not downtime or not getattr(downtime, 'reason', None):
-            return ''
-        return downtime.reason.button_label or downtime.reason.name or str(downtime.reason)
-
     def excavator_current_state(excavator):
         if not getattr(excavator, 'is_active', True):
             return equipment_state_for('inactive')
@@ -2374,7 +2342,9 @@ def build_dispatcher_dashboard_context(
         downtime_state_code = downtime_state_code_for(truck.id)
         if downtime_state_code:
             status, label, state_code = equipment_state_for(downtime_state_code)
-            return status, downtime_reason_label_for(truck.id) or label, state_code
+            return status, dispatcher_downtime_reason_label(
+                downtime_by_equipment_id.get(truck.id)
+            ) or label, state_code
         active_trip = active_trip_by_truck_id.get(truck.id)
         if active_trip:
             if active_trip.status in OPEN_TRIP_STATUSES:
@@ -2385,27 +2355,6 @@ def build_dispatcher_dashboard_context(
         if assignment and assignment.status == AssignmentStatus.ACCEPTED:
             return equipment_state_for('assigned')
         return equipment_state_for('free')
-
-    def shift_details(equipment):
-        shift = open_shift_by_equipment_id.get(equipment.id) if equipment else None
-        if not shift:
-            return []
-        presence = getattr(shift, 'application_presence', None) or {}
-        details = [
-            {'label': 'Смена', 'value': shift.get_shift_type_display()},
-            {'label': 'Смена открыта', 'value': format_dispatcher_datetime(shift.opened_at)},
-            {'label': 'Связь', 'value': presence.get('status_label') or 'Не подключался'},
-        ]
-        if presence.get('last_seen_at'):
-            details.append({'label': 'Последняя связь', 'value': format_dispatcher_datetime(presence['last_seen_at'])})
-        client_labels = [
-            badge.get('label')
-            for badge in presence.get('client_badges') or []
-            if badge.get('label')
-        ]
-        if client_labels:
-            details.append({'label': 'Приложение', 'value': ', '.join(dict.fromkeys(client_labels))})
-        return details
 
     completed_tons = Decimal('0')
     completed_use_tonnage = False
@@ -2567,7 +2516,9 @@ def build_dispatcher_dashboard_context(
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
         status_key, status_label, equipment_state_code = complex_equipment_state(excavator, row)
-        status_label = downtime_reason_label_for(excavator.id) or status_label
+        status_label = dispatcher_downtime_reason_label(
+            downtime_by_equipment_id.get(excavator.id)
+        ) or status_label
 
         complex_trips = trips_by_excavator_id.get(excavator.id, [])
         placement = placement_by_excavator_id.get(excavator.id)
@@ -2670,7 +2621,10 @@ def build_dispatcher_dashboard_context(
                 'free_bucket_expires_at': (
                     free_bucket_marker_by_truck_id.get(truck_id, {}).get('expires_at')
                 ),
-                **equipment_presence_fields(truck.id),
+                **dispatcher_equipment_presence_fields(
+                    truck.id,
+                    open_shift_by_equipment_id,
+                ),
             })
         forecast = fact
         current_rock = (
@@ -2716,7 +2670,10 @@ def build_dispatcher_dashboard_context(
             'current_block': current_block,
             'current_rock': current_rock,
             'active_downtime': dispatcher_downtime_card_payload(active_downtime),
-            **equipment_presence_fields(excavator.id),
+            **dispatcher_equipment_presence_fields(
+                excavator.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     excavator_tiles = []
@@ -2749,7 +2706,10 @@ def build_dispatcher_dashboard_context(
             'icon': equipment_icon_key(excavator, status),
             'card_id': str(excavator.id) if excavator else '',
             'board_number': board_number,
-            **equipment_presence_fields(excavator.id),
+            **dispatcher_equipment_presence_fields(
+                excavator.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     excavator_garage_tiles = []
@@ -3065,7 +3025,10 @@ def build_dispatcher_dashboard_context(
             ),
             'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
             'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
-            **equipment_presence_fields(truck.id),
+            **dispatcher_equipment_presence_fields(
+                truck.id,
+                open_shift_by_equipment_id,
+            ),
         })
     mobile_truck_garage_tiles = []
     mobile_truck_sort_source = sorted(trucks_list, key=dispatcher_garage_number_int)
@@ -3107,7 +3070,10 @@ def build_dispatcher_dashboard_context(
             ),
             'free_bucket_label': free_bucket_marker_by_truck_id.get(truck.id, {}).get('label', ''),
             'free_bucket_expires_at': free_bucket_marker_by_truck_id.get(truck.id, {}).get('expires_at'),
-            **equipment_presence_fields(truck.id),
+            **dispatcher_equipment_presence_fields(
+                truck.id,
+                open_shift_by_equipment_id,
+            ),
         })
 
     completed_shift_percent = (
@@ -3170,13 +3136,19 @@ def build_dispatcher_dashboard_context(
         if (
             not equipment
             or not tile.get('card_id')
-            or not equipment_card_requested(tile['card_id'])
+            or not dispatcher_equipment_card_requested(
+                requested_equipment_card_ids,
+                tile['card_id'],
+            )
         ):
             continue
         downtime = downtime_by_equipment_id.get(equipment.id)
         active_trip = active_trip_by_excavator_id.get(equipment.id)
         latest_trip = latest_trip_by_equipment_id.get(equipment.id)
-        details = shift_details(equipment)
+        details = dispatcher_shift_details(
+            open_shift_by_equipment_id.get(equipment.id),
+            format_datetime=format_dispatcher_datetime,
+        )
         details.extend([
             {'label': 'Комплекс', 'value': tile.get('complex')},
         ])
@@ -3195,7 +3167,11 @@ def build_dispatcher_dashboard_context(
                 {'label': 'Простой', 'value': downtime.reason},
                 {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
             ])
-        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+            equipment.id,
+            open_shift_by_equipment_id,
+            work_assignment_by_equipment_id,
+        )
         equipment_cards[str(tile['card_id'])] = build_dispatcher_equipment_card(
             card_id=tile['card_id'],
             equipment=equipment,
@@ -3221,11 +3197,17 @@ def build_dispatcher_dashboard_context(
         )
 
     for card in complex_cards:
-        if not equipment_card_requested(card['card_id']):
+        if not dispatcher_equipment_card_requested(
+            requested_equipment_card_ids,
+            card['card_id'],
+        ):
             continue
         complex_report = dispatcher_complex_shift_report(card)
         complex_excavator = card.get('excavator')
-        details = shift_details(complex_excavator) + [
+        details = dispatcher_shift_details(
+            open_shift_by_equipment_id.get(complex_excavator.id),
+            format_datetime=format_dispatcher_datetime,
+        ) + [
             {
                 'label': 'Экскаватор',
                 'value': ' · '.join(part for part in [
@@ -3241,7 +3223,11 @@ def build_dispatcher_dashboard_context(
             details.append({'label': 'Требует внимания', 'value': card.get('status_label') or 'Комплекс остановлен'})
         elif card.get('status_key') == 'blue':
             details.append({'label': 'Требует внимания', 'value': 'Комплекс назначен без активной операции'})
-        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(complex_excavator.id)
+        equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+            complex_excavator.id,
+            open_shift_by_equipment_id,
+            work_assignment_by_equipment_id,
+        )
         equipment_cards[str(card['card_id'])] = build_dispatcher_equipment_card(
             card_id=card['card_id'],
             equipment=complex_excavator,
@@ -3280,13 +3266,30 @@ def build_dispatcher_dashboard_context(
             if (
                 not card_id
                 or card_id in equipment_cards
-                or not equipment_card_requested(card_id)
+                or not dispatcher_equipment_card_requested(
+                    requested_equipment_card_ids,
+                    card_id,
+                )
             ):
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             downtime = downtime_by_equipment_id.get(equipment.id) if equipment else None
+            if equipment:
+                equipment_employee, employee_presence_label = (
+                    dispatcher_employee_for_equipment(
+                        equipment.id,
+                        open_shift_by_equipment_id,
+                        work_assignment_by_equipment_id,
+                    )
+                )
+            else:
+                equipment_employee = None
+                employee_presence_label = 'Сотрудник не назначен'
             status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
-            details = shift_details(equipment) + [
+            details = dispatcher_shift_details(
+                open_shift_by_equipment_id.get(equipment.id) if equipment else None,
+                format_datetime=format_dispatcher_datetime,
+            ) + [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
                 {'label': 'Комплекс', 'value': complex_card.get('id')},
                 {'label': 'Состояние', 'value': tile.get('label')},
@@ -3307,7 +3310,7 @@ def build_dispatcher_dashboard_context(
                 status_label=status_label,
                 zone=f'{complex_card.get("id")} / в составе',
                 percent=tile.get('percent', 0),
-                employee=dispatcher_employee_for_equipment(equipment.id)[0] if equipment else None,
+                employee=equipment_employee,
                 shift=open_shift_by_equipment_id.get(equipment.id) if equipment else None,
                 manual_trip=dispatcher_manual_trip_payload(
                     equipment,
@@ -3317,10 +3320,7 @@ def build_dispatcher_dashboard_context(
                     rock_types=dispatcher_rock_types,
                     dump_points=dispatcher_dump_points,
                 ) if equipment else None,
-                employee_presence_label=(
-                    dispatcher_employee_for_equipment(equipment.id)[1]
-                    if equipment else 'Сотрудник не назначен'
-                ),
+                employee_presence_label=employee_presence_label,
                 details=details,
                 shift_report=dispatcher_card_shift_report(equipment, 'Самосвал'),
                 plan=tile.get('plan'),
@@ -3332,7 +3332,10 @@ def build_dispatcher_dashboard_context(
         for mobile_tile in mobile_truck_garage_tiles
         if mobile_tile.get('card_id') and str(mobile_tile.get('card_id')) not in equipment_cards
     ]:
-        if not equipment_card_requested(tile.get('card_id')):
+        if not dispatcher_equipment_card_requested(
+            requested_equipment_card_ids,
+            tile.get('card_id'),
+        ):
             continue
         equipment = tile.get('equipment')
         status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
@@ -3342,7 +3345,10 @@ def build_dispatcher_dashboard_context(
             active_trip = active_trip_by_truck_id.get(equipment.id)
             assignment = assignment_by_truck_id.get(equipment.id)
             latest_trip = latest_trip_by_equipment_id.get(equipment.id)
-            details = shift_details(equipment) + details
+            details = dispatcher_shift_details(
+                open_shift_by_equipment_id.get(equipment.id),
+                format_datetime=format_dispatcher_datetime,
+            ) + details
             if assignment:
                 details.extend([
                     {'label': 'Назначение', 'value': 'принято' if assignment.status == AssignmentStatus.ACCEPTED else 'ожидает'},
@@ -3365,7 +3371,11 @@ def build_dispatcher_dashboard_context(
                     {'label': 'Простой', 'value': downtime.reason},
                     {'label': 'С начала', 'value': format_dispatcher_datetime(downtime.started_at)},
                 ])
-            equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(equipment.id)
+            equipment_employee, employee_presence_label = dispatcher_employee_for_equipment(
+                equipment.id,
+                open_shift_by_equipment_id,
+                work_assignment_by_equipment_id,
+            )
             card = build_dispatcher_equipment_card(
                 card_id=tile['card_id'],
                 equipment=equipment,

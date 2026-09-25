@@ -49,6 +49,26 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
             trips_views.dispatcher_complex_number_int,
             dispatcher_dashboard_projection.dispatcher_complex_number_int,
         )
+        self.assertIs(
+            trips_views.dispatcher_employee_for_equipment,
+            dispatcher_dashboard_projection.dispatcher_employee_for_equipment,
+        )
+        self.assertIs(
+            trips_views.dispatcher_equipment_presence_fields,
+            dispatcher_dashboard_projection.dispatcher_equipment_presence_fields,
+        )
+        self.assertIs(
+            trips_views.dispatcher_equipment_card_requested,
+            dispatcher_dashboard_projection.dispatcher_equipment_card_requested,
+        )
+        self.assertIs(
+            trips_views.dispatcher_downtime_reason_label,
+            dispatcher_dashboard_projection.dispatcher_downtime_reason_label,
+        )
+        self.assertIs(
+            trips_views.dispatcher_shift_details,
+            dispatcher_dashboard_projection.dispatcher_shift_details,
+        )
 
     def test_views_keeps_compatibility_wrapper_for_report_formatters(self):
         source = inspect.getsource(trips_views.dispatcher_complex_shift_report)
@@ -80,6 +100,11 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
         self.assertNotIn('def dispatcher_plan_details(', source)
         self.assertNotIn('def dispatcher_complex_label(', source)
         self.assertNotIn('def garage_number_int(', source)
+        self.assertNotIn('def dispatcher_employee_for_equipment(', source)
+        self.assertNotIn('def equipment_presence_fields(', source)
+        self.assertNotIn('def equipment_card_requested(', source)
+        self.assertNotIn('def downtime_reason_label_for(', source)
+        self.assertNotIn('def shift_details(', source)
 
 
 class DispatcherDashboardProjectionBehaviorTests(SimpleTestCase):
@@ -179,6 +204,140 @@ class DispatcherDashboardProjectionBehaviorTests(SimpleTestCase):
         self.assertEqual(
             dispatcher_dashboard_projection.dispatcher_status_label('gray'),
             '',
+        )
+
+    def test_employee_presence_and_requested_card_projection_are_preserved(self):
+        active_employee = SimpleNamespace(full_name='Сотрудник смены')
+        assigned_employee = SimpleNamespace(full_name='Назначенный сотрудник')
+        open_shift = SimpleNamespace(
+            employee=active_employee,
+            application_presence={
+                'status_code': 'online',
+                'status_label': 'Связь есть',
+            },
+        )
+        work_assignment = SimpleNamespace(
+            employee=assigned_employee,
+            get_shift_type_display=lambda: 'Первая смена',
+        )
+
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_employee_for_equipment(
+                1,
+                {1: open_shift},
+                {2: work_assignment},
+            ),
+            (active_employee, 'В смене · Связь есть'),
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_employee_for_equipment(
+                2,
+                {1: open_shift},
+                {2: work_assignment},
+            ),
+            (assigned_employee, 'Назначен на первая смена'),
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_employee_for_equipment(
+                3,
+                {1: open_shift},
+                {2: work_assignment},
+            ),
+            (None, 'Сотрудник не назначен'),
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_equipment_presence_fields(
+                1,
+                {1: open_shift},
+            ),
+            {
+                'has_current_shift': True,
+                'presence_status': 'online',
+                'presence_label': 'Связь есть',
+            },
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_equipment_presence_fields(
+                3,
+                {1: open_shift},
+            ),
+            {
+                'has_current_shift': False,
+                'presence_status': '',
+                'presence_label': '',
+            },
+        )
+        self.assertTrue(
+            dispatcher_dashboard_projection.dispatcher_equipment_card_requested(
+                None,
+                50,
+            )
+        )
+        self.assertTrue(
+            dispatcher_dashboard_projection.dispatcher_equipment_card_requested(
+                {'50'},
+                50,
+            )
+        )
+        self.assertFalse(
+            dispatcher_dashboard_projection.dispatcher_equipment_card_requested(
+                {'51'},
+                50,
+            )
+        )
+
+    def test_shift_and_downtime_detail_labels_are_preserved(self):
+        reason = SimpleNamespace(
+            button_label='Ремонт',
+            name='Ремонт оборудования',
+        )
+        downtime = SimpleNamespace(reason=reason)
+        shift = SimpleNamespace(
+            opened_at='opened',
+            application_presence={
+                'status_label': 'На связи',
+                'last_seen_at': 'seen',
+                'client_badges': [
+                    {'label': 'APK'},
+                    {'label': 'APK'},
+                    {'label': 'PWA'},
+                    {'label': ''},
+                ],
+            },
+            get_shift_type_display=lambda: 'Вторая смена',
+        )
+
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_downtime_reason_label(
+                downtime,
+            ),
+            'Ремонт',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_downtime_reason_label(
+                None,
+            ),
+            '',
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_shift_details(
+                shift,
+                format_datetime=lambda value: f'dt:{value}',
+            ),
+            [
+                {'label': 'Смена', 'value': 'Вторая смена'},
+                {'label': 'Смена открыта', 'value': 'dt:opened'},
+                {'label': 'Связь', 'value': 'На связи'},
+                {'label': 'Последняя связь', 'value': 'dt:seen'},
+                {'label': 'Приложение', 'value': 'APK, PWA'},
+            ],
+        )
+        self.assertEqual(
+            dispatcher_dashboard_projection.dispatcher_shift_details(
+                None,
+                format_datetime=str,
+            ),
+            [],
         )
 
     def test_complex_labels_and_sort_numbers_are_preserved(self):

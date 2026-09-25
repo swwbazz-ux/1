@@ -16,6 +16,86 @@ def dispatcher_tons_from_label(value):
     return Decimal(digits or '0')
 
 
+def dispatcher_employee_for_equipment(
+    equipment_id,
+    open_shifts,
+    work_assignments,
+):
+    open_shift = open_shifts.get(equipment_id)
+    if open_shift:
+        presence = getattr(open_shift, 'application_presence', None) or {}
+        presence_label = presence.get('status_label') or 'Нет связи'
+        return open_shift.employee, f'В смене · {presence_label}'
+    work_assignment = work_assignments.get(equipment_id)
+    if work_assignment:
+        shift_label = work_assignment.get_shift_type_display().lower()
+        return work_assignment.employee, f'Назначен на {shift_label}'
+    return None, 'Сотрудник не назначен'
+
+
+def dispatcher_equipment_presence_fields(equipment_id, open_shifts):
+    shift = open_shifts.get(equipment_id)
+    if not shift:
+        return {
+            'has_current_shift': False,
+            'presence_status': '',
+            'presence_label': '',
+        }
+    presence = getattr(shift, 'application_presence', None) or {}
+    return {
+        'has_current_shift': True,
+        'presence_status': presence.get('status_code') or 'not_registered',
+        'presence_label': presence.get('status_label') or 'Не подключался',
+    }
+
+
+def dispatcher_equipment_card_requested(requested_card_ids, card_id):
+    return (
+        requested_card_ids is None
+        or str(card_id) in requested_card_ids
+    )
+
+
+def dispatcher_downtime_reason_label(downtime):
+    reason = getattr(downtime, 'reason', None) if downtime else None
+    if not reason:
+        return ''
+    return reason.button_label or reason.name or str(reason)
+
+
+def dispatcher_shift_details(shift, *, format_datetime):
+    if not shift:
+        return []
+    presence = getattr(shift, 'application_presence', None) or {}
+    details = [
+        {'label': 'Смена', 'value': shift.get_shift_type_display()},
+        {
+            'label': 'Смена открыта',
+            'value': format_datetime(shift.opened_at),
+        },
+        {
+            'label': 'Связь',
+            'value': presence.get('status_label') or 'Не подключался',
+        },
+    ]
+    if presence.get('last_seen_at'):
+        details.append({
+            'label': 'Последняя связь',
+            'value': format_datetime(presence['last_seen_at']),
+        })
+    client_labels = [
+        badge.get('label')
+        for badge in presence.get('client_badges') or []
+        if badge.get('label')
+    ]
+    if client_labels:
+        details.append({
+            'label': 'Приложение',
+            'value': ', '.join(dict.fromkeys(client_labels)),
+        })
+    return details
+
+
 def dispatcher_plan_details(plan):
     if not plan:
         return []
