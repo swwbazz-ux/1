@@ -1933,9 +1933,6 @@
             sourceSelector: "[data-driver-manual-source]",
             targetSelector: '[data-driver-manual-dump-target]:not([data-driver-manual-current-only="true"])',
             gradientId: "driver-manual-drag-comet-light",
-            onTargetChange: function (card, target) {
-                if (target) applyDumpMagnetScale(target);
-            },
             canDrag: function () {
                 return !sourceShouldBeLocked(savingLocal, currentTripProjection);
             },
@@ -1952,7 +1949,8 @@
                     try { root.navigator.vibrate(pattern); } catch (error) {}
                 }
             },
-            onTargetChange: function () {
+            onTargetChange: function (card, target) {
+                if (target) applyDumpMagnetScale(target);
                 playGestureHaptic("target");
             }
         });

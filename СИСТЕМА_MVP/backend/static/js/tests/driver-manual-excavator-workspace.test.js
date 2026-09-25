@@ -467,7 +467,6 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     assert.match(source, /var excavatorShell = workspace\.querySelector\("\[data-driver-manual-eo-shell\]"\)/);
     assert.match(source, /ExcavatorDashboardDrag\.attach\(\{\s*shell: excavatorShell,/s);
     assert.match(source, /ExcavatorDumpReturnSwipe\.attach\(\{\s*shell: excavatorShell,/s);
-    assert.match(source, /onTargetChange:\s*function \(\) \{\s*playGestureHaptic\("target"\)/s);
     assert.match(source, /onArm:\s*function \(target, direction\)/);
     assert.match(source, /target\.dataset\.eoReturnEnabled === "true"/);
     assert.match(source, /createDriverManualLoadCancelledEvent/);
@@ -485,7 +484,13 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     // по любую сторону, 1.5 здесь только запасное значение по умолчанию.
     assert.match(css, /\.driver-manual-workspace__dump-card\.is-drop-ready\s*\{[^}]*transform-origin:\s*50% 100% !important;[^}]*transform:\s*scale\(var\(--driver-manual-magnet-scale, 1\.5\)\) !important;/s);
     assert.match(source, /function applyDumpMagnetScale\(target\)/);
-    assert.match(source, /onTargetChange:\s*function \(card, target\) \{\s*if \(target\) applyDumpMagnetScale\(target\);/s);
+    // Раньше в объекте attach() было два ключа onTargetChange подряд — второй
+    // молча перекрывал первый, и applyDumpMagnetScale никогда не вызывался
+    // через этот путь (магнит не мешал перестройке, но и сам не работал).
+    // Теперь один ключ делает оба дела: подгоняет кегль цели и вибрацию.
+    assert.match(source, /onTargetChange:\s*function \(card, target\) \{\s*if \(target\) applyDumpMagnetScale\(target\);\s*playGestureHaptic\("target"\);\s*\}/s);
+    const onTargetChangeCount = (source.match(/onTargetChange:/g) || []).length;
+    assert.equal(onTargetChangeCount, 1);
     assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
 });
 

@@ -1177,23 +1177,6 @@ body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab
     filter: brightness(1.16) saturate(1.12) !important;
 }
 
-@media (orientation: landscape) and (max-height: 500px) {
-    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid {
-        flex-direction: column !important;
-        align-items: flex-end !important;
-    }
-
-    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
-        width: 78% !important;
-        height: auto !important;
-    }
-
-    body.excavator-operator-screen .eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-card.is-drop-ready {
-        width: 112% !important;
-        height: auto !important;
-    }
-}
-
 body.excavator-operator-screen .eo-dashboard-unload-card.is-last-dump:not(.is-drop-ready) {
     border-color: rgba(255, 214, 41, .98) !important;
     background: radial-gradient(circle at 50% 34%, rgba(255, 214, 41, .22), transparent 62%), rgba(42, 35, 10, .9) !important;
