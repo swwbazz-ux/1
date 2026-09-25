@@ -20,6 +20,10 @@ const INCLUDE_FILES = [
         path.join(BACKEND, "templates", "trips", "includes", "dispatcher_service_lists.html"),
     ],
     [
+        "trips/includes/dispatcher_equipment_detail.html",
+        path.join(BACKEND, "templates", "trips", "includes", "dispatcher_equipment_detail.html"),
+    ],
+    [
         "trips/includes/dispatcher_push_invite.html",
         path.join(BACKEND, "templates", "trips", "includes", "dispatcher_push_invite.html"),
     ],

@@ -42,6 +42,10 @@ const DISPATCHER_SERVICE_LISTS = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "includes", "dispatcher_service_lists.html"),
     "utf8"
 );
+const DISPATCHER_EQUIPMENT_DETAIL = fs.readFileSync(
+    path.join(BACKEND, "templates", "trips", "includes", "dispatcher_equipment_detail.html"),
+    "utf8"
+);
 const DISPATCHER_PUSH_INVITE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "includes", "dispatcher_push_invite.html"),
     "utf8"
@@ -115,6 +119,30 @@ test("скрытые служебные списки живут в отдель�
     assert.match(
         PRODUCTION_MANIFEST,
         /templates\/trips\/includes\/dispatcher_service_lists\.html/
+    );
+});
+
+test("detail-карточка живёт в отдельном упакованном include", () => {
+    assert.match(
+        SHARED_TEMPLATE,
+        /{% include "trips\/includes\/dispatcher_equipment_detail\.html" %}/
+    );
+    assert.doesNotMatch(
+        SHARED_TEMPLATE,
+        /<div class="gd-equipment-detail mm-equipment-detail"/
+    );
+    assert.match(
+        DISPATCHER_EQUIPMENT_DETAIL,
+        /class="gd-equipment-detail mm-equipment-detail"[^>]*data-gd-equipment-detail[^>]*hidden/
+    );
+    assert.match(DISPATCHER_EQUIPMENT_DETAIL, /data-gd-detail-service-close/);
+    assert.match(DISPATCHER_EQUIPMENT_DETAIL, /data-gd-detail-downtime-close/);
+    assert.match(DISPATCHER_EQUIPMENT_DETAIL, /data-gd-detail-settings/);
+    assert.match(DISPATCHER_EQUIPMENT_DETAIL, /data-gd-detail-manual-trip-form/);
+    assert.doesNotMatch(DISPATCHER_EQUIPMENT_DETAIL, /class="dispatcher-push-invite"/);
+    assert.match(
+        PRODUCTION_MANIFEST,
+        /templates\/trips\/includes\/dispatcher_equipment_detail\.html/
     );
 });
 

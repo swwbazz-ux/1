@@ -34,6 +34,16 @@ receiver = load_module(
 
 
 class ReleaseProtocolTests(unittest.TestCase):
+    def test_dispatcher_equipment_detail_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/"
+            "dispatcher_equipment_detail.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
     def test_dispatcher_service_lists_include_is_packaged_once(self):
         expected = (
             "СИСТЕМА_MVP/backend/templates/trips/includes/"
