@@ -400,6 +400,22 @@
         title.style.setProperty("font-size", fitted.toFixed(2) + "px", "important");
         return fitted;
     }
+
+    /* Название породы в шапке («Окисленная руда») раньше обрезалось
+       многоточием — та же задача, что общий модуль equipment-label-fit-v1.js
+       уже решает для номеров техники и точек разгрузки: кегль вниз, потом
+       (если разрешено) перенос, потом горизонтальное сжатие, и только в
+       крайнем случае — кегль ниже привычного пола. Обрезки при этом не
+       бывает никогда. Строка одна (топбар высотой 42px, второй строке негде
+       встать), поэтому перенос запрещён явно, а не подбором высоты. */
+    function fitFaceRock(workspace) {
+        var rock = workspace && workspace.querySelector ? workspace.querySelector(".eo-face-rock") : null;
+        if (!rock) return null;
+        var fitter = root.EquipmentLabelFit;
+        if (!fitter || typeof fitter.fit !== "function") return null;
+        return fitter.fit(rock, {allowWrap: false});
+    }
+
     function updateManualTripCount(workspace, pointId, delta, adjustmentId) {
         if (!workspace || !positive(pointId) || !delta) return null;
         var key = String(adjustmentId || "");
@@ -1267,7 +1283,10 @@
         if (coordinates[0]) coordinates[0].textContent = "Гор. " + String(context.loading_horizon || "—");
         if (coordinates[1]) coordinates[1].textContent = "Бл. " + String(context.loading_block || "—");
         var topRock = workspace.querySelector(".eo-face-rock");
-        if (topRock) topRock.textContent = String(context.rock_type_name || "");
+        if (topRock) {
+            topRock.textContent = String(context.rock_type_name || "");
+            fitFaceRock(workspace);
+        }
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");
         if (grid && points.length && !needsAlternateOnly) {
             var prototype = grid.querySelector("[data-driver-manual-dump-target]");
@@ -1874,6 +1893,16 @@
         var openedSource = workspace.querySelector("[data-driver-manual-source]");
         watchSourceWidth(openedSource);
         fitSourceTitle(openedSource);
+        /* До этой строки коробка названия породы скрыта (workspace.hidden
+           было true) и имеет нулевую ширину — подгонка кегля, вызванная
+           раньше из syncWorkspaceContext, ничего не считает. Пересчитываем
+           заново теперь, когда ширина уже настоящая; кадром позже — чтобы
+           браузер успел применить только что снятое hidden. */
+        if (root.requestAnimationFrame) {
+            root.requestAnimationFrame(function () { fitFaceRock(workspace); });
+        } else {
+            fitFaceRock(workspace);
+        }
         var source = workspace.querySelector("[data-driver-manual-source]");
         var back = workspace.querySelector("[data-driver-manual-close]");
         if (source || back) (source || back).focus({preventScroll: true});
@@ -2066,6 +2095,7 @@
             });
             root.addEventListener("resize", function () {
                 fitSourceTitle(currentWorkspace && currentWorkspace.querySelector("[data-driver-manual-source]"));
+                fitFaceRock(currentWorkspace);
             });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
@@ -2119,6 +2149,7 @@
         markLastDump: markLastDump,
         manualCancelWins: manualCancelWins,
         fitSourceTitle: fitSourceTitle,
+        fitFaceRock: fitFaceRock,
         updateManualTripCount: updateManualTripCount,
         buildManualLoadCancelEvent: buildManualLoadCancelEvent,
         cancelManualLoad: cancelManualLoad,

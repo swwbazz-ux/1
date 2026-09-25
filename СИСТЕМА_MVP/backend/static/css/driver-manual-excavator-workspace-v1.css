@@ -50,6 +50,24 @@ body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo
     background: rgba(10, 16, 20, .88) !important;
     box-shadow: inset 0 0 18px rgba(255, 255, 255, .035) !important;
 }
+
+/* Название породы обрезалось многоточием («Окисленна…») — excavator-work-v55-shift.css
+   ставит на .eo-face-rock overflow: hidden и text-overflow: ellipsis. У машиниста
+   это осознанный выбор (плашка теснее и своя ширина посчитана под него), но в
+   шапке водителя строка теперь вмещается скриптом (fitFaceRock зовёт общий
+   EquipmentLabelFit.fit из equipment-label-fit-v1.js — та же подгонка, что у
+   номеров техники: кегль вниз, затем горизонтальное сжатие через transform).
+   Обрезки при этом быть не должно — но сжатие через transform двигает только
+   ОТРИСОВКУ, а не раскладку: overflow: hidden как был обрезает по старой,
+   несжатой ширине, и снятие одного текста ellipsis ничего не даёт, обрезка
+   остаётся, просто без многоточия. Даём подписи overflow: visible — реальная
+   граница обрезки остаётся у самого топбара (.eo-topbar, задан выше), это
+   последняя ячейка в строке, сжатому тексту дальше некуда вылезать. */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace .eo-face-rock {
+    overflow: visible !important;
+    text-overflow: clip !important;
+}
+
 body.driver-mobile-screen .driver-manual-workspace > .eo-shell {
     --eo-app-height: calc(var(--driver-viewport-h, 100dvh) - var(--driver-header-total-h, 0px));
     width: 100% !important;
@@ -57,6 +75,19 @@ body.driver-mobile-screen .driver-manual-workspace > .eo-shell {
     height: calc(var(--driver-viewport-h, 100dvh) - var(--driver-header-total-h, 0px)) !important;
     min-height: 0 !important;
     margin: 0 !important;
+}
+
+/* excavator-work-v55.css резервирует .eo-shell отступ сверху размером с
+   ПРИБИТЫЙ .eo-topbar экскаваторщика (--eo-fixed-header-reserve, это же
+   safe-area устройства + высота шапки) — у машиниста топбар лежит поверх
+   всего экрана, и без этого отступа контент рисовался бы под ним. В ручном
+   режиме водителя топбар уже вернули в обычный поток (правило выше), с
+   безопасной зоной уже разобралась настоящая шапка водителя — а этот
+   унаследованный отступ остаётся и превращается в пустой чёрный промежуток
+   между шапкой водителя и панелью экскаватора. Сводим его к обычному
+   отступу, как на других вкладках водителя (--driver-work-gap). */
+body.driver-mobile-screen.excavator-operator-screen .driver-manual-workspace > .eo-shell {
+    padding-top: var(--driver-work-gap, 12px) !important;
 }
 
 body.driver-mobile-screen .driver-shell.is-driver-manual-workspace-open {
@@ -358,7 +389,6 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__poi
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__point-notice[hidden] {
     display: none !important;
-}
 }
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > strong {
