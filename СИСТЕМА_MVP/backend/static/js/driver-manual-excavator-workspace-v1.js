@@ -1255,11 +1255,17 @@
         }
         var faceSummary = workspace.querySelector("[data-driver-manual-face-summary]");
         if (faceSummary) {
-            var faceText = String(context.excavator_label || "—")
+            var faceDoc = workspace.ownerDocument || root.document;
+            var faceLine1 = String(context.excavator_label || "—")
                 + " · Гор. " + String(context.loading_horizon || "—")
-                + "/Бл. " + String(context.loading_block || "—")
-                + (context.rock_type_name ? " · " + String(context.rock_type_name) : "");
-            faceSummary.textContent = faceText;
+                + "/Бл. " + String(context.loading_block || "—");
+            var faceRockLine = context.rock_type_name ? String(context.rock_type_name) : "";
+            faceSummary.textContent = "";
+            faceSummary.appendChild(faceDoc.createTextNode(faceLine1));
+            if (faceRockLine) {
+                faceSummary.appendChild(faceDoc.createElement("br"));
+                faceSummary.appendChild(faceDoc.createTextNode(faceRockLine));
+            }
             fitFaceSummary(workspace);
         }
         var grid = workspace.querySelector(".eo-dashboard-unload-grid");

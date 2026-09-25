@@ -9,7 +9,12 @@
                        вместо него показываем, с каким экскаватором и забоем
                        сейчас работает ручной режим (было в убранной шапке eo-topbar). {% endcomment %}
                     <span>Работаете с</span>
-                    <strong class="driver-manual-workspace__face-summary" data-driver-manual-face-summary title="{{ dashboard_face_excavator|default:'—' }} · Горизонт {{ dashboard_face_horizon|default:'—' }} / Блок {{ dashboard_face_block|default:'—' }}{% if dashboard_face_rock %} · Порода: {{ dashboard_face_rock }}{% endif %}">{{ dashboard_face_excavator|default:"—" }} · Гор. {{ dashboard_face_horizon|default:"—" }}/Бл. {{ dashboard_face_block|default:"—" }}{% if dashboard_face_rock %} · {{ dashboard_face_rock }}{% endif %}</strong>
+                    {% comment %} Пользователь попросил разбить на две строки, а не
+                       тянуть одной длинной — перенос настоящим <br>, а не
+                       word-wrap: подгонка (fitFaceSummary) держит текст в
+                       nowrap для замера ширины, и только явный <br> у неё
+                       ломает строку принудительно, независимо от кегля. {% endcomment %}
+                    <strong class="driver-manual-workspace__face-summary" data-driver-manual-face-summary title="{{ dashboard_face_excavator|default:'—' }} · Горизонт {{ dashboard_face_horizon|default:'—' }} / Блок {{ dashboard_face_block|default:'—' }}{% if dashboard_face_rock %} · Порода: {{ dashboard_face_rock }}{% endif %}">{{ dashboard_face_excavator|default:"—" }} · Гор. {{ dashboard_face_horizon|default:"—" }}/Бл. {{ dashboard_face_block|default:"—" }}{% if dashboard_face_rock %}<br>{{ dashboard_face_rock }}{% endif %}</strong>
                 {% else %}
                     <span>Машинист экскаватора</span>
                     <strong>{{ dashboard_operator_name|default:access.employee.full_name|default:"-" }}</strong>
