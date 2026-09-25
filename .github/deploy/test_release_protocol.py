@@ -34,6 +34,16 @@ receiver = load_module(
 
 
 class ReleaseProtocolTests(unittest.TestCase):
+    def test_dispatcher_push_include_is_packaged_once(self):
+        expected = (
+            "СИСТЕМА_MVP/backend/templates/trips/includes/"
+            "dispatcher_push_invite.html"
+        )
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(production_files.count(expected), 1)
+
     def diagnostic_metadata(self):
         return {
             "operation": "trip_accounting_incident_v1",

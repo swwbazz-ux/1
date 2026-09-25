@@ -34,6 +34,10 @@ const SHARED_TEMPLATE = fs.readFileSync(
     path.join(BACKEND, "templates", "trips", "dispatcher_control.html"),
     "utf8"
 );
+const DISPATCHER_PUSH_INVITE = fs.readFileSync(
+    path.join(BACKEND, "templates", "trips", "includes", "dispatcher_push_invite.html"),
+    "utf8"
+);
 const DISPATCHER_PWA = fs.readFileSync(
     path.join(BACKEND, "trips", "dispatcher_pwa.py"),
     "utf8"
@@ -66,6 +70,21 @@ test("мобильный контур Горного мастера сохран
     assert.match(SHARED_TEMPLATE, /function bindMiningMasterMobileScreens\(\)/);
     assert.match(SHARED_TEMPLATE, /function refreshMobileBoardFromServer\(options\)/);
     assert.match(SHARED_TEMPLATE, /window\.MiningMasterPwaUpdates = \{/);
+});
+
+test("desktop-приглашение уведомлений живёт в отдельном упакованном include", () => {
+    assert.match(
+        SHARED_TEMPLATE,
+        /{% if not mining_master_mobile_enabled %}\s*{% include "trips\/includes\/dispatcher_push_invite\.html" %}\s*{% endif %}/
+    );
+    assert.doesNotMatch(SHARED_TEMPLATE, /class="dispatcher-push-invite"/);
+    assert.match(DISPATCHER_PUSH_INVITE, /class="dispatcher-push-invite"/);
+    assert.match(DISPATCHER_PUSH_INVITE, /data-app-name="Диспетчер"/);
+    assert.doesNotMatch(DISPATCHER_PUSH_INVITE, /data-mm-/);
+    assert.match(
+        PRODUCTION_MANIFEST,
+        /templates\/trips\/includes\/dispatcher_push_invite\.html/
+    );
 });
 
 test("карточка и desktop-доска физически отделены от оркестратора", () => {
