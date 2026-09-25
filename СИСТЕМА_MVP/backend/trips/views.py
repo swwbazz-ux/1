@@ -110,10 +110,15 @@ from .dispatcher_assignment_commands import (
     execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
 )
 from .dispatcher_dashboard_projection import (
+    dispatcher_complex_label,
+    dispatcher_complex_number_int,
     dispatcher_complex_face_label,
     dispatcher_complex_location_parts,
     dispatcher_complex_shift_report as _build_dispatcher_complex_shift_report,
     dispatcher_complex_truck_rows,
+    dispatcher_garage_number_int,
+    dispatcher_plan_details,
+    dispatcher_status_label,
     dispatcher_tons_from_label,
 )
 from .dispatcher_downtime_commands import (
@@ -2241,19 +2246,6 @@ def build_dispatcher_dashboard_context(
             plan_by_equipment_id[equipment_id] = plan_progress_display_context(progress)
         return plan_by_equipment_id[equipment_id]
 
-    def dispatcher_plan_details(plan):
-        if not plan:
-            return []
-        rows = [
-            {'label': 'Статус плана', 'value': plan.get('status_label')},
-            {'label': 'Факт / план', 'value': plan.get('fact_plan_label')},
-        ]
-        if plan.get('has_plan'):
-            rows.insert(1, {'label': 'Выполнение плана', 'value': plan.get('percent_label')})
-        if plan.get('group_name'):
-            rows.append({'label': 'Группа плана', 'value': plan.get('group_name')})
-        return rows
-
     downtime_by_equipment_id = {}
     for downtime in open_downtime_list:
         downtime_by_equipment_id.setdefault(downtime.equipment_id, downtime)
@@ -2351,9 +2343,6 @@ def build_dispatcher_dashboard_context(
         if row.get('accepted') or excavator.id in active_excavator_ids:
             return equipment_state_for('assigned')
         return equipment_state_for('garage')
-
-    def status_label_for(status, label=''):
-        return label or ''
 
     def downtime_state_code_for(equipment_id):
         downtime = downtime_by_equipment_id.get(equipment_id)
@@ -2546,32 +2535,10 @@ def build_dispatcher_dashboard_context(
     )
     active_excavator_ids.update(trip.excavator_id for trip in active_trips_list if trip.excavator_id)
 
-    def garage_number_int(equipment):
-        match = re.search(r'\d+', str(getattr(equipment, 'garage_number', '') or ''))
-        return int(match.group(0)) if match else 9999
-
-    def dispatcher_complex_label(equipment):
-        """Человекочитаемое и однозначное имя комплекса.
-
-        Обычные номера ``5``/``Э-5``/``ЭКГ-5`` остаются ``K-5``. Маркированный
-        номер вроде ``ТВИ 4`` нельзя сводить к первой цифре: иначе он сливается
-        с реальным экскаватором ``4`` и ломает ключи realtime-фрагмента.
-        """
-        raw = str(getattr(equipment, 'garage_number', '') or '').strip().upper()
-        ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
-        if ordinary:
-            return f'K-{int(ordinary.group(1))}'
-        slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
-        return f'K-{slug}' if slug else f'K-ID-{equipment.id}'
-
-    def complex_number_int(card):
-        match = re.search(r'\d+', str(card.get('id', '') or ''))
-        return int(match.group(0)) if match else 9999
-
     excavator_by_id = {excavator.id: excavator for excavator in excavators_list}
     shown_excavators = sorted(
         [excavator_by_id[equipment_id] for equipment_id in active_excavator_ids if equipment_id in excavator_by_id],
-        key=garage_number_int,
+        key=dispatcher_garage_number_int,
     )
 
     trips_by_excavator_id = defaultdict(list)
@@ -2590,7 +2557,7 @@ def build_dispatcher_dashboard_context(
         # настоящей техники, его не трогаем; фильтруем только префикс «ТЕСТ».
         if str(excavator.garage_number or '').strip().upper().startswith('ТЕСТ'):
             continue
-        index = garage_number_int(excavator)
+        index = dispatcher_garage_number_int(excavator)
         complex_label = dispatcher_complex_label(excavator)
         row = by_excavator[excavator.id]
         need = max(len(row['trucks']), row['accepted'] + row['pending'], 0)
@@ -2640,7 +2607,7 @@ def build_dispatcher_dashboard_context(
             if trip.rock_type:
                 rock_by_truck[trip.truck_id] = str(trip.rock_type)
         truck_by_id = {truck.id: truck for truck in trucks_list}
-        for truck_id in sorted(current_truck_ids, key=lambda item: garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
+        for truck_id in sorted(current_truck_ids, key=lambda item: dispatcher_garage_number_int(truck_by_id.get(item)) if item in truck_by_id else 9999):
             truck = truck_by_id.get(truck_id)
             if not truck:
                 continue
@@ -2754,7 +2721,7 @@ def build_dispatcher_dashboard_context(
 
     excavator_tiles = []
     for index, excavator in enumerate(excavators_list[:12], start=1):
-        board_number = garage_number_int(excavator)
+        board_number = dispatcher_garage_number_int(excavator)
         status, label, equipment_state_code = excavator_current_state(excavator)
         excavator_plan = dispatcher_plan_for_equipment(excavator)
         percent = excavator_plan['css_percent']
@@ -2960,7 +2927,7 @@ def build_dispatcher_dashboard_context(
         complex_cards,
         key=lambda card: (
             status_order.get(card['status_key'], 3),
-            complex_number_int(card),
+            dispatcher_complex_number_int(card),
             card.get('id') or '',
         ),
     )
@@ -3101,7 +3068,7 @@ def build_dispatcher_dashboard_context(
             **equipment_presence_fields(truck.id),
         })
     mobile_truck_garage_tiles = []
-    mobile_truck_sort_source = sorted(trucks_list, key=garage_number_int)
+    mobile_truck_sort_source = sorted(trucks_list, key=dispatcher_garage_number_int)
     for index, truck in enumerate(mobile_truck_sort_source, start=1):
         if len(mobile_truck_garage_tiles) >= 52:
             break
@@ -3235,7 +3202,7 @@ def build_dispatcher_dashboard_context(
             number=tile.get('display_name') or tile.get('name'),
             icon=tile.get('icon'),
             status=tile.get('status'),
-            status_label=status_label_for(tile.get('status'), tile.get('label')),
+            status_label=dispatcher_status_label(tile.get('status'), tile.get('label')),
             zone=tile.get('complex') or 'гараж',
             percent=tile.get('percent', 0),
             employee=equipment_employee,
@@ -3318,7 +3285,7 @@ def build_dispatcher_dashboard_context(
                 continue
             equipment = truck_by_id.get(int(card_id)) if card_id.isdigit() else None
             downtime = downtime_by_equipment_id.get(equipment.id) if equipment else None
-            status_label = status_label_for(tile.get('status'), tile.get('label'))
+            status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
             details = shift_details(equipment) + [
                 {'label': 'Гаражный N', 'value': tile.get('name')},
                 {'label': 'Комплекс', 'value': complex_card.get('id')},
@@ -3368,7 +3335,7 @@ def build_dispatcher_dashboard_context(
         if not equipment_card_requested(tile.get('card_id')):
             continue
         equipment = tile.get('equipment')
-        status_label = status_label_for(tile.get('status'), tile.get('label'))
+        status_label = dispatcher_status_label(tile.get('status'), tile.get('label'))
         details = dispatcher_plan_details(tile.get('plan'))
         if equipment:
             downtime = downtime_by_equipment_id.get(equipment.id)

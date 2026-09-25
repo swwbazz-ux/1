@@ -1,5 +1,6 @@
 """Чистые представления данных комплекса для Диспетчерского пульта."""
 
+import re
 from collections import defaultdict
 from decimal import Decimal
 
@@ -13,6 +14,57 @@ def dispatcher_tons_from_label(value):
         return Decimal('0')
     digits = ''.join(char for char in str(value) if char.isdigit())
     return Decimal(digits or '0')
+
+
+def dispatcher_plan_details(plan):
+    if not plan:
+        return []
+    rows = [
+        {'label': 'Статус плана', 'value': plan.get('status_label')},
+        {'label': 'Факт / план', 'value': plan.get('fact_plan_label')},
+    ]
+    if plan.get('has_plan'):
+        rows.insert(
+            1,
+            {
+                'label': 'Выполнение плана',
+                'value': plan.get('percent_label'),
+            },
+        )
+    if plan.get('group_name'):
+        rows.append(
+            {'label': 'Группа плана', 'value': plan.get('group_name')}
+        )
+    return rows
+
+
+def dispatcher_status_label(status, label=''):
+    return label or ''
+
+
+def dispatcher_garage_number_int(equipment):
+    match = re.search(
+        r'\d+',
+        str(getattr(equipment, 'garage_number', '') or ''),
+    )
+    return int(match.group(0)) if match else 9999
+
+
+def dispatcher_complex_label(equipment):
+    """Вернуть человекочитаемое и однозначное имя комплекса."""
+    raw = str(
+        getattr(equipment, 'garage_number', '') or ''
+    ).strip().upper()
+    ordinary = re.fullmatch(r'(?:ЭКГ|ЭКС|Э)?[\s\-№]*(\d+)', raw)
+    if ordinary:
+        return f'K-{int(ordinary.group(1))}'
+    slug = re.sub(r'[^0-9A-ZА-ЯЁ]+', '-', raw).strip('-')
+    return f'K-{slug}' if slug else f'K-ID-{equipment.id}'
+
+
+def dispatcher_complex_number_int(card):
+    match = re.search(r'\d+', str(card.get('id', '') or ''))
+    return int(match.group(0)) if match else 9999
 
 
 def dispatcher_complex_face_label(card):
