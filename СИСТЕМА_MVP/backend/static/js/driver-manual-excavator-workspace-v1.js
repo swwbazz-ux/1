@@ -918,9 +918,25 @@
             requestAutomaticTripRefresh(receipt);
             return {state: "automatic", tripId: positive(receipt.server_ids && receipt.server_ids.trip_id)};
         }
+        /* Запись «погрузка подтверждена» живёт в памяти телефона и после того, как рейс
+           завершён. Если экран сервера новее этой погрузки, а рейса с её номером на нём
+           нет — рейс уже закрыт, «воскрешать» его нельзя: водитель застревал с рейсом-
+           призраком, которого сервер не принимает (пойман на телефоне 26.09.2026). */
+        var receiptTripId = positive(receipt && receipt.server_ids && receipt.server_ids.trip_id);
+        var screenVersion = Number(root.document && root.document.body
+            && root.document.body.dataset.operationalStateVersion || 0);
+        var receiptVersion = Number(receipt && receipt.version || 0);
+        var receiptTripClosed = Boolean(
+            receiptTripId
+            && serverTripId !== receiptTripId
+            && screenVersion > 0
+            && receiptVersion > 0
+            && screenVersion > receiptVersion
+        );
         if (
             !projected
             && receipt
+            && !receiptTripClosed
             && receipt.event_type === "driver.trip.loaded"
             && receipt.trip_origin === "driver_manual"
         ) {
