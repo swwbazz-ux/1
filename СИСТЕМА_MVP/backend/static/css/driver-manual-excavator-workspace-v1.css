@@ -280,6 +280,38 @@ body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__res
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__result-ack[hidden] {
     display: none !important;
 }
+/* Смена точки разгрузки: сервер отклоняет её по своим причинам (точка
+   деактивирована, рейс уже не редактируется, точку уже меняли позже) —
+   это отдельная проверка от погрузки, забой тут ни при чём. Раньше отказ
+   не показывался вовсе: клиент тихо оставлял прежнюю точку, а водитель
+   думал, что сменил.
+   Стоит СНАРУЖИ карточки таймера (в разметке — сразу после шапки), а не
+   внутри неё: та ограничена по высоте (--driver-manual-timer-height) и
+   обрезает всё, что не влезает — третья строка текста внутри неё раньше
+   уходила за нижний край карточки. Здесь, в обычном потоке, элемент
+   ничего не блокирует и не сдвигает жёстко: в скрытом виде (обычное
+   состояние) — нулевой высоты, при показе — раздвигает соседей на свою
+   высоту и сам исчезает через несколько секунд, кнопки тут не нужно. */
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__point-notice {
+    display: block;
+    margin: 6px clamp(10px, 3vw, 16px) 0;
+    padding: 6px clamp(10px, 3vw, 14px);
+    border: 1px solid rgba(255, 182, 72, .45);
+    border-radius: 10px;
+    background: rgba(255, 182, 72, .1);
+    color: #ffb648;
+    font-size: clamp(10px, 2.6vw, 12px);
+    font-style: normal;
+    font-weight: 800;
+    line-height: 1.25;
+    text-transform: none;
+    overflow-wrap: break-word;
+}
+
+body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__point-notice[hidden] {
+    display: none !important;
+}
+}
 
 body.driver-mobile-screen .driver-manual-workspace .driver-manual-workspace__trip-timer > strong {
     color: rgba(225, 235, 239, .72);

@@ -608,6 +608,37 @@
         toggleRejectedTripAck(workspace, false);
         setResult(workspace, "", null, false);
     }
+    /* Смена точки разгрузки в ручном режиме отклоняется по своим причинам
+       (точка деактивирована, рейс уже не редактируется, точку уже меняли
+       позже) — сервер тут забой не проверяет вовсе, путь отдельный от
+       погрузки. Блокировки здесь и не было (источник и выход держит только
+       currentTripProjection погрузки, не эта запись) — не хватало только
+       того, чтобы водитель узнал, что выбор не применился. Короткое
+       сообщение само пропадает через несколько секунд: держать его на
+       экране постоянно незачем, кнопка «Понятно» тут не нужна.
+       lastShownRejectedDumpPointKey не даёт заново показывать ту же самую
+       запись на каждом повторном рендере (проекция перерисовывается часто,
+       событие в очереди остаётся тем же). */
+    var lastShownRejectedDumpPointKey = "";
+    function showRejectedDumpPointChangeNotice(workspace, rejectedEvent) {
+        var notice = workspace && workspace.querySelector("[data-driver-manual-point-notice]");
+        if (!notice) return;
+        var key = String(
+            rejectedEvent.event_id || rejectedEvent.local_trip_id || rejectedEvent.occurred_at || ""
+        );
+        if (key && key === lastShownRejectedDumpPointKey) return;
+        lastShownRejectedDumpPointKey = key;
+        var reason = String(
+            (rejectedEvent.last_error && rejectedEvent.last_error.message) || "Точка не изменена."
+        );
+        notice.textContent = reason + " Выберите точку снова.";
+        notice.hidden = false;
+        root.clearTimeout(notice.__driverManualPointNoticeTimer);
+        notice.__driverManualPointNoticeTimer = root.setTimeout(function () {
+            notice.hidden = true;
+        }, 4200);
+    }
+
     function setSourceLocked(workspace, locked) {
         var source = workspace && workspace.querySelector("[data-driver-manual-source]");
         if (source) {
@@ -864,6 +895,11 @@
                     || ""
                 )
             });
+        } else if (latestPoint && isTerminalState(latestPoint.state)) {
+            // Выбор не применился: прежняя точка в payload/context_snapshot
+            // остаётся как есть — это и есть правильное поведение, просто
+            // теперь водитель об этом узнаёт, а не молчит вместе с экраном.
+            showRejectedDumpPointChangeNotice(workspace, latestPoint);
         }
         var pointName = projectionPointName(projected);
         // projected здесь никогда не бывает terminal-состояния: отклонённые
