@@ -54,6 +54,7 @@
 СИСТЕМА_MVP/backend/trips/free_bucket.py
 СИСТЕМА_MVP/backend/trips/manual_loading.py
 СИСТЕМА_MVP/backend/trips/models.py
+СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
 СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py
 СИСТЕМА_MVP/backend/trips/dispatcher_guards.py
 СИСТЕМА_MVP/backend/trips/dispatcher_pwa.py

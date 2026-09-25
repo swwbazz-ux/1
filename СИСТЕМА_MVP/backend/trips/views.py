@@ -30,13 +30,11 @@ from assignments.models import (
     HaulAssignmentHandoff,
 )
 from assignments.services import (
-    HaulAssignmentStateConflict,
     active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
     reconcile_due_haul_assignments,
     resolve_excavator_load_authority,
-    schedule_haul_release,
     work_assignment_state,
 )
 from core.db_locks import lock_idempotency_key
@@ -112,6 +110,9 @@ from users.session_device import get_session_device_kind, set_session_device_kin
 
 from .excavator_hourly_report import build_excavator_hourly_report
 from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
+from .dispatcher_assignment_commands import (
+    execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
+)
 from .dispatcher_downtime_commands import (
     execute_dispatcher_close_downtime as _execute_dispatcher_close_downtime,
 )
@@ -7294,66 +7295,12 @@ def dispatcher_service_close_shift_view(request, shift_id):
 
 @transaction.atomic
 def dispatcher_cancel_assignment_view(request, assignment_id):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
-        return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
-        return redirect('role_home')
-    redirect_url = get_dispatcher_control_url(request)
-
-    if request.method != 'POST':
-        return redirect(redirect_url)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        messages.error(request, 'Роль неактивна — доступен только просмотр.')
-        return redirect(redirect_url)
-    shift_error = dispatcher_shift_required_redirect(request, access, redirect_url)
-    if shift_error:
-        return shift_error
-    lock_production_state()
-    reason = request.POST.get('reason', '').strip()
-
-    assignment = (
-        HaulAssignment.objects
-        .select_for_update(of=('self',))
-        .select_related('truck', 'excavator')
-        .filter(id=assignment_id, ended_at__isnull=True, status__in={AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED})
-        .first()
+    return _execute_dispatcher_cancel_assignment(
+        request,
+        assignment_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
     )
-    if not assignment:
-        messages.error(request, 'Активное назначение для отмены не найдено.')
-        return redirect(redirect_url)
-
-    if assignment.status == AssignmentStatus.ACCEPTED:
-        try:
-            pending_release, _ = schedule_haul_release(
-                truck=assignment.truck,
-                assigned_by=access.employee,
-                now=timezone.now(),
-                expected_state_id=assignment.id,
-            )
-        except HaulAssignmentStateConflict:
-            messages.error(
-                request,
-                'Назначение уже изменилось. Обновите пульт и повторите действие.',
-            )
-            return redirect(redirect_url)
-        logged_assignment = pending_release or assignment
-    else:
-        assignment.status = AssignmentStatus.CANCELLED
-        assignment.ended_at = timezone.now()
-        assignment.save(update_fields=['status', 'ended_at'])
-        logged_assignment = assignment
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        haul_assignment=logged_assignment,
-        target_summary=f'{assignment.truck} под {assignment.excavator}',
-        reason=reason,
-    )
-    messages.success(request, f'Назначение {assignment.truck} под {assignment.excavator} отменено.')
-    return redirect(redirect_url)
 
 
 @transaction.atomic
