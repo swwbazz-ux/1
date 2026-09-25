@@ -112,6 +112,9 @@ from users.session_device import get_session_device_kind, set_session_device_kin
 
 from .excavator_hourly_report import build_excavator_hourly_report
 from .dispatcher_header import build_dispatcher_header_context, close_dispatcher_shift, get_active_dispatcher_shift, open_dispatcher_shift
+from .dispatcher_downtime_commands import (
+    execute_dispatcher_close_downtime as _execute_dispatcher_close_downtime,
+)
 from .dispatcher_guards import (
     dispatcher_access_from_request,
     dispatcher_client_action_error,
@@ -6776,96 +6779,13 @@ def dispatcher_downtime_close_response(payload, *, status=200):
 @require_POST
 @transaction.atomic
 def dispatcher_close_downtime_view(request, event_id):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'forbidden'},
-            status=403,
-        )
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'inactive_role'},
-            status=409,
-        )
-    if not get_active_dispatcher_shift(access):
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'dispatcher_shift_required'},
-            status=409,
-        )
-
-    payload = dispatcher_json_payload(request)
-    try:
-        requested_version = int(payload.get('state_version', -1))
-    except (TypeError, ValueError):
-        requested_version = -1
-    if requested_version < 0:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'invalid_state_version'},
-            status=400,
-        )
-
-    state = lock_production_state()
-    event = (
-        DowntimeEvent.objects
-        .select_for_update()
-        .select_related('equipment', 'equipment__equipment_type', 'reason')
-        .filter(
-            pk=event_id,
-            equipment__is_active=True,
-            equipment__equipment_type__name__in={'Самосвал', 'Экскаватор'},
-        )
-        .first()
+    return _execute_dispatcher_close_downtime(
+        request,
+        event_id,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        response_builder=dispatcher_downtime_close_response,
+        event_payload=downtime_event_payload,
     )
-    if not event:
-        return dispatcher_downtime_close_response(
-            {'ok': False, 'error': 'downtime_not_found'},
-            status=404,
-        )
-    if event.ended_at:
-        response_payload = downtime_event_payload(event, action='dispatcher_downtime_already_closed')
-        response_payload.update({
-            'closed': False,
-            'already_closed': True,
-            'version': state.version,
-        })
-        return dispatcher_downtime_close_response(response_payload)
-    if state.version != requested_version:
-        return dispatcher_downtime_close_response(
-            {
-                'ok': False,
-                'error': 'stale_board',
-                'version': state.version,
-            },
-            status=409,
-        )
-
-    event.ended_at = timezone.now()
-    event.save(update_fields=['ended_at'])
-    state = bump_operational_state(
-        'Dispatcher:downtime_closed',
-        event_type='downtime_changed',
-        object_type='DowntimeEvent',
-        object_id=event.id,
-        payload={
-            'action': 'dispatcher_downtime_closed',
-            'actor_id': access.employee_id,
-            'equipment_id': event.equipment_id,
-            'equipment_type': event.equipment.equipment_type.name,
-            'reason_id': event.reason_id,
-            'source': 'dispatcher_override',
-        },
-    )
-    response_payload = downtime_event_payload(
-        event,
-        action='dispatcher_downtime_closed',
-        closed=True,
-    )
-    response_payload.update({
-        'already_closed': False,
-        'version': state.version,
-    })
-    return dispatcher_downtime_close_response(response_payload)
 
 
 @require_http_methods(['GET', 'POST'])

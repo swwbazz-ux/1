@@ -1284,6 +1284,26 @@ class DispatcherDowntimeControlTests(TestCase):
         downtime.refresh_from_db()
         self.assertIsNone(downtime.ended_at)
 
+    def test_inactive_role_blocks_downtime_close_before_mutation(self):
+        downtime = self.create_downtime(self.excavator, self.excavator_reason)
+
+        with patch(
+            'trips.views.role_session_state',
+            return_value={'is_active': False},
+        ):
+            response = self.close_downtime(downtime)
+
+        self.assertEqual(response.status_code, 409, response.content)
+        self.assertEqual(response.json()['error'], 'inactive_role')
+        downtime.refresh_from_db()
+        self.assertIsNone(downtime.ended_at)
+        self.assertFalse(
+            OperationalStateEvent.objects.filter(
+                reason='Dispatcher:downtime_closed',
+                object_id=str(downtime.id),
+            ).exists()
+        )
+
     def test_unauthenticated_close_is_forbidden(self):
         downtime = self.create_downtime(self.truck, self.truck_reason)
 
