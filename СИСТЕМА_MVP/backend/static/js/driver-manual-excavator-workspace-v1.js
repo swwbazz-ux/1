@@ -239,11 +239,13 @@
             try { root.navigator.vibrate(patterns[kind] || patterns.created); } catch (error) {}
         }
         /* Ручной режим на круге основного экрана звучит как обычная работа водителя:
-           отправка — тот же сигнал, что свайп простоя; «едем на …» и «рейс завершён»
-           приходят голосом по подтверждению сервера, как у рейса экскаваторщика
-           (driver-shift-voice-v1.js, driver-shift-v1.js). */
+           жест уже подал свой тональный сигнал (driver-point-drum-v1.js, тот же click,
+           что у свайпа простоя); «едем на …» и «рейс завершён» приходят голосом по
+           подтверждению сервера, как у рейса экскаваторщика (driver-shift-voice-v1.js,
+           driver-shift-v1.js) — эти два звука шли подряд и звучали двойным сигналом
+           перед голосом, поэтому здесь для отправки звук больше не дублируется.
+           У отмены голосового подтверждения нет — свой сигнал ей нужен. */
         if (dialHostsManualMode()) {
-            if (kind === "created" && typeof root.playDriverSound === "function") root.playDriverSound("action_ok");
             if (kind === "cancelled" && typeof root.playDriverSound === "function") root.playDriverSound("action_error");
             return true;
         }

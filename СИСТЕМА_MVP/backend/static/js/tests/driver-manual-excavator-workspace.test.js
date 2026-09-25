@@ -732,7 +732,10 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     const refresh = read("static", "js", "driver-shift-refresh-v1.js");
     assert.match(refresh, /freshShell\.dataset\.driverActiveTripOrigin === "driver_manual"/);
     assert.match(shift, /event\.event_type === "driver\.trip\.manual_completed"/);
-    assert.match(runtime, /if \(dialHostsManualMode\(\)\) \{\s*if \(kind === "created"[^\n]*playDriverSound\("action_ok"\)/);
+    // Отправка не дублирует звук: тональный сигнал даёт жест, голос и его тон — сервер
+    // по подтверждению (иначе перед голосом звучал двойной сигнал, поймано 26.09.2026).
+    assert.doesNotMatch(runtime, /kind === "created" && typeof root\.playDriverSound/);
+    assert.match(runtime, /if \(dialHostsManualMode\(\)\) \{\s*if \(kind === "cancelled"[^\n]*playDriverSound\("action_error"\)/);
     // Старые стили под новой разметкой (пойманный на телефоне случай) лечатся сами.
     assert.match(drum, /function healStaleStyles\(\)[\s\S]*indexOf\("pointdrum"\)/);
     // Разгрузка всегда удержанием со шкалой, одного касания нет.

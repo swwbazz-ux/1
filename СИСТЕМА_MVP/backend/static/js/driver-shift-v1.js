@@ -2026,12 +2026,12 @@ window.bindDriverMobileShell = function () {
             }, totalMs / HOLD_SEGMENTS);
         }
         unloadHoldGuard = window.createDriverRoleHoldGuard({
-            /* Разгрузка повторяется десятки раз за смену: ровно секунда — достаточно,
+            /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
                чтобы случайное касание не отправило рейс, и не утомляет за смену. */
-            holdMs: 1000,
+            holdMs: 500,
             onStart: function () {
                 holdButton.classList.add("is-holding");
-                startHoldSegmentFeedback(1000);
+                startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
