@@ -376,19 +376,24 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v143')
+        self.assertContains(response, 'dispatcher-desktop-shell-v144')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
             'dispatcher-detail-v1.css',
             'dispatcher-adaptive-v1.css',
             'dispatcher-detail-overrides-v1.css',
+            'dispatcher-canvas-v1.css',
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v143',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v144',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
+        self.assertContains(
+            response,
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v144',
+        )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
         self.assertContains(response, 'data-app-sync-overlay')

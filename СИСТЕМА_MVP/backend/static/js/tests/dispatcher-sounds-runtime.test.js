@@ -250,13 +250,13 @@ test("dispatcher shell wires and precaches the isolated sound module", () => {
         assert.ok(currentStyle > previousStyle, `${file} must keep dispatcher cascade order`);
         previousStyle = currentStyle;
     }
-    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
-    assert.match(template, /dispatcher-transport-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
-    assert.match(template, /dispatcher-detail-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
-    assert.match(template, /dispatcher-board-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
-    assert.match(template, /dispatcher-realtime-v1\.js[^\n]+dispatcher-desktop-shell-v143/);
+    assert.match(template, /dispatcher-sounds-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-transport-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-detail-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-board-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
+    assert.match(template, /dispatcher-realtime-v1\.js[^\n]+dispatcher-desktop-shell-v144/);
     assert.match(header, /data-dispatcher-sound-toggle/);
-    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v143/);
+    assert.match(dispatcherPwa, /dispatcher-desktop-shell-v144/);
     assert.match(dispatcherPwa, /\/static\/js\/dispatcher-sounds-v1\.js/);
     assert.match(control, /new CustomEvent\("dispatcher-action-error"/);
     assert.match(css, /@media \(max-width: 1180px\)[\s\S]+?\.dispatcher-command-utility\s*\{[\s\S]+?grid-template-columns:\s*repeat\(5,/);

@@ -25,6 +25,7 @@ DISPATCHER_STYLE_FILES = (
     'dispatcher-detail-v1.css',
     'dispatcher-adaptive-v1.css',
     'dispatcher-detail-overrides-v1.css',
+    'dispatcher-canvas-v1.css',
 )
 
 
@@ -115,6 +116,7 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     self.assertIn('/static/js/dispatcher-board-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-realtime-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-sounds-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-canvas-v1.js', core_assets.group(1))
                 else:
                     self.assertEqual(
                         script.count('self.addEventListener("install"'),

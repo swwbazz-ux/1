@@ -47,30 +47,65 @@
        посчитанными ровно для 2400x1500. Существующие правила при этом
        не переписаны ни одного.
 
-       Телефонный landscape-режим пульта (скрипт выше) и мобильный
-       экран горного мастера сюда не попадают — там холст выключен и
-       раскладка остаётся ровно прежней. */
+       На телефоне в landscape пульт использует отдельный опорный размер
+       1400×800. Этот режим включается только явным атрибутом
+       data-dispatcher-phone-fit на холсте пульта, поэтому отчётные экраны
+       не получают чужую трансформацию. Мобильный экран горного мастера
+       сюда не попадает: desktop-файл для него не подключается. */
     var CANVAS_HEIGHT = 1108;
     var CANVAS_WIDTH_MIN = 1400;
+    var PHONE_HEIGHT = 800;
+    var PHONE_WIDTH_MIN = 1400;
+
+    function fitDispatcherPhoneShell(shell, enabled) {
+        /* innerWidth/innerHeight берутся напрямую: vh/dvh внутри уже
+           уменьшенной transform-ом оболочки давали повторное сжатие и
+           плавающую высоту при появлении системных панелей телефона. */
+        if (!shell) return;
+        if (!enabled) {
+            shell.style.transform = "";
+            shell.style.width = "";
+            return;
+        }
+        var designWidth = Math.max(
+            PHONE_WIDTH_MIN,
+            Math.round(PHONE_HEIGHT * window.innerWidth / window.innerHeight)
+        );
+        var scale = Math.min(
+            window.innerWidth / designWidth,
+            window.innerHeight / PHONE_HEIGHT
+        );
+        shell.style.width = designWidth + "px";
+        shell.style.transform = "scale(" + scale + ")";
+    }
+
+    function disableDispatcherCanvas(canvas) {
+        canvas.setAttribute("data-dispatcher-canvas", "off");
+        canvas.style.removeProperty("--dispatcher-canvas-w");
+        canvas.style.removeProperty("--dispatcher-canvas-h");
+        canvas.style.removeProperty("--dispatcher-canvas-scale");
+        canvas.style.removeProperty("--gd-vw");
+        canvas.style.removeProperty("--gd-vh");
+    }
 
     function fitDispatcherCanvas() {
         var canvas = document.querySelector("[data-dispatcher-canvas]");
         if (!canvas) return;
+        var shell = canvas.querySelector(".dispatcher-shell");
         var isMiningMasterMobile = document.body.classList.contains(
             "mining-master-mobile-screen"
         );
         var isPhoneLandscape = window.matchMedia(
             "(orientation: landscape) and (max-width: 1180px)"
         ).matches;
+        var usePhoneShellFit = isPhoneLandscape
+            && canvas.hasAttribute("data-dispatcher-phone-fit");
         if (isMiningMasterMobile || isPhoneLandscape) {
-            canvas.setAttribute("data-dispatcher-canvas", "off");
-            canvas.style.removeProperty("--dispatcher-canvas-w");
-            canvas.style.removeProperty("--dispatcher-canvas-h");
-            canvas.style.removeProperty("--dispatcher-canvas-scale");
-            canvas.style.removeProperty("--gd-vw");
-            canvas.style.removeProperty("--gd-vh");
+            disableDispatcherCanvas(canvas);
+            fitDispatcherPhoneShell(shell, usePhoneShellFit);
             return;
         }
+        fitDispatcherPhoneShell(shell, false);
         var canvasWidth = Math.max(
             CANVAS_WIDTH_MIN,
             Math.round(CANVAS_HEIGHT * window.innerWidth / window.innerHeight)

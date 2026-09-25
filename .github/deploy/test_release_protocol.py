@@ -34,6 +34,17 @@ receiver = load_module(
 
 
 class ReleaseProtocolTests(unittest.TestCase):
+    def test_dispatcher_canvas_assets_are_packaged_once(self):
+        production_files = (
+            ROOT / ".github" / "deploy" / "production-files.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        for expected in (
+            "СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css",
+            "СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js",
+        ):
+            with self.subTest(asset=expected):
+                self.assertEqual(production_files.count(expected), 1)
+
     def test_dispatcher_equipment_detail_include_is_packaged_once(self):
         expected = (
             "СИСТЕМА_MVP/backend/templates/trips/includes/"

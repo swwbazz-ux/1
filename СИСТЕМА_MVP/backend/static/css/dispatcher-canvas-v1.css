@@ -279,17 +279,17 @@
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-kpi strong {
     /* font-size: clamp(13px, .82vw, 16px) */
-    font-size: clamp(13px, .calc(82 * var(--gd-vw)), 16px);
+    font-size: clamp(13px, calc(.82 * var(--gd-vw)), 16px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-kpi.kpi-wide strong {
     /* font-size: clamp(12px, .78vw, 15px) */
-    font-size: clamp(12px, .calc(78 * var(--gd-vw)), 15px);
+    font-size: clamp(12px, calc(.78 * var(--gd-vw)), 15px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-kpi:not(.kpi-wide):not(.kpi-compact):not(.kpi-alert) strong {
     /* font-size: clamp(13px, .8vw, 15px) */
-    font-size: clamp(13px, .calc(8 * var(--gd-vw)), 15px);
+    font-size: clamp(13px, calc(.8 * var(--gd-vw)), 15px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .dispatcher-report-tile h2 {
@@ -309,7 +309,7 @@
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-header-title span {
     /* font-size: clamp(12px, .82vw, 15px) */
-    font-size: clamp(12px, .calc(82 * var(--gd-vw)), 15px);
+    font-size: clamp(12px, calc(.82 * var(--gd-vw)), 15px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-header-title h1 {
@@ -319,7 +319,7 @@
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-header-title p {
     /* font-size: clamp(13px, .95vw, 16px) */
-    font-size: clamp(13px, .calc(95 * var(--gd-vw)), 16px);
+    font-size: clamp(13px, calc(.95 * var(--gd-vw)), 16px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-header-meta strong {
@@ -349,7 +349,7 @@
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-kpis .dispatcher-report-tile h2 {
     /* font-size: clamp(14px, .9vw, 17px) */
-    font-size: clamp(14px, .calc(9 * var(--gd-vw)), 17px);
+    font-size: clamp(14px, calc(.9 * var(--gd-vw)), 17px);
 }
 
 :where(.dispatcher-canvas[data-dispatcher-canvas="on"]) .management-dashboard-kpis .dispatcher-report-tile > strong {

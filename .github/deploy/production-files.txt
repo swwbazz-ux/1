@@ -17,6 +17,7 @@
 СИСТЕМА_MVP/backend/static/css/dispatcher-detail-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-adaptive-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-detail-overrides-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css
 СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js
 СИСТЕМА_MVP/backend/static/js/client-error-report.js
 СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js
@@ -27,6 +28,7 @@
 СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-sounds-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js
 СИСТЕМА_MVP/backend/static/js/mobile-operational-sounds-v1.js
 СИСТЕМА_MVP/backend/static/js/native-background-connection-v1.js
 СИСТЕМА_MVP/backend/static/js/realtime-client.js
