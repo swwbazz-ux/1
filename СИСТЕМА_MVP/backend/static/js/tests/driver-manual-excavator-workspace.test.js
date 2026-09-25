@@ -383,8 +383,13 @@ test("Driver binds the common gesture to the real Excavator shell and preserves 
     assert.match(source, /createDriverManualLoadCancelledEvent/);
     assert.match(source, /data-driver-manual-current-only/);
     assert.match(source, /targetSelector: '\[data-driver-manual-dump-target\]:not\(\[data-driver-manual-current-only="true"\]\)'/);
-    assert.match(css, /:not\(\.is-truck-drag-active\) \.driver-manual-workspace__dump-card\s*\{\s*height:\s*100% !important;/s);
-    assert.doesNotMatch(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
+    // Точки разгрузки остаются горизонтальной сеткой всегда, включая
+    // перетаскивание — высота плитки больше не выключается на время
+    // .is-truck-drag-active (раньше уступала место сжатому флекс-ряду
+    // машиниста, теперь сетка и высота одни и те же в обоих состояниях).
+    assert.doesNotMatch(css, /:not\(\.is-truck-drag-active\)/);
+    assert.match(css, /\[data-driver-manual-eo-shell\] \.driver-manual-workspace__dump-card\s*\{[^}]*height:\s*100% !important;/s);
+    assert.match(css, /\.driver-manual-workspace__dump-card\.is-drop-ready\s*\{[^}]*transform:\s*scale\(1\.14\) !important;/s);
     assert.match(css, /\.is-driver-manual-one-off:not\(\.is-last-dump\):not\(\.is-drop-ready\)/);
 });
 
