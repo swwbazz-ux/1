@@ -34,19 +34,10 @@ from assignments.services import (
     active_haul_handoffs,
     excavator_load_assignment_queryset,
     get_active_equipment_assignment,
-    projected_haul_assignments_for_excavator,
     reconcile_due_haul_assignments,
     resolve_excavator_load_authority,
-    schedule_haul_assignment,
     schedule_haul_release,
-    validate_projected_excavator_state,
     work_assignment_state,
-)
-from assignments.command_guards import (
-    ClientActionPayloadConflict,
-    ClientActionRequired,
-    begin_client_action,
-    complete_client_action,
 )
 from core.db_locks import lock_idempotency_key
 from core.models import OperationalStateVersion, bump_operational_state, lock_production_state
@@ -132,6 +123,12 @@ from .dispatcher_guards import (
     lock_dispatcher_mutation_access as _lock_dispatcher_mutation_access,
 )
 from .dispatcher_read_model import build_dispatcher_control_read_model
+from .dispatcher_topology_commands import (
+    execute_dispatcher_assign_truck as _execute_dispatcher_assign_truck,
+    execute_dispatcher_move_excavator as _execute_dispatcher_move_excavator,
+    required_assignment_state_id,
+    required_projected_assignment_states,
+)
 from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 from .trip_creation import (
@@ -3683,323 +3680,26 @@ def lock_dispatcher_mutation_access(request, access):
     )
 
 
-def required_assignment_state_id(payload):
-    if 'expected_assignment_state_id' not in payload:
-        raise ClientActionRequired(
-            'Экран открыт в старой версии. Обновите пульт перед изменением расстановки.'
-        )
-    try:
-        value = int(payload.get('expected_assignment_state_id'))
-    except (TypeError, ValueError):
-        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
-    if value < 0:
-        raise ClientActionRequired('Некорректная версия назначения. Обновите пульт.')
-    return value
-
-
-def required_projected_assignment_states(payload):
-    if 'expected_assignment_states' not in payload:
-        raise ClientActionRequired(
-            'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
-        )
-    return payload.get('expected_assignment_states')
-
-
 @require_POST
 @transaction.atomic
 def dispatcher_move_excavator_view(request):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': 'Роль неактивна — доступен только просмотр',
-                'code': 'inactive_role',
-            },
-            status=409,
-        )
-    shift_error = dispatcher_shift_required_response(access)
-    if shift_error:
-        return shift_error
-    payload = dispatcher_json_payload(request)
-    try:
-        client_action_id, signature, repeated_response = begin_client_action(
-            employee=access.employee,
-            action_type='dispatcher_move_excavator',
-            payload=payload,
-        )
-    except (ClientActionRequired, ClientActionPayloadConflict) as error:
-        return dispatcher_client_action_error(payload, error)
-    if repeated_response is not None:
-        return JsonResponse(repeated_response)
-    lock_production_state()
-    excavator = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('excavator_id'),
-        equipment_type__name__icontains='Экскаватор',
-        is_active=True,
+    return _execute_dispatcher_move_excavator(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
+        equipment_label=equipment_short_name,
     )
-    zone = payload.get('zone')
-    if zone not in {ExcavatorPlacement.Zone.ACTIVE, ExcavatorPlacement.Zone.INACTIVE}:
-        return JsonResponse({'ok': False, 'error': 'Некорректная зона экскаватора.'}, status=400)
-
-    placement = (
-        ExcavatorPlacement.objects.select_for_update()
-        .filter(excavator=excavator)
-        .first()
-    )
-    actual_zone = placement.zone if placement else ExcavatorPlacement.Zone.INACTIVE
-    expected_zone = str(payload.get('expected_zone') or '').strip()
-    if not expected_zone:
-        return dispatcher_client_action_error(
-            payload,
-            ClientActionRequired('Экран открыт в старой версии. Обновите пульт.'),
-        )
-    if expected_zone != actual_zone:
-        return dispatcher_client_action_error(
-            payload,
-            HaulAssignmentStateConflict(
-                expected_state_id=expected_zone,
-                actual_state_id=actual_zone,
-            ),
-            code='state_conflict',
-        )
-    if not placement:
-        placement = ExcavatorPlacement.objects.create(excavator=excavator)
-
-    scheduled_assignments = []
-    if zone == ExcavatorPlacement.Zone.INACTIVE:
-        try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
-            )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            now = timezone.now()
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
-        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-
-    placement.zone = zone
-    placement.changed_by = access.employee
-    placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
-    if zone == ExcavatorPlacement.Zone.INACTIVE:
-        scheduled = len(scheduled_assignments)
-        summary = f'{equipment_short_name(excavator)} возвращен в гараж, снятие назначений ожидает ({scheduled} самосв.)'
-    else:
-        scheduled = 0
-        summary = f'{equipment_short_name(excavator)} переведен в активную смену'
-
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        target_summary=summary,
-    )
-    response_payload = {
-        'ok': True,
-        'scheduled': scheduled,
-        'assignment_state_ids': {
-            str(item.truck_id): item.id for item in scheduled_assignments
-        },
-        'client_action_id': client_action_id,
-    }
-    complete_client_action(
-        employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
-        action_type='dispatcher_move_excavator',
-        client_action_id=client_action_id,
-        signature=signature,
-        response_payload=response_payload,
-    )
-    return JsonResponse(response_payload)
 
 
 @require_POST
 @transaction.atomic
 def dispatcher_assign_truck_view(request):
-    access = dispatcher_access_from_request(request)
-    if not access:
-        return JsonResponse({'ok': False, 'error': 'Нет доступа к диспетчерскому пульту.'}, status=403)
-    access = lock_dispatcher_mutation_access(request, access)
-    if not access:
-        return JsonResponse(
-            {
-                'ok': False,
-                'error': 'Роль неактивна — доступен только просмотр',
-                'code': 'inactive_role',
-            },
-            status=409,
-        )
-    shift_error = dispatcher_shift_required_response(access)
-    if shift_error:
-        return shift_error
-    payload = dispatcher_json_payload(request)
-    action = payload.get('action')
-    now = timezone.now()
-    try:
-        client_action_id, signature, repeated_response = begin_client_action(
-            employee=access.employee,
-            action_type='dispatcher_assign_truck',
-            payload=payload,
-        )
-    except (ClientActionRequired, ClientActionPayloadConflict) as error:
-        return dispatcher_client_action_error(payload, error)
-    if repeated_response is not None:
-        return JsonResponse(repeated_response)
-    lock_production_state()
-
-    if action == 'release_complex':
-        excavator = get_object_or_404(
-            Equipment.objects.select_for_update().select_related('equipment_type'),
-            id=payload.get('excavator_id'),
-            equipment_type__name__icontains='Экскаватор',
-            is_active=True,
-        )
-        try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
-            )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            scheduled_assignments = []
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
-        except (ClientActionRequired, HaulAssignmentStateConflict) as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-        scheduled = len(scheduled_assignments)
-        log_dispatcher_action(
-            actor=access.employee,
-            action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-            target_summary=f'{equipment_short_name(excavator)}: снятие назначений ожидает ({scheduled})',
-        )
-        response_payload = {
-            'ok': True,
-            'scheduled': scheduled,
-            'assignment_state_ids': {
-                str(item.truck_id): item.id for item in scheduled_assignments
-            },
-            'client_action_id': client_action_id,
-        }
-        complete_client_action(
-            employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
-            action_type='dispatcher_assign_truck',
-            client_action_id=client_action_id,
-            signature=signature,
-            response_payload=response_payload,
-        )
-        return JsonResponse(response_payload)
-
-    truck = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('truck_id'),
-        equipment_type__name__icontains='Самосвал',
-        is_active=True,
+    return _execute_dispatcher_assign_truck(
+        request,
+        lock_mutation_access=lock_dispatcher_mutation_access,
+        action_logger=log_dispatcher_action,
+        equipment_label=equipment_short_name,
     )
-    try:
-        expected_state_id = required_assignment_state_id(payload)
-    except ClientActionRequired as error:
-        return dispatcher_client_action_error(payload, error)
-    if action == 'release':
-        try:
-            assignment, created = schedule_haul_release(
-                truck=truck,
-                assigned_by=access.employee,
-                now=now,
-                expected_state_id=expected_state_id,
-            )
-        except HaulAssignmentStateConflict as error:
-            return dispatcher_client_action_error(payload, error, code='state_conflict')
-        log_dispatcher_action(
-            actor=access.employee,
-            action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-            target_summary=f'{equipment_short_name(truck)} снят с комплекса и возвращен в гараж',
-        )
-        response_payload = {
-            'ok': True,
-            'assignment_id': assignment.id if assignment else None,
-            'assignment_state_id': assignment.id if assignment else 0,
-            'created': created,
-            'client_action_id': client_action_id,
-        }
-        complete_client_action(
-            employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
-            action_type='dispatcher_assign_truck',
-            client_action_id=client_action_id,
-            signature=signature,
-            response_payload=response_payload,
-        )
-        return JsonResponse(response_payload)
-
-    if action != 'assign':
-        return JsonResponse({'ok': False, 'error': 'Некорректное действие с самосвалом.'}, status=400)
-
-    excavator = get_object_or_404(
-        Equipment.objects.select_for_update().select_related('equipment_type'),
-        id=payload.get('excavator_id'),
-        equipment_type__name__icontains='Экскаватор',
-        is_active=True,
-    )
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
-    if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
-        placement.zone = ExcavatorPlacement.Zone.ACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
-    try:
-        assignment, created = schedule_haul_assignment(
-            truck=truck,
-            excavator=excavator,
-            assigned_by=access.employee,
-            now=now,
-            expected_state_id=expected_state_id,
-        )
-    except HaulAssignmentStateConflict as error:
-        return dispatcher_client_action_error(payload, error, code='state_conflict')
-    log_dispatcher_action(
-        actor=access.employee,
-        action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
-        target_summary=f'{equipment_short_name(truck)} назначен под {equipment_short_name(excavator)}',
-        haul_assignment=assignment,
-    )
-    response_payload = {
-        'ok': True,
-        'assignment_id': assignment.id,
-        'assignment_state_id': assignment.id,
-        'created': created,
-        'client_action_id': client_action_id,
-    }
-    complete_client_action(
-        employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
-        action_type='dispatcher_assign_truck',
-        client_action_id=client_action_id,
-        signature=signature,
-        response_payload=response_payload,
-    )
-    return JsonResponse(response_payload)
 
 
 def excavator_access_from_request(request, *, require_active_role=True):
