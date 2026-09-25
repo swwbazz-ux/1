@@ -112,6 +112,9 @@ from .dispatcher_assignment_commands import (
 from .dispatcher_downtime_commands import (
     execute_dispatcher_close_downtime as _execute_dispatcher_close_downtime,
 )
+from .dispatcher_equipment_commands import (
+    execute_dispatcher_equipment_settings as _execute_dispatcher_equipment_settings,
+)
 from .dispatcher_guards import (
     dispatcher_access_from_request,
     dispatcher_client_action_error,
@@ -6832,100 +6835,21 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         card_key = str(equipment.pk)
 
     if request.method == 'POST':
-        if equipment.equipment_type.name != 'Экскаватор':
-            return dispatcher_equipment_detail_error('settings_not_available', status=400)
-        if not role_session_state(request, access)['is_active']:
-            return dispatcher_equipment_detail_error('inactive_role', status=409)
-        if not get_active_dispatcher_shift(access):
-            return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
-
-        payload = excavator_json_payload(request)
-        try:
-            requested_version = int(payload.get('state_version', -1))
-        except (TypeError, ValueError):
-            requested_version = -1
-        if requested_version < 0:
-            return dispatcher_equipment_detail_error('invalid_state_version', status=400)
-
-        rock_type = RockType.objects.filter(
-            id=payload.get('rock_type_id'),
-            is_active=True,
-        ).first()
-        try:
-            destinations = parse_excavator_destinations(
-                payload,
-                list(DumpPoint.objects.filter(is_active=True).order_by('name')),
-            )
-        except ValueError:
-            return dispatcher_equipment_detail_error('invalid_transport_distance', status=400)
-        if not rock_type or not destinations:
-            return dispatcher_equipment_detail_error('invalid_work_settings', status=400)
-        dump_points = [row['dump_point'] for row in destinations]
-        loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
-        loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
-
-        with transaction.atomic():
-            access = lock_dispatcher_mutation_access(request, access)
-            if not access:
-                return dispatcher_equipment_detail_error('inactive_role', status=409)
-            if not get_active_dispatcher_shift(access):
-                return dispatcher_equipment_detail_error('dispatcher_shift_required', status=409)
-            state = lock_production_state()
-            if state.version != requested_version:
-                return dispatcher_equipment_detail_error('stale_board', status=409)
-            equipment = (
-                Equipment.objects
-                .select_for_update()
-                .select_related('equipment_type')
-                .get(pk=equipment.pk)
-            )
-            placement = save_excavator_work_context(
-                current_excavator=equipment,
-                actor=access.employee,
-                rock_type=rock_type,
-                dump_points=dump_points,
-                loading_horizon=loading_horizon,
-                loading_block=loading_block,
-                destination_settings=destinations,
-            )
-            state = bump_operational_state(
-                'Dispatcher:excavator_work_settings',
-                event_type='equipment_changed',
-                object_type='Equipment',
-                object_id=equipment.id,
-                payload={
-                    'action': 'dispatcher_excavator_work_settings',
-                    'actor_id': access.employee_id,
-                    'excavator_id': equipment.id,
-                    'rock_type_id': rock_type.id,
-                    'dump_point_ids': [point.id for point in dump_points],
-                    'destinations': [
-                        {
-                            'dump_point_id': row['dump_point'].id,
-                            'transport_distance_km': (
-                                str(row['transport_distance_km'])
-                                if row['transport_distance_km'] is not None
-                                else ''
-                            ),
-                        }
-                        for row in destinations
-                    ],
-                    'loading_horizon': loading_horizon,
-                    'loading_block': loading_block,
-                },
-            )
-        return protect_dispatcher_equipment_detail_response(JsonResponse({
-            'ok': True,
-            'contract': 'dispatcher-equipment-settings-v2',
-            'equipment_id': equipment.id,
-            'version': state.version,
-            'settings': dispatcher_excavator_settings(
-                equipment,
-                placement,
-                rock_types=RockType.objects.filter(is_active=True).order_by('name'),
-                dump_points=DumpPoint.objects.filter(is_active=True).order_by('name'),
-            ),
-        }))
+        return _execute_dispatcher_equipment_settings(
+            request,
+            access,
+            equipment,
+            active_role_state=role_session_state,
+            active_shift_getter=get_active_dispatcher_shift,
+            json_payload=excavator_json_payload,
+            parse_destinations=parse_excavator_destinations,
+            normalize_numeric_setting=normalize_excavator_numeric_setting,
+            lock_mutation_access=lock_dispatcher_mutation_access,
+            error_response=dispatcher_equipment_detail_error,
+            save_work_context=save_excavator_work_context,
+            build_settings=dispatcher_excavator_settings,
+            protect_response=protect_dispatcher_equipment_detail_response,
+        )
 
     return dispatcher_control_view(
         request,
