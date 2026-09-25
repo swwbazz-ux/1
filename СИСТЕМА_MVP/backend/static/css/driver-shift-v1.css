@@ -1094,8 +1094,16 @@ body.driver-mobile-screen .driver-work-label.is-single-medium {
     font-size: 46px;
 }
 
+/* Две-три строки вдвое-втрое выше одной — коробка подписи дальше от центра круга,
+   а круглый край там уже, чем её обычная ширина 92%: подгонка кегля меряет доступную
+   ширину от РЕАЛЬНОЙ ширины коробки (driver-shift-v1.js, fitDriverDialLabel), поэтому
+   достаточно сузить коробку здесь — она подгонится и впишется в круг сама. Без этого
+   «РАЗГРУЗКА СОХРАНЕНА» и подобные двухсловные подписи были правильного кегля для
+   своей коробки, но сама коробка резалась краем круга почти впритык (запас < 1px,
+   пойман на телефоне 26.09.2026). */
 body.driver-mobile-screen .driver-work-label.is-two-line {
-    font-size: 40px;
+    width: 70%;
+    max-width: 70%;
     row-gap: 6px;
     line-height: 1.04;
     font-weight: 900;
@@ -1103,7 +1111,8 @@ body.driver-mobile-screen .driver-work-label.is-two-line {
 }
 
 body.driver-mobile-screen .driver-work-label.is-three-line {
-    font-size: 34px;
+    width: 64%;
+    max-width: 64%;
     row-gap: 4px;
     line-height: 1.02;
     font-weight: 900;
@@ -1114,9 +1123,17 @@ body.driver-mobile-screen .driver-work-note {
     color: rgba(156,173,178,0.58);
     text-transform: uppercase;
     font-size: 15px;
-    line-height: 1;
+    line-height: 1.3;
     font-style: normal;
     font-weight: 500;
+    /* Ширина ограничена так, чтобы длинная строка перенеслась на вторую строку раньше,
+       чем дойдёт до круглого края круга: у него ближе к нижней трети ободок уже, чем
+       вся ширина сердцевины, поэтому одну длинную строку резало ободком («ОЖИДАНИЕ
+       СИНХРОНИЗАЦИИ» у сохранённой без сети разгрузки — пойман на телефоне 26.09.2026).
+       Короткие подписи («НА ЗАГРУЗКУ», «ТОЧКА РАЗГРУЗКИ») в одну строку не задевают. */
+    min-width: 0;
+    max-width: 58%;
+    text-align: center;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-loaded {

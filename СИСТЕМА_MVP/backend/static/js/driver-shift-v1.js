@@ -716,6 +716,14 @@ window.bindDriverMobileShell = function () {
         });
     }
     window.scheduleDriverDialLabelFit = scheduleDriverDialLabelFit;
+    /* Синхронный вариант — для мест, где смена текста и подгонка кегля обязаны попасть
+       в один и тот же кадр: обычный scheduleDriverDialLabelFit считает через
+       requestAnimationFrame, и браузер успевает нарисовать один кадр новым текстом
+       ещё старым (слишком крупным) кеглем — на телефоне это была вспышка вылезающей
+       за круг подписи при «РАЗГРУЗКА СОХРАНЕНА» (пойман 26.09.2026). */
+    window.fitDriverDialLabelNow = function (label) {
+        fitDriverDialLabel(label || shell.querySelector("[data-driver-dial-label]"), true);
+    };
     if (window.driverDialLabelResizeObserver) {
         window.driverDialLabelResizeObserver.disconnect();
     }

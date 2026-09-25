@@ -293,6 +293,13 @@
         api.startManualLoadAtPoint(pointId);
     }
 
+    // Как круг подпишет себя, когда рейс сойдёт с него (syncDial ниже): тот же текст,
+    // что у обычной разгрузки, «сохранено локально, отправляем» — а не гадать прежнюю
+    // подпись круга, которая могла быть уже чем угодно (пойманный на телефоне баг
+    // 26.09.2026: после пары ручных рейсов подряд круг показывал «—» вместо номера
+    // экскаватора, потому что запоминал подпись с предыдущего, ещё не досинхронного цикла).
+    var lastManualOutcome = "complete";
+
     function recallPoint() {
         var api = engine();
         if (!api || typeof api.cancelActiveManualLoad !== "function") {
@@ -300,6 +307,7 @@
             return;
         }
         haptic([70, 45, 35]); click(1.3);
+        lastManualOutcome = "cancel";
         api.cancelActiveManualLoad();
     }
 
@@ -316,7 +324,16 @@
         label.dataset.driverDialRaw = text;
         label.setAttribute("aria-label", text);
         delete label.dataset.driverDialFitKey;
-        if (typeof root.scheduleDriverDialLabelFit === "function") root.scheduleDriverDialLabelFit();
+        /* Подгонка кегля — синхронно, в этом же кадре: асинхронная (через rAF) на один
+           кадр рисовала новый текст ещё старым, слишком крупным кеглем от прежней
+           подписи — «РАЗГРУЗКА СОХРАНЕНА» вспышкой вылезала за круг (пойман на телефоне
+           26.09.2026). Geometry круга к этому моменту уже точно готова: сама смена
+           классов круга (is-empty и т.п.) идёт раньше этого вызова, в том же тике. */
+        if (typeof root.fitDriverDialLabelNow === "function") {
+            root.fitDriverDialLabelNow(label);
+        } else if (typeof root.scheduleDriverDialLabelFit === "function") {
+            root.scheduleDriverDialLabelFit(true);
+        }
     }
 
     function pointName(id) {
@@ -339,11 +356,7 @@
         var id = isManual() ? assignedPointId() : "";
         if (id) {
             var name = pointName(id) || "РУЧНОЙ РЕЙС";
-            if (button.dataset.driverManualDial !== "true") {
-                button.dataset.driverManualDial = "true";
-                var label = q("[data-driver-dial-label]");
-                button.dataset.driverManualPrevLabel = label ? String(label.dataset.driverDialRaw || label.textContent.trim()) : "";
-            }
+            button.dataset.driverManualDial = "true";
             if (button.dataset.driverManualDialLabel !== name) button.dataset.driverManualDialLabel = name;
             // Идёт отправка завершения: круг показывает «ОТПРАВКА», не трогаем.
             if (button.classList.contains("is-pending")) return;
@@ -360,11 +373,15 @@
             return;
         }
         if (button.dataset.driverManualDial !== "true") return;
-        // Рейс завершён или отменён: круг снова пустой, как его рисует сервер без рейса.
-        var prev = button.dataset.driverManualPrevLabel || "—";
+        /* Рейс завершён или отменён. Настоящее подтверждение сервера придёт отдельным
+           обновлением экрана (может занять до минуты) и само перерисует круг верно —
+           здесь важно не соврать: не гадать, каким был круг ДО ручного рейса (тот
+           текст мог сам оказаться устаревшим от предыдущего цикла — так родился баг
+           с «—» вместо номера экскаватора, пойманный на телефоне 26.09.2026), а
+           честно показать то же «сохранено, ждём подтверждения», что и у обычной
+           разгрузки (driver-shift-v1.js, applyDriverOfflineProjection). */
         delete button.dataset.driverManualDial;
         delete button.dataset.driverManualDialLabel;
-        delete button.dataset.driverManualPrevLabel;
         button.disabled = true;
         button.setAttribute("aria-disabled", "true");
         button.setAttribute("aria-label", "Разгрузка недоступна: нет загруженного рейса");
@@ -373,7 +390,18 @@
         setUnloadWait(button, false);
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
-        setDialLabel(prev);
+        var savedLabel = lastManualOutcome === "cancel" ? "ОТМЕНА СОХРАНЕНА" : "РАЗГРУЗКА СОХРАНЕНА";
+        var savedNote = q(".driver-work-note");
+        if (savedNote && savedNote.textContent.trim() !== "ОЖИДАНИЕ СИНХРОНИЗАЦИИ") {
+            savedNote.textContent = "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+        }
+        setDialLabel(savedLabel);
+        // Страховка от того же кадра: если geometry круга ещё не готова прямо сейчас
+        // (driverDialCoreHasVisibleGeometry вернёт false и молча пропустит), кадром позже
+        // она уже готова почти наверняка — пересчитываем ещё раз явно.
+        root.setTimeout(function () {
+            if (typeof root.scheduleDriverDialLabelFit === "function") root.scheduleDriverDialLabelFit(true);
+        }, 120);
     }
 
     // Удержание круга с ручным рейсом (вызывает driver-shift-v1.js вместо разгрузки).
@@ -388,6 +416,7 @@
             if (button) button.classList.remove("is-pending");
             refresh();
         }
+        lastManualOutcome = "complete";
         api.completeActiveManualLoad().then(function (saved) {
             if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); }
         }).catch(function () {
