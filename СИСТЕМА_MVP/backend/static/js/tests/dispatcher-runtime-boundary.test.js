@@ -58,6 +58,10 @@ const DISPATCHER_BOARD_MUTATIONS = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-mutations-v1.js"),
     "utf8"
 );
+const DISPATCHER_BOARD_ACTIONS = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-board-actions-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -233,6 +237,11 @@ test("карточка и desktop-доска физически отделены
     assert.match(DISPATCHER_BOARD_DND, /function resetSession\(\)/);
     assert.match(DISPATCHER_BOARD_DND, /function bindDispatcherComplexDrop\(zone\)/);
     assert.doesNotMatch(DISPATCHER_BOARD_DND, /moveDesktopTruckToComplex|refreshDispatcherDesktopBoardFromServer/);
+    assert.match(DISPATCHER_BOARD_ACTIONS, /function createDispatcherBoardActions\(options\)/);
+    assert.match(DISPATCHER_BOARD_ACTIONS, /global\.createDispatcherBoardActions = createDispatcherBoardActions;/);
+    assert.match(DISPATCHER_BOARD_ACTIONS, /function applyDesktopTruckAction\(response, action\)/);
+    assert.match(DISPATCHER_BOARD_ACTIONS, /function refreshDesktopBoardAfterStructuralAction\(response, localFallback\)/);
+    assert.doesNotMatch(DISPATCHER_BOARD_ACTIONS, /dispatcherPost|dragstart|addEventListener/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function complexTileForGrid\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function watchComplexTruckRacks\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherEquipmentSearch\(\)/);
@@ -244,6 +253,8 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindEquipmentCardTrigger\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherComplexDrop\(zone\)/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherTruckGarageDrop\(garage\)/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function applyDesktopTruckAction\(/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function refreshDesktopBoardAfterStructuralAction\(/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
     assert.match(DISPATCHER_BOARD, /function bindDispatcherDesktopInteractions\(\)/);
@@ -273,6 +284,7 @@ test("transport загружается перед основным runtime и в
     const assignmentStateIndex = SHARED_TEMPLATE.indexOf("dispatcher-haul-assignment-state-v1.js");
     const dndIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-dnd-v1.js");
     const mutationsIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-mutations-v1.js");
+    const actionsIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-actions-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
@@ -290,7 +302,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(assignmentStateIndex > complexTruckRacksIndex, "assignment state must load after complex racks");
     assert.ok(dndIndex > assignmentStateIndex, "drag-and-drop must load after assignment state");
     assert.ok(mutationsIndex > dndIndex, "local board mutations must load after drag-and-drop");
-    assert.ok(boardIndex > mutationsIndex, "board must load after its local mutation helpers");
+    assert.ok(actionsIndex > mutationsIndex, "board action policy must load after local mutations");
+    assert.ok(boardIndex > actionsIndex, "board must load after its action policy");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
@@ -307,6 +320,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-haul-assignment-state-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-dnd-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-mutations-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-actions-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
@@ -320,6 +334,7 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-haul-assignment-state-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-dnd-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-mutations-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-actions-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
@@ -394,6 +409,18 @@ test("модуль локальных перестановок упакован 
     assert.doesNotMatch(DISPATCHER_BOARD_MUTATIONS, /dispatcherPost\s*\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function moveDesktopTruckToGarage/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoardMutations/);
+});
+
+test("политика ответа сервера упакована ровно один раз и отделена от DnD", () => {
+    const runtimeName = "dispatcher-board-actions-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-board-actions-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-board-actions-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
+    assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoardActions\(\{/);
 });
 
 test("offline queue физически отделена, но сохраняет production-контракт", () => {

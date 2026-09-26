@@ -11,6 +11,7 @@ const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const RUNTIME_SOURCE = [
     "dispatcher-control-v1.js",
     "dispatcher-board-v1.js",
+    "dispatcher-board-actions-v1.js",
     "dispatcher-board-dnd-v1.js",
     "dispatcher-detail-v1.js",
 ].map((name) => fs.readFileSync(path.resolve(__dirname, "..", name), "utf8")).join("\n");

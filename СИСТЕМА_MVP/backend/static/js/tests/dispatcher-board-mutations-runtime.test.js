@@ -19,6 +19,10 @@ const DND_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-board-dnd-v1.js"),
     "utf8"
 );
+const ACTIONS_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-actions-v1.js"),
+    "utf8"
+);
 const BOARD_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-board-v1.js"),
     "utf8"
@@ -472,6 +476,7 @@ test("доска собирается только с выделенным мо�
     const context = {document: documentStub, window: {}};
     vm.runInNewContext(DND_SOURCE, context, {filename: "dispatcher-board-dnd-v1.js"});
     vm.runInNewContext(MUTATIONS_SOURCE, context, {filename: "dispatcher-board-mutations-v1.js"});
+    vm.runInNewContext(ACTIONS_SOURCE, context, {filename: "dispatcher-board-actions-v1.js"});
     vm.runInNewContext(LAYOUT_SOURCE, context, {filename: "dispatcher-board-layout-v1.js"});
     vm.runInNewContext(BOARD_SOURCE, context, {filename: "dispatcher-board-v1.js"});
 

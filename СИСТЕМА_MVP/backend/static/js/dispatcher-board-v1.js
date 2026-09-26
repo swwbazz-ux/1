@@ -1,20 +1,20 @@
 /* Dispatcher desktop board.
-   Owns action policy and joins the interaction modules.
-   Local DOM mutations, layout, transport, realtime reconciliation and detail rendering are injected. */
+   Composes the desktop board interaction modules.
+   Action policy, local DOM mutations, layout, transport, realtime and detail rendering are injected. */
 (function (global, document) {
     "use strict";
 
     function createDispatcherBoard(options) {
         options = options || {};
         if (typeof global.createDispatcherBoardDnD !== "function" ||
-            typeof global.createDispatcherBoardMutations !== "function") {
+            typeof global.createDispatcherBoardMutations !== "function" ||
+            typeof global.createDispatcherBoardActions !== "function") {
             throw new Error("Dispatcher board interaction modules are not loaded");
         }
         var dispatcherPost = options.post;
         var dispatcherMoveExcavatorUrl = options.moveExcavatorUrl || "";
         var dispatcherAssignTruckUrl = options.assignTruckUrl || "";
         var showDispatcherDnDError = options.showError || function () {};
-        var reloadDispatcherBoardAsFallback = options.reloadFallback || function () {};
         var dispatcherEquipmentStateClass = options.equipmentStateClass;
         var dispatcherEquipmentStateLabel = options.equipmentStateLabel;
         var dispatcherNeutralEquipmentIcon = options.neutralEquipmentIcon;
@@ -28,9 +28,6 @@
         var collectComplexAssignmentStates = typeof dispatcherHaulAssignmentState.collectComplexStates === "function"
             ? dispatcherHaulAssignmentState.collectComplexStates
             : function () { return {}; };
-        var applyHaulAssignmentState = typeof dispatcherHaulAssignmentState.applyState === "function"
-            ? dispatcherHaulAssignmentState.applyState
-            : function () {};
         var applyHaulAssignmentStates = typeof dispatcherHaulAssignmentState.applyStates === "function"
             ? dispatcherHaulAssignmentState.applyStates
             : function () {};
@@ -52,12 +49,8 @@
         }
         var bindEquipmentCardTrigger = equipmentCardTrigger.bind;
         var dispatcherMutations = null;
+        var dispatcherActions = null;
         var dispatcherDnD = null;
-        var moveDesktopTruckToGarage = function () { return false; };
-        var moveDesktopTruckToComplex = function () { return false; };
-        var releaseDesktopComplexTrucks = function () { return false; };
-        var moveDesktopComplexToExcavatorGarage = function () { return false; };
-        var activateDesktopComplexFromExcavatorTile = function () { return false; };
         function bindDispatcherDragTile(tile) {
             if (!dispatcherDnD || typeof dispatcherDnD.bindDragTile !== "function") return;
             dispatcherDnD.bindDragTile(tile);
@@ -66,9 +59,6 @@
             return typeof options.getShiftOpen === "function"
                 ? Boolean(options.getShiftOpen())
                 : false;
-        }
-        function refreshDispatcherDesktopBoardFromServer(refreshOptions) {
-            return options.refreshBoardFromServer(refreshOptions);
         }
         var board = document.querySelector(".dispatcher-board");
         var refreshComplexTruckRack = typeof complexTruckRacks.refreshRack === "function"
@@ -81,55 +71,6 @@
             if (dispatcherMutations) dispatcherMutations.reconcileTruckUniqueness();
             refreshTruckGarage();
             refreshAllComplexTruckRacks();
-        }
-        function refreshDesktopBoardAfterStructuralAction(response, localFallback) {
-            if (response && response.queued) {
-                if (typeof localFallback === "function") {
-                    localFallback();
-                }
-                return response;
-            }
-            return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
-                if (!applied) {
-                    if (typeof localFallback === "function") {
-                        localFallback();
-                    }
-                }
-                return response;
-            }).catch(function (error) {
-                if (typeof localFallback === "function") {
-                    localFallback();
-                } else {
-                    throw error;
-                }
-                return response;
-            });
-        }
-        function handleDesktopOptimisticBoardError(error) {
-            showDispatcherDnDError(error);
-            return refreshDispatcherDesktopBoardFromServer().catch(function () {
-                /* Первичная ошибка уже показана. При отсутствии сети повторный fragment
-                   не должен становиться необработанным Promise в drag-and-drop. */
-                return null;
-            });
-        }
-        function applyDesktopTruckAction(response, action) {
-            if (response && response.queued) return response;
-            if (!action || !action.type) return response;
-            if (action.truckTile) applyHaulAssignmentState(response, action.truckTile);
-            if (action.complexCard) applyHaulAssignmentStates(response, action.complexCard);
-            var applied = false;
-            if (action.type === "assign") {
-                applied = moveDesktopTruckToComplex(action.truckTile, action.complexCard);
-            } else if (action.type === "release") {
-                applied = moveDesktopTruckToGarage(action.truckTile);
-            } else if (action.type === "release_complex") {
-                applied = releaseDesktopComplexTrucks(action.complexCard);
-            }
-            if (!applied) {
-                refreshDispatcherDesktopBoardFromServer().catch(reloadDispatcherBoardAsFallback);
-            }
-            return response;
         }
         refreshExcavatorGarage();
         refreshTruckGarage();
@@ -167,11 +108,13 @@
             refreshComplexTruckRacks: refreshAllComplexTruckRacks,
             normalizeComplexGrid: normalizeComplexGrid
         });
-        moveDesktopTruckToGarage = dispatcherMutations.moveTruckToGarage;
-        moveDesktopTruckToComplex = dispatcherMutations.moveTruckToComplex;
-        releaseDesktopComplexTrucks = dispatcherMutations.releaseComplexTrucks;
-        moveDesktopComplexToExcavatorGarage = dispatcherMutations.moveComplexToExcavatorGarage;
-        activateDesktopComplexFromExcavatorTile = dispatcherMutations.activateComplexFromExcavatorTile;
+        dispatcherActions = global.createDispatcherBoardActions({
+            showError: showDispatcherDnDError,
+            refreshBoardFromServer: options.refreshBoardFromServer,
+            reloadFallback: options.reloadFallback,
+            assignmentState: dispatcherHaulAssignmentState,
+            mutations: dispatcherMutations
+        });
         dispatcherDnD = global.createDispatcherBoardDnD({
             document: document,
             post: dispatcherPost,
@@ -182,11 +125,11 @@
             getAssignmentStateId: haulAssignmentStateId,
             collectComplexAssignmentStates: collectComplexAssignmentStates,
             applyHaulAssignmentStates: applyHaulAssignmentStates,
-            applyDesktopTruckAction: applyDesktopTruckAction,
-            refreshDesktopBoardAfterStructuralAction: refreshDesktopBoardAfterStructuralAction,
-            activateDesktopComplexFromExcavatorTile: activateDesktopComplexFromExcavatorTile,
-            moveDesktopComplexToExcavatorGarage: moveDesktopComplexToExcavatorGarage,
-            handleStructuralError: handleDesktopOptimisticBoardError,
+            applyDesktopTruckAction: dispatcherActions.applyTruckAction,
+            refreshDesktopBoardAfterStructuralAction: dispatcherActions.refreshAfterStructuralAction,
+            activateDesktopComplexFromExcavatorTile: dispatcherMutations.activateComplexFromExcavatorTile,
+            moveDesktopComplexToExcavatorGarage: dispatcherMutations.moveComplexToExcavatorGarage,
+            handleStructuralError: dispatcherActions.handleOptimisticError,
             showError: showDispatcherDnDError,
             confirmDanger: requestDispatcherDesktopDangerConfirmation
         });
