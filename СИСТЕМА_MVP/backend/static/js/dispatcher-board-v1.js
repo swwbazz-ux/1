@@ -6,8 +6,9 @@
 
     function createDispatcherBoard(options) {
         options = options || {};
-        if (typeof global.createDispatcherBoardDnD !== "function") {
-            throw new Error("Dispatcher board drag-and-drop module is not loaded");
+        if (typeof global.createDispatcherBoardDnD !== "function" ||
+            typeof global.createDispatcherBoardMutations !== "function") {
+            throw new Error("Dispatcher board interaction modules are not loaded");
         }
         var dispatcherPost = options.post;
         var dispatcherMoveExcavatorUrl = options.moveExcavatorUrl || "";
@@ -34,6 +35,17 @@
         var applyHaulAssignmentStates = typeof dispatcherHaulAssignmentState.applyStates === "function"
             ? dispatcherHaulAssignmentState.applyStates
             : function () {};
+        var dispatcherMutations = null;
+        var dispatcherDnD = null;
+        var moveDesktopTruckToGarage = function () { return false; };
+        var moveDesktopTruckToComplex = function () { return false; };
+        var releaseDesktopComplexTrucks = function () { return false; };
+        var moveDesktopComplexToExcavatorGarage = function () { return false; };
+        var activateDesktopComplexFromExcavatorTile = function () { return false; };
+        function bindDispatcherDragTile(tile) {
+            if (!dispatcherDnD || typeof dispatcherDnD.bindDragTile !== "function") return;
+            dispatcherDnD.bindDragTile(tile);
+        }
         function dispatcherShiftIsOpen() {
             return typeof options.getShiftOpen === "function"
                 ? Boolean(options.getShiftOpen())
@@ -100,36 +112,8 @@
         var refreshAllComplexTruckRacks = typeof complexTruckRacks.refreshAll === "function"
             ? complexTruckRacks.refreshAll
             : function () {};
-        function dispatcherSelectorValue(value) {
-            var stringValue = String(value || "");
-            if (window.CSS && typeof window.CSS.escape === "function") {
-                return window.CSS.escape(stringValue);
-            }
-            return stringValue.replace(/["\\]/g, "\\$&");
-        }
-        function removeDuplicateDesktopTruckTiles(truckId, keepTile) {
-            if (!truckId) return;
-            var selector = '[data-dispatcher-drag="truck"][data-equipment-id="' + dispatcherSelectorValue(truckId) + '"]';
-            document.querySelectorAll(selector).forEach(function (tile) {
-                if (tile !== keepTile) {
-                    tile.remove();
-                }
-            });
-        }
-        function reconcileDesktopTruckUniqueness() {
-            var seen = {};
-            document.querySelectorAll('[data-dispatcher-drag="truck"][data-equipment-id]').forEach(function (tile) {
-                var truckId = tile.dataset.equipmentId || "";
-                if (!truckId) return;
-                if (seen[truckId]) {
-                    tile.remove();
-                    return;
-                }
-                seen[truckId] = true;
-            });
-        }
         function refreshDesktopBoardIntegrity() {
-            reconcileDesktopTruckUniqueness();
+            if (dispatcherMutations) dispatcherMutations.reconcileTruckUniqueness();
             refreshTruckGarage();
             refreshAllComplexTruckRacks();
         }
@@ -157,11 +141,6 @@
                 garage.appendChild(slot);
             }
         }
-        function escapeHtml(value) {
-            return String(value || "").replace(/[&<>"']/g, function (char) {
-                return {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[char];
-            });
-        }
         function normalizeComplexGrid() {
             var grid = document.querySelector(".dispatcher-zone-grid");
             if (!grid) return;
@@ -185,233 +164,6 @@
             active.concat(empty).forEach(function (card) {
                 grid.appendChild(card);
             });
-        }
-        function findTruckGarageList() {
-            return document.querySelector(".dispatcher-trucks");
-        }
-        function findComplexTruckRack(complexCard) {
-            return complexCard ? complexCard.querySelector(".complex-assigned-trucks") : null;
-        }
-        function getFirstTruckGaragePlaceholder() {
-            var garage = findTruckGarageList();
-            return garage ? garage.querySelector(".dispatcher-truck-tile.is-placeholder") : null;
-        }
-        function moveDesktopTruckToGarage(tile) {
-            var garage = findTruckGarageList();
-            if (!garage || !tile) return false;
-            removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
-            tile.classList.remove("complex-truck-tile", "dispatcher-dragging");
-            tile.removeAttribute("data-truck-tile");
-            setDispatcherNodeEquipmentState(tile, "free", "truck");
-            tile.dataset.dispatcherDrag = "truck";
-            tile.dataset.garageItem = "truck";
-            tile.setAttribute("draggable", "true");
-            tile.removeAttribute("aria-disabled");
-            delete tile.dataset.complexTruck;
-            delete tile.dataset.assignedZone;
-            var firstPlaceholder = getFirstTruckGaragePlaceholder();
-            if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
-                garage.insertBefore(tile, firstPlaceholder);
-            } else {
-                garage.appendChild(tile);
-            }
-            bindDispatcherDragTile(tile);
-            bindEquipmentCardTrigger(tile);
-            refreshDesktopBoardIntegrity();
-            return true;
-        }
-        function moveDesktopTruckToComplex(tile, complexCard) {
-            var rack = findComplexTruckRack(complexCard);
-            if (!rack || !tile) return false;
-            var sourceRack = tile.closest(".complex-assigned-trucks");
-            var zoneId = complexCard.dataset.zoneId || "";
-            removeDuplicateDesktopTruckTiles(tile.dataset.equipmentId, tile);
-            tile.classList.add("complex-truck-tile");
-            tile.setAttribute("data-truck-tile", "");
-            tile.classList.remove("dispatcher-dragging", "is-placeholder");
-            setDispatcherNodeEquipmentState(tile, "assigned", "truck");
-            tile.dataset.dispatcherDrag = "truck";
-            tile.dataset.complexTruck = "true";
-            tile.dataset.assignedZone = zoneId;
-            tile.setAttribute("draggable", "true");
-            tile.removeAttribute("aria-disabled");
-            delete tile.dataset.garageItem;
-            var empty = rack.querySelector(".complex-truck-empty");
-            if (empty) empty.hidden = true;
-            rack.appendChild(tile);
-            if (sourceRack && sourceRack !== rack) {
-                refreshComplexTruckRack(sourceRack);
-            }
-            bindDispatcherDragTile(tile);
-            bindEquipmentCardTrigger(tile);
-            refreshDesktopBoardIntegrity();
-            return true;
-        }
-        function releaseDesktopComplexTrucks(complexCard) {
-            var rack = findComplexTruckRack(complexCard);
-            if (!rack) return false;
-            var trucks = Array.from(rack.querySelectorAll(".complex-truck-tile"));
-            if (!trucks.length) {
-                refreshComplexTruckRack(rack);
-                return true;
-            }
-            trucks.forEach(moveDesktopTruckToGarage);
-            refreshComplexTruckRack(rack);
-            refreshTruckGarage();
-            return true;
-        }
-        function findExcavatorGarageList() {
-            return document.querySelector(".dispatcher-excavators");
-        }
-        function getFirstExcavatorGaragePlaceholder() {
-            var garage = findExcavatorGarageList();
-            return garage ? garage.querySelector(".dispatcher-excavator-garage-tile.is-placeholder") : null;
-        }
-        function resetDesktopComplexCardToEmpty(complexCard) {
-            if (!complexCard) return false;
-            var zoneId = complexCard.dataset.zoneId || "";
-            complexCard.className = "dispatcher-complex-card status-empty";
-            complexCard.style.setProperty("--complex-progress", "0%");
-            complexCard.style.setProperty("--complex-total-progress", "0%");
-            complexCard.dataset.dispatcherDrop = "complex";
-            complexCard.dataset.zoneId = zoneId;
-            delete complexCard.dataset.dispatcherDrag;
-            delete complexCard.dataset.equipmentCardId;
-            delete complexCard.dataset.sourceEquipmentCardId;
-            delete complexCard.dataset.equipmentId;
-            delete complexCard.dataset.equipmentName;
-            delete complexCard.dataset.equipmentState;
-            delete complexCard.dataset.excavatorSlot;
-            delete complexCard.dataset.placementZone;
-            delete complexCard.dataset.planStatus;
-            delete complexCard.dataset.planPercent;
-            delete complexCard.dataset.planLoopPercent;
-            delete complexCard.dataset.planCompletedLoops;
-            delete complexCard.dataset.planProgressPhase;
-            delete complexCard.dataset.planMode;
-            delete complexCard.dataset.planValue;
-            delete complexCard.dataset.planFact;
-            delete complexCard.dataset.planUnit;
-            delete complexCard.dataset.planGroup;
-            delete complexCard.dataset.dragBound;
-            delete complexCard.dataset.cardBound;
-            complexCard.removeAttribute("role");
-            complexCard.removeAttribute("tabindex");
-            complexCard.removeAttribute("draggable");
-            complexCard.innerHTML = '<div class="complex-empty" aria-hidden="true"></div>';
-            return true;
-        }
-        function buildDesktopExcavatorGarageTile(complexCard) {
-            var tile = document.createElement("article");
-            var slot = complexCard.dataset.excavatorSlot || "";
-            var name = complexCard.dataset.equipmentName || ("Экскаватор " + slot).trim();
-            var cardId = complexCard.dataset.equipmentId || complexCard.dataset.equipmentCardId || complexCard.dataset.sourceEquipmentCardId || "";
-            var stateCode = "garage";
-            tile.className = "dispatcher-equipment-tile dispatcher-excavator-garage-tile " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
-            tile.style.setProperty("--tile-progress", "0%");
-            tile.setAttribute("role", "button");
-            tile.setAttribute("tabindex", "0");
-            tile.setAttribute("draggable", "true");
-            tile.dataset.dispatcherDrag = "excavator";
-            tile.dataset.equipmentCardId = cardId;
-            tile.dataset.equipmentId = cardId;
-            tile.dataset.equipmentName = name;
-            tile.dataset.equipmentState = stateCode;
-            tile.dataset.excavatorSlot = slot;
-            tile.dataset.garageItem = "excavator";
-            tile.innerHTML =
-                (slot ? "<strong>" + escapeHtml(slot) + "</strong>" : "") +
-                '<img src="' + escapeHtml(dispatcherNeutralEquipmentIcon("excavator")) + '" alt="">' +
-                "<span>" + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + "</span>";
-            return tile;
-        }
-        function moveDesktopComplexToExcavatorGarage(complexCard) {
-            var garage = findExcavatorGarageList();
-            if (!garage || !complexCard || complexCard.classList.contains("status-empty")) return false;
-            releaseDesktopComplexTrucks(complexCard);
-            var tile = buildDesktopExcavatorGarageTile(complexCard);
-            var firstPlaceholder = getFirstExcavatorGaragePlaceholder();
-            if (firstPlaceholder && firstPlaceholder.parentNode === garage) {
-                garage.insertBefore(tile, firstPlaceholder);
-            } else {
-                garage.appendChild(tile);
-            }
-            resetDesktopComplexCardToEmpty(complexCard);
-            bindDispatcherDragTile(tile);
-            bindEquipmentCardTrigger(tile);
-            refreshExcavatorGarage();
-            refreshTruckGarage();
-            refreshAllComplexTruckRacks();
-            normalizeComplexGrid();
-            return true;
-        }
-        function activateDesktopComplexFromExcavatorTile(tile, complexCard) {
-            if (!tile || !complexCard) return false;
-            var targetCard = complexCard.classList.contains("status-empty")
-                ? complexCard
-                : document.querySelector(".dispatcher-complex-card.status-empty");
-            if (!targetCard) return false;
-            var zoneId = targetCard.dataset.zoneId || "К";
-            var cardId = tile.dataset.equipmentId || tile.dataset.equipmentCardId || "";
-            var name = tile.dataset.equipmentName || "";
-            var slot = tile.dataset.excavatorSlot || (tile.querySelector("strong") && tile.querySelector("strong").textContent) || "";
-            var zoneLabel = slot ? "K-" + slot : (targetCard.dataset.zoneLabel || "K");
-            var stateCode = "assigned";
-            targetCard.className = "dispatcher-complex-card " + dispatcherEquipmentStateClass(stateCode) + " is-sync-pending";
-            targetCard.style.setProperty("--complex-progress", "0%");
-            targetCard.dataset.dispatcherDrop = "complex";
-            targetCard.dataset.zoneId = zoneId;
-            targetCard.dataset.zoneLabel = zoneLabel;
-            targetCard.dataset.dispatcherDrag = "complex";
-            targetCard.dataset.equipmentCardId = cardId;
-            targetCard.dataset.sourceEquipmentCardId = cardId;
-            targetCard.dataset.equipmentId = cardId;
-            targetCard.dataset.equipmentName = name;
-            targetCard.dataset.equipmentState = stateCode;
-            targetCard.dataset.excavatorSlot = slot;
-            delete targetCard.dataset.dragBound;
-            delete targetCard.dataset.cardBound;
-            targetCard.setAttribute("role", "button");
-            targetCard.setAttribute("tabindex", "0");
-            targetCard.setAttribute("draggable", "true");
-            targetCard.innerHTML =
-                '<div class="complex-work-head">' +
-                    '<div class="complex-title-state">' +
-                        "<h2>" + escapeHtml(zoneLabel) + "</h2>" +
-                        '<span class="complex-state-chip">' + escapeHtml(dispatcherEquipmentStateLabel(stateCode)) + '</span>' +
-                    '</div>' +
-                    '<div class="complex-context">' +
-                        '<span class="complex-info-chip chip-horizon">Гор. -</span>' +
-                        '<span class="complex-info-chip chip-block">Блок -</span>' +
-                        '<span class="complex-info-chip chip-rock">порода не указана</span>' +
-                    "</div>" +
-                "</div>" +
-                '<div class="complex-assigned-trucks truck-fill-1" style="--complex-truck-cols: 6;" data-truck-need="0" aria-label="Активные самосвалы комплекса">' +
-                    '<em class="complex-truck-empty">самосвалы не назначены</em>' +
-                "</div>";
-            if (!document.body.classList.contains("mining-master-mobile-screen")) {
-                /* На настольном пульте карточка несёт полосу ключевых цифр, как в
-                   шаблоне; значений до ответа сервера нет — нули и прочерк, как у
-                   комплекса без плана. Единицу объёма берём у соседней карточки. */
-                var unitNode = document.querySelector('.dispatcher-complex-card .complex-kpi[data-kpi="volume"] small');
-                var unit = unitNode ? unitNode.textContent : "т";
-                targetCard.querySelector(".complex-assigned-trucks").insertAdjacentHTML(
-                    "beforebegin",
-                    '<div class="complex-kpis" aria-label="Показатели комплекса">' +
-                        '<span class="complex-kpi is-zero" data-kpi="trucks" title="Назначено самосвалов / нужно по составу"><i>Машин</i><b>0<small>/0</small></b></span>' +
-                        '<span class="complex-kpi" data-kpi="volume" title="Погружено за смену"><i>Объём</i><b>0<small>' + escapeHtml(unit) + '</small></b></span>' +
-                        '<span class="complex-kpi is-muted" data-kpi="plan" title="План не назначен"><i>План</i><b>&mdash;</b></span>' +
-                    "</div>"
-                );
-            }
-            tile.remove();
-            bindDispatcherDragTile(targetCard);
-            bindEquipmentCardTrigger(targetCard);
-            refreshExcavatorGarage();
-            refreshTruckGarage();
-            refreshAllComplexTruckRacks();
-            normalizeComplexGrid();
-            return true;
         }
         function confirmDesktopOptimisticBoardAction(response) {
             if (response && response.queued) return response;
@@ -520,7 +272,28 @@
                 }
             );
         }
-        var dispatcherDnD = global.createDispatcherBoardDnD({
+        dispatcherMutations = global.createDispatcherBoardMutations({
+            document: document,
+            window: global,
+            equipmentStateClass: dispatcherEquipmentStateClass,
+            equipmentStateLabel: dispatcherEquipmentStateLabel,
+            neutralEquipmentIcon: dispatcherNeutralEquipmentIcon,
+            setNodeEquipmentState: setDispatcherNodeEquipmentState,
+            bindDragTile: bindDispatcherDragTile,
+            bindEquipmentCard: bindEquipmentCardTrigger,
+            refreshIntegrity: refreshDesktopBoardIntegrity,
+            refreshTruckGarage: refreshTruckGarage,
+            refreshExcavatorGarage: refreshExcavatorGarage,
+            refreshComplexTruckRack: refreshComplexTruckRack,
+            refreshComplexTruckRacks: refreshAllComplexTruckRacks,
+            normalizeComplexGrid: normalizeComplexGrid
+        });
+        moveDesktopTruckToGarage = dispatcherMutations.moveTruckToGarage;
+        moveDesktopTruckToComplex = dispatcherMutations.moveTruckToComplex;
+        releaseDesktopComplexTrucks = dispatcherMutations.releaseComplexTrucks;
+        moveDesktopComplexToExcavatorGarage = dispatcherMutations.moveComplexToExcavatorGarage;
+        activateDesktopComplexFromExcavatorTile = dispatcherMutations.activateComplexFromExcavatorTile;
+        dispatcherDnD = global.createDispatcherBoardDnD({
             document: document,
             post: dispatcherPost,
             moveExcavatorUrl: dispatcherMoveExcavatorUrl,
@@ -538,7 +311,6 @@
             showError: showDispatcherDnDError,
             confirmDanger: requestDispatcherDesktopDangerConfirmation
         });
-        var bindDispatcherDragTile = dispatcherDnD.bindDragTile;
         function bindDispatcherDesktopInteractions() {
             board = document.querySelector(".dispatcher-board");
             excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");

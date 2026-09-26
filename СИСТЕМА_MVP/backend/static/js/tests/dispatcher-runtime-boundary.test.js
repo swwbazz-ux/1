@@ -46,6 +46,10 @@ const DISPATCHER_BOARD_DND = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-dnd-v1.js"),
     "utf8"
 );
+const DISPATCHER_BOARD_MUTATIONS = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-board-mutations-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -242,6 +246,7 @@ test("transport загружается перед основным runtime и в
     const complexTruckRacksIndex = SHARED_TEMPLATE.indexOf("dispatcher-complex-truck-racks-v1.js");
     const assignmentStateIndex = SHARED_TEMPLATE.indexOf("dispatcher-haul-assignment-state-v1.js");
     const dndIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-dnd-v1.js");
+    const mutationsIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-mutations-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
@@ -256,7 +261,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(complexTruckRacksIndex > equipmentSearchIndex, "complex racks must load after equipment search");
     assert.ok(assignmentStateIndex > complexTruckRacksIndex, "assignment state must load after complex racks");
     assert.ok(dndIndex > assignmentStateIndex, "drag-and-drop must load after assignment state");
-    assert.ok(boardIndex > dndIndex, "board must load after drag-and-drop");
+    assert.ok(mutationsIndex > dndIndex, "local board mutations must load after drag-and-drop");
+    assert.ok(boardIndex > mutationsIndex, "board must load after its local mutation helpers");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
@@ -270,6 +276,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-complex-truck-racks-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-haul-assignment-state-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-dnd-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-mutations-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
@@ -280,6 +287,7 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-complex-truck-racks-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-haul-assignment-state-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-dnd-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-mutations-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
@@ -315,6 +323,23 @@ test("модуль drag-and-drop упакован ровно один раз", (
         PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
         1
     );
+});
+
+test("модуль локальных перестановок упакован ровно один раз и владеет только DOM-операциями", () => {
+    const runtimeName = "dispatcher-board-mutations-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-board-mutations-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-board-mutations-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
+    assert.match(DISPATCHER_BOARD_MUTATIONS, /global\.createDispatcherBoardMutations = createDispatcherBoardMutations;/);
+    assert.match(DISPATCHER_BOARD_MUTATIONS, /function moveTruckToGarage/);
+    assert.match(DISPATCHER_BOARD_MUTATIONS, /function moveComplexToExcavatorGarage/);
+    assert.doesNotMatch(DISPATCHER_BOARD_MUTATIONS, /dispatcherPost\s*\(/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function moveDesktopTruckToGarage/);
+    assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoardMutations/);
 });
 
 test("offline queue физически отделена, но сохраняет production-контракт", () => {

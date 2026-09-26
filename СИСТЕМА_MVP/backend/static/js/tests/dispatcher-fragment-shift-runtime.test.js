@@ -22,6 +22,10 @@ const ASSIGNMENT_STATE_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-haul-assignment-state-v1.js"),
     "utf8"
 );
+const MUTATIONS_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-mutations-v1.js"),
+    "utf8"
+);
 const DND_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-board-dnd-v1.js"),
     "utf8"
@@ -450,9 +454,14 @@ test("fallback расформирования сохраняет новые ве
 
 test("empty complex fallback clears stale plan markers before the next fragment", () => {
     const resetSource = extractBraceBlock(
-        RUNTIME_SOURCE,
+        MUTATIONS_SOURCE,
         "function resetDesktopComplexCardToEmpty(complexCard)",
         "Dispatcher empty complex reset"
+    );
+    const clearPlanSource = extractBraceBlock(
+        MUTATIONS_SOURCE,
+        "function clearComplexPlanPresentation(complexCard)",
+        "Dispatcher empty complex plan presentation reset"
     );
     const styleValues = {
         "--complex-progress": "74%",
@@ -483,6 +492,7 @@ test("empty complex fallback clears stale plan markers before the next fragment"
                 styleValues[name] = value;
             },
         },
+        classList: {remove() {}},
         removeAttribute(name) {
             removedAttributes.push(name);
         },
@@ -490,8 +500,8 @@ test("empty complex fallback clears stale plan markers before the next fragment"
     };
     const context = {complexCard};
 
-    vm.runInNewContext(`${resetSource}\nresetDesktopComplexCardToEmpty(complexCard);`, context, {
-        filename: "dispatcher-board-v1.js#empty-complex-plan-reset",
+    vm.runInNewContext(`${clearPlanSource}\n${resetSource}\nresetDesktopComplexCardToEmpty(complexCard);`, context, {
+        filename: "dispatcher-board-mutations-v1.js#empty-complex-plan-reset",
     });
 
     assert.equal(complexCard.className, "dispatcher-complex-card status-empty");

@@ -320,6 +320,7 @@ class DispatcherSharedShiftStartTests(TestCase):
                 'dispatcher-equipment-search-v1.js',
                 'dispatcher-complex-truck-racks-v1.js',
                 'dispatcher-board-dnd-v1.js',
+                'dispatcher-board-mutations-v1.js',
                 'dispatcher-board-v1.js',
                 'dispatcher-realtime-v1.js',
                 'dispatcher-control-v1.js',
@@ -334,6 +335,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'js/dispatcher-equipment-search-v1.js')
         self.assertContains(response, 'js/dispatcher-complex-truck-racks-v1.js')
         self.assertContains(response, 'js/dispatcher-board-dnd-v1.js')
+        self.assertContains(response, 'js/dispatcher-board-mutations-v1.js')
         self.assertContains(response, 'js/dispatcher-board-v1.js')
         self.assertContains(response, 'js/dispatcher-realtime-v1.js')
         self.assertContains(response, 'js/dispatcher-sounds-v1.js')
@@ -345,7 +347,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'function sortDesktopEquipmentList',
             'function compareDesktopEquipmentTiles',
             'function removeDuplicateDesktopTruckTiles',
-            'function reconcileDesktopTruckUniqueness',
+            'function reconcileTruckUniqueness',
             'function refreshDesktopBoardIntegrity',
             'function refreshDesktopBoardAfterStructuralAction',
             'moveDesktopTruckToComplex',
@@ -386,7 +388,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v154')
+        self.assertContains(response, 'dispatcher-desktop-shell-v155')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -397,20 +399,24 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v154',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v155',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v154',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v155',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v154',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v155',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v154',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v155',
+        )
+        self.assertContains(
+            response,
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v155',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)

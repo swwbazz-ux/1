@@ -29,6 +29,10 @@ const BOARD_RUNTIME = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
 );
+const MUTATIONS_RUNTIME = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-board-mutations-v1.js"),
+    "utf8"
+);
 const SCRIPT = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-complex-truck-racks-v1.js"),
     "utf8"
@@ -278,7 +282,7 @@ test("карточка, собранная скриптом в пустой зо
        мобильного контура; на настольном пульте она растворяется, иначе
        области сетки head/info не находят своих элементов. */
     assert.match(CSS, /> \.complex-work-head \{[^}]*display: contents;/s);
-    for (const source of [TEMPLATE, BOARD_RUNTIME]) {
+    for (const source of [TEMPLATE, MUTATIONS_RUNTIME]) {
         const from = source.indexOf('targetCard.innerHTML =');
         assert.notEqual(from, -1, "сборщик карточки не найден");
         const builder = source.slice(from, source.indexOf("tile.remove();", from));

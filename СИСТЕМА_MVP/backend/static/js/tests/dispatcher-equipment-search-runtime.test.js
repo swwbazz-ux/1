@@ -87,7 +87,7 @@ test("поиск загружается до доски и полностью в
     assert.ok(boardIndex > searchIndex, "поиск должен загрузиться до доски");
     assert.match(
         TEMPLATE,
-        /dispatcher-equipment-search-v1\.js[^\n]+dispatcher-desktop-shell-v154/
+        /dispatcher-equipment-search-v1\.js[^\n]+dispatcher-desktop-shell-v155/
     );
     assert.equal(
         (PWA_SOURCE.match(/\/static\/js\/dispatcher-equipment-search-v1\.js/g) || []).length,
