@@ -944,20 +944,77 @@ def _resolve_trip_reference(access, normalized):
     return trip
 
 
-def _historical_excavator_assignment(*, shift, truck_id, requested_assignment_id, occurred_at):
-    from assignments.models import HaulAssignment, HaulAssignmentAction
+def _historical_excavator_assignment(*, access, shift, truck_id, requested_assignment_id, occurred_at):
+    from assignments.models import AssignmentStatus, HaulAssignment, HaulAssignmentAction
 
-    assignment = (
+    requested = (
         HaulAssignment.objects.select_for_update(of=('self',))
         .select_related('truck', 'excavator')
         .filter(pk=requested_assignment_id, truck_id=truck_id, excavator_id=shift.equipment_id)
         .first()
     )
-    if not assignment or assignment.action != HaulAssignmentAction.ASSIGN:
-        _conflict('assignment_context_changed', 'Назначение из события не найдено.')
-    if occurred_at < assignment.assigned_at or (assignment.ended_at and occurred_at > assignment.ended_at):
-        _conflict('assignment_time_mismatch', 'В указанное время это назначение не действовало.')
-    return assignment
+    if (
+        requested
+        and requested.action == HaulAssignmentAction.ASSIGN
+        and requested.assigned_at <= occurred_at
+        and not (requested.ended_at and occurred_at > requested.ended_at)
+    ):
+        return requested
+
+    # Запрошенное назначение не найдено или не действовало в момент нажатия —
+    # погрузку машиниста это не отменяет (правило: сервер не отклоняет
+    # действия работника из-за спора о служебных ссылках). Ищем назначение,
+    # ДЕЙСТВОВАВШЕЕ на этой паре техники в момент нажатия, по времени, а не
+    # по конкретному ID.
+    fitting = (
+        HaulAssignment.objects.select_for_update(of=('self',))
+        .select_related('truck', 'excavator')
+        .filter(
+            truck_id=truck_id, excavator_id=shift.equipment_id,
+            action=HaulAssignmentAction.ASSIGN, assigned_at__lte=occurred_at,
+        )
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gte=occurred_at))
+        .order_by('-assigned_at', '-id')
+        .first()
+    )
+    resolved = fitting or (
+        HaulAssignment.objects.select_for_update(of=('self',))
+        .select_related('truck', 'excavator')
+        .filter(truck_id=truck_id, excavator_id=shift.equipment_id, action=HaulAssignmentAction.ASSIGN)
+        .order_by('-assigned_at', '-id')
+        .first()
+    )
+    if not resolved:
+        # Ни запрошенное, ни вообще какое-либо назначение для этой пары
+        # техники не найдено — восстановить нечего. Правило: сервер всё равно
+        # не отклоняет погрузку машиниста, а принимает её с той парой
+        # самосвал/экскаватор, что прислал телефон, заводя недостающее
+        # назначение по факту этой погрузки.
+        resolved = HaulAssignment.objects.create(
+            truck_id=truck_id, excavator_id=shift.equipment_id,
+            action=HaulAssignmentAction.ASSIGN, status=AssignmentStatus.ACCEPTED,
+            assigned_by=access.employee, assigned_at=occurred_at, accepted_at=occurred_at,
+        )
+        _log_discrepancy(
+            access=access, code='assignment_context_changed', process='Погрузка экскаватором',
+            description=(
+                f'Для пары самосвал {truck_id}/экскаватор {shift.equipment_id} на момент погрузки '
+                f'({occurred_at}) не нашлось вообще никакого назначения. Погрузка машиниста принята, '
+                f'заведено назначение #{resolved.id} по факту этой погрузки.'
+            ),
+        )
+        return resolved
+    code = 'assignment_context_changed' if not requested else 'assignment_time_mismatch'
+    _log_discrepancy(
+        access=access, code=code, process='Погрузка экскаватором',
+        description=(
+            f'Запрошенное назначение #{requested_assignment_id} не подошло на момент нажатия '
+            f'({occurred_at}) для пары самосвал {truck_id}/экскаватор {shift.equipment_id}. '
+            f'Принято назначение #{resolved.id}, действовавшее в это время на этой паре техники '
+            f'(или ближайшее известное, если точного совпадения по времени нет).'
+        ),
+    )
+    return resolved
 
 
 def _manual_load_matches_trip(trip, payload, *, acceptance=None):
@@ -1643,7 +1700,7 @@ def _process_excavator_loaded(access, normalized):
             'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
         )
     assignment = _historical_excavator_assignment(
-        shift=shift, truck_id=truck_id, requested_assignment_id=assignment_id,
+        access=access, shift=shift, truck_id=truck_id, requested_assignment_id=assignment_id,
         occurred_at=normalized['occurred_at'],
     )
     assignment.truck = truck

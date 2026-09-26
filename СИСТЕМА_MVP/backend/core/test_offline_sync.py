@@ -2015,7 +2015,13 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.unload_received_at, receipt.received_at)
         self.assertEqual(trip.unload_time_source, 'server_receipt')
 
-    def test_historical_assignment_is_used_but_event_after_end_conflicts(self):
+    def test_historical_assignment_is_used_and_event_after_end_is_still_accepted(self):
+        """Машинист — истина по погрузке даже если назначение уже формально истекло.
+
+        Сервер не отклоняет: берёт последнее известное назначение этой пары
+        техники и принимает погрузку с тем экскаватором, что прислал телефон
+        (через смену), расхождение — только в лог.
+        """
         occurred_at = timezone.now()
         ended_at = occurred_at + timedelta(seconds=2)
         HaulAssignment.objects.filter(pk=self.assignment.id).update(
@@ -2032,12 +2038,37 @@ class OfflineEventSyncTests(TestCase):
         historical = self.load_event('historical-load', 1, occurred_at=occurred_at)
         accepted = self.sync([historical]).json()['results'][0]
         self.assertEqual(accepted['status'], 'accepted', accepted)
-        self.assertEqual(Trip.objects.get().excavator_id, self.excavator.id)
+        first_trip = Trip.objects.get()
+        self.assertEqual(first_trip.excavator_id, self.excavator.id)
+        self.assertTrue(finalize_trip_unloaded(
+            first_trip, driver=self.driver, unloading_shift=self.truck_shift,
+            occurred_at=ended_at + timedelta(milliseconds=500),
+        ))
 
         too_late = self.load_event('late-load', 2, occurred_at=ended_at + timedelta(seconds=1))
-        rejected = self.sync([too_late]).json()['results'][0]
-        self.assertEqual(rejected['status'], 'conflict')
-        self.assertEqual(rejected['code'], 'assignment_time_mismatch')
+        result = self.sync([too_late]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        second_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(second_trip.excavator_id, self.excavator.id)
+
+    def test_load_accepted_when_no_assignment_ever_existed_for_the_pair(self):
+        """Для пары техники вообще нет ни одного назначения — сервер всё равно не отклоняет.
+
+        Погрузка машиниста принимается с той парой самосвал/экскаватор, что
+        прислал телефон; недостающее назначение заводится по факту.
+        """
+        HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).delete()
+
+        event = self.load_event('load-with-no-assignment-ever', 1)
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertTrue(
+            HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).exists()
+        )
 
     def test_delayed_load_keeps_driver_shift_from_occurrence_not_new_shift(self):
         occurred_at = timezone.now()
