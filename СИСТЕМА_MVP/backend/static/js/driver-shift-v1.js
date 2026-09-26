@@ -1551,20 +1551,43 @@ window.bindDriverMobileShell = function () {
     }
 
     function startDriverDowntimeTimer(payload) {
-        clearDriverDowntimeTimer();
         payload = payload || {};
-        syncDriverReasonTotals(payload);
         var activeReasonId = String(payload.reason_id || "");
+        var eventId = String(payload.event_id || "");
+        var existing = window.driverDowntimeClock;
+        if (existing && eventId && existing.eventId === eventId && existing.activeReasonId === activeReasonId) {
+            /* Тот же самый простой (тот же event_id и причина) — не
+               перезапускаем отсчёт. Раньше любое фоновое обновление экрана
+               (опрос раз в ~2 с, подмена фрагмента) заново вызывало эту
+               функцию с оптимистичным/устаревшим payload.elapsed_seconds
+               (обычно 0) и просто обнуляло видимый таймер каждые несколько
+               секунд, хотя простой всё это время оставался тем же самым
+               (пойман на бою 27.09.2026, v358). Освежаем только видимые
+               накопленные секунды по причинам — они могли поменяться. */
+            syncDriverReasonTotals(payload);
+            return;
+        }
+        clearDriverDowntimeTimer();
+        syncDriverReasonTotals(payload);
         /* Отсчёт ведётся от собственных часов телефона в момент получения ответа,
            а не от серверной отметки времени. Сервер присылает уже накопленные
            секунды; складывать их с разницей «серверное время минус время
            телефона» нельзя: на телефоне с вручную выставленными часами эта
            разница и есть сдвиг, и водитель видел трёхчасовой обед вместо
-           десяти минут. В базе при этом всё верно — там время приёма сервером. */
+           десяти минут. В базе при этом всё верно — там время приёма сервером.
+           Базовое число секунд считается от started_at активного простоя (а
+           не от присланного elapsed_seconds — тот бывает нулевым или
+           устаревшим снимком), чтобы редкий неизбежный перезапуск (первая
+           загрузка экрана, смена причины) не терял накопленное время. */
         var syncedAtMs = Date.now();
+        var startedAtMs = Date.parse(payload.started_at || "");
+        var baseActiveElapsedSeconds = Number.isFinite(startedAtMs)
+            ? Math.max(0, Math.floor((syncedAtMs - startedAtMs) / 1000))
+            : Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0));
         var clock = {
             activeReasonId: activeReasonId,
-            baseActiveElapsedSeconds: Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0)),
+            eventId: eventId,
+            baseActiveElapsedSeconds: baseActiveElapsedSeconds,
             baseShiftSeconds: Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0)),
             syncedAtMs: syncedAtMs
         };

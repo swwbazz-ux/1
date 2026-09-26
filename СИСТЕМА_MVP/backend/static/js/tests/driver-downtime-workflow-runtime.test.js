@@ -388,6 +388,61 @@ test("downtime switch freezes the previous reason while the shift total stays co
     assert.equal(runtime.buttons[1].reasonDuration.textContent, "00:00:07");
 });
 
+test("repeated refresh of the same active downtime does not reset the running timer", () => {
+    // Боевой 27.09.2026 (v358): каждое фоновое обновление экрана (опрос,
+    // подмена фрагмента) заново вызывало startDriverDowntimeTimer с тем же
+    // самым простоем (тот же event_id/причина), но оптимистичным/устаревшим
+    // payload.elapsed_seconds (обычно 0) — таймер обнулялся каждые
+    // несколько секунд, хотя простой всё это время был тем же самым.
+    const runtime = loadDowntimeTimerRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-1",
+        reason_id: 1,
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 13,
+        calculated_at: "2026-09-17T01:00:00.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:02.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:15");
+
+    // Повторная отрисовка того же простоя — как при фоновом опросе — со
+    // "свежим" elapsed_seconds: 0, тем же event_id/причиной.
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-1",
+        reason_id: 1,
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 13,
+        calculated_at: "2026-09-17T01:00:02.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:07.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:20");
+});
+
+test("the timer's base always counts from started_at, ignoring a zero or stale elapsed_seconds snapshot", () => {
+    const runtime = loadDowntimeTimerRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-2",
+        reason_id: 1,
+        // Простой на самом деле идёт уже 30 с, но снимок elapsed_seconds
+        // прислал 0 (оптимистичный локальный payload) — таймер обязан
+        // считать от started_at, а не от этого числа.
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-17T01:00:30.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:30.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:30");
+});
+
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
