@@ -474,7 +474,6 @@ test("доска собирается только с выделенным мо�
         post() { return Promise.resolve({}); },
         getShiftOpen() { return false; },
         refreshBoardFromServer() { return Promise.resolve(true); },
-        markLocalAssignmentApplied() {},
         reloadFallback() {},
         openEquipmentCard() { return false; },
         equipmentStateClass() { return ""; },

@@ -1,6 +1,6 @@
 /* Dispatcher desktop board.
-   Owns board layout and optimistic DOM updates.
-   Network transport, realtime reconciliation and detail rendering are injected. */
+   Owns action policy and board-layout coordination.
+   Local DOM mutations, transport, realtime reconciliation and detail rendering are injected. */
 (function (global, document) {
     "use strict";
 
@@ -54,10 +54,6 @@
         function refreshDispatcherDesktopBoardFromServer(refreshOptions) {
             return options.refreshBoardFromServer(refreshOptions);
         }
-        function markDispatcherLocalAssignmentApplied() {
-            return options.markLocalAssignmentApplied();
-        }
-
         var board = document.querySelector(".dispatcher-board");
         var excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
         function refreshExcavatorGarage() {
@@ -165,17 +161,11 @@
                 grid.appendChild(card);
             });
         }
-        function confirmDesktopOptimisticBoardAction(response) {
-            if (response && response.queued) return response;
-            markDispatcherLocalAssignmentApplied();
-            return response;
-        }
         function refreshDesktopBoardAfterStructuralAction(response, localFallback) {
             if (response && response.queued) {
                 if (typeof localFallback === "function") {
                     localFallback();
                 }
-                markDispatcherLocalAssignmentApplied();
                 return response;
             }
             return refreshDispatcherDesktopBoardFromServer().then(function (applied) {
@@ -183,13 +173,11 @@
                     if (typeof localFallback === "function") {
                         localFallback();
                     }
-                    markDispatcherLocalAssignmentApplied();
                 }
                 return response;
             }).catch(function (error) {
                 if (typeof localFallback === "function") {
                     localFallback();
-                    markDispatcherLocalAssignmentApplied();
                 } else {
                     throw error;
                 }
@@ -219,8 +207,6 @@
             }
             if (!applied) {
                 refreshDispatcherDesktopBoardFromServer().catch(reloadDispatcherBoardAsFallback);
-            } else {
-                markDispatcherLocalAssignmentApplied();
             }
             return response;
         }

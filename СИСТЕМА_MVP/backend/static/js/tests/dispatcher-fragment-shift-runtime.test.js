@@ -416,7 +416,6 @@ test("fallback расформирования сохраняет новые ве
         refreshDispatcherDesktopBoardFromServer() {
             return Promise.resolve(false);
         },
-        markDispatcherLocalAssignmentApplied() {},
         requestDispatcherDesktopDangerConfirmation(options) {
             options.action();
         },

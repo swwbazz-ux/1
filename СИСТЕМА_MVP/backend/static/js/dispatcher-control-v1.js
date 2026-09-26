@@ -139,9 +139,6 @@ document.addEventListener("DOMContentLoaded", function () {
         assignmentState: dispatcherHaulAssignmentState,
         refreshBoardFromServer: function (refreshOptions) {
             return dispatcherRealtime.refreshBoardFromServer(refreshOptions);
-        },
-        markLocalAssignmentApplied: function () {
-            return dispatcherRealtime.markLocalAssignmentApplied();
         }
     });
     function reloadDispatcherBoardAsFallback() {
@@ -171,7 +168,6 @@ document.addEventListener("DOMContentLoaded", function () {
         refreshBoardIntegrity: dispatcherBoard.refreshIntegrity,
         updateSyncIndicator: updateDispatcherSyncIndicator
     });
-    var markDispatcherLocalAssignmentApplied = dispatcherRealtime.markLocalAssignmentApplied;
     var isDispatcherOperationalRefreshUnsafe = dispatcherRealtime.isOperationalRefreshUnsafe;
     var refreshDispatcherDesktopBoardFromServer = dispatcherRealtime.refreshBoardFromServer;
     var seedDispatcherBoardFingerprints = dispatcherRealtime.seedBoardFingerprints;

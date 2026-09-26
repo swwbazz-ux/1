@@ -13,7 +13,6 @@
         var transport = options.transport;
         var storageKey = "operational-state-version";
         var hardLagLimit = 150;
-        var localAssignmentAppliedUntil = 0;
         var incomingRefreshQueueGraceMs = 15000;
         var syncQueueWakeThrottleMs = 1500;
         var lastSyncQueueWakeAt = 0;
@@ -100,20 +99,8 @@
             return isElementRendered(hostDocument.querySelector(".dispatcher-board"));
         }
 
-        function markDispatcherLocalAssignmentApplied() {
-            localAssignmentAppliedUntil = Date.now() + 8000;
-        }
-
         function hasDispatcherRelevantEvents(events) {
             return Array.isArray(events) && events.length > 0;
-        }
-
-        function canTrustLocalDispatcherAssignmentEvents(events) {
-            if (!Array.isArray(events) || !events.length) return false;
-            if (Date.now() > localAssignmentAppliedUntil) return false;
-            return events.every(function (event) {
-                return event && event.type === "assignment_changed";
-            });
         }
 
         function isDispatcherOperationalRefreshUnsafe() {
@@ -407,7 +394,7 @@
                     return {deferred: true, reason: "dispatcher_refresh_error"};
                 });
             }
-            if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
+            if (!hasDispatcherRelevantEvents(events)) {
                 return Promise.resolve({
                     applied: true,
                     version: storeDispatcherRealtimeVersion(targetVersion)
@@ -424,7 +411,6 @@
         return {
             applyOperationalStateRefresh: applyDispatcherOperationalStateRefresh,
             isOperationalRefreshUnsafe: isDispatcherOperationalRefreshUnsafe,
-            markLocalAssignmentApplied: markDispatcherLocalAssignmentApplied,
             refreshBoardFromServer: refreshDispatcherDesktopBoardFromServer,
             seedBoardFingerprints: seedDispatcherBoardFingerprints
         };

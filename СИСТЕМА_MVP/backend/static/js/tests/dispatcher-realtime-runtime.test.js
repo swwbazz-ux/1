@@ -185,6 +185,26 @@ test("активный drag откладывает fragment и не сбрасы
     assert.equal(harness.calls.bind, 0);
 });
 
+test("assignment_changed always refreshes the authoritative dispatcher board", async () => {
+    const harness = createHarness({
+        payload: {html: "<section></section>", version: 11, equipment_cards: {}},
+    });
+
+    assert.equal(typeof harness.runtime.markLocalAssignmentApplied, "undefined");
+    const result = await harness.runtime.applyOperationalStateRefresh({
+        version: 11,
+        events: [{
+            type: "assignment_changed",
+            payload: {truck_ids: ["other-truck"], target_excavator_id: "other-excavator"},
+        }],
+    });
+
+    assert.equal(result.applied, true);
+    assert.deepEqual(harness.calls.request, [{screen: "dispatcher", version: 11}]);
+    assert.equal(harness.currentBoard.replacedWith, harness.freshBoard);
+    assert.equal(harness.body.dataset.operationalStateVersion, "11");
+});
+
 test("truncated realtime history uses full-board fallback and restores runtime hooks", async () => {
     const harness = createHarness({payload: {html: "<section></section>", version: 200, equipment_cards: {7: {id: 7}}}});
 
