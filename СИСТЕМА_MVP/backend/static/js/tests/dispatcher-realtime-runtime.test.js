@@ -10,6 +10,10 @@ const SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
 );
+const RECONCILER_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-fragment-reconciler-v1.js"),
+    "utf8"
+);
 
 function classList() {
     const values = new Set();
@@ -115,7 +119,9 @@ function createHarness({payload = null, unsafeDrag = false, deferredRequests = f
             },
         },
     };
-    vm.runInNewContext(SOURCE, {window, console}, {filename: "dispatcher-realtime-v1.js"});
+    const context = {window, console};
+    vm.runInNewContext(RECONCILER_SOURCE, context, {filename: "dispatcher-fragment-reconciler-v1.js"});
+    vm.runInNewContext(SOURCE, context, {filename: "dispatcher-realtime-v1.js"});
     const runtime = window.createDispatcherRealtime({
         transport: {
             getQueueState() { return {isFlushing: false, pendingCount: 0}; },

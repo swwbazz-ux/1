@@ -66,6 +66,10 @@ const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
 );
+const DISPATCHER_FRAGMENT_RECONCILER = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-fragment-reconciler-v1.js"),
+    "utf8"
+);
 const DISPATCHER_REALTIME = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-realtime-v1.js"),
     "utf8"
@@ -298,6 +302,7 @@ test("transport загружается перед основным runtime и в
     const mutationsIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-mutations-v1.js");
     const actionsIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-actions-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
+    const fragmentReconcilerIndex = SHARED_TEMPLATE.indexOf("dispatcher-fragment-reconciler-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
 
@@ -316,7 +321,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(mutationsIndex > dndIndex, "local board mutations must load after drag-and-drop");
     assert.ok(actionsIndex > mutationsIndex, "board action policy must load after local mutations");
     assert.ok(boardIndex > actionsIndex, "board must load after its action policy");
-    assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
+    assert.ok(fragmentReconcilerIndex > boardIndex, "fragment reconciler must load after board");
+    assert.ok(realtimeIndex > fragmentReconcilerIndex, "realtime must load after fragment reconciler");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
@@ -334,6 +340,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-mutations-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-actions-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-fragment-reconciler-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-settings-v1\.js/);
@@ -348,6 +355,7 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-mutations-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-actions-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-fragment-reconciler-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
 
@@ -444,7 +452,19 @@ test("offline queue физически отделена, но сохраняет
 });
 
 test("realtime reconciliation is physically separated behind a narrow callback boundary", () => {
-    assert.match(DISPATCHER_REALTIME, /function reconcileDispatcherDesktopBoard\(currentBoard, freshBoard\)/);
+    const runtimeName = "dispatcher-fragment-reconciler-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-fragment-reconciler-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-fragment-reconciler-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
+    assert.match(DISPATCHER_FRAGMENT_RECONCILER, /function reconcileDispatcherDesktopBoard\(currentBoard, freshBoard\)/);
+    assert.match(DISPATCHER_FRAGMENT_RECONCILER, /function captureDispatcherDesktopState\(currentBoard\)/);
+    assert.match(DISPATCHER_FRAGMENT_RECONCILER, /global\.createDispatcherFragmentReconciler/);
+    assert.doesNotMatch(DISPATCHER_REALTIME, /function reconcileDispatcherDesktopBoard\(currentBoard, freshBoard\)/);
+    assert.match(DISPATCHER_REALTIME, /fragmentReconciler\.reconcileBoard/);
     assert.match(DISPATCHER_REALTIME, /function refreshDispatcherDesktopBoardFromServer\(refreshOptions\)/);
     assert.match(DISPATCHER_REALTIME, /function applyDispatcherOperationalStateRefresh\(context\)/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function reconcileDispatcherDesktopBoard\(/);

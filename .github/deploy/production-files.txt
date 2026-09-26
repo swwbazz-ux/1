@@ -37,6 +37,7 @@
 СИСТЕМА_MVP/backend/static/js/dispatcher-board-mutations-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-board-actions-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-fragment-reconciler-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-sounds-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js

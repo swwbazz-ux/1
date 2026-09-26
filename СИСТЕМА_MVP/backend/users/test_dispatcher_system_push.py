@@ -164,7 +164,7 @@ class DispatcherServiceWorkerPushContractTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('dispatcher-desktop-shell-v161', script)
+        self.assertIn('dispatcher-desktop-shell-v162', script)
         self.assertIn('/static/js/dispatcher-transport-v1.js', script)
         self.assertIn('/static/js/dispatcher-detail-settings-v1.js', script)
         self.assertIn('/static/js/dispatcher-detail-charts-v1.js', script)
@@ -177,6 +177,7 @@ class DispatcherServiceWorkerPushContractTests(TestCase):
         self.assertIn('/static/js/dispatcher-board-mutations-v1.js', script)
         self.assertIn('/static/js/dispatcher-board-actions-v1.js', script)
         self.assertIn('/static/js/dispatcher-board-v1.js', script)
+        self.assertIn('/static/js/dispatcher-fragment-reconciler-v1.js', script)
         self.assertIn('/static/js/dispatcher-realtime-v1.js', script)
         self.assertIn('self.addEventListener("push"', script)
         self.assertIn('hasVisibleDispatcherWindow', script)

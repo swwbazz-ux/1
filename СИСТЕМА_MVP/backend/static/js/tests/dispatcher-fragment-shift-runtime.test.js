@@ -19,6 +19,10 @@ const REALTIME_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
 );
+const RECONCILER_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-fragment-reconciler-v1.js"),
+    "utf8"
+);
 const ASSIGNMENT_STATE_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-haul-assignment-state-v1.js"),
     "utf8"
@@ -651,7 +655,7 @@ test("fragment refresh synchronizes shift runtime before replacement and rebind"
 
 test("dispatcher fragment reconciliation is keyed by equipment and complex identity", () => {
     const reconcileSource = extractBraceBlock(
-        REALTIME_SOURCE,
+        RECONCILER_SOURCE,
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
         "Dispatcher keyed board reconciliation"
     );
@@ -677,7 +681,7 @@ test("one changed truck replaces only that keyed tile", () => {
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
     ];
     const helpers = helperNames.map((signature) => (
-        extractBraceBlock(REALTIME_SOURCE, signature, signature)
+        extractBraceBlock(RECONCILER_SOURCE, signature, signature)
     )).join("\n");
     function node(markup, dataset = {}) {
         return {
