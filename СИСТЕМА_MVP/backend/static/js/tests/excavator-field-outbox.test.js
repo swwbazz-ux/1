@@ -602,6 +602,27 @@ test('flush drains a queue in bounded batches', async () => {
     assert.deepEqual(await box.pending(), []);
 });
 
+test('retry backoff after repeated failures on a live connection never exceeds ten seconds', async () => {
+    // Карьер: связь с сервером есть, но нестабильна (не браузерное online/offline
+    // событие) — экспоненциальный откат не должен растягиваться до старых 60 с,
+    // иначе водитель долго не видит, куда ехать, после погрузки машинистом.
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-backoff',
+        send: async events => ({
+            ok: true,
+            results: events.map(event => ({event_id: event.event_id, status: 'retry'})),
+        }),
+    });
+    await box.queue(loadEvent('flaky-network', 1));
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+        await box.retryNow();
+    }
+    const [event] = await box.pending();
+    const delay = Number(event.next_retry_at) - Date.now();
+    assert.ok(delay <= 10000, `expected retry delay <= 10000ms, got ${delay}ms`);
+});
+
 test('a backoff on an earlier event is not bypassed by later events', async () => {
     const calls = [];
     let retryFirst = true;

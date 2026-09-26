@@ -6,7 +6,11 @@
     var STORE_NAME = "events";
     var LEGACY_PREFIX = "excavator-field-outbox-v1:";
     var RETRY_BASE_MS = 2000;
-    var RETRY_MAX_MS = 60000;
+    // Карьер: связь бывает нестабильна без браузерного online/offline события
+    // (сервер временно не отвечает, а не пропадает интерфейс) — окно старого
+    // отказа 60 с держало «куда ехать» у водителя слишком долго. 80 машин с
+    // повтором раз в 8 с — для сервера не нагрузка.
+    var RETRY_MAX_MS = 8000;
     var DEFAULT_BATCH_SIZE = 25;
 
     function clone(value) {

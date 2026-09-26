@@ -88,6 +88,7 @@ def create_loaded_waiting_unload_trip(
     downtime_text='',
     note='',
     supersede_trip=None,
+    historical_closed_at=None,
     participation=None,
     occurred_at=None,
     resolve_assignment_transition=True,
@@ -126,7 +127,11 @@ def create_loaded_waiting_unload_trip(
         if supersede_trip.truck_id != locked_truck.pk or supersede_trip.status not in OPEN_TRIP_STATUSES:
             raise ValidationError('Предыдущий рейс изменился. Обновите экран.')
         open_trips = open_trips.exclude(pk=supersede_trip.pk)
-    if open_trips.exists():
+    # historical_closed_at: опоздавшая погрузка, которая попала в промежуток
+    # МЕЖДУ уже известными рейсами этого самосвала (см. offline_sync._process_late_excavator_load).
+    # Рейс создаётся сразу закрытым и не является «открытым» ни секунды, поэтому
+    # не конфликтует с уже действующим текущим открытым рейсом самосвала.
+    if not historical_closed_at and open_trips.exists():
         raise ValidationError('Самосвал уже находится в незакрытом рейсе.')
     if assignment is not None:
         assignment.truck = locked_truck
@@ -176,10 +181,12 @@ def create_loaded_waiting_unload_trip(
         transport_distance_km=transport_distance_km,
         downtime_text=str(downtime_text or '')[:255],
         note=str(note or '')[:1000],
-        status=TripStatus.LOADED_WAITING_UNLOAD,
+        status=TripStatus.UNCONTROLLED if historical_closed_at else TripStatus.LOADED_WAITING_UNLOAD,
         loaded_at=load_occurred_at,
         load_received_at=received_at,
         load_time_source=resolved_load_time_source,
+        operationally_closed_at=historical_closed_at,
+        closure_recorded_by=excavator_operator if historical_closed_at else None,
     )
     if supersede_trip:
         supersede_trip.superseded_by = trip
