@@ -442,6 +442,30 @@ test("fallback расформирования сохраняет новые ве
     assert.deepEqual(movedTokens, ["99"]);
 });
 
+test("ошибка структурного переноса не оставляет необработанное отклонение при недоступном refresh", async () => {
+    const errorHandlerSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function handleDesktopOptimisticBoardError(error)",
+        "Dispatcher structural error handler"
+    );
+    const shown = [];
+    const context = {
+        Promise,
+        showDispatcherDnDError(error) {
+            shown.push(error.message);
+        },
+        refreshDispatcherDesktopBoardFromServer() {
+            return Promise.reject(new Error("refresh offline"));
+        },
+    };
+    vm.runInNewContext(errorHandlerSource, context);
+
+    const result = await context.handleDesktopOptimisticBoardError(new Error("move offline"));
+
+    assert.equal(result, null);
+    assert.deepEqual(shown, ["move offline"]);
+});
+
 
 test("assignment conflict refreshes the dispatcher board once after the notice closes", async () => {
     const runtime = createConflictRecoveryRuntime();

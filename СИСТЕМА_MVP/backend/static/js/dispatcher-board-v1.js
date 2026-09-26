@@ -438,7 +438,11 @@
         }
         function handleDesktopOptimisticBoardError(error) {
             showDispatcherDnDError(error);
-            return refreshDispatcherDesktopBoardFromServer();
+            return refreshDispatcherDesktopBoardFromServer().catch(function () {
+                /* Первичная ошибка уже показана. При отсутствии сети повторный fragment
+                   не должен становиться необработанным Promise в drag-and-drop. */
+                return null;
+            });
         }
         function applyDesktopTruckAction(response, action) {
             if (response && response.queued) return response;
