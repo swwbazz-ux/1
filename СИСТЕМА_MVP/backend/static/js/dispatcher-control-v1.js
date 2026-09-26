@@ -104,6 +104,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (typeof window.createDispatcherHaulAssignmentState !== "function") {
         throw new Error("Dispatcher haul assignment state module is not loaded");
     }
+    if (typeof window.createDispatcherBoardDnD !== "function") {
+        throw new Error("Dispatcher board drag-and-drop module is not loaded");
+    }
     if (typeof window.createDispatcherBoard !== "function") {
         throw new Error("Dispatcher board module is not loaded");
     }
@@ -163,6 +166,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setEquipmentCards: dispatcherDetail.setCards,
         getDetailLayer: dispatcherDetail.getLayer,
         openEquipmentCard: dispatcherDetail.openEquipmentCard,
+        resetBoardDragSession: dispatcherBoard.resetDragSession,
         bindBoardInteractions: dispatcherBoard.bindInteractions,
         refreshBoardIntegrity: dispatcherBoard.refreshIntegrity,
         updateSyncIndicator: updateDispatcherSyncIndicator

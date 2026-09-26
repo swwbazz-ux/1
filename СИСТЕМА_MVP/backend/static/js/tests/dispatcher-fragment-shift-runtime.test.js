@@ -11,6 +11,7 @@ const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const RUNTIME_SOURCE = [
     "dispatcher-control-v1.js",
     "dispatcher-board-v1.js",
+    "dispatcher-board-dnd-v1.js",
     "dispatcher-detail-v1.js",
 ].map((name) => fs.readFileSync(path.resolve(__dirname, "..", name), "utf8")).join("\n");
 const REALTIME_SOURCE = fs.readFileSync(
@@ -19,6 +20,10 @@ const REALTIME_SOURCE = fs.readFileSync(
 );
 const ASSIGNMENT_STATE_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-haul-assignment-state-v1.js"),
+    "utf8"
+);
+const DND_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-dnd-v1.js"),
     "utf8"
 );
 const TEMPLATE_SOURCE = dispatcherScreenSource();
@@ -184,57 +189,58 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         "function syncDispatcherShiftRuntime(freshBoard)",
         "Dispatcher shift runtime sync"
     );
-    const bindDragSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDragTile(tile)",
-        "Dispatcher drag source bind"
-    );
-    const bindDropSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDispatcherComplexDrop(zone)",
-        "Dispatcher complex drop bind"
-    );
     const assignmentStateFactorySource = extractBraceBlock(
         ASSIGNMENT_STATE_SOURCE,
         "function createDispatcherHaulAssignmentState()",
         "Haul assignment state factory"
     );
-    const bindAllSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDispatcherDesktopInteractions()",
-        "Dispatcher desktop interactions bind"
+    const dndFactorySource = extractBraceBlock(
+        DND_SOURCE,
+        "function createDispatcherBoardDnD(options)",
+        "Dispatcher drag-and-drop factory"
     );
     vm.runInNewContext(
         `
         var dispatcherShiftOpen = ${initialShiftOpen ? "true" : "false"};
         function dispatcherShiftIsOpen() { return dispatcherShiftOpen; }
-        var draggedTile = null;
         var board = null;
-        var excavatorGarage = null;
-        var dragGhost = null;
         var dispatcherAssignTruckUrl = "/dispatcher/assign-truck/";
-        function clearDragGhost() {}
+        var dispatcherMoveExcavatorUrl = "/dispatcher/excavator/move/";
         function bindEquipmentCardTrigger() {}
-        function normalizeComplexGrid() {}
-        function refreshExcavatorGarage() {}
-        function refreshTruckGarage() {}
-        function refreshAllComplexTruckRacks() {}
-        function rebindEquipmentSearch() {}
-        function bindDispatcherExcavatorGarageDrop() {}
-        function bindDispatcherTruckGarageDrop() {}
         function dispatcherPost() {
             fetchCount += 1;
             return Promise.resolve({});
         }
         function applyDesktopTruckAction(response) { return response; }
         function showDispatcherDnDError(error) { throw error; }
+        function handleDesktopOptimisticBoardError(error) { throw error; }
+        function refreshDesktopBoardAfterStructuralAction(response) { return Promise.resolve(response); }
+        function activateDesktopComplexFromExcavatorTile() {}
+        function moveDesktopComplexToExcavatorGarage() {}
         ${syncSource}
         ${assignmentStateFactorySource}
+        ${dndFactorySource}
         var dispatcherHaulAssignmentState = createDispatcherHaulAssignmentState();
-        var haulAssignmentStateId = dispatcherHaulAssignmentState.getStateId;
-        ${bindDragSource}
-        ${bindDropSource}
-        ${bindAllSource}
+        var dispatcherDnD = createDispatcherBoardDnD({
+            document: document,
+            post: dispatcherPost,
+            moveExcavatorUrl: dispatcherMoveExcavatorUrl,
+            assignTruckUrl: dispatcherAssignTruckUrl,
+            getShiftOpen: dispatcherShiftIsOpen,
+            getBoard: function () { return board; },
+            getAssignmentStateId: dispatcherHaulAssignmentState.getStateId,
+            collectComplexAssignmentStates: dispatcherHaulAssignmentState.collectComplexStates,
+            applyHaulAssignmentStates: dispatcherHaulAssignmentState.applyStates,
+            applyDesktopTruckAction: applyDesktopTruckAction,
+            refreshDesktopBoardAfterStructuralAction: refreshDesktopBoardAfterStructuralAction,
+            activateDesktopComplexFromExcavatorTile: activateDesktopComplexFromExcavatorTile,
+            moveDesktopComplexToExcavatorGarage: moveDesktopComplexToExcavatorGarage,
+            handleStructuralError: handleDesktopOptimisticBoardError,
+            showError: showDispatcherDnDError
+        });
+        function bindDispatcherDesktopInteractions() {
+            dispatcherDnD.bind();
+        }
         `,
         context,
         {filename: "templates/trips/dispatcher_control.html#dispatcher-shift-runtime"}

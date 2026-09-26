@@ -42,6 +42,10 @@ const DISPATCHER_HAUL_ASSIGNMENT_STATE = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-haul-assignment-state-v1.js"),
     "utf8"
 );
+const DISPATCHER_BOARD_DND = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-board-dnd-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -80,7 +84,7 @@ const PRODUCTION_MANIFEST = fs.readFileSync(
 );
 
 test("desktop runtime содержит только контур Диспетчера", () => {
-    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_EQUIPMENT_SEARCH, DISPATCHER_COMPLEX_TRUCK_RACKS, DISPATCHER_HAUL_ASSIGNMENT_STATE, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
+    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_EQUIPMENT_SEARCH, DISPATCHER_COMPLEX_TRUCK_RACKS, DISPATCHER_HAUL_ASSIGNMENT_STATE, DISPATCHER_BOARD_DND, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
     for (const mobileContract of [
         "function bindMiningMasterMobileScreens()",
         "function refreshMobileBoardFromServer(options)",
@@ -204,10 +208,17 @@ test("карточка и desktop-доска физически отделены
     assert.match(DISPATCHER_HAUL_ASSIGNMENT_STATE, /function createDispatcherHaulAssignmentState\(\)/);
     assert.match(DISPATCHER_HAUL_ASSIGNMENT_STATE, /global\.createDispatcherHaulAssignmentState = createDispatcherHaulAssignmentState;/);
     assert.doesNotMatch(DISPATCHER_HAUL_ASSIGNMENT_STATE, /dispatcherPost|dragstart|refreshBoardFromServer/);
+    assert.match(DISPATCHER_BOARD_DND, /function createDispatcherBoardDnD\(options\)/);
+    assert.match(DISPATCHER_BOARD_DND, /global\.createDispatcherBoardDnD = createDispatcherBoardDnD;/);
+    assert.match(DISPATCHER_BOARD_DND, /function resetSession\(\)/);
+    assert.match(DISPATCHER_BOARD_DND, /function bindDispatcherComplexDrop\(zone\)/);
+    assert.doesNotMatch(DISPATCHER_BOARD_DND, /moveDesktopTruckToComplex|refreshDispatcherDesktopBoardFromServer/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function complexTileForGrid\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function watchComplexTruckRacks\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherEquipmentSearch\(\)/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function haulAssignmentStateId\(/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherComplexDrop\(zone\)/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherTruckGarageDrop\(garage\)/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
     assert.match(DISPATCHER_BOARD, /function bindDispatcherDesktopInteractions\(\)/);
@@ -216,6 +227,7 @@ test("карточка и desktop-доска физически отделены
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherDetail\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherComplexTruckRacks\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherHaulAssignmentState\(\)/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoardDnD/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoard\(\{/);
     assert.match(DISPATCHER_RUNTIME, /complexTruckRacks: dispatcherComplexTruckRacks/);
     assert.match(DISPATCHER_RUNTIME, /assignmentState: dispatcherHaulAssignmentState/);
@@ -229,6 +241,7 @@ test("transport загружается перед основным runtime и в
     const equipmentSearchIndex = SHARED_TEMPLATE.indexOf("dispatcher-equipment-search-v1.js");
     const complexTruckRacksIndex = SHARED_TEMPLATE.indexOf("dispatcher-complex-truck-racks-v1.js");
     const assignmentStateIndex = SHARED_TEMPLATE.indexOf("dispatcher-haul-assignment-state-v1.js");
+    const dndIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-dnd-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
@@ -242,7 +255,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(equipmentSearchIndex > detailIndex, "equipment search must load after detail");
     assert.ok(complexTruckRacksIndex > equipmentSearchIndex, "complex racks must load after equipment search");
     assert.ok(assignmentStateIndex > complexTruckRacksIndex, "assignment state must load after complex racks");
-    assert.ok(boardIndex > assignmentStateIndex, "board must load after assignment state");
+    assert.ok(dndIndex > assignmentStateIndex, "drag-and-drop must load after assignment state");
+    assert.ok(boardIndex > dndIndex, "board must load after drag-and-drop");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
@@ -255,6 +269,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-equipment-search-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-complex-truck-racks-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-haul-assignment-state-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-dnd-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
@@ -264,6 +279,7 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-equipment-search-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-complex-truck-racks-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-haul-assignment-state-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-dnd-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });
@@ -284,6 +300,17 @@ test("модуль версий назначений упакован ровно
     const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-haul-assignment-state-v1.js";
     assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
     assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-haul-assignment-state-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
+});
+
+test("модуль drag-and-drop упакован ровно один раз", () => {
+    const runtimeName = "dispatcher-board-dnd-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-board-dnd-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-board-dnd-v1\.js/g) || []).length, 1);
     assert.equal(
         PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
         1

@@ -37,7 +37,7 @@ function boardNode() {
     };
 }
 
-function createHarness({payload = null} = {}) {
+function createHarness({payload = null, unsafeDrag = false} = {}) {
     const currentBoard = boardNode();
     const freshBoard = boardNode();
     freshBoard.dataset.dispatcherShiftOpen = "true";
@@ -45,9 +45,15 @@ function createHarness({payload = null} = {}) {
     const calls = {
         request: [],
         syncShift: 0,
+        reset: 0,
         bind: 0,
         integrity: 0,
         indicator: 0,
+        lifecycle: [],
+    };
+    currentBoard.replaceWith = function (node) {
+        calls.lifecycle.push("replace");
+        this.replacedWith = node;
     };
     const body = {
         dataset: {operationalStateVersion: "10"},
@@ -58,6 +64,7 @@ function createHarness({payload = null} = {}) {
         activeElement: null,
         querySelector(selector) {
             if (selector === ".dispatcher-board") return currentBoard;
+            if (unsafeDrag && selector.includes(".dispatcher-dragging")) return {};
             return null;
         },
     };
@@ -87,12 +94,22 @@ function createHarness({payload = null} = {}) {
             readQueue() { return []; },
             scheduleFlush() {},
         },
-        syncShiftRuntime() { calls.syncShift += 1; },
+        syncShiftRuntime() {
+            calls.syncShift += 1;
+            calls.lifecycle.push("sync");
+        },
         getEquipmentCards() { return {}; },
         setEquipmentCards() {},
         getDetailLayer() { return null; },
         openEquipmentCard() {},
-        bindBoardInteractions() { calls.bind += 1; },
+        resetBoardDragSession() {
+            calls.reset += 1;
+            calls.lifecycle.push("reset");
+        },
+        bindBoardInteractions() {
+            calls.bind += 1;
+            calls.lifecycle.push("bind");
+        },
         refreshBoardIntegrity() { calls.integrity += 1; },
         updateSyncIndicator() { calls.indicator += 1; },
     });
@@ -110,6 +127,21 @@ test("irrelevant realtime version is stored without fetching a dispatcher fragme
     assert.equal(harness.storage.get("operational-state-version"), "11");
 });
 
+test("активный drag откладывает fragment и не сбрасывает текущую сессию", async () => {
+    const harness = createHarness({unsafeDrag: true});
+
+    const result = await harness.runtime.applyOperationalStateRefresh({
+        version: 11,
+        events: [{type: "assignment_changed"}],
+    });
+
+    assert.equal(result.deferred, true);
+    assert.equal(result.reason, "dispatcher_busy");
+    assert.equal(harness.calls.request.length, 0);
+    assert.equal(harness.calls.reset, 0);
+    assert.equal(harness.calls.bind, 0);
+});
+
 test("truncated realtime history uses full-board fallback and restores runtime hooks", async () => {
     const harness = createHarness({payload: {html: "<section></section>", equipment_cards: {7: {id: 7}}}});
 
@@ -123,7 +155,9 @@ test("truncated realtime history uses full-board fallback and restores runtime h
     assert.deepEqual(harness.calls.request, [{screen: "dispatcher", version: 200}]);
     assert.equal(harness.currentBoard.replacedWith, harness.freshBoard);
     assert.equal(harness.calls.syncShift, 1);
+    assert.equal(harness.calls.reset, 1);
     assert.equal(harness.calls.bind, 1);
+    assert.deepEqual(harness.calls.lifecycle.slice(0, 4), ["sync", "replace", "reset", "bind"]);
     assert.equal(harness.calls.integrity, 1);
     assert.equal(harness.calls.indicator, 1);
     assert.equal(harness.body.dataset.operationalStateVersion, "200");

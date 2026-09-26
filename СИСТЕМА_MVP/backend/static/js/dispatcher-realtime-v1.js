@@ -329,6 +329,12 @@
                     currentBoard.replaceWith(freshBoard);
                     refreshedBoard = freshBoard;
                 }
+                /* A fragment can replace the drag source without a native dragend.
+                   Clear that stale session only at this replacement boundary, never
+                   during an ordinary interaction rebind. */
+                if (typeof options.resetBoardDragSession === "function") {
+                    options.resetBoardDragSession();
+                }
                 if (typeof options.bindBoardInteractions === "function") {
                     options.bindBoardInteractions();
                 }
