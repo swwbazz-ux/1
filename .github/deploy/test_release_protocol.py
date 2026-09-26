@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import re
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -196,6 +197,138 @@ class ReleaseProtocolTests(unittest.TestCase):
             "summary": {"row_count": 1, "truncated": False},
         }
 
+    def infra_metadata(self):
+        return {"operation": "infra_capacity_v1"}
+
+    def infra_report(self):
+        service = {
+            "load_state": "loaded",
+            "active_state": "active",
+            "sub_state": "running",
+            "main_pid": 123,
+            "restarts": 0,
+            "cpu_usage_ns": 123456789,
+            "memory_current_bytes": 268435456,
+            "memory_peak_bytes": 300000000,
+            "tasks_current": 8,
+            "tasks_max": 256,
+            "limit_nofile": 4096,
+        }
+        redis_ok = {
+            "status": "ok",
+            "port": 6379,
+            "version": "7.2.4",
+            "uptime_seconds": 86400,
+            "connected_clients": 12,
+            "blocked_clients": 0,
+            "maxclients": 10000,
+            "used_memory_bytes": 8388608,
+            "used_memory_peak_bytes": 12582912,
+            "maxmemory_bytes": 67108864,
+            "maxmemory_policy": "noeviction",
+            "instantaneous_ops_per_sec": 25,
+            "rejected_connections": 0,
+            "evicted_keys": 0,
+            "pubsub_channels": 4,
+            "acl_details_returned": False,
+            "channel_names_returned": False,
+        }
+        redis_auth = {
+            "status": "auth_required",
+            "port": 6381,
+            "version": None,
+            "uptime_seconds": None,
+            "connected_clients": None,
+            "blocked_clients": None,
+            "maxclients": None,
+            "used_memory_bytes": None,
+            "used_memory_peak_bytes": None,
+            "maxmemory_bytes": None,
+            "maxmemory_policy": None,
+            "instantaneous_ops_per_sec": None,
+            "rejected_connections": None,
+            "evicted_keys": None,
+            "pubsub_channels": None,
+            "acl_details_returned": False,
+            "channel_names_returned": False,
+        }
+        return {
+            "schema": 1,
+            "operation": "infra_capacity_v1",
+            "request": {},
+            "scope": {
+                "sample_started_utc": "2026-09-27T00:00:00Z",
+                "sample_finished_utc": "2026-09-27T00:00:05Z",
+                "sample_seconds": 5.1,
+                "historical_window_available": False,
+                "application_event_loop_probe_available": False,
+            },
+            "host": {
+                "logical_cpu_count": 8,
+                "cpu_usage_percent_samples": [10.0, 20.0, 30.0, 40.0, 50.0],
+                "cpu_usage_percent_average": 30.0,
+                "cpu_usage_percent_maximum": 50.0,
+                "load_average": {"one_minute": 1.25, "five_minutes": 1.0, "fifteen_minutes": 0.75},
+                "uptime_seconds": 123456.0,
+                "memory_bytes": {
+                    "total": 17179869184,
+                    "available": 8589934592,
+                    "swap_total": 2147483648,
+                    "swap_free": 2147483648,
+                },
+                "pressure": {
+                    "cpu": {"avg10": 0.1, "avg60": 0.2, "avg300": 0.3, "total_us": 1000},
+                    "memory": None,
+                    "io": None,
+                },
+                "file_handles": {"allocated": 1024, "maximum": 1048576},
+                "disk_bytes": {
+                    "root": {"total": 1000, "used": 400, "free": 600},
+                    "application": {"total": 1000, "used": 400, "free": 600},
+                },
+            },
+            "services": {
+                "accounting_mvp": dict(service),
+                "nginx": dict(service),
+                "postgresql": dict(service),
+                "redis_server": dict(service),
+            },
+            "postgresql": {
+                "status": "ok",
+                "server_version_num": 160004,
+                "transaction_read_only": True,
+                "transaction_isolation": "read_committed",
+                "max_connections": 100,
+                "reserved_connections_supported": True,
+                "reserved_connections": 5,
+                "superuser_reserved_connections": 3,
+                "role_connection_limit": -1,
+                "server_process_rows": 22,
+                "observed_client_backend_connections": 20,
+                "rows_with_unknown_backend_type": 2,
+                "client_backend_count_complete": False,
+                "database_process_rows": 14,
+                "observed_database_client_connections": 12,
+                "database_rows_with_unknown_backend_type": 1,
+                "database_rows_with_known_nonclient_backend_type": 1,
+                "database_client_backend_count_complete": False,
+                "observed_database_client_connections_with_visible_details": 10,
+                "observed_database_client_connections_with_hidden_details": 2,
+                "observed_database_client_connections_with_disabled_tracking": 0,
+                "activity_details_visibility": "partial",
+                "visible_active_database_client_connections": 3,
+                "visible_idle_in_transaction_database_client_connections": 0,
+                "visible_lock_waiting_database_client_connections": 0,
+                "locks": 25,
+                "ungranted_locks": 0,
+                "database_size_bytes": 1073741824,
+                "visible_oldest_transaction_seconds": 0.125,
+            },
+            "redis": {"6379": redis_ok, "6381": redis_auth},
+            "summary": {"row_count": 0, "truncated": False},
+            "limitations": list(receiver.INFRA_CAPACITY_LIMITATIONS),
+        }
+
     def test_plain_deploy_rejects_migration_but_migration_mode_accepts_it(self):
         with self.assertRaises(receiver.ReleaseError):
             receiver.validate_target("trips/migrations/0013_example.py", "deploy")
@@ -303,6 +436,73 @@ class ReleaseProtocolTests(unittest.TestCase):
                     with self.assertRaises(SystemExit):
                         builder.load_diagnostic_metadata(event_path)
 
+    def test_infra_capacity_metadata_has_no_free_form_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            inputs = {
+                "diagnostic_operation": "infra_capacity_v1",
+                "diagnostic_equipment": "",
+                "diagnostic_from_utc": "",
+                "diagnostic_to_utc": "",
+                "diagnostic_max_rows": "500",
+            }
+            event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+            self.assertEqual(builder.load_diagnostic_metadata(event_path), self.infra_metadata())
+            self.assertEqual(receiver.validate_diagnostic_metadata(self.infra_metadata()), self.infra_metadata())
+            receiver.validate_mode_contract({
+                "schema": 2,
+                "mode": "diagnose",
+                "commit": "a" * 40,
+                "files": [],
+                "metadata": self.infra_metadata(),
+            }, {})
+
+            for field, value in (
+                ("diagnostic_equipment", "EXC-1"),
+                ("diagnostic_from_utc", "2026-09-27T00:00:00Z"),
+                ("diagnostic_to_utc", "2026-09-27T01:00:00Z"),
+                ("diagnostic_max_rows", "100"),
+            ):
+                with self.subTest(field=field):
+                    candidate = dict(inputs)
+                    candidate[field] = value
+                    event_path.write_text(json.dumps({"inputs": candidate}), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        builder.load_diagnostic_metadata(event_path)
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_metadata({"operation": "infra_capacity_v1", "command": "id"})
+
+    def test_infra_capacity_package_contains_only_the_fixed_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_path = root / "event.json"
+            package = root / "infra-capacity.tar.gz"
+            files_path = root / "files.txt"
+            files_path.write_text("", encoding="utf-8")
+            event_path.write_text(json.dumps({"inputs": {
+                "diagnostic_operation": "infra_capacity_v1",
+                "diagnostic_equipment": "",
+                "diagnostic_from_utc": "",
+                "diagnostic_to_utc": "",
+                "diagnostic_max_rows": "500",
+            }}), encoding="utf-8")
+            argv = [
+                "build_release.py", "--root", str(root), "--files", str(files_path),
+                "--output", str(package), "--commit", "b" * 40, "--mode", "diagnose",
+                "--event-file", str(event_path),
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(sys, "stdout", new_callable=io.StringIO) as captured,
+            ):
+                builder.main()
+            self.assertEqual(captured.getvalue(), "PACKAGE_READY mode=diagnose files=0\n")
+            with tarfile.open(package, "r:gz") as archive:
+                self.assertEqual(archive.getnames(), ["release-manifest.json"])
+            manifest, payload = receiver.load_release(package)
+            self.assertEqual(manifest["metadata"], self.infra_metadata())
+            self.assertEqual(payload, {})
+
     def test_diagnostic_package_has_no_payload_or_executable_operation(self):
         manifest = {
             "schema": 2,
@@ -381,6 +581,220 @@ class ReleaseProtocolTests(unittest.TestCase):
                     self.diagnostic_metadata(),
                 )
 
+    def test_infra_capacity_report_is_exact_bounded_and_contains_no_sensitive_details(self):
+        report = self.infra_report()
+        parsed = receiver.validate_diagnostic_report(
+            json.dumps(report).encode("utf-8"),
+            self.infra_metadata(),
+        )
+        self.assertEqual(parsed["host"]["logical_cpu_count"], 8)
+        self.assertEqual(parsed["postgresql"]["observed_database_client_connections"], 12)
+        self.assertEqual(parsed["postgresql"]["activity_details_visibility"], "partial")
+
+        unsafe_reports = []
+        historical = json.loads(json.dumps(report))
+        historical["scope"]["historical_window_available"] = True
+        unsafe_reports.append(historical)
+        writable = json.loads(json.dumps(report))
+        writable["postgresql"]["transaction_read_only"] = False
+        unsafe_reports.append(writable)
+        redis_acl = json.loads(json.dumps(report))
+        redis_acl["redis"]["6379"]["acl_details_returned"] = True
+        unsafe_reports.append(redis_acl)
+        leaked_path = json.loads(json.dumps(report))
+        leaked_path["services"]["nginx"]["path"] = "/etc/nginx/nginx.conf"
+        unsafe_reports.append(leaked_path)
+        inconsistent_cpu = json.loads(json.dumps(report))
+        inconsistent_cpu["host"]["cpu_usage_percent_average"] = 99.0
+        unsafe_reports.append(inconsistent_cpu)
+        for candidate in unsafe_reports:
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_report(
+                    json.dumps(candidate).encode("utf-8"),
+                    self.infra_metadata(),
+                )
+
+    def test_infra_capacity_disk_space_accepts_reserved_blocks_but_rejects_impossible_values(self):
+        report = self.infra_report()
+        report["host"]["disk_bytes"]["root"] = {"total": 1000, "used": 400, "free": 500}
+        receiver.validate_diagnostic_report(json.dumps(report).encode(), self.infra_metadata())
+
+        no_reserve = json.loads(json.dumps(report))
+        no_reserve["host"]["disk_bytes"]["root"] = {"total": 1000, "used": 400, "free": 600}
+        receiver.validate_diagnostic_report(json.dumps(no_reserve).encode(), self.infra_metadata())
+
+        for disk in (
+            {"total": 1000, "used": -1, "free": 500},
+            {"total": 1000, "used": 600, "free": 500},
+        ):
+            invalid = json.loads(json.dumps(report))
+            invalid["host"]["disk_bytes"]["root"] = disk
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_report(json.dumps(invalid).encode(), self.infra_metadata())
+
+    def test_infra_capacity_cpu_totals_do_not_double_count_guest_time(self):
+        tree = ast.parse(receiver.INFRA_CAPACITY_SOURCE)
+        function = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "cpu_totals"
+        )
+        namespace = {}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), "<cpu-totals>", "exec"), namespace)
+
+        zero_guest = "cpu 100 0 0 100 20 0 0 10 0 0\n"
+        nonzero_guest = "cpu 100 0 0 100 20 0 0 10 50 25\n"
+        values = []
+        for sample in (zero_guest, nonzero_guest):
+            namespace["read_text"] = lambda path, maximum, sample=sample: sample
+            total, idle = namespace["cpu_totals"]()
+            values.append((total, idle, round(100 * (total - idle) / total, 3)))
+        self.assertEqual(values, [(230, 120, 47.826), (230, 120, 47.826)])
+        self.assertIn("iowait is treated as idle; steal remains busy", receiver.INFRA_CAPACITY_SOURCE)
+
+    def test_infra_capacity_postgresql_visibility_and_reserve_semantics_are_explicit(self):
+        partial = self.infra_report()
+        receiver.validate_diagnostic_report(json.dumps(partial).encode(), self.infra_metadata())
+        postgres = partial["postgresql"]
+        self.assertNotIn("cluster_connections", postgres)
+        self.assertFalse(postgres["client_backend_count_complete"])
+        self.assertFalse(postgres["database_client_backend_count_complete"])
+        self.assertEqual(postgres["superuser_reserved_connections"], 3)
+        self.assertEqual(postgres["reserved_connections"], 5)
+
+        full = json.loads(json.dumps(partial))
+        full_postgres = full["postgresql"]
+        full_postgres["server_process_rows"] = 20
+        full_postgres["rows_with_unknown_backend_type"] = 0
+        full_postgres["client_backend_count_complete"] = True
+        full_postgres["database_process_rows"] = 12
+        full_postgres["database_rows_with_unknown_backend_type"] = 0
+        full_postgres["database_rows_with_known_nonclient_backend_type"] = 0
+        full_postgres["database_client_backend_count_complete"] = True
+        full_postgres["observed_database_client_connections_with_visible_details"] = 12
+        full_postgres["observed_database_client_connections_with_hidden_details"] = 0
+        full_postgres["activity_details_visibility"] = "full"
+        receiver.validate_diagnostic_report(json.dumps(full).encode(), self.infra_metadata())
+
+        disabled = json.loads(json.dumps(full))
+        disabled_postgres = disabled["postgresql"]
+        disabled_postgres["observed_database_client_connections_with_visible_details"] = 11
+        disabled_postgres["observed_database_client_connections_with_disabled_tracking"] = 1
+        disabled_postgres["activity_details_visibility"] = "partial"
+        receiver.validate_diagnostic_report(json.dumps(disabled).encode(), self.infra_metadata())
+
+        pre_v16 = json.loads(json.dumps(full))
+        pre_v16["postgresql"]["server_version_num"] = 150000
+        pre_v16["postgresql"]["reserved_connections_supported"] = False
+        pre_v16["postgresql"]["reserved_connections"] = None
+        receiver.validate_diagnostic_report(json.dumps(pre_v16).encode(), self.infra_metadata())
+
+        for mutate in (
+            lambda item: item["postgresql"].update(activity_details_visibility="full"),
+            lambda item: item["postgresql"].update(reserved_connections_supported=False),
+            lambda item: item["postgresql"].update(client_backend_count_complete=True),
+            lambda item: item["postgresql"].update(database_process_rows=13),
+        ):
+            invalid = json.loads(json.dumps(partial))
+            mutate(invalid)
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_report(json.dumps(invalid).encode(), self.infra_metadata())
+        self.assertIn("backend_type = 'client backend'", receiver.INFRA_CAPACITY_SOURCE)
+        self.assertIn("state IS NULL", receiver.INFRA_CAPACITY_SOURCE)
+
+    def test_infra_capacity_postgresql_producer_predicates_preserve_unknown_backend_rows(self):
+        tree = ast.parse(receiver.INFRA_CAPACITY_SOURCE)
+        assignment = next(
+            node for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "POSTGRES_ACTIVITY_COUNT_SQL" for target in node.targets)
+        )
+        sql = ast.literal_eval(assignment.value).replace("current_database()", "'appdb'")
+        database = sqlite3.connect(":memory:")
+        self.addCleanup(database.close)
+        database.execute(
+            "CREATE TABLE pg_stat_activity "
+            "(backend_type TEXT, datname TEXT, state TEXT, wait_event_type TEXT)"
+        )
+        database.executemany(
+            "INSERT INTO pg_stat_activity VALUES (?, ?, ?, ?)",
+            (
+                ("client backend", "appdb", "active", None),
+                (None, "appdb", None, None),
+                ("parallel worker", "appdb", "active", None),
+            ),
+        )
+        row = database.execute(sql).fetchone()
+        self.assertEqual(row[:10], (3, 1, 1, 3, 1, 1, 1, 1, 0, 0))
+
+        report = self.infra_report()
+        postgres = report["postgresql"]
+        postgres.update({
+            "server_process_rows": row[0],
+            "observed_client_backend_connections": row[1],
+            "rows_with_unknown_backend_type": row[2],
+            "client_backend_count_complete": False,
+            "database_process_rows": row[3],
+            "observed_database_client_connections": row[4],
+            "database_rows_with_unknown_backend_type": row[5],
+            "database_rows_with_known_nonclient_backend_type": row[6],
+            "database_client_backend_count_complete": False,
+            "observed_database_client_connections_with_visible_details": row[7],
+            "observed_database_client_connections_with_hidden_details": row[8],
+            "observed_database_client_connections_with_disabled_tracking": row[9],
+            "activity_details_visibility": "partial",
+            "visible_active_database_client_connections": row[10],
+            "visible_idle_in_transaction_database_client_connections": row[11],
+            "visible_lock_waiting_database_client_connections": row[12],
+        })
+        receiver.validate_diagnostic_report(json.dumps(report).encode(), self.infra_metadata())
+
+    def test_infra_capacity_rejects_nonfinite_numbers_and_python_equality_type_aliases(self):
+        variants = []
+        sample_nan = self.infra_report()
+        sample_nan["scope"]["sample_seconds"] = float("nan")
+        variants.append(sample_nan)
+        average_nan = self.infra_report()
+        average_nan["host"]["cpu_usage_percent_average"] = float("nan")
+        variants.append(average_nan)
+        uptime_infinity = self.infra_report()
+        uptime_infinity["host"]["uptime_seconds"] = float("inf")
+        variants.append(uptime_infinity)
+        boolean_schema = self.infra_report()
+        boolean_schema["schema"] = True
+        variants.append(boolean_schema)
+        float_port = self.infra_report()
+        float_port["redis"]["6379"]["port"] = 6379.0
+        variants.append(float_port)
+        boolean_rows = self.infra_report()
+        boolean_rows["summary"]["row_count"] = False
+        variants.append(boolean_rows)
+        integer_truncated = self.infra_report()
+        integer_truncated["summary"]["truncated"] = 0
+        variants.append(integer_truncated)
+
+        for candidate in variants:
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_report(
+                    json.dumps(candidate).encode("utf-8"),
+                    self.infra_metadata(),
+                )
+
+    def test_infra_capacity_helper_uses_only_fixed_local_probes(self):
+        compile(receiver.INFRA_CAPACITY_SOURCE, "<infra-capacity>", "exec")
+        source = receiver.INFRA_CAPACITY_SOURCE
+        self.assertIn('SERVICE_ALLOWLIST = (', source)
+        for value in (
+            '"accounting-mvp.service"', '"nginx.service"', '"postgresql.service"',
+            '"redis-server.service"', 'REDIS_PORTS = (6379, 6381)',
+            'socket.create_connection(("127.0.0.1", port)',
+            'cursor.execute("SET TRANSACTION READ ONLY")',
+        ):
+            self.assertIn(value, source)
+        for forbidden in ("shell=True", "os.system", "os.popen", "eval(", "exec(", "nginx -T", "/etc/"):
+            self.assertNotIn(forbidden, source)
+        for forbidden in ("from trips", "from users", "from assignments", "SELECT *", "pg_read_file"):
+            self.assertNotIn(forbidden, source)
+
     def test_fixed_diagnostic_helper_enforces_postgresql_read_only_and_timeouts(self):
         compile(receiver.DIAGNOSTIC_QUERY_SOURCE, "<diagnostic-query>", "exec")
         self.assertIn("with transaction.atomic():", receiver.DIAGNOSTIC_QUERY_SOURCE)
@@ -437,6 +851,24 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertEqual(command[1:3], ["-c", receiver.DIAGNOSTIC_QUERY_SOURCE])
         self.assertNotIn("shell", execute.call_args.kwargs)
 
+    def test_infra_capacity_execution_passes_no_user_parameters_to_fixed_helper(self):
+        manifest = {"metadata": self.infra_metadata()}
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(self.infra_report()).encode("utf-8"),
+            stderr=b"",
+        )
+        with mock.patch.object(receiver.subprocess, "run", return_value=completed) as execute:
+            result = receiver.run_diagnostic(manifest)
+        self.assertEqual(result["operation"], "infra_capacity_v1")
+        command = execute.call_args.args[0]
+        self.assertEqual(command, [str(receiver.APP / ".venv/bin/python"), "-c", receiver.INFRA_CAPACITY_SOURCE])
+        self.assertNotIn("shell", execute.call_args.kwargs)
+        self.assertEqual(execute.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertEqual(execute.call_args.kwargs["stderr"], subprocess.PIPE)
+        self.assertEqual(execute.call_args.kwargs["user"], receiver.DIAGNOSTIC_OS_USER)
+
     def test_receiver_encrypts_report_before_returning_it_to_actions(self):
         report = self.diagnostic_report()
         ciphertext = b"\x30\x82server-encrypted-cms"
@@ -473,6 +905,8 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertNotIn("production-diagnostic-plaintext", workflow)
         self.assertIn("production-diagnostic-envelope.json", workflow)
         self.assertIn("production_diagnostic_ciphertext", workflow)
+        self.assertIn("- infra_capacity_v1", workflow)
+        self.assertIn('{"trip_accounting_incident_v1", "infra_capacity_v1"}', workflow)
         self.assertNotIn("openssl cms -encrypt", workflow)
         self.assertIn("production-diagnostic-${{ github.run_id }}.cms", workflow)
         certificate = (ROOT / ".github" / "deploy" / "diagnostic-recipient-cert.pem").read_text(encoding="ascii")

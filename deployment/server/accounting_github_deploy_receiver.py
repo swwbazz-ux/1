@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
@@ -45,8 +46,9 @@ RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
 FCM_PAYLOAD = "deploy/secrets/firebase-service-account.json"
 FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
 APP_ENV_PATH = APP / ".env"
-DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1"}
-DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
+DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
+TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
+INFRA_DIAGNOSTIC_METADATA_KEYS = {"operation"}
 DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
 DIAGNOSTIC_MAX_WINDOW = timedelta(hours=24)
 DIAGNOSTIC_MAX_ROWS = 500
@@ -543,6 +545,472 @@ if __name__ == "__main__":
 '''
 
 
+INFRA_CAPACITY_SOURCE = r'''
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+APP_ROOT = Path("/srv/accounting-mvp")
+SYSTEMCTL = Path("/usr/bin/systemctl")
+SERVICE_ALLOWLIST = (
+    ("accounting_mvp", "accounting-mvp.service"),
+    ("nginx", "nginx.service"),
+    ("postgresql", "postgresql.service"),
+    ("redis_server", "redis-server.service"),
+)
+SERVICE_PROPERTIES = (
+    "LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
+    "CPUUsageNSec", "MemoryCurrent", "MemoryPeak", "TasksCurrent",
+    "TasksMax", "LimitNOFILE",
+)
+REDIS_PORTS = (6379, 6381)
+LIMITATIONS = (
+    "snapshot_not_capacity_baseline",
+    "no_historical_normal_or_peak_window",
+    "no_application_event_loop_probe",
+    "no_nginx_effective_config_or_routes",
+    "no_redis_acl_or_channel_names",
+)
+SAFE_STATE = re.compile(r"[a-z0-9_.@-]{1,48}\Z")
+
+
+def utc_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def read_text(path, maximum=65536):
+    try:
+        value = Path(path).read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError):
+        return None
+    return value if len(value) <= maximum else None
+
+
+def integer(value):
+    if value in (None, "", "infinity", "[not set]"):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def safe_state(value, fallback="unknown"):
+    value = str(value or "").strip().lower()
+    return value if SAFE_STATE.fullmatch(value) else fallback
+
+
+def cpu_totals():
+    text = read_text("/proc/stat", 16384)
+    if not text:
+        raise RuntimeError("cpu counters unavailable")
+    fields = text.splitlines()[0].split()
+    if not fields or fields[0] != "cpu" or len(fields) < 9:
+        raise RuntimeError("cpu counters invalid")
+    values = [int(value) for value in fields[1:]]
+    # Linux user/nice already include guest/guest_nice, so fields 9-10 must
+    # not be summed again.  iowait is treated as idle; steal remains busy.
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return sum(values[:8]), idle
+
+
+def cpu_samples():
+    samples = []
+    total_before, idle_before = cpu_totals()
+    for _ in range(5):
+        time.sleep(1)
+        total_after, idle_after = cpu_totals()
+        total_delta = total_after - total_before
+        idle_delta = idle_after - idle_before
+        if total_delta <= 0 or idle_delta < 0:
+            raise RuntimeError("cpu counters did not advance")
+        samples.append(round(100.0 * (total_delta - idle_delta) / total_delta, 3))
+        total_before, idle_before = total_after, idle_after
+    return samples
+
+
+def memory_bytes():
+    text = read_text("/proc/meminfo", 65536)
+    if not text:
+        raise RuntimeError("memory counters unavailable")
+    values = {}
+    for line in text.splitlines():
+        key, separator, tail = line.partition(":")
+        if not separator:
+            continue
+        token = tail.strip().split()[0]
+        if token.isdigit():
+            values[key] = int(token) * 1024
+    required = ("MemTotal", "MemAvailable", "SwapTotal", "SwapFree")
+    if any(key not in values for key in required):
+        raise RuntimeError("memory counters invalid")
+    return {
+        "total": values["MemTotal"],
+        "available": values["MemAvailable"],
+        "swap_total": values["SwapTotal"],
+        "swap_free": values["SwapFree"],
+    }
+
+
+def pressure(kind):
+    text = read_text(f"/proc/pressure/{kind}", 4096)
+    if not text:
+        return None
+    line = next((item for item in text.splitlines() if item.startswith("some ")), None)
+    if not line:
+        return None
+    values = dict(part.split("=", 1) for part in line.split()[1:] if "=" in part)
+    try:
+        return {
+            "avg10": float(values["avg10"]),
+            "avg60": float(values["avg60"]),
+            "avg300": float(values["avg300"]),
+            "total_us": int(values["total"]),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def file_handles():
+    text = read_text("/proc/sys/fs/file-nr", 256)
+    if not text:
+        return {"allocated": None, "maximum": None}
+    fields = text.split()
+    if len(fields) != 3:
+        return {"allocated": None, "maximum": None}
+    return {"allocated": integer(fields[0]), "maximum": integer(fields[2])}
+
+
+def disk_bytes(path):
+    usage = shutil.disk_usage(path)
+    return {"total": usage.total, "used": usage.used, "free": usage.free}
+
+
+def service_metrics(service):
+    result = {
+        "load_state": "unknown", "active_state": "unknown", "sub_state": "unknown",
+        "main_pid": 0, "restarts": None, "cpu_usage_ns": None,
+        "memory_current_bytes": None, "memory_peak_bytes": None,
+        "tasks_current": None, "tasks_max": None, "limit_nofile": None,
+    }
+    if not SYSTEMCTL.is_file():
+        return result
+    try:
+        completed = subprocess.run(
+            [str(SYSTEMCTL), "show", service, "--no-pager", "--property=" + ",".join(SERVICE_PROPERTIES)],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return result
+    if completed.returncode not in (0, 1) or len(completed.stdout) > 16384:
+        return result
+    values = dict(line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
+    result.update({
+        "load_state": safe_state(values.get("LoadState")),
+        "active_state": safe_state(values.get("ActiveState")),
+        "sub_state": safe_state(values.get("SubState")),
+        "main_pid": integer(values.get("MainPID")) or 0,
+        "restarts": integer(values.get("NRestarts")),
+        "cpu_usage_ns": integer(values.get("CPUUsageNSec")),
+        "memory_current_bytes": integer(values.get("MemoryCurrent")),
+        "memory_peak_bytes": integer(values.get("MemoryPeak")),
+        "tasks_current": integer(values.get("TasksCurrent")),
+        "tasks_max": integer(values.get("TasksMax")),
+        "limit_nofile": integer(values.get("LimitNOFILE")),
+    })
+    return result
+
+
+POSTGRES_ACTIVITY_COUNT_SQL = """
+    SELECT COUNT(*),
+           COUNT(*) FILTER (WHERE backend_type = 'client backend'),
+           COUNT(*) FILTER (WHERE backend_type IS NULL),
+           COUNT(*) FILTER (WHERE datname = current_database()),
+           COUNT(*) FILTER (
+               WHERE datname = current_database() AND backend_type = 'client backend'
+           ),
+           COUNT(*) FILTER (
+               WHERE datname = current_database() AND backend_type IS NULL
+           ),
+           COUNT(*) FILTER (
+               WHERE datname = current_database() AND backend_type IS NOT NULL
+                 AND backend_type <> 'client backend'
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state IS NOT NULL
+                 AND state <> 'disabled'
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state IS NULL
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state = 'disabled'
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state = 'active'
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state = 'idle in transaction'
+           ),
+           COUNT(*) FILTER (
+               WHERE backend_type = 'client backend'
+                 AND datname = current_database() AND state IS NOT NULL
+                 AND wait_event_type = 'Lock'
+           )
+    FROM pg_stat_activity
+"""
+
+
+def postgres_metrics():
+    keys = (
+        "server_version_num", "transaction_read_only", "transaction_isolation",
+        "max_connections", "reserved_connections_supported", "reserved_connections",
+        "superuser_reserved_connections", "role_connection_limit",
+        "server_process_rows", "observed_client_backend_connections",
+        "rows_with_unknown_backend_type", "client_backend_count_complete",
+        "database_process_rows", "observed_database_client_connections",
+        "database_rows_with_unknown_backend_type",
+        "database_rows_with_known_nonclient_backend_type",
+        "database_client_backend_count_complete",
+        "observed_database_client_connections_with_visible_details",
+        "observed_database_client_connections_with_hidden_details",
+        "observed_database_client_connections_with_disabled_tracking",
+        "activity_details_visibility",
+        "visible_active_database_client_connections",
+        "visible_idle_in_transaction_database_client_connections",
+        "visible_lock_waiting_database_client_connections", "locks", "ungranted_locks",
+        "database_size_bytes", "visible_oldest_transaction_seconds",
+    )
+    result = {"status": "error", **{key: None for key in keys}}
+    try:
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        import django
+        django.setup()
+        from django.db import connection, transaction
+        if connection.vendor != "postgresql":
+            result["status"] = "unsupported"
+            return result
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
+                cursor.execute("SET LOCAL statement_timeout = '3000ms'")
+                cursor.execute("SET LOCAL lock_timeout = '1000ms'")
+                cursor.execute("SHOW transaction_read_only")
+                result["transaction_read_only"] = cursor.fetchone()[0] == "on"
+                cursor.execute("SHOW transaction_isolation")
+                result["transaction_isolation"] = safe_state(cursor.fetchone()[0].replace(" ", "_"))
+                cursor.execute("SHOW server_version_num")
+                result["server_version_num"] = int(cursor.fetchone()[0])
+                cursor.execute("SHOW max_connections")
+                result["max_connections"] = int(cursor.fetchone()[0])
+                if result["server_version_num"] >= 160000:
+                    cursor.execute("SHOW reserved_connections")
+                    result["reserved_connections"] = int(cursor.fetchone()[0])
+                    result["reserved_connections_supported"] = True
+                else:
+                    result["reserved_connections"] = None
+                    result["reserved_connections_supported"] = False
+                cursor.execute("SHOW superuser_reserved_connections")
+                result["superuser_reserved_connections"] = int(cursor.fetchone()[0])
+                cursor.execute("SELECT rolconnlimit FROM pg_roles WHERE rolname = current_user")
+                result["role_connection_limit"] = int(cursor.fetchone()[0])
+                cursor.execute(POSTGRES_ACTIVITY_COUNT_SQL)
+                row = cursor.fetchone()
+                result.update({
+                    "server_process_rows": int(row[0]),
+                    "observed_client_backend_connections": int(row[1]),
+                    "rows_with_unknown_backend_type": int(row[2]),
+                    "client_backend_count_complete": int(row[2]) == 0,
+                    "database_process_rows": int(row[3]),
+                    "observed_database_client_connections": int(row[4]),
+                    "database_rows_with_unknown_backend_type": int(row[5]),
+                    "database_rows_with_known_nonclient_backend_type": int(row[6]),
+                    "database_client_backend_count_complete": int(row[5]) == 0,
+                    "observed_database_client_connections_with_visible_details": int(row[7]),
+                    "observed_database_client_connections_with_hidden_details": int(row[8]),
+                    "observed_database_client_connections_with_disabled_tracking": int(row[9]),
+                    "activity_details_visibility": "partial" if int(row[5]) or int(row[8]) or int(row[9]) else "full",
+                    "visible_active_database_client_connections": int(row[10]),
+                    "visible_idle_in_transaction_database_client_connections": int(row[11]),
+                    "visible_lock_waiting_database_client_connections": int(row[12]),
+                })
+                cursor.execute("""
+                    SELECT COALESCE(MAX(EXTRACT(EPOCH FROM clock_timestamp() - xact_start)), 0)
+                    FROM pg_stat_activity
+                    WHERE backend_type = 'client backend'
+                      AND datname = current_database()
+                      AND state IS NOT NULL AND state <> 'disabled'
+                      AND xact_start IS NOT NULL
+                """)
+                result["visible_oldest_transaction_seconds"] = round(float(cursor.fetchone()[0]), 3)
+                cursor.execute("SELECT COUNT(*), COUNT(*) FILTER (WHERE NOT granted) FROM pg_locks")
+                row = cursor.fetchone()
+                result["locks"] = int(row[0])
+                result["ungranted_locks"] = int(row[1])
+                cursor.execute("SELECT pg_database_size(current_database())")
+                result["database_size_bytes"] = int(cursor.fetchone()[0])
+        result["status"] = "ok"
+    except Exception:
+        result = {"status": "error", **{key: None for key in keys}}
+    return result
+
+
+def redis_exchange(port, command):
+    payload = "*{}\r\n".format(len(command))
+    for part in command:
+        encoded = part.encode("ascii")
+        payload += "${}\r\n".format(len(encoded)) + part + "\r\n"
+    with socket.create_connection(("127.0.0.1", port), timeout=0.5) as connection:
+        connection.settimeout(0.5)
+        connection.sendall(payload.encode("ascii"))
+        data = b""
+        while len(data) <= 131072:
+            chunk = connection.recv(16384)
+            if not chunk:
+                break
+            data += chunk
+            if data.startswith((b"+", b"-", b":")) and data.endswith(b"\r\n"):
+                break
+            if data.startswith(b"$") and b"\r\n" in data:
+                length = int(data[1:data.index(b"\r\n")])
+                header = data.index(b"\r\n") + 2
+                if len(data) >= header + length + 2:
+                    break
+        if not data or len(data) > 131072:
+            raise RuntimeError("redis response invalid")
+        return data
+
+
+def redis_metrics(port):
+    fields = (
+        "version", "uptime_seconds", "connected_clients", "blocked_clients", "maxclients",
+        "used_memory_bytes", "used_memory_peak_bytes", "maxmemory_bytes", "maxmemory_policy",
+        "instantaneous_ops_per_sec", "rejected_connections", "evicted_keys", "pubsub_channels",
+    )
+    result = {
+        "status": "unreachable", "port": port,
+        **{field: None for field in fields},
+        "acl_details_returned": False, "channel_names_returned": False,
+    }
+    try:
+        ping = redis_exchange(port, ("PING",))
+        if ping.startswith(b"-NOAUTH"):
+            result["status"] = "auth_required"
+            return result
+        if ping != b"+PONG\r\n":
+            result["status"] = "error"
+            return result
+        raw = redis_exchange(port, ("INFO",))
+        if raw.startswith(b"-NOAUTH"):
+            result["status"] = "auth_required"
+            return result
+        if not raw.startswith(b"$") or b"\r\n" not in raw:
+            result["status"] = "error"
+            return result
+        header = raw.index(b"\r\n") + 2
+        length = int(raw[1:header - 2])
+        text = raw[header:header + length].decode("utf-8", "strict")
+        values = dict(line.split(":", 1) for line in text.splitlines() if ":" in line and not line.startswith("#"))
+        version = values.get("redis_version")
+        result.update({
+            "status": "ok",
+            "version": version if version and re.fullmatch(r"[0-9.]{1,24}", version) else None,
+            "uptime_seconds": integer(values.get("uptime_in_seconds")),
+            "connected_clients": integer(values.get("connected_clients")),
+            "blocked_clients": integer(values.get("blocked_clients")),
+            "maxclients": integer(values.get("maxclients")),
+            "used_memory_bytes": integer(values.get("used_memory")),
+            "used_memory_peak_bytes": integer(values.get("used_memory_peak")),
+            "maxmemory_bytes": integer(values.get("maxmemory")),
+            "maxmemory_policy": safe_state(values.get("maxmemory_policy"), fallback="unknown"),
+            "instantaneous_ops_per_sec": integer(values.get("instantaneous_ops_per_sec")),
+            "rejected_connections": integer(values.get("rejected_connections")),
+            "evicted_keys": integer(values.get("evicted_keys")),
+            "pubsub_channels": integer(values.get("pubsub_channels")),
+        })
+    except (OSError, UnicodeError, ValueError, RuntimeError):
+        result["status"] = "unreachable"
+    return result
+
+
+def main():
+    started_utc = utc_now()
+    started = time.monotonic()
+    samples = cpu_samples()
+    load_average = os.getloadavg()
+    uptime_text = read_text("/proc/uptime", 256)
+    if not uptime_text:
+        raise RuntimeError("uptime unavailable")
+    uptime_seconds = round(float(uptime_text.split()[0]), 3)
+    services = {key: service_metrics(service) for key, service in SERVICE_ALLOWLIST}
+    host = {
+        "logical_cpu_count": os.cpu_count() or 1,
+        "cpu_usage_percent_samples": samples,
+        "cpu_usage_percent_average": round(sum(samples) / len(samples), 3),
+        "cpu_usage_percent_maximum": max(samples),
+        "load_average": {
+            "one_minute": round(load_average[0], 3),
+            "five_minutes": round(load_average[1], 3),
+            "fifteen_minutes": round(load_average[2], 3),
+        },
+        "uptime_seconds": uptime_seconds,
+        "memory_bytes": memory_bytes(),
+        "pressure": {kind: pressure(kind) for kind in ("cpu", "memory", "io")},
+        "file_handles": file_handles(),
+        "disk_bytes": {
+            "root": disk_bytes(Path("/")),
+            "application": disk_bytes(APP_ROOT),
+        },
+    }
+    postgresql = postgres_metrics()
+    redis = {str(port): redis_metrics(port) for port in REDIS_PORTS}
+    finished_utc = utc_now()
+    sample_seconds = round(time.monotonic() - started, 3)
+    report = {
+        "schema": 1,
+        "operation": "infra_capacity_v1",
+        "request": {},
+        "scope": {
+            "sample_started_utc": started_utc,
+            "sample_finished_utc": finished_utc,
+            "sample_seconds": sample_seconds,
+            "historical_window_available": False,
+            "application_event_loop_probe_available": False,
+        },
+        "host": host,
+        "services": services,
+        "postgresql": postgresql,
+        "redis": redis,
+        "summary": {"row_count": 0, "truncated": False},
+        "limitations": list(LIMITATIONS),
+    }
+    print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 class ReleaseError(RuntimeError):
     pass
 
@@ -561,12 +1029,18 @@ def parse_diagnostic_utc(value: object, field: str) -> datetime:
 
 
 def validate_diagnostic_metadata(metadata: object) -> dict[str, object]:
-    if not isinstance(metadata, dict) or set(metadata) != DIAGNOSTIC_METADATA_KEYS:
+    if not isinstance(metadata, dict):
         raise ReleaseError("diagnostic metadata keys do not match the fixed contract")
     operation = metadata.get("operation")
-    equipment = metadata.get("equipment")
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise ReleaseError("diagnostic operation is not allowlisted")
+    if operation == "infra_capacity_v1":
+        if set(metadata) != INFRA_DIAGNOSTIC_METADATA_KEYS:
+            raise ReleaseError("infra capacity metadata keys do not match the fixed contract")
+        return {"operation": operation}
+    if set(metadata) != TRIP_DIAGNOSTIC_METADATA_KEYS:
+        raise ReleaseError("diagnostic metadata keys do not match the fixed contract")
+    equipment = metadata.get("equipment")
     if (
         not isinstance(equipment, str)
         or equipment != equipment.strip()
@@ -693,7 +1167,7 @@ def reject_sensitive_diagnostic_value(value: object, *, key: str = "") -> None:
         raise ReleaseError("diagnostic report contains an unsupported value")
 
 
-def validate_diagnostic_report(
+def validate_trip_diagnostic_report(
     raw: bytes,
     metadata: dict[str, object],
 ) -> dict[str, Any]:
@@ -800,6 +1274,308 @@ def validate_diagnostic_report(
                 raise ReleaseError("diagnostic equipment candidate contract is invalid")
     reject_sensitive_diagnostic_value(report)
     return report
+
+
+INFRA_CAPACITY_LIMITATIONS = [
+    "snapshot_not_capacity_baseline",
+    "no_historical_normal_or_peak_window",
+    "no_application_event_loop_probe",
+    "no_nginx_effective_config_or_routes",
+    "no_redis_acl_or_channel_names",
+]
+INFRA_SERVICE_KEYS = {
+    "load_state", "active_state", "sub_state", "main_pid", "restarts",
+    "cpu_usage_ns", "memory_current_bytes", "memory_peak_bytes",
+    "tasks_current", "tasks_max", "limit_nofile",
+}
+INFRA_POSTGRES_KEYS = {
+    "status", "server_version_num", "transaction_read_only", "transaction_isolation",
+    "max_connections", "reserved_connections_supported", "reserved_connections",
+    "superuser_reserved_connections", "role_connection_limit",
+    "server_process_rows", "observed_client_backend_connections",
+    "rows_with_unknown_backend_type", "client_backend_count_complete",
+    "database_process_rows", "observed_database_client_connections",
+    "database_rows_with_unknown_backend_type",
+    "database_rows_with_known_nonclient_backend_type",
+    "database_client_backend_count_complete",
+    "observed_database_client_connections_with_visible_details",
+    "observed_database_client_connections_with_hidden_details",
+    "observed_database_client_connections_with_disabled_tracking",
+    "activity_details_visibility",
+    "visible_active_database_client_connections",
+    "visible_idle_in_transaction_database_client_connections",
+    "visible_lock_waiting_database_client_connections", "locks", "ungranted_locks",
+    "database_size_bytes", "visible_oldest_transaction_seconds",
+}
+INFRA_REDIS_KEYS = {
+    "status", "port", "version", "uptime_seconds", "connected_clients",
+    "blocked_clients", "maxclients", "used_memory_bytes", "used_memory_peak_bytes",
+    "maxmemory_bytes", "maxmemory_policy", "instantaneous_ops_per_sec",
+    "rejected_connections", "evicted_keys", "pubsub_channels",
+    "acl_details_returned", "channel_names_returned",
+}
+INFRA_SAFE_STATE_RE = re.compile(r"[a-z0-9_.@-]{1,48}\Z")
+
+
+def require_number(value: object, *, minimum: float = 0, maximum: float | None = None) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ReleaseError("infra capacity report contains an invalid number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ReleaseError("infra capacity report contains a non-finite number")
+    if number < minimum or (maximum is not None and number > maximum):
+        raise ReleaseError("infra capacity report number is out of bounds")
+    return number
+
+
+def require_nonnegative_integer(value: object, *, nullable: bool = False) -> int | None:
+    if value is None and nullable:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ReleaseError("infra capacity report contains an invalid integer")
+    return value
+
+
+def validate_infra_capacity_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
+    if metadata != {"operation": "infra_capacity_v1"}:
+        raise ReleaseError("infra capacity request contract mismatch")
+    if not raw or len(raw) > DIAGNOSTIC_MAX_OUTPUT_BYTES:
+        raise ReleaseError("diagnostic report size is invalid")
+    try:
+        report = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("diagnostic report is not valid JSON") from exc
+    if not isinstance(report, dict) or set(report) != {
+        "schema", "operation", "request", "scope", "host", "services",
+        "postgresql", "redis", "summary", "limitations",
+    }:
+        raise ReleaseError("infra capacity top-level contract mismatch")
+    if type(report.get("schema")) is not int or report["schema"] != 1:
+        raise ReleaseError("infra capacity schema is invalid")
+    if report.get("operation") != "infra_capacity_v1":
+        raise ReleaseError("infra capacity operation contract mismatch")
+    if report.get("request") != {}:
+        raise ReleaseError("infra capacity operation does not accept parameters")
+
+    scope = report.get("scope")
+    if not isinstance(scope, dict) or set(scope) != {
+        "sample_started_utc", "sample_finished_utc", "sample_seconds",
+        "historical_window_available", "application_event_loop_probe_available",
+    }:
+        raise ReleaseError("infra capacity sampling scope is invalid")
+    try:
+        started = datetime.strptime(scope["sample_started_utc"], "%Y-%m-%dT%H:%M:%SZ")
+        finished = datetime.strptime(scope["sample_finished_utc"], "%Y-%m-%dT%H:%M:%SZ")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ReleaseError("infra capacity sampling timestamps are invalid") from exc
+    if finished < started:
+        raise ReleaseError("infra capacity sampling timestamps are reversed")
+    require_number(scope.get("sample_seconds"), minimum=4.5, maximum=30)
+    if scope.get("historical_window_available") is not False:
+        raise ReleaseError("infra capacity report cannot claim historical coverage")
+    if scope.get("application_event_loop_probe_available") is not False:
+        raise ReleaseError("infra capacity report cannot claim application event-loop coverage")
+
+    host = report.get("host")
+    if not isinstance(host, dict) or set(host) != {
+        "logical_cpu_count", "cpu_usage_percent_samples", "cpu_usage_percent_average",
+        "cpu_usage_percent_maximum", "load_average", "uptime_seconds", "memory_bytes",
+        "pressure", "file_handles", "disk_bytes",
+    }:
+        raise ReleaseError("infra capacity host contract mismatch")
+    cpu_count = require_nonnegative_integer(host.get("logical_cpu_count"))
+    if cpu_count is None or not 1 <= cpu_count <= 4096:
+        raise ReleaseError("infra capacity CPU count is invalid")
+    samples = host.get("cpu_usage_percent_samples")
+    if not isinstance(samples, list) or len(samples) != 5:
+        raise ReleaseError("infra capacity CPU sample count is invalid")
+    normalized_samples = [require_number(item, maximum=100) for item in samples]
+    average = require_number(host.get("cpu_usage_percent_average"), maximum=100)
+    maximum = require_number(host.get("cpu_usage_percent_maximum"), maximum=100)
+    if abs(average - sum(normalized_samples) / len(normalized_samples)) > 0.01:
+        raise ReleaseError("infra capacity CPU average mismatch")
+    if abs(maximum - max(normalized_samples)) > 0.001:
+        raise ReleaseError("infra capacity CPU maximum mismatch")
+    require_number(host.get("uptime_seconds"))
+
+    load_average = host.get("load_average")
+    if not isinstance(load_average, dict) or set(load_average) != {
+        "one_minute", "five_minutes", "fifteen_minutes",
+    }:
+        raise ReleaseError("infra capacity load average is invalid")
+    for value in load_average.values():
+        require_number(value, maximum=1000000)
+
+    memory = host.get("memory_bytes")
+    if not isinstance(memory, dict) or set(memory) != {"total", "available", "swap_total", "swap_free"}:
+        raise ReleaseError("infra capacity memory contract mismatch")
+    for value in memory.values():
+        require_nonnegative_integer(value)
+    if memory["available"] > memory["total"] or memory["swap_free"] > memory["swap_total"]:
+        raise ReleaseError("infra capacity memory values are inconsistent")
+
+    pressure = host.get("pressure")
+    if not isinstance(pressure, dict) or set(pressure) != {"cpu", "memory", "io"}:
+        raise ReleaseError("infra capacity pressure contract mismatch")
+    for item in pressure.values():
+        if item is None:
+            continue
+        if not isinstance(item, dict) or set(item) != {"avg10", "avg60", "avg300", "total_us"}:
+            raise ReleaseError("infra capacity pressure sample is invalid")
+        for field in ("avg10", "avg60", "avg300"):
+            require_number(item[field], maximum=100)
+        require_nonnegative_integer(item["total_us"])
+
+    handles = host.get("file_handles")
+    if not isinstance(handles, dict) or set(handles) != {"allocated", "maximum"}:
+        raise ReleaseError("infra capacity file handle contract mismatch")
+    for value in handles.values():
+        require_nonnegative_integer(value, nullable=True)
+
+    disks = host.get("disk_bytes")
+    if not isinstance(disks, dict) or set(disks) != {"root", "application"}:
+        raise ReleaseError("infra capacity disk contract mismatch")
+    for disk in disks.values():
+        if not isinstance(disk, dict) or set(disk) != {"total", "used", "free"}:
+            raise ReleaseError("infra capacity disk sample is invalid")
+        for value in disk.values():
+            require_nonnegative_integer(value)
+        # shutil.disk_usage().free is space available to this unprivileged
+        # process.  Reserved filesystem blocks may make used + free < total.
+        if (
+            disk["used"] > disk["total"]
+            or disk["free"] > disk["total"]
+            or disk["used"] + disk["free"] > disk["total"]
+        ):
+            raise ReleaseError("infra capacity disk values are inconsistent")
+
+    services = report.get("services")
+    if not isinstance(services, dict) or set(services) != {
+        "accounting_mvp", "nginx", "postgresql", "redis_server",
+    }:
+        raise ReleaseError("infra capacity service allowlist mismatch")
+    for service in services.values():
+        if not isinstance(service, dict) or set(service) != INFRA_SERVICE_KEYS:
+            raise ReleaseError("infra capacity service contract mismatch")
+        for field in ("load_state", "active_state", "sub_state"):
+            if not isinstance(service[field], str) or not INFRA_SAFE_STATE_RE.fullmatch(service[field]):
+                raise ReleaseError("infra capacity service state is invalid")
+        require_nonnegative_integer(service["main_pid"])
+        for field in INFRA_SERVICE_KEYS - {"load_state", "active_state", "sub_state", "main_pid"}:
+            require_nonnegative_integer(service[field], nullable=True)
+
+    postgres = report.get("postgresql")
+    if not isinstance(postgres, dict) or set(postgres) != INFRA_POSTGRES_KEYS:
+        raise ReleaseError("infra capacity PostgreSQL contract mismatch")
+    if postgres.get("status") not in {"ok", "error", "unsupported"}:
+        raise ReleaseError("infra capacity PostgreSQL status is invalid")
+    postgres_values = INFRA_POSTGRES_KEYS - {"status"}
+    if postgres["status"] == "ok":
+        if postgres["transaction_read_only"] is not True:
+            raise ReleaseError("infra capacity PostgreSQL transaction is not read only")
+        if not isinstance(postgres["transaction_isolation"], str) or not INFRA_SAFE_STATE_RE.fullmatch(postgres["transaction_isolation"]):
+            raise ReleaseError("infra capacity PostgreSQL isolation is invalid")
+        if type(postgres["reserved_connections_supported"]) is not bool:
+            raise ReleaseError("infra capacity PostgreSQL reserved connection support is invalid")
+        for field in ("client_backend_count_complete", "database_client_backend_count_complete"):
+            if type(postgres[field]) is not bool:
+                raise ReleaseError("infra capacity PostgreSQL completeness flag is invalid")
+        if postgres["reserved_connections_supported"]:
+            require_nonnegative_integer(postgres["reserved_connections"])
+        elif postgres["reserved_connections"] is not None:
+            raise ReleaseError("infra capacity PostgreSQL unsupported reserved connections must be empty")
+        for field in postgres_values - {
+            "transaction_read_only", "transaction_isolation", "reserved_connections_supported",
+            "client_backend_count_complete", "database_client_backend_count_complete",
+            "reserved_connections", "activity_details_visibility",
+            "visible_oldest_transaction_seconds", "role_connection_limit",
+        }:
+            require_nonnegative_integer(postgres[field])
+        if isinstance(postgres["role_connection_limit"], bool) or not isinstance(postgres["role_connection_limit"], int) or postgres["role_connection_limit"] < -1:
+            raise ReleaseError("infra capacity PostgreSQL role limit is invalid")
+        if postgres["activity_details_visibility"] not in {"full", "partial"}:
+            raise ReleaseError("infra capacity PostgreSQL visibility is invalid")
+        unknown = postgres["rows_with_unknown_backend_type"]
+        database_unknown = postgres["database_rows_with_unknown_backend_type"]
+        database_nonclient = postgres["database_rows_with_known_nonclient_backend_type"]
+        observed_database_clients = postgres["observed_database_client_connections"]
+        hidden = postgres["observed_database_client_connections_with_hidden_details"]
+        disabled = postgres["observed_database_client_connections_with_disabled_tracking"]
+        visible = postgres["observed_database_client_connections_with_visible_details"]
+        if visible + hidden + disabled != observed_database_clients:
+            raise ReleaseError("infra capacity PostgreSQL visibility counts are inconsistent")
+        if observed_database_clients + database_unknown + database_nonclient != postgres["database_process_rows"]:
+            raise ReleaseError("infra capacity PostgreSQL database row partition is inconsistent")
+        if postgres["observed_client_backend_connections"] + unknown > postgres["server_process_rows"]:
+            raise ReleaseError("infra capacity PostgreSQL server row counts are inconsistent")
+        if postgres["database_process_rows"] > postgres["server_process_rows"]:
+            raise ReleaseError("infra capacity PostgreSQL database row counts are inconsistent")
+        if postgres["client_backend_count_complete"] != (unknown == 0):
+            raise ReleaseError("infra capacity PostgreSQL client completeness flag is inconsistent")
+        if postgres["database_client_backend_count_complete"] != (database_unknown == 0):
+            raise ReleaseError("infra capacity PostgreSQL database completeness flag is inconsistent")
+        if postgres["activity_details_visibility"] != ("partial" if database_unknown or hidden or disabled else "full"):
+            raise ReleaseError("infra capacity PostgreSQL visibility flag is inconsistent")
+        if postgres["observed_client_backend_connections"] < observed_database_clients:
+            raise ReleaseError("infra capacity PostgreSQL client connection counts are inconsistent")
+        for field in (
+            "visible_active_database_client_connections",
+            "visible_idle_in_transaction_database_client_connections",
+            "visible_lock_waiting_database_client_connections",
+        ):
+            if postgres[field] > visible:
+                raise ReleaseError("infra capacity PostgreSQL visible detail count is inconsistent")
+        require_number(postgres["visible_oldest_transaction_seconds"])
+    elif any(postgres[field] is not None for field in postgres_values):
+        raise ReleaseError("infra capacity unavailable PostgreSQL metrics must be empty")
+
+    redis = report.get("redis")
+    if not isinstance(redis, dict) or set(redis) != {"6379", "6381"}:
+        raise ReleaseError("infra capacity Redis endpoint allowlist mismatch")
+    for key, item in redis.items():
+        if not isinstance(item, dict) or set(item) != INFRA_REDIS_KEYS:
+            raise ReleaseError("infra capacity Redis contract mismatch")
+        if item.get("status") not in {"ok", "auth_required", "unreachable", "error"}:
+            raise ReleaseError("infra capacity Redis status is invalid")
+        if type(item.get("port")) is not int or item["port"] != int(key):
+            raise ReleaseError("infra capacity Redis port mismatch")
+        if item.get("acl_details_returned") is not False or item.get("channel_names_returned") is not False:
+            raise ReleaseError("infra capacity Redis report exposes forbidden details")
+        metric_fields = INFRA_REDIS_KEYS - {
+            "status", "port", "acl_details_returned", "channel_names_returned", "version", "maxmemory_policy",
+        }
+        if item["status"] == "ok":
+            for field in metric_fields:
+                require_nonnegative_integer(item[field], nullable=True)
+            if item["version"] is not None and (
+                not isinstance(item["version"], str) or not re.fullmatch(r"[0-9.]{1,24}", item["version"])
+            ):
+                raise ReleaseError("infra capacity Redis version is invalid")
+            if not isinstance(item["maxmemory_policy"], str) or not INFRA_SAFE_STATE_RE.fullmatch(item["maxmemory_policy"]):
+                raise ReleaseError("infra capacity Redis policy is invalid")
+        elif any(item[field] is not None for field in metric_fields | {"version", "maxmemory_policy"}):
+            raise ReleaseError("infra capacity unavailable Redis metrics must be empty")
+
+    summary = report.get("summary")
+    if (
+        not isinstance(summary, dict)
+        or set(summary) != {"row_count", "truncated"}
+        or type(summary["row_count"]) is not int
+        or summary["row_count"] != 0
+        or type(summary["truncated"]) is not bool
+        or summary["truncated"] is not False
+    ):
+        raise ReleaseError("infra capacity public summary is invalid")
+    if report.get("limitations") != INFRA_CAPACITY_LIMITATIONS:
+        raise ReleaseError("infra capacity limitations contract mismatch")
+    reject_sensitive_diagnostic_value(report)
+    return report
+
+
+def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
+    if metadata.get("operation") == "infra_capacity_v1":
+        return validate_infra_capacity_report(raw, metadata)
+    return validate_trip_diagnostic_report(raw, metadata)
 
 
 def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
@@ -1293,7 +2069,12 @@ def apply_data(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
 
 def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
     metadata = validate_diagnostic_metadata(manifest["metadata"])
-    if not DIAGNOSTIC_QUERY_SOURCE.strip():
+    source = (
+        INFRA_CAPACITY_SOURCE
+        if metadata["operation"] == "infra_capacity_v1"
+        else DIAGNOSTIC_QUERY_SOURCE
+    )
+    if not source.strip():
         raise ReleaseError("diagnostic helper is unavailable")
     diagnostic_env = os.environ.copy()
     diagnostic_env.update({
@@ -1308,13 +2089,16 @@ def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
     command = [
         str(APP / ".venv/bin/python"),
         "-c",
-        DIAGNOSTIC_QUERY_SOURCE,
-        str(metadata["operation"]),
-        str(metadata["equipment"]),
-        str(metadata["from_utc"]),
-        str(metadata["to_utc"]),
-        str(metadata["max_rows"]),
+        source,
     ]
+    if metadata["operation"] == "trip_accounting_incident_v1":
+        command.extend([
+            str(metadata["operation"]),
+            str(metadata["equipment"]),
+            str(metadata["from_utc"]),
+            str(metadata["to_utc"]),
+            str(metadata["max_rows"]),
+        ])
     try:
         result = subprocess.run(
             command,
