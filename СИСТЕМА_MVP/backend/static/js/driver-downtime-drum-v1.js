@@ -224,7 +224,11 @@
             // Угол грани относительно зрителя: 0 — прямо перед ним.
             var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
             var a = Math.abs(rel);
-            var isCenter = index === front;
+            // Без открытой смены барабан весь неактивен: передняя грань не подсвечивается
+            // жёлтым — иначе водитель видит ровно то, на что жаловался («простой горит
+            // без смены»), хотя это просто «эта грань сейчас смотрит на меня», а не
+            // «простой идёт» (пойман на реальном полевом тесте 26.09.2026).
+            var isCenter = index === front && hasOpenShift();
             if (card.classList.contains("is-center") !== isCenter) card.classList.toggle("is-center", isCenter);
             var isBack = a > 100;
             if (card.classList.contains("is-back") !== isBack) card.classList.toggle("is-back", isBack);

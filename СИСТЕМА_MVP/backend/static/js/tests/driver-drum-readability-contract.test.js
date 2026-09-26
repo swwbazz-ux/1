@@ -83,3 +83,25 @@ test("templates classify labels by character length, matching CSS tiers", () => 
         /driver-drum-card-label\{% if point\.name\|length > 14 %\} is-drum-label-long\{% elif point\.name\|length > 6 %\} is-drum-label-medium\{% endif %\}/
     );
 });
+
+test("without an open shift, the top drum stays a real card slot instead of collapsing to nothing", () => {
+    // Раньше пустой цикл {% for point in drum_points %} без смены не рисовал вообще
+    // ничего — барабан «схлопывался» в пустое место. Теперь пустая грань того же
+    // класса .driver-drum-card стоит на месте всегда, просто серая — как барабан
+    // простоев без смены. Текст «не назначены точки» — только когда смена ОТКРЫТА,
+    // но назначения на экскаватор нет (это другая, осмысленная причина показать
+    // предупреждение). Пойман на реальном полевом тесте 26.09.2026.
+    assert.match(POINT_TEMPLATE, /\{% empty %\}[\s\S]*?driver-drum-card driver-drum-card-empty/);
+    assert.match(POINT_TEMPLATE, /\{% if open_shift %\}[\s\S]*?Экскаватору не назначены точки разгрузки/);
+});
+
+test("downtime drum front card is never highlighted yellow without an open shift", () => {
+    // is-center — это «эта грань сейчас смотрит на водителя», не «простой идёт»,
+    // но выглядит одинаково ярко-жёлто в обоих случаях. Без смены простоя быть не
+    // может вообще, поэтому и переднюю грань подсвечивать нечем — иначе водитель
+    // видит ровно то, на что жаловался («ОФР горит без смены»). Пойман на реальном
+    // полевом тесте 26.09.2026.
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /var isCenter = index === front && hasOpenShift\(\);/);
+    assert.match(drumJs, /function hasOpenShift\(\)/);
+});
