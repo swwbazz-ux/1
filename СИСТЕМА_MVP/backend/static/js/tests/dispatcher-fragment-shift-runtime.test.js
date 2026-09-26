@@ -448,6 +448,73 @@ test("fallback расформирования сохраняет новые ве
     assert.deepEqual(movedTokens, ["99"]);
 });
 
+test("empty complex fallback clears stale plan markers before the next fragment", () => {
+    const resetSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function resetDesktopComplexCardToEmpty(complexCard)",
+        "Dispatcher empty complex reset"
+    );
+    const styleValues = {
+        "--complex-progress": "74%",
+        "--complex-total-progress": "174%",
+    };
+    const removedAttributes = [];
+    const complexCard = {
+        className: "dispatcher-complex-card status-orange is-plan-overrun",
+        dataset: {
+            zoneId: "82",
+            zoneLabel: "K-530",
+            dispatcherDrag: "complex",
+            equipmentId: "530",
+            placementZone: "active",
+            planStatus: "in_progress",
+            planPercent: "74",
+            planLoopPercent: "34",
+            planCompletedLoops: "3",
+            planProgressPhase: "amber",
+            planMode: "loops",
+            planValue: "400",
+            planFact: "296",
+            planUnit: "м³",
+            planGroup: "Смена 1",
+        },
+        style: {
+            setProperty(name, value) {
+                styleValues[name] = value;
+            },
+        },
+        removeAttribute(name) {
+            removedAttributes.push(name);
+        },
+        innerHTML: "",
+    };
+    const context = {complexCard};
+
+    vm.runInNewContext(`${resetSource}\nresetDesktopComplexCardToEmpty(complexCard);`, context, {
+        filename: "dispatcher-board-v1.js#empty-complex-plan-reset",
+    });
+
+    assert.equal(complexCard.className, "dispatcher-complex-card status-empty");
+    assert.equal(complexCard.dataset.zoneId, "82");
+    assert.equal(complexCard.dataset.dispatcherDrop, "complex");
+    assert.equal(complexCard.dataset.placementZone, undefined);
+    [
+        "planStatus",
+        "planPercent",
+        "planLoopPercent",
+        "planCompletedLoops",
+        "planProgressPhase",
+        "planMode",
+        "planValue",
+        "planFact",
+        "planUnit",
+        "planGroup",
+    ].forEach((key) => assert.equal(complexCard.dataset[key], undefined, key));
+    assert.equal(styleValues["--complex-progress"], "0%");
+    assert.equal(styleValues["--complex-total-progress"], "0%");
+    assert.deepEqual(removedAttributes.sort(), ["draggable", "role", "tabindex"]);
+});
+
 test("ошибка структурного переноса не оставляет необработанное отклонение при недоступном refresh", async () => {
     const errorHandlerSource = extractBraceBlock(
         RUNTIME_SOURCE,

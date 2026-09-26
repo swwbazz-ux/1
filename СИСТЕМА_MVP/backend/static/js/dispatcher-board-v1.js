@@ -272,6 +272,7 @@
             var zoneId = complexCard.dataset.zoneId || "";
             complexCard.className = "dispatcher-complex-card status-empty";
             complexCard.style.setProperty("--complex-progress", "0%");
+            complexCard.style.setProperty("--complex-total-progress", "0%");
             complexCard.dataset.dispatcherDrop = "complex";
             complexCard.dataset.zoneId = zoneId;
             delete complexCard.dataset.dispatcherDrag;
@@ -281,6 +282,17 @@
             delete complexCard.dataset.equipmentName;
             delete complexCard.dataset.equipmentState;
             delete complexCard.dataset.excavatorSlot;
+            delete complexCard.dataset.placementZone;
+            delete complexCard.dataset.planStatus;
+            delete complexCard.dataset.planPercent;
+            delete complexCard.dataset.planLoopPercent;
+            delete complexCard.dataset.planCompletedLoops;
+            delete complexCard.dataset.planProgressPhase;
+            delete complexCard.dataset.planMode;
+            delete complexCard.dataset.planValue;
+            delete complexCard.dataset.planFact;
+            delete complexCard.dataset.planUnit;
+            delete complexCard.dataset.planGroup;
             delete complexCard.dataset.dragBound;
             delete complexCard.dataset.cardBound;
             complexCard.removeAttribute("role");
