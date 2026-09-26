@@ -41,10 +41,17 @@
         }
 
         var lastVersion = readRenderedOperationalStateVersion() || readDispatcherRealtimeVersion();
+        /* Direct fragment refreshes can be started by realtime, optimistic
+           recovery and conflict handling at the same time. Freshness belongs
+           to the server payload version, never to network response order. */
+        var dispatcherDesktopRefreshGeneration = 0;
+        var lastAppliedFragmentVersion = readRenderedOperationalStateVersion();
+        var lastAppliedFragmentGeneration = 0;
 
         function storeDispatcherRealtimeVersion(version) {
             var parsed = parseInt(version || "0", 10);
-            if (!Number.isFinite(parsed) || parsed <= 0) return;
+            if (!Number.isFinite(parsed) || parsed <= 0) return lastVersion;
+            if (lastVersion && parsed < lastVersion) return lastVersion;
             lastVersion = parsed;
             if (hostDocument.body) {
                 hostDocument.body.dataset.operationalStateVersion = String(parsed);
@@ -52,6 +59,7 @@
             try {
                 hostWindow.sessionStorage.setItem(storageKey, String(parsed));
             } catch (error) {}
+            return lastVersion;
         }
 
         function wakeDispatcherSyncQueueForRefresh() {
@@ -304,10 +312,25 @@
             var currentBoard = hostDocument.querySelector(".dispatcher-board");
             var desktopState = captureDispatcherDesktopState(currentBoard);
             if (!hostWindow.AppOperationalFragment) return Promise.resolve(false);
+            var requestedVersion = Number(refreshOptions.version || 0);
+            var requestGeneration = ++dispatcherDesktopRefreshGeneration;
             return hostWindow.AppOperationalFragment.request(
                 "dispatcher",
-                Number(refreshOptions.version || 0)
+                requestedVersion
             ).then(function (payload) {
+                var payloadVersion = Number(payload && payload.version);
+                if (!Number.isSafeInteger(payloadVersion) || payloadVersion < requestedVersion) {
+                    return false;
+                }
+                var renderedBoardCoversRequest = lastAppliedFragmentVersion >= requestedVersion;
+                if (payloadVersion < lastAppliedFragmentVersion || payloadVersion < lastVersion) {
+                    return renderedBoardCoversRequest && lastAppliedFragmentVersion >= payloadVersion;
+                }
+                if (payloadVersion === lastAppliedFragmentVersion) {
+                    if (!refreshOptions.forceFullBoard || requestGeneration < lastAppliedFragmentGeneration) {
+                        return renderedBoardCoversRequest;
+                    }
+                }
                 if (isDispatcherOperationalRefreshUnsafe()) return false;
                 var freshBoard = hostWindow.AppOperationalFragment.parseRoot(
                     payload.html,
@@ -329,6 +352,9 @@
                     currentBoard.replaceWith(freshBoard);
                     refreshedBoard = freshBoard;
                 }
+                lastAppliedFragmentVersion = payloadVersion;
+                lastAppliedFragmentGeneration = requestGeneration;
+                storeDispatcherRealtimeVersion(payloadVersion);
                 /* A fragment can replace the drag source without a native dragend.
                    Clear that stale session only at this replacement boundary, never
                    during an ordinary interaction rebind. */
@@ -376,20 +402,20 @@
                     forceFullBoard: true
                 }).then(function (applied) {
                     if (!applied) return {deferred: true, reason: "dispatcher_refresh_failed"};
-                    storeDispatcherRealtimeVersion(targetVersion);
-                    return {applied: true};
+                    return {applied: true, version: lastVersion};
                 }).catch(function () {
                     return {deferred: true, reason: "dispatcher_refresh_error"};
                 });
             }
             if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
-                storeDispatcherRealtimeVersion(targetVersion);
-                return Promise.resolve({applied: true});
+                return Promise.resolve({
+                    applied: true,
+                    version: storeDispatcherRealtimeVersion(targetVersion)
+                });
             }
             return refreshDispatcherDesktopBoardFromServer({version: targetVersion}).then(function (applied) {
                 if (!applied) return {deferred: true, reason: "dispatcher_refresh_failed"};
-                storeDispatcherRealtimeVersion(targetVersion);
-                return {applied: true};
+                return {applied: true, version: lastVersion};
             }).catch(function () {
                 return {deferred: true, reason: "dispatcher_refresh_error"};
             });
