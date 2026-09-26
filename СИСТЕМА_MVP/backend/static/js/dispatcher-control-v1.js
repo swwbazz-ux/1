@@ -93,6 +93,11 @@ document.addEventListener("DOMContentLoaded", function () {
             return dispatcherShiftOpen;
         }
     });
+    if (typeof window.createDispatcherEquipmentSearch !== "function") {
+        throw new Error("Dispatcher equipment search module is not loaded");
+    }
+    var dispatcherEquipmentSearch = window.createDispatcherEquipmentSearch();
+    dispatcherEquipmentSearch.bind();
     if (typeof window.createDispatcherBoard !== "function") {
         throw new Error("Dispatcher board module is not loaded");
     }
@@ -111,6 +116,7 @@ document.addEventListener("DOMContentLoaded", function () {
         equipmentStateLabel: dispatcherDetail.equipmentStateLabel,
         neutralEquipmentIcon: dispatcherDetail.neutralEquipmentIcon,
         setNodeEquipmentState: dispatcherDetail.setNodeEquipmentState,
+        rebindEquipmentSearch: dispatcherEquipmentSearch.bind,
         refreshBoardFromServer: function (refreshOptions) {
             return dispatcherRealtime.refreshBoardFromServer(refreshOptions);
         },

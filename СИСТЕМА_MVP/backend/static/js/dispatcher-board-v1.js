@@ -1,5 +1,5 @@
 /* Dispatcher desktop board.
-   Owns board layout, equipment search, drag-and-drop and optimistic DOM updates.
+   Owns board layout, drag-and-drop and optimistic DOM updates.
    Network transport, realtime reconciliation and detail rendering are injected. */
 (function (global, document) {
     "use strict";
@@ -16,6 +16,7 @@
         var dispatcherEquipmentStateLabel = options.equipmentStateLabel;
         var dispatcherNeutralEquipmentIcon = options.neutralEquipmentIcon;
         var setDispatcherNodeEquipmentState = options.setNodeEquipmentState;
+        var rebindEquipmentSearch = options.rebindEquipmentSearch || function () {};
         function dispatcherShiftIsOpen() {
             return typeof options.getShiftOpen === "function"
                 ? Boolean(options.getShiftOpen())
@@ -442,121 +443,6 @@
                 complexRackResizeObserver.observe(rack);
             });
         }
-        /* Живой поиск техники: набранный номер подсвечивает все плитки этой
-           машины — в комплексе, в гараже, карточку комплекса по экскаватору.
-           Совпадение по началу номера, чтобы набор сужал круг; «к-2» и «k-2»
-           одинаково находят комплекс по имени зоны. Доска после ответа сервера
-           перерисовывается целиком — MutationObserver возвращает подсветку. */
-        function bindDispatcherEquipmentSearch() {
-            var input = document.querySelector("[data-dispatcher-equipment-search]");
-            if (!input || document.body.classList.contains("mining-master-mobile-screen")) return;
-            var box = input.closest("[data-dispatcher-equipment-search-box]") || input.parentElement;
-            var count = document.querySelector("[data-dispatcher-equipment-search-count]");
-            var query = "";
-
-            function normalizeSearchText(value) {
-                return String(value || "").trim().toLowerCase().replace(/k/g, "к").replace(/\s+/g, "");
-            }
-
-            function matchesSearch(node, needle) {
-                var name = normalizeSearchText(node.getAttribute("data-equipment-name"));
-                if (name && name.indexOf(needle) === 0) return true;
-                var zone = normalizeSearchText(node.getAttribute("data-zone-label"));
-                return !!zone && zone.indexOf(needle) === 0;
-            }
-
-            function applyEquipmentSearch() {
-                var needle = normalizeSearchText(query);
-                var hits = 0;
-                var first = null;
-                document.querySelectorAll(".dispatcher-shell [data-equipment-name]").forEach(function (node) {
-                    var hit = needle !== "" && matchesSearch(node, needle);
-                    node.classList.toggle("is-search-hit", hit);
-                    if (hit) {
-                        hits += 1;
-                        if (!first) first = node;
-                    }
-                });
-                document.body.classList.toggle("is-equipment-search", needle !== "");
-                box.classList.toggle("has-query", needle !== "");
-                if (count) {
-                    count.hidden = needle === "";
-                    count.textContent = String(hits);
-                    count.classList.toggle("is-none", hits === 0);
-                }
-                /* Гараж прокручивается — первое совпадение подтягиваем в кадр. */
-                if (first && typeof first.scrollIntoView === "function") {
-                    first.scrollIntoView({ block: "nearest", inline: "nearest" });
-                }
-            }
-
-            input.addEventListener("input", function () {
-                query = input.value;
-                applyEquipmentSearch();
-            });
-            input.addEventListener("keydown", function (event) {
-                if (event.key === "Escape") clearEquipmentSearch();
-            });
-
-            function clearEquipmentSearch() {
-                input.value = "";
-                query = "";
-                applyEquipmentSearch();
-                if (document.activeElement === input) input.blur();
-            }
-
-            /* Набор без клика по полю: цифра или буква, нажатая когда фокус не в
-               другом поле ввода и не открыт диалог, уходит в поиск — диспетчер
-               просто начинает печатать номер. Backspace стирает так же. */
-            function isTypingElsewhere() {
-                var active = document.activeElement;
-                if (!active || active === document.body || active === input) return false;
-                var tag = active.tagName;
-                return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || active.isContentEditable;
-            }
-            function isDialogOpen() {
-                if (document.querySelector("dialog[open]")) return true;
-                var modal = document.getElementById("app-confirm-modal");
-                return !!(modal && !modal.hidden && getComputedStyle(modal).display !== "none");
-            }
-            document.addEventListener("keydown", function (event) {
-                if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
-                if (document.activeElement === input || isTypingElsewhere() || isDialogOpen()) return;
-                var key = event.key;
-                if (key.length === 1 && /[0-9a-zа-яё\-]/i.test(key)) {
-                    if (input.maxLength > 0 && input.value.length >= input.maxLength) return;
-                    input.value += key;
-                } else if (key === "Backspace" && input.value) {
-                    input.value = input.value.slice(0, -1);
-                } else {
-                    return;
-                }
-                event.preventDefault();
-                query = input.value;
-                applyEquipmentSearch();
-                input.focus({ preventScroll: true });
-                input.setSelectionRange(input.value.length, input.value.length);
-            });
-
-            /* Клик или захват мышью в любом месте вне поля снимает поиск:
-               техника найдена, диспетчер тянет её или работает дальше. */
-            document.addEventListener("pointerdown", function (event) {
-                if (query === "" || box.contains(event.target)) return;
-                clearEquipmentSearch();
-            }, true);
-
-            var pending = null;
-            var observer = new MutationObserver(function () {
-                if (query === "" || pending) return;
-                pending = setTimeout(function () {
-                    pending = null;
-                    applyEquipmentSearch();
-                }, 60);
-            });
-            observer.observe(document.querySelector(".dispatcher-shell") || document.body, { childList: true, subtree: true });
-        }
-        bindDispatcherEquipmentSearch();
-
         watchComplexTruckRacks();
         function findTruckGarageList() {
             return document.querySelector(".dispatcher-trucks");
@@ -1066,6 +952,7 @@
         function bindDispatcherDesktopInteractions() {
             board = document.querySelector(".dispatcher-board");
             excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
+            rebindEquipmentSearch();
             document.querySelectorAll("[data-dispatcher-drag]").forEach(bindDragTile);
             document.querySelectorAll("[data-equipment-card-id]").forEach(bindEquipmentCardTrigger);
             normalizeComplexGrid();

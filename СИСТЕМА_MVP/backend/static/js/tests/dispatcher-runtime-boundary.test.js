@@ -30,6 +30,10 @@ const DISPATCHER_DETAIL_CHARTS = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-detail-charts-v1.js"),
     "utf8"
 );
+const DISPATCHER_EQUIPMENT_SEARCH = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-equipment-search-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -68,7 +72,7 @@ const PRODUCTION_MANIFEST = fs.readFileSync(
 );
 
 test("desktop runtime содержит только контур Диспетчера", () => {
-    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
+    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_EQUIPMENT_SEARCH, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
     for (const mobileContract of [
         "function bindMiningMasterMobileScreens()",
         "function refreshMobileBoardFromServer(options)",
@@ -184,6 +188,9 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_DETAIL, /function addDetailDestinationRow\(destination\)/);
     assert.doesNotMatch(DISPATCHER_DETAIL, /function buildDetailChartShell\(chart\)/);
     assert.doesNotMatch(DISPATCHER_DETAIL, /function renderDetailChart\(chart\)/);
+    assert.match(DISPATCHER_EQUIPMENT_SEARCH, /function createDispatcherEquipmentSearch\(\)/);
+    assert.match(DISPATCHER_EQUIPMENT_SEARCH, /global\.createDispatcherEquipmentSearch = createDispatcherEquipmentSearch;/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherEquipmentSearch\(\)/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
     assert.match(DISPATCHER_BOARD, /function bindDispatcherDesktopInteractions\(\)/);
@@ -198,6 +205,7 @@ test("transport загружается перед основным runtime и в
     const detailSettingsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-settings-v1.js");
     const detailChartsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-charts-v1.js");
     const detailIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-v1.js");
+    const equipmentSearchIndex = SHARED_TEMPLATE.indexOf("dispatcher-equipment-search-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
@@ -208,7 +216,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(detailSettingsIndex > transportIndex, "detail settings must load after transport");
     assert.ok(detailChartsIndex > detailSettingsIndex, "detail charts must load after detail settings");
     assert.ok(detailIndex > detailChartsIndex, "detail must load after its chart presenter");
-    assert.ok(boardIndex > detailIndex, "board must load after detail");
+    assert.ok(equipmentSearchIndex > detailIndex, "equipment search must load after detail");
+    assert.ok(boardIndex > equipmentSearchIndex, "board must load after equipment search");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
@@ -218,12 +227,14 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-settings-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-charts-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-equipment-search-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-settings-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-charts-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-equipment-search-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
 });

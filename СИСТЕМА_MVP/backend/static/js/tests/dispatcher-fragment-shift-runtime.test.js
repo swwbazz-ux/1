@@ -215,6 +215,7 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         function refreshExcavatorGarage() {}
         function refreshTruckGarage() {}
         function refreshAllComplexTruckRacks() {}
+        function rebindEquipmentSearch() {}
         function bindDispatcherExcavatorGarageDrop() {}
         function bindDispatcherTruckGarageDrop() {}
         function dispatcherPost() {
