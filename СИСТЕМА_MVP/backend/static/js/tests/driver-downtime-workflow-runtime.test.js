@@ -431,6 +431,44 @@ test("waiting_unload enables the yellow mode but keeps hold-to-unload; clearing 
     );
 });
 
+test("durable automatic and manual trip completion immediately suppress waiting_unload projection", () => {
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /function tripTerminalEventClosesWaitingUnload\(events, latestDowntime, activeFlow\)/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /event\.event_type === "driver\.trip\.unloaded"[\s\S]*event\.event_type === "driver\.trip\.manual_completed"/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /tripTerminalEventClosesWaitingUnload\(ordered, latestDowntime, projectedDowntimeFlow\)[\s\S]*snapshotDriverDowntimeTimer[\s\S]*clearDriverActiveDowntime/
+    );
+
+    const source = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "function tripTerminalEventClosesWaitingUnload(events, latestDowntime, activeFlow)",
+        "Driver terminal waiting-unload projection helper"
+    );
+    const context = {helper: null};
+    vm.runInNewContext(
+        `${source}\ncontext.helper = tripTerminalEventClosesWaitingUnload;`,
+        {context, String, Number},
+        {filename: "static/js/driver-shift-v1.js#terminal-waiting-unload"}
+    );
+    const started = {event_type: "driver.downtime.started", sequence: 1, state: "pending"};
+    const unloaded = {event_type: "driver.trip.unloaded", sequence: 2, state: "pending"};
+    const nextWait = {event_type: "driver.downtime.started", sequence: 3, state: "pending"};
+    const reviewed = {event_type: "driver.trip.manual_completed", sequence: 4, state: "conflict"};
+    const manualCompleted = {event_type: "driver.trip.manual_completed", sequence: 5, state: "pending"};
+
+    assert.equal(context.helper([started, unloaded], started, "waiting_unload"), unloaded);
+    assert.equal(context.helper([started, unloaded, nextWait], nextWait, "waiting_unload"), null);
+    assert.equal(context.helper([reviewed], null, "waiting_unload"), null);
+    assert.equal(context.helper([manualCompleted], null, "waiting_loading"), null);
+    assert.equal(context.helper([manualCompleted], null, "waiting_unload"), manualCompleted);
+});
+
 
 test("waiting_loading turns the empty Work dial yellow but keeps it inert", () => {
     const runtime = loadWaitingModeRuntime({hasTrip: false});

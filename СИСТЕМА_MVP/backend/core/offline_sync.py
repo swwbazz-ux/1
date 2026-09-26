@@ -2867,6 +2867,18 @@ def _legacy_action_result(access, normalized):
     }, {'trip': trip, 'shift': trip.unloading_shift, 'equipment': trip.truck}
 
 
+def _exact_driver_terminal_can_recover_missing_dependency(normalized):
+    return (
+        normalized.get('role_code') == 'driver'
+        and normalized.get('event_type') in {
+            'driver.trip.unloaded',
+            'driver.trip.manual_completed',
+        }
+        and bool(normalized.get('trip_id'))
+        and not normalized.get('local_trip_id')
+    )
+
+
 def _dependency_state(access, normalized):
     if not normalized['depends_on']:
         return
@@ -2879,6 +2891,9 @@ def _dependency_state(access, normalized):
     for dependency_id in normalized['depends_on']:
         dependency = dependencies.get(dependency_id)
         if not dependency:
+            if _exact_driver_terminal_can_recover_missing_dependency(normalized):
+                normalized.setdefault('ignored_missing_dependencies', []).append(dependency_id)
+                continue
             _retry('dependency_pending', 'Предыдущее событие ещё не получено сервером.')
         if (
             dependency.actor_id != access.employee_id
@@ -3123,6 +3138,11 @@ def process_one_offline_event(access, normalized):
             receipt.error_code = ''
             receipt.error_message = ''
             result_payload = dict(result_payload or {})
+            if normalized.get('ignored_missing_dependencies'):
+                result_payload['dependency_recovery'] = {
+                    'reason': 'exact_terminal_reference',
+                    'ignored': list(normalized['ignored_missing_dependencies']),
+                }
             result_payload.setdefault('server_received_at', receipt.received_at.isoformat())
             if normalized.get('clock_adjusted'):
                 result_payload.update({

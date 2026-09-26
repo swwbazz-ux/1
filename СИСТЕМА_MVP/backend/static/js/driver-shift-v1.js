@@ -1182,6 +1182,18 @@ window.bindDriverMobileShell = function () {
         });
     }
 
+    function tripTerminalEventClosesWaitingUnload(events, latestDowntime, activeFlow) {
+        if (String(activeFlow || "") !== "waiting_unload") return null;
+        var latestDowntimeSequence = latestDowntime ? Number(latestDowntime.sequence || 0) : 0;
+        return (events || []).slice().reverse().find(function (event) {
+            return (
+                (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1
+                && Number(event.sequence || 0) > latestDowntimeSequence
+            );
+        }) || null;
+    }
+
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
@@ -1261,14 +1273,30 @@ window.bindDriverMobileShell = function () {
                 return (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
                     && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1;
             });
-        if (latestDowntime) {
+        var latestDowntimeReasonButton = null;
+        var projectedDowntimeFlow = downtimeCard && downtimeCard.dataset.driverActiveDowntimeFlow || "";
+        if (latestDowntime && latestDowntime.event_type === "driver.downtime.started") {
+            var latestDowntimeReasonId = String(latestDowntime.payload && latestDowntime.payload.reason_id || "");
+            latestDowntimeReasonButton = current.querySelector(
+                '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + latestDowntimeReasonId + '"]'
+            );
+            projectedDowntimeFlow = latestDowntimeReasonButton && latestDowntimeReasonButton.dataset.driverDowntimeFlow || projectedDowntimeFlow;
+        }
+        var tripTerminalEvent = tripTerminalEventClosesWaitingUnload(ordered, latestDowntime, projectedDowntimeFlow);
+        if (tripTerminalEvent) {
+            snapshotDriverDowntimeTimer(Date.parse(tripTerminalEvent.occurred_at || ""));
+            clearDriverActiveDowntime({
+                shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                calculated_at: tripTerminalEvent.occurred_at || ""
+            });
+        } else if (latestDowntime) {
             if (latestDowntime.event_type === "driver.downtime.ended") {
                 clearDriverActiveDowntime({
                     shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0
                 });
             } else {
                 var reasonId = String(latestDowntime.payload && latestDowntime.payload.reason_id || "");
-                var reasonButton = current.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
+                var reasonButton = latestDowntimeReasonButton || current.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
                 applyDriverActiveDowntime({
                     active: true,
                     event_id: "local:" + latestDowntime.event_id,
