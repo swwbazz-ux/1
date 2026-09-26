@@ -3283,6 +3283,17 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         )
 
     def test_two_devices_racing_for_truck_do_not_create_two_open_trips(self):
+        """Правило пользователя: машинист — истина, сервер не отклоняет.
+
+        Оба устройства грузят один и тот же самосвал одновременно — сервер
+        принимает оба (никаких отказов из-за гонки), но advisory-lock
+        trip_load_pair сериализует их в БД: победитель гонки открывает рейс,
+        второй либо сливается с ним же (то же окно погрузки), либо застаёт
+        его уже открытым и проходит тем же приёмом, что и обычный «чужой»
+        рейс — закрывает старый как UNCONTROLLED и открывает свой. В любом
+        исходе на самосвале ровно один ОТКРЫТЫЙ рейс, никакого
+        IntegrityError и никакого дубля.
+        """
         events = [
             (self.event('parallel-device-a-load', 1), 'parallel-device-a'),
             (self.event('parallel-device-b-load', 1), 'parallel-device-b'),
@@ -3290,11 +3301,15 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda args: self.post_from_thread(*args), events))
 
-        statuses = sorted(item[1]['status'] for item in results)
-        self.assertEqual(statuses, ['accepted', 'conflict'])
-        self.assertEqual(Trip.objects.count(), 1)
-        self.assertEqual(
-            Trip.objects.filter(status=TripStatus.LOADED_WAITING_UNLOAD).count(),
-            1,
-        )
+        statuses = [item[1]['status'] for item in results]
+        self.assertEqual(statuses, ['accepted', 'accepted'], results)
         self.assertEqual(OfflineFieldEvent.objects.count(), 2)
+
+        all_trips = list(Trip.objects.filter(truck=self.truck).order_by('id'))
+        open_trips = [t for t in all_trips if t.status == TripStatus.LOADED_WAITING_UNLOAD]
+        self.assertEqual(len(open_trips), 1, f'ожидался ровно один открытый рейс, рейсы: {all_trips}')
+        self.assertIn(len(all_trips), (1, 2), f'неожиданное число рейсов: {all_trips}')
+        if len(all_trips) == 2:
+            uncontrolled = [t for t in all_trips if t.status == TripStatus.UNCONTROLLED]
+            self.assertEqual(len(uncontrolled), 1, f'второй рейс должен быть UNCONTROLLED: {all_trips}')
+            self.assertEqual(uncontrolled[0].superseded_by_id, open_trips[0].id)
