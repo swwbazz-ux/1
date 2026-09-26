@@ -6,12 +6,12 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v144">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v144">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v144">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v144">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v144">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v144">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v162">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v162">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v162">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v162">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v162">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v162">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -579,7 +579,7 @@
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v144"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v162"></script>
 {% else %}
 <script>
 (function () {
@@ -6820,11 +6820,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v144" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v162" defer></script>
 {% endif %}
 {% endblock %}

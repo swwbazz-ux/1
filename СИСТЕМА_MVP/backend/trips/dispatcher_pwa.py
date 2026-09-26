@@ -11,7 +11,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v144";
+const CACHE_NAME = "dispatcher-desktop-shell-v162";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -22,8 +22,19 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/js/dispatcher-control-v1.js",
   "/static/js/dispatcher-transport-v1.js",
+  "/static/js/dispatcher-detail-settings-v1.js",
+  "/static/js/dispatcher-detail-charts-v1.js",
   "/static/js/dispatcher-detail-v1.js",
+  "/static/js/dispatcher-equipment-card-trigger-v1.js",
+  "/static/js/dispatcher-equipment-search-v1.js",
+  "/static/js/dispatcher-board-layout-v1.js",
+  "/static/js/dispatcher-complex-truck-racks-v1.js",
+  "/static/js/dispatcher-haul-assignment-state-v1.js",
+  "/static/js/dispatcher-board-dnd-v1.js",
+  "/static/js/dispatcher-board-mutations-v1.js",
+  "/static/js/dispatcher-board-actions-v1.js",
   "/static/js/dispatcher-board-v1.js",
+  "/static/js/dispatcher-fragment-reconciler-v1.js",
   "/static/js/dispatcher-realtime-v1.js",
   "/static/js/dispatcher-sounds-v1.js",
   "/static/js/dispatcher-canvas-v1.js",

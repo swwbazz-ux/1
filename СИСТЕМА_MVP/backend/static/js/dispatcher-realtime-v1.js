@@ -13,7 +13,6 @@
         var transport = options.transport;
         var storageKey = "operational-state-version";
         var hardLagLimit = 150;
-        var localAssignmentAppliedUntil = 0;
         var incomingRefreshQueueGraceMs = 15000;
         var syncQueueWakeThrottleMs = 1500;
         var lastSyncQueueWakeAt = 0;
@@ -21,6 +20,16 @@
         if (!hostDocument || !transport) {
             throw new Error("Dispatcher realtime dependencies are not configured");
         }
+        if (typeof global.createDispatcherFragmentReconciler !== "function") {
+            throw new Error("Dispatcher fragment reconciler module is not loaded");
+        }
+        var fragmentReconciler = global.createDispatcherFragmentReconciler({
+            window: hostWindow,
+            document: hostDocument,
+            getEquipmentCards: options.getEquipmentCards,
+            getDetailLayer: options.getDetailLayer,
+            openEquipmentCard: options.openEquipmentCard
+        });
 
         function readRenderedOperationalStateVersion() {
             var parsed = parseInt(
@@ -41,10 +50,17 @@
         }
 
         var lastVersion = readRenderedOperationalStateVersion() || readDispatcherRealtimeVersion();
+        /* Direct fragment refreshes can be started by realtime, optimistic
+           recovery and conflict handling at the same time. Freshness belongs
+           to the server payload version, never to network response order. */
+        var dispatcherDesktopRefreshGeneration = 0;
+        var lastAppliedFragmentVersion = readRenderedOperationalStateVersion();
+        var lastAppliedFragmentGeneration = 0;
 
         function storeDispatcherRealtimeVersion(version) {
             var parsed = parseInt(version || "0", 10);
-            if (!Number.isFinite(parsed) || parsed <= 0) return;
+            if (!Number.isFinite(parsed) || parsed <= 0) return lastVersion;
+            if (lastVersion && parsed < lastVersion) return lastVersion;
             lastVersion = parsed;
             if (hostDocument.body) {
                 hostDocument.body.dataset.operationalStateVersion = String(parsed);
@@ -52,6 +68,7 @@
             try {
                 hostWindow.sessionStorage.setItem(storageKey, String(parsed));
             } catch (error) {}
+            return lastVersion;
         }
 
         function wakeDispatcherSyncQueueForRefresh() {
@@ -92,20 +109,8 @@
             return isElementRendered(hostDocument.querySelector(".dispatcher-board"));
         }
 
-        function markDispatcherLocalAssignmentApplied() {
-            localAssignmentAppliedUntil = Date.now() + 8000;
-        }
-
         function hasDispatcherRelevantEvents(events) {
             return Array.isArray(events) && events.length > 0;
-        }
-
-        function canTrustLocalDispatcherAssignmentEvents(events) {
-            if (!Array.isArray(events) || !events.length) return false;
-            if (Date.now() > localAssignmentAppliedUntil) return false;
-            return events.every(function (event) {
-                return event && event.type === "assignment_changed";
-            });
         }
 
         function isDispatcherOperationalRefreshUnsafe() {
@@ -136,167 +141,10 @@
             return false;
         }
 
-        function captureDispatcherDesktopState(currentBoard) {
-            var selectors = [
-                ".dispatcher-left",
-                ".dispatcher-excavators",
-                ".dispatcher-complexes",
-                ".dispatcher-zone-grid",
-                ".dispatcher-right",
-                ".dispatcher-trucks"
-            ];
-            var state = {
-                scrollX: hostWindow.scrollX || 0,
-                scrollY: hostWindow.scrollY || 0,
-                scrolls: {},
-                activeDetailCardId: "",
-                detailScrollTop: 0
-            };
-            selectors.forEach(function (selector) {
-                var node = currentBoard ? currentBoard.querySelector(selector) : hostDocument.querySelector(selector);
-                if (!node) return;
-                state.scrolls[selector] = {
-                    top: node.scrollTop || 0,
-                    left: node.scrollLeft || 0
-                };
-            });
-            var detailLayer = options.getDetailLayer ? options.getDetailLayer() : null;
-            if (detailLayer && !detailLayer.hidden) {
-                state.activeDetailCardId = detailLayer.dataset.gdActiveCardId || "";
-                var panel = detailLayer.querySelector(".mm-equipment-detail-panel");
-                state.detailScrollTop = panel ? panel.scrollTop || 0 : 0;
-            }
-            return state;
-        }
-
-        function restoreDispatcherDesktopState(freshBoard, state) {
-            if (!state) return;
-            Object.keys(state.scrolls || {}).forEach(function (selector) {
-                var node = freshBoard ? freshBoard.querySelector(selector) : hostDocument.querySelector(selector);
-                var saved = state.scrolls[selector];
-                if (!node || !saved) return;
-                node.scrollTop = saved.top || 0;
-                node.scrollLeft = saved.left || 0;
-            });
-            hostWindow.scrollTo(state.scrollX || 0, state.scrollY || 0);
-            var equipmentCards = options.getEquipmentCards ? options.getEquipmentCards() : {};
-            if (state.activeDetailCardId && equipmentCards[String(state.activeDetailCardId || "")]) {
-                if (typeof options.openEquipmentCard === "function") {
-                    options.openEquipmentCard(state.activeDetailCardId);
-                }
-                var detailLayer = options.getDetailLayer ? options.getDetailLayer() : null;
-                var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
-                if (panel) panel.scrollTop = state.detailScrollTop || 0;
-            }
-        }
-
-        function dispatcherNodeMarkup(node) {
-            return node && typeof node.outerHTML === "string" ? node.outerHTML : "";
-        }
-
-        function dispatcherMarkupFingerprint(markup) {
-            var value = String(markup || "");
-            var hash = 2166136261;
-            for (var index = 0; index < value.length; index += 1) {
-                hash ^= value.charCodeAt(index);
-                hash = Math.imul(hash, 16777619);
-            }
-            return (hash >>> 0).toString(16) + ":" + value.length;
-        }
-
-        function seedDispatcherServerFingerprint(node) {
-            if (!node) return "";
-            if (!node.__dispatcherServerFingerprint) {
-                node.__dispatcherServerFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(node));
-            }
-            return node.__dispatcherServerFingerprint;
-        }
-
-        function seedDispatcherBoardFingerprints(boardNode) {
-            if (!boardNode) return;
-            boardNode.querySelectorAll(
-                ".dispatcher-equipment-tile, .dispatcher-complex-card[data-zone-id], "
-                + ".dispatcher-truck-tile[data-equipment-id]"
-            ).forEach(seedDispatcherServerFingerprint);
-        }
-
-        function dispatcherServerMarkupMatches(currentNode, freshNode) {
-            var currentFingerprint = seedDispatcherServerFingerprint(currentNode);
-            var freshFingerprint = dispatcherMarkupFingerprint(dispatcherNodeMarkup(freshNode));
-            freshNode.__dispatcherServerFingerprint = freshFingerprint;
-            return currentFingerprint === freshFingerprint;
-        }
-
-        function syncDispatcherNodeAttributes(currentNode, freshNode) {
-            if (!currentNode || !freshNode) return false;
-            Array.prototype.slice.call(currentNode.attributes || []).forEach(function (attribute) {
-                if (!freshNode.hasAttribute(attribute.name)) {
-                    currentNode.removeAttribute(attribute.name);
-                }
-            });
-            Array.prototype.slice.call(freshNode.attributes || []).forEach(function (attribute) {
-                currentNode.setAttribute(attribute.name, attribute.value);
-            });
-            return true;
-        }
-
-        function dispatcherItemKey(node, keyName, index) {
-            if (!node || !node.dataset) return "__position:" + index;
-            return String(node.dataset[keyName] || "__position:" + index);
-        }
-
-        function reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition) {
-            var currentRegion = currentBoard.querySelector(definition.region);
-            var freshRegion = freshBoard.querySelector(definition.region);
-            if (!currentRegion || !freshRegion) return false;
-            var currentItems = Array.prototype.slice.call(currentRegion.querySelectorAll(definition.items));
-            var freshItems = Array.prototype.slice.call(freshRegion.querySelectorAll(definition.items));
-            var currentKeys = currentItems.map(function (node, index) {
-                return dispatcherItemKey(node, definition.key, index);
-            });
-            var freshKeys = freshItems.map(function (node, index) {
-                return dispatcherItemKey(node, definition.key, index);
-            });
-            var keysMatch = currentKeys.length === freshKeys.length
-                && currentKeys.every(function (key, index) {
-                    return key === freshKeys[index];
-                });
-            if (!keysMatch) {
-                seedDispatcherBoardFingerprints(freshRegion);
-                currentRegion.replaceWith(freshRegion);
-                return true;
-            }
-            currentItems.forEach(function (currentItem, index) {
-                var freshItem = freshItems[index];
-                if (!dispatcherServerMarkupMatches(currentItem, freshItem)) {
-                    currentItem.replaceWith(freshItem);
-                }
-            });
-            syncDispatcherNodeAttributes(currentRegion, freshRegion);
-            return true;
-        }
-
-        function reconcileDispatcherDesktopBoard(currentBoard, freshBoard) {
-            if (!currentBoard || !freshBoard) return null;
-            var regions = [
-                {region: ".dispatcher-excavators", items: ".dispatcher-equipment-tile", key: "equipmentId"},
-                {region: ".dispatcher-zone-grid", items: ".dispatcher-complex-card[data-zone-id]", key: "zoneId"},
-                {region: ".dispatcher-trucks", items: ".dispatcher-truck-tile[data-equipment-id]", key: "equipmentId"}
-            ];
-            var currentTopbar = currentBoard.querySelector(".dispatcher-topbar");
-            var freshTopbar = freshBoard.querySelector(".dispatcher-topbar");
-            var completeContract = currentTopbar && freshTopbar && regions.every(function (definition) {
-                return currentBoard.querySelector(definition.region)
-                    && freshBoard.querySelector(definition.region);
-            });
-            if (!completeContract) return null;
-            var reconciled = regions.every(function (definition) {
-                return reconcileDispatcherKeyedRegion(currentBoard, freshBoard, definition);
-            });
-            if (!reconciled) return null;
-            syncDispatcherNodeAttributes(currentBoard, freshBoard);
-            return currentBoard;
-        }
+        var captureDispatcherDesktopState = fragmentReconciler.captureState;
+        var restoreDispatcherDesktopState = fragmentReconciler.restoreState;
+        var reconcileDispatcherDesktopBoard = fragmentReconciler.reconcileBoard;
+        var seedDispatcherBoardFingerprints = fragmentReconciler.seedBoardFingerprints;
 
         function refreshDispatcherDesktopBoardFromServer(refreshOptions) {
             refreshOptions = refreshOptions || {};
@@ -304,10 +152,25 @@
             var currentBoard = hostDocument.querySelector(".dispatcher-board");
             var desktopState = captureDispatcherDesktopState(currentBoard);
             if (!hostWindow.AppOperationalFragment) return Promise.resolve(false);
+            var requestedVersion = Number(refreshOptions.version || 0);
+            var requestGeneration = ++dispatcherDesktopRefreshGeneration;
             return hostWindow.AppOperationalFragment.request(
                 "dispatcher",
-                Number(refreshOptions.version || 0)
+                requestedVersion
             ).then(function (payload) {
+                var payloadVersion = Number(payload && payload.version);
+                if (!Number.isSafeInteger(payloadVersion) || payloadVersion < requestedVersion) {
+                    return false;
+                }
+                var renderedBoardCoversRequest = lastAppliedFragmentVersion >= requestedVersion;
+                if (payloadVersion < lastAppliedFragmentVersion || payloadVersion < lastVersion) {
+                    return renderedBoardCoversRequest && lastAppliedFragmentVersion >= payloadVersion;
+                }
+                if (payloadVersion === lastAppliedFragmentVersion) {
+                    if (!refreshOptions.forceFullBoard || requestGeneration < lastAppliedFragmentGeneration) {
+                        return renderedBoardCoversRequest;
+                    }
+                }
                 if (isDispatcherOperationalRefreshUnsafe()) return false;
                 var freshBoard = hostWindow.AppOperationalFragment.parseRoot(
                     payload.html,
@@ -328,6 +191,15 @@
                     seedDispatcherBoardFingerprints(freshBoard);
                     currentBoard.replaceWith(freshBoard);
                     refreshedBoard = freshBoard;
+                }
+                lastAppliedFragmentVersion = payloadVersion;
+                lastAppliedFragmentGeneration = requestGeneration;
+                storeDispatcherRealtimeVersion(payloadVersion);
+                /* A fragment can replace the drag source without a native dragend.
+                   Clear that stale session only at this replacement boundary, never
+                   during an ordinary interaction rebind. */
+                if (typeof options.resetBoardDragSession === "function") {
+                    options.resetBoardDragSession();
                 }
                 if (typeof options.bindBoardInteractions === "function") {
                     options.bindBoardInteractions();
@@ -370,20 +242,20 @@
                     forceFullBoard: true
                 }).then(function (applied) {
                     if (!applied) return {deferred: true, reason: "dispatcher_refresh_failed"};
-                    storeDispatcherRealtimeVersion(targetVersion);
-                    return {applied: true};
+                    return {applied: true, version: lastVersion};
                 }).catch(function () {
                     return {deferred: true, reason: "dispatcher_refresh_error"};
                 });
             }
-            if (!hasDispatcherRelevantEvents(events) || canTrustLocalDispatcherAssignmentEvents(events)) {
-                storeDispatcherRealtimeVersion(targetVersion);
-                return Promise.resolve({applied: true});
+            if (!hasDispatcherRelevantEvents(events)) {
+                return Promise.resolve({
+                    applied: true,
+                    version: storeDispatcherRealtimeVersion(targetVersion)
+                });
             }
             return refreshDispatcherDesktopBoardFromServer({version: targetVersion}).then(function (applied) {
                 if (!applied) return {deferred: true, reason: "dispatcher_refresh_failed"};
-                storeDispatcherRealtimeVersion(targetVersion);
-                return {applied: true};
+                return {applied: true, version: lastVersion};
             }).catch(function () {
                 return {deferred: true, reason: "dispatcher_refresh_error"};
             });
@@ -392,7 +264,6 @@
         return {
             applyOperationalStateRefresh: applyDispatcherOperationalStateRefresh,
             isOperationalRefreshUnsafe: isDispatcherOperationalRefreshUnsafe,
-            markLocalAssignmentApplied: markDispatcherLocalAssignmentApplied,
             refreshBoardFromServer: refreshDispatcherDesktopBoardFromServer,
             seedBoardFingerprints: seedDispatcherBoardFingerprints
         };
