@@ -39,18 +39,6 @@
         var detailDowntimeTimer = document.querySelector("[data-gd-detail-downtime-timer]");
         var detailDowntimeClose = document.querySelector("[data-gd-detail-downtime-close]");
         var detailDowntimeResult = document.querySelector("[data-gd-detail-downtime-result]");
-        var detailSettings = document.querySelector("[data-gd-detail-settings]");
-        var detailSettingsTitle = document.querySelector("[data-gd-detail-settings-title]");
-        var detailSettingsHint = document.querySelector("[data-gd-detail-settings-hint]");
-        var detailSettingsStatus = document.querySelector("[data-gd-detail-settings-status]");
-        var detailSettingHorizon = document.querySelector("[data-gd-setting-horizon]");
-        var detailSettingBlock = document.querySelector("[data-gd-setting-block]");
-        var detailSettingRock = document.querySelector("[data-gd-setting-rock]");
-        var detailDestinationList = document.querySelector("[data-gd-destination-list]");
-        var detailDestinationAdd = document.querySelector("[data-gd-destination-add]");
-        var detailDestinationCount = document.querySelector("[data-gd-destination-count]");
-        var detailSettingSave = document.querySelector("[data-gd-setting-save]");
-        var detailDumpPointOptions = [];
         var detailShiftReport = document.querySelector("[data-gd-detail-shift-report]");
         var detailMetrics = document.querySelector("[data-gd-detail-metrics]");
         var detailMeta = document.querySelector("[data-gd-detail-meta]");
@@ -271,253 +259,18 @@
             detailIconSlot.appendChild(cleanDetailTile(tile));
         }
 
-        function buildDetailChartShell(chart) {
-            var card = document.createElement("div");
-            card.className = "gd-detail-chart-card gd-detail-chart-" + (chart.type || "bar");
-            var title = document.createElement("div");
-            title.className = "gd-detail-report-title";
-            title.textContent = chart.title || "";
-            card.appendChild(title);
-            if (chart.summary) {
-                var summary = document.createElement("div");
-                summary.className = "gd-detail-report-summary";
-                summary.textContent = chart.summary;
-                card.appendChild(summary);
-            }
-            if (chart.type === "donut-list") {
-                return card;
-            }
-            var gauges = document.createElement("div");
-            gauges.className = "gd-detail-gauge-strip";
-            chart.rows.slice(0, 3).forEach(function (row) {
-                var item = document.createElement("div");
-                item.className = "gd-detail-gauge-summary accent-" + (row.accent || "green");
-                item.style.setProperty("--gauge-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
-                item.innerHTML =
-                    "<div class=\"gd-detail-gauge\"><strong>" + escapeHtml(row.value || "") + "</strong></div>" +
-                    "<span>" + escapeHtml(row.target || row.label || row.source || "") + "</span>";
-                gauges.appendChild(item);
-            });
-            card.appendChild(gauges);
-            return card;
-        }
-
-        function renderDetailChart(chart) {
-            if (!detailDashboard) return;
-            detailDashboard.innerHTML = "";
-            if (!chart || !chart.rows || !chart.rows.length) return;
-            var card = buildDetailChartShell(chart);
-            if (chart.type === "matrix") {
-                var groupedRows = {};
-                chart.rows.forEach(function (row) {
-                    var key = row.label || "не указан";
-                    if (!groupedRows[key]) {
-                        groupedRows[key] = [];
-                    }
-                    groupedRows[key].push(row);
-                });
-                Object.keys(groupedRows).forEach(function (label) {
-                    var rows = groupedRows[label];
-                    var matrix = document.createElement("div");
-                    matrix.className = "gd-detail-matrix-row is-grouped";
-                    var face = document.createElement("div");
-                    face.className = "gd-detail-matrix-face";
-                    face.textContent = label;
-                    var cell = document.createElement("div");
-                    cell.className = "gd-detail-matrix-cell gd-detail-matrix-pie-cell";
-                    var pie = document.createElement("div");
-                    pie.className = "gd-detail-pie";
-                    var cursor = 0;
-                    var totalPercent = rows.reduce(function (sum, row) {
-                        return sum + Math.max(0, Number(row.percent || 0));
-                    }, 0) || 100;
-                    var stops = rows.map(function (row) {
-                        var raw = Math.max(0, Number(row.percent || 0));
-                        var size = Math.max(4, Math.min(100, (raw / totalPercent) * 100));
-                        var start = cursor;
-                        cursor += size;
-                        return "var(--pie-" + (row.accent || "green") + ") " + start + "% " + cursor + "%";
-                    });
-                    if (cursor < 100) {
-                        stops.push("rgba(142, 158, 166, .16) " + cursor + "% 100%");
-                    }
-                    pie.style.backgroundImage = "radial-gradient(circle at center, var(--gd-detail-panel) 0 50%, transparent 51%), conic-gradient(" + stops.join(", ") + ")";
-                    var total = document.createElement("strong");
-                    total.textContent = rows.length + " напр.";
-                    pie.appendChild(total);
-                    var legend = document.createElement("div");
-                    legend.className = "gd-detail-pie-legend";
-                    rows.forEach(function (row) {
-                        var item = document.createElement("div");
-                        item.className = "gd-detail-pie-item accent-" + (row.accent || "green");
-                        item.innerHTML = "<span></span><strong>" + escapeHtml(row.target || "") + "</strong><em>" + escapeHtml(row.value || "") + "</em><small>" + escapeHtml(row.meta || "") + "</small>";
-                        legend.appendChild(item);
-                    });
-                    cell.appendChild(pie);
-                    cell.appendChild(legend);
-                    matrix.appendChild(face);
-                    matrix.appendChild(cell);
-                    card.appendChild(matrix);
-                });
-                detailDashboard.appendChild(card);
-                return;
-            }
-            if (chart.type === "donut-list") {
-                var breakdown = document.createElement("div");
-                breakdown.className = "gd-detail-breakdown";
-                var stack = document.createElement("div");
-                stack.className = "gd-detail-stack";
-                var totalPercent = chart.rows.reduce(function (sum, row) {
-                    return sum + Math.max(0, Number(row.percent || 0));
-                }, 0) || 100;
-                chart.rows.forEach(function (row) {
-                    var segment = document.createElement("i");
-                    segment.className = "accent-" + (row.accent || "green");
-                    segment.style.setProperty("--segment-share", Math.max(4, Math.min(100, (Math.max(0, Number(row.percent || 0)) / totalPercent) * 100)) + "%");
-                    stack.appendChild(segment);
-                });
-                breakdown.appendChild(stack);
-                var donutGrid = document.createElement("div");
-                donutGrid.className = "gd-detail-breakdown-grid";
-                chart.rows.forEach(function (row) {
-                    var item = document.createElement("div");
-                    item.className = "gd-detail-breakdown-row accent-" + (row.accent || "green");
-                    item.style.setProperty("--bar-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
-                    item.innerHTML =
-                        "<div class=\"gd-detail-breakdown-mark\"></div>" +
-                        "<div class=\"gd-detail-breakdown-main\"><strong>" + escapeHtml(row.label || "") + "</strong><span>" + escapeHtml(row.meta || "") + "</span><em><i></i></em></div>" +
-                        "<b>" + escapeHtml(row.value || "") + "</b>";
-                    donutGrid.appendChild(item);
-                });
-                breakdown.appendChild(donutGrid);
-                card.appendChild(breakdown);
-                detailDashboard.appendChild(card);
-                return;
-            }
-            if (chart.type === "truck-ledger") {
-                var ledger = document.createElement("div");
-                ledger.className = "gd-detail-truck-ledger";
-                ["current", "removed"].forEach(function (stateKey) {
-                    var stateRows = chart.rows.filter(function (row) { return row.state_key === stateKey; });
-                    if (!stateRows.length) return;
-                    var group = document.createElement("div");
-                    group.className = "gd-detail-truck-group is-" + stateKey;
-                    var groupTitle = document.createElement("strong");
-                    groupTitle.textContent = stateKey === "current" ? "В составе сейчас" : "Работали и выведены";
-                    group.appendChild(groupTitle);
-                    stateRows.forEach(function (row) {
-                        var item = document.createElement("div");
-                        item.className = "gd-detail-truck-ledger-row accent-" + (row.accent || "green");
-                        item.style.setProperty("--tile-progress", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
-                        item.innerHTML =
-                            "<div class=\"gd-detail-truck-mini\"><b>" + escapeHtml(row.truck || row.label || "") + "</b><span>" + escapeHtml(row.state || "") + "</span></div>" +
-                            "<div class=\"gd-detail-truck-route\"><strong>" + escapeHtml(row.target || "") + "</strong><span>" + escapeHtml(row.rock || "") + "</span><em><i></i></em></div>" +
-                            "<div class=\"gd-detail-truck-value\">" + escapeHtml(row.value || "") + "</div>";
-                        group.appendChild(item);
-                    });
-                    ledger.appendChild(group);
-                });
-                card.appendChild(ledger);
-                detailDashboard.appendChild(card);
-                return;
-            }
-            chart.rows.forEach(function (row) {
-                if (chart.type === "route") {
-                    var route = document.createElement("div");
-                    route.className = "gd-detail-route-row accent-" + (row.accent || "green");
-                    route.style.setProperty("--gauge-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
-                    var source = document.createElement("div");
-                    source.className = "gd-detail-route-node";
-                    source.textContent = row.source || "";
-                    var flow = document.createElement("div");
-                    flow.className = "gd-detail-route-flow";
-                    flow.innerHTML = "<i></i>";
-                    var target = document.createElement("div");
-                    target.className = "gd-detail-route-node";
-                    target.textContent = row.target || "";
-                    var gauge = document.createElement("div");
-                    gauge.className = "gd-detail-gauge";
-                    gauge.innerHTML = "<strong>" + escapeHtml(row.value || "") + "</strong>";
-                    var meta = document.createElement("div");
-                    meta.className = "gd-detail-route-meta";
-                    meta.textContent = row.meta || "";
-                    route.appendChild(source);
-                    route.appendChild(flow);
-                    route.appendChild(target);
-                    route.appendChild(gauge);
-                    route.appendChild(meta);
-                    card.appendChild(route);
-                    return;
-                }
-                var line = document.createElement("div");
-                line.className = "gd-detail-chart-row accent-" + (row.accent || "green");
-                line.style.setProperty("--bar-pct", Math.max(0, Math.min(100, Number(row.percent || 0))) + "%");
-                var head = document.createElement("div");
-                head.className = "gd-detail-chart-head";
-                var label = document.createElement("strong");
-                var value = document.createElement("span");
-                label.textContent = row.label || "";
-                value.textContent = row.value || "";
-                head.appendChild(label);
-                head.appendChild(value);
-                var meta = document.createElement("div");
-                meta.className = "gd-detail-chart-meta";
-                meta.textContent = row.meta || "";
-                var bar = document.createElement("div");
-                bar.className = "gd-detail-chart-bar";
-                bar.appendChild(document.createElement("i"));
-                line.appendChild(head);
-                line.appendChild(meta);
-                line.appendChild(bar);
-                card.appendChild(line);
-            });
-            detailDashboard.appendChild(card);
-        }
+        var detailCharts = global.createDispatcherDetailCharts({
+            detailLayer: detailLayer,
+            detailShiftReport: detailShiftReport,
+            detailMetrics: detailMetrics,
+            detailTabs: detailTabs,
+            detailDashboard: detailDashboard,
+            escapeHtml: escapeHtml
+        });
 
         function renderDetailShiftReport(report) {
-            if (!detailShiftReport || !detailMetrics || !detailTabs || !detailDashboard) return;
-            var metrics = (report && report.metrics) || [];
-            var charts = ((report && report.charts) || []).filter(function (chart) {
-                return chart && chart.rows && chart.rows.length;
-            });
-            detailMetrics.innerHTML = "";
-            detailTabs.innerHTML = "";
-            detailDashboard.innerHTML = "";
-            metrics.forEach(function (metric) {
-                if (!metric || !metric.value) return;
-                var item = document.createElement("div");
-                var label = document.createElement("span");
-                var value = document.createElement("strong");
-                label.textContent = metric.label || "";
-                value.textContent = metric.value || "";
-                item.appendChild(label);
-                item.appendChild(value);
-                detailMetrics.appendChild(item);
-            });
-            charts.forEach(function (chart, index) {
-                var button = document.createElement("button");
-                button.type = "button";
-                button.className = "gd-detail-tab" + (index === 0 ? " is-active" : "");
-                button.textContent = chart.title || ("Отчет " + (index + 1));
-                button.addEventListener("click", function () {
-                    var panel = detailLayer ? detailLayer.querySelector(".mm-equipment-detail-panel") : null;
-                    var savedScrollTop = panel ? panel.scrollTop : 0;
-                    detailTabs.querySelectorAll(".gd-detail-tab").forEach(function (node) {
-                        node.classList.remove("is-active");
-                    });
-                    button.classList.add("is-active");
-                    renderDetailChart(chart);
-                    if (panel) {
-                        panel.scrollTop = savedScrollTop;
-                    }
-                });
-                detailTabs.appendChild(button);
-            });
-            renderDetailChart(charts[0]);
-            detailTabs.hidden = charts.length < 2;
-            detailShiftReport.hidden = metrics.length === 0 && charts.length === 0;
+            detailCharts.renderShiftReport(report);
         }
-
         function currentDispatcherBoardVersion() {
             var currentBoard = document.querySelector(".dispatcher-board");
             var parsed = Number(currentBoard && currentBoard.dataset
@@ -525,6 +278,15 @@
                 : 0);
             return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
         }
+
+        var detailSettingsRuntime = global.createDispatcherDetailSettings({
+            detailLayer: detailLayer,
+            getCsrfToken: getCsrfToken,
+            roleIsReadonly: dispatcherRoleIsReadonly,
+            getShiftOpen: dispatcherShiftIsOpen,
+            getBoardVersion: currentDispatcherBoardVersion,
+            closeEquipmentCard: closeEquipmentCard
+        });
 
         function setDetailLoadState(message, canRetry) {
             if (detailLoadMessage) detailLoadMessage.textContent = message || "";
@@ -539,8 +301,7 @@
             if (detailDowntimeResult) detailDowntimeResult.textContent = "";
             if (detailDowntimeClose) detailDowntimeClose.disabled = false;
             if (detailLayer) delete detailLayer.dataset.gdDowntimeEventId;
-            if (detailSettings) detailSettings.hidden = true;
-            if (detailSettingsStatus) detailSettingsStatus.textContent = "";
+            detailSettingsRuntime.reset();
             if (detailList) detailList.innerHTML = "";
             if (detailShiftReport) detailShiftReport.hidden = true;
             if (detailMeta) detailMeta.textContent = "";
@@ -926,213 +687,6 @@
             });
         }
 
-        function fillDetailSettingSelect(select, options, selectedId) {
-            if (!select) return;
-            select.innerHTML = "";
-            var placeholder = document.createElement("option");
-            placeholder.value = "";
-            placeholder.textContent = "Выберите";
-            select.appendChild(placeholder);
-            (options || []).forEach(function (item) {
-                var option = document.createElement("option");
-                option.value = String(item.id || "");
-                option.textContent = item.name || "";
-                option.selected = String(item.id || "") === String(selectedId || "");
-                select.appendChild(option);
-            });
-        }
-
-        function detailDestinationRows() {
-            return detailDestinationList
-                ? Array.prototype.slice.call(detailDestinationList.querySelectorAll("[data-gd-destination-row]"))
-                : [];
-        }
-
-        function refreshDetailDestinationRows() {
-            var rows = detailDestinationRows();
-            var selectedIds = rows.map(function (row) {
-                var select = row.querySelector("[data-gd-destination-select]");
-                return select ? String(select.value || "") : "";
-            }).filter(Boolean);
-            rows.forEach(function (row) {
-                var select = row.querySelector("[data-gd-destination-select]");
-                var remove = row.querySelector("[data-gd-destination-remove]");
-                if (select) {
-                    Array.prototype.forEach.call(select.options, function (option) {
-                        option.disabled = !!option.value
-                            && option.value !== select.value
-                            && selectedIds.indexOf(String(option.value)) !== -1;
-                    });
-                }
-                if (remove) remove.disabled = rows.length <= 1;
-            });
-            if (detailDestinationCount) {
-                detailDestinationCount.textContent = rows.length
-                    ? rows.length + " " + (rows.length === 1 ? "точка" : rows.length < 5 ? "точки" : "точек")
-                    : "не назначены";
-            }
-            if (detailDestinationAdd) {
-                detailDestinationAdd.disabled = dispatcherRoleIsReadonly()
-                    || !dispatcherShiftIsOpen()
-                    || rows.length >= detailDumpPointOptions.length;
-            }
-        }
-
-        function addDetailDestinationRow(destination) {
-            if (!detailDestinationList) return;
-            var row = document.createElement("div");
-            row.className = "gd-detail-destination-row";
-            row.setAttribute("data-gd-destination-row", "");
-
-            var selectLabel = document.createElement("label");
-            var selectCaption = document.createElement("span");
-            selectCaption.textContent = "Точка";
-            var select = document.createElement("select");
-            select.setAttribute("data-gd-destination-select", "");
-            fillDetailSettingSelect(select, detailDumpPointOptions, destination && destination.dump_point_id);
-            selectLabel.appendChild(selectCaption);
-            selectLabel.appendChild(select);
-
-            var distanceLabel = document.createElement("label");
-            distanceLabel.className = "gd-detail-destination-distance";
-            var distanceCaption = document.createElement("span");
-            distanceCaption.textContent = "Плечо, км";
-            var distance = document.createElement("input");
-            distance.type = "text";
-            distance.inputMode = "decimal";
-            distance.maxLength = 12;
-            distance.placeholder = "—";
-            distance.value = String(destination && destination.transport_distance_km || "").replace(".", ",");
-            distance.setAttribute("data-gd-destination-distance", "");
-            distanceLabel.appendChild(distanceCaption);
-            distanceLabel.appendChild(distance);
-
-            var remove = document.createElement("button");
-            remove.type = "button";
-            remove.className = "gd-detail-destination-remove";
-            remove.setAttribute("data-gd-destination-remove", "");
-            remove.setAttribute("aria-label", "Убрать точку разгрузки");
-            remove.textContent = "×";
-
-            select.addEventListener("change", refreshDetailDestinationRows);
-            remove.addEventListener("click", function () {
-                row.remove();
-                refreshDetailDestinationRows();
-            });
-            row.appendChild(selectLabel);
-            row.appendChild(distanceLabel);
-            row.appendChild(remove);
-            detailDestinationList.appendChild(row);
-            refreshDetailDestinationRows();
-        }
-
-        function collectDetailDestinations() {
-            var seen = Object.create(null);
-            var destinations = [];
-            detailDestinationRows().forEach(function (row) {
-                var select = row.querySelector("[data-gd-destination-select]");
-                var distance = row.querySelector("[data-gd-destination-distance]");
-                var id = select ? String(select.value || "") : "";
-                if (!id || seen[id]) return;
-                seen[id] = true;
-                destinations.push({
-                    dump_point_id: id,
-                    transport_distance_km: distance ? distance.value : ""
-                });
-            });
-            return destinations;
-        }
-
-        function renderDetailSettings(settings) {
-            if (!detailSettings) return;
-            if (!settings || !settings.editable) {
-                detailSettings.hidden = true;
-                return;
-            }
-            detailSettings.hidden = false;
-            if (detailSettingsTitle) detailSettingsTitle.textContent = settings.title || "Рабочие параметры комплекса";
-            if (detailSettingsHint) detailSettingsHint.textContent = settings.hint || "";
-            if (detailSettingsStatus) detailSettingsStatus.textContent = "";
-            if (detailSettingHorizon) detailSettingHorizon.value = settings.loading_horizon || "";
-            if (detailSettingBlock) detailSettingBlock.value = settings.loading_block || "";
-            fillDetailSettingSelect(detailSettingRock, settings.rock_types, settings.rock_type_id);
-            detailDumpPointOptions = settings.dump_points || [];
-            if (detailDestinationList) detailDestinationList.innerHTML = "";
-            var destinations = Array.isArray(settings.destinations) ? settings.destinations : [];
-            if (!destinations.length && settings.dump_point_id) {
-                destinations = [{
-                    dump_point_id: settings.dump_point_id,
-                    transport_distance_km: settings.transport_distance_km || ""
-                }];
-            }
-            destinations.forEach(addDetailDestinationRow);
-            if (!destinations.length && detailDumpPointOptions.length) {
-                addDetailDestinationRow({dump_point_id: detailDumpPointOptions[0].id});
-            }
-            refreshDetailDestinationRows();
-            if (detailSettingSave) detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftIsOpen();
-        }
-
-        function detailSettingsErrorMessage(code) {
-            if (code === "stale_board") return "Данные пульта уже изменились. Закройте карточку и откройте снова.";
-            if (code === "dispatcher_shift_required") return "Сначала откройте смену Горного диспетчера.";
-            if (code === "invalid_transport_distance") return "Плечо должно быть числом не меньше нуля.";
-            if (code === "invalid_work_settings") return "Выберите действующие породу и точку разгрузки.";
-            if (code === "inactive_role") return "Роль неактивна — доступен только просмотр.";
-            return "Не удалось сохранить параметры.";
-        }
-
-        function saveDetailSettings() {
-            if (!detailLayer || !detailSettingSave) return;
-            var url = detailLayer.dataset.gdSettingsUrl || "";
-            if (!url) return;
-            var destinations = collectDetailDestinations();
-            if (!detailSettingRock || !detailSettingRock.value || !destinations.length) {
-                if (detailSettingsStatus) detailSettingsStatus.textContent = "Выберите породу и хотя бы одну точку.";
-                return;
-            }
-            detailSettingSave.disabled = true;
-            if (detailSettingsStatus) detailSettingsStatus.textContent = "Сохраняю…";
-            fetch(url, {
-                method: "POST",
-                credentials: "same-origin",
-                cache: "no-store",
-                headers: {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": getCsrfToken(),
-                    "X-Requested-With": "XMLHttpRequest"
-                },
-                body: JSON.stringify({
-                    state_version: currentDispatcherBoardVersion(),
-                    loading_horizon: detailSettingHorizon ? detailSettingHorizon.value : "",
-                    loading_block: detailSettingBlock ? detailSettingBlock.value : "",
-                    rock_type_id: detailSettingRock.value,
-                    dump_point_ids: destinations.map(function (row) { return row.dump_point_id; }),
-                    destinations: destinations
-                })
-            }).then(function (response) {
-                return response.json().catch(function () { return {}; }).then(function (payload) {
-                    if (!response.ok) {
-                        var error = new Error("settings_request_failed");
-                        error.code = payload.error || "";
-                        throw error;
-                    }
-                    return payload;
-                });
-            }).then(function (payload) {
-                if (detailSettingsStatus) detailSettingsStatus.textContent = "Настройки сохранены";
-                if (payload && payload.settings) renderDetailSettings(payload.settings);
-                if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
-                    window.AppRealtime.wake("dispatcher_settings_saved");
-                }
-                window.setTimeout(closeEquipmentCard, 650);
-            }).catch(function (error) {
-                if (detailSettingsStatus) detailSettingsStatus.textContent = detailSettingsErrorMessage(error && error.code);
-                detailSettingSave.disabled = dispatcherRoleIsReadonly() || !dispatcherShiftIsOpen();
-            });
-        }
-
         function renderEquipmentCard(cardId, data) {
             if (!data || !detailLayer) return false;
             detailLayer.dataset.gdActiveCardId = String(cardId || "");
@@ -1179,7 +733,7 @@
             renderDetailManualTrip(data.manual_trip || null);
             window.setTimeout(syncDetailScrollHint, 0);
             renderDetailDowntime(data.downtime || null);
-            renderDetailSettings(data.settings || null);
+            detailSettingsRuntime.render(data.settings || null);
             renderDetailTrucks(data);
             if (detailMeta) {
                 var metaParts = [];
@@ -1426,21 +980,6 @@
             if (event.key === "Escape") closeEquipmentCard();
         });
 
-
-        if (detailSettingSave) {
-            detailSettingSave.addEventListener("click", saveDetailSettings);
-        }
-        if (detailDestinationAdd) {
-            detailDestinationAdd.addEventListener("click", function () {
-                var usedIds = collectDetailDestinations().map(function (row) {
-                    return String(row.dump_point_id);
-                });
-                var nextPoint = detailDumpPointOptions.find(function (option) {
-                    return usedIds.indexOf(String(option.id)) === -1;
-                });
-                if (nextPoint) addDetailDestinationRow({dump_point_id: nextPoint.id});
-            });
-        }
 
         return {
             getCards: function () {
