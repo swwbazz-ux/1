@@ -11,7 +11,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v149";
+const CACHE_NAME = "dispatcher-desktop-shell-v150";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -27,6 +27,7 @@ const CORE_ASSETS = [
   "/static/js/dispatcher-detail-v1.js",
   "/static/js/dispatcher-equipment-search-v1.js",
   "/static/js/dispatcher-complex-truck-racks-v1.js",
+  "/static/js/dispatcher-haul-assignment-state-v1.js",
   "/static/js/dispatcher-board-v1.js",
   "/static/js/dispatcher-realtime-v1.js",
   "/static/js/dispatcher-sounds-v1.js",

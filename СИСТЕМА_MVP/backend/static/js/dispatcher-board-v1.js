@@ -18,6 +18,19 @@
         var setDispatcherNodeEquipmentState = options.setNodeEquipmentState;
         var rebindEquipmentSearch = options.rebindEquipmentSearch || function () {};
         var complexTruckRacks = options.complexTruckRacks || {};
+        var dispatcherHaulAssignmentState = options.assignmentState || {};
+        var haulAssignmentStateId = typeof dispatcherHaulAssignmentState.getStateId === "function"
+            ? dispatcherHaulAssignmentState.getStateId
+            : function () { return "0"; };
+        var collectComplexAssignmentStates = typeof dispatcherHaulAssignmentState.collectComplexStates === "function"
+            ? dispatcherHaulAssignmentState.collectComplexStates
+            : function () { return {}; };
+        var applyHaulAssignmentState = typeof dispatcherHaulAssignmentState.applyState === "function"
+            ? dispatcherHaulAssignmentState.applyState
+            : function () {};
+        var applyHaulAssignmentStates = typeof dispatcherHaulAssignmentState.applyStates === "function"
+            ? dispatcherHaulAssignmentState.applyStates
+            : function () {};
         function dispatcherShiftIsOpen() {
             return typeof options.getShiftOpen === "function"
                 ? Boolean(options.getShiftOpen())
@@ -30,36 +43,6 @@
             return options.markLocalAssignmentApplied();
         }
 
-        function haulAssignmentStateId(node) {
-            var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
-            return /^\d+$/.test(String(value || "")) ? String(value) : "0";
-        }
-        function collectComplexAssignmentStates(complexCard) {
-            var states = {};
-            if (!complexCard) return states;
-            complexCard.querySelectorAll(
-                "[data-complex-truck='true'][data-equipment-id], " +
-                "[data-mm-mobile-home-truck-id]"
-            ).forEach(function (truck) {
-                var truckId = truck.dataset.equipmentId || truck.dataset.mmMobileHomeTruckId || "";
-                if (truckId) states[String(truckId)] = haulAssignmentStateId(truck);
-            });
-            return states;
-        }
-        function applyHaulAssignmentState(response, truckNode) {
-            if (!response || !truckNode || response.assignment_state_id === undefined) return;
-            truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
-        }
-        function applyHaulAssignmentStates(response, root) {
-            var states = response && response.assignment_state_ids;
-            if (!states || !root) return;
-            root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
-                var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
-                if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
-                    node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
-                }
-            });
-        }
         var draggedTile = null;
         var board = document.querySelector(".dispatcher-board");
         var excavatorGarage = document.querySelector("[data-dispatcher-excavator-garage]");
@@ -633,6 +616,7 @@
                             expected_assignment_states: collectComplexAssignmentStates(inactiveComplexCard)
                         }, { queueOnNetworkFailure: false }).then(function (response) {
                             return refreshDesktopBoardAfterStructuralAction(response, function () {
+                                applyHaulAssignmentStates(response, inactiveComplexCard);
                                 moveDesktopComplexToExcavatorGarage(inactiveComplexCard);
                             });
                         }).catch(handleDesktopOptimisticBoardError);

@@ -101,11 +101,15 @@ document.addEventListener("DOMContentLoaded", function () {
     if (typeof window.createDispatcherComplexTruckRacks !== "function") {
         throw new Error("Dispatcher complex truck racks module is not loaded");
     }
+    if (typeof window.createDispatcherHaulAssignmentState !== "function") {
+        throw new Error("Dispatcher haul assignment state module is not loaded");
+    }
     if (typeof window.createDispatcherBoard !== "function") {
         throw new Error("Dispatcher board module is not loaded");
     }
     var dispatcherRealtime = null;
     var dispatcherBoard = null;
+    var dispatcherHaulAssignmentState = window.createDispatcherHaulAssignmentState();
     var dispatcherComplexTruckRacks = window.createDispatcherComplexTruckRacks({
         sortEquipmentList: function (container, selector) {
             if (dispatcherBoard && typeof dispatcherBoard.sortEquipmentList === "function") {
@@ -129,6 +133,7 @@ document.addEventListener("DOMContentLoaded", function () {
         setNodeEquipmentState: dispatcherDetail.setNodeEquipmentState,
         rebindEquipmentSearch: dispatcherEquipmentSearch.bind,
         complexTruckRacks: dispatcherComplexTruckRacks,
+        assignmentState: dispatcherHaulAssignmentState,
         refreshBoardFromServer: function (refreshOptions) {
             return dispatcherRealtime.refreshBoardFromServer(refreshOptions);
         },

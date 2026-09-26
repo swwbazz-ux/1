@@ -17,6 +17,10 @@ const REALTIME_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
     "utf8"
 );
+const ASSIGNMENT_STATE_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-haul-assignment-state-v1.js"),
+    "utf8"
+);
 const TEMPLATE_SOURCE = dispatcherScreenSource();
 
 
@@ -190,10 +194,10 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         "function bindDispatcherComplexDrop(zone)",
         "Dispatcher complex drop bind"
     );
-    const assignmentStateSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function haulAssignmentStateId(node)",
-        "Haul assignment state helper"
+    const assignmentStateFactorySource = extractBraceBlock(
+        ASSIGNMENT_STATE_SOURCE,
+        "function createDispatcherHaulAssignmentState()",
+        "Haul assignment state factory"
     );
     const bindAllSource = extractBraceBlock(
         RUNTIME_SOURCE,
@@ -225,7 +229,9 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         function applyDesktopTruckAction(response) { return response; }
         function showDispatcherDnDError(error) { throw error; }
         ${syncSource}
-        ${assignmentStateSource}
+        ${assignmentStateFactorySource}
+        var dispatcherHaulAssignmentState = createDispatcherHaulAssignmentState();
+        var haulAssignmentStateId = dispatcherHaulAssignmentState.getStateId;
         ${bindDragSource}
         ${bindDropSource}
         ${bindAllSource}
@@ -360,6 +366,80 @@ test("open to closed fragment blocks dispatcher drag-and-drop with fetch count z
     assert.equal(context.dispatcherShiftOpen, false);
     assert.equal(dragStart.defaultPrevented, true);
     assert.equal(context.fetchCount, 0);
+});
+
+
+test("fallback расформирования сохраняет новые версии назначений до переноса плиток", async () => {
+    const bindDropSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function bindDispatcherExcavatorGarageDrop(garage)",
+        "Dispatcher excavator garage drop bind"
+    );
+    const structuralRefreshSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function refreshDesktopBoardAfterStructuralAction(response, localFallback)",
+        "Dispatcher structural refresh"
+    );
+    const assignmentStateFactorySource = extractBraceBlock(
+        ASSIGNMENT_STATE_SOURCE,
+        "function createDispatcherHaulAssignmentState()",
+        "Haul assignment state factory"
+    );
+    const garage = new ElementStub();
+    const truck = new ElementStub({
+        dataset: {equipmentId: "17", haulAssignmentStateId: "41", complexTruck: "true"},
+    });
+    const complexCard = new ElementStub({
+        dataset: {dispatcherDrag: "complex", equipmentId: "3", equipmentName: "3"},
+    });
+    complexCard.querySelectorAll = () => [truck];
+    const movedTokens = [];
+    const posted = [];
+    const context = {
+        Promise,
+        dispatcherMoveExcavatorUrl: "/dispatcher/excavator/move/",
+        draggedTile: complexCard,
+        dispatcherPost(url, payload, options) {
+            posted.push({url, payload, options});
+            return Promise.resolve({assignment_state_ids: {17: 99}});
+        },
+        refreshDispatcherDesktopBoardFromServer() {
+            return Promise.resolve(false);
+        },
+        markDispatcherLocalAssignmentApplied() {},
+        requestDispatcherDesktopDangerConfirmation(options) {
+            options.action();
+        },
+        moveDesktopComplexToExcavatorGarage() {
+            movedTokens.push(truck.dataset.haulAssignmentStateId);
+        },
+        handleDesktopOptimisticBoardError(error) {
+            throw error;
+        },
+    };
+    vm.runInNewContext(
+        `
+        ${assignmentStateFactorySource}
+        var dispatcherHaulAssignmentState = createDispatcherHaulAssignmentState();
+        var collectComplexAssignmentStates = dispatcherHaulAssignmentState.collectComplexStates;
+        var applyHaulAssignmentStates = dispatcherHaulAssignmentState.applyStates;
+        ${structuralRefreshSource}
+        ${bindDropSource}
+        `,
+        context,
+        {filename: "dispatcher-board-v1.js#inactive-complex-fallback"}
+    );
+
+    context.bindDispatcherExcavatorGarageDrop(garage);
+    garage.dispatch("drop");
+    await new Promise((resolve) => setImmediate(resolve));
+    await Promise.resolve();
+
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].payload.expected_assignment_states["17"], "41");
+    assert.deepEqual(Object.keys(posted[0].payload.expected_assignment_states), ["17"]);
+    assert.equal(posted[0].options.queueOnNetworkFailure, false);
+    assert.deepEqual(movedTokens, ["99"]);
 });
 
 
