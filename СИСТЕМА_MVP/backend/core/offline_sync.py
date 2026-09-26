@@ -32,6 +32,20 @@ EVENT_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
 DEVICE_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{5,127}$')
 logger = logging.getLogger(__name__)
 
+
+def _log_discrepancy(*, access, code, process, description):
+    """Note a discrepancy the server accepted instead of blocking, for developers only.
+
+    Не для диспетчера — он один на 80+ единиц техники и утонет в пометках.
+    Только технический лог, чтобы разработчики ловили ошибки. Действие
+    работника уже применяется как есть, этим вызовом ничего не меняется.
+    """
+    logger.warning(
+        'offline_sync: accepted despite discrepancy (%s/%s) employee=%s role=%s — %s',
+        process, code, access.employee_id, access.role_id, description,
+    )
+
+
 SUPPORTED_EVENT_ROLES = {
     'excavator.free_bucket.accepted': 'excavator_operator',
     'excavator.free_bucket.cancelled': 'excavator_operator',
@@ -1474,6 +1488,130 @@ def _process_driver_loaded(access, normalized):
         'free_bucket_acceptance': acceptance}
 
 
+def _late_excavator_load_slot(*, truck_id, occurred_at, open_trip):
+    """Classify a late excavator-loaded event against the truck's known trip history.
+
+    occurred_at здесь всегда раньше open_trip.loaded_at (иначе это не
+    «опоздавшее» событие, а обычная более новая погрузка — та идёт обычным
+    путём). Возвращает ('same_load', trip) — окно уже существующего рейса
+    накрывает occurred_at (та же физическая погрузка, отмеченная повторно),
+    либо ('gap', next_trip) — occurred_at в промежутке между рейсами;
+    next_trip — тот, что начался сразу после него, по нему рассчитывается
+    время закрытия исторической записи.
+    """
+    from trips.models import Trip, TripStatus
+
+    trips = list(
+        Trip.objects.select_for_update()
+        .filter(truck_id=truck_id)
+        .exclude(status=TripStatus.CANCELLED)
+        .order_by('loaded_at')
+    )
+    for trip in trips:
+        if trip.status == TripStatus.LOADED_WAITING_UNLOAD:
+            window_end = None
+        elif trip.status == TripStatus.UNCONTROLLED:
+            window_end = trip.operationally_closed_at
+        else:
+            window_end = trip.completed_at
+        window_start = trip.loaded_at - MAX_FUTURE_CLOCK_SKEW
+        if window_start <= occurred_at and (window_end is None or occurred_at <= window_end + MAX_FUTURE_CLOCK_SKEW):
+            return 'same_load', trip
+    next_trip = next((trip for trip in trips if trip.loaded_at > occurred_at), open_trip)
+    return 'gap', next_trip
+
+
+def _process_late_excavator_load(
+    access, normalized, *, shift, excavator, truck, assignment, participation, open_trip, payload,
+):
+    """Опоздавшее событие погрузки про цикл РАНЬШЕ текущего открытого рейса.
+
+    Правило: опоздавшее событие никогда не гасит и не меняет рейс, погруженный
+    позже него — действующий open_trip не трогаем. Дальше — по времени
+    нажатия: либо это уже известная серверу погрузка (окно существующего
+    рейса накрывает это время — просто лог), либо реальная погрузка,
+    провалившаяся в промежуток между рейсами (создаём исторический рейс,
+    сразу закрытый как непроконтролированный).
+    """
+    from references.models import DumpPoint, RockType
+    from trips.models import TripClientAction
+    from trips.trip_creation import create_loaded_waiting_unload_trip
+
+    slot, ref_trip = _late_excavator_load_slot(
+        truck_id=truck.id, occurred_at=normalized['occurred_at'], open_trip=open_trip,
+    )
+    if slot == 'same_load':
+        _log_discrepancy(
+            access=access, code='open_trip_changed', process='Погрузка экскаватором',
+            description=(
+                f'Опоздавшее событие погрузки самосвала {truck} на {normalized["occurred_at"]} '
+                f'попадает в окно уже известного рейса #{ref_trip.id} — та же погрузка, повторно '
+                f'отмеченная. Новый рейс не создан, действующий рейс #{open_trip.id} не тронут.'
+            ),
+        )
+        state = bump_operational_state(
+            'OfflineFieldEvent:excavator_trip_loaded_late_duplicate', event_type='trip_changed',
+            object_type='Trip', object_id=ref_trip.id,
+            payload={'action': 'truck_loaded_late_duplicate', 'trip_id': ref_trip.id, 'truck_id': truck.id},
+        )
+        return {
+            'server_ids': {'trip_id': ref_trip.id, 'shift_id': shift.id},
+            'version': state.version,
+        }, {'trip': ref_trip, 'shift': shift, 'equipment': truck}
+
+    dump_point_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
+    rock_type_id = _positive_int(payload.get('rock_type_id') or payload.get('rock_type'), field='rock_type_id')
+    dump_point = DumpPoint.objects.select_for_update().filter(pk=dump_point_id).first()
+    rock_type = RockType.objects.filter(pk=rock_type_id).first()
+    if not dump_point or not rock_type:
+        _conflict('reference_data_changed', 'Справочные данные погрузки больше недоступны.')
+    try:
+        trip = create_loaded_waiting_unload_trip(
+            assignment=assignment,
+            excavator_operator=access.employee,
+            loading_shift=shift,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            planned_volume_m3=payload.get('planned_volume_m3') or None,
+            loading_horizon=str(payload.get('loading_horizon') or '')[:64],
+            loading_block=str(payload.get('loading_block') or '')[:64],
+            transport_distance_km=payload.get('transport_distance_km') or None,
+            downtime_text=payload.get('downtime_text'),
+            note=payload.get('note'),
+            participation=participation,
+            historical_closed_at=ref_trip.loaded_at,
+            occurred_at=normalized['occurred_at'],
+            resolve_assignment_transition=False,
+        )
+    except ValidationError as error:
+        _conflict('trip_validation_failed', '; '.join(error.messages))
+    TripClientAction.objects.create(
+        action_type='truck_loaded', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    _log_discrepancy(
+        access=access, code='open_trip_changed', process='Погрузка экскаватором',
+        description=(
+            f'Опоздавшее событие погрузки самосвала {truck} на {normalized["occurred_at"]} попало в '
+            f'промежуток перед рейсом #{ref_trip.id} — создан исторический рейс #{trip.id}, сразу '
+            f'закрытый как непроконтролированный на момент начала #{ref_trip.id}. Действующий рейс '
+            f'#{open_trip.id} не тронут.'
+        ),
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:excavator_trip_loaded_historical', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={
+            'action': 'truck_loaded_historical', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+            'excavator_id': trip.excavator_id, 'status': trip.status,
+        },
+    )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck}
+
+
 def _process_excavator_loaded(access, normalized):
     from assignments.models import AssignmentStatus
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
@@ -1585,11 +1723,37 @@ def _process_excavator_loaded(access, normalized):
             ).exists()
         )
         if not merge_driver_trip:
-            if str(expected_id or '') != str(open_trip.id):
-                _conflict('open_trip_changed', 'Незакрытый рейс самосвала уже изменился.')
+            trip_mismatch = str(expected_id or '') != str(open_trip.id)
             prior_is_own_offline_event = bool(linked_previous and linked_previous.id == open_trip.id)
-            if not prior_is_own_offline_event and not may_replace_open_trip(open_trip, participation):
-                _conflict('open_trip_cannot_be_replaced', 'Действующий рейс нельзя заменить этой погрузкой.')
+            replace_blocked = not prior_is_own_offline_event and not may_replace_open_trip(open_trip, participation)
+            if (trip_mismatch or replace_blocked) and normalized['occurred_at'] < open_trip.loaded_at:
+                # Это событие про цикл РАНЬШЕ действующего рейса — опоздавший пакет,
+                # не более новая погрузка. Действующий рейс #{open_trip.id} не гасим
+                # (правило: опоздавшее событие не закрывает и не меняет рейс,
+                # погруженный позже него) — разбираем отдельно, по времени.
+                return _process_late_excavator_load(
+                    access, normalized, shift=shift, excavator=excavator, truck=truck,
+                    assignment=assignment, participation=participation,
+                    open_trip=open_trip, payload=payload,
+                )
+            if trip_mismatch:
+                _log_discrepancy(
+                    access=access, code='open_trip_changed', process='Погрузка экскаватором',
+                    description=(
+                        f'Машинист грузит самосвал {truck}, но открытый рейс #{open_trip.id} на сервере '
+                        f'не совпал с ожидаемым (#{expected_id or "—"}). Погрузка принята, старый рейс '
+                        f'закрыт как непроконтролированный (uncontrolled), засчитан тому, кто грузил.'
+                    ),
+                )
+            if replace_blocked:
+                _log_discrepancy(
+                    access=access, code='open_trip_cannot_be_replaced', process='Погрузка экскаватором',
+                    description=(
+                        f'Машинист грузит самосвал {truck} поверх действующего рейса #{open_trip.id}, '
+                        f'хотя по правилам замены рейс нельзя заменять. Погрузка машиниста принята как '
+                        f'истина, старый рейс закрыт как непроконтролированный, засчитан тому, кто грузил.'
+                    ),
+                )
     truck_downtime = (
         DowntimeEvent.objects.select_for_update(of=('self',))
         .select_related('reason')
@@ -1607,9 +1771,12 @@ def _process_excavator_loaded(access, normalized):
         (truck_downtime and truck_downtime.started_at > normalized['occurred_at'])
         or any(item.started_at > normalized['occurred_at'] for item in excavator_downtimes)
     ):
-        _conflict(
-            'newer_downtime_exists',
-            'После сохранённой погрузки состояние простоя техники уже изменилось.',
+        _log_discrepancy(
+            access=access, code='newer_downtime_exists', process='Погрузка экскаватором',
+            description=(
+                f'Погрузка самосвала {truck} на {normalized["occurred_at"]} принята, хотя после неё '
+                f'по времени уже зафиксирован простой техники. Порядок событий — по времени нажатия.'
+            ),
         )
     load_block = excavator_truck_load_block(
         assignment,
@@ -1646,6 +1813,16 @@ def _process_excavator_loaded(access, normalized):
                 'load_received_at', 'load_time_source',
             ])
         else:
+            # Между чтением open_trip выше и этим вызовом рейс мог уже смениться
+            # (другое событие того же батча его закрыло/заменило) — перечитываем
+            # под блокировкой то, что открыто прямо сейчас, и закрываем именно
+            # его; отказа тут быть не должно (правило: сервер не отклоняет
+            # погрузку машиниста).
+            current_open_trip = (
+                Trip.objects.select_for_update()
+                .filter(truck_id=truck_id, status__in=OPEN_TRIP_STATUSES)
+                .first()
+            )
             trip = create_loaded_waiting_unload_trip(
             assignment=assignment,
             excavator_operator=access.employee,
@@ -1659,7 +1836,7 @@ def _process_excavator_loaded(access, normalized):
             downtime_text=payload.get('downtime_text'),
             note=payload.get('note'),
             participation=participation,
-            supersede_trip=open_trip,
+            supersede_trip=current_open_trip,
             occurred_at=normalized['occurred_at'],
             resolve_assignment_transition=(
                 assignment.ended_at is None
@@ -1711,6 +1888,33 @@ def _process_excavator_loaded(access, normalized):
     }, {'trip': trip, 'shift': shift, 'equipment': truck}
 
 
+def _flag_discrepancy(*, access, conflict_type, process, description):
+    """Record a discrepancy WITHOUT blocking the worker's action.
+
+    Пользователь: «Водитель и экскаваторщик — истина и источник данных.
+    Телефон решает всё сам и сразу, без ожидания ответа сервера. Сервер —
+    статист: записывает то, что прислал телефон, и подсказывает, когда
+    спросят. Сервер не имеет права отклонять, отменять, автозакрывать,
+    переписывать или блокировать действия работника».
+
+    Это НЕ то же самое, что _conflict(): та функция прерывает транзакцию
+    целиком, и действие работника не сохраняется вовсе. Эта — пишет
+    расхождение в уже существующий, охраняемый разбор (AdminConflict,
+    экран «Административные конфликты» у диспетчера), а действие работника
+    применяется как есть, тем же вызовом, что и раньше. Вызывать ДО того,
+    как процессор вернёт результат, а не в обработчике исключения.
+    """
+    from users.models import AdminConflict
+
+    AdminConflict.objects.get_or_create(
+        employee=access.employee,
+        role=access.role,
+        conflict_type=conflict_type,
+        process=process,
+        description=description,
+    )
+
+
 def _create_free_bucket_load_review(*, access, normalized, receipt, problem):
     """Place an irreconcilable actual free-bucket load in existing review UI.
 
@@ -1751,9 +1955,25 @@ def _process_excavator_loaded_cancelled(access, normalized):
     if trip.loading_shift_id != shift.id or trip.excavator_operator_id != access.employee_id:
         _conflict('trip_owner_changed', 'Рейс не принадлежит этой смене машиниста.')
     if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
-        _conflict('cancel_before_load', 'Время отмены раньше времени погрузки.')
+        _log_discrepancy(
+            access=access, code='cancel_before_load', process='Отмена погрузки',
+            description=(
+                f'Отмена рейса #{trip.id} на {normalized["occurred_at"]} раньше времени погрузки '
+                f'({trip.loaded_at or trip.created_at}). Принято по времени нажатия.'
+            ),
+        )
+    if trip.status == TripStatus.CANCELLED:
+        state = bump_operational_state(
+            'OfflineFieldEvent:excavator_trip_loaded_cancelled', event_type='trip_changed',
+            object_type='Trip', object_id=trip.id,
+            payload={'action': 'truck_loaded_cancel', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+                     'excavator_id': trip.excavator_id, 'status': trip.status},
+        )
+        return {'server_ids': {'trip_id': trip.id, 'shift_id': shift.id}, 'version': state.version}, {
+            'trip': trip, 'shift': shift, 'equipment': trip.truck,
+        }
     if trip.status != TripStatus.LOADED_WAITING_UNLOAD:
-        _conflict('trip_not_cancellable', 'Рейс уже завершён, отменён или заменён.')
+        _conflict('trip_not_cancellable', 'Рейс уже завершён или заменён.')
     trip.status = TripStatus.CANCELLED
     trip.cancelled_at = normalized['occurred_at']
     trip.save(update_fields=['status', 'cancelled_at'])
@@ -2212,23 +2432,39 @@ def _process_downtime(access, normalized, *, role_code, close):
         if normalized['occurred_at'] < event.started_at:
             _conflict('downtime_end_before_start', 'Время окончания простоя раньше его начала.')
         if event.employee_id not in (None, access.employee_id):
-            _conflict('downtime_owner_changed', 'Простой относится к другому сотруднику.')
-        if event.ended_at:
-            if normalized['occurred_at'] > event.ended_at:
-                _conflict('downtime_already_closed', 'Простой уже завершён более ранним серверным действием.')
-            if normalized['occurred_at'] < event.ended_at:
-                event.ended_at = normalized['occurred_at']
-                event.save(update_fields=['ended_at'])
-        else:
-            event.ended_at = normalized['occurred_at']
-            event.save(update_fields=['ended_at'])
+            _log_discrepancy(
+                access=access, code='downtime_owner_changed', process='Закрытие простоя',
+                description=(
+                    f'Простой #{event.id} числится за сотрудником {event.employee_id}, закрывает '
+                    f'сотрудник {access.employee_id}. Записаны оба, закрытие принято.'
+                ),
+            )
+        if event.ended_at and event.ended_at != normalized['occurred_at']:
+            _log_discrepancy(
+                access=access, code='downtime_already_closed', process='Закрытие простоя',
+                description=(
+                    f'Простой #{event.id} ({equipment}) уже был закрыт на {event.ended_at}, '
+                    f'работник закрывает на {normalized["occurred_at"]}. Принято время работника.'
+                ),
+            )
+        event.ended_at = normalized['occurred_at']
+        event.save(update_fields=['ended_at'])
         action = 'downtime_closed'
     else:
         reason_id = _positive_int(normalized['payload'].get('reason_id'), field='reason_id')
         workplace = 'truck_driver' if role_code == 'driver' else 'excavator_operator'
         reason = DowntimeReason.for_workplace(workplace, equipment.equipment_type).filter(pk=reason_id).first()
         if not reason:
-            _conflict('downtime_reason_changed', 'Причина простоя больше недоступна.')
+            reason = DowntimeReason.objects.filter(pk=reason_id).first()
+            if not reason:
+                _conflict('downtime_reason_changed', 'Причина простоя больше недоступна.')
+            _log_discrepancy(
+                access=access, code='downtime_reason_changed', process='Начало простоя',
+                description=(
+                    f'Причина простоя #{reason_id} ({reason.name}) больше не входит в текущий '
+                    f'список для этой техники/роли, но принята — как была на экране в момент нажатия.'
+                ),
+            )
         if role_code == 'driver':
             # Гружёный / пустой самосвал и точка рейса — общие правила driver_workflow.
             start_conflict = driver_downtime_start_conflict(reason, equipment)
@@ -2241,14 +2477,24 @@ def _process_downtime(access, normalized, *, role_code, close):
             equipment=equipment, ended_at__isnull=True,
         ).order_by('-started_at', '-id').first()
         if open_event and open_event.employee_id != access.employee_id:
-            _conflict(
-                'downtime_owner_changed',
-                'Активный простой начат другим сотрудником: его можно завершить, но нельзя подменить его причину.',
+            _log_discrepancy(
+                access=access, code='downtime_owner_changed', process='Переключение причины простоя',
+                description=(
+                    f'Активный простой #{open_event.id} начат сотрудником {open_event.employee_id}, '
+                    f'причину переключает сотрудник {access.employee_id}. Записаны оба: старый простой '
+                    f'закрыт, новый открыт на переключившего.'
+                ),
             )
+        effective_occurred_at = normalized['occurred_at']
         if open_event and normalized['occurred_at'] < open_event.started_at:
-            _conflict(
-                'downtime_switch_before_start',
-                'Время переключения причины раньше начала текущего простоя.',
+            effective_occurred_at = open_event.started_at
+            _log_discrepancy(
+                access=access, code='downtime_switch_before_start', process='Переключение причины простоя',
+                description=(
+                    f'Работник переключает причину простоя на {normalized["occurred_at"]}, раньше начала '
+                    f'текущего простоя #{open_event.id} ({open_event.started_at}). Принято по фактическому '
+                    f'времени начала текущего простоя.'
+                ),
             )
         if open_event and open_event.reason_id == reason.id:
             # Repeated delivery or a repeated tap on the active reason is a no-op:
@@ -2259,7 +2505,7 @@ def _process_downtime(access, normalized, *, role_code, close):
             if open_event:
                 # One timestamp closes the previous category and opens the next one,
                 # so the total downtime has neither a gap nor an overlap.
-                open_event.ended_at = normalized['occurred_at']
+                open_event.ended_at = effective_occurred_at
                 open_event.save(update_fields=['ended_at'])
             event = DowntimeEvent.objects.create(
                 equipment=equipment,
@@ -2267,7 +2513,7 @@ def _process_downtime(access, normalized, *, role_code, close):
                 subject_employee=access.employee,
                 recorded_by=access.employee,
                 reason=reason,
-                started_at=normalized['occurred_at'],
+                started_at=effective_occurred_at,
                 comment=str(normalized['payload'].get('comment') or '')[:255],
                 recorded_at=normalized['received_at'],
                 ended_at=(
