@@ -1056,94 +1056,58 @@ def _claim_trip_for_driver_manual_event(trip, *, access, shift, event_id):
     )
 
 
-def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effective_occurred_at):
-    from assignments.models import ExcavatorPlacement
+def _driver_manual_primary_context(*, payload, context_snapshot):
     from references.models import DumpPoint, RockType
-    from trips.free_bucket import canonical_free_bucket_work_context_snapshot
 
-    try:
-        authoritative = canonical_free_bucket_work_context_snapshot(excavator)
-    except ValidationError as error:
-        _conflict('manual_work_context_unavailable', '; '.join(error.messages))
-    if str(authoritative.get('placement_id') or '') != str(payload.get('placement_id') or ''):
+    # Телефон — источник истины: водитель отмечает то, что реально видел на
+    # экране в момент нажатия (payload/context_snapshot — снимок ТОГО
+    # момента). Настройки забоя экскаватора могли уже уйти дальше на
+    # сервере — без связи телефон не мог об этом узнать, и это не повод
+    # отклонять честную отметку. Раньше здесь сравнивалось с ТЕКУЩИМ
+    # состоянием ExcavatorPlacement и требовалось «отметка раньше
+    # изменения» — эта раскладка по времени снята: применяем значения
+    # телефона всегда. Отказ остаётся только на битую ссылку — если породы
+    # или точки разгрузки с таким ID вообще нет в справочнике (удалена или
+    # деактивирована), это не «расхождение во времени», а испорченные данные.
+    rock_type_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
+    rock_type = RockType.objects.filter(pk=rock_type_id, is_active=True).first()
+    if not rock_type:
         _conflict(
             'manual_work_context_changed',
-            'Настройки забоя изменились после сохранения отметки на телефоне.',
+            'Порода из отметки на телефоне не найдена в действующем справочнике.',
         )
-    # placement_updated_at сознательно не сравнивается напрямую: эта метка
-    # сдвигается ЛЮБЫМ пересохранением формы забоя, даже без единого
-    # изменившегося значения (save_excavator_work_context ставит её всегда).
-    # Боевой случай: водитель 43 отметил погрузку у ЭКС-4, пользователь
-    # штатно пересохранил настройки этого же экскаватора уже ПОСЛЕ отметки —
-    # порода, горизонт и блок совпадали один в один, но строгое сравнение
-    # меток времени всё равно объявило конфликт, и рейс потерялся.
-    context_fields = ('rock_type_id', 'loading_horizon', 'loading_block')
-    context_changed = any(
-        str(authoritative.get(field) or '') != str(payload.get(field) or '')
-        for field in context_fields
-    )
-    if context_changed:
-        # Настройки забоя ДЕЙСТВИТЕЛЬНО другие. Решение пользователя: смотрим,
-        # когда сама отметка сделана относительно момента изменения. Отметка
-        # раньше изменения — на месте погрузки ещё действовали старые
-        # настройки, и рейс принимается с ними (они и есть настоящая история
-        # погрузки, а не текущий экран). Отметка в момент изменения или позже
-        # — это уже не старые настройки, а устаревшие: телефон прислал то, что
-        # на момент погрузки было неверным, и это настоящий конфликт.
-        placement = ExcavatorPlacement.objects.select_for_update(of=('self',)).filter(
-            pk=authoritative.get('placement_id'),
-        ).first()
-        changed_at = placement.work_context_updated_at if placement else None
-        if changed_at is None or effective_occurred_at >= changed_at:
-            _conflict(
-                'manual_work_context_changed',
-                'Настройки забоя изменились после сохранения отметки на телефоне.',
-            )
-        rock_type_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
-        rock_type = RockType.objects.filter(pk=rock_type_id, is_active=True).first()
-        if not rock_type:
-            _conflict(
-                'manual_work_context_changed',
-                'Порода из отметки на телефоне больше не существует или неактивна.',
-            )
-        authoritative = {
-            **authoritative,
-            'rock_type_id': rock_type.id,
-            'loading_horizon': str(payload.get('loading_horizon') or '')[:64],
-            'loading_block': str(payload.get('loading_block') or '')[:64],
-        }
+
+    dump_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
+    dump_point = DumpPoint.objects.select_for_update().filter(pk=dump_id, is_active=True).first()
+    if not dump_point:
+        _conflict(
+            'manual_dump_point_not_allowed',
+            'Точка разгрузки из отметки на телефоне не найдена в действующем справочнике.',
+        )
+
+    transport_distance_km = None
     client_points = context_snapshot.get('dump_points')
-    if not isinstance(client_points, list):
-        _invalid('manual_dump_points_required', 'Не сохранён список точек ручного рейса.')
-    authoritative_by_id = {str(item['id']): item for item in authoritative['dump_points']}
-    client_by_id = {
-        str(item.get('id')): item for item in client_points if isinstance(item, dict) and item.get('id')
-    }
-    dump_id = str(_positive_int(payload.get('dump_point_id'), field='dump_point_id'))
-    selected_one_off = context_snapshot.get('selected_one_off') is True
-    allowed_client_ids = set(client_by_id)
-    if selected_one_off:
-        allowed_client_ids.discard(dump_id)
-    if set(authoritative_by_id) != allowed_client_ids:
-        _conflict(
-            'manual_work_context_changed',
-            'Список точек разгрузки изменился после сохранения отметки на телефоне.',
+    if isinstance(client_points, list):
+        client_selected = next(
+            (
+                item for item in client_points
+                if isinstance(item, dict) and str(item.get('id')) == str(dump_id)
+            ),
+            None,
         )
-    selected = authoritative_by_id.get(dump_id)
-    if not selected and selected_one_off:
-        client_selected = client_by_id.get(dump_id)
-        one_off_point = DumpPoint.objects.select_for_update().filter(
-            pk=_positive_int(dump_id, field='dump_point_id'),
-            is_active=True,
-        ).first()
-        if client_selected and one_off_point:
-            selected = {
-                'id': one_off_point.id,
-                'name': str(one_off_point),
-                'transport_distance_km': client_selected.get('transport_distance_km'),
-            }
-    if not selected:
-        _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
+        if client_selected:
+            transport_distance_km = client_selected.get('transport_distance_km')
+
+    authoritative = {
+        'rock_type_id': rock_type.id,
+        'loading_horizon': str(payload.get('loading_horizon') or '')[:64],
+        'loading_block': str(payload.get('loading_block') or '')[:64],
+    }
+    selected = {
+        'id': dump_point.id,
+        'name': str(dump_point),
+        'transport_distance_km': transport_distance_km,
+    }
     return authoritative, selected
 
 
@@ -1208,10 +1172,8 @@ def _process_driver_loaded(access, normalized):
         assignment.truck = truck
         assignment.excavator = excavator
         authoritative, selected = _driver_manual_primary_context(
-            excavator=excavator,
             payload=payload,
             context_snapshot=context_snapshot,
-            effective_occurred_at=normalized['occurred_at'],
         )
         rock_type = RockType.objects.filter(pk=authoritative['rock_type_id']).first()
         dump_point = DumpPoint.objects.select_for_update().filter(pk=selected['id']).first()
@@ -2097,6 +2059,10 @@ def _process_driver_dump_point_changed(access, normalized):
         _conflict('trip_driver_shift_changed', 'Рейс закреплён за другой сменой водителя.')
     if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
         _conflict('dump_point_change_before_load', 'Время изменения точки раньше погрузки.')
+    # Правило 1 (волна 2): побеждает последнее по occurred_at нажатие; более
+    # раннее не откатывает уже применённое состояние, а просто ложится в
+    # историю рейса — без отказа (раньше оба случая ниже были
+    # stale_dump_point_change).
     latest_offline_change = OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
         trip=trip,
         event_type='driver.trip.dump_point_changed',
@@ -2105,34 +2071,32 @@ def _process_driver_dump_point_changed(access, normalized):
     ).exclude(event_id=normalized['event_id']).order_by(
         '-occurred_at', '-updated_at', '-id',
     ).first()
-    if latest_offline_change and (
+    superseded = bool(latest_offline_change and (
         latest_offline_change.occurred_at > normalized['occurred_at']
         or latest_offline_change.event_id not in normalized['depends_on']
-    ):
-        _conflict('stale_dump_point_change', 'После этого действия точка разгрузки уже менялась.')
+    ))
     offline_change_ids = OfflineFieldEvent.objects.filter(
         trip=trip,
         event_type='driver.trip.dump_point_changed',
     ).values_list('event_id', flat=True)
-    newer_legacy_change = (
-        TripClientAction.objects.select_for_update(of=('self',))
-        .filter(
-            trip=trip,
-            action_type='change_actual_unload_point',
-            created_at__gt=normalized['occurred_at'],
+    if not superseded:
+        superseded = (
+            TripClientAction.objects.select_for_update(of=('self',))
+            .filter(
+                trip=trip,
+                action_type='change_actual_unload_point',
+                created_at__gt=normalized['occurred_at'],
+            )
+            .exclude(client_action_id=normalized['event_id'])
+            .exclude(client_action_id__in=offline_change_ids)
+            .exists()
         )
-        .exclude(client_action_id=normalized['event_id'])
-        .exclude(client_action_id__in=offline_change_ids)
-        .exists()
-    )
-    if newer_legacy_change:
-        _conflict('stale_dump_point_change', 'После этого действия точка разгрузки уже менялась.')
     expected_dump_point_id = (
         normalized['payload'].get('expected_actual_dump_point_id')
         or normalized['payload'].get('expected_dump_point_id')
     )
     current_dump_point_id = trip.actual_dump_point_id or trip.dump_point_id
-    if expected_dump_point_id not in (None, '') and (
+    if not superseded and expected_dump_point_id not in (None, '') and (
         _positive_int(expected_dump_point_id, field='expected_dump_point_id') != current_dump_point_id
     ):
         _conflict('dump_point_state_changed', 'Текущая точка разгрузки уже отличается от сохранённого состояния.')
@@ -2159,6 +2123,23 @@ def _process_driver_dump_point_changed(access, normalized):
         dump_point = DumpPoint.objects.select_for_update().filter(pk=dump_point_id).first()
     if not dump_point:
         _conflict('dump_point_changed', 'Точка разгрузки больше недоступна.')
+    if superseded:
+        # Честная отметка, но случилась раньше уже применённого изменения —
+        # не откатываем текущую точку рейса, только фиксируем в истории.
+        logger.warning(
+            'offline_sync: dump point change %s for trip %s (occurred_at=%s) superseded by a later '
+            'change; recorded to history without moving the trip\'s current point',
+            normalized['event_id'], trip.id, normalized['occurred_at'],
+        )
+        TripClientAction.objects.create(
+            action_type='change_actual_unload_point', client_action_id=normalized['event_id'],
+            trip=trip, actor=access.employee,
+        )
+        return {
+            'server_ids': {'trip_id': trip.id, 'shift_id': shift.id, 'dump_point_id': dump_point.id},
+            'version': production_state.version,
+            'no_change': True,
+        }, {'trip': trip, 'shift': shift, 'equipment': trip.truck}
     if current_dump_point_id == dump_point.id:
         return {
             'server_ids': {'trip_id': trip.id, 'shift_id': shift.id, 'dump_point_id': dump_point.id},

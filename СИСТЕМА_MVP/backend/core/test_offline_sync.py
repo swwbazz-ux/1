@@ -634,15 +634,19 @@ class OfflineEventSyncTests(TestCase):
         self.assertIsNone(acceptance.requesting_shift_id)
         self.assertEqual(Trip.objects.count(), 0)
 
-    def test_driver_manual_load_rejects_changed_context_without_creating_trip(self):
+    def test_driver_manual_load_accepts_context_that_differs_from_current_placement(self):
+        # Телефон — источник истины (волна 2): раньше расхождение с ТЕКУЩИМИ
+        # настройками забоя было отказом (manual_work_context_changed) даже
+        # когда порода и точка из отметки вполне существуют в справочнике.
+        # Теперь сервер применяет то, что водитель видел на экране.
         event = self.driver_manual_event()
         event['payload']['loading_block'] = '99'
         result = self.sync(
             [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
         ).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'manual_work_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_block, '99')
 
     def test_driver_manual_load_accepts_old_context_marked_before_placement_change(self):
         # Боевой случай 25.09: водитель 43 отметил погрузку у ЭКС-4 с
@@ -678,12 +682,12 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.loading_horizon, '125')
         self.assertEqual(trip.rock_type_id, self.rock.id)
 
-    def test_driver_manual_load_rejects_stale_context_marked_after_placement_change(self):
-        # Симметричный случай: настройки забоя уже поменялись, а отметка
-        # сделана ПОСЛЕ этого момента — телефон прислал устаревшие значения,
-        # а не «те, что действовали на месте погрузки». Это настоящее
-        # устаревание, а не отметка, обогнавшая изменение, и остаётся
-        # конфликтом.
+    def test_driver_manual_load_accepts_context_even_when_marked_well_after_placement_change(self):
+        # Симметричный случай к предыдущему тесту: настройки забоя уже
+        # поменялись, а отметка сделана ПОСЛЕ этого момента. Раньше это была
+        # «настоящая устарелость» и конфликт (manual_work_context_changed) —
+        # но правило 2 не делает исключений по времени: порода и точка из
+        # отметки существуют в справочнике, значит применяются как есть.
         occurred_at = timezone.now()
         type(self.shift).objects.filter(
             pk__in=[self.shift.id, self.truck_shift.id],
@@ -705,9 +709,9 @@ class OfflineEventSyncTests(TestCase):
             [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'manual_work_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_block, '4')
 
     def test_driver_manual_load_accepts_context_resaved_with_same_values_before_mark(self):
         # Пересохранение формы забоя сдвигает placement_updated_at даже без
@@ -760,6 +764,34 @@ class OfflineEventSyncTests(TestCase):
 
         self.assertEqual(result['status'], 'conflict', result)
         self.assertEqual(result['code'], 'manual_work_context_changed')
+        self.assertEqual(Trip.objects.count(), 0)
+
+    def test_driver_manual_load_accepts_dump_point_outside_excavator_settings(self):
+        # Правило 2: точка была на экране водителя в момент нажатия —
+        # принимается, даже если её нет в текущем списке точек экскаватора
+        # (ExcavatorDumpPointSetting). Раньше это был отказ
+        # manual_dump_point_not_allowed; отказ остаётся только если точки с
+        # таким ID нет в справочнике вообще.
+        outside_point = DumpPoint.objects.create(name='Точка не из списка экскаватора')
+        event = self.driver_manual_event()
+        event['payload']['dump_point_id'] = outside_point.id
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.dump_point_id, outside_point.id)
+
+    def test_driver_manual_load_rejects_dump_point_missing_from_directory(self):
+        # Настоящая битая ссылка — точки с таким ID нет в справочнике вообще
+        # (не деактивирована, а просто не существует) — остаётся отказом.
+        event = self.driver_manual_event()
+        event['payload']['dump_point_id'] = 999999
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'manual_dump_point_not_allowed')
         self.assertEqual(Trip.objects.count(), 0)
 
     def test_manual_load_rejects_separate_unload_after_point_change(self):
@@ -2184,7 +2216,87 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.dump_point_id, changed_point.id)
         self.assertEqual(Trip.objects.count(), 1)
 
-    def test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state(self):
+    def test_out_of_order_dump_point_change_lands_in_history_without_rejection(self):
+        # Правило 1 (волна 2): плохая связь доставила более РАННЕЕ по
+        # occurred_at изменение точки уже ПОСЛЕ того, как более позднее
+        # изменение применилось. Раньше это был отказ stale_dump_point_change
+        # — теперь честная (просто опоздавшая) отметка принимается и ложится
+        # в историю рейса, но действующую точку не откатывает.
+        self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
+        self.truck_shift.save(update_fields=['opened_at'])
+        point_b = DumpPoint.objects.create(name='Точка второго нажатия')
+        point_earlier = DumpPoint.objects.create(name='Точка первого нажатия, опоздавшая')
+        loaded_at = timezone.now() - timedelta(minutes=5)
+        earlier_occurred_at = timezone.now() - timedelta(minutes=3)
+        later_occurred_at = timezone.now() - timedelta(minutes=1)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=loaded_at,
+        )
+        later_event = {
+            'event_id': 'dump-out-of-order-later',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': later_occurred_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': point_b.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+        earlier_event_arriving_late = {
+            'event_id': 'dump-out-of-order-earlier',
+            'event_type': 'driver.trip.dump_point_changed',
+            'format_version': 1,
+            'occurred_at': earlier_occurred_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {
+                'trip_id': trip.id,
+                'dump_point_id': point_earlier.id,
+                'expected_actual_dump_point_id': self.dump_point.id,
+            },
+        }
+
+        later_result = self.sync(
+            [later_event], client=self.driver_client(), role_code='driver', device_id='driver-device-order-a',
+        ).json()['results'][0]
+        earlier_result = self.sync(
+            [earlier_event_arriving_late],
+            client=self.driver_client(), role_code='driver', device_id='driver-device-order-b',
+        ).json()['results'][0]
+
+        self.assertEqual(later_result['status'], 'accepted', later_result)
+        self.assertEqual(earlier_result['status'], 'accepted', earlier_result)
+        self.assertTrue(earlier_result.get('no_change'))
+        trip.refresh_from_db()
+        self.assertEqual(trip.actual_dump_point_id, point_b.id)
+        self.assertEqual(trip.dump_point_id, point_b.id)
+        self.assertTrue(
+            TripClientAction.objects.filter(
+                trip=trip, client_action_id='dump-out-of-order-earlier',
+                action_type='change_actual_unload_point',
+            ).exists()
+        )
+
+    def test_late_equal_timestamp_dump_point_change_is_recorded_without_rolling_back_newer_state(self):
         self.truck_shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.truck_shift.save(update_fields=['opened_at'])
         point_b = DumpPoint.objects.create(name='Склад равного времени Б')
@@ -2244,8 +2356,8 @@ class OfflineEventSyncTests(TestCase):
         ).json()['results'][0]
 
         self.assertEqual(first_result['status'], 'accepted', first_result)
-        self.assertEqual(late_result['status'], 'conflict', late_result)
-        self.assertEqual(late_result['code'], 'stale_dump_point_change')
+        self.assertEqual(late_result['status'], 'accepted', late_result)
+        self.assertTrue(late_result.get('no_change'))
         trip.refresh_from_db()
         self.assertEqual(trip.actual_dump_point_id, point_b.id)
         self.assertEqual(trip.dump_point_id, point_b.id)
