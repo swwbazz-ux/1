@@ -25,7 +25,32 @@
        гранью, поэтому и коридор под неё не должен. */
     var FACE_GAP = 10;
     var TILT = 0;          // барабан смотрит строго в лоб: при наклоне боковые грани поднимаются и заходят на угловые кнопки
+    /* Перспектива задана в CSS (.driver-downtime-drum-stage), боковые грани должны
+       вставать точно над угловыми кнопками круга — координатор поймал по скриншоту,
+       что «касание соседних граней» (radius только от ширины грани и просвета)
+       сажало боковые грани заметно ближе к центру, чем кнопки. SIDE_TARGET_RATIO —
+       доля ширины барабана от центра до центра боковой грани, снята с рабочего
+       примера (пустой барабан точек на статичных --drum-radius/--drum-step из CSS,
+       который лёг ровно на кнопки) и решена в обратную сторону через ту же формулу
+       перспективной проекции. Пойман и проверен на телефоне 27.09.2026. */
+    var PERSPECTIVE = 900;
+    var SIDE_TARGET_RATIO = 0.365;
     var doc = root.document;
+
+    function sideCardRadius(stepDeg, cardW, containerW) {
+        var touchRadius = (cardW + FACE_GAP) / 2 / Math.tan((stepDeg / 2) * Math.PI / 180);
+        if (!containerW) return touchRadius;
+        var phi = stepDeg * Math.PI / 180;
+        var a = Math.sin(phi);
+        var b = Math.cos(phi) - 1;
+        var target = SIDE_TARGET_RATIO * containerW;
+        var denom = a * PERSPECTIVE + target * b;
+        if (denom <= 0) return touchRadius;
+        var aligned = target * PERSPECTIVE / denom;
+        // Не даём соседним граням наехать друг на друга (нижняя граница —
+        // прежний радиус «касания» с просветом под обводку).
+        return Math.max(touchRadius, aligned);
+    }
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
     function all(sel, base) { return Array.prototype.slice.call((base || doc).querySelectorAll(sel)); }
@@ -125,9 +150,8 @@
         var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
         var n = list.length;
         var step = 360 / n;
-        // Радиус чуть больше «касания» соседних граней: между карточками остаётся просвет,
-        // сквозь который проходит обводка контура (ширина грани плюс FACE_GAP).
-        var radius = (cardW + FACE_GAP) / 2 / Math.tan((step / 2) * Math.PI / 180);
+        var drumEl = drum(); var containerW = drumEl ? (drumEl.offsetWidth || drumEl.getBoundingClientRect().width) : 0;
+        var radius = sideCardRadius(step, cardW, containerW);
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
         geo.reasons = reasons;
         geo.signature = drumSignature(c);
@@ -211,7 +235,8 @@
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
             geo.cardW = liveCardW;
-            geo.radius = (liveCardW + FACE_GAP) / 2 / Math.tan((geo.step / 2) * Math.PI / 180);
+            var liveDrumEl = drum(); var liveContainerW = liveDrumEl ? (liveDrumEl.offsetWidth || liveDrumEl.getBoundingClientRect().width) : 0;
+            geo.radius = sideCardRadius(geo.step, liveCardW, liveContainerW);
             var drumNode = drum();
             if (drumNode) drumNode.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
         }
