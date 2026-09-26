@@ -829,8 +829,27 @@
                     return item.state === "pending" && Number(item.next_retry_at || 0) <= Date.now();
                 });
                 var batchDeviceId = allDue.length ? String(allDue[0].device_id || "") : "";
-                var due = allDue.filter(function (item) {
+                var dueById = new Map(allDue.filter(function (item) {
                     return String(item.device_id || "") === batchDeviceId;
+                }).map(function (item) { return [String(item.event_id || ""), item]; }));
+                var pendingById = new Map(items.filter(function (item) {
+                    return item.state === "pending" && String(item.device_id || "") === batchDeviceId;
+                }).map(function (item) { return [String(item.event_id || ""), item]; }));
+                var dependencyAdded = true;
+                while (dependencyAdded) {
+                    dependencyAdded = false;
+                    Array.from(dueById.values()).forEach(function (item) {
+                        (item.depends_on || []).forEach(function (dependencyId) {
+                            var dependency = pendingById.get(String(dependencyId || ""));
+                            if (dependency && !dueById.has(String(dependency.event_id || ""))) {
+                                dueById.set(String(dependency.event_id || ""), dependency);
+                                dependencyAdded = true;
+                            }
+                        });
+                    });
+                }
+                var due = Array.from(dueById.values()).sort(function (a, b) {
+                    return Number(a.sequence || 0) - Number(b.sequence || 0);
                 }).slice(0, Number(options.batchSize) || 20);
                 if (!due.length) {
                     var future = items.filter(function (item) { return item.state === "pending"; })
