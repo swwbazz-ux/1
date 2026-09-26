@@ -15,7 +15,6 @@
         var dispatcherAssignTruckUrl = options.assignTruckUrl || "";
         var showDispatcherDnDError = options.showError || function () {};
         var reloadDispatcherBoardAsFallback = options.reloadFallback || function () {};
-        var openEquipmentCard = options.openEquipmentCard || function () { return false; };
         var dispatcherEquipmentStateClass = options.equipmentStateClass;
         var dispatcherEquipmentStateLabel = options.equipmentStateLabel;
         var dispatcherNeutralEquipmentIcon = options.neutralEquipmentIcon;
@@ -47,6 +46,11 @@
         var refreshTruckGarage = dispatcherLayout.refreshTruckGarage;
         var refreshExcavatorGarage = dispatcherLayout.refreshExcavatorGarage;
         var normalizeComplexGrid = dispatcherLayout.normalizeComplexGrid;
+        var equipmentCardTrigger = options.equipmentCardTrigger;
+        if (!equipmentCardTrigger || typeof equipmentCardTrigger.bind !== "function") {
+            throw new Error("Dispatcher equipment card trigger is not configured");
+        }
+        var bindEquipmentCardTrigger = equipmentCardTrigger.bind;
         var dispatcherMutations = null;
         var dispatcherDnD = null;
         var moveDesktopTruckToGarage = function () { return false; };
@@ -129,34 +133,6 @@
         }
         refreshExcavatorGarage();
         refreshTruckGarage();
-        function bindEquipmentCardTrigger(node) {
-            if (!node || node.dataset.cardBound === "true") return;
-            node.dataset.cardBound = "true";
-            function isEquipmentCardTapBlocked(event) {
-                var control = event.target && event.target.closest ? event.target.closest("button, a, input, form") : null;
-                return node.classList.contains("is-placeholder") ||
-                    Boolean(control && control !== node);
-            }
-            function openBoundEquipmentCard(event) {
-                if (!openEquipmentCard(node.dataset.equipmentCardId, node)) return false;
-                if (event) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-                return true;
-            }
-            node.addEventListener("click", function (event) {
-                if (isEquipmentCardTapBlocked(event)) return;
-                if (node.dataset.complexTruck === "true") event.stopPropagation();
-                openBoundEquipmentCard(event);
-            });
-            node.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                if (openEquipmentCard(node.dataset.equipmentCardId, node)) {
-                    event.preventDefault();
-                }
-            });
-        }
         function requestDispatcherDesktopDangerConfirmation(options) {
             options = options || {};
             if (typeof options.action !== "function") return;

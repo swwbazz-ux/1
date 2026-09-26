@@ -480,7 +480,7 @@ test("доска собирается только с выделенным мо�
         getShiftOpen() { return false; },
         refreshBoardFromServer() { return Promise.resolve(true); },
         reloadFallback() {},
-        openEquipmentCard() { return false; },
+        equipmentCardTrigger: {bind() {}},
         equipmentStateClass() { return ""; },
         equipmentStateLabel() { return ""; },
         neutralEquipmentIcon() { return ""; },

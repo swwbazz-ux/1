@@ -317,6 +317,7 @@ class DispatcherSharedShiftStartTests(TestCase):
                 'dispatcher-detail-settings-v1.js',
                 'dispatcher-detail-charts-v1.js',
                 'dispatcher-detail-v1.js',
+                'dispatcher-equipment-card-trigger-v1.js',
                 'dispatcher-equipment-search-v1.js',
                 'dispatcher-board-layout-v1.js',
                 'dispatcher-complex-truck-racks-v1.js',
@@ -333,6 +334,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, 'js/dispatcher-detail-settings-v1.js')
         self.assertContains(response, 'js/dispatcher-detail-charts-v1.js')
         self.assertContains(response, 'js/dispatcher-detail-v1.js')
+        self.assertContains(response, 'js/dispatcher-equipment-card-trigger-v1.js')
         self.assertContains(response, 'js/dispatcher-equipment-search-v1.js')
         self.assertContains(response, 'js/dispatcher-board-layout-v1.js')
         self.assertContains(response, 'js/dispatcher-complex-truck-racks-v1.js')
@@ -390,7 +392,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v157')
+        self.assertContains(response, 'dispatcher-desktop-shell-v158')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -401,28 +403,32 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v157',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v158',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v157',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v158',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v157',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v158',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v157',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v158',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v157',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v158',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v157',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v158',
+        )
+        self.assertContains(
+            response,
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v158',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)

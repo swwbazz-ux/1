@@ -34,6 +34,10 @@ const DISPATCHER_EQUIPMENT_SEARCH = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-equipment-search-v1.js"),
     "utf8"
 );
+const DISPATCHER_EQUIPMENT_CARD_TRIGGER = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-equipment-card-trigger-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD_LAYOUT = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-layout-v1.js"),
     "utf8"
@@ -210,6 +214,9 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_DETAIL, /function renderDetailChart\(chart\)/);
     assert.match(DISPATCHER_EQUIPMENT_SEARCH, /function createDispatcherEquipmentSearch\(\)/);
     assert.match(DISPATCHER_EQUIPMENT_SEARCH, /global\.createDispatcherEquipmentSearch = createDispatcherEquipmentSearch;/);
+    assert.match(DISPATCHER_EQUIPMENT_CARD_TRIGGER, /function createDispatcherEquipmentCardTrigger\(options\)/);
+    assert.match(DISPATCHER_EQUIPMENT_CARD_TRIGGER, /global\.createDispatcherEquipmentCardTrigger = createDispatcherEquipmentCardTrigger;/);
+    assert.doesNotMatch(DISPATCHER_EQUIPMENT_CARD_TRIGGER, /dispatcherPost|fetch\(|assignmentState|dragstart/);
     assert.match(DISPATCHER_BOARD_LAYOUT, /function createDispatcherBoardLayout\(options\)/);
     assert.match(DISPATCHER_BOARD_LAYOUT, /global\.createDispatcherBoardLayout = createDispatcherBoardLayout;/);
     assert.match(DISPATCHER_BOARD_LAYOUT, /function refreshTruckGarage\(\)/);
@@ -234,6 +241,7 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_BOARD, /function refreshExcavatorGarage\(\)/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function normalizeComplexGrid\(\)/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function sortDesktopEquipmentList\(/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function bindEquipmentCardTrigger\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherComplexDrop\(zone\)/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherTruckGarageDrop\(garage\)/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
@@ -242,6 +250,7 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function openEquipmentCard\(/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function bindDispatcherDesktopInteractions\(/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherDetail\(\{/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherEquipmentCardTrigger\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoardLayout\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherComplexTruckRacks\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherHaulAssignmentState\(\)/);
@@ -257,6 +266,7 @@ test("transport загружается перед основным runtime и в
     const detailSettingsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-settings-v1.js");
     const detailChartsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-charts-v1.js");
     const detailIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-v1.js");
+    const equipmentCardTriggerIndex = SHARED_TEMPLATE.indexOf("dispatcher-equipment-card-trigger-v1.js");
     const equipmentSearchIndex = SHARED_TEMPLATE.indexOf("dispatcher-equipment-search-v1.js");
     const layoutIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-layout-v1.js");
     const complexTruckRacksIndex = SHARED_TEMPLATE.indexOf("dispatcher-complex-truck-racks-v1.js");
@@ -273,7 +283,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(detailSettingsIndex > transportIndex, "detail settings must load after transport");
     assert.ok(detailChartsIndex > detailSettingsIndex, "detail charts must load after detail settings");
     assert.ok(detailIndex > detailChartsIndex, "detail must load after its chart presenter");
-    assert.ok(equipmentSearchIndex > detailIndex, "equipment search must load after detail");
+    assert.ok(equipmentCardTriggerIndex > detailIndex, "equipment card trigger must load after detail");
+    assert.ok(equipmentSearchIndex > equipmentCardTriggerIndex, "equipment search must load after card trigger");
     assert.ok(layoutIndex > equipmentSearchIndex, "board layout must load after equipment search");
     assert.ok(complexTruckRacksIndex > layoutIndex, "complex racks must load after board layout");
     assert.ok(assignmentStateIndex > complexTruckRacksIndex, "assignment state must load after complex racks");
@@ -289,6 +300,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-settings-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-charts-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-equipment-card-trigger-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-equipment-search-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-layout-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-complex-truck-racks-v1\.js"/);
@@ -301,6 +313,7 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-settings-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-charts-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-equipment-card-trigger-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-equipment-search-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-layout-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-complex-truck-racks-v1\.js/);
@@ -309,6 +322,17 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-mutations-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
+});
+
+test("модуль запуска карточки техники упакован ровно один раз", () => {
+    const runtimeName = "dispatcher-equipment-card-trigger-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-equipment-card-trigger-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-equipment-card-trigger-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
 });
 
 test("модуль общей раскладки доски упакован ровно один раз", () => {

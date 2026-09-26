@@ -98,6 +98,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var dispatcherEquipmentSearch = window.createDispatcherEquipmentSearch();
     dispatcherEquipmentSearch.bind();
+    if (typeof window.createDispatcherEquipmentCardTrigger !== "function") {
+        throw new Error("Dispatcher equipment card trigger module is not loaded");
+    }
     if (typeof window.createDispatcherBoardLayout !== "function") {
         throw new Error("Dispatcher board layout module is not loaded");
     }
@@ -116,6 +119,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtime = null;
     var dispatcherBoard = null;
     var dispatcherHaulAssignmentState = window.createDispatcherHaulAssignmentState();
+    var dispatcherEquipmentCardTrigger = window.createDispatcherEquipmentCardTrigger({
+        openEquipmentCard: dispatcherDetail.openEquipmentCard
+    });
     var dispatcherBoardLayout = window.createDispatcherBoardLayout({
         document: document
     });
@@ -165,7 +171,7 @@ document.addEventListener("DOMContentLoaded", function () {
         getEquipmentCards: dispatcherDetail.getCards,
         setEquipmentCards: dispatcherDetail.setCards,
         getDetailLayer: dispatcherDetail.getLayer,
-        openEquipmentCard: dispatcherDetail.openEquipmentCard,
+        equipmentCardTrigger: dispatcherEquipmentCardTrigger,
         resetBoardDragSession: dispatcherBoard.resetDragSession,
         bindBoardInteractions: dispatcherBoard.bindInteractions,
         refreshBoardIntegrity: dispatcherBoard.refreshIntegrity,
