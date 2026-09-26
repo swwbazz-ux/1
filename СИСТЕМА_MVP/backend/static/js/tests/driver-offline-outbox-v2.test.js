@@ -635,9 +635,41 @@ test("acknowledged identity tombstone prevents incompatible id reuse", async () 
     await assert.rejects(box.enqueue({...original, trip_id: 2, payload: {trip_id: 2}}), /offline_event_id_reused/);
 });
 
-test("retry backoff is bounded", () => {
+test("retry backoff is bounded to 5-10s while online, not the old 5-minute cap", () => {
+    // Раньше пауза между повторами росла до 5 минут (backoff(20) === 300000) —
+    // на нестабильной, но живой связи водитель мог не увидеть подтверждение
+    // своих действий у машиниста/на пульте минутами (26.09.2026).
     assert.equal(backoff(1), 5000);
-    assert.equal(backoff(20), 300000);
+    assert.equal(backoff(20), 8000);
+});
+
+test("regaining connectivity retries immediately instead of waiting out a stale backoff", async () => {
+    // Раньше 'online' просто звал flush(), а flush() пропускает события, чьё
+    // next_retry_at ещё не наступило — назначенное офлайн-попытками на минуты
+    // вперёд время пережидалось полностью, хотя связь уже вернулась.
+    let attempts = 0;
+    const box = runtime({
+        send: async () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error("offline");
+            return {results: [{event_id: "reconnect-1", status: "accepted"}]};
+        },
+    });
+    await box.enqueue({
+        event_id: "reconnect-1",
+        event_type: "driver.trip.unloaded",
+        trip_id: 1,
+        payload: {trip_id: 1},
+    });
+    await box.flush();
+    assert.equal(attempts, 1);
+    const [scheduled] = await box.pending();
+    assert.ok(Number(scheduled.next_retry_at) > Date.now());
+
+    await box.retryNow();
+
+    assert.equal(attempts, 2);
+    assert.equal((await box.pending()).length, 0);
 });
 
 test("accepted callback runs only after durable removal and published zero state", async () => {
@@ -971,10 +1003,6 @@ test("local guards reject ungranted or incomplete driver actions before storage"
         /offline_downtime_reason_required/
     );
     await assert.rejects(
-        box.enqueue({event_id: "end", event_type: "driver.downtime.ended", payload: {local_downtime_id: "start"}}),
-        /offline_downtime_reference_required/
-    );
-    await assert.rejects(
         box.enqueue({event_id: "access", event_type: "driver.downtime.started", access_id: 8, payload: {reason_id: 1}}),
         /offline_event_access_mismatch/
     );
@@ -999,6 +1027,21 @@ test("local guards reject ungranted or incomplete driver actions before storage"
         /offline_free_bucket_acceptance_ambiguous/
     );
     assert.equal((await box.pending()).length, 0);
+});
+
+test("closing a downtime is always queued, even with no reference to its start yet", async () => {
+    // Раньше здесь требовали ссылку на начало простоя до постановки закрытия в
+    // очередь — водитель мог остаться без возможности завершить простой на
+    // нестабильной связи. Телефон обязан принять закрытие всегда; сервер сам
+    // свяжет его с началом, когда оно синхронизуется.
+    const box = runtime();
+    const queued = await box.enqueue({
+        event_id: "end-no-reference",
+        event_type: "driver.downtime.ended",
+        payload: {}
+    });
+    assert.equal(queued.event_id, "end-no-reference");
+    assert.equal((await box.pending()).length, 1);
 });
 
 test("auth classifier recognizes status redirect to root and login HTML", () => {

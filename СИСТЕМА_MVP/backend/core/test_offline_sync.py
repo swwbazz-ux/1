@@ -1491,6 +1491,41 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['code'], 'event_before_shift')
         self.assertFalse(DowntimeEvent.objects.filter(reason=reason).exists())
 
+    def test_late_event_after_shift_close_is_accepted_into_its_own_shift_history(self):
+        """Телефон — источник истины: связь подвела, событие честно опоздало,
+        но реально случилось до того, как смена была открыта на сервере в
+        этом окне. Раньше это был отказ (event_after_shift); теперь событие
+        ложится в историю СВОЕЙ смены её собственным временем."""
+        opened_at = timezone.now() - timedelta(hours=6)
+        closed_at = timezone.now() - timedelta(hours=1)
+        self.shift.opened_at = opened_at
+        self.shift.closed_at = closed_at
+        self.shift.save(update_fields=['opened_at', 'closed_at'])
+        reason = DowntimeReason.objects.create(
+            name='Простой, опоздавший после закрытия смены',
+            equipment_type=self.excavator_type,
+            show_for_excavator_operator=True,
+        )
+        device_occurred_at = closed_at + timedelta(minutes=5)
+        event = {
+            'event_id': 'excavator-after-shift',
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'occurred_at': device_occurred_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        downtime = DowntimeEvent.objects.get(reason=reason)
+        self.assertEqual(downtime.equipment_id, self.excavator.id)
+        self.assertEqual(downtime.started_at, device_occurred_at)
+
     def test_excavator_downtime_clock_ahead_uses_server_time(self):
         self.shift.opened_at = timezone.now() - timedelta(minutes=10)
         self.shift.save(update_fields=['opened_at'])

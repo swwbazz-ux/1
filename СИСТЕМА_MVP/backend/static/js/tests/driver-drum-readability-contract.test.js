@@ -83,3 +83,38 @@ test("templates classify labels by character length, matching CSS tiers", () => 
         /driver-drum-card-label\{% if point\.name\|length > 14 %\} is-drum-label-long\{% elif point\.name\|length > 6 %\} is-drum-label-medium\{% endif %\}/
     );
 });
+
+test("without an open shift, the top drum keeps its full three-card shape and outline instead of collapsing", () => {
+    // Первая попытка чинить это оставляла одну серую грань без окантовки — координатор
+    // поймал по скриншоту: у барабана точек пропадала рамка-«горлышко» к кругу (она
+    // ищет .is-center у настоящей карточки), и было видно только одну грань вместо
+    // трёх (центр + два бока), хотя со сменой барабан всегда так и выглядит. Теперь
+    // пустых граней три, на тех же углах (--drum-step), и у центральной свой класс
+    // is-drum-empty-center — не .is-center, чтобы не словить жёлтую CSS-подсветку,
+    // но контур её всё равно находит (driver-downtime-drum-v1.js). Пойман на реальном
+    // полевом тесте 26-27.09.2026.
+    const emptyBlock = POINT_TEMPLATE.split("{% empty %}")[1].split("{% endfor %}")[0];
+    const emptyCardCount = (emptyBlock.match(/driver-drum-card driver-drum-card-empty/g) || []).length;
+    assert.equal(emptyCardCount, 3);
+    assert.match(emptyBlock, /is-drum-empty-center/);
+    assert.doesNotMatch(emptyBlock, /driver-drum-card-empty is-center/);
+    assert.match(emptyBlock, /--card-angle:\s*calc\(-1 \* var\(--drum-step\)\)/);
+    assert.match(emptyBlock, /--card-angle:\s*var\(--drum-step\)/);
+    assert.match(POINT_TEMPLATE, /\{% if open_shift %\}[\s\S]*?Экскаватору не назначены точки разгрузки/);
+});
+
+test("the keyhole outline still finds the top drum's empty center card", () => {
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /\[data-driver-point-drum\]\s*\.driver-drum-card-empty\.is-drum-empty-center/);
+});
+
+test("downtime drum front card is never highlighted yellow without an open shift", () => {
+    // is-center — это «эта грань сейчас смотрит на водителя», не «простой идёт»,
+    // но выглядит одинаково ярко-жёлто в обоих случаях. Без смены простоя быть не
+    // может вообще, поэтому и переднюю грань подсвечивать нечем — иначе водитель
+    // видит ровно то, на что жаловался («ОФР горит без смены»). Пойман на реальном
+    // полевом тесте 26.09.2026.
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /var isCenter = index === front && hasOpenShift\(\);/);
+    assert.match(drumJs, /function hasOpenShift\(\)/);
+});

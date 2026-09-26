@@ -25,7 +25,32 @@
        гранью, поэтому и коридор под неё не должен. */
     var FACE_GAP = 10;
     var TILT = 0;          // барабан смотрит строго в лоб: при наклоне боковые грани поднимаются и заходят на угловые кнопки
+    /* Перспектива задана в CSS (.driver-downtime-drum-stage), боковые грани должны
+       вставать точно над угловыми кнопками круга — координатор поймал по скриншоту,
+       что «касание соседних граней» (radius только от ширины грани и просвета)
+       сажало боковые грани заметно ближе к центру, чем кнопки. SIDE_TARGET_RATIO —
+       доля ширины барабана от центра до центра боковой грани, снята с рабочего
+       примера (пустой барабан точек на статичных --drum-radius/--drum-step из CSS,
+       который лёг ровно на кнопки) и решена в обратную сторону через ту же формулу
+       перспективной проекции. Пойман и проверен на телефоне 27.09.2026. */
+    var PERSPECTIVE = 900;
+    var SIDE_TARGET_RATIO = 0.365;
     var doc = root.document;
+
+    function sideCardRadius(stepDeg, cardW, containerW) {
+        var touchRadius = (cardW + FACE_GAP) / 2 / Math.tan((stepDeg / 2) * Math.PI / 180);
+        if (!containerW) return touchRadius;
+        var phi = stepDeg * Math.PI / 180;
+        var a = Math.sin(phi);
+        var b = Math.cos(phi) - 1;
+        var target = SIDE_TARGET_RATIO * containerW;
+        var denom = a * PERSPECTIVE + target * b;
+        if (denom <= 0) return touchRadius;
+        var aligned = target * PERSPECTIVE / denom;
+        // Не даём соседним граням наехать друг на друга (нижняя граница —
+        // прежний радиус «касания» с просветом под обводку).
+        return Math.max(touchRadius, aligned);
+    }
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
     function all(sel, base) { return Array.prototype.slice.call((base || doc).querySelectorAll(sel)); }
@@ -37,7 +62,15 @@
     function allCards() { var c = cylinder(); return c ? all("[data-driver-drum-card]:not([data-driver-drum-clone])", c) : []; }
     function dial() { return q(".driver-work-dial"); }
     function stateCard() { return q("[data-driver-active-downtime-id]"); }
+    function hasOpenShift() {
+        var shell = q("[data-driver-shell]");
+        return !!(shell && shell.dataset.driverShiftId);
+    }
     function activeReasonId() {
+        // Без открытой смены простоя быть не может: барабан не должен подсвечивать
+        // причину, если карточка состояния отстала от закрытия смены (см. фрагмент-
+        // оптимизатор, который иногда пропускает обновление вкладки «Простои»).
+        if (!hasOpenShift()) return "";
         var card = stateCard();
         return card ? String(card.dataset.driverActiveReasonId || "") : "";
     }
@@ -117,9 +150,8 @@
         var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
         var n = list.length;
         var step = 360 / n;
-        // Радиус чуть больше «касания» соседних граней: между карточками остаётся просвет,
-        // сквозь который проходит обводка контура (ширина грани плюс FACE_GAP).
-        var radius = (cardW + FACE_GAP) / 2 / Math.tan((step / 2) * Math.PI / 180);
+        var drumEl = drum(); var containerW = drumEl ? (drumEl.offsetWidth || drumEl.getBoundingClientRect().width) : 0;
+        var radius = sideCardRadius(step, cardW, containerW);
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c;
         geo.reasons = reasons;
         geo.signature = drumSignature(c);
@@ -203,7 +235,8 @@
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
             geo.cardW = liveCardW;
-            geo.radius = (liveCardW + FACE_GAP) / 2 / Math.tan((geo.step / 2) * Math.PI / 180);
+            var liveDrumEl = drum(); var liveContainerW = liveDrumEl ? (liveDrumEl.offsetWidth || liveDrumEl.getBoundingClientRect().width) : 0;
+            geo.radius = sideCardRadius(geo.step, liveCardW, liveContainerW);
             var drumNode = drum();
             if (drumNode) drumNode.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
         }
@@ -216,7 +249,11 @@
             // Угол грани относительно зрителя: 0 — прямо перед ним.
             var rel = mod(index * geo.step + geo.theta + 180, 360) - 180;
             var a = Math.abs(rel);
-            var isCenter = index === front;
+            // Без открытой смены барабан весь неактивен: передняя грань не подсвечивается
+            // жёлтым — иначе водитель видит ровно то, на что жаловался («простой горит
+            // без смены»), хотя это просто «эта грань сейчас смотрит на меня», а не
+            // «простой идёт» (пойман на реальном полевом тесте 26.09.2026).
+            var isCenter = index === front && hasOpenShift();
             if (card.classList.contains("is-center") !== isCenter) card.classList.toggle("is-center", isCenter);
             var isBack = a > 100;
             if (card.classList.contains("is-back") !== isBack) card.classList.toggle("is-back", isBack);
@@ -759,7 +796,10 @@
         // Над кругом стоит барабан точек разгрузки: контур — одна замкнутая кривая на оба
         // горлышка (верхняя рамка → правая дуга → нижняя рамка → левая дуга → верхняя
         // рамка), поэтому при простое он мигает целиком, как единый элемент.
-        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center");
+        // Без назначения барабан точек показывает пустую серую грань вместо настоящей
+        // карточки (driver_point_drum.html) — у неё нет data-driver-point-card, только
+        // класс, но контур-горлышко должен стоять на месте и в этом состоянии.
+        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
         var tr = top ? top.getBoundingClientRect() : null;
         var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
         if (halfT && halfT < r) {
@@ -806,6 +846,7 @@
             return m.type === "childList" || (m.target && m.target.hasAttribute && (
                 m.target.hasAttribute("data-driver-active-downtime-id")
                 || m.target.hasAttribute("data-driver-reason-duration")
+                || m.target.hasAttribute("data-driver-shell")
             ));
         });
         // Любая правка экрана может сдвинуть круг и грани без изменения их размера
@@ -821,7 +862,7 @@
         syncTotals();
         reconcileQuick();
         syncActive();
-        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
+        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id"] });
         root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();

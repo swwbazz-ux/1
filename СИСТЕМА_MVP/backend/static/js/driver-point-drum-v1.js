@@ -22,7 +22,25 @@
     var MIN_FACES = 12;
     var FACE_GAP = 10;      // тот же просвет под обводку, что у барабана простоев
     var MANUAL_CLASS = "is-driver-dial-manual";
+    /* Тот же расчёт радиуса, что у барабана простоев (driver-downtime-drum-v1.js) —
+       боковые грани должны вставать над угловыми кнопками, а не «касаться» соседних
+       граней с минимальным просветом. Подробности и вывод формулы — там же. */
+    var PERSPECTIVE = 900;
+    var SIDE_TARGET_RATIO = 0.365;
     var doc = root.document;
+
+    function sideCardRadius(stepDeg, cardW, containerW) {
+        var touchRadius = (cardW + FACE_GAP) / 2 / Math.tan((stepDeg / 2) * Math.PI / 180);
+        if (!containerW) return touchRadius;
+        var phi = stepDeg * Math.PI / 180;
+        var a = Math.sin(phi);
+        var b = Math.cos(phi) - 1;
+        var target = SIDE_TARGET_RATIO * containerW;
+        var denom = a * PERSPECTIVE + target * b;
+        if (denom <= 0) return touchRadius;
+        var aligned = target * PERSPECTIVE / denom;
+        return Math.max(touchRadius, aligned);
+    }
 
     function q(sel, base) { return (base || doc).querySelector(sel); }
     function all(sel, base) { return Array.prototype.slice.call((base || doc).querySelectorAll(sel)); }
@@ -121,7 +139,8 @@
         var cardW = list[0].offsetWidth || list[0].getBoundingClientRect().width || 150;
         var n = list.length;
         var step = 360 / n;
-        var radius = (cardW + FACE_GAP) / 2 / Math.tan((step / 2) * Math.PI / 180);
+        var drumEl = drum(); var containerW = drumEl ? (drumEl.offsetWidth || drumEl.getBoundingClientRect().width) : 0;
+        var radius = sideCardRadius(step, cardW, containerW);
         // Свежая копия экрана с тем же набором точек: поворот барабана остаётся прежним.
         var keepTheta = geo.signature === signature && geo.n === n;
         geo.n = n; geo.step = step; geo.radius = radius; geo.cardW = cardW; geo.built = c; geo.signature = signature;
@@ -213,7 +232,8 @@
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
             geo.cardW = liveCardW;
-            geo.radius = (liveCardW + FACE_GAP) / 2 / Math.tan((geo.step / 2) * Math.PI / 180);
+            var liveDrumEl = drum(); var liveContainerW = liveDrumEl ? (liveDrumEl.offsetWidth || liveDrumEl.getBoundingClientRect().width) : 0;
+            geo.radius = sideCardRadius(geo.step, liveCardW, liveContainerW);
             var drumNode = drum();
             if (drumNode) drumNode.style.setProperty("--drum-radius", geo.radius.toFixed(1) + "px");
         }
@@ -293,13 +313,6 @@
         api.startManualLoadAtPoint(pointId);
     }
 
-    // Как круг подпишет себя, когда рейс сойдёт с него (syncDial ниже): тот же текст,
-    // что у обычной разгрузки, «сохранено локально, отправляем» — а не гадать прежнюю
-    // подпись круга, которая могла быть уже чем угодно (пойманный на телефоне баг
-    // 26.09.2026: после пары ручных рейсов подряд круг показывал «—» вместо номера
-    // экскаватора, потому что запоминал подпись с предыдущего, ещё не досинхронного цикла).
-    var lastManualOutcome = "complete";
-
     function recallPoint() {
         var api = engine();
         if (!api || typeof api.cancelActiveManualLoad !== "function") {
@@ -307,7 +320,6 @@
             return;
         }
         haptic([70, 45, 35]); click(1.3);
-        lastManualOutcome = "cancel";
         api.cancelActiveManualLoad();
     }
 
@@ -373,13 +385,13 @@
             return;
         }
         if (button.dataset.driverManualDial !== "true") return;
-        /* Рейс завершён или отменён. Настоящее подтверждение сервера придёт отдельным
-           обновлением экрана (может занять до минуты) и само перерисует круг верно —
-           здесь важно не соврать: не гадать, каким был круг ДО ручного рейса (тот
-           текст мог сам оказаться устаревшим от предыдущего цикла — так родился баг
-           с «—» вместо номера экскаватора, пойманный на телефоне 26.09.2026), а
-           честно показать то же «сохранено, ждём подтверждения», что и у обычной
-           разгрузки (driver-shift-v1.js, applyDriverOfflineProjection). */
+        /* Рейс завершён или отменён. Куда ехать дальше телефон знает сам: назначение
+           на экскаватор ручной разгрузкой не снимается. Раньше здесь держали
+           заглушку «ожидание синхронизации» до ответа сервера (до минуты на
+           нестабильной связи) — берём номер экскаватора не с экрана (тот текст мог
+           быть устаревшим от предыдущего цикла — так родился баг с «—» вместо
+           номера, пойманный на телефоне 26.09.2026), а из свежего атрибута карточки
+           ручного режима, который сервер обновляет при каждой отрисовке. */
         delete button.dataset.driverManualDial;
         delete button.dataset.driverManualDialLabel;
         button.disabled = true;
@@ -390,10 +402,18 @@
         setUnloadWait(button, false);
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
-        var savedLabel = lastManualOutcome === "cancel" ? "ОТМЕНА СОХРАНЕНА" : "РАЗГРУЗКА СОХРАНЕНА";
+        var manualWorkspace = q("[data-driver-manual-workspace]");
+        var nextExcavatorLabel = manualWorkspace
+            ? String(
+                manualWorkspace.dataset.driverManualExcavatorLabel
+                || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                || ""
+            )
+            : "";
+        var savedLabel = nextExcavatorLabel || "НА ЗАГРУЗКУ";
         var savedNote = q(".driver-work-note");
-        if (savedNote && savedNote.textContent.trim() !== "ОЖИДАНИЕ СИНХРОНИЗАЦИИ") {
-            savedNote.textContent = "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+        if (savedNote && savedNote.textContent.trim() !== "НА ЗАГРУЗКУ") {
+            savedNote.textContent = "НА ЗАГРУЗКУ";
         }
         setDialLabel(savedLabel);
         // Страховка от того же кадра: если geometry круга ещё не готова прямо сейчас
@@ -416,7 +436,6 @@
             if (button) button.classList.remove("is-pending");
             refresh();
         }
-        lastManualOutcome = "complete";
         api.completeActiveManualLoad().then(function (saved) {
             if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); }
         }).catch(function () {
