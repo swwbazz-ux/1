@@ -193,9 +193,11 @@ function loadActiveDowntimeRuntime() {
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
         "function syncDriverReasonTotals(payload)",
         "function setDriverDowntimeStatusClass(statusKey)",
+        "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
-        "function markDriverDowntimeInstanceClosed(reasonId, startedAt)",
-        "function driverDowntimeInstanceIsClosed(reasonId, startedAt)",
+        "function driverDowntimeClosedKeys(reasonId, startedAt, eventId)",
+        "function markDriverDowntimeInstanceClosed(reasonId, startedAt, eventId)",
+        "function driverDowntimeInstanceIsClosed(reasonId, startedAt, eventId)",
         "function startDriverDowntimeTimer(payload)",
         "function applyDriverActiveDowntime(payload)",
         "function clearDriverActiveDowntime(payload)",
@@ -283,6 +285,7 @@ function loadActiveDowntimeRuntime() {
         context,
         downtimeCard,
         downtimeDuration,
+        window: runtimeWindow,
         setNow(value) { nowMs = Date.parse(value); },
         tick() { assert.ok(intervalCallback); intervalCallback(); },
     };
@@ -295,6 +298,7 @@ function loadDowntimeTimerRuntime() {
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
         "function syncDriverReasonTotals(payload)",
+        "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
         "function startDriverDowntimeTimer(payload)",
         "function snapshotDriverDowntimeTimer(atMs)",
@@ -369,6 +373,7 @@ function loadDowntimeTimerRuntime() {
         context,
         downtimeCard,
         downtimeDuration,
+        window: runtimeWindow,
         setNow(value) { nowMs = Date.parse(value); },
         tick() { assert.ok(intervalCallback); intervalCallback(); },
     };
@@ -569,11 +574,55 @@ test("a local downtime syncing to a server-confirmed numeric id does not reset t
     assert.equal(runtime.downtimeDuration.textContent, "00:00:04");
 
     // Тот же простой, но теперь под серверным числовым ID — та же причина,
-    // тот же started_at, "свежий" elapsed_seconds: 0.
+    // тот же started_at, "свежий" elapsed_seconds: 0. Алиас ещё не известен —
+    // сработать должен запасной признак (причина + started_at).
     runtime.context.apply({
         event_id: "55",
         reason_id: 1,
         started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:04.000Z",
+    });
+    runtime.setNow("2026-09-27T01:00:09.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:09");
+});
+
+test("a device with a skewed clock still recognises the same downtime via the server-id alias", () => {
+    // Замечание координатора 27.09.2026: started_at (причина + время начала)
+    // — только запасной признак. На телефоне со сбитыми часами (реальный
+    // Xiaomi отставал на ~30 мин) сервер хранит уже СКОРРЕКТИРОВАННОЕ
+    // started_at (device_clock_ahead/behind), а телефон запомнил своё
+    // собственное (несверенное) время старта — секунды не совпадут вообще.
+    // driver-offline-outbox-v2.js пишет алиас "local:<uuid>" → серверный ID
+    // синхронно в момент подтверждения (window.driverDowntimeIdAliases) —
+    // именно он должен решать, а не started_at.
+    const runtime = loadActiveDowntimeRuntime();
+    runtime.context.apply({
+        event_id: "local:driver-downtime-uuid-skew",
+        reason_id: 4,
+        started_at: "2026-09-27T01:00:00.000Z", // часы телефона, ещё не сверены
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+    });
+    runtime.setNow("2026-09-27T01:00:04.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:04");
+
+    // Подтверждение пришло: outbox узнал server_ids.downtime_event_id и
+    // записал алиас — ДО следующего вызова apply (как в реальном коде).
+    runtime.window.driverDowntimeIdAliases = {
+        "driver-downtime-uuid-skew": "77",
+    };
+
+    // Сервер прислал started_at, скорректированный на 30 минут вперёд —
+    // причина+started_at НЕ совпадут с локальной записью.
+    runtime.context.apply({
+        event_id: "77",
+        reason_id: 4,
+        started_at: "2026-09-27T01:30:00.000Z", // серверная поправка часов
         elapsed_seconds: 0,
         shift_total_seconds: 0,
         calculated_at: "2026-09-27T01:00:04.000Z",

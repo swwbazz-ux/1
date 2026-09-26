@@ -1578,10 +1578,28 @@ window.bindDriverMobileShell = function () {
         });
     }
 
+    /* "local:<uuid>" становится серверным числовым ID в момент синхронизации
+       офлайн-записи простоя (driver-offline-outbox-v2.js пишет алиас в
+       window.driverDowntimeIdAliases синхронно, до того как удалить
+       подтверждённую запись из очереди). Раз алиас известен — оба вида ID
+       сводятся к одному и тому же серверному значению. */
+    function driverDowntimeCanonicalEventId(eventId) {
+        var raw = String(eventId || "");
+        var stripped = raw.indexOf("local:") === 0 ? raw.slice(6) : raw;
+        var aliases = window.driverDowntimeIdAliases || {};
+        return String(aliases[stripped] || stripped);
+    }
+
     /* Признак «это тот же самый простой» — причина + время начала, округлённое
-       до секунды (секунды в started_at не зависят от того, каким кодом путём
-       карточка узнала о простое, а event_id зависит: локальный ("local:<uuid>")
-       становится серверным числовым в момент синхронизации). */
+       до секунды. ЗАПАСНОЙ признак, а не основной: started_at, который прислал
+       телефон СВОИМ (возможно, сбитым) временем в момент нажатия, и started_at,
+       который вернул сервер (уже с поправкой на расхождение часов —
+       device_clock_ahead/behind), могут отличаться на минуты и даже на
+       полчаса на телефоне со сбитыми часами (боевой Xiaomi, координатор
+       27.09.2026). Используется только когда серверный алиас ещё не известен —
+       то есть строго ДО первой синхронизации, когда обе стороны читают
+       started_at с одних и тех же (пока не скорректированных) часов телефона
+       и расхождения ещё нет. */
     function driverDowntimeIdentityKey(reasonId, startedAt) {
         var startedAtMs = Date.parse(startedAt || "");
         if (!Number.isFinite(startedAtMs)) return "";
@@ -1603,37 +1621,54 @@ window.bindDriverMobileShell = function () {
        oldShell.replaceWith(freshShell)) заново запускает bindDriverMobileShell
        на свежем узле — локальный var потерял бы память о закрытых простоях
        ровно в момент, когда она нужнее всего. */
-    function markDriverDowntimeInstanceClosed(reasonId, startedAt) {
-        var key = driverDowntimeIdentityKey(reasonId, startedAt);
-        if (!key) return;
-        var list = (window.driverDowntimeClosedInstances || []).filter(function (item) { return item !== key; });
-        list.push(key);
-        if (list.length > 8) list.shift();
+    function driverDowntimeClosedKeys(reasonId, startedAt, eventId) {
+        var keys = [];
+        var canonical = eventId ? driverDowntimeCanonicalEventId(eventId) : "";
+        if (canonical) keys.push("id:" + canonical);
+        var identityKey = driverDowntimeIdentityKey(reasonId, startedAt);
+        if (identityKey) keys.push("at:" + identityKey);
+        return keys;
+    }
+    function markDriverDowntimeInstanceClosed(reasonId, startedAt, eventId) {
+        var keys = driverDowntimeClosedKeys(reasonId, startedAt, eventId);
+        if (!keys.length) return;
+        var list = (window.driverDowntimeClosedInstances || []).filter(function (item) { return keys.indexOf(item) < 0; });
+        list = list.concat(keys);
+        while (list.length > 16) list.shift();
         window.driverDowntimeClosedInstances = list;
     }
-    function driverDowntimeInstanceIsClosed(reasonId, startedAt) {
-        var key = driverDowntimeIdentityKey(reasonId, startedAt);
-        return !!key && (window.driverDowntimeClosedInstances || []).indexOf(key) >= 0;
+    function driverDowntimeInstanceIsClosed(reasonId, startedAt, eventId) {
+        var keys = driverDowntimeClosedKeys(reasonId, startedAt, eventId);
+        if (!keys.length) return false;
+        var list = window.driverDowntimeClosedInstances || [];
+        return keys.some(function (key) { return list.indexOf(key) >= 0; });
     }
 
     function startDriverDowntimeTimer(payload) {
         payload = payload || {};
         var activeReasonId = String(payload.reason_id || "");
         var eventId = String(payload.event_id || "");
+        var canonicalEventId = driverDowntimeCanonicalEventId(eventId);
         var identityKey = driverDowntimeIdentityKey(activeReasonId, payload.started_at);
         var existing = window.driverDowntimeClock;
+        /* Канонический ID у СУЩЕСТВУЮЩЕГО таймера пересчитывается заново, а не
+           берётся из кэша на объекте часов: алиас "local:<uuid>" → серверный
+           ID мог появиться уже ПОСЛЕ того, как этот таймер запустился — кэш
+           навсегда остался бы со старым (нерастворённым) значением и никогда
+           не совпал бы с новым payload, у которого алиас уже известен. */
+        var existingCanonicalEventId = existing ? driverDowntimeCanonicalEventId(existing.eventId) : "";
         var sameInstance = existing && existing.activeReasonId === activeReasonId && (
-            /* identityKey (причина + started_at) — основной признак: он не
-               меняется, когда офлайн-запись простоя синхронизируется и её
-               event_id переходит из локального вида ("local:<uuid>") в
-               серверный числовой ID — под нагрузкой (много техники меняет
-               состояние в ту же секунду) это переключение ловится КАЖДЫМ
-               фоновым обновлением, и сравнение только по event_id ловило
-               ложное «это другой простой» и обнуляло таймер (боевой
-               27.09.2026, v359). event_id остаётся запасным признаком на
-               случай, если started_at не пришёл вовсе. */
-            (identityKey && existing.identityKey === identityKey)
-            || (!identityKey && eventId && existing.eventId === eventId)
+            /* canonicalEventId — основной признак: "local:<uuid>" и серверный
+               числовой ID сводятся к одному значению через алиас, который
+               driver-offline-outbox-v2.js пишет синхронно в момент
+               подтверждения. identityKey (причина + started_at) — запасной,
+               на случай, если алиас ещё не известен (до первой синхронизации,
+               пока обе стороны читают одни и те же, ещё не скорректированные
+               часы телефона); started_at, который сервер мог уже
+               скорректировать при сбитых часах устройства, не должен решать
+               в одиночку (координатор, 27.09.2026). */
+            (canonicalEventId && existingCanonicalEventId === canonicalEventId)
+            || (identityKey && existing.identityKey === identityKey)
         );
         if (sameInstance) {
             /* Тот же самый простой — не перезапускаем отсчёт. Раньше любое
@@ -1778,7 +1813,7 @@ window.bindDriverMobileShell = function () {
         if (!downtimeCard || !payload || !payload.event_id) {
             return false;
         }
-        if (driverDowntimeInstanceIsClosed(payload.reason_id, payload.started_at)) {
+        if (driverDowntimeInstanceIsClosed(payload.reason_id, payload.started_at, payload.event_id)) {
             /* Этот телефон уже закрыл именно этот простой (та же причина и
                started_at) — источник, вызвавший этот payload (устаревший
                локальный список офлайн-событий или запоздавший серверный
@@ -1823,7 +1858,8 @@ window.bindDriverMobileShell = function () {
         if (downtimeCard && downtimeCard.dataset.driverActiveReasonId) {
             markDriverDowntimeInstanceClosed(
                 downtimeCard.dataset.driverActiveReasonId,
-                downtimeCard.dataset.driverActiveStartedAt
+                downtimeCard.dataset.driverActiveStartedAt,
+                downtimeCard.dataset.driverActiveDowntimeId
             );
         }
         clearDriverDowntimeTimer();

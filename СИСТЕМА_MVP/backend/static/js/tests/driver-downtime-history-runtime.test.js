@@ -79,6 +79,7 @@ test("per-reason downtime timer survives close and marks every used reason", () 
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
         "function syncDriverReasonTotals(payload)",
+        "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
         "function startDriverDowntimeTimer(payload)",
     ];
