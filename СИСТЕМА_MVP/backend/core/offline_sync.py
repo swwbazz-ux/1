@@ -906,7 +906,18 @@ def _locked_shift(access, normalized, *, role_code):
         else:
             _conflict('event_before_shift', 'Время события раньше начала смены.')
     if shift.closed_at and occurred_at > shift.closed_at:
-        _conflict('event_after_shift', 'Время события позже закрытия смены.')
+        # Телефон — источник истины: запоздалое событие (плохая связь, сон
+        # устройства) действительно случилось после закрытия смены на
+        # сервере. Раньше это было отказом (event_after_shift) — водитель или
+        # машинист получал ошибку синхронизации за действие, которое сам
+        # честно совершил. Событие ложится в историю СВОЕЙ смены её же
+        # честным временем; сервер не решает за телефон, диспетчеру ничего
+        # не показываем — только предупреждение в журнал для последующего
+        # разбора при необходимости.
+        logger.warning(
+            'offline_sync: event %s occurred_at=%s after shift %s closed_at=%s; accepted into shift history anyway',
+            normalized.get('event_id'), occurred_at, shift.id, shift.closed_at,
+        )
     return shift
 
 

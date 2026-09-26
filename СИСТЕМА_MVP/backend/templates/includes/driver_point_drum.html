@@ -21,7 +21,34 @@
                     </span>
                 </button>
             {% empty %}
-                <div class="driver-inline-note">Экскаватору не назначены точки разгрузки.</div>
+                {% comment %}
+                Три пустые грани вместо содержимого — та же форма барабана, что и со
+                сменой (центральная + две боковые на тех же углах), только серые и без
+                надписи. Раньше тут было либо пусто (без смены барабан «схлопывался» в
+                пустое место, ни горлышка, ни боковых граней), либо текстовая плашка
+                (со сменой, но не назначена точка). Своих data-точечных атрибутов у
+                граней нет — скрипт барабана (driver-point-drum-v1.js) их не считает и
+                не двигает; углы заданы статично тем же шагом, что CSS берёт по
+                умолчанию (--drum-step). Контур-горлышко (driver-downtime-drum-v1.js,
+                syncLinkVars) ищет свою обычную грань ИЛИ эту пустую с классом
+                is-center — поэтому окантовка не пропадает.
+                {% endcomment %}
+                <div class="driver-drum-card driver-drum-card-empty" style="--card-angle: calc(-1 * var(--drum-step))" aria-hidden="true">
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
+                </div>
+                {% comment %} Свой класс, не .is-center: та CSS-подсветка (жёлтый акцент)
+                   не должна включаться на пустой грани — она нужна только для контура. {% endcomment %}
+                <div class="driver-drum-card driver-drum-card-empty is-drum-empty-center" aria-hidden="true">
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
+                    {% if open_shift %}
+                        <span class="driver-drum-card-body">
+                            <span class="driver-drum-card-label is-drum-label-long">Экскаватору не назначены точки разгрузки</span>
+                        </span>
+                    {% endif %}
+                </div>
+                <div class="driver-drum-card driver-drum-card-empty" style="--card-angle: var(--drum-step)" aria-hidden="true">
+                    <span class="driver-drum-card-face" aria-hidden="true"></span>
+                </div>
             {% endfor %}
             {% endwith %}
         </div>

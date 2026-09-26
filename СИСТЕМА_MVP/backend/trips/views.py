@@ -4157,7 +4157,11 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
         trip.volume_m3 = trip.volume_m3 if trip.volume_m3 is not None else volume
         trip.tonnage = trip.tonnage if trip.tonnage is not None else tonnage
     trip.status = TripStatus.COMPLETED
-    trip.driver = driver
+    # Рейс засчитывается тому, кто грузил, а не тому, кто разгружал — самосвал
+    # мог перейти сменщику гружёным (см. is_carryover). Перезаписываем только
+    # если водителя загрузки почему-то не было зафиксировано вовсе.
+    if trip.driver_id is None:
+        trip.driver = driver
     trip.unload_received_at = timezone.now()
     trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
     trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
