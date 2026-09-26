@@ -1322,6 +1322,7 @@ def _process_driver_loaded(access, normalized):
         .select_related('free_bucket_acceptance')
         .first()
     )
+    supersede_open_trip = None
     if open_trip:
         existing_manual = TripClientAction.objects.select_for_update(of=('self',)).filter(
             trip=open_trip,
@@ -1372,7 +1373,33 @@ def _process_driver_loaded(access, normalized):
             or not authority_matches
             or not _manual_load_matches_trip(open_trip, payload, acceptance=acceptance)
         ):
-            _conflict('open_trip_changed', 'У самосвала уже есть другой незавершённый рейс.')
+            previous_loaded_at = open_trip.loaded_at or open_trip.created_at
+            if normalized['occurred_at'] < previous_loaded_at:
+                # Опоздавшее событие про цикл РАНЬШЕ действующего рейса — живой
+                # более поздний рейс более ранним событием не трогаем никогда,
+                # разбираем отдельно по времени (тот же приём, что у
+                # экскаваторщика — _process_late_excavator_load).
+                return _process_late_driver_manual_load(
+                    access, normalized, shift=shift, truck=truck, excavator=excavator,
+                    assignment=assignment, acceptance=acceptance,
+                    rock_type=rock_type, dump_point=dump_point, load_context=load_context,
+                    open_trip=open_trip, payload=payload,
+                )
+            # Событие ПОЗЖЕ действующего открытого рейса, но не совпадает с
+            # ним — водитель истина: отметка принимается, старый рейс
+            # закрывается как непроконтролированный (uncontrolled) и
+            # засчитывается тому, кто его грузил; отказа быть не должно.
+            _log_discrepancy(
+                access=access, code='open_trip_changed', process='Ручная отправка водителем',
+                description=(
+                    f'Водитель грузит самосвал {truck} вручную на {normalized["occurred_at"]}, но '
+                    f'открытый рейс #{open_trip.id} на сервере не совпал с этой отметкой. Отметка '
+                    f'принята, старый рейс закрыт как непроконтролированный (uncontrolled), '
+                    f'засчитан тому, кто грузил.'
+                ),
+            )
+            supersede_open_trip = open_trip
+            open_trip = None
         if open_trip:
             _claim_trip_for_driver_manual_event(
                 open_trip,
@@ -1464,6 +1491,16 @@ def _process_driver_loaded(access, normalized):
         'code': 'driver_manual',
         'label': '',
     }
+    if supersede_open_trip is not None:
+        # Между чтением open_trip выше и этим вызовом рейс мог уже смениться
+        # (другое событие того же батча его закрыло/заменило) — перечитываем
+        # под блокировкой то, что открыто прямо сейчас, и заменяем именно
+        # его (тот же приём, что у экскаваторщика).
+        supersede_open_trip = (
+            Trip.objects.select_for_update(of=('self',))
+            .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
+            .first()
+        )
     try:
         trip = create_loaded_waiting_unload_trip(
             assignment=assignment,
@@ -1479,6 +1516,7 @@ def _process_driver_loaded(access, normalized):
             transport_distance_km=load_context['transport_distance_km'],
             note=str(payload.get('note') or 'Ручная отправка водителем')[:1000],
             participation=participation,
+            supersede_trip=supersede_open_trip,
             occurred_at=normalized['occurred_at'],
             resolve_assignment_transition=False,
             driver=access.employee,
@@ -1493,6 +1531,11 @@ def _process_driver_loaded(access, normalized):
         trip=trip,
         actor=access.employee,
     )
+    if supersede_open_trip is not None:
+        TripClientAction.objects.create(
+            action_type='truck_load_supersede', client_action_id=normalized['event_id'],
+            trip=supersede_open_trip, actor=access.employee,
+        )
     close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
     if acceptance:
         acceptance.status = FreeBucketAcceptanceStatus.USED
@@ -1517,6 +1560,110 @@ def _process_driver_loaded(access, normalized):
         'version': state.version,
     }, {'trip': trip, 'shift': shift, 'equipment': truck,
         'free_bucket_acceptance': acceptance}
+
+
+def _process_late_driver_manual_load(
+    access, normalized, *, shift, truck, excavator, assignment, acceptance,
+    rock_type, dump_point, load_context, open_trip, payload,
+):
+    """Опоздавшая ручная отправка водителя про цикл РАНЬШЕ текущего открытого рейса.
+
+    Тот же приём, что и у экскаваторщика (_process_late_excavator_load):
+    живой более поздний рейс более ранним событием не трогаем никогда.
+    Дальше — по времени: либо это уже известная погрузка (окно уже
+    существующего рейса накрывает это время — только лог), либо реальная
+    отметка, провалившаяся в промежуток между рейсами (создаём исторический
+    рейс, сразу закрытый как непроконтролированный).
+    """
+    from trips.models import FreeBucketAcceptanceStatus, TripClientAction
+    from trips.trip_creation import create_loaded_waiting_unload_trip
+
+    slot, ref_trip = _late_excavator_load_slot(
+        truck_id=truck.id, occurred_at=normalized['occurred_at'], open_trip=open_trip,
+    )
+    if slot == 'same_load':
+        _log_discrepancy(
+            access=access, code='open_trip_changed', process='Ручная отправка водителем',
+            description=(
+                f'Опоздавшая ручная отметка водителя по самосвалу {truck} на '
+                f'{normalized["occurred_at"]} попадает в окно уже известного рейса #{ref_trip.id} — '
+                f'та же погрузка, повторно отмеченная. Новый рейс не создан, действующий рейс '
+                f'#{open_trip.id} не тронут.'
+            ),
+        )
+        state = bump_operational_state(
+            'OfflineFieldEvent:driver_manual_loaded_late_duplicate', event_type='trip_changed',
+            object_type='Trip', object_id=ref_trip.id,
+            payload={'action': 'driver_manual_loaded_late_duplicate', 'trip_id': ref_trip.id, 'truck_id': truck.id},
+        )
+        return {
+            'server_ids': {'trip_id': ref_trip.id, 'shift_id': shift.id},
+            'trip_origin': 'driver_manual',
+            'version': state.version,
+        }, {'trip': ref_trip, 'shift': shift, 'equipment': truck}
+
+    participation = {
+        'shift': shift,
+        'control_shift': shift,
+        'passive': False,
+        'code': 'driver_manual',
+        'label': '',
+    }
+    try:
+        trip = create_loaded_waiting_unload_trip(
+            assignment=assignment,
+            truck=truck if acceptance else None,
+            excavator=excavator if acceptance else None,
+            free_bucket_acceptance=acceptance,
+            excavator_operator=acceptance.operator if acceptance else None,
+            loading_shift=acceptance.loading_shift if acceptance else None,
+            rock_type=rock_type,
+            dump_point=dump_point,
+            loading_horizon=load_context['loading_horizon'],
+            loading_block=load_context['loading_block'],
+            transport_distance_km=load_context['transport_distance_km'],
+            note=str(payload.get('note') or 'Ручная отправка водителем')[:1000],
+            participation=participation,
+            historical_closed_at=ref_trip.loaded_at,
+            occurred_at=normalized['occurred_at'],
+            resolve_assignment_transition=False,
+            driver=access.employee,
+            driver_participation_recorded=True,
+            load_time_source='driver_device',
+        )
+    except ValidationError as error:
+        _conflict('trip_validation_failed', '; '.join(error.messages))
+    TripClientAction.objects.create(
+        action_type='driver_manual_loaded', client_action_id=normalized['event_id'],
+        trip=trip, actor=access.employee,
+    )
+    if acceptance:
+        acceptance.status = FreeBucketAcceptanceStatus.USED
+        acceptance.used_at = normalized['occurred_at']
+        acceptance.used_trip = trip
+        acceptance.save(update_fields=['status', 'used_at', 'used_trip'])
+    _log_discrepancy(
+        access=access, code='open_trip_changed', process='Ручная отправка водителем',
+        description=(
+            f'Опоздавшая ручная отметка водителя по самосвалу {truck} на {normalized["occurred_at"]} '
+            f'попала в промежуток перед рейсом #{ref_trip.id} — создан исторический рейс #{trip.id}, '
+            f'сразу закрытый как непроконтролированный на момент начала #{ref_trip.id}. Действующий '
+            f'рейс #{open_trip.id} не тронут.'
+        ),
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:driver_manual_loaded_historical', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={
+            'action': 'driver_manual_loaded_historical', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+            'excavator_id': trip.excavator_id, 'status': trip.status,
+        },
+    )
+    return {
+        'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
+        'trip_origin': 'driver_manual',
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck, 'free_bucket_acceptance': acceptance}
 
 
 def _late_excavator_load_slot(*, truck_id, occurred_at, open_trip):

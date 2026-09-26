@@ -424,12 +424,18 @@ class OfflineEventSyncTests(TestCase):
         ).exists())
 
     def test_excavator_first_merge_requires_same_assignment_identity(self):
+        # Волна 2: более позднее по времени событие, не совпадающее с
+        # открытым рейсом, больше не отказ (open_trip_changed) — водитель
+        # истина, старый рейс закрывается как непроконтролированный
+        # (uncontrolled) и засчитывается тому, кто его грузил, а отметка
+        # создаёт новый рейс.
         automatic = self.load_event('excavator-assignment-a', 1)
         automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
         automatic_result = self.sync(
             [automatic], device_id='excavator-assignment-device',
         ).json()['results'][0]
         self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        first_trip_id = automatic_result['server_ids']['trip_id']
 
         switched_at = automatic_at + timedelta(seconds=1)
         self.assignment.ended_at = switched_at
@@ -459,13 +465,144 @@ class OfflineEventSyncTests(TestCase):
             device_id='driver-assignment-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'open_trip_changed')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.count(), 2)
+        new_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertNotEqual(new_trip.id, first_trip_id)
+        first_trip = Trip.objects.get(pk=first_trip_id)
+        self.assertEqual(first_trip.status, TripStatus.UNCONTROLLED)
+        self.assertTrue(TripClientAction.objects.filter(
+            action_type='driver_manual_loaded',
+            client_action_id=manual['event_id'],
+        ).exists())
+
+    def test_late_driver_manual_load_inside_open_trip_window_is_a_no_op(self):
+        # Волна 2, случай «время внутри существующего рейса»: опоздавшая
+        # ручная отметка водителя приходит РАНЬШЕ действующего открытого
+        # рейса, но её время попадает в его собственное окно (та же
+        # физическая погрузка, отмеченная повторно из-за плохой связи) —
+        # принимается без создания нового рейса, живой рейс не трогается.
+        self._open_shift_context_earlier(timedelta(minutes=30))
+        automatic = self.load_event('excavator-assignment-same-load', 1)
+        automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
+        automatic_result = self.sync(
+            [automatic], device_id='excavator-assignment-same-load-device',
+        ).json()['results'][0]
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        open_trip_id = automatic_result['server_ids']['trip_id']
+
+        switched_at = automatic_at + timedelta(seconds=1)
+        self.assignment.ended_at = switched_at
+        self.assignment.save(update_fields=['ended_at'])
+        replacement = HaulAssignment.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            assigned_by=self.operator,
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=automatic_at - timedelta(minutes=1),
+        )
+        HaulAssignment.objects.filter(pk=replacement.pk).update(
+            assigned_at=automatic_at - timedelta(minutes=1),
+        )
+        replacement.refresh_from_db()
+
+        manual = self.driver_manual_event(
+            'driver-manual-same-load',
+            1,
+            occurred_at=automatic_at - timedelta(seconds=30),
+        )
+        manual['payload']['assignment_id'] = replacement.id
+        manual['context_snapshot']['assignment_id'] = replacement.id
+        result = self.sync(
+            [manual],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-same-load-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['server_ids']['trip_id'], open_trip_id)
         self.assertEqual(Trip.objects.count(), 1)
+        open_trip = Trip.objects.get(pk=open_trip_id)
+        self.assertEqual(open_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
         self.assertFalse(TripClientAction.objects.filter(
             action_type='driver_manual_loaded',
             client_action_id=manual['event_id'],
         ).exists())
+
+    def test_late_driver_manual_load_in_the_gap_between_trips_creates_historical_trip(self):
+        # Волна 2, случай «в промежутке между рейсами»: опоздавшая ручная
+        # отметка водителя провалилась в промежуток между уже известным
+        # закрытым рейсом и текущим открытым — создаётся исторический рейс,
+        # сразу закрытый как непроконтролированный, живой открытый рейс не
+        # трогается.
+        self._open_shift_context_earlier(timedelta(hours=1))
+        earlier_closed_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            driver_participation_recorded=True,
+            driver_control_shift=self.truck_shift,
+            status=TripStatus.COMPLETED,
+            loaded_at=timezone.now() - timedelta(minutes=30),
+            completed_at=timezone.now() - timedelta(minutes=20),
+        )
+
+        automatic = self.load_event('excavator-assignment-gap', 1)
+        automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
+        automatic_result = self.sync(
+            [automatic], device_id='excavator-assignment-gap-device',
+        ).json()['results'][0]
+        self.assertEqual(automatic_result['status'], 'accepted', automatic_result)
+        open_trip_id = automatic_result['server_ids']['trip_id']
+
+        self.assignment.ended_at = timezone.now() - timedelta(minutes=16)
+        self.assignment.save(update_fields=['ended_at'])
+        replacement = HaulAssignment.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            assigned_by=self.operator,
+            action=HaulAssignmentAction.ASSIGN,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now() - timedelta(minutes=15),
+        )
+        HaulAssignment.objects.filter(pk=replacement.pk).update(
+            assigned_at=timezone.now() - timedelta(minutes=15),
+        )
+        replacement.refresh_from_db()
+
+        manual = self.driver_manual_event(
+            'driver-manual-gap',
+            1,
+            occurred_at=timezone.now() - timedelta(minutes=10),
+        )
+        manual['payload']['assignment_id'] = replacement.id
+        manual['context_snapshot']['assignment_id'] = replacement.id
+        result = self.sync(
+            [manual],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-gap-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.count(), 3)
+        historical_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(historical_trip.status, TripStatus.UNCONTROLLED)
+        self.assertTrue(TripClientAction.objects.filter(
+            action_type='driver_manual_loaded',
+            client_action_id=manual['event_id'],
+            trip=historical_trip,
+        ).exists())
+        open_trip = Trip.objects.get(pk=open_trip_id)
+        self.assertEqual(open_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        earlier_closed_trip.refresh_from_db()
+        self.assertEqual(earlier_closed_trip.status, TripStatus.COMPLETED)
 
     def test_late_excavator_load_inside_own_trip_window_is_a_no_op(self):
         """Пункт 2 правила: опоздавший пакет попадает в окно СВОЕГО, уже известного рейса."""
