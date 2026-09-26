@@ -137,7 +137,7 @@ document.addEventListener("DOMContentLoaded", function () {
         },
         showError: showDispatcherDnDError,
         reloadFallback: reloadDispatcherBoardAsFallback,
-        openEquipmentCard: dispatcherDetail.openEquipmentCard,
+        equipmentCardTrigger: dispatcherEquipmentCardTrigger,
         equipmentStateClass: dispatcherDetail.equipmentStateClass,
         equipmentStateLabel: dispatcherDetail.equipmentStateLabel,
         neutralEquipmentIcon: dispatcherDetail.neutralEquipmentIcon,

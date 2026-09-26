@@ -267,6 +267,15 @@ test("карточка и desktop-доска физически отделены
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherHaulAssignmentState\(\)/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoardDnD/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoard\(\{/);
+    assert.match(
+        DISPATCHER_RUNTIME,
+        /window\.createDispatcherBoard\(\{[\s\S]*?equipmentCardTrigger: dispatcherEquipmentCardTrigger/
+    );
+    assert.equal(
+        (DISPATCHER_RUNTIME.match(/openEquipmentCard: dispatcherDetail\.openEquipmentCard/g) || []).length,
+        1,
+        "detail callback must only configure the card-trigger factory"
+    );
     assert.match(DISPATCHER_RUNTIME, /layout: dispatcherBoardLayout/);
     assert.match(DISPATCHER_RUNTIME, /complexTruckRacks: dispatcherComplexTruckRacks/);
     assert.match(DISPATCHER_RUNTIME, /assignmentState: dispatcherHaulAssignmentState/);
