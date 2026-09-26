@@ -2070,6 +2070,29 @@ class OfflineEventSyncTests(TestCase):
             HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).exists()
         )
 
+    def test_load_stays_a_conflict_when_truck_openly_assigned_to_another_excavator(self):
+        """Самосвал открыто числится за ДРУГИМ экскаватором — не заводим второе назначение.
+
+        Иначе самосвал «переехал» бы на пульте диспетчера под этот экскаватор
+        мимо диспетчера, а уникальный индекс на один открытый ACCEPTED на
+        самосвал уронил бы транзакцию.
+        """
+        HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).delete()
+        HaulAssignment.objects.create(
+            truck=self.truck, excavator=self.other_excavator,
+            action=HaulAssignmentAction.ASSIGN, status=AssignmentStatus.ACCEPTED,
+            accepted_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        event = self.load_event('load-truck-claimed-by-other-excavator', 1)
+        response = self.sync([event])
+
+        self.assertEqual(response.status_code, 200, response.content)
+        result = response.json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'assignment_context_changed')
+        self.assertEqual(Trip.objects.count(), 0)
+
     def test_delayed_load_keeps_driver_shift_from_occurrence_not_new_shift(self):
         occurred_at = timezone.now()
         self.truck_shift.opened_at = occurred_at - timedelta(minutes=10)

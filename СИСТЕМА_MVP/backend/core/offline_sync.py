@@ -986,10 +986,23 @@ def _historical_excavator_assignment(*, access, shift, truck_id, requested_assig
     )
     if not resolved:
         # Ни запрошенное, ни вообще какое-либо назначение для этой пары
-        # техники не найдено — восстановить нечего. Правило: сервер всё равно
-        # не отклоняет погрузку машиниста, а принимает её с той парой
-        # самосвал/экскаватор, что прислал телефон, заводя недостающее
-        # назначение по факту этой погрузки.
+        # техники не найдено. Прежде чем завести недостающее назначение по
+        # факту погрузки, проверяем: самосвал не числится ОТКРЫТО назначенным
+        # на ДРУГОЙ экскаватор прямо сейчас. Если числится — это уже не спор
+        # о времени одной пары техники, а конфликт с чужим действующим
+        # назначением на пульте диспетчера (самосвал «переехал» бы на доске);
+        # это решает диспетчер, не эта функция. Плюс на truck висит уникальный
+        # индекс «один открытый ACCEPTED/PENDING на самосвал» — тихое создание
+        # второго уронило бы транзакцию IntegrityError.
+        conflicting_open = (
+            HaulAssignment.objects.select_for_update(of=('self',))
+            .filter(truck_id=truck_id, ended_at__isnull=True)
+            .exclude(excavator_id=shift.equipment_id)
+            .exclude(status=AssignmentStatus.CANCELLED)
+            .exists()
+        )
+        if conflicting_open:
+            _conflict('assignment_context_changed', 'Назначение из события не найдено.')
         resolved = HaulAssignment.objects.create(
             truck_id=truck_id, excavator_id=shift.equipment_id,
             action=HaulAssignmentAction.ASSIGN, status=AssignmentStatus.ACCEPTED,
