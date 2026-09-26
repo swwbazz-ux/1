@@ -1139,7 +1139,48 @@ window.bindDriverMobileShell = function () {
     window.addEventListener("operational-state-refresh-applied", function () {
         var current = document.querySelector("[data-driver-shell]");
         if (current && driverOfflineEvents.length) applyDriverOfflineProjection(current, driverOfflineEvents);
+        syncDriverDowntimeTimerFromCard();
     });
+
+    /* Фоновое обновление раз в ~20 с меняет атрибуты карточки состояния простоя
+       через послойную подмену (syncAttributes), но сам JS-таймер (замыкание
+       setInterval) заново не привязывается — экран уже «привязан» и повторный
+       bindDriverMobileShell выходит по защите на входе функции. Раньше это
+       давало замороженный счётчик старой причины после любого стороннего
+       изменения простоя (пойман на реальном полевом тесте 26.09.2026):
+       переустанавливаем таймер отдельно, сверяя его с реальным содержимым
+       карточки на каждое обновление, а не только при собственном касании
+       водителя. */
+    function syncDriverDowntimeTimerFromCard() {
+        if (!downtimeCard) return;
+        var cardReasonId = String(downtimeCard.dataset.driverActiveReasonId || "");
+        var clock = window.driverDowntimeClock;
+        var clockReasonId = clock ? String(clock.activeReasonId || "") : "";
+        var cardEventId = String(downtimeCard.dataset.driverActiveDowntimeId || "");
+        var clockEventId = window.driverDowntimeActiveEventId || "";
+        if (cardReasonId === clockReasonId && cardEventId === clockEventId) return;
+        window.driverDowntimeActiveEventId = cardEventId;
+        if (!cardReasonId) {
+            clearDriverActiveDowntime({
+                shift_total_seconds: Number(downtimeCard.dataset.driverShiftDowntimeSeconds) || 0
+            });
+            return;
+        }
+        var cardReasonButton = shell.querySelector(
+            '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + cardReasonId + '"]'
+        );
+        applyDriverActiveDowntime({
+            event_id: cardEventId,
+            reason_id: cardReasonId,
+            workflow: downtimeCard.dataset.driverActiveDowntimeFlow || "",
+            started_at: downtimeCard.dataset.driverActiveStartedAt || "",
+            elapsed_seconds: Number(downtimeCard.dataset.driverActiveElapsedSeconds) || 0,
+            shift_total_seconds: Number(downtimeCard.dataset.driverShiftDowntimeSeconds) || 0,
+            calculated_at: downtimeCard.dataset.driverDowntimeCalculatedAt || "",
+            status_key: (downtimeCard.className.match(/status-(\w+)/) || [])[1] || "red",
+            reason: (cardReasonButton && cardReasonButton.dataset.driverReasonLabel) || "Простой"
+        });
+    }
 
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
@@ -1170,13 +1211,29 @@ window.bindDriverMobileShell = function () {
                 /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
                    прежний ключ подгонки оставался прежним, и длинная надпись выводилась
                    кеглем короткой — она вылезала за круг и обрезалась. */
-                var unloadDialText = unloadNeedsReview ? "НЕ ПОДТВЕРЖДЕНО" : "РАЗГРУЗКА СОХРАНЕНА";
+                /* Куда ехать дальше после разгрузки телефон знает сам, без сервера:
+                   назначение на экскаватор разгрузкой не снимается, самосвал просто
+                   пустеет и едет за новой погрузкой к тому же экскаватору. Раньше
+                   тут держали заглушку «ожидание синхронизации» до ответа сервера —
+                   на нестабильной связи это давало задержку в минуты (реальный
+                   полевой тест 26.09.2026). */
+                var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
+                var nextExcavatorLabel = manualWorkspace
+                    ? String(
+                        manualWorkspace.dataset.driverManualExcavatorLabel
+                        || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                        || ""
+                    )
+                    : "";
+                var unloadDialText = unloadNeedsReview
+                    ? "НЕ ПОДТВЕРЖДЕНО"
+                    : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
                 dialLabel.textContent = unloadDialText;
                 dialLabel.dataset.driverDialRaw = unloadDialText;
                 delete dialLabel.dataset.driverDialFitKey;
                 if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
             }
-            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
             var pointCard = current.querySelector("[data-driver-point-open]");
             if (pointCard) {
                 pointCard.disabled = true;
@@ -1625,6 +1682,7 @@ window.bindDriverMobileShell = function () {
         downtimeCard.dataset.driverShiftDowntimeSeconds = String(payload.shift_total_seconds || 0);
         downtimeCard.dataset.driverDowntimeCalculatedAt = payload.calculated_at || "";
         downtimeCard.classList.add("is-active");
+        window.driverDowntimeActiveEventId = String(payload.event_id || "");
         setDriverDowntimeStatusClass(payload.status_key || "red");
         if (downtimeTitle) downtimeTitle.textContent = "Активный простой";
         if (downtimeReason) downtimeReason.textContent = payload.reason || "";
@@ -1639,6 +1697,7 @@ window.bindDriverMobileShell = function () {
 
     function clearDriverActiveDowntime(payload) {
         clearDriverDowntimeTimer();
+        window.driverDowntimeActiveEventId = "";
         if (downtimeTitle) downtimeTitle.textContent = "Простоя нет";
         if (downtimeReason) downtimeReason.textContent = "Выберите причину для начала";
         var shiftTotalSeconds = Math.max(0, Number(payload && payload.shift_total_seconds) || Number(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds) || 0);
@@ -1709,9 +1768,12 @@ window.bindDriverMobileShell = function () {
             return mappingPromise.then(function (mapping) {
                 var mappedServerId = Number(mapping && (mapping.downtime_event_id || mapping.downtime_id)) || null;
                 var directServerId = activeDowntimeId.indexOf("local:") === 0 ? null : Number(activeDowntimeId) || null;
-                if (isClose && !unresolvedStart && !mappedServerId && !directServerId) {
-                    throw new Error("Начало простоя ещё не подтверждено. Дождитесь синхронизации или сверки.");
-                }
+                /* Раньше здесь отказывали в закрытии, если начало простоя ещё не
+                   подтверждено сервером, — водитель жал «завершить» и получал
+                   отказ на нестабильной связи. Телефон решает сам и сразу: событие
+                   закрытия ставится в очередь без ссылки, если ссылки ещё нет,
+                   сервер связывает его с началом простоя, когда оно синхронизуется
+                   (см. _retry('downtime_reference_pending', ...) в offline_sync.py). */
                 if (isClose) {
                     if (typeof window.createDriverDowntimeEndEvent !== "function") {
                         throw new Error("offline_runtime_unavailable");
@@ -1867,6 +1929,7 @@ window.bindDriverMobileShell = function () {
     }
 
     if (downtimeCard && downtimeCard.dataset.driverActiveDowntimeId && downtimeCard.dataset.driverActiveStartedAt) {
+        window.driverDowntimeActiveEventId = downtimeCard.dataset.driverActiveDowntimeId;
         startDriverDowntimeTimer({
             active: true,
             event_id: downtimeCard.dataset.driverActiveDowntimeId,

@@ -84,13 +84,13 @@ GitHub Actions подключается к production отдельным клю�
 
 ### Зашифрованная read-only диагностика
 
-- `diagnose` / `DIAGNOSE` выполняет только установленную в receiver фиксированную операцию. Первоначально разрешена `trip_accounting_incident_v1`.
+- `diagnose` / `DIAGNOSE` выполняет только установленную в receiver фиксированную операцию. Разрешены `trip_accounting_incident_v1` и `infra_capacity_v1`.
 - Текущая версия workflow отклоняет `update_receiver` и `diagnose` вне канонической control-ветки `codex/github-production-deploy-20260916`.
 - Проверки внутри изменяемого workflow недостаточно. До этих двух режимов GitHub Environment `production` должен быть ограничен канонической веткой, а сама ветка — защищена от несанкционированного изменения; без внешней policy запуск запрещён.
-- Пакет диагностики не содержит файлов, Python-кода, SQL, команд или путей. Допустимы только гаражный номер техники, строгие UTC-границы `YYYY-MM-DDTHH:MM:SSZ` и общий лимит строк.
-- Окно должно быть положительным и не превышать 24 часа; максимальный лимит — 500 строк.
-- Helper запускается от непривилегированного пользователя приложения с `PGOPTIONS default_transaction_read_only=on`, начинает единый снимок `transaction.atomic()` первым SQL `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`, проверяет оба режима и устанавливает `statement_timeout`, `lock_timeout` и отдельный process timeout.
-- В отчёт попадают только секции и технические поля из жёсткого server-side allowlist: внутренние ID, статусы, времена, гаражные номера, версии и коды ошибок. ФИО, PIN, телефон, cookies, токены, URL/query, request body, stack и произвольные payload не выводятся.
+- Пакет диагностики не содержит файлов, Python-кода, SQL, команд или путей. Для `trip_accounting_incident_v1` допустимы только гаражный номер техники, строгие UTC-границы `YYYY-MM-DDTHH:MM:SSZ` и общий лимит строк. `infra_capacity_v1` не принимает никаких параметров; непустые поля рейсовой диагностики и нестандартный лимит строк отклоняются builder до отправки.
+- Для `trip_accounting_incident_v1` окно должно быть положительным и не превышать 24 часа; максимальный лимит — 500 строк. Его helper запускается от непривилегированного пользователя приложения с `PGOPTIONS default_transaction_read_only=on`, начинает единый снимок `transaction.atomic()` первым SQL `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`, проверяет оба режима и устанавливает `statement_timeout`, `lock_timeout` и отдельный process timeout.
+- PostgreSQL probe операции `infra_capacity_v1` также работает только в `transaction.atomic()` с первым `SET TRANSACTION READ ONLY`, короткими `statement_timeout`/`lock_timeout` и фиксированными агрегирующими запросами только к системным представлениям. Таблицы приложения не читаются.
+- В отчёты попадают только секции и технические поля из жёсткого server-side allowlist. ФИО, PIN, телефон, cookies, токены, URL/query, request body, stack и произвольные payload не выводятся.
 - Диагностические inputs не передаются через Actions `env` и не печатаются: builder читает их непосредственно из `GITHUB_EVENT_PATH`.
 - Receiver валидирует отчёт и шифрует его CMS-сертификатом ещё на production. По SSH возвращается только JSON-конверт с base64 CMS-DER, безопасной сводкой и SHA-256; диагностический plaintext никогда не попадает на GitHub runner.
 - Runner строго валидирует конверт, fingerprint, лимиты и SHA, извлекает только `.cms`; временный конверт и диагностический stderr удаляются в том же шаге.
@@ -108,6 +108,18 @@ GitHub Actions подключается к production отдельным клю�
 ```
 
 `diagnose` не устанавливает файлы приложения, не создаёт backup, не вызывает `collectstatic`, миграции или restart. До первого запуска режима необходимо отдельно выполнить `verify_receiver`, получить явное разрешение владельца и только затем выполнить `update_receiver` для точного проверенного SHA.
+
+`infra_capacity_v1` возвращает один зашифрованный пятисекундный снимок: CPU/load average, RAM/swap/PSI, disk/file handles, фиксированные безопасные свойства четырех systemd units, агрегированные PostgreSQL connections/locks/size/limits и доступные без секрета агрегаты Redis на loopback-портах 6379/6381. Имена хоста, IP, пути/командные строки процессов, environment, пользователи/роли БД, SQL/query text, Redis ACL/channel names и содержимое БД не возвращаются. Если Redis требует пароль, результат ограничивается состоянием `auth_required`; receiver не читает и не передает credential.
+
+CPU считается по `/proc/stat` без повторного включения `guest`/`guest_nice`: `iowait` относится к idle, `steal` — к busy. Поле disk `free` означает место, доступное непривилегированному helper; разница `total - used - free` может содержать зарезервированные файловой системой блоки и не считается ошибкой.
+
+PostgreSQL connection counters отдельно возвращают общее число строк `pg_stat_activity`, наблюдаемую нижнюю границу `client backend`, строки с неизвестным `backend_type` и флаги полноты. Неизвестные строки не классифицируются как клиентские: среди них могут быть фоновые процессы. Отдельно возвращаются `reserved_connections` (если поддерживается версией), `superuser_reserved_connections` и разбиение строк текущей БД на наблюдаемые client backends, неизвестный тип и известный неклиентский тип. `activity_details_visibility=partial` означает, что active/idle-in-transaction/lock-wait/oldest-transaction показатели относятся только к полностью видимым helper-роли client-сессиям и не доказывают отсутствие активности в строках с неизвестным типом, скрытыми деталями или отключенным `track_activities`.
+
+Этот снимок намеренно сообщает `historical_window_available=false` и `application_event_loop_probe_available=false`. Он не доказывает нормальную или пиковую capacity и не утверждает будущие CPU/RAM/DB лимиты.
+
+Порядок будущей установки без прямого SSH: после отдельного разрешения принять проверенный commit в защищенную control-ветку, выполнить `verify_receiver` / `VERIFY_RECEIVER` для точного SHA, затем отдельным подтвержденным запуском `update_receiver` / `UPDATE_RECEIVER` установить только receiver. После этого `diagnose` / `DIAGNOSE` с операцией `infra_capacity_v1` и пустыми остальными diagnostic inputs вернет только зашифрованный CMS-артефакт. Workflow не перезапускает приложение при обновлении receiver.
+
+Откат receiver выполняется тем же защищенным каналом: подготовить проверенный revert commit, возвращающий предыдущие байты `deployment/server/accounting_github_deploy_receiver.py`, затем пройти `verify_receiver` и `update_receiver` для точного SHA revert. Встроенная резервная копия receiver автоматически используется только если новая версия не проходит `py_compile`; общий режим `rollback` предназначен для application release и не должен подменять откат receiver.
 
 ### Откат
 

@@ -39,16 +39,21 @@ test("drum script parses and installs without touching the DOM", () => {
    ширины и грань берёт свой нижний предел. Потом просвет чинили долей ширины
    грани, и он разъезжался вместе с гранью. */
 test("drum ring follows the face width it actually has", () => {
+    // 27.09.2026: формула радиуса переехала в sideCardRadius() (боковые грани
+    // теперь целятся в угловые кнопки, а не только в касание соседей), но правило
+    // «сборка и перерисовка считают радиус одинаково, по актуальной ширине грани»
+    // осталось — обе точки вызывают одну и ту же функцию.
     assert.match(
         SOURCE,
-        /geo\.radius = \(liveCardW \+ FACE_GAP\) \/ 2 \/ Math\.tan\(\(geo\.step \/ 2\) \* Math\.PI \/ 180\)/,
+        /geo\.radius = sideCardRadius\(geo\.step, liveCardW, liveContainerW\)/,
         "радиус приводится к текущей ширине грани при отрисовке"
     );
     assert.match(
         SOURCE,
-        /var radius = \(cardW \+ FACE_GAP\) \/ 2 \/ Math\.tan\(\(step \/ 2\) \* Math\.PI \/ 180\)/,
-        "сборка кольца считает радиус по той же формуле"
+        /var radius = sideCardRadius\(step, cardW, containerW\)/,
+        "сборка кольца считает радиус той же функцией"
     );
+    assert.match(SOURCE, /function sideCardRadius\(stepDeg, cardW, containerW\)/);
     assert.doesNotMatch(SOURCE, /\* 1\.22/, "просвет больше не доля ширины грани");
 });
 

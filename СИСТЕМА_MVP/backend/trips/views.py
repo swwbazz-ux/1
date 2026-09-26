@@ -624,7 +624,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v261";
+const CACHE_NAME = "excavator-mobile-shell-v262";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -638,26 +638,26 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v261",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v261",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v261",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v261",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v261",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v261",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v261",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v261",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v261",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v261",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -4157,7 +4157,11 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
         trip.volume_m3 = trip.volume_m3 if trip.volume_m3 is not None else volume
         trip.tonnage = trip.tonnage if trip.tonnage is not None else tonnage
     trip.status = TripStatus.COMPLETED
-    trip.driver = driver
+    # Рейс засчитывается тому, кто грузил, а не тому, кто разгружал — самосвал
+    # мог перейти сменщику гружёным (см. is_carryover). Перезаписываем только
+    # если водителя загрузки почему-то не было зафиксировано вовсе.
+    if trip.driver_id is None:
+        trip.driver = driver
     trip.unload_received_at = timezone.now()
     trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
     trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
