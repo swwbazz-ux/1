@@ -8,8 +8,6 @@
     var tripTimerInterval = null;
     var currentTripProjection = null;
     var savingLocal = false;
-    var dismissedRejectedManualLoadKey = "";
-    var lastShownRejectedManualLoadKey = "";
     var workspaceRequestedOpen = false;
     var workspacePreferenceKnown = false;
     var automaticTripRefreshKey = "";
@@ -167,6 +165,8 @@
             assignment_id: null,
             free_bucket_acceptance_id: positive(freeBucketState.acceptance_id),
             free_bucket_acceptance_local_id: String(freeBucketState.acceptance_local_id || ""),
+            free_bucket_expires_at: String(freeBucketState.expires_at || ""),
+            free_bucket_expires_local_at_ms: Number(freeBucketState.expires_local_at_ms || 0),
             excavator_id: positive(selection.id),
             excavator_label: String(selection.label || ""),
             complex_label: String(selection.complex_label || ""),
@@ -194,10 +194,6 @@
             ? "РЕЙС ЗАВЕРШЁН НА ТЕЛЕФОНЕ · БЕЗ СЕТИ"
             : "РЕЙС ЗАВЕРШЁН · ОТПРАВЛЯЕМ";
         if (state === "completed") return "РЕЙС ЗАВЕРШЁН";
-        if (state === "review") {
-            var reviewMessage = String(detail || "Настройки места погрузки изменились после отметки.");
-            return reviewMessage + " Отметьте погрузку заново.";
-        }
         if (state === "storage-error") return "Не сохранено · повторите отправку";
         return "";
     }
@@ -581,23 +577,12 @@
             .pop() || null;
     }
 
-    /* Тот же самый последний driver.trip.loaded, но БЕЗ фильтра по
-       состоянию — нужен только чтобы показать сообщение об отказе, а не
-       чтобы решать, блокировать ли экран. Если реальный последний load
-       отклонён, а manualLoadFromEvents вернул более раннюю живую запись
-       или ничего — сравнение по sequence отличит «есть свежий отказ,
-       который стоит показать» от «отказ устарел, поверх него уже есть
-       новая попытка». */
-    function latestManualLoadEventIncludingRejected(events) {
-        return (Array.isArray(events) ? events : [])
+    function latestRejectedManualLoad(events, projected) {
+        var latest = (Array.isArray(events) ? events : [])
             .filter(function (event) { return event && event.event_type === "driver.trip.loaded"; })
             .slice()
             .sort(function (left, right) { return Number(left.sequence || 0) - Number(right.sequence || 0); })
             .pop() || null;
-    }
-
-    function rejectedManualLoadNotice(events, projected) {
-        var latest = latestManualLoadEventIncludingRejected(events);
         if (!latest || !isTerminalState(latest.state)) return null;
         if (projected && Number(projected.sequence || 0) >= Number(latest.sequence || 0)) return null;
         return latest;
@@ -658,69 +643,18 @@
         }
     }
 
-    /* Отклонённая отметка (conflict/invalid/auth_required) с 25.09.2026
-       НИКОГДА не блокирует источник и выход — см. manualLoadFromEvents
-       выше: она попросту не становится currentTripProjection, поэтому
-       экран у следующего же водителя разблокирован сам, без единого
-       касания, сразу как только применится свежая разметка (в том числе
-       после перезапуска приложения на новой оболочке — водитель мог быть
-       за рулём и физически не иметь возможности нажимать на экран).
-       «Понятно» здесь — не выход из блокировки (блокировки нет), а просто
-       способ убрать с экрана прочитанное сообщение об отказе. */
-    function toggleRejectedTripAck(workspace, show) {
-        var button = workspace && workspace.querySelector("[data-driver-manual-dismiss-rejected]");
-        if (!button) return;
-        button.hidden = !show;
-    }
-
-    function showRejectedManualLoadNotice(workspace, rejectedEvent) {
-        var key = String(
-            rejectedEvent.event_id || rejectedEvent.local_trip_id || rejectedEvent.occurred_at || ""
-        );
-        if (key && key === dismissedRejectedManualLoadKey) {
-            toggleRejectedTripAck(workspace, false);
-            setResult(workspace, "", null, false);
-            return;
-        }
-        lastShownRejectedManualLoadKey = key;
-        setResult(workspace, "review", rejectedEvent.last_error && rejectedEvent.last_error.message, true);
-        toggleRejectedTripAck(workspace, true);
-    }
-
-    function dismissRejectedTripProjection(workspace) {
-        dismissedRejectedManualLoadKey = lastShownRejectedManualLoadKey;
-        toggleRejectedTripAck(workspace, false);
-        setResult(workspace, "", null, false);
-    }
-    /* Смена точки разгрузки в ручном режиме отклоняется по своим причинам
-       (точка деактивирована, рейс уже не редактируется, точку уже меняли
-       позже) — сервер тут забой не проверяет вовсе, путь отдельный от
-       погрузки. Блокировки здесь и не было (источник и выход держит только
-       currentTripProjection погрузки, не эта запись) — не хватало только
-       того, чтобы водитель узнал, что выбор не применился. Короткое
-       сообщение само пропадает через несколько секунд: держать его на
-       экране постоянно незачем, кнопка «Понятно» тут не нужна.
-       lastShownRejectedDumpPointKey не даёт заново показывать ту же самую
-       запись на каждом повторном рендере (проекция перерисовывается часто,
-       событие в очереди остаётся тем же). */
-    var lastShownRejectedDumpPointKey = "";
-    function showRejectedDumpPointChangeNotice(workspace, rejectedEvent) {
-        var notice = workspace && workspace.querySelector("[data-driver-manual-point-notice]");
-        if (!notice) return;
-        var key = String(
-            rejectedEvent.event_id || rejectedEvent.local_trip_id || rejectedEvent.occurred_at || ""
-        );
-        if (key && key === lastShownRejectedDumpPointKey) return;
-        lastShownRejectedDumpPointKey = key;
-        var reason = String(
-            (rejectedEvent.last_error && rejectedEvent.last_error.message) || "Точка не изменена."
-        );
-        notice.textContent = reason + " Выберите точку снова.";
-        notice.hidden = false;
-        root.clearTimeout(notice.__driverManualPointNoticeTimer);
-        notice.__driverManualPointNoticeTimer = root.setTimeout(function () {
-            notice.hidden = true;
-        }, 4200);
+    /* Terminal transport records are diagnostics, not a field-worker state.
+       The authoritative projection below is rebuilt from accepted/pending
+       events and the server snapshot; no acknowledgement or retry prompt is
+       shown to the driver. */
+    function logTerminalEvent(event, scope) {
+        if (!event || !root.console || typeof root.console.warn !== "function") return;
+        root.console.warn("driver manual event reconciled", {
+            scope: scope,
+            event_id: event.event_id || "",
+            state: event.state || "",
+            code: event.last_error && event.last_error.code || ""
+        });
     }
 
     function setSourceLocked(workspace, locked) {
@@ -852,7 +786,6 @@
             currentTripProjection = null;
             stopTripTimer(workspace);
             markLastDump(workspace, positive(completion.payload && completion.payload.dump_point_id));
-            toggleRejectedTripAck(workspace, false);
             setSourceLocked(workspace, savingLocal);
             setManualExitAvailability(workspace);
             setResult(workspace, "complete-pending", null, true);
@@ -888,7 +821,6 @@
             stopTripTimer(workspace);
             markLastDump(workspace, null);
             restoreStandardTargets(workspace);
-            toggleRejectedTripAck(workspace, false);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             setResult(workspace, queuedCancel ? "cancel-pending" : "cancelled", null, !!queuedCancel);
             if (confirmedCancel) requestManualCancellationRefresh(confirmedCancel);
@@ -980,16 +912,8 @@
         currentTripProjection = projected;
         if (!projected) {
             stopTripTimer(workspace);
-            var rejectedNotice = rejectedManualLoadNotice(events, projected);
-            if (rejectedNotice) {
-                showRejectedManualLoadNotice(workspace, rejectedNotice);
-            } else {
-                toggleRejectedTripAck(workspace, false);
-            }
-            /* Источник и выход разблокируются независимо от того, есть ли
-               сообщение об отказе на экране: currentTripProjection пуст, а
-               значит держать их нечем — ровно так, будто рейса никогда не
-               было. */
+            logTerminalEvent(latestRejectedManualLoad(events, projected), "load");
+            setResult(workspace, "", null, false);
             setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, null));
             updatePointAction(workspace);
             return null;
@@ -1025,16 +949,12 @@
                 )
             });
         } else if (latestPoint && isTerminalState(latestPoint.state)) {
-            // Выбор не применился: прежняя точка в payload/context_snapshot
-            // остаётся как есть — это и есть правильное поведение, просто
-            // теперь водитель об этом узнаёт, а не молчит вместе с экраном.
-            showRejectedDumpPointChangeNotice(workspace, latestPoint);
+            // Прежняя точка остаётся в авторитетной проекции; техническая
+            // запись не превращается в отдельное состояние для водителя.
+            logTerminalEvent(latestPoint, "dump_point");
         }
         var pointName = projectionPointName(projected);
-        // projected здесь никогда не бывает terminal-состояния: отклонённые
-        // записи manualLoadFromEvents отфильтровывает, прежде чем они дойдут
-        // досюда — см. rejectedManualLoadNotice ниже, где отказ только
-        // показывается, но не блокирует.
+        // Terminal records are filtered before they can become a projection.
         projected.can_depend_on_prior = projected.can_depend_on_prior !== false;
         syncWorkspaceContext(workspace);
         if (projected.state !== "confirmed" && !serverTripId) {
@@ -1047,7 +967,6 @@
         }
         markLastDump(workspace, projected.payload && projected.payload.dump_point_id);
         startTripTimer(workspace, pointName, Date.parse(projected.occurred_at));
-        toggleRejectedTripAck(workspace, false);
         setSourceLocked(workspace, sourceShouldBeLocked(savingLocal, projected));
         setResult(
             workspace,
@@ -1514,6 +1433,19 @@
             events: events,
             contextSnapshot: {
                 source: "driver_manual",
+                authority_type: context.authority_type,
+                free_bucket_acceptance_id: positive(context.free_bucket_acceptance_id),
+                free_bucket_acceptance_local_id: String(context.free_bucket_acceptance_local_id || ""),
+                free_bucket_expires_at: String(context.free_bucket_expires_at || ""),
+                free_bucket_expires_local_at_ms: Number(context.free_bucket_expires_local_at_ms || 0),
+                excavator_id: positive(context.excavator_id),
+                excavator_label: String(context.excavator_label || ""),
+                complex_label: String(context.complex_label || ""),
+                loading_horizon: String(context.loading_horizon || ""),
+                loading_block: String(context.loading_block || ""),
+                rock_type_id: positive(context.rock_type_id),
+                rock_type_name: String(context.rock_type_name || ""),
+                dump_points: clone(context.dump_points || []),
                 assigned_dump_point_id: positive(projection.payload && projection.payload.assigned_dump_point_id)
                     || positive(context.assigned_dump_point_id)
                     || pointId,
@@ -2152,16 +2084,6 @@
     if (root.document && !root.__driverManualExcavatorWorkspaceDelegated) {
         root.__driverManualExcavatorWorkspaceDelegated = true;
         root.document.addEventListener("click", function (event) {
-            var dismissRejected = event.target && event.target.closest
-                ? event.target.closest("[data-driver-manual-dismiss-rejected]")
-                : null;
-            if (dismissRejected) {
-                event.preventDefault();
-                event.stopPropagation();
-                playGestureHaptic("tap");
-                dismissRejectedTripProjection(dismissRejected.closest("[data-driver-manual-workspace]"));
-                return;
-            }
             var freeBucket = event.target && event.target.closest
                 ? event.target.closest("[data-driver-manual-free-bucket-open]")
                 : null;
@@ -2329,7 +2251,6 @@
         showOnlyCurrentAlternateTarget: showOnlyCurrentAlternateTarget,
         restoreStandardTargets: restoreStandardTargets,
         resultText: resultText,
-        dismissRejectedTripProjection: dismissRejectedTripProjection,
         startManualLoad: startManualLoad,
         activeManualPointId: activeManualPointId,
         activeManualPointName: activeManualPointName,

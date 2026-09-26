@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,111 @@ TRIP_CAPACITY_UNRESOLVED_MESSAGE = (
 TRIP_DENSITY_UNRESOLVED_MESSAGE = (
     'Для выбранной породы не настроена плотность.'
 )
+LOAD_DUPLICATE_CLOCK_WINDOW = timedelta(minutes=5)
+
+
+def load_context_matches_trip(
+    trip,
+    *,
+    excavator_id,
+    dump_point_id,
+    rock_type_id,
+    loading_horizon='',
+    loading_block='',
+):
+    """Return whether a second mark describes the same physical load.
+
+    The short clock window protects against two role/device marks of one load;
+    it must not swallow a factual load by another excavator or with another
+    phone snapshot.  In that case worker truth starts the next trip even when
+    the marks are only seconds apart.
+    """
+    try:
+        # Older field clients did not always include the optional face labels.
+        # Missing values do not contradict a known trip context; an explicitly
+        # supplied value still has to match exactly.
+        expected_horizon = (
+            None if loading_horizon is None else str(loading_horizon or '')[:64]
+        )
+        expected_block = (
+            None if loading_block is None else str(loading_block or '')[:64]
+        )
+        return bool(
+            trip.excavator_id == int(excavator_id)
+            and trip.dump_point_id == int(dump_point_id)
+            and trip.rock_type_id == int(rock_type_id)
+            and (
+                expected_horizon is None
+                or str(trip.loading_horizon or '') == expected_horizon
+            )
+            and (
+                expected_block is None
+                or str(trip.loading_block or '') == expected_block
+            )
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def classify_late_load_slot(
+    *,
+    truck_id,
+    occurred_at,
+    open_trip,
+    excavator_id,
+    dump_point_id,
+    rock_type_id,
+    loading_horizon='',
+    loading_block='',
+):
+    """Classify a load that happened before the currently open trip.
+
+    A timestamp inside an already known trip window is the same physical load
+    only when its immutable load context matches that trip. A different
+    excavator, route, rock or face context is a distinct worker-truth load even
+    inside the short clock window. A timestamp between trips becomes a
+    historical UNCONTROLLED trip ending at the next known load. The caller must
+    hold the production/truck lock.
+    """
+    trips = list(
+        Trip.objects.select_for_update()
+        .filter(truck_id=truck_id)
+        .exclude(status=TripStatus.CANCELLED)
+        .order_by('loaded_at', 'id')
+    )
+    for trip in trips:
+        loaded_at = trip.loaded_at or trip.created_at
+        if trip.status == TripStatus.LOADED_WAITING_UNLOAD:
+            # An open trip has no terminal boundary, but it must not absorb
+            # every future physical load forever. Only a short double-mark
+            # window around its own load belongs to the same load.
+            window_end = loaded_at
+        elif trip.status == TripStatus.UNCONTROLLED:
+            window_end = trip.operationally_closed_at
+        else:
+            window_end = trip.completed_at
+        window_start = loaded_at - LOAD_DUPLICATE_CLOCK_WINDOW
+        if (
+            window_start <= occurred_at
+            and (
+                window_end is None
+                or occurred_at <= window_end + LOAD_DUPLICATE_CLOCK_WINDOW
+            )
+            and load_context_matches_trip(
+                trip,
+                excavator_id=excavator_id,
+                dump_point_id=dump_point_id,
+                rock_type_id=rock_type_id,
+                loading_horizon=loading_horizon,
+                loading_block=loading_block,
+            )
+        ):
+            return 'same_load', trip
+    next_trip = next(
+        (trip for trip in trips if (trip.loaded_at or trip.created_at) > occurred_at),
+        open_trip,
+    )
+    return 'gap', next_trip
 
 
 def lock_trip_participant_equipment(*, excavator_id, truck_id):
@@ -145,7 +251,11 @@ def create_loaded_waiting_unload_trip(
         supersede_trip.status = TripStatus.UNCONTROLLED
         supersede_trip.operationally_closed_at = load_occurred_at
         supersede_trip.closure_recorded_by = excavator_operator
-        supersede_trip.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by'])
+        update_fields = ['status', 'operationally_closed_at', 'closure_recorded_by']
+        if supersede_trip.driver_id is None and supersede_trip.driver_control_shift_id:
+            supersede_trip.driver = supersede_trip.driver_control_shift.employee
+            update_fields.append('driver')
+        supersede_trip.save(update_fields=update_fields)
         from .free_bucket import close_free_bucket_acceptance_for_trip
         close_free_bucket_acceptance_for_trip(supersede_trip, closed_at=load_occurred_at)
     if participation is None:
@@ -158,6 +268,7 @@ def create_loaded_waiting_unload_trip(
         else bool(driver_participation_recorded)
     )
     control_shift = participation['control_shift'] if participation_recorded else participation['shift']
+    loading_driver = driver or (control_shift.employee if control_shift else None)
     resolved_load_time_source = load_time_source or (
         'excavator_device' if occurred_at else 'server_receipt'
     )
@@ -165,7 +276,7 @@ def create_loaded_waiting_unload_trip(
         excavator_id=excavator_id,
         truck=locked_truck,
         excavator_operator=excavator_operator,
-        driver=driver,
+        driver=loading_driver,
         loading_shift=loading_shift,
         rock_type=rock_type,
         dump_point=dump_point,

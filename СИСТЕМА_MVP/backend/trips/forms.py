@@ -45,7 +45,15 @@ class TripCreateForm(forms.Form):
         self.fields['loading_block'].initial = last_trip.loading_block
         self.fields['transport_distance_km'].initial = last_trip.transport_distance_km
 
-    def create_trip(self, excavator_operator, *, loading_shift=None):
+    def create_trip(
+        self,
+        excavator_operator,
+        *,
+        loading_shift=None,
+        occurred_at=None,
+        supersede_trip=None,
+        historical_closed_at=None,
+    ):
         assignment = self.cleaned_data['assignment']
         rock_type = self.cleaned_data['rock_type']
         dump_point = self.cleaned_data['dump_point']
@@ -66,4 +74,7 @@ class TripCreateForm(forms.Form):
             transport_distance_km=self.cleaned_data.get('transport_distance_km'),
             downtime_text=self.cleaned_data.get('downtime_text', ''),
             note=self.cleaned_data.get('note', ''),
+            occurred_at=occurred_at,
+            supersede_trip=supersede_trip,
+            historical_closed_at=historical_closed_at,
         )

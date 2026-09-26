@@ -195,6 +195,48 @@ test("manual trip confirmation survives restart with the server mapping", async 
     assert.equal((await restarted.pending()).length, 0);
 });
 
+test("manual free-bucket cancellation receipt preserves server restore metadata", async () => {
+    const originalDeadline = Date.parse("2026-09-21T01:12:03.000Z");
+    const local = storage();
+    const send = async batch => ({results: batch.events.map(event => ({
+        event_id: event.event_id,
+        status: "accepted",
+        server_received_at: "2026-09-21T01:04:05.000Z",
+        server_ids: {trip_id: 451, shift_id: 23, free_bucket_acceptance_id: 91},
+        trip_origin: "driver_manual",
+        free_bucket_restored: true,
+        free_bucket_client_acceptance_id: "free-local-91",
+        free_bucket_expires_at: "2026-09-21T01:12:03.000Z",
+        version: 813,
+    }))});
+    const first = runtime({local, send});
+    await first.enqueue(createDriverManualLoadCancelledEvent({
+        eventId: "manual-free-cancel-1",
+        occurredAt: "2026-09-21T01:04:03.000Z",
+        tripId: 451,
+        truckId: 58,
+        excavatorId: 9,
+        dumpPointId: 4,
+        contextSnapshot: {
+            source: "driver_manual",
+            authority_type: "free_bucket",
+            free_bucket_acceptance_id: 91,
+            free_bucket_acceptance_local_id: "free-local-91",
+            free_bucket_expires_local_at_ms: originalDeadline,
+        },
+    }));
+    await first.flush();
+
+    const restarted = runtime({local, send});
+    const receipt = await restarted.getManualTripProjectionReceipt(23, 58);
+    assert.equal(receipt.event_type, "driver.trip.loaded.cancelled");
+    assert.equal(receipt.free_bucket_restored, true);
+    assert.equal(receipt.server_ids.free_bucket_acceptance_id, 91);
+    assert.equal(receipt.free_bucket_client_acceptance_id, "free-local-91");
+    assert.equal(receipt.free_bucket_expires_at, "2026-09-21T01:12:03.000Z");
+    assert.equal(receipt.free_bucket_expires_local_at_ms, originalDeadline);
+});
+
 test("terminal downtime events never replace the authoritative active downtime", () => {
     const projection = selectDriverDowntimeProjection([
         {
@@ -283,6 +325,130 @@ test("restart recovers only clock conflict and its dependency chain with immutab
     assert.deepEqual(delivered[0].map(event => event.occurred_at), [deviceStart, deviceEnd]);
     assert.deepEqual(delivered[0][1].depends_on, ["clock-parent"]);
     assert.equal((await restarted.pending()).length, 0);
+});
+
+test("restart independently retries every legacy dependency cascade code", async () => {
+    for (const dependencyCode of [
+        "dependency_rejected",
+        "dependency_owner_mismatch",
+        "dependency_order_invalid",
+    ]) {
+        const local = storage();
+        const parentId = `business-parent-${dependencyCode}`;
+        const childId = `independent-child-${dependencyCode}`;
+        const rejected = runtime({
+            local,
+            send: async batch => ({
+                results: batch.events.map(event => ({
+                    event_id: event.event_id,
+                    status: "conflict",
+                    code: event.event_id === parentId
+                        ? "equipment_context_changed"
+                        : dependencyCode,
+                    message: "legacy conflict",
+                })),
+            }),
+        });
+        await rejected.enqueue({
+            event_id: parentId,
+            event_type: "driver.downtime.started",
+            payload: {reason_id: 9},
+        });
+        await rejected.enqueue({
+            event_id: childId,
+            event_type: "driver.downtime.started",
+            depends_on: [parentId],
+            payload: {reason_id: 10},
+        });
+        await rejected.flush();
+        assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+        const delivered = [];
+        const restarted = runtime({
+            local,
+            send: async batch => {
+                delivered.push(...batch.events.map(event => event.event_id));
+                return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+            },
+        });
+        await restarted.initialize();
+
+        assert.deepEqual(delivered, [childId]);
+        const remaining = await restarted.pending();
+        assert.deepEqual(remaining.map(event => [event.event_id, event.state]), [
+            [parentId, "conflict"],
+        ]);
+    }
+});
+
+test("restart retries a legacy unload_before_load worker-truth event", async () => {
+    const local = storage();
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: "unload_before_load",
+                message: "legacy chronology conflict",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "legacy-unload-before-load",
+        event_type: "driver.trip.unloaded",
+        trip_id: 41,
+        payload: {trip_id: 41},
+    });
+    await rejected.flush();
+    assert.equal((await rejected.pending())[0].state, "conflict");
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(...batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await restarted.initialize();
+
+    assert.deepEqual(delivered, ["legacy-unload-before-load"]);
+    assert.deepEqual(await restarted.pending(), []);
+});
+
+test("restart retries legacy inactive-equipment conflicts for a factual manual load", async () => {
+    for (const code of ["free_bucket_excavator_unavailable", "free_bucket_truck_unavailable"]) {
+        const local = storage();
+        const eventId = `legacy-manual-load-${code}`;
+        const rejected = runtime({
+            local,
+            send: async batch => ({
+                results: batch.events.map(event => ({
+                    event_id: event.event_id,
+                    status: "conflict",
+                    code,
+                    message: "legacy inactive equipment conflict",
+                })),
+            }),
+        });
+        await rejected.enqueue(manualLoad({eventId}));
+        await rejected.flush();
+        assert.equal((await rejected.pending())[0].state, "conflict");
+
+        const delivered = [];
+        const restarted = runtime({
+            local,
+            send: async batch => {
+                delivered.push(...batch.events.map(event => event.event_id));
+                return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+            },
+        });
+        await restarted.initialize();
+
+        assert.deepEqual(delivered, [eventId]);
+        assert.deepEqual(await restarted.pending(), []);
+    }
 });
 
 test("restart never retries a real domain conflict", async () => {

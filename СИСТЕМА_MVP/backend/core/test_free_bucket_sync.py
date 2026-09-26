@@ -20,11 +20,11 @@ from assignments.models import (
 )
 from core.models import OfflineFieldEvent
 from downtimes.models import DowntimeEvent, DowntimeReason
-from references.models import DumpPoint, Equipment
+from references.models import DumpPoint, Equipment, TruckCapacityRule
 from shifts.models import EmployeeShift
 from trips import tests as trip_fixtures
 from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripStatus
-from users.models import AdminConflict, EmployeeAccess
+from users.models import ActiveApplicationSession, AdminConflict, EmployeeAccess
 
 
 @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
@@ -344,17 +344,348 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(acceptance.requested_by_id, self.driver.id)
         self.assertEqual(acceptance.accepted_at, accepted_at)
 
-    def test_different_targets_conflict_without_mutating_driver_request(self):
+    def test_different_target_accept_is_no_effect_without_mutating_driver_request(self):
         selected = self.select_event(excavator=self.other_excavator)
         self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
         conflicting = self.accept_event(event_id='free-accept-different-target')
         result = self.sync([conflicting], device_id='free-bucket-different-target-001').json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_target_changed')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
         acceptance = FreeBucketAcceptance.objects.get()
         self.assertEqual(acceptance.excavator_id, self.other_excavator.id)
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.REQUESTED)
         self.assertEqual(Trip.objects.count(), 0)
+
+    def test_losing_acceptance_still_allows_its_excavator_factual_load(self):
+        base = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        first = self.accept_event(
+            event_id='free-accept-coordination-winner',
+            occurred_at=base,
+        )
+        first_result = self.sync(
+            [first], device_id='free-bucket-coordination-winner-device',
+        ).json()['results'][0]
+        self.assertEqual(first_result['status'], 'accepted', first_result)
+        winner = FreeBucketAcceptance.objects.get()
+
+        other_client, identity = self.other_excavator_identity()
+        type(identity['shift']).objects.filter(pk=identity['shift'].pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        losing = self.accept_event(
+            event_id='free-accept-coordination-loser',
+            occurred_at=base + timedelta(seconds=1),
+            **identity,
+        )
+        losing_result = self.sync(
+            [losing],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-coordination-loser-device',
+        ).json()['results'][0]
+        self.assertEqual(losing_result['status'], 'accepted', losing_result)
+        self.assertTrue(losing_result['no_effect'])
+        self.assertEqual(
+            losing_result['server_ids']['free_bucket_acceptance_id'],
+            winner.id,
+        )
+
+        factual_load = self.load_event(
+            losing,
+            event_id='free-load-by-coordination-loser',
+            sequence=2,
+            occurred_at=base + timedelta(seconds=2),
+            **identity,
+        )
+        loaded_result = self.sync(
+            [factual_load],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-coordination-loser-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        winner.refresh_from_db()
+        self.assertEqual(winner.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(winner.cancelled_at, trip.loaded_at)
+        used = FreeBucketAcceptance.objects.get(pk=loaded_result['server_ids']['free_bucket_acceptance_id'])
+        self.assertEqual(used.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(used.used_trip_id, trip.id)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(self.assignment.excavator_id, self.excavator.id)
+
+    def test_losing_acceptance_cancel_is_no_effect_even_with_winner_server_id(self):
+        base = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        winner_event = self.accept_event(
+            event_id='free-accept-cancel-winner',
+            occurred_at=base,
+        )
+        winner_result = self.sync(
+            [winner_event], device_id='free-bucket-cancel-winner-device',
+        ).json()['results'][0]
+        winner = FreeBucketAcceptance.objects.get()
+
+        other_client, identity = self.other_excavator_identity()
+        type(identity['shift']).objects.filter(pk=identity['shift'].pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        losing = self.accept_event(
+            event_id='free-accept-cancel-loser',
+            occurred_at=base + timedelta(seconds=1),
+            **identity,
+        )
+        device_id = 'free-bucket-cancel-loser-device'
+        losing_result = self.sync(
+            [losing], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id=device_id,
+        ).json()['results'][0]
+        self.assertTrue(losing_result['no_effect'])
+        self.assertEqual(
+            losing_result['server_ids']['free_bucket_acceptance_id'],
+            winner_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        cancelled = self.event(
+            'free-cancel-coordination-loser',
+            'excavator.free_bucket.cancelled',
+            2,
+            occurred_at=base + timedelta(seconds=2),
+            payload={
+                # Old cached clients replaced the local id with the winner id.
+                'free_bucket_acceptance_id': winner.id,
+                'truck_id': self.truck.id,
+            },
+            **identity,
+        )
+        cancelled_result = self.sync(
+            [cancelled], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id=device_id,
+        ).json()['results'][0]
+
+        self.assertEqual(cancelled_result['status'], 'accepted', cancelled_result)
+        self.assertTrue(cancelled_result['no_effect'])
+        winner.refresh_from_db()
+        self.assertEqual(winner.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        receipt = OfflineFieldEvent.objects.get(event_id=cancelled['event_id'])
+        self.assertEqual(receipt.equipment_id, self.truck.id)
+
+    def test_duplicate_own_acceptance_can_still_cancel_the_live_reservation(self):
+        base = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        first = self.accept_event(
+            event_id='free-accept-own-first',
+            occurred_at=base,
+        )
+        device_id = 'free-bucket-own-duplicate-device'
+        first_result = self.sync([first], device_id=device_id).json()['results'][0]
+        duplicate = self.accept_event(
+            event_id='free-accept-own-duplicate',
+            sequence=2,
+            occurred_at=base + timedelta(seconds=1),
+        )
+        duplicate_result = self.sync([duplicate], device_id=device_id).json()['results'][0]
+        self.assertEqual(duplicate_result['status'], 'accepted', duplicate_result)
+        self.assertTrue(duplicate_result['no_effect'])
+
+        cancelled = self.event(
+            'free-cancel-own-duplicate',
+            'excavator.free_bucket.cancelled',
+            3,
+            occurred_at=base + timedelta(seconds=2),
+            payload={
+                'free_bucket_acceptance_local_id': duplicate['event_id'],
+                'truck_id': self.truck.id,
+            },
+        )
+        cancelled_result = self.sync([cancelled], device_id=device_id).json()['results'][0]
+
+        self.assertEqual(cancelled_result['status'], 'accepted', cancelled_result)
+        self.assertFalse(cancelled_result.get('no_effect', False))
+        acceptance = FreeBucketAcceptance.objects.get(
+            pk=first_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+
+    def test_losing_driver_target_cancel_keeps_the_winning_reservation(self):
+        third_excavator = Equipment.objects.create(
+            equipment_type=self.excavator_type,
+            model=self.excavator.model,
+            garage_number='free-bucket-third-target',
+        )
+        placement = ExcavatorPlacement.objects.create(
+            excavator=third_excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_rock_type=self.rock,
+            work_dump_point=self.dump_point,
+            loading_horizon='125',
+            loading_block='4',
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=self.dump_point,
+            position=0,
+        )
+        base = timezone.now() - timedelta(minutes=1)
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        winner_event = self.select_event(
+            event_id='driver-free-select-target-winner',
+            occurred_at=base,
+        )
+        device_id = 'driver-free-target-loser-device'
+        winner_result = self.sync_driver([winner_event], device_id=device_id).json()['results'][0]
+        winner = FreeBucketAcceptance.objects.get(
+            pk=winner_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        losing_event = self.select_event(
+            event_id='driver-free-select-target-loser',
+            sequence=2,
+            excavator=third_excavator,
+            occurred_at=base + timedelta(seconds=1),
+        )
+        losing_result = self.sync_driver([losing_event], device_id=device_id).json()['results'][0]
+        self.assertEqual(losing_result['status'], 'accepted', losing_result)
+        self.assertTrue(losing_result['no_effect'])
+        self.assertEqual(
+            losing_result['server_ids']['free_bucket_acceptance_id'],
+            winner.id,
+        )
+
+        # A later-delivered stale duplicate of the winning target must not
+        # rewrite what the earlier cancel (sequence 3) refers to merely because
+        # both no-effect receipts point at the same numeric server row.
+        stale_winner = self.select_event(
+            event_id='driver-free-select-stale-winner',
+            sequence=4,
+            occurred_at=base - timedelta(seconds=1),
+        )
+        stale_result = self.sync_driver([stale_winner], device_id=device_id).json()['results'][0]
+        self.assertEqual(stale_result['status'], 'accepted', stale_result)
+        self.assertNotIn('no_effect', stale_result)
+        winner.refresh_from_db()
+        self.assertEqual(winner.occurred_at, base - timedelta(seconds=1))
+
+        cancelled = self.driver_event(
+            'driver-free-cancel-target-loser',
+            'driver.free_bucket.cancelled',
+            3,
+            occurred_at=base + timedelta(seconds=2),
+            payload={'free_bucket_acceptance_id': winner.id},
+        )
+        cancelled_result = self.sync_driver([cancelled], device_id=device_id).json()['results'][0]
+
+        self.assertEqual(cancelled_result['status'], 'accepted', cancelled_result)
+        self.assertTrue(cancelled_result['no_effect'])
+        winner.refresh_from_db()
+        self.assertEqual(winner.status, FreeBucketAcceptanceStatus.REQUESTED)
+        self.assertEqual(winner.excavator_id, self.other_excavator.id)
+
+    def test_delayed_accept_without_row_does_not_leave_its_load_retrying(self):
+        base = timezone.now() - timedelta(minutes=20)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        known_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            driver_control_shift=self.truck_shift,
+            driver_participation_recorded=True,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=base + timedelta(minutes=10),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-before-known-trip',
+            occurred_at=base,
+        )
+        accepted_result = self.sync(
+            [accepted], device_id='free-bucket-delayed-no-row-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        self.assertTrue(accepted_result['no_effect'])
+        self.assertNotIn('free_bucket_acceptance_id', accepted_result['server_ids'])
+
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-before-known-trip',
+            sequence=2,
+            occurred_at=base + timedelta(minutes=1),
+        )
+        loaded_result = self.sync(
+            [loaded], device_id='free-bucket-delayed-no-row-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        historical = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        known_trip.refresh_from_db()
+        self.assertEqual(historical.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(historical.operationally_closed_at, known_trip.loaded_at)
+        self.assertEqual(known_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(Trip.objects.count(), 2)
+
+    def test_excavator_cancel_of_no_row_acceptance_is_no_effect(self):
+        base = timezone.now() - timedelta(minutes=20)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        known_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            driver_control_shift=self.truck_shift,
+            driver_participation_recorded=True,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=base + timedelta(minutes=10),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-no-row-cancel',
+            occurred_at=base,
+        )
+        device_id = 'free-bucket-no-row-cancel-device'
+        accepted_result = self.sync([accepted], device_id=device_id).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        self.assertTrue(accepted_result['no_effect'])
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+
+        cancelled = self.event(
+            'free-cancel-no-row',
+            'excavator.free_bucket.cancelled',
+            2,
+            occurred_at=base + timedelta(minutes=1),
+            depends_on=[accepted['event_id']],
+            payload={
+                'free_bucket_acceptance_local_id': accepted['event_id'],
+                'truck_id': self.truck.id,
+            },
+        )
+        cancelled_result = self.sync([cancelled], device_id=device_id).json()['results'][0]
+        self.assertEqual(cancelled_result['status'], 'accepted', cancelled_result)
+        self.assertTrue(cancelled_result['no_effect'])
+        known_trip.refresh_from_db()
+        self.assertEqual(known_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
 
     def test_driver_can_cancel_own_accepted_request_before_load(self):
         selected = self.select_event()
@@ -380,7 +711,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
         self.assertEqual(Trip.objects.count(), 0)
 
-    def test_excavator_cancel_before_acceptance_time_is_terminal_conflict(self):
+    def test_excavator_cancel_before_acceptance_time_is_no_effect(self):
         accepted = self.accept_event(event_id='free-accept-before-stale-cancel')
         accepted_result = self.sync([accepted]).json()['results'][0]
         self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
@@ -396,8 +727,8 @@ class FreeBucketServerIntegrationTests(TestCase):
 
         result = self.sync([cancelled]).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_cancel_stale')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
         acceptance.refresh_from_db()
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
         self.assertIsNone(acceptance.cancelled_at)
@@ -572,6 +903,308 @@ class FreeBucketServerIntegrationTests(TestCase):
         acceptance.refresh_from_db()
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
 
+    def test_expired_driver_request_is_terminalized_at_deadline_and_replaced(self):
+        from trips.free_bucket import FREE_BUCKET_REQUEST_TTL
+        from users.views import driver_free_bucket_payload
+
+        selected_at = timezone.now() - timedelta(minutes=11)
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(
+            opened_at=selected_at - timedelta(minutes=1),
+        )
+        first = self.select_event(
+            event_id='driver-free-expired-first',
+            occurred_at=selected_at,
+        )
+        first_result = self.sync_driver(
+            [first], device_id='driver-free-expired-device',
+        ).json()['results'][0]
+        old = FreeBucketAcceptance.objects.get(
+            pk=first_result['server_ids']['free_bucket_acceptance_id'],
+        )
+
+        _, expired_state, expired_acceptance = driver_free_bucket_payload(
+            current_truck=self.truck,
+            current_assignment=self.assignment,
+            version=1,
+            open_shift=self.truck_shift,
+        )
+        self.assertFalse(expired_state['active'])
+        self.assertIsNone(expired_acceptance)
+
+        replacement_at = selected_at + FREE_BUCKET_REQUEST_TTL
+        replacement = self.select_event(
+            event_id='driver-free-expired-replacement',
+            sequence=2,
+            occurred_at=replacement_at,
+        )
+        replacement_result = self.sync_driver(
+            [replacement], device_id='driver-free-expired-device',
+        ).json()['results'][0]
+
+        self.assertEqual(replacement_result['status'], 'accepted', replacement_result)
+        old.refresh_from_db()
+        self.assertEqual(old.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(old.cancelled_at, selected_at + FREE_BUCKET_REQUEST_TTL)
+        current = FreeBucketAcceptance.objects.get(
+            pk=replacement_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        self.assertEqual(current.status, FreeBucketAcceptanceStatus.REQUESTED)
+        _, state, active = driver_free_bucket_payload(
+            current_truck=self.truck,
+            current_assignment=self.assignment,
+            version=2,
+            open_shift=self.truck_shift,
+        )
+        self.assertEqual(active.id, current.id)
+        self.assertEqual(state['expires_at'], (replacement_at + FREE_BUCKET_REQUEST_TTL).isoformat())
+
+    def test_used_visual_tail_does_not_block_a_new_driver_request(self):
+        base = timezone.now() - timedelta(minutes=2)
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        other_client, identity = self.other_excavator_identity()
+        EmployeeShift.objects.filter(pk=identity['shift'].pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        selected = self.select_event(
+            event_id='driver-free-used-tail-select',
+            occurred_at=base,
+        )
+        selected_result = self.sync_driver(
+            [selected], device_id='driver-free-used-tail-driver',
+        ).json()['results'][0]
+        self.assertEqual(selected_result['status'], 'accepted', selected_result)
+        # The Driver and Excavator use independent devices, but resolve the same
+        # one-load reservation on the server.
+        accepted = self.accept_event(
+            event_id='driver-free-used-tail-accept',
+            occurred_at=base + timedelta(seconds=1),
+            **identity,
+        )
+        accepted_result = self.sync(
+            [accepted],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='driver-free-used-tail-excavator',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        loaded = self.load_event(
+            accepted,
+            event_id='driver-free-used-tail-load',
+            sequence=2,
+            occurred_at=base + timedelta(seconds=2),
+            **identity,
+        )
+        loaded_result = self.sync(
+            [loaded],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='driver-free-used-tail-excavator',
+        ).json()['results'][0]
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        Trip.objects.filter(pk=trip.pk).update(
+            status=TripStatus.COMPLETED,
+            completed_at=base + timedelta(seconds=3),
+        )
+        used = FreeBucketAcceptance.objects.get(used_trip=trip)
+
+        replacement = self.select_event(
+            event_id='driver-free-used-tail-replacement',
+            sequence=2,
+            occurred_at=base + timedelta(seconds=4),
+        )
+        replacement_result = self.sync_driver(
+            [replacement], device_id='driver-free-used-tail-driver',
+        ).json()['results'][0]
+
+        self.assertEqual(replacement_result['status'], 'accepted', replacement_result)
+        used.refresh_from_db()
+        self.assertEqual(used.status, FreeBucketAcceptanceStatus.CLOSED)
+        current = FreeBucketAcceptance.objects.get(
+            pk=replacement_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        self.assertNotEqual(current.id, used.id)
+        self.assertEqual(current.status, FreeBucketAcceptanceStatus.REQUESTED)
+
+    def test_expired_acceptance_is_terminalized_when_a_new_accept_arrives(self):
+        from trips.free_bucket import active_free_bucket_acceptance_for_truck
+
+        old_at = timezone.now() - timedelta(minutes=11)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=old_at - timedelta(minutes=1),
+        )
+        old_event = self.accept_event(
+            event_id='free-accept-expired-old',
+            occurred_at=old_at,
+        )
+        old_result = self.sync(
+            [old_event], device_id='free-bucket-expired-replace-device',
+        ).json()['results'][0]
+        self.assertEqual(old_result['status'], 'accepted', old_result)
+        old_acceptance = FreeBucketAcceptance.objects.get()
+        self.assertIsNone(active_free_bucket_acceptance_for_truck(self.truck))
+
+        new_at = old_at + timedelta(minutes=11)
+        new_event = self.accept_event(
+            event_id='free-accept-after-expiry',
+            sequence=2,
+            occurred_at=new_at,
+        )
+        new_result = self.sync(
+            [new_event], device_id='free-bucket-expired-replace-device',
+        ).json()['results'][0]
+
+        self.assertEqual(new_result['status'], 'accepted', new_result)
+        old_acceptance.refresh_from_db()
+        self.assertEqual(old_acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(
+            old_acceptance.cancelled_at,
+            old_at + timedelta(minutes=10),
+        )
+        current = active_free_bucket_acceptance_for_truck(self.truck)
+        self.assertIsNotNone(current)
+        self.assertNotEqual(current.id, old_acceptance.id)
+        self.assertEqual(current.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertEqual(current.occurred_at, new_at)
+
+    def test_expired_acceptance_card_disappears_but_factual_load_still_passes(self):
+        old_at = timezone.now() - timedelta(minutes=11)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=old_at - timedelta(minutes=1),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-expired-before-load',
+            occurred_at=old_at,
+        )
+        accepted_result = self.sync(
+            [accepted], device_id='free-bucket-expired-load-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        expired = FreeBucketAcceptance.objects.get()
+
+        fragment = self.client.get(
+            reverse('excavator_work'),
+            {'_operational_fragment': 'excavator', '_operational_version': 0},
+        ).json()
+        self.assertEqual(fragment['free_bucket_cards'], [])
+
+        loaded_at = old_at + timedelta(minutes=11)
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-after-acceptance-expiry',
+            sequence=2,
+            occurred_at=loaded_at,
+        )
+        loaded_result = self.sync(
+            [loaded], device_id='free-bucket-expired-load-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        self.assertEqual(trip.loaded_at, loaded_at)
+        expired.refresh_from_db()
+        self.assertEqual(expired.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(expired.cancelled_at, old_at + timedelta(minutes=10))
+        one_shot = FreeBucketAcceptance.objects.get(
+            pk=loaded_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        self.assertNotEqual(one_shot.id, expired.id)
+        self.assertEqual(one_shot.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(one_shot.used_trip_id, trip.id)
+
+    def test_used_visual_tail_allows_next_acceptance_and_next_factual_load(self):
+        other_client, identity = self.other_excavator_identity()
+        base = timezone.now() - timedelta(minutes=5)
+        type(identity['shift']).objects.filter(pk=identity['shift'].pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        first_accept = self.accept_event(
+            event_id='free-accept-used-cycle-one',
+            occurred_at=base,
+            **identity,
+        )
+        first_load = self.load_event(
+            first_accept,
+            event_id='free-load-used-cycle-one',
+            sequence=2,
+            occurred_at=base + timedelta(seconds=1),
+            **identity,
+        )
+        first_results = self.sync(
+            [first_accept, first_load],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-used-next-cycle-device',
+        ).json()['results']
+        self.assertEqual([item['status'] for item in first_results], ['accepted', 'accepted'])
+        old_trip = Trip.objects.get()
+        old_acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(old_acceptance.status, FreeBucketAcceptanceStatus.USED)
+
+        payload = other_client.get(
+            reverse('excavator_work'),
+            {'_operational_fragment': 'excavator', '_operational_version': 0},
+        ).json()
+        directory_item = next(
+            item
+            for item in payload['free_bucket_truck_directory']['trucks']
+            if item['id'] == self.truck.id
+        )
+        self.assertTrue(directory_item['can_accept_free_bucket'])
+
+        second_accept_at = base + timedelta(seconds=2)
+        second_accept = self.accept_event(
+            event_id='free-accept-used-cycle-two',
+            sequence=3,
+            occurred_at=second_accept_at,
+            **identity,
+        )
+        second_accept_result = self.sync(
+            [second_accept],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-used-next-cycle-device',
+        ).json()['results'][0]
+        self.assertEqual(second_accept_result['status'], 'accepted', second_accept_result)
+        old_acceptance.refresh_from_db()
+        self.assertEqual(old_acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(old_acceptance.closed_at, second_accept_at)
+        current = FreeBucketAcceptance.objects.get(status=FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertNotEqual(current.id, old_acceptance.id)
+        old_trip.refresh_from_db()
+        self.assertEqual(old_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        second_load = self.load_event(
+            second_accept,
+            event_id='free-load-used-cycle-two',
+            sequence=4,
+            occurred_at=base + timedelta(seconds=3),
+            **identity,
+        )
+        second_load_result = self.sync(
+            [second_load],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-used-next-cycle-device',
+        ).json()['results'][0]
+        self.assertEqual(second_load_result['status'], 'accepted', second_load_result)
+        new_trip = Trip.objects.get(pk=second_load_result['server_ids']['trip_id'])
+        old_trip.refresh_from_db()
+        self.assertEqual(old_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(old_trip.superseded_by_id, new_trip.id)
+        self.assertEqual(new_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(Trip.objects.filter(status=TripStatus.LOADED_WAITING_UNLOAD).count(), 1)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+
     def test_driver_shift_close_keeps_used_acceptance_and_loaded_trip(self):
         selected = self.select_event(event_id='driver-free-before-used-shift-close')
         self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
@@ -647,7 +1280,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
-    def test_driver_request_is_rejected_while_truck_has_open_trip(self):
+    def test_driver_request_while_truck_has_open_trip_is_no_effect(self):
         Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
@@ -659,19 +1292,31 @@ class FreeBucketServerIntegrationTests(TestCase):
             loaded_at=timezone.now(),
         )
         result = self.sync_driver([self.select_event()]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'open_trip_exists')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
         self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
 
-    def test_driver_cannot_request_the_current_primary_excavator(self):
-        result = self.sync_driver([
-            self.select_event(excavator=self.excavator),
-        ]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_primary_target')
+    def test_driver_primary_excavator_selection_is_accepted_no_effect(self):
+        selected = self.select_event(excavator=self.excavator)
+        result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        self.assertEqual(result['code'], '')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+
+        cancelled = self.driver_event(
+            'driver-free-primary-cancel',
+            'driver.free_bucket.cancelled',
+            2,
+            depends_on=[selected['event_id']],
+            payload={'free_bucket_acceptance_local_id': selected['event_id']},
+        )
+        cancelled_result = self.sync_driver([cancelled]).json()['results'][0]
+        self.assertEqual(cancelled_result['status'], 'accepted', cancelled_result)
+        self.assertTrue(cancelled_result['no_effect'])
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
 
     def test_late_driver_request_does_not_resurrect_after_completed_trip(self):
         occurred_at = self.truck_shift.opened_at + timedelta(milliseconds=1)
@@ -692,8 +1337,9 @@ class FreeBucketServerIntegrationTests(TestCase):
             occurred_at=occurred_at,
         )
         result = self.sync_driver([late]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_request_stale')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        self.assertEqual(result['code'], '')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
 
     def test_duplicate_and_late_driver_selection_do_not_revive_cancelled_request(self):
@@ -718,8 +1364,9 @@ class FreeBucketServerIntegrationTests(TestCase):
             occurred_at=selected_at + timedelta(seconds=1),
         )
         late_result = self.sync_driver([late]).json()['results'][0]
-        self.assertEqual(late_result['status'], 'conflict', late_result)
-        self.assertEqual(late_result['code'], 'free_bucket_request_stale')
+        self.assertEqual(late_result['status'], 'accepted', late_result)
+        self.assertTrue(late_result['no_effect'])
+        self.assertEqual(late_result['code'], '')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
         self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.CANCELLED)
 
@@ -773,6 +1420,91 @@ class FreeBucketServerIntegrationTests(TestCase):
         new_primary.refresh_from_db()
         self.assertEqual(new_primary.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(new_primary.ended_at)
+
+    def test_free_bucket_load_uses_context_visible_on_phone_at_load_tap(self):
+        accepted = self.accept_event(event_id='free-accept-context-a')
+        accepted_result = self.sync(
+            [accepted], device_id='free-bucket-load-context-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.work_context_snapshot['rock_type_id'], self.rock.id)
+        self.assertEqual(acceptance.work_context_snapshot['dump_points'][0]['id'], self.dump_point.id)
+
+        rock_at_tap = type(self.rock).objects.create(
+            name='Rock visible at free-bucket load tap',
+            density=self.rock.density,
+            loosening_factor=self.rock.loosening_factor,
+        )
+        TruckCapacityRule.objects.create(
+            equipment_model=self.truck.model,
+            rock_type=rock_at_tap,
+            volume_m3=self.capacity_rule.volume_m3,
+        )
+        dump_at_tap = DumpPoint.objects.create(name='Dump visible at free-bucket load tap')
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        placement.work_rock_type = rock_at_tap
+        placement.work_dump_point = dump_at_tap
+        placement.loading_horizon = '220'
+        placement.loading_block = 'B-7'
+        placement.transport_distance_km = Decimal('2.50')
+        placement.save(update_fields=[
+            'work_rock_type', 'work_dump_point', 'loading_horizon',
+            'loading_block', 'transport_distance_km',
+        ])
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-context-b',
+            sequence=2,
+        )
+        loaded['payload'].update({
+            'rock_type_id': rock_at_tap.id,
+            'dump_point_id': dump_at_tap.id,
+            'loading_horizon': '220',
+            'loading_block': 'B-7',
+            'transport_distance_km': '2.50',
+            'dump_points_snapshot': [{
+                'id': dump_at_tap.id,
+                'name': dump_at_tap.name,
+                'transport_distance_km': '2.50',
+            }],
+        })
+
+        # The server moves on to context C before the delayed event arrives;
+        # the immutable phone payload B must still drive the Trip.
+        placement.work_rock_type = self.rock
+        placement.work_dump_point = self.dump_point
+        placement.loading_horizon = '999'
+        placement.loading_block = 'C-9'
+        placement.transport_distance_km = Decimal('9.90')
+        placement.save(update_fields=[
+            'work_rock_type', 'work_dump_point', 'loading_horizon',
+            'loading_block', 'transport_distance_km',
+        ])
+
+        loaded_result = self.sync(
+            [loaded], device_id='free-bucket-load-context-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        self.assertEqual(trip.rock_type_id, rock_at_tap.id)
+        self.assertEqual(trip.dump_point_id, dump_at_tap.id)
+        self.assertEqual(trip.loading_horizon, '220')
+        self.assertEqual(trip.loading_block, 'B-7')
+        self.assertEqual(trip.transport_distance_km, Decimal('2.50'))
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.work_context_snapshot['rock_type_id'], rock_at_tap.id)
+        self.assertEqual(acceptance.work_context_snapshot['loading_horizon'], '220')
+        self.assertEqual(acceptance.work_context_snapshot['loading_block'], 'B-7')
+        self.assertEqual(
+            acceptance.work_context_snapshot['dump_points'],
+            [{
+                'id': dump_at_tap.id,
+                'name': dump_at_tap.name,
+                'transport_distance_km': '2.50',
+            }],
+        )
 
     def test_accept_then_load_creates_one_trip_without_changing_primary_assignment(self):
         other_client, other_operator, other_shift = (
@@ -854,7 +1586,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         )
         self.assertEqual(Trip.objects.count(), 1)
 
-    def test_new_load_event_id_after_used_acceptance_is_terminal_conflict(self):
+    def test_new_load_event_id_after_used_acceptance_is_no_effect(self):
         other_client, identity = self.other_excavator_identity()
         accepted = self.accept_event(event_id='free-accept-terminal-load', **identity)
         loaded = self.load_event(accepted, event_id='free-load-terminal-first', **identity)
@@ -882,8 +1614,8 @@ class FreeBucketServerIntegrationTests(TestCase):
             access=identity['access'],
             device_id='free-bucket-terminal-load-001',
         ).json()['results'][0]
-        self.assertEqual(second_result['status'], 'conflict', second_result)
-        self.assertEqual(second_result['code'], 'free_bucket_already_loaded')
+        self.assertEqual(second_result['status'], 'accepted', second_result)
+        self.assertTrue(second_result['no_effect'])
         self.assertEqual(Trip.objects.count(), 1)
 
     def test_server_confirmed_acceptance_can_be_loaded_from_another_device(self):
@@ -1125,7 +1857,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(deduplicated['status'], 'deduplicated', deduplicated)
         self.assertEqual(Trip.objects.count(), 1)
 
-    def test_second_confirmed_acceptance_of_the_same_truck_is_a_stable_conflict(self):
+    def test_second_confirmed_acceptance_of_the_same_truck_is_a_stable_no_effect(self):
         first = self.accept_event('free-accept-first', 1)
         first_result = self.sync([first], device_id='free-bucket-first-device').json()['results'][0]
         self.assertEqual(first_result['status'], 'accepted', first_result)
@@ -1145,11 +1877,11 @@ class FreeBucketServerIntegrationTests(TestCase):
             [second], client=other_client, actor=other_operator, access=other_access,
             device_id='free-bucket-second-device',
         ).json()['results'][0]
-        self.assertEqual(second_result['status'], 'conflict', second_result)
-        self.assertEqual(second_result['code'], 'free_bucket_already_accepted')
+        self.assertEqual(second_result['status'], 'accepted', second_result)
+        self.assertTrue(second_result['no_effect'])
         self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
 
-    def test_second_acceptance_after_free_bucket_load_is_a_stable_conflict(self):
+    def test_second_acceptance_after_free_bucket_load_is_no_effect(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
@@ -1176,8 +1908,8 @@ class FreeBucketServerIntegrationTests(TestCase):
             [second],
             device_id='free-bucket-after-used-device',
         ).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'open_trip_exists')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
         self.assertEqual(Trip.objects.count(), 1)
         self.assertEqual(
             FreeBucketAcceptance.objects.get().status,
@@ -1192,6 +1924,9 @@ class FreeBucketServerIntegrationTests(TestCase):
         trip = Trip.objects.get()
         acceptance = FreeBucketAcceptance.objects.get()
         anchor = timezone.now() - timedelta(minutes=5)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=anchor - timedelta(minutes=1),
+        )
         Trip.objects.filter(pk=trip.pk).update(loaded_at=anchor)
         FreeBucketAcceptance.objects.filter(pk=acceptance.pk).update(used_at=anchor)
 
@@ -1221,14 +1956,40 @@ class FreeBucketServerIntegrationTests(TestCase):
             0,
         )
 
-        duplicate = self.load_event(accepted, event_id='free-load-after-timeout', sequence=3)
+        duplicate = self.load_event(
+            accepted,
+            event_id='free-load-after-timeout',
+            sequence=3,
+            occurred_at=anchor,
+        )
         duplicate['depends_on'] = []
         duplicate['payload'].pop('free_bucket_acceptance_local_id')
         duplicate['payload']['free_bucket_acceptance_id'] = acceptance.id
         duplicate_result = self.sync([duplicate]).json()['results'][0]
-        self.assertEqual(duplicate_result['status'], 'conflict', duplicate_result)
-        self.assertEqual(duplicate_result['code'], 'free_bucket_not_available')
+        self.assertEqual(duplicate_result['status'], 'accepted', duplicate_result)
+        self.assertTrue(duplicate_result['no_effect'])
+        self.assertEqual(duplicate_result['server_ids']['trip_id'], trip.id)
         self.assertEqual(Trip.objects.count(), 1)
+
+        next_load_at = anchor + timedelta(minutes=7)
+        next_load = self.load_event(
+            accepted,
+            event_id='free-load-distinct-after-timeout',
+            sequence=4,
+            occurred_at=next_load_at,
+        )
+        next_load['depends_on'] = []
+        next_load['payload'].pop('free_bucket_acceptance_local_id')
+        next_load['payload']['free_bucket_acceptance_id'] = acceptance.id
+        next_result = self.sync([next_load]).json()['results'][0]
+        self.assertEqual(next_result['status'], 'accepted', next_result)
+        next_trip = Trip.objects.get(pk=next_result['server_ids']['trip_id'])
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(trip.superseded_by_id, next_trip.id)
+        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(next_trip.loaded_at, next_load_at)
+        self.assertEqual(Trip.objects.count(), 2)
 
     def test_database_blocks_second_open_right_until_used_history_is_closed(self):
         accepted = self.accept_event()
@@ -1355,7 +2116,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertIsNotNone(acceptance.cancelled_at)
         self.assertEqual(Trip.objects.count(), 0)
 
-    def test_cancelling_loaded_trip_closes_consumed_acceptance(self):
+    def test_cancelling_loaded_trip_restores_acceptance_until_original_deadline(self):
         accepted = self.accept_event()
         loaded = self.load_event(accepted)
         cancelled = self.event(
@@ -1379,20 +2140,132 @@ class FreeBucketServerIntegrationTests(TestCase):
         trip = Trip.objects.get()
         acceptance = FreeBucketAcceptance.objects.get()
         self.assertEqual(trip.status, TripStatus.CANCELLED)
-        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
-        self.assertEqual(acceptance.used_trip_id, trip.id)
-        self.assertIsNotNone(acceptance.closed_at)
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertIsNone(acceptance.used_trip_id)
+        self.assertIsNone(acceptance.used_at)
+        self.assertIsNone(acceptance.closed_at)
+        cancel_result = results[cancelled['event_id']]
+        self.assertTrue(cancel_result['free_bucket_restored'])
+        self.assertEqual(
+            cancel_result['server_ids']['free_bucket_acceptance_id'],
+            acceptance.id,
+        )
+        self.assertEqual(
+            cancel_result['free_bucket_expires_at'],
+            (acceptance.occurred_at + timedelta(minutes=10)).isoformat(),
+        )
 
-    def test_confirmed_other_excavator_acceptance_blocks_online_and_offline_ordinary_load(self):
+    def test_late_delivery_of_early_load_cancel_closes_at_original_deadline(self):
+        base = timezone.now() - timedelta(minutes=12)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-expired-undo',
+            occurred_at=base,
+        )
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-expired-undo',
+            sequence=2,
+            occurred_at=base + timedelta(minutes=1),
+        )
+        cancelled = self.event(
+            'free-cancel-expired-undo',
+            'excavator.trip.loaded.cancelled',
+            3,
+            occurred_at=base + timedelta(minutes=2),
+            depends_on=[loaded['event_id']],
+            local_trip_id=loaded['local_trip_id'],
+            payload={'local_trip_id': loaded['local_trip_id']},
+        )
+
+        response = self.sync([cancelled, loaded, accepted])
+
+        self.assertEqual(response.status_code, 200, response.content)
+        results = {item['event_id']: item for item in response.json()['results']}
+        self.assertEqual(results[cancelled['event_id']]['status'], 'accepted')
+        self.assertFalse(results[cancelled['event_id']]['free_bucket_restored'])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(acceptance.closed_at, base + timedelta(minutes=10))
+        self.assertEqual(acceptance.used_trip.status, TripStatus.CANCELLED)
+
+    def test_late_cancel_does_not_resurrect_acceptance_over_a_later_cycle(self):
+        base = timezone.now() - timedelta(minutes=5)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        first_accept = self.accept_event(
+            event_id='free-accept-cycle-a',
+            occurred_at=base,
+        )
+        first_load = self.load_event(
+            first_accept,
+            event_id='free-load-cycle-a',
+            sequence=2,
+            occurred_at=base + timedelta(minutes=1),
+        )
+        first_response = self.sync([first_load, first_accept])
+        self.assertEqual(first_response.status_code, 200, first_response.content)
+        first_acceptance = FreeBucketAcceptance.objects.get()
+
+        second_accept = self.accept_event(
+            event_id='free-accept-cycle-b',
+            sequence=3,
+            occurred_at=base + timedelta(minutes=3),
+        )
+        second_cancel = self.event(
+            'free-cancel-cycle-b',
+            'excavator.free_bucket.cancelled',
+            4,
+            occurred_at=base + timedelta(minutes=4),
+            depends_on=[second_accept['event_id']],
+            payload={'free_bucket_acceptance_local_id': second_accept['event_id']},
+        )
+        second_response = self.sync([second_cancel, second_accept])
+        self.assertEqual(second_response.status_code, 200, second_response.content)
+
+        late_first_cancel = self.event(
+            'free-cancel-cycle-a-late',
+            'excavator.trip.loaded.cancelled',
+            5,
+            occurred_at=base + timedelta(minutes=2),
+            depends_on=[first_load['event_id']],
+            local_trip_id=first_load['local_trip_id'],
+            payload={'local_trip_id': first_load['local_trip_id']},
+        )
+        late_response = self.sync([late_first_cancel])
+
+        result = late_response.json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertFalse(result['free_bucket_restored'])
+        first_acceptance.refresh_from_db()
+        self.assertEqual(first_acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(
+            first_acceptance.closed_at,
+            timezone.datetime.fromisoformat(second_accept['occurred_at']),
+        )
+        self.assertEqual(
+            FreeBucketAcceptance.objects.filter(status=FreeBucketAcceptanceStatus.ACCEPTED).count(),
+            0,
+        )
+
+    def test_delayed_direct_ordinary_load_retires_hint_active_at_the_tap(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
         other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        base = timezone.now() - timedelta(minutes=12)
+        EmployeeShift.objects.filter(pk__in=[self.shift.pk, other_shift.pk]).update(
+            opened_at=base - timedelta(minutes=1),
+        )
         accepted = self.accept_event(
             actor=other_operator,
             access=other_access,
             shift=other_shift,
             excavator=self.other_excavator,
+            occurred_at=base,
         )
         accepted_result = self.sync(
             [accepted],
@@ -1407,19 +2280,20 @@ class FreeBucketServerIntegrationTests(TestCase):
             self,
             client_action_id='ordinary-online-blocked',
             assignment=self.assignment,
+            manual_control=True,
+            occurred_at=base + timedelta(minutes=5),
         )
-        self.assertEqual(online.status_code, 409, online.content)
-        self.assertEqual(online.json()['code'], 'free_bucket_acceptance_required')
-        primary_screen = self.client.get(reverse('excavator_work'))
-        self.assertContains(primary_screen, 'Свободный ковш')
-        self.assertContains(primary_screen, str(self.other_excavator.garage_number))
-        self.assertContains(primary_screen, '"updated_at"')
-        self.assertContains(primary_screen, '"availability_label"')
+        self.assertEqual(online.status_code, 200, online.content)
+        online_trip = Trip.objects.get(pk=online.json()['trip_id'])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, online_trip.loaded_at)
 
         ordinary_offline = self.event(
             'ordinary-offline-blocked',
             'excavator.trip.loaded',
             1,
+            occurred_at=base + timedelta(minutes=5),
             local_trip_id='local-ordinary-offline-blocked',
             payload={
                 'truck_id': self.truck.id,
@@ -1433,16 +2307,79 @@ class FreeBucketServerIntegrationTests(TestCase):
             [ordinary_offline],
             device_id='free-bucket-ordinary-guard-001',
         ).json()['results'][0]
-        self.assertEqual(offline_result['status'], 'conflict', offline_result)
-        self.assertEqual(offline_result['code'], 'free_bucket_acceptance_required')
-        self.assertEqual(Trip.objects.count(), 0)
-        self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertEqual(offline_result['status'], 'accepted', offline_result)
+        self.assertTrue(offline_result['no_effect'])
+        self.assertEqual(offline_result['server_ids']['trip_id'], online_trip.id)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
         self.assertEqual(
             OfflineFieldEvent.objects.get(event_id=ordinary_offline['event_id']).status,
-            'conflict',
+            'accepted',
         )
 
-    def test_driver_request_blocks_online_and_offline_ordinary_load_before_operator_accepts(self):
+    def test_delayed_legacy_ordinary_load_retires_hint_active_at_the_tap(self):
+        other_client, other_operator, other_shift = (
+            trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
+        )
+        other_access = EmployeeAccess.objects.get(employee=other_operator, role=self.role)
+        base = timezone.now() - timedelta(minutes=12)
+        EmployeeShift.objects.filter(pk__in=[self.shift.pk, other_shift.pk]).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-before-delayed-legacy-load',
+            occurred_at=base,
+            actor=other_operator,
+            access=other_access,
+            shift=other_shift,
+            excavator=self.other_excavator,
+        )
+        accepted_result = self.sync(
+            [accepted],
+            client=other_client,
+            actor=other_operator,
+            access=other_access,
+            device_id='free-bucket-before-delayed-legacy-load-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        acceptance = FreeBucketAcceptance.objects.get()
+        loaded_at = base + timedelta(minutes=5)
+        ActiveApplicationSession.objects.create(
+            session_key='legacy-delayed-free-bucket-driver',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            last_seen_at=timezone.now(),
+            foreground_seen_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse('excavator_work'),
+            data={
+                'client_action_id': 'legacy-delayed-after-free-bucket-hint',
+                'assignment': self.assignment.id,
+                'rock_type': self.rock.id,
+                'dump_point': self.dump_point.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'occurred_at': loaded_at.isoformat(),
+            },
+            HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loaded_at, loaded_at)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, loaded_at)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+
+    def test_driver_request_does_not_block_online_and_offline_ordinary_load(self):
         selected = self.select_event(event_id='driver-free-request-ordinary-guard')
         selected_result = self.sync_driver([selected]).json()['results'][0]
         self.assertEqual(selected_result['status'], 'accepted', selected_result)
@@ -1451,9 +2388,13 @@ class FreeBucketServerIntegrationTests(TestCase):
             self,
             client_action_id='ordinary-online-requested-blocked',
             assignment=self.assignment,
+            manual_control=True,
         )
-        self.assertEqual(online.status_code, 409, online.content)
-        self.assertEqual(online.json()['code'], 'free_bucket_acceptance_required')
+        self.assertEqual(online.status_code, 200, online.content)
+        online_trip = Trip.objects.get(pk=online.json()['trip_id'])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, online_trip.loaded_at)
 
         ordinary_offline = self.event(
             'ordinary-offline-requested-blocked',
@@ -1472,15 +2413,117 @@ class FreeBucketServerIntegrationTests(TestCase):
             [ordinary_offline],
             device_id='free-bucket-requested-ordinary-guard-001',
         ).json()['results'][0]
-        self.assertEqual(offline_result['status'], 'conflict', offline_result)
-        self.assertEqual(offline_result['code'], 'free_bucket_acceptance_required')
-        self.assertEqual(Trip.objects.count(), 0)
-        self.assertEqual(
-            FreeBucketAcceptance.objects.get().status,
-            FreeBucketAcceptanceStatus.REQUESTED,
+        self.assertEqual(offline_result['status'], 'accepted', offline_result)
+        self.assertTrue(offline_result['no_effect'])
+        self.assertEqual(offline_result['server_ids']['trip_id'], online_trip.id)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+
+    def test_delayed_offline_ordinary_load_retires_hint_active_at_the_tap(self):
+        other_client, identity = self.other_excavator_identity()
+        base = timezone.now() - timedelta(minutes=12)
+        type(self.shift).objects.filter(pk__in=[self.shift.pk, identity['shift'].pk]).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        accepted = self.accept_event(
+            event_id='free-accept-before-offline-ordinary-load',
+            occurred_at=base,
+            **identity,
+        )
+        accepted_result = self.sync(
+            [accepted],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-before-offline-load-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        acceptance = FreeBucketAcceptance.objects.get()
+        loaded_at = base + timedelta(minutes=5)
+        ordinary = self.event(
+            'ordinary-offline-after-free-bucket-hint',
+            'excavator.trip.loaded',
+            1,
+            occurred_at=loaded_at,
+            local_trip_id='local-ordinary-after-free-bucket-hint',
+            payload={
+                'truck_id': self.truck.id,
+                'assignment_id': self.assignment.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+                'manual_control': True,
+            },
         )
 
-    def test_conflicting_free_bucket_load_is_retained_in_existing_review_queue(self):
+        result = self.sync(
+            [ordinary], device_id='ordinary-offline-after-hint-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.loaded_at, loaded_at)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, loaded_at)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+
+    def test_delayed_offline_load_preserves_a_newer_free_bucket_hint(self):
+        other_client, identity = self.other_excavator_identity()
+        base = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk__in=[self.shift.pk, identity['shift'].pk]).update(
+            opened_at=base - timedelta(minutes=1),
+        )
+        loaded_at = base + timedelta(seconds=1)
+        accepted_at = base + timedelta(seconds=2)
+        accepted = self.accept_event(
+            event_id='free-accept-after-delayed-offline-load',
+            occurred_at=accepted_at,
+            **identity,
+        )
+        accepted_result = self.sync(
+            [accepted],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-newer-hint-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        acceptance = FreeBucketAcceptance.objects.get()
+        ordinary = self.event(
+            'ordinary-delayed-before-free-bucket-hint',
+            'excavator.trip.loaded',
+            1,
+            occurred_at=loaded_at,
+            local_trip_id='local-ordinary-before-free-bucket-hint',
+            payload={
+                'truck_id': self.truck.id,
+                'assignment_id': self.assignment.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+                'manual_control': True,
+            },
+        )
+
+        result = self.sync(
+            [ordinary], device_id='ordinary-delayed-before-hint-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.loaded_at, loaded_at)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.ACCEPTED)
+        self.assertEqual(acceptance.accepted_at, accepted_at)
+        self.assertIsNone(acceptance.cancelled_at)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(self.assignment.ended_at)
+
+    def test_foreign_free_bucket_reference_never_vetoes_factual_load(self):
         other_client, other_operator, other_shift = (
             trip_fixtures.ExcavatorWorkServerIntegrationTests.create_other_excavator_client(self)
         )
@@ -1498,11 +2541,11 @@ class FreeBucketServerIntegrationTests(TestCase):
         conflicting_load = self.load_event(accepted)
         result = self.sync([conflicting_load]).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(Trip.objects.count(), 0)
-        review = AdminConflict.objects.get(process='Свободный ковш')
-        self.assertEqual(review.employee_id, self.operator.id)
-        self.assertIn(conflicting_load['event_id'], review.description)
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(AdminConflict.objects.count(), 0)
 
     def test_driver_completion_closes_used_acceptance_without_changing_primary_assignment(self):
         accepted = self.accept_event()
@@ -1571,6 +2614,67 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(new_primary.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(new_primary.ended_at)
 
+    def test_delayed_load_uses_assignment_effective_at_tap_for_free_bucket(self):
+        tap_at = timezone.now() - timedelta(minutes=1)
+        switched_at = tap_at + timedelta(seconds=30)
+        type(self.shift).objects.filter(pk=self.shift.pk).update(
+            opened_at=tap_at - timedelta(minutes=5),
+        )
+        type(self.truck_shift).objects.filter(pk=self.truck_shift.pk).update(
+            opened_at=tap_at - timedelta(minutes=5),
+        )
+        HaulAssignment.objects.filter(pk=self.assignment.pk).update(
+            excavator=self.other_excavator,
+            status=AssignmentStatus.CANCELLED,
+            assigned_at=tap_at - timedelta(minutes=5),
+            accepted_at=tap_at - timedelta(minutes=5),
+            ended_at=switched_at,
+        )
+        self.assignment.refresh_from_db()
+        current = HaulAssignment.objects.create(
+            truck=self.truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=switched_at,
+        )
+        HaulAssignment.objects.filter(pk=current.pk).update(
+            # Planned before the tap but activated only afterwards: production
+            # truth follows accepted_at, not the scheduling timestamp.
+            assigned_at=tap_at - timedelta(minutes=1),
+            accepted_at=switched_at,
+        )
+        current.refresh_from_db()
+
+        delayed = self.event(
+            'ordinary-load-delayed-across-reassignment',
+            'excavator.trip.loaded',
+            1,
+            occurred_at=tap_at,
+            local_trip_id='local-load-delayed-across-reassignment',
+            payload={
+                'truck_id': self.truck.id,
+                'assignment_id': current.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+                'manual_control': False,
+            },
+        )
+        result = self.sync(
+            [delayed], device_id='delayed-across-reassignment-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        acceptance = FreeBucketAcceptance.objects.get(used_trip=trip)
+        self.assertEqual(acceptance.primary_assignment_id, self.assignment.id)
+        self.assignment.refresh_from_db()
+        current.refresh_from_db()
+        self.assertEqual(self.assignment.status, AssignmentStatus.CANCELLED)
+        self.assertEqual(self.assignment.ended_at, switched_at)
+        self.assertEqual(current.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNone(current.ended_at)
+
     def test_dispatcher_keeps_primary_tile_and_shows_requested_free_bucket_marker(self):
         selected = self.select_event(event_id='driver-free-dispatcher-marker')
         response = self.sync_driver(
@@ -1582,7 +2686,11 @@ class FreeBucketServerIntegrationTests(TestCase):
         primary_tile = self.dispatcher_primary_tile()
         self.assertIn('Свободный ковш', primary_tile['free_bucket_label'])
         self.assertIn(str(self.other_excavator.garage_number), primary_tile['free_bucket_label'])
-        self.assertIsNone(primary_tile['free_bucket_expires_at'])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(
+            primary_tile['free_bucket_expires_at'],
+            acceptance.occurred_at + timedelta(minutes=10),
+        )
 
     def test_dispatcher_used_marker_is_visible_only_for_five_minutes(self):
         other_client, other_operator, other_shift = (
@@ -1650,6 +2758,293 @@ class FreeBucketServerIntegrationTests(TestCase):
             payload['free_bucket_cards'][0]['client_acceptance_id'],
             accepted['event_id'],
         )
+
+    def test_free_bucket_load_accepts_downtimes_and_closes_them_at_tap(self):
+        selected = self.select_event(
+            event_id='driver-free-select-through-downtime',
+            excavator=self.other_excavator,
+        )
+        selected_result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(selected_result['status'], 'accepted', selected_result)
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(
+            event_id='free-accept-through-downtime',
+            **identity,
+        )
+        accepted_at = timezone.datetime.fromisoformat(accepted['occurred_at'])
+        loaded_at = accepted_at + timedelta(seconds=2)
+        truck_reason = DowntimeReason.objects.create(
+            name='Ремонт самосвала free bucket Stage A',
+            equipment_type=self.truck_type,
+            is_critical=True,
+            show_for_truck_driver=True,
+        )
+        excavator_reason = DowntimeReason.objects.create(
+            name='Ремонт экскаватора free bucket Stage A',
+            equipment_type=self.excavator_type,
+            is_critical=True,
+            show_for_excavator_operator=True,
+        )
+        truck_downtime = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=truck_reason,
+            started_at=loaded_at - timedelta(minutes=2),
+        )
+        excavator_downtime = DowntimeEvent.objects.create(
+            equipment=self.other_excavator,
+            employee=identity['actor'],
+            reason=excavator_reason,
+            started_at=loaded_at - timedelta(minutes=1),
+        )
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-through-downtime',
+            occurred_at=loaded_at,
+            **identity,
+        )
+
+        results = self.sync(
+            [accepted, loaded],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-through-downtime-device',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        self.assertEqual(Trip.objects.count(), 1)
+        for downtime in (truck_downtime, excavator_downtime):
+            downtime.refresh_from_db()
+            self.assertEqual(downtime.ended_at, loaded_at)
+            self.assertEqual(getattr(downtime, 'closure_reason', ''), 'work_resumed_by_load')
+
+    def test_confirmed_free_bucket_load_supersedes_open_trip(self):
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(event_id='free-accept-before-stale-trip', **identity)
+        accepted_result = self.sync(
+            [accepted],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-supersede-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+
+        accepted_at = timezone.datetime.fromisoformat(accepted['occurred_at'])
+        stale_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            driver_control_shift=self.truck_shift,
+            driver_participation_recorded=True,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=accepted_at + timedelta(milliseconds=500),
+        )
+        loaded = self.load_event(
+            accepted,
+            event_id='free-load-supersedes-stale-trip',
+            occurred_at=accepted_at + timedelta(seconds=1),
+            **identity,
+        )
+
+        loaded_result = self.sync(
+            [loaded],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='free-bucket-supersede-device',
+        ).json()['results'][0]
+
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        new_trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        stale_trip.refresh_from_db()
+        self.assertEqual(stale_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(stale_trip.superseded_by_id, new_trip.id)
+        self.assertEqual(stale_trip.operationally_closed_at, new_trip.loaded_at)
+        self.assertEqual(new_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(new_trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(Trip.objects.count(), 2)
+
+    def test_foreign_factual_load_closes_previous_used_free_bucket_before_supersede(self):
+        loaded_at = timezone.now() - timedelta(minutes=2)
+        old_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            driver_control_shift=self.truck_shift,
+            driver_participation_recorded=True,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=loaded_at,
+        )
+        old_acceptance = FreeBucketAcceptance.objects.create(
+            client_acceptance_id='old-used-free-bucket-before-foreign-load',
+            truck=self.truck,
+            excavator=self.excavator,
+            operator=self.operator,
+            loading_shift=self.shift,
+            primary_assignment=self.assignment,
+            status=FreeBucketAcceptanceStatus.USED,
+            occurred_at=loaded_at,
+            accepted_at=loaded_at,
+            used_at=loaded_at,
+            used_trip=old_trip,
+        )
+        other_client, identity = self.other_excavator_identity()
+        factual_load = self.event(
+            'foreign-load-after-used-free-bucket',
+            'excavator.trip.loaded',
+            1,
+            occurred_at=loaded_at + timedelta(minutes=1),
+            local_trip_id='local-foreign-after-used-free-bucket',
+            payload={
+                'truck_id': self.truck.id,
+                'assignment_id': self.assignment.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type_id': self.rock.id,
+                'manual_control': False,
+            },
+            **identity,
+        )
+
+        result = self.sync(
+            [factual_load],
+            client=other_client,
+            actor=identity['actor'],
+            access=identity['access'],
+            device_id='foreign-load-after-used-free-bucket-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        new_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        old_trip.refresh_from_db()
+        old_acceptance.refresh_from_db()
+        self.assertEqual(old_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(old_trip.superseded_by_id, new_trip.id)
+        self.assertEqual(old_acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(new_trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(
+            FreeBucketAcceptance.objects.get(used_trip=new_trip).status,
+            FreeBucketAcceptanceStatus.USED,
+        )
+
+    def test_driver_free_bucket_selection_after_shift_close_is_no_effect(self):
+        occurred_at = timezone.now() - timedelta(seconds=10)
+        self.truck_shift.opened_at = occurred_at - timedelta(minutes=5)
+        self.truck_shift.save(update_fields=['opened_at'])
+        selected = self.select_event(
+            event_id='driver-free-select-after-shift-close',
+            occurred_at=occurred_at,
+        )
+        self.truck_shift.closed_at = occurred_at + timedelta(seconds=1)
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        result = self.sync_driver(
+            [selected],
+            device_id='driver-free-select-after-close-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+
+    def test_excavator_acceptance_after_shift_close_is_no_effect(self):
+        occurred_at = timezone.now() - timedelta(seconds=10)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            opened_at=occurred_at - timedelta(minutes=5),
+        )
+        accepted = self.accept_event(
+            event_id='excavator-free-accept-after-shift-close',
+            occurred_at=occurred_at,
+        )
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            closed_at=occurred_at + timedelta(seconds=1),
+        )
+
+        result = self.sync(
+            [accepted], device_id='excavator-free-accept-after-close-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+
+    def test_driver_cancel_after_ttl_keeps_the_exact_expiry_boundary(self):
+        from trips.free_bucket import FREE_BUCKET_REQUEST_TTL
+
+        selected_at = timezone.now() - timedelta(minutes=11)
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(
+            opened_at=selected_at - timedelta(minutes=1),
+        )
+        selected = self.select_event(
+            event_id='driver-free-cancel-after-ttl-select',
+            occurred_at=selected_at,
+        )
+        device_id = 'driver-free-cancel-after-ttl-device'
+        selected_result = self.sync_driver([selected], device_id=device_id).json()['results'][0]
+        acceptance = FreeBucketAcceptance.objects.get(
+            pk=selected_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        cancelled = self.driver_event(
+            'driver-free-cancel-after-ttl',
+            'driver.free_bucket.cancelled',
+            2,
+            occurred_at=selected_at + timedelta(minutes=11),
+            depends_on=[selected['event_id']],
+            payload={'free_bucket_acceptance_local_id': selected['event_id']},
+        )
+
+        result = self.sync_driver([cancelled], device_id=device_id).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, selected_at + FREE_BUCKET_REQUEST_TTL)
+
+    def test_excavator_cancel_after_ttl_keeps_the_exact_expiry_boundary(self):
+        from trips.free_bucket import FREE_BUCKET_REQUEST_TTL
+
+        accepted_at = timezone.now() - timedelta(minutes=11)
+        EmployeeShift.objects.filter(pk=self.shift.pk).update(
+            opened_at=accepted_at - timedelta(minutes=1),
+        )
+        accepted = self.accept_event(
+            event_id='excavator-free-cancel-after-ttl-accept',
+            occurred_at=accepted_at,
+        )
+        device_id = 'excavator-free-cancel-after-ttl-device'
+        accepted_result = self.sync([accepted], device_id=device_id).json()['results'][0]
+        acceptance = FreeBucketAcceptance.objects.get(
+            pk=accepted_result['server_ids']['free_bucket_acceptance_id'],
+        )
+        cancelled = self.event(
+            'excavator-free-cancel-after-ttl',
+            'excavator.free_bucket.cancelled',
+            2,
+            occurred_at=accepted_at + timedelta(minutes=11),
+            depends_on=[accepted['event_id']],
+            payload={
+                'free_bucket_acceptance_local_id': accepted['event_id'],
+                'truck_id': self.truck.id,
+            },
+        )
+
+        result = self.sync([cancelled], device_id=device_id).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['no_effect'])
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(acceptance.cancelled_at, accepted_at + FREE_BUCKET_REQUEST_TTL)
 
 
 @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
@@ -1807,7 +3202,14 @@ class FreeBucketPostgreSQLConcurrencyTests(TransactionTestCase):
             ))
 
         self.assertEqual([status for status, _ in results], [200, 200])
-        self.assertEqual(sorted(result['status'] for _, result in results), ['accepted', 'conflict'])
+        self.assertEqual(
+            [result['status'] for _, result in results],
+            ['accepted', 'accepted'],
+        )
+        self.assertEqual(
+            sum(bool(result.get('no_effect')) for _, result in results),
+            1,
+        )
         self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
         self.assertEqual(Trip.objects.count(), 0)
         self.assignment.refresh_from_db()

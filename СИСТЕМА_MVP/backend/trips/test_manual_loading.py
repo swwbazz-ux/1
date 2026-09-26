@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from . import manual_loading as manual_loading_module
 from . import tests as fixtures
-from .manual_loading import truck_driver_participation
+from .manual_loading import manual_dump_card_expires_at, truck_driver_participation
 from .models import OPEN_TRIP_STATUSES, Trip, TripStatus
 from assignments.models import AssignmentStatus, HaulAssignment
 from assignments.services import schedule_haul_release
@@ -54,6 +54,11 @@ class ManualLoadingTests(TestCase):
         return client.post(reverse('driver_complete_trip', args=[trip.pk]),
                            dict(client_action_id=str(uuid4()), **payload))
 
+    def distinct_load_times(self):
+        """Two taps far enough apart to represent two physical loads."""
+        second_at = timezone.now()
+        return second_at - timedelta(minutes=6), second_at
+
     def test_no_driver_shift_no_fake_shift_and_loading_counts_immediately(self):
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save()
@@ -71,10 +76,11 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(self.send().status_code, 200)
 
     def test_next_loading_closes_previous_without_inventing_unload(self):
-        first = self.send()
+        first_at, second_at = self.distinct_load_times()
+        first = self.send(occurred_at=first_at.isoformat())
         self.assertEqual(first.status_code, 200, first.content)
         old = Trip.objects.get(pk=first.json()['trip_id'])
-        response = self.send(previous=old)
+        response = self.send(previous=old, occurred_at=second_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old.refresh_from_db()
         self.assertEqual(old.status, TripStatus.UNCONTROLLED)
@@ -88,26 +94,45 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(Trip.objects.filter(truck=self.truck, status__in=OPEN_TRIP_STATUSES).count(), 1)
         self.assertEqual(calculate_open_shift_progress(self.shift)['trip_count'], 2)
 
-    def test_stale_next_send_and_retries_do_not_create_extra_trips(self):
-        action = str(uuid4())
-        response = self.send(action=action)
+    def test_unique_load_taps_create_trips_and_exact_retry_is_deduplicated(self):
+        first_at, second_at = self.distinct_load_times()
+        first_action = str(uuid4())
+        response = self.send(action=first_action, occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old = Trip.objects.get(pk=response.json()['trip_id'])
-        self.assertTrue(self.send(action=action).json()['deduplicated'])
-        self.assertEqual(self.send().status_code, 409)
-        self.assertEqual(self.send(previous=old).status_code, 200)
-        self.assertEqual(self.send(previous=old).status_code, 409)
+        self.assertTrue(self.send(
+            action=first_action,
+            occurred_at=first_at.isoformat(),
+        ).json()['deduplicated'])
+
+        second_action = str(uuid4())
+        second = self.send(
+            action=second_action,
+            previous=old,
+            occurred_at=second_at.isoformat(),
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        self.assertTrue(self.send(
+            action=second_action,
+            previous=old,
+            occurred_at=second_at.isoformat(),
+        ).json()['deduplicated'])
         self.assertEqual(Trip.objects.count(), 2)
 
     def test_driver_joins_receives_only_next_trip(self):
-        response = self.send()
+        first_at, second_at = self.distinct_load_times()
+        response = self.send(occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old = Trip.objects.get(pk=response.json()['trip_id'])
         self.presence()
         self.unload(old)
         old.refresh_from_db()
         self.assertEqual(old.status, TripStatus.LOADED_WAITING_UNLOAD)
-        response = self.send(manual=False, previous=old)
+        response = self.send(
+            manual=False,
+            previous=old,
+            occurred_at=second_at.isoformat(),
+        )
         self.assertEqual(response.status_code, 200, response.content)
         new = Trip.objects.get(pk=response.json()['trip_id'])
         self.assertEqual(new.driver_control_shift_id, self.truck_shift.pk)
@@ -115,24 +140,33 @@ class ManualLoadingTests(TestCase):
         new.refresh_from_db()
         self.assertEqual(new.status, TripStatus.COMPLETED)
 
-    def test_online_background_recent_do_not_allow_overriding_controlled_trip(self):
+    def test_online_background_recent_load_supersedes_controlled_trip(self):
         for kind in ('online', 'background', 'recent'):
             with self.subTest(kind=kind):
                 self.presence(kind)
                 self.assertFalse(truck_driver_participation([self.truck.pk])[self.truck.pk]['passive'])
-        response = self.send(manual=False)
+        first_at, second_at = self.distinct_load_times()
+        response = self.send(manual=False, occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
-        trip = Trip.objects.get(pk=response.json()['trip_id'])
-        self.assertEqual(self.send(previous=trip).status_code, 409)
+        old_trip = Trip.objects.get(pk=response.json()['trip_id'])
+        second = self.send(previous=old_trip, occurred_at=second_at.isoformat())
+        self.assertEqual(second.status_code, 200, second.content)
+        old_trip.refresh_from_db()
+        new_trip = Trip.objects.get(pk=second.json()['trip_id'])
+        self.assertEqual(old_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(old_trip.superseded_by_id, new_trip.id)
+        self.assertEqual(old_trip.driver_id, self.truck_shift.employee_id)
+        self.assertEqual(new_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
 
     def test_late_confirmation_changes_only_original_trip(self):
         self.presence()
-        response = self.send(manual=False)
+        first_at, second_at = self.distinct_load_times()
+        unloaded_at = second_at - timedelta(minutes=1)
+        response = self.send(manual=False, occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old = Trip.objects.get(pk=response.json()['trip_id'])
-        unloaded_at = timezone.now()
         self.presence('offline')
-        response = self.send(previous=old)
+        response = self.send(previous=old, occurred_at=second_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         new = Trip.objects.get(pk=response.json()['trip_id'])
         self.unload(old, occurred_at=unloaded_at.isoformat())
@@ -144,34 +178,44 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(calculate_open_shift_progress(self.shift)['trip_count'], 2)
 
     def test_failed_new_load_does_not_close_previous(self):
-        response = self.send()
+        first_at, second_at = self.distinct_load_times()
+        response = self.send(occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old = Trip.objects.get(pk=response.json()['trip_id'])
         self.capacity_rule.delete()
-        response = self.send(previous=old)
+        response = self.send(previous=old, occurred_at=second_at.isoformat())
         self.assertEqual(response.status_code, 409, response.content)
         old.refresh_from_db()
         self.assertEqual(old.status, TripStatus.LOADED_WAITING_UNLOAD)
 
     def test_reassignment_preserves_first_excavator_and_operator(self):
-        response = self.send()
+        first_at, second_at = self.distinct_load_times()
+        response = self.send(occurred_at=first_at.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         old = Trip.objects.get(pk=response.json()['trip_id'])
         HaulAssignment.objects.filter(truck=self.truck).update(excavator=self.other_excavator)
         self.shift.equipment = self.other_excavator
         self.shift.save()
-        response = self.send(previous=old, excavator_id=self.other_excavator.pk)
+        response = self.send(
+            previous=old,
+            excavator_id=self.other_excavator.pk,
+            occurred_at=second_at.isoformat(),
+        )
         self.assertEqual(response.status_code, 200, response.content)
         old.refresh_from_db()
         self.assertEqual(old.excavator_id, self.excavator.pk)
         self.assertEqual(old.excavator_operator_id, self.operator.pk)
         self.assertEqual(Trip.objects.get(pk=response.json()['trip_id']).excavator_id, self.other_excavator.pk)
 
-    def test_manual_cannot_bypass_breakdown_or_inactive_truck(self):
+    def test_manual_load_closes_breakdown_but_inactive_truck_stays_blocked(self):
         reason, _ = DowntimeReason.objects.get_or_create(name='Поломка', defaults={'is_critical': True})
         event = DowntimeEvent.objects.create(equipment=self.truck, reason=reason, started_at=timezone.now())
-        self.assertEqual(self.send().status_code, 409)
-        event.delete()
+        loaded = self.send()
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        event.refresh_from_db()
+        self.assertIsNotNone(event.ended_at)
+        self.assertEqual(getattr(event, 'closure_reason', ''), 'work_resumed_by_load')
+        Trip.objects.update(status=TripStatus.CANCELLED, cancelled_at=timezone.now())
         self.truck.is_active = False
         self.truck.save()
         self.assertEqual(self.send().status_code, 409)
@@ -221,7 +265,7 @@ class ManualLoadingTests(TestCase):
         response = self.send(action='manual-preview-expiry')
         self.assertEqual(response.status_code, 200, response.content)
         trip = Trip.objects.get(pk=response.json()['trip_id'])
-        expected_deadline = trip.created_at + timedelta(minutes=5)
+        expected_deadline = manual_dump_card_expires_at(trip)
         self.assertEqual(response.json()['dump_badge_auto_hide_at'], expected_deadline.isoformat())
 
         fresh = self.client.get(reverse('excavator_work'))
@@ -230,7 +274,10 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(dump_card['pending_trucks'][0]['auto_hide_at'], expected_deadline)
 
         expired_created_at = timezone.now() - timedelta(minutes=5, seconds=1)
-        Trip.objects.filter(pk=trip.pk).update(created_at=expired_created_at)
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=expired_created_at,
+            loaded_at=expired_created_at,
+        )
         expired = self.client.get(reverse('excavator_work'))
         dump_card = next(card for card in expired.context['dump_cards'] if card['point'].id == self.dump_point.id)
         self.assertEqual(dump_card['pending_trucks'], [])
@@ -263,16 +310,21 @@ class ManualLoadingTests(TestCase):
         self.assertIsNone(dump_card['pending_trucks'][0]['auto_hide_at'])
 
     def test_manual_dump_badge_retry_and_replacement_keep_trip_specific_deadlines(self):
+        first_at, second_at = self.distinct_load_times()
         action = 'manual-preview-retry'
-        first = self.send(action=action)
+        first = self.send(action=action, occurred_at=first_at.isoformat())
         self.assertEqual(first.status_code, 200, first.content)
         old = Trip.objects.get(pk=first.json()['trip_id'])
-        retry = self.send(action=action)
+        retry = self.send(action=action, occurred_at=first_at.isoformat())
         self.assertTrue(retry.json()['deduplicated'])
         self.assertEqual(retry.json()['trip_id'], old.id)
         self.assertEqual(retry.json()['dump_badge_auto_hide_at'], first.json()['dump_badge_auto_hide_at'])
 
-        replacement = self.send(previous=old, action='manual-preview-replacement')
+        replacement = self.send(
+            previous=old,
+            action='manual-preview-replacement',
+            occurred_at=second_at.isoformat(),
+        )
         self.assertEqual(replacement.status_code, 200, replacement.content)
         new = Trip.objects.get(pk=replacement.json()['trip_id'])
         old.refresh_from_db()
@@ -338,10 +390,11 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(first.json()['client_action_id'], payload['client_action_id'])
 
     def test_cancel_next_loading_restores_previous_operational_trip(self):
-        first = self.send()
+        first_at, second_at = self.distinct_load_times()
+        first = self.send(occurred_at=first_at.isoformat())
         self.assertEqual(first.status_code, 200, first.content)
         old = Trip.objects.get(pk=first.json()['trip_id'])
-        response = self.send(previous=old)
+        response = self.send(previous=old, occurred_at=second_at.isoformat())
         new = Trip.objects.get(pk=response.json()['trip_id'])
         response = self.client.post(reverse('excavator_truck_loaded_cancel'), json.dumps(dict(
             client_action_id='cancel-new', trip_id=new.pk, truck_id=new.truck_id,
@@ -442,25 +495,66 @@ class ManualTripAutoReconcileTests(TestCase):
             [],
         )
 
-    def test_shift_closed_after_loading_also_expires(self):
-        """Боевой случай 20.09.2026, рейс id 1816 на бою: driver_control_shift
-        был установлен ПРАВИЛЬНО в момент погрузки, но та смена закрылась через
-        минуту, и рейс провисел «на разгрузку» больше четырёх часов — старая
-        проверка смотрела только на пустой control_shift, а этот не пуст,
-        просто указывает на мёртвую смену."""
+    def test_carryover_survives_background_expiry_and_replacement_driver_unloads(self):
         self.presence('online')
-        response = self.send(action='closed-shift-orphan')
+        response = self.send(action='carryover-after-shift-close')
         self.assertEqual(response.status_code, 200, response.content)
         trip = Trip.objects.get(pk=response.json()['trip_id'])
+        original_driver = trip.driver
         self.assertEqual(trip.driver_control_shift_id, self.truck_shift.pk)
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
 
         stale = timezone.now() - timedelta(seconds=400)
         self.truck_shift.closed_at = stale
         self.truck_shift.save(update_fields=['closed_at'])
+        trip.is_carryover = True
+        trip.save(update_fields=['is_carryover'])
+        replacement, replacement_access, replacement_shift = self.create_registered_driver_shift(
+            self.truck,
+            full_name='Сменщик водителя',
+            access_code='200099',
+        )
 
         cleared = manual_loading_module.reconcile_expired_manual_trips_throttled()
-        self.assertEqual(cleared, [trip.pk])
+        self.assertEqual(cleared, [])
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+
+        client = Client()
+        session = client.session
+        session['employee_access_id'] = replacement_access.pk
+        session.save()
+        unloaded_at = replacement_shift.opened_at + timedelta(seconds=1)
+        unload = client.post(
+            reverse('driver_complete_trip', args=[trip.pk]),
+            {
+                'client_action_id': 'replacement-unloads-after-reconcile-window',
+                'occurred_at': unloaded_at.isoformat(),
+            },
+            HTTP_ACCEPT='application/json',
+        )
+
+        self.assertEqual(unload.status_code, 200, unload.content)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.driver, original_driver)
+        self.assertEqual(trip.driver_control_shift, self.truck_shift)
+        self.assertEqual(trip.unloading_shift, replacement_shift)
+
+    def test_legacy_closed_control_shift_without_carryover_marker_still_expires(self):
+        self.presence('online')
+        response = self.send(action='legacy-closed-shift-orphan')
+        self.assertEqual(response.status_code, 200, response.content)
+        trip = Trip.objects.get(pk=response.json()['trip_id'])
+        self.assertFalse(trip.is_carryover)
+
+        self.truck_shift.closed_at = timezone.now() - timedelta(seconds=400)
+        self.truck_shift.save(update_fields=['closed_at'])
+
+        self.assertEqual(
+            manual_loading_module.reconcile_expired_manual_trips_throttled(),
+            [trip.pk],
+        )
         trip.refresh_from_db()
         self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
 

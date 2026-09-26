@@ -77,7 +77,32 @@
             || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error && event.last_error.message || ""));
     }
     function recoverableDependencyConflict(event) {
-        return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
+        return !!event && event.state === "conflict"
+            && ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(errorCode(event)) >= 0;
+    }
+    function recoverableWorkerTruthConflict(event) {
+        if (!event || event.state !== "conflict") return false;
+        var code = errorCode(event);
+        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(code) >= 0) return true;
+        if (
+            event.event_type === "driver.trip.unloaded"
+            && ["open_trip_changed", "late_unload_after_supersede", "trip_driver_shift_changed", "unload_before_load"].indexOf(code) >= 0
+        ) return true;
+        if (event.event_type === "driver.trip.dump_point_changed" && code === "trip_driver_shift_changed") return true;
+        if (event.event_type === "driver.free_bucket.selected" && code === "driver_shift_closed") return true;
+        if (event.event_type === "driver.shift.closed" && code === "shift_already_closed") return true;
+        if (
+            event.event_type === "driver.trip.loaded"
+            && [
+                "active_downtime",
+                "equipment_downtime_active",
+                "excavator_unavailable",
+                "free_bucket_excavator_unavailable",
+                "free_bucket_truck_unavailable",
+                "open_trip_changed",
+            ].indexOf(code) >= 0
+        ) return true;
+        return false;
     }
     function identityRecord(event) {
         return IMMUTABLE_FIELDS.reduce(function (result, field) {
@@ -782,6 +807,13 @@
                             context_snapshot: clone(event.context_snapshot || {}),
                             server_ids: clone(result.server_ids || null),
                             trip_origin: "driver_manual",
+                            free_bucket_restored: result.free_bucket_restored === true,
+                            free_bucket_client_acceptance_id: String(result.free_bucket_client_acceptance_id || ""),
+                            free_bucket_expires_at: String(result.free_bucket_expires_at || ""),
+                            free_bucket_expires_local_at_ms: number(
+                                event.context_snapshot
+                                && event.context_snapshot.free_bucket_expires_local_at_ms
+                            ),
                             version: number(result.server_version || result.version)
                         });
                     }
@@ -810,7 +842,7 @@
                         state: status,
                         next_retry_at: 0,
                         auth_generation: status === "auth_required" ? String(context().authGeneration || "") : null,
-                        last_error: {code: result.code || status, message: result.message || "Требуется сверка."},
+                        last_error: {code: result.code || status, message: result.message || "Техническое событие завершено."},
                         server_received_at: result.server_received_at || null
                     });
                     review.push([clone(event), clone(result)]);
@@ -937,7 +969,9 @@
             });
             var recoverable = Object.create(null);
             events.forEach(function (event) {
-                if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                if (recoverableDeviceClockConflict(event) || recoverableWorkerTruthConflict(event)) {
+                    recoverable[event.event_id] = true;
+                }
             });
             var changed = true;
             while (changed) {

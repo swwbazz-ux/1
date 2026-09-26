@@ -98,6 +98,12 @@ class DowntimeEvent(models.Model):
     reason = models.ForeignKey(DowntimeReason, verbose_name='Причина', on_delete=models.PROTECT)
     started_at = models.DateTimeField('Начало')
     ended_at = models.DateTimeField('Окончание', null=True, blank=True)
+    closure_reason = models.CharField(
+        'Причина завершения',
+        max_length=64,
+        blank=True,
+        default='',
+    )
     comment = models.TextField('Комментарий', blank=True)
     recorded_at = models.DateTimeField('Зарегистрировано', default=timezone.now, editable=False)
 

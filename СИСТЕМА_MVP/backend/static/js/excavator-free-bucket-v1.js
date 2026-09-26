@@ -6,7 +6,9 @@
     var STORE_NAME = "catalogs";
     var LS_PREFIX = "excavator-free-bucket-catalog-v1:";
     var CONSUMED_PREFIX = "excavator-free-bucket-consumed-v1:";
+    var SERVER_CLOCK_PREFIX = "excavator-free-bucket-server-clock-v1:";
     var OPEN_STATE_KEY = "eoFreeBucket";
+    var FREE_BUCKET_REQUEST_TTL_MS = 10 * 60 * 1000;
     var modal = null;
     var input = null;
     var results = null;
@@ -23,9 +25,67 @@
     var opener = null;
     var historyOwned = false;
     var closing = false;
+    var expiryTimer = null;
+    var serverClock = {serverEpoch: 0, clientCapturedAt: 0};
 
     function text(value) {
         return String(value == null ? "" : value).trim();
+    }
+
+    function timestampMs(value) {
+        var parsed = Date.parse(text(value));
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function serverDeadlineOnClientClock(deadline, clock) {
+        clock = clock || serverClock;
+        if (!deadline || !clock.serverEpoch || !clock.clientCapturedAt) return deadline || 0;
+        return clock.clientCapturedAt + (deadline - clock.serverEpoch);
+    }
+
+    function captureServerClock(currentShell) {
+        var parsed = timestampMs(currentShell && currentShell.dataset.eoServerNow);
+        if (!parsed) return serverClock;
+        var scope = text(currentShell && currentShell.dataset.eoAccessId || "anonymous");
+        var stored = null;
+        try {
+            stored = JSON.parse(root.localStorage.getItem(SERVER_CLOCK_PREFIX + scope) || "null");
+        } catch (error) {}
+        if (
+            stored
+            && Number(stored.serverEpoch || 0) >= parsed
+            && Number(stored.clientCapturedAt || 0) > 0
+        ) {
+            serverClock = {
+                serverEpoch: Number(stored.serverEpoch),
+                clientCapturedAt: Number(stored.clientCapturedAt)
+            };
+            return serverClock;
+        }
+        serverClock = {serverEpoch: parsed, clientCapturedAt: Date.now()};
+        try {
+            root.localStorage.setItem(SERVER_CLOCK_PREFIX + scope, JSON.stringify(serverClock));
+        } catch (error) {}
+        return serverClock;
+    }
+
+    function acceptanceExpiresAt(item, event, clock) {
+        var explicitCardDeadline = timestampMs(item && item.expires_at);
+        if (explicitCardDeadline) return serverDeadlineOnClientClock(explicitCardDeadline, clock);
+        var occurred = timestampMs(
+            (event && event.occurred_at)
+            || (item && item.occurred_at)
+        );
+        var explicitCatalogDeadline = timestampMs(item && item.free_bucket_expires_at);
+        if (explicitCatalogDeadline) {
+            var catalogDeadline = serverDeadlineOnClientClock(explicitCatalogDeadline, clock);
+            // A future deadline belongs to the Driver request being promoted.
+            // A deadline at/before a fresh tap belongs to an expired prior cycle
+            // and must not instantly hide the new optimistic card.
+            if (!event || !occurred || catalogDeadline > occurred) return catalogDeadline;
+        }
+        if (event && occurred) return occurred + FREE_BUCKET_REQUEST_TTL_MS;
+        return occurred ? occurred + FREE_BUCKET_REQUEST_TTL_MS : 0;
     }
 
     function numberOf(item) {
@@ -78,6 +138,13 @@
     function eventAcceptanceReferences(payload) {
         payload = payload || {};
         return [payload.free_bucket_acceptance_id, payload.free_bucket_acceptance_local_id].map(text).filter(Boolean);
+    }
+
+    function snapshotContainsAcceptance(snapshot, payload) {
+        var references = acceptanceReferenceSet(snapshot && snapshot.cards || []);
+        return eventAcceptanceReferences(payload).some(function (reference) {
+            return Boolean(references[reference]);
+        });
     }
 
     function itemWasConsumed(item) {
@@ -190,6 +257,38 @@
         return !references[text(event.event_id)] && (!serverId || !references[serverId]);
     }
 
+    function loadedCancellationReferences(payload, result) {
+        payload = payload || {};
+        result = result || {};
+        var serverIds = result.server_ids || {};
+        return [
+            result.free_bucket_acceptance_id,
+            serverIds.free_bucket_acceptance_id,
+            payload.free_bucket_acceptance_id,
+            result.free_bucket_client_acceptance_id,
+            payload.free_bucket_acceptance_local_id
+        ].map(text).filter(Boolean).filter(function (reference, index, references) {
+            return references.indexOf(reference) === index;
+        });
+    }
+
+    function confirmedCancellationIsAbsent(record, snapshot) {
+        var event = record && record.event;
+        var result = record && record.result || {};
+        if (!event || event.event_type !== "excavator.trip.loaded.cancelled") return false;
+        if (result.free_bucket_restored !== true && result.free_bucket_restored !== "true") return false;
+        snapshot = snapshot || {};
+        var snapshotVersion = Number(snapshot.version || 0);
+        var restoredVersion = Number(result.server_version || result.version || 0);
+        if (!snapshotVersion || !restoredVersion || snapshotVersion < restoredVersion) return false;
+        var references = loadedCancellationReferences(event.payload, result);
+        if (!references.length) return false;
+        var snapshotReferences = acceptanceReferenceSet(snapshot.cards || []);
+        return !references.some(function (reference) {
+            return Boolean(snapshotReferences[reference]);
+        });
+    }
+
     function serverAcceptanceSnapshot(currentShell) {
         return {
             version: Number(root.document && root.document.body && root.document.body.dataset.operationalStateVersion || 0),
@@ -208,6 +307,7 @@
             : null;
         catalogMeta = snapshot;
         renderSearch();
+        scheduleExpiryTimer();
     }
 
     function hydrateCatalog(currentShell) {
@@ -275,8 +375,11 @@
         return pieces.join(" · ");
     }
 
-    function itemCanBeAccepted(item) {
-        return Boolean(item && item.is_active !== false && item.can_accept_free_bucket !== false);
+    function itemCanBeAccepted(item, nowMs, clock) {
+        if (!item || item.is_active === false) return false;
+        if (item.can_accept_free_bucket !== false) return true;
+        var expiresAt = acceptanceExpiresAt(item, null, clock);
+        return Boolean(expiresAt && (nowMs == null ? Date.now() : nowMs) >= expiresAt);
     }
 
     function appendActiveItems() {
@@ -390,6 +493,7 @@
     function openModal(button) {
         if (!modal || !shell || shell.dataset.eoCurrentExcavatorId === "") return;
         if (root.ExcavatorHourlyReport && root.ExcavatorHourlyReport.isOpen()) return;
+        pruneExpiredCards();
         opener = button;
         selectedTruck = null;
         input.value = "";
@@ -458,12 +562,23 @@
     function renderLocalCard(item, event, conflict) {
         var truckId = truckIdOf(item) || text(event && event.payload && event.payload.truck_id);
         if (!truckId) return null;
+        var expiresAt = acceptanceExpiresAt(item, event);
         var existing = cardForTruck(truckId);
+        if (expiresAt && Date.now() >= expiresAt) {
+            if (
+                existing
+                && existing.dataset.eoFreeBucket === "1"
+                && (!event || text(existing.dataset.eoFreeBucketAcceptanceLocalId) === text(event.event_id))
+            ) existing.remove();
+            return null;
+        }
         if (existing) {
             if (existing.dataset.eoFreeBucket === "1" && event && event.event_id) {
                 existing.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
-                existing.classList.toggle("is-free-bucket-conflict", !!conflict);
+                existing.classList.remove("is-free-bucket-conflict");
+                if (expiresAt) existing.dataset.eoFreeBucketExpiresAt = String(expiresAt);
             }
+            scheduleExpiryTimer();
             return existing;
         }
         var grid = gridForShell();
@@ -471,18 +586,19 @@
         var number = numberOf(item) || text(event && event.payload && event.payload.truck_number) || truckId;
         var statusKey = text(item.status_key || "blue").toLowerCase();
         if (["green", "yellow", "blue", "orange", "red", "gray"].indexOf(statusKey) < 0) statusKey = "blue";
-        var card = make("button", "eo-truck-card eo-dashboard-truck-card status-" + statusKey + " is-free-bucket is-saved-on-device" + (conflict ? " is-free-bucket-conflict" : ""));
+        var card = make("button", "eo-truck-card eo-dashboard-truck-card status-" + statusKey + " is-free-bucket is-saved-on-device");
         card.type = "button";
         card.draggable = true;
         card.dataset.eoTruckCard = "";
         card.dataset.eoDashboardTruck = "";
         card.dataset.eoFreeBucket = "1";
         card.dataset.eoFreeBucketAcceptanceLocalId = text(event && event.event_id);
+        if (expiresAt) card.dataset.eoFreeBucketExpiresAt = String(expiresAt);
         card.dataset.truckId = truckId;
         card.dataset.eoTruckNumber = number;
         card.dataset.eoTruckDetailId = truckId;
         card.dataset.eoEquipmentState = text(item.state_code || "assigned");
-        card.dataset.eoCanLoad = conflict ? "0" : "1";
+        card.dataset.eoCanLoad = "1";
         card.dataset.eoManualAvailable = "0";
         card.dataset.eoOpenTripId = "";
         card.dataset.eoPlanPercent = "";
@@ -505,15 +621,16 @@
         card.appendChild(presence);
         card.appendChild(icon);
         card.appendChild(make("strong", "", number));
-        card.appendChild(make("span", "", conflict ? "Требуется сверка" : text(item.state_label || item.availability_label || "Принят временно")));
+        card.appendChild(make("span", "", text(item.state_label || item.availability_label || "Принят временно")));
         card.appendChild(make("small", "", "—"));
-        card.appendChild(make("div", "eo-free-bucket-card-marker", conflict ? "Свободный ковш · конфликт" : "Свободный ковш"));
+        card.appendChild(make("div", "eo-free-bucket-card-marker", "Свободный ковш"));
         var accent = make("u", "eo-free-bucket-card-accent");
         accent.setAttribute("aria-hidden", "true");
         card.appendChild(accent);
         grid.insertBefore(card, grid.firstElementChild);
         if (typeof bindTruckCard === "function") bindTruckCard(card);
         normalizeGrid();
+        scheduleExpiryTimer();
         return card;
     }
 
@@ -604,6 +721,14 @@
                 markAttention(event, {});
             }
         });
+        (events || []).forEach(function (event) {
+            if (event.event_type !== "excavator.trip.loaded.cancelled") return;
+            if (["pending", "syncing"].indexOf(event.sync_state) < 0) return;
+            restoreLoadedCancellation({
+                payload: event.payload || {},
+                free_bucket_restored: true
+            });
+        });
         normalizeGrid();
     }
 
@@ -614,8 +739,21 @@
         }).forEach(function (record) {
             var event = record && record.event;
             var result = record && record.result || {};
-            if (!event || event.event_type.indexOf("excavator.free_bucket.") !== 0) return;
+            if (!event) return;
             var payload = event.payload || {};
+            if (event.event_type === "excavator.trip.loaded.cancelled") {
+                if (confirmedCancellationIsAbsent(record, snapshot)) {
+                    retireLoadedCancellation(payload, result);
+                    return;
+                }
+                restoreLoadedCancellation({
+                    payload: payload,
+                    result: result,
+                    free_bucket_restored: result.free_bucket_restored
+                });
+                return;
+            }
+            if (event.event_type.indexOf("excavator.free_bucket.") !== 0) return;
             if (event.event_type === "excavator.free_bucket.accepted") {
                 if (confirmedAcceptanceIsAbsent(record, snapshot)) {
                     var absentServerId = text(result.server_ids && result.server_ids.free_bucket_acceptance_id);
@@ -628,15 +766,19 @@
                 if (acceptedCard) {
                     acceptedCard.classList.remove("is-saved-on-device");
                     acceptedCard.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
-                    acceptedCard.dataset.eoFreeBucketAcceptanceId = text(
-                        result.server_ids && result.server_ids.free_bucket_acceptance_id
-                    );
+                    acceptedCard.dataset.eoFreeBucketAcceptanceId = result.no_effect
+                        ? ""
+                        : text(result.server_ids && result.server_ids.free_bucket_acceptance_id);
                 }
                 return;
             }
             var reference = text(payload.free_bucket_acceptance_id || payload.free_bucket_acceptance_local_id);
             var card = reference ? cardForAcceptance(reference) : cardForTruck(payload.truck_id);
             if (event.event_type === "excavator.free_bucket.loaded") {
+                if (snapshotContainsAcceptance(snapshot, payload)) {
+                    storeConsumedReferences(eventAcceptanceReferences(payload), false);
+                    return;
+                }
                 storeConsumedReferences(eventAcceptanceReferences(payload), true);
                 removeLoadedCard(card);
             } else if (event.event_type === "excavator.free_bucket.cancelled") {
@@ -750,8 +892,165 @@
         normalizeGrid();
     }
 
+    function cardMatchesAcceptanceReferences(card, references) {
+        if (!card || card.dataset.eoFreeBucket !== "1") return false;
+        var cardReferences = [
+            card.dataset.eoFreeBucketAcceptanceId,
+            card.dataset.eoFreeBucketAcceptanceLocalId
+        ].map(text).filter(Boolean);
+        return (references || []).some(function (reference) {
+            return cardReferences.indexOf(text(reference)) >= 0;
+        });
+    }
+
+    function retireLoadedCancellation(payload, result) {
+        var references = loadedCancellationReferences(payload, result);
+        storeConsumedReferences(references, true);
+        for (var index = 0; index < references.length; index += 1) {
+            var card = cardForAcceptance(references[index]);
+            if (!cardMatchesAcceptanceReferences(card, references)) continue;
+            removeLoadedCard(card);
+            break;
+        }
+        scheduleExpiryTimer();
+        return null;
+    }
+
+    function restoreLoadedCancellation(info) {
+        info = info || {};
+        var payload = info.payload || info;
+        var result = info.result || info;
+        var restored = result.free_bucket_restored;
+        if (restored === undefined) restored = info.free_bucket_restored;
+        if (restored === false || restored === "false") {
+            return retireLoadedCancellation(payload, result);
+        }
+
+        var serverId = text(
+            result.free_bucket_acceptance_id
+            || (result.server_ids && result.server_ids.free_bucket_acceptance_id)
+            || payload.free_bucket_acceptance_id
+        );
+        var localId = text(
+            result.free_bucket_client_acceptance_id
+            || payload.free_bucket_acceptance_local_id
+        );
+        var references = loadedCancellationReferences(payload, result);
+        var deadline = Number(
+            result.free_bucket_reservation_expires_at_ms
+            || payload.free_bucket_reservation_expires_at_ms
+            || 0
+        );
+        if (!deadline) {
+            var serverDeadline = timestampMs(
+                result.free_bucket_expires_at
+                || payload.free_bucket_expires_at
+            );
+            if (serverDeadline) deadline = serverDeadlineOnClientClock(serverDeadline);
+        }
+        if (!references.length && !deadline) return null;
+        if (!deadline || Date.now() >= deadline) {
+            return retireLoadedCancellation(payload, result);
+        }
+
+        var truckId = text(payload.truck_id || result.truck_id);
+        if (!truckId) return null;
+        var existing = cardForTruck(truckId);
+        if (
+            existing
+            && existing.dataset.eoFreeBucket === "1"
+            && !cardMatchesAcceptanceReferences(existing, references)
+        ) {
+            return retireLoadedCancellation(payload, result);
+        }
+        storeConsumedReferences(references, false);
+        var item = Object.assign({}, findCatalogItem(truckId, payload));
+        delete item.expires_at;
+        delete item.free_bucket_expires_at;
+        var synthetic = {
+            event_id: localId || serverId,
+            event_type: "excavator.free_bucket.accepted",
+            occurred_at: new Date(deadline - FREE_BUCKET_REQUEST_TTL_MS).toISOString(),
+            payload: {
+                truck_id: truckId,
+                truck_number: payload.truck_number || result.truck_number || ""
+            }
+        };
+        var card = renderLocalCard(item, synthetic, false);
+        if (!card || card.dataset.eoFreeBucket !== "1") return card;
+        card.dataset.eoFreeBucketAcceptanceId = serverId;
+        card.dataset.eoFreeBucketAcceptanceLocalId = localId;
+        card.dataset.eoFreeBucketExpiresAt = String(deadline);
+        if (result.version || result.server_version) card.classList.remove("is-saved-on-device");
+        scheduleExpiryTimer();
+        return card;
+    }
+
+    function pruneExpiredCards(nowMs) {
+        var now = nowMs == null ? Date.now() : nowMs;
+        var removed = false;
+        Array.prototype.forEach.call(document.querySelectorAll(
+            "[data-eo-truck-card][data-eo-free-bucket='1']"
+        ), function (card) {
+            var expiresAt = Number(card.dataset.eoFreeBucketExpiresAt || 0);
+            if (!expiresAt || now < expiresAt) return;
+            card.remove();
+            removed = true;
+        });
+        if (removed) normalizeGrid();
+        return removed;
+    }
+
+    function scheduleExpiryTimer() {
+        if (expiryTimer && typeof root.clearTimeout === "function") {
+            root.clearTimeout(expiryTimer);
+            expiryTimer = null;
+        }
+        if (typeof root.setTimeout !== "function") return;
+        var now = Date.now();
+        pruneExpiredCards(now);
+        var deadlines = [];
+        Array.prototype.forEach.call(document.querySelectorAll(
+            "[data-eo-truck-card][data-eo-free-bucket='1']"
+        ), function (card) {
+            var expiresAt = Number(card.dataset.eoFreeBucketExpiresAt || 0);
+            if (expiresAt > now) deadlines.push(expiresAt);
+        });
+        catalog.forEach(function (item) {
+            var expiresAt = acceptanceExpiresAt(item, null);
+            if (expiresAt > now && item.can_accept_free_bucket === false) deadlines.push(expiresAt);
+        });
+        if (!deadlines.length) return;
+        var nextDeadline = Math.min.apply(Math, deadlines);
+        expiryTimer = root.setTimeout(function () {
+            expiryTimer = null;
+            pruneExpiredCards();
+            if (results && input) renderSearch();
+            scheduleExpiryTimer();
+        }, Math.max(0, nextDeadline - now + 5));
+        if (expiryTimer && typeof expiryTimer.unref === "function") expiryTimer.unref();
+    }
+
     function renderEmbeddedCards(currentShell) {
-        readEmbeddedCards(currentShell).forEach(function (item) {
+        var embedded = readEmbeddedCards(currentShell);
+        var references = acceptanceReferenceSet(embedded);
+        Array.prototype.forEach.call(document.querySelectorAll(
+            "[data-eo-truck-card][data-eo-free-bucket='1']:not(.is-saved-on-device)"
+        ), function (card) {
+            var serverId = text(card.dataset.eoFreeBucketAcceptanceId);
+            var localId = text(card.dataset.eoFreeBucketAcceptanceLocalId);
+            if ((!serverId || !references[serverId]) && (!localId || !references[localId])) {
+                card.remove();
+            }
+        });
+        embedded.forEach(function (item) {
+            if (!item.is_used) {
+                storeConsumedReferences([
+                    item.id,
+                    item.free_bucket_acceptance_id,
+                    item.client_acceptance_id
+                ], false);
+            }
             if (item.is_used || itemWasConsumed(item)) return;
             var cardItem = Object.assign({}, item, {id: item.truck_id});
             var event = {
@@ -764,19 +1063,31 @@
                 card.classList.remove("is-saved-on-device");
                 card.dataset.eoFreeBucketAcceptanceId = text(item.id || item.free_bucket_acceptance_id);
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
+                var expiresAt = acceptanceExpiresAt(item, event);
+                if (expiresAt) card.dataset.eoFreeBucketExpiresAt = String(expiresAt);
             }
         });
+        pruneExpiredCards();
+        scheduleExpiryTimer();
     }
 
     function handleConfirmed(event, result) {
         if (!event) return;
         var payload = event.payload || {};
-        if (event.event_type === "excavator.free_bucket.accepted") {
+        if (event.event_type === "excavator.trip.loaded.cancelled") {
+            restoreLoadedCancellation({
+                payload: payload,
+                result: result || {},
+                free_bucket_restored: result && result.free_bucket_restored
+            });
+        } else if (event.event_type === "excavator.free_bucket.accepted") {
             var card = cardForTruck(payload.truck_id);
             if (card) {
                 card.classList.remove("is-saved-on-device");
                 card.dataset.eoFreeBucketAcceptanceLocalId = event.event_id;
-                card.dataset.eoFreeBucketAcceptanceId = text(result && result.server_ids && result.server_ids.free_bucket_acceptance_id);
+                card.dataset.eoFreeBucketAcceptanceId = result && result.no_effect
+                    ? ""
+                    : text(result && result.server_ids && result.server_ids.free_bucket_acceptance_id);
             }
         } else if (event.event_type === "excavator.free_bucket.loaded") {
             var loadedReference = text(payload.free_bucket_acceptance_id || payload.free_bucket_acceptance_local_id);
@@ -798,17 +1109,15 @@
             if (rejectedCard) rejectedCard.remove();
             normalizeGrid();
             renderSearch();
-            if (typeof showNotice === "function") showNotice((result && (result.message || result.error)) || "Самосвал нельзя принять под свободный ковш.");
             return;
         }
-        var card = cardForTruck(payload.truck_id);
-        if (card) {
-            card.classList.add("is-free-bucket-conflict");
-            card.dataset.eoCanLoad = "0";
-            var marker = card.querySelector(".eo-free-bucket-card-marker");
-            if (marker) marker.textContent = "Свободный ковш · конфликт";
+        if (window.console && typeof window.console.warn === "function") {
+            window.console.warn("Free-bucket event was resolved by server state", {
+                event: event,
+                result: result || {}
+            });
         }
-        if (typeof showNotice === "function") showNotice((result && (result.message || result.error)) || "Свободный ковш требует сверки.");
+        if (typeof invalidateRefresh === "function") invalidateRefresh();
     }
 
     function attachShell(options) {
@@ -819,17 +1128,23 @@
         bindTruckCard = options.bindTruckCard || bindTruckCard;
         showNotice = options.showNotice || showNotice;
         invalidateRefresh = options.invalidateRefresh || invalidateRefresh;
+        captureServerClock(shell);
         var snapshot = serverAcceptanceSnapshot(shell);
         renderEmbeddedCards(shell);
         hydrateCatalog(shell);
+        pruneExpiredCards();
         normalizeGrid();
-        reconcileDurableState(snapshot).catch(function () {});
+        reconcileDurableState(snapshot).then(function () {
+            pruneExpiredCards();
+            scheduleExpiryTimer();
+        }).catch(function () {});
         if (modal && !modal.hidden) setUnderlyingBlocked(true);
         return {
             reconcileEvents: reconcileEvents,
             handleConfirmed: handleConfirmed,
             markAttention: markAttention,
             markLoaded: removeLoadedCard,
+            restoreLoadedCancellation: restoreLoadedCancellation,
             cancelAccepted: cancelAcceptedCard,
             normalizeGrid: normalizeGrid
         };
@@ -894,13 +1209,27 @@
             }
         });
         window.addEventListener("popstate", function () { if (!modal.hidden) finishClose(); });
+        function resumeExpiryClock() {
+            if (document.visibilityState && document.visibilityState !== "visible") return;
+            pruneExpiredCards();
+            if (results && input) renderSearch();
+            scheduleExpiryTimer();
+        }
+        document.addEventListener("visibilitychange", resumeExpiryClock);
+        document.addEventListener("resume", resumeExpiryClock);
+        window.addEventListener("pageshow", resumeExpiryClock);
         window.addEventListener("operational-state-refresh-applied", function () {
             shell = document.querySelector("[data-eo-shell]");
+            captureServerClock(shell);
             var snapshot = serverAcceptanceSnapshot(shell);
             hydrateCatalog(shell);
             renderEmbeddedCards(shell);
+            pruneExpiredCards();
             normalizeGrid();
-            reconcileDurableState(snapshot).catch(function () {});
+            reconcileDurableState(snapshot).then(function () {
+                pruneExpiredCards();
+                scheduleExpiryTimer();
+            }).catch(function () {});
             if (modal && !modal.hidden) setUnderlyingBlocked(true);
         });
     }
@@ -918,6 +1247,7 @@
         handleConfirmed: handleConfirmed,
         markAttention: markAttention,
         markLoaded: removeLoadedCard,
+        restoreLoadedCancellation: restoreLoadedCancellation,
         cancelAccepted: cancelAcceptedCard,
         normalizeGrid: normalizeGrid,
         isOpen: function () { return Boolean(modal && !modal.hidden); }
@@ -925,7 +1255,17 @@
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = {
-            confirmedAcceptanceIsAbsent: confirmedAcceptanceIsAbsent
+            acceptanceExpiresAt: acceptanceExpiresAt,
+            captureServerClock: captureServerClock,
+            confirmedAcceptanceIsAbsent: confirmedAcceptanceIsAbsent,
+            confirmedCancellationIsAbsent: confirmedCancellationIsAbsent,
+            itemCanBeAccepted: itemCanBeAccepted,
+            pruneExpiredCards: pruneExpiredCards,
+            reconcileConfirmed: reconcileConfirmed,
+            restoreLoadedCancellation: restoreLoadedCancellation,
+            scheduleExpiryTimer: scheduleExpiryTimer,
+            snapshotContainsAcceptance: snapshotContainsAcceptance,
+            serverDeadlineOnClientClock: serverDeadlineOnClientClock
         };
     }
 })(typeof window !== "undefined" ? window : globalThis);

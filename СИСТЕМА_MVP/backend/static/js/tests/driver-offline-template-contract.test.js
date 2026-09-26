@@ -12,6 +12,7 @@ const offlineRuntime = fs.readFileSync(path.resolve(__dirname, "../driver-offlin
 const views = fs.readFileSync(path.resolve(__dirname, "../../../users/views.py"), "utf8");
 const roleApps = fs.readFileSync(path.resolve(__dirname, "../../../users/role_apps.py"), "utf8");
 const driverShiftRuntime = fs.readFileSync(path.resolve(__dirname, "../driver-shift-v1.js"), "utf8");
+const driverPointDrumRuntime = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
 
 function functionSource(source, name) {
     const start = source.indexOf("function " + name + "(");
@@ -26,10 +27,10 @@ function functionSource(source, name) {
     throw new Error("function_not_closed");
 }
 
-test("driver v338 shell precaches the durable runtime and exact authenticated dependencies", () => {
+test("driver v358 shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v357'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v358'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-haptics-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-native-push-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
@@ -46,7 +47,7 @@ test("driver v338 shell precaches the durable runtime and exact authenticated de
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v357'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v358'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -166,7 +167,7 @@ test("dump-point projection helper updates the tile, dial, dataset and sync labe
     assert.match(newTileStatus.innerHTML, /Текущая/);
 });
 
-test("sync uses canonical batch endpoint and distinguishes pending review and storage failure", () => {
+test("sync uses canonical batch endpoint without exposing technical review to the driver", () => {
     assert.match(template, /fetch\("\/offline-events\/sync\/"/);
     assert.match(template, /status: "auth_required"/);
     assert.match(template, /isDriverSyncAuthResponse/);
@@ -177,12 +178,23 @@ test("sync uses canonical batch endpoint and distinguishes pending review and st
     assert.match(template, /window\.driverOfflinePendingCount/);
     assert.match(template, /window\.driverOfflinePendingCount = pending/);
     assert.match(template, /Действие сохранено/);
-    assert.match(template, /Не подтверждено/);
+    assert.doesNotMatch(template, /Не подтверждено/i);
+    assert.doesNotMatch(template, /НУЖНА СВЕРКА/i);
+    assert.doesNotMatch(template, /ПРОВЕРЬТЕ СОБЫТИЕ/i);
+    assert.doesNotMatch(template, /сообщите диспетчеру/i);
     assert.doesNotMatch(template, /data-driver-sync-count/);
     assert.doesNotMatch(template, /Нужна сверка/);
     assert.match(template, /Не удалось открыть защищённое хранилище/);
     assert.match(template, /aria-live="polite"/);
     assert.match(template, /driver-active-tab-v1:/);
+});
+
+test("unload instruction matches the actual half-second hold", () => {
+    assert.match(template, /aria-label="[^"]*Удерживайте полсекунды[^"]*"/);
+    assert.match(driverShiftRuntime, /holdMs:\s*500/);
+    assert.match(driverPointDrumRuntime, /Удерживайте полсекунды/);
+    assert.doesNotMatch(template, /Удерживайте 1 секунду/);
+    assert.doesNotMatch(driverPointDrumRuntime, /Удерживайте 1 секунду/);
 });
 
 test("a failed background flush never recasts a durable unload as a storage failure", () => {

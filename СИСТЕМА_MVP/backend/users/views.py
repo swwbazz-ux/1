@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v357'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v358'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4135,6 +4135,7 @@ def driver_prefixed_context_value(prefix, value):
 
 def driver_free_bucket_payload(*, current_truck, current_assignment, version, open_shift=None):
     """Build the real, cacheable driver-side free-bucket directory and state."""
+    from trips.free_bucket import free_bucket_acceptance_expires_at
     from trips.models import FreeBucketAcceptance
 
     generated_at = timezone.now().isoformat()
@@ -4324,6 +4325,11 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         ),
         'excavators': excavators,
     }
+    active_expires_at = (
+        free_bucket_acceptance_expires_at(active_acceptance)
+        if active_acceptance and active_acceptance.status in {'requested', 'accepted'}
+        else None
+    )
     state = {
         'schema': 'driver-free-bucket-state-v1',
         'generated_at': generated_at,
@@ -4334,6 +4340,7 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         'status': active_acceptance.status if active_acceptance else '',
         'can_cancel': bool(active_acceptance and active_acceptance.status in {'requested', 'accepted'}),
         'selection': active_item,
+        'expires_at': active_expires_at.isoformat() if active_expires_at else '',
     }
     return catalog, state, active_acceptance
 

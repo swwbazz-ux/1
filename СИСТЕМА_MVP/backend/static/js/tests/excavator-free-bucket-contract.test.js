@@ -2,7 +2,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
+const {
+    acceptanceExpiresAt,
+    confirmedAcceptanceIsAbsent,
+    confirmedCancellationIsAbsent,
+    itemCanBeAccepted,
+    pruneExpiredCards,
+    reconcileConfirmed,
+    restoreLoadedCancellation,
+    snapshotContainsAcceptance,
+    scheduleExpiryTimer,
+} = require('../excavator-free-bucket-v1.js');
 const {dispatcherScreenSource} = require('./dispatcher-screen-source');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
@@ -64,6 +74,92 @@ test('catalog and accepted cards survive offline shell lifecycle', () => {
     assert.match(source, /confirmed\.then\(function \(records\) \{ return reconcileConfirmed\(records, snapshot\); \}\)/);
 });
 
+test('ten-minute reservation deadline uses the correct local or server clock basis', () => {
+    const serverEpoch = Date.parse('2026-09-27T00:00:00Z');
+    const clientEpoch = serverEpoch + 20 * 60 * 1000;
+    const clock = {serverEpoch, clientCapturedAt: clientEpoch};
+    const serverDeadline = new Date(serverEpoch + 10 * 60 * 1000).toISOString();
+    assert.equal(
+        acceptanceExpiresAt({free_bucket_expires_at: serverDeadline}, null, clock),
+        clientEpoch + 10 * 60 * 1000,
+    );
+    assert.equal(
+        acceptanceExpiresAt(
+            {free_bucket_expires_at: serverDeadline},
+            {occurred_at: new Date(clientEpoch + 9 * 60 * 1000).toISOString()},
+            clock,
+        ),
+        clientEpoch + 10 * 60 * 1000,
+        'accepting on minute nine must not extend the original reservation deadline',
+    );
+
+    const staleDeadline = new Date(serverEpoch + 10 * 60 * 1000).toISOString();
+    const freshTap = new Date(clientEpoch + 11 * 60 * 1000).toISOString();
+    assert.equal(
+        acceptanceExpiresAt(
+            {free_bucket_expires_at: staleDeadline},
+            {occurred_at: freshTap},
+            clock,
+        ),
+        Date.parse(freshTap) + 10 * 60 * 1000,
+        'an expired catalog cycle must not instantly expire a new local acceptance',
+    );
+
+    const localTap = new Date(clientEpoch).toISOString();
+    assert.equal(
+        acceptanceExpiresAt({}, {occurred_at: localTap}, clock),
+        clientEpoch + 10 * 60 * 1000,
+    );
+    assert.equal(acceptanceExpiresAt({}, {}, clock), 0);
+
+    const reserved = {is_active: true, can_accept_free_bucket: false, free_bucket_expires_at: serverDeadline};
+    assert.equal(itemCanBeAccepted(reserved, clientEpoch + 10 * 60 * 1000 - 1, clock), false);
+    assert.equal(itemCanBeAccepted(reserved, clientEpoch + 10 * 60 * 1000, clock), true);
+    assert.equal(itemCanBeAccepted({...reserved, is_active: false}, clientEpoch + 20 * 60 * 1000, clock), false);
+});
+
+test('expiry cleanup removes the boundary card and scheduler chooses the nearest future deadline', () => {
+    const previousDocument = global.document;
+    const previousSetTimeout = global.setTimeout;
+    const previousClearTimeout = global.clearTimeout;
+    const now = Date.now();
+    const cards = [
+        {dataset: {eoFreeBucketExpiresAt: String(now)}, removed: false, remove() { this.removed = true; }},
+        {dataset: {eoFreeBucketExpiresAt: String(now + 1200)}, removed: false, remove() { this.removed = true; }},
+    ];
+    let scheduledDelay = null;
+    global.document = {
+        querySelectorAll() { return cards.filter(card => !card.removed); },
+        querySelector() { return null; },
+    };
+    global.setTimeout = (_callback, delay) => {
+        scheduledDelay = delay;
+        return {unref() {}};
+    };
+    global.clearTimeout = () => {};
+    try {
+        assert.equal(pruneExpiredCards(now), true);
+        assert.equal(cards[0].removed, true);
+        assert.equal(cards[1].removed, false);
+        scheduleExpiryTimer();
+        assert.ok(scheduledDelay >= 1 && scheduledDelay <= 1300, scheduledDelay);
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
+        global.setTimeout = previousSetTimeout;
+        global.clearTimeout = previousClearTimeout;
+    }
+});
+
+test('expired offline acceptance cannot be resurrected after restart or resume', () => {
+    assert.match(source, /if \(expiresAt && Date\.now\(\) >= expiresAt\) \{/);
+    assert.match(source, /reconcileDurableState\(snapshot\)\.then\(function \(\) \{[\s\S]*?pruneExpiredCards\(\);[\s\S]*?scheduleExpiryTimer\(\)/);
+    assert.match(source, /document\.addEventListener\("visibilitychange", resumeExpiryClock\)/);
+    assert.match(source, /document\.addEventListener\("resume", resumeExpiryClock\)/);
+    assert.match(source, /window\.addEventListener\("pageshow", resumeExpiryClock\)/);
+    assert.match(source, /captureServerClock\(shell\)/);
+});
+
 test('accept cancel and load use the durable field outbox', () => {
     assert.match(source, /queueEvent\("excavator\.free_bucket\.accepted"/);
     assert.match(source, /queueEvent\("excavator\.free_bucket\.cancelled"/);
@@ -74,6 +170,7 @@ test('accept cancel and load use the durable field outbox', () => {
     assert.match(template, /freeBucketAcceptanceId \? "" : freeBucketAcceptanceLocalId/);
     assert.match(template, /manual_control: card\.dataset\.eoManualAvailable === "1"/);
     assert.doesNotMatch(template, /manual_control: isFreeBucketLoad \|\|/);
+    assert.match(template, /dump_points_snapshot: Array\.prototype\.map\.call/);
     assert.match(template, /function bindExcavatorTruckCard\(card\)/);
     assert.match(template, /bindTruckCard: bindExcavatorTruckCard/);
     assert.match(template, /freeBucketController\.markLoaded\(card\)/);
@@ -98,8 +195,218 @@ test('a rejected repeat acceptance is removed instead of becoming a dead card', 
     assert.match(source, /\["conflict", "invalid"\]\.indexOf\(status\)/);
     assert.match(source, /if \(rejectedAcceptance\(event\)\) \{[\s\S]*cardForAcceptance\(event\.event_id\)[\s\S]*rejectedCard\.remove\(\)/);
     assert.match(source, /if \(rejectedAcceptance\(event, result\)\) \{[\s\S]*cardForAcceptance\(event\.event_id\)[\s\S]*renderSearch\(\)/);
-    assert.match(source, /function itemCanBeAccepted\(item\)/);
+    assert.match(source, /function itemCanBeAccepted\(item, nowMs, clock\)/);
     assert.match(source, /item\.can_accept_free_bucket !== false/);
+});
+
+test('cancelling a temporary load restores the same card until its original deadline', () => {
+    const snapshot = {
+        cards: [{id: 17, client_acceptance_id: 'free-accept-local'}],
+    };
+    assert.equal(snapshotContainsAcceptance(snapshot, {
+        free_bucket_acceptance_id: 17,
+    }), true);
+    assert.equal(snapshotContainsAcceptance(snapshot, {
+        free_bucket_acceptance_local_id: 'free-accept-local',
+    }), true);
+    assert.equal(snapshotContainsAcceptance(snapshot, {
+        free_bucket_acceptance_id: 99,
+    }), false);
+
+    assert.match(source, /function restoreLoadedCancellation\(info\)/);
+    assert.match(source, /storeConsumedReferences\(references, false\)/);
+    assert.match(source, /deadline - FREE_BUCKET_REQUEST_TTL_MS/);
+    assert.match(source, /event\.event_type === "excavator\.trip\.loaded\.cancelled"[\s\S]*restoreLoadedCancellation/);
+    assert.match(source, /snapshotContainsAcceptance\(snapshot, payload\)[\s\S]*storeConsumedReferences\(eventAcceptanceReferences\(payload\), false\)/);
+
+    const embeddedStart = source.indexOf('function renderEmbeddedCards(currentShell)');
+    const embeddedEnd = source.indexOf('function handleConfirmed(event, result)', embeddedStart);
+    const embeddedSource = source.slice(embeddedStart, embeddedEnd);
+    assert.ok(embeddedSource.indexOf('storeConsumedReferences([') < embeddedSource.indexOf('itemWasConsumed(item)'));
+
+    assert.match(template, /fieldOutbox\.pending\(\)\.then\(function \(events\)[\s\S]*fieldOutbox\.discardUnsent\(loadEventId\)/);
+    assert.match(template, /free_bucket_reservation_expires_at_ms/);
+    assert.match(template, /occurred_at: cancelOccurredAt/);
+    assert.match(template, /freeBucketController\.restoreLoadedCancellation/);
+    assert.match(template, /data-eo-free-bucket-reservation-expires-at/);
+});
+
+test('failed temporary-load restore retires only the matching old acceptance', () => {
+    const previousDocument = global.document;
+    const previousLocalStorage = global.localStorage;
+    const stored = new Map();
+    const oldCard = {
+        dataset: {
+            eoFreeBucket: '1',
+            eoFreeBucketAcceptanceId: '17',
+            eoFreeBucketAcceptanceLocalId: 'old-local',
+            truckId: '21',
+        },
+        removed: false,
+        remove() { this.removed = true; },
+    };
+    const newerCard = {
+        dataset: {
+            eoFreeBucket: '1',
+            eoFreeBucketAcceptanceId: '99',
+            eoFreeBucketAcceptanceLocalId: 'new-local',
+            truckId: '21',
+        },
+        removed: false,
+        remove() { this.removed = true; },
+    };
+    const cards = [oldCard, newerCard];
+    const shell = {
+        dataset: {eoAccessId: '7', eoCurrentExcavatorId: '8'},
+        querySelector() { return null; },
+    };
+    global.localStorage = {
+        getItem(key) { return stored.has(key) ? stored.get(key) : null; },
+        setItem(key, value) { stored.set(key, value); },
+    };
+    global.document = {
+        querySelector(selector) { return selector === '[data-eo-shell]' ? shell : null; },
+        querySelectorAll() { return cards.filter(card => !card.removed); },
+    };
+    try {
+        restoreLoadedCancellation({
+            payload: {
+                truck_id: 21,
+                free_bucket_acceptance_id: 17,
+                free_bucket_acceptance_local_id: 'old-local',
+            },
+            result: {free_bucket_restored: false},
+        });
+
+        assert.equal(oldCard.removed, true);
+        assert.equal(newerCard.removed, false);
+        const consumed = JSON.parse(Array.from(stored.values())[0] || '{}');
+        assert.ok(consumed['17']);
+        assert.ok(consumed['old-local']);
+        assert.equal(consumed['99'], undefined);
+        assert.equal(consumed['new-local'], undefined);
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
+        if (previousLocalStorage === undefined) delete global.localStorage;
+        else global.localStorage = previousLocalStorage;
+    }
+});
+
+test('fresh server snapshot prevents an old confirmed cancellation from resurrecting an acceptance', () => {
+    const record = {
+        event: {
+            event_type: 'excavator.trip.loaded.cancelled',
+            payload: {
+                free_bucket_acceptance_id: 17,
+                free_bucket_acceptance_local_id: 'old-local',
+            },
+        },
+        result: {
+            free_bucket_restored: true,
+            version: 40,
+            server_ids: {free_bucket_acceptance_id: 17},
+            free_bucket_client_acceptance_id: 'old-local',
+        },
+    };
+
+    assert.equal(confirmedCancellationIsAbsent(record, {version: 41, cards: []}), true);
+    assert.equal(confirmedCancellationIsAbsent(record, {
+        version: 41,
+        cards: [{id: 17, client_acceptance_id: 'old-local'}],
+    }), false);
+    assert.equal(
+        confirmedCancellationIsAbsent(record, {version: 39, cards: []}),
+        false,
+        'an older snapshot cannot override the newer confirmed cancellation result',
+    );
+});
+
+test('confirmed cancellation replay respects a newer acceptance for the same truck', () => {
+    const previousDocument = global.document;
+    const previousLocalStorage = global.localStorage;
+    const stored = new Map();
+    const newerCard = {
+        dataset: {
+            eoFreeBucket: '1',
+            eoFreeBucketAcceptanceId: '99',
+            eoFreeBucketAcceptanceLocalId: 'new-local',
+            truckId: '21',
+        },
+        removed: false,
+        remove() { this.removed = true; },
+    };
+    const shell = {
+        dataset: {eoAccessId: '7', eoCurrentExcavatorId: '8'},
+        querySelector(selector) {
+            return selector.includes('data-truck-id="21"') ? newerCard : null;
+        },
+    };
+    global.localStorage = {
+        getItem(key) { return stored.has(key) ? stored.get(key) : null; },
+        setItem(key, value) { stored.set(key, value); },
+    };
+    global.document = {
+        querySelector(selector) { return selector === '[data-eo-shell]' ? shell : null; },
+        querySelectorAll() { return newerCard.removed ? [] : [newerCard]; },
+    };
+    const record = {
+        event: {
+            event_type: 'excavator.trip.loaded.cancelled',
+            sequence: 3,
+            payload: {
+                truck_id: 21,
+                free_bucket_acceptance_id: 17,
+                free_bucket_acceptance_local_id: 'old-local',
+                free_bucket_reservation_expires_at_ms: Date.now() + 60_000,
+            },
+        },
+        result: {
+            free_bucket_restored: true,
+            version: 40,
+            server_ids: {free_bucket_acceptance_id: 17},
+            free_bucket_client_acceptance_id: 'old-local',
+        },
+    };
+    try {
+        reconcileConfirmed([record], {
+            version: 41,
+            cards: [{id: 99, client_acceptance_id: 'new-local', truck_id: 21}],
+        });
+
+        assert.equal(newerCard.removed, false);
+        assert.equal(newerCard.dataset.eoFreeBucketAcceptanceId, '99');
+        assert.equal(newerCard.dataset.eoFreeBucketAcceptanceLocalId, 'new-local');
+        const consumed = JSON.parse(Array.from(stored.values())[0] || '{}');
+        assert.ok(consumed['17']);
+        assert.ok(consumed['old-local']);
+        assert.equal(consumed['99'], undefined);
+    } finally {
+        if (previousDocument === undefined) delete global.document;
+        else global.document = previousDocument;
+        if (previousLocalStorage === undefined) delete global.localStorage;
+        else global.localStorage = previousLocalStorage;
+    }
+});
+
+test('a no-effect acceptance keeps its local reference instead of borrowing the winner id', () => {
+    assert.match(source, /eoFreeBucketAcceptanceId = result\.no_effect\s*\? ""/);
+    assert.match(source, /eoFreeBucketAcceptanceId = result && result\.no_effect\s*\? ""/);
+});
+
+test('technical reconciliation never becomes a blocked field card or review prompt', () => {
+    const attentionStart = source.indexOf('function markAttention(event, result) {');
+    const attentionEnd = source.indexOf('function attachShell(options) {', attentionStart);
+    assert.ok(attentionStart >= 0 && attentionEnd > attentionStart);
+    const attentionSource = source.slice(attentionStart, attentionEnd);
+    assert.doesNotMatch(attentionSource, /eoCanLoad\s*=\s*"0"/);
+    assert.doesNotMatch(attentionSource, /is-free-bucket-conflict/);
+    assert.doesNotMatch(attentionSource, /showNotice/);
+    assert.doesNotMatch(attentionSource, /сверк|конфликт/i);
+    assert.match(attentionSource, /console\.warn/);
+    assert.match(attentionSource, /invalidateRefresh/);
+    assert.doesNotMatch(source, /Требуется сверка|Свободный ковш · конфликт/);
+    assert.doesNotMatch(template, /Нужна сверка|требует сверки/i);
 });
 
 test('dispatcher removes the used marker at its server deadline without polling', () => {
@@ -121,8 +428,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v262/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v262/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v263/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v263/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

@@ -693,25 +693,35 @@ class TripTerminalSequentialRegressionTests(TripTerminalFixtureMixin, TestCase):
         )
         self.assertEqual(action.trip, trip)
 
-    def test_trip_action_same_id_different_object_rejects_reused_identifier(self):
+    def test_trip_action_same_id_different_object_returns_neutral_ack_for_requested_trip(self):
         first_trip = self.create_trip()
         driver_client = self.client_for_access(self.driver_one_access)
 
         first = self.post_driver_unload(driver_client, first_trip, 'stale-tab-trip-action')
         second_trip = self.create_trip()
-        second = self.post_driver_unload(driver_client, second_trip, 'stale-tab-trip-action')
+        second = driver_client.post(
+            reverse('driver_complete_trip', args=[second_trip.pk]),
+            data={'client_action_id': 'stale-tab-trip-action'},
+            HTTP_ACCEPT='application/json',
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(first.status_code, 302)
-        self.assertEqual(second.status_code, 302)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()['ok'])
+        self.assertTrue(second.json()['no_effect'])
+        self.assertEqual(second.json()['client_action_id'], 'stale-tab-trip-action')
+        self.assertEqual(second.json()['trip_id'], second_trip.id)
         first_trip.refresh_from_db()
         second_trip.refresh_from_db()
         self.assertEqual(first_trip.status, TripStatus.COMPLETED)
         self.assertEqual(second_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
-        action = TripClientAction.objects.get(
+        actions = TripClientAction.objects.filter(
             action_type='trip_unloaded',
             client_action_id='stale-tab-trip-action',
         )
-        self.assertEqual(action.trip, first_trip)
+        self.assertEqual(actions.count(), 1)
+        self.assertEqual(actions.get().trip, first_trip)
 
     def test_shift_action_same_id_same_object_returns_one_shift_result(self):
         first_shift, first_created = close_driver_shift(

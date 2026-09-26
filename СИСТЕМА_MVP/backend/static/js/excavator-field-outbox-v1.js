@@ -90,8 +90,26 @@
 
     function recoverableDependencyConflict(event) {
         if (!event || event.sync_state !== "conflict") return false;
-        return event.last_error_code === "dependency_rejected"
+        return ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(event.last_error_code) >= 0
             || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
+    }
+
+    function recoverableWorkerTruthConflict(event) {
+        if (!event || event.sync_state !== "conflict") return false;
+        var code = String(event.last_error_code || "");
+        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid", "shift_already_closed"].indexOf(code) >= 0) return true;
+        if (
+            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
+            && [
+                "active_downtime",
+                "equipment_downtime_active",
+                "excavator_unavailable",
+                "free_bucket_excavator_unavailable",
+                "free_bucket_truck_unavailable",
+                "open_trip_changed",
+            ].indexOf(code) >= 0
+        ) return true;
+        return false;
     }
 
     function createLocalStorageAdapter(storage, queueKey) {
@@ -457,72 +475,16 @@
 
         function eligible(events) {
             var now = Date.now();
-            var blocked = Object.create(null);
             var batch = [];
-            events.forEach(function (event) {
-                if (["conflict", "invalid", "auth_required"].indexOf(event.sync_state) >= 0) blocked[event.event_id] = true;
-            });
             var ordered = events.slice().sort(compareEvents);
             for (var index = 0; index < ordered.length; index += 1) {
                 var event = ordered[index];
                 if (event.sync_state !== "pending") continue;
                 if (Number(event.next_retry_at || 0) > now) break;
-                if ((event.depends_on || []).some(function (dependency) { return blocked[dependency]; })) {
-                    blocked[event.event_id] = true;
-                    continue;
-                }
                 batch.push(event);
                 if (batch.length >= batchSize) break;
             }
             return batch;
-        }
-
-        function markTerminalDependencyConflicts(events) {
-            var rejected = Object.create(null);
-            events.forEach(function (event) {
-                if (event.sync_state === "conflict" || event.sync_state === "invalid") {
-                    rejected[event.event_id] = true;
-                }
-            });
-            var affected = [];
-            var ordered = events.slice().sort(compareEvents);
-            var changed = true;
-            while (changed) {
-                changed = false;
-                ordered.forEach(function (event) {
-                    if (
-                        event.sync_state === "pending"
-                        && !rejected[event.event_id]
-                        && (event.depends_on || []).some(function (dependency) { return rejected[dependency]; })
-                    ) {
-                        rejected[event.event_id] = true;
-                        affected.push(event);
-                        changed = true;
-                    }
-                });
-            }
-            var chain = Promise.resolve();
-            affected.forEach(function (event) {
-                chain = chain.then(function () {
-                    var message = "Предыдущее связанное действие требует сверки.";
-                    return updateEvent(event.event_id, {
-                        sync_state: "conflict",
-                        next_retry_at: 0,
-                        last_error_code: "dependency_rejected",
-                        last_error: message
-                    }).then(function () {
-                        if (typeof options.onAttention === "function") {
-                            options.onAttention(clone(event), {
-                                event_id: event.event_id,
-                                status: "conflict",
-                                code: "dependency_rejected",
-                                message: message
-                            });
-                        }
-                    });
-                });
-            });
-            return chain.then(list);
         }
 
         function applyResults(sent, payload) {
@@ -567,7 +529,7 @@
             running = list().then(function (events) {
                 notify(events, {reason: "flush_start"});
                 function drain() {
-                    return list().then(markTerminalDependencyConflicts).then(function (current) {
+                    return list().then(function (current) {
                         var batch = eligible(current);
                         if (!batch.length || documentHidden()) return current;
                         return Promise.all(batch.map(function (event) {
@@ -610,7 +572,9 @@
             return list().then(function (events) {
                 var recoverable = Object.create(null);
                 events.forEach(function (event) {
-                    if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                    if (recoverableDeviceClockConflict(event) || recoverableWorkerTruthConflict(event)) {
+                        recoverable[event.event_id] = true;
+                    }
                 });
                 var changed = true;
                 while (changed) {

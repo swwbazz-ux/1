@@ -1,6 +1,7 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
 СИСТЕМА_MVP/backend/downtimes/driver_workflow.py
+СИСТЕМА_MVP/backend/downtimes/models.py
 СИСТЕМА_MVP/backend/core/dump_point_names.py
 СИСТЕМА_MVP/backend/core/equipment_numbers.py
 СИСТЕМА_MVP/backend/core/dispatcher_push.py
@@ -60,6 +61,7 @@
 СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
 СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
 СИСТЕМА_MVP/backend/trips/free_bucket.py
+СИСТЕМА_MVP/backend/trips/forms.py
 СИСТЕМА_MVP/backend/trips/manual_loading.py
 СИСТЕМА_MVP/backend/trips/models.py
 СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
@@ -113,3 +115,4 @@
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_workspace.html
 СИСТЕМА_MVP/backend/trips/trip_creation.py
+СИСТЕМА_MVP/backend/trips/qa_simulator.py

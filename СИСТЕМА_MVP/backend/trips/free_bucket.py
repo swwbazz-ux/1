@@ -25,8 +25,22 @@ FREE_BUCKET_REQUEST_TTL = timedelta(
 )
 
 
+def free_bucket_reservation_expires_at(acceptance):
+    """Return the immutable deadline of the original ten-minute reservation."""
+    if acceptance is None or acceptance.occurred_at is None:
+        return None
+    return acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
+
+
 def free_bucket_acceptance_expires_at(acceptance):
-    """Return the server deadline only for the already-used visual card."""
+    """Return the operational deadline for a reservation or used visual card."""
+    from .models import FreeBucketAcceptanceStatus
+
+    if acceptance.status in {
+        FreeBucketAcceptanceStatus.REQUESTED,
+        FreeBucketAcceptanceStatus.ACCEPTED,
+    }:
+        return free_bucket_reservation_expires_at(acceptance)
     trip = getattr(acceptance, 'used_trip', None)
     anchor = (
         getattr(trip, 'loaded_at', None)
@@ -37,10 +51,7 @@ def free_bucket_acceptance_expires_at(acceptance):
 
 
 def active_free_bucket_acceptance_filter(*, now=None):
-    """Keep requests/acceptances until action; keep USED only for its card window.
-
-    The five-minute window never cancels a pending driver request or an accepted
-    one-load right.  It only retires the already-consumed Excavator card.
+    """Keep a ten-minute reservation or a used five-minute visual card.
 
     An unspent right also dies with its own shift.  Normally
     ``cancel_free_bucket_acceptances_for_shift`` does that at shift close, but a
@@ -57,23 +68,53 @@ def active_free_bucket_acceptance_filter(*, now=None):
     cutoff = now - FREE_BUCKET_DUMP_CARD_VISIBILITY
     # Включённый, но не использованный ковш живёт не дольше FREE_BUCKET_REQUEST_TTL
     # с момента включения (occurred_at — момент выбора на устройстве водителя).
-    request_is_fresh = Q(occurred_at__gt=now - FREE_BUCKET_REQUEST_TTL)
-    used_time_is_recent = Q(used_trip__loaded_at__gt=cutoff) | Q(
+    request_is_fresh = Q(
+        occurred_at__lte=now,
+        occurred_at__gt=now - FREE_BUCKET_REQUEST_TTL,
+    )
+    used_time_is_recent = Q(
+        used_trip__loaded_at__lte=now,
+        used_trip__loaded_at__gt=cutoff,
+    ) | Q(
         used_trip__loaded_at__isnull=True,
+        used_at__lte=now,
         used_at__gt=cutoff,
     ) | Q(
         used_trip__loaded_at__isnull=True,
         used_at__isnull=True,
+        used_trip__created_at__lte=now,
         used_trip__created_at__gt=cutoff,
     )
     # Заявку может завести и водитель (requesting_shift), и машинист
     # экскаватора (loading_shift). Право живо, пока жива хотя бы одна из своих
     # смен; без единой привязки к смене не трогаем — такие записи заводят
     # другие пути, и гадать за них здесь нельзя.
+    # Every participant shift bound to the right must still be open. Closing
+    # either the requesting Driver shift or the accepting Excavator shift ends
+    # an unused one-load reservation; null means that side never participated.
     shift_is_alive = (
-        Q(requesting_shift__isnull=False, requesting_shift__closed_at__isnull=True)
-        | Q(loading_shift__isnull=False, loading_shift__closed_at__isnull=True)
-        | Q(requesting_shift__isnull=True, loading_shift__isnull=True)
+        (
+            Q(requesting_shift__isnull=True)
+            | Q(
+                requesting_shift__opened_at__lte=now,
+                requesting_shift__closed_at__isnull=True,
+            )
+            | Q(
+                requesting_shift__opened_at__lte=now,
+                requesting_shift__closed_at__gt=now,
+            )
+        )
+        & (
+            Q(loading_shift__isnull=True)
+            | Q(
+                loading_shift__opened_at__lte=now,
+                loading_shift__closed_at__isnull=True,
+            )
+            | Q(
+                loading_shift__opened_at__lte=now,
+                loading_shift__closed_at__gt=now,
+            )
+        )
     )
     return (
         Q(status__in=(
@@ -100,6 +141,38 @@ def active_free_bucket_acceptance_for_truck(truck, *, for_update=False, now=None
     if for_update:
         queryset = queryset.select_for_update(of=('self',))
     return queryset.first()
+
+
+def finish_free_bucket_hint_for_factual_load(acceptance, *, loaded_at):
+    """Retire an older free-bucket hint without vetoing a factual load.
+
+    A REQUESTED/ACCEPTED row is only an operational hint.  If the loader taps
+    after that hint, the tap wins and the unused row is cancelled.  A USED row
+    belongs to the preceding trip and is closed when a later load supersedes
+    that trip.  A hint created after the tap is historical future state and is
+    deliberately left untouched.
+    """
+    from .models import FreeBucketAcceptanceStatus
+
+    if acceptance.status == FreeBucketAcceptanceStatus.USED:
+        used_trip = getattr(acceptance, 'used_trip', None)
+        anchor = acceptance.used_at or getattr(used_trip, 'loaded_at', None) or acceptance.occurred_at
+    else:
+        anchor = acceptance.accepted_at or acceptance.occurred_at
+    if anchor and anchor > loaded_at:
+        return False
+    if acceptance.status in {
+        FreeBucketAcceptanceStatus.REQUESTED,
+        FreeBucketAcceptanceStatus.ACCEPTED,
+    }:
+        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+        acceptance.cancelled_at = loaded_at
+        acceptance.save(update_fields=['status', 'cancelled_at'])
+        return True
+    if acceptance.status == FreeBucketAcceptanceStatus.USED and acceptance.used_trip_id:
+        close_free_bucket_acceptance_for_trip(acceptance.used_trip, closed_at=loaded_at)
+        return True
+    return False
 
 
 @transaction.atomic
@@ -207,23 +280,86 @@ def canonical_free_bucket_work_context_snapshot(excavator):
     }
 
 
+def _factual_free_bucket_work_context_snapshot(acceptance, payload, load_context):
+    """Build the immutable context that was visible for the factual load.
+
+    New clients send the complete dump-point drum. Older clients only send the
+    selected point; for them we preserve the acceptance list but replace/add
+    the selected point so a later Driver action can never be constrained to an
+    obsolete route.
+    """
+    previous = acceptance.work_context_snapshot or {}
+    raw_rows = payload.get('dump_points_snapshot')
+    rows = []
+    if isinstance(raw_rows, list):
+        for raw in raw_rows:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                point_id = int(raw.get('id'))
+            except (TypeError, ValueError):
+                continue
+            if point_id <= 0 or any(item['id'] == point_id for item in rows):
+                continue
+            rows.append({
+                'id': point_id,
+                'name': str(raw.get('name') or 'Точка разгрузки')[:255],
+                'transport_distance_km': raw.get('transport_distance_km'),
+            })
+    else:
+        rows = [
+            dict(raw)
+            for raw in (previous.get('dump_points') or [])
+            if isinstance(raw, dict)
+        ]
+
+    selected = {
+        'id': load_context['dump_point'].id,
+        'name': str(load_context['dump_point']),
+        'transport_distance_km': load_context['transport_distance_km'],
+    }
+    selected_index = next(
+        (index for index, row in enumerate(rows) if str(row.get('id')) == str(selected['id'])),
+        None,
+    )
+    if selected_index is None:
+        rows.append(selected)
+    else:
+        rows[selected_index] = selected
+
+    return {
+        **previous,
+        'format_version': 2,
+        'source': 'load_tap',
+        'excavator_id': acceptance.excavator_id,
+        'rock_type_id': load_context['rock_type'].id,
+        'rock_type_name': str(load_context['rock_type']),
+        'loading_horizon': load_context['loading_horizon'],
+        'loading_block': load_context['loading_block'],
+        'selected_dump_point_id': load_context['dump_point'].id,
+        'dump_points': rows,
+    }
+
+
 def resolve_free_bucket_load_context(acceptance, payload):
-    """Resolve a load strictly from the immutable acceptance snapshot."""
+    """Resolve the factual load from the worker's immutable tap payload.
+
+    The acceptance snapshot remains audit/fallback data for older clients. It
+    must never veto a later load whose screen showed a different valid route or
+    face context: the tap snapshot is the production fact.
+    """
     from references.models import DumpPoint, RockType
 
     snapshot = acceptance.work_context_snapshot or {}
     try:
-        snapshot_rock_id = int(snapshot.get('rock_type_id'))
         requested_rock_id = int(payload.get('rock_type_id') or payload.get('rock_type'))
         requested_dump_id = int(payload.get('dump_point_id'))
     except (TypeError, ValueError):
         raise ValidationError('Контекст погрузки свободного ковша заполнен не полностью.')
-    if requested_rock_id != snapshot_rock_id:
-        raise ValidationError('Порода погрузки отличается от сохранённого контекста свободного ковша.')
 
     dump_rows = snapshot.get('dump_points')
     if not isinstance(dump_rows, list):
-        raise ValidationError('Сохранённый контекст свободного ковша повреждён.')
+        dump_rows = []
     selected_dump = next(
         (
             item for item in dump_rows
@@ -231,20 +367,35 @@ def resolve_free_bucket_load_context(acceptance, payload):
         ),
         None,
     )
-    if not selected_dump:
-        raise ValidationError('Точка разгрузки не входила в сохранённый контекст свободного ковша.')
 
-    rock = RockType.objects.filter(pk=snapshot_rock_id).first()
+    rock = RockType.objects.filter(pk=requested_rock_id).first()
     dump_point = DumpPoint.objects.select_for_update().filter(pk=requested_dump_id).first()
     if not rock or not dump_point:
-        raise ValidationError('Справочные данные сохранённого контекста больше недоступны.')
-    return {
+        raise ValidationError('Справочные данные из отметки погрузки больше недоступны.')
+    transport_distance = (
+        payload.get('transport_distance_km')
+        if 'transport_distance_km' in payload
+        else (selected_dump or {}).get('transport_distance_km')
+    )
+    load_context = {
         'rock_type': rock,
         'dump_point': dump_point,
-        'loading_horizon': str(snapshot.get('loading_horizon') or '')[:64],
-        'loading_block': str(snapshot.get('loading_block') or '')[:64],
-        'transport_distance_km': selected_dump.get('transport_distance_km'),
+        'loading_horizon': str(
+            payload.get('loading_horizon')
+            if 'loading_horizon' in payload else snapshot.get('loading_horizon') or ''
+        )[:64],
+        'loading_block': str(
+            payload.get('loading_block')
+            if 'loading_block' in payload else snapshot.get('loading_block') or ''
+        )[:64],
+        'transport_distance_km': transport_distance,
     }
+    acceptance.work_context_snapshot = _factual_free_bucket_work_context_snapshot(
+        acceptance,
+        payload,
+        load_context,
+    )
+    return load_context
 
 
 def free_bucket_snapshot_dump_points_for_trip(trip):
@@ -297,6 +448,86 @@ def close_free_bucket_acceptance_for_trip(trip, *, closed_at=None):
     )
 
 
+def restore_free_bucket_acceptance_after_trip_cancel(
+    trip,
+    *,
+    cancelled_at=None,
+    as_of=None,
+):
+    """Return a cancelled temporary load to its original reservation window.
+
+    The reservation keeps the deadline that started at ``occurred_at``.  A
+    swipe-back before that deadline reopens the same acceptance; it never starts
+    another ten-minute window.  If the deadline/participant shift already ended
+    (or another cycle is active), the historical acceptance stays terminal.
+    """
+    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    cancelled_at = cancelled_at or timezone.now()
+    as_of = as_of or timezone.now()
+    acceptance = (
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .select_related('requesting_shift', 'loading_shift')
+        .filter(
+            used_trip=trip,
+            status__in=(
+                FreeBucketAcceptanceStatus.USED,
+                FreeBucketAcceptanceStatus.CLOSED,
+            ),
+        )
+        .first()
+    )
+    if acceptance is None:
+        return None, False, None
+
+    deadline = free_bucket_reservation_expires_at(acceptance)
+    shift_boundaries = [
+        bound_shift.closed_at
+        for bound_shift in (acceptance.requesting_shift, acceptance.loading_shift)
+        if bound_shift and bound_shift.closed_at
+    ]
+    later_cycles = list(
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .filter(truck=acceptance.truck)
+        .exclude(pk=acceptance.pk)
+        .filter(
+            Q(occurred_at__gt=acceptance.occurred_at)
+            | Q(occurred_at=acceptance.occurred_at, pk__gt=acceptance.pk)
+        )
+        .order_by('occurred_at', 'id')
+    )
+    later_cycle_at = later_cycles[0].occurred_at if later_cycles else None
+    terminal_at = min([
+        deadline,
+        *shift_boundaries,
+        *([later_cycle_at] if later_cycle_at else []),
+    ])
+    can_restore = bool(
+        cancelled_at < terminal_at
+        and as_of < terminal_at
+        and not later_cycles
+    )
+    if can_restore:
+        acceptance.status = FreeBucketAcceptanceStatus.ACCEPTED
+        acceptance.cancelled_at = None
+        acceptance.used_at = None
+        acceptance.used_trip = None
+        acceptance.closed_at = None
+        acceptance.save(update_fields=[
+            'status', 'cancelled_at', 'used_at', 'used_trip', 'closed_at',
+        ])
+        return acceptance, True, terminal_at
+
+    if acceptance.status == FreeBucketAcceptanceStatus.USED:
+        acceptance.status = FreeBucketAcceptanceStatus.CLOSED
+        acceptance.closed_at = terminal_at
+        acceptance.save(update_fields=['status', 'closed_at'])
+    elif acceptance.closed_at is None or terminal_at < acceptance.closed_at:
+        acceptance.closed_at = terminal_at
+        acceptance.save(update_fields=['closed_at'])
+    return acceptance, False, terminal_at
+
+
 def cancel_free_bucket_acceptances_for_shift(shift, *, cancelled_at=None):
     """Cancel unspent temporary rights when either participating shift closes.
 
@@ -306,7 +537,7 @@ def cancel_free_bucket_acceptances_for_shift(shift, *, cancelled_at=None):
     from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
 
     with transaction.atomic():
-        acceptance_ids = list(
+        acceptances = list(
             FreeBucketAcceptance.objects.select_for_update(of=('self',))
             .filter(
                 Q(requesting_shift=shift) | Q(loading_shift=shift),
@@ -316,14 +547,18 @@ def cancel_free_bucket_acceptances_for_shift(shift, *, cancelled_at=None):
                 ),
             )
             .order_by('id')
-            .values_list('id', flat=True)
         )
-        if not acceptance_ids:
+        if not acceptances:
             return 0
-        return FreeBucketAcceptance.objects.filter(id__in=acceptance_ids).update(
-            status=FreeBucketAcceptanceStatus.CANCELLED,
-            cancelled_at=cancelled_at or timezone.now(),
-        )
+        shift_boundary = cancelled_at or timezone.now()
+        for acceptance in acceptances:
+            acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+            acceptance.cancelled_at = min(
+                shift_boundary,
+                acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL,
+            )
+            acceptance.save(update_fields=['status', 'cancelled_at'])
+        return len(acceptances)
 
 
 def free_bucket_dump_card_expires_at(trip):

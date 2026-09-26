@@ -325,15 +325,16 @@ test("all three unloading waits use one semantic workflow and template availabil
     );
 });
 
-test("downtime review reconciles server truth and terminal events are not projected as active", () => {
+test("downtime confirmation reconciles server truth and terminal events are not projected as active", () => {
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
         /window\.selectDriverDowntimeProjection\(ordered\)/
     );
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
-        /event\.event_type === "driver\.downtime\.started" \|\| event\.event_type === "driver\.downtime\.ended"[\s\S]*window\.AppRealtime\.requestReconcile\([\s\S]*"driver_downtime_review"/
+        /event\.event_type === "driver\.downtime\.started" \|\| event\.event_type === "driver\.downtime\.ended"[\s\S]*if \(isDowntime\)[\s\S]*window\.AppRealtime\.requestReconcile\("driver_offline_event_confirmed"\)/
     );
+    assert.doesNotMatch(DRIVER_TEMPLATE_SOURCE, /driver_downtime_review/);
 });
 
 test("a confirmed downtime receipt overrides only an older cached shell", () => {
