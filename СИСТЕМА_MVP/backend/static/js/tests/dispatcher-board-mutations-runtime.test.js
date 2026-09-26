@@ -11,6 +11,10 @@ const MUTATIONS_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-board-mutations-v1.js"),
     "utf8"
 );
+const LAYOUT_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-layout-v1.js"),
+    "utf8"
+);
 const DND_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-board-dnd-v1.js"),
     "utf8"
@@ -468,6 +472,7 @@ test("доска собирается только с выделенным мо�
     const context = {document: documentStub, window: {}};
     vm.runInNewContext(DND_SOURCE, context, {filename: "dispatcher-board-dnd-v1.js"});
     vm.runInNewContext(MUTATIONS_SOURCE, context, {filename: "dispatcher-board-mutations-v1.js"});
+    vm.runInNewContext(LAYOUT_SOURCE, context, {filename: "dispatcher-board-layout-v1.js"});
     vm.runInNewContext(BOARD_SOURCE, context, {filename: "dispatcher-board-v1.js"});
 
     const board = context.window.createDispatcherBoard({
@@ -480,6 +485,7 @@ test("доска собирается только с выделенным мо�
         equipmentStateLabel() { return ""; },
         neutralEquipmentIcon() { return ""; },
         setNodeEquipmentState() {},
+        layout: context.window.createDispatcherBoardLayout({document: documentStub}),
     });
 
     assert.equal(typeof board.bindInteractions, "function");

@@ -115,6 +115,7 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     self.assertIn('/static/js/dispatcher-detail-settings-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-detail-charts-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-detail-v1.js', core_assets.group(1))
+                    self.assertIn('/static/js/dispatcher-board-layout-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-complex-truck-racks-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-haul-assignment-state-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-board-v1.js', core_assets.group(1))
