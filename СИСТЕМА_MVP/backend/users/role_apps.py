@@ -237,7 +237,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v358',
+        shell_version='driver-mobile-shell-v360',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -308,7 +308,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v144',
+        shell_version='dispatcher-desktop-shell-v162',
     ),
     RoleApp(
         role_code='settlement_clerk',

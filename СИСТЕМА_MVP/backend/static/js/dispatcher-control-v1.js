@@ -93,11 +93,42 @@ document.addEventListener("DOMContentLoaded", function () {
             return dispatcherShiftOpen;
         }
     });
+    if (typeof window.createDispatcherEquipmentSearch !== "function") {
+        throw new Error("Dispatcher equipment search module is not loaded");
+    }
+    var dispatcherEquipmentSearch = window.createDispatcherEquipmentSearch();
+    dispatcherEquipmentSearch.bind();
+    if (typeof window.createDispatcherEquipmentCardTrigger !== "function") {
+        throw new Error("Dispatcher equipment card trigger module is not loaded");
+    }
+    if (typeof window.createDispatcherBoardLayout !== "function") {
+        throw new Error("Dispatcher board layout module is not loaded");
+    }
+    if (typeof window.createDispatcherComplexTruckRacks !== "function") {
+        throw new Error("Dispatcher complex truck racks module is not loaded");
+    }
+    if (typeof window.createDispatcherHaulAssignmentState !== "function") {
+        throw new Error("Dispatcher haul assignment state module is not loaded");
+    }
+    if (typeof window.createDispatcherBoardDnD !== "function") {
+        throw new Error("Dispatcher board drag-and-drop module is not loaded");
+    }
     if (typeof window.createDispatcherBoard !== "function") {
         throw new Error("Dispatcher board module is not loaded");
     }
     var dispatcherRealtime = null;
-    var dispatcherBoard = window.createDispatcherBoard({
+    var dispatcherBoard = null;
+    var dispatcherHaulAssignmentState = window.createDispatcherHaulAssignmentState();
+    var dispatcherEquipmentCardTrigger = window.createDispatcherEquipmentCardTrigger({
+        openEquipmentCard: dispatcherDetail.openEquipmentCard
+    });
+    var dispatcherBoardLayout = window.createDispatcherBoardLayout({
+        document: document
+    });
+    var dispatcherComplexTruckRacks = window.createDispatcherComplexTruckRacks({
+        sortEquipmentList: dispatcherBoardLayout.sortEquipmentList
+    });
+    dispatcherBoard = window.createDispatcherBoard({
         post: dispatcherPost,
         moveExcavatorUrl: dispatcherMoveExcavatorUrl,
         assignTruckUrl: dispatcherAssignTruckUrl,
@@ -106,16 +137,17 @@ document.addEventListener("DOMContentLoaded", function () {
         },
         showError: showDispatcherDnDError,
         reloadFallback: reloadDispatcherBoardAsFallback,
-        openEquipmentCard: dispatcherDetail.openEquipmentCard,
+        equipmentCardTrigger: dispatcherEquipmentCardTrigger,
         equipmentStateClass: dispatcherDetail.equipmentStateClass,
         equipmentStateLabel: dispatcherDetail.equipmentStateLabel,
         neutralEquipmentIcon: dispatcherDetail.neutralEquipmentIcon,
         setNodeEquipmentState: dispatcherDetail.setNodeEquipmentState,
+        rebindEquipmentSearch: dispatcherEquipmentSearch.bind,
+        layout: dispatcherBoardLayout,
+        complexTruckRacks: dispatcherComplexTruckRacks,
+        assignmentState: dispatcherHaulAssignmentState,
         refreshBoardFromServer: function (refreshOptions) {
             return dispatcherRealtime.refreshBoardFromServer(refreshOptions);
-        },
-        markLocalAssignmentApplied: function () {
-            return dispatcherRealtime.markLocalAssignmentApplied();
         }
     });
     function reloadDispatcherBoardAsFallback() {
@@ -140,11 +172,11 @@ document.addEventListener("DOMContentLoaded", function () {
         setEquipmentCards: dispatcherDetail.setCards,
         getDetailLayer: dispatcherDetail.getLayer,
         openEquipmentCard: dispatcherDetail.openEquipmentCard,
+        resetBoardDragSession: dispatcherBoard.resetDragSession,
         bindBoardInteractions: dispatcherBoard.bindInteractions,
         refreshBoardIntegrity: dispatcherBoard.refreshIntegrity,
         updateSyncIndicator: updateDispatcherSyncIndicator
     });
-    var markDispatcherLocalAssignmentApplied = dispatcherRealtime.markLocalAssignmentApplied;
     var isDispatcherOperationalRefreshUnsafe = dispatcherRealtime.isOperationalRefreshUnsafe;
     var refreshDispatcherDesktopBoardFromServer = dispatcherRealtime.refreshBoardFromServer;
     var seedDispatcherBoardFingerprints = dispatcherRealtime.seedBoardFingerprints;

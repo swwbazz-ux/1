@@ -673,6 +673,143 @@ test("active selection A blocks selection B before enqueue and preserves A", asy
     assert.equal(controller.state().acceptance_id, 701);
 });
 
+test("a server-rejected selected event never leaves the free bucket stuck active", () => {
+    // Боевой случай 26.09.2026 (afb373a5): отклонённый driver.free_bucket.selected
+    // (conflict/invalid/auth_required) всё равно давал active:true + sync_mode
+    // "review" — самосвал застревал навсегда, ни выбрать заново, ни отменить.
+    // Сервер его не принял — ковша нет вообще, а не "на сверке".
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    const projected = controller.project([{
+        event_type: "driver.free_bucket.selected",
+        event_id: "rejected-selection-1",
+        sequence: 1,
+        state: "conflict",
+        occurred_at: "2026-09-26T10:00:00Z",
+        payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    }]);
+    assert.equal(projected.active, false);
+    assert.notEqual(projected.sync_mode, "review");
+    assert.equal(controller.state().active, false);
+});
+
+test("cancel drops a rejected local selection without queueing a meaningless server cancel", async () => {
+    let enqueueCalls = 0;
+    const localStorage = storage();
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: localStorage,
+        window: {localStorage},
+        outbox: {
+            pending() {
+                return Promise.resolve([{
+                    event_type: "driver.free_bucket.selected",
+                    event_id: "rejected-selection-to-cancel",
+                    state: "conflict",
+                }]);
+            },
+            enqueue() {
+                enqueueCalls += 1;
+                return Promise.resolve({event_id: "unexpected-cancel"});
+            },
+        },
+        now: Date.parse("2026-09-26T10:03:00Z"),
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({
+        active: true,
+        acceptance_local_id: "rejected-selection-to-cancel",
+        status: "requested",
+        can_cancel: true,
+        selection: item(),
+        sync_mode: "local",
+        generated_at: "2026-09-26T10:01:00Z",
+    });
+
+    assert.equal(await controller.cancel(), null);
+    assert.equal(enqueueCalls, 0);
+    assert.equal(controller.state().active, false);
+    assert.notEqual(controller.state().sync_mode, "review");
+});
+
+test("a rejected cancel (dependency_rejected on an already-rejected selection) still deactivates locally", () => {
+    // Замкнутый круг 26.09.2026: cancel() ставил dependsOn на отклонённый
+    // selected → сервер отвечал dependency_rejected (state "conflict") →
+    // project() снова ставил "review" и оставлял active — отменить было
+    // нельзя никогда. Правило 1: намерение водителя отменить — истина, даже
+    // если сама отмена не подтверждена сервером.
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+        now: Date.parse("2026-09-26T10:03:00Z"),
+    });
+    controller.installCatalog(serverCatalog());
+    controller.project([{
+        event_type: "driver.free_bucket.selected",
+        event_id: "selection-2",
+        sequence: 1,
+        state: "conflict",
+        occurred_at: "2026-09-26T10:00:00Z",
+        payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    }]);
+    // Отклонённый выбор уже неактивен (правило выше); имитируем отдельный
+    // случай — активный выбор, чью отмену сервер отклоняет как dependency_rejected.
+    controller.project([{
+        event_type: "driver.free_bucket.selected",
+        event_id: "selection-3",
+        sequence: 2,
+        occurred_at: "2026-09-26T10:01:00Z",
+        payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    }]);
+    assert.equal(controller.state().active, true);
+    const projected = controller.project([{
+        event_type: "driver.free_bucket.cancelled",
+        event_id: "cancel-3",
+        sequence: 3,
+        state: "conflict",
+        depends_on: ["selection-3"],
+        occurred_at: "2026-09-26T10:02:00Z",
+        payload: {free_bucket_acceptance_local_id: "selection-3"},
+    }]);
+    assert.equal(projected.active, false);
+    assert.notEqual(projected.sync_mode, "review");
+});
+
+test("a stuck review state from storage becomes inactive as soon as project() runs, even with no new events", () => {
+    // Третий сценарий из того же замкнутого круга: состояние, уже записанное
+    // в хранилище (stateKey) с sync_mode "review" ДО этой правки, не должно
+    // пережить следующий же вызов project() — даже без единого нового
+    // события в пакете.
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({
+        active: true,
+        status: "requested",
+        can_cancel: true,
+        acceptance_local_id: "stuck-selection",
+        selection: item(),
+        sync_mode: "review",
+        version: 12,
+        generated_at: "2026-09-14T03:01:00Z",
+    });
+    const projected = controller.project([]);
+    assert.equal(projected.active, false);
+    assert.notEqual(projected.sync_mode, "review");
+    assert.equal(controller.state().active, false);
+});
+
 test("missing or invalid server catalog keeps last-good snapshot", () => {
     const localStorage = storage();
     const controller = createDriverFreeBucketController({
@@ -717,9 +854,9 @@ test("aged online catalog is marked stale", () => {
 
 test("unavailable tile keeps its status after an unselected state render", () => {
     const unavailable = item({available: false});
-    assert.equal(tileStatusLabel(unavailable, false, {sync_mode: "confirmed"}), "Недоступно");
-    assert.equal(tileStatusLabel(unavailable, true, {sync_mode: "review"}), "Выбран");
-    assert.equal(tileStatusLabel(unavailable, false, {sync_mode: "confirmed"}), "Недоступно");
+    assert.equal(tileStatusLabel(unavailable, false), "Недоступно");
+    assert.equal(tileStatusLabel(unavailable, true), "Выбран");
+    assert.equal(tileStatusLabel(unavailable, false), "Недоступно");
 });
 
 test("technical review state is never shown as a field-worker problem", () => {

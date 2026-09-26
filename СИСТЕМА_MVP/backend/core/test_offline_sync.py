@@ -1276,6 +1276,133 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(repeated['status'], 'deduplicated')
         self.assertEqual(Trip.objects.count(), 1)
 
+    def test_exact_manual_completion_does_not_wait_forever_for_missing_point_dependency(self):
+        loaded = self.driver_manual_event('manual-cycle-missing-point-parent', 1)
+        load_result = self.sync(
+            [loaded],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-missing-parent-device',
+        ).json()['results'][0]
+        trip = Trip.objects.get(pk=load_result['server_ids']['trip_id'])
+        wait_reason = DowntimeReason.objects.get(name='Ожидание разгрузки')
+        wait = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=wait_reason,
+            started_at=trip.loaded_at + timedelta(seconds=1),
+        )
+        completed = self.driver_manual_complete_event(
+            loaded,
+            event_id='manual-complete-after-missing-point-parent',
+            sequence=3,
+            trip_id=trip.id,
+            occurred_at=trip.loaded_at + timedelta(minutes=1),
+        )
+        completed['depends_on'] = ['missing-point-change-receipt']
+
+        result = self.sync(
+            [completed],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-manual-missing-parent-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(
+            result['dependency_recovery']['ignored'],
+            ['missing-point-change-receipt'],
+        )
+        trip.refresh_from_db()
+        wait.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(wait.ended_at, trip.completed_at)
+
+    def test_exact_automatic_unload_does_not_wait_forever_for_missing_point_dependency(self):
+        loaded_at = timezone.now() - timedelta(minutes=2)
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            loading_shift=self.shift,
+            driver=self.driver,
+            driver_control_shift=self.truck_shift,
+            driver_participation_recorded=True,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=loaded_at,
+        )
+        TripClientAction.objects.create(
+            action_type='truck_loaded',
+            client_action_id='automatic-load-before-unload',
+            trip=trip,
+            actor=self.operator,
+        )
+        wait_reason = DowntimeReason.objects.get(name='Ожидание разгрузки')
+        wait = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            employee=self.driver,
+            reason=wait_reason,
+            started_at=loaded_at + timedelta(seconds=1),
+        )
+        unloaded_at = loaded_at + timedelta(minutes=1)
+        event = {
+            'event_id': 'automatic-unload-after-missing-point-parent',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': unloaded_at.isoformat(),
+            'sequence': 2,
+            'depends_on': ['missing-point-change-receipt'],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'context_snapshot': {},
+            'payload': {'trip_id': trip.id},
+        }
+
+        result = self.sync(
+            [event],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-automatic-missing-parent-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(
+            result['dependency_recovery']['ignored'],
+            ['missing-point-change-receipt'],
+        )
+        trip.refresh_from_db()
+        wait.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(wait.ended_at, trip.completed_at)
+        self.assertGreaterEqual(trip.completed_at, unloaded_at)
+
+    def test_local_manual_completion_still_waits_for_its_required_load_dependency(self):
+        loaded = self.driver_manual_event('manual-load-still-required', 1)
+        completed = self.driver_manual_complete_event(
+            loaded,
+            event_id='manual-complete-without-required-load',
+            sequence=2,
+        )
+
+        result = self.sync(
+            [completed],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-local-required-parent-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'retry', result)
+        # Stage A does not block a child merely because the generic dependency
+        # receipt is absent. The completion processor still waits for the
+        # concrete local trip reference that it genuinely needs.
+        self.assertEqual(result['code'], 'trip_reference_pending')
+        self.assertEqual(Trip.objects.count(), 0)
+
     def test_driver_manual_load_can_be_cancelled_by_exact_upward_swipe_event(self):
         loaded = self.driver_manual_event('driver-load-to-cancel', 1)
         cancelled = self.driver_manual_cancel_event(loaded)

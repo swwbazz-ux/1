@@ -389,6 +389,61 @@ test("downtime switch freezes the previous reason while the shift total stays co
     assert.equal(runtime.buttons[1].reasonDuration.textContent, "00:00:07");
 });
 
+test("repeated refresh of the same active downtime does not reset the running timer", () => {
+    // Боевой 27.09.2026 (v358): каждое фоновое обновление экрана (опрос,
+    // подмена фрагмента) заново вызывало startDriverDowntimeTimer с тем же
+    // самым простоем (тот же event_id/причина), но оптимистичным/устаревшим
+    // payload.elapsed_seconds (обычно 0) — таймер обнулялся каждые
+    // несколько секунд, хотя простой всё это время был тем же самым.
+    const runtime = loadDowntimeTimerRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-1",
+        reason_id: 1,
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 13,
+        calculated_at: "2026-09-17T01:00:00.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:02.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:15");
+
+    // Повторная отрисовка того же простоя — как при фоновом опросе — со
+    // "свежим" elapsed_seconds: 0, тем же event_id/причиной.
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-1",
+        reason_id: 1,
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 13,
+        calculated_at: "2026-09-17T01:00:02.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:07.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:20");
+});
+
+test("the timer's base always counts from started_at, ignoring a zero or stale elapsed_seconds snapshot", () => {
+    const runtime = loadDowntimeTimerRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "local:downtime-2",
+        reason_id: 1,
+        // Простой на самом деле идёт уже 30 с, но снимок elapsed_seconds
+        // прислал 0 (оптимистичный локальный payload) — таймер обязан
+        // считать от started_at, а не от этого числа.
+        started_at: "2026-09-17T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-17T01:00:30.000Z",
+    });
+    runtime.setNow("2026-09-17T01:00:30.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:30");
+});
+
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {
     assert.match(
         DRIVER_TEMPLATE_SOURCE,
@@ -430,6 +485,44 @@ test("waiting_unload enables the yellow mode but keeps hold-to-unload; clearing 
         DRIVER_TEMPLATE_SOURCE,
         /\.driver-work-dial\.is-waiting-operation,[\s\S]*\.driver-work-dial-button\.is-waiting-operation\s*\{[\s\S]*?--driver-green:\s*#facc15/
     );
+});
+
+test("durable automatic and manual trip completion immediately suppress waiting_unload projection", () => {
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /function tripTerminalEventClosesWaitingUnload\(events, latestDowntime, activeFlow\)/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /event\.event_type === "driver\.trip\.unloaded"[\s\S]*event\.event_type === "driver\.trip\.manual_completed"/
+    );
+    assert.match(
+        DRIVER_TEMPLATE_SOURCE,
+        /tripTerminalEventClosesWaitingUnload\(ordered, latestDowntime, projectedDowntimeFlow\)[\s\S]*snapshotDriverDowntimeTimer[\s\S]*clearDriverActiveDowntime/
+    );
+
+    const source = extractBraceBlock(
+        DRIVER_TEMPLATE_SOURCE,
+        "function tripTerminalEventClosesWaitingUnload(events, latestDowntime, activeFlow)",
+        "Driver terminal waiting-unload projection helper"
+    );
+    const context = {helper: null};
+    vm.runInNewContext(
+        `${source}\ncontext.helper = tripTerminalEventClosesWaitingUnload;`,
+        {context, String, Number},
+        {filename: "static/js/driver-shift-v1.js#terminal-waiting-unload"}
+    );
+    const started = {event_type: "driver.downtime.started", sequence: 1, state: "pending"};
+    const unloaded = {event_type: "driver.trip.unloaded", sequence: 2, state: "pending"};
+    const nextWait = {event_type: "driver.downtime.started", sequence: 3, state: "pending"};
+    const reviewed = {event_type: "driver.trip.manual_completed", sequence: 4, state: "conflict"};
+    const manualCompleted = {event_type: "driver.trip.manual_completed", sequence: 5, state: "pending"};
+
+    assert.equal(context.helper([started, unloaded], started, "waiting_unload"), unloaded);
+    assert.equal(context.helper([started, unloaded, nextWait], nextWait, "waiting_unload"), null);
+    assert.equal(context.helper([reviewed], null, "waiting_unload"), null);
+    assert.equal(context.helper([manualCompleted], null, "waiting_loading"), null);
+    assert.equal(context.helper([manualCompleted], null, "waiting_unload"), manualCompleted);
 });
 
 

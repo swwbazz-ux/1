@@ -1178,6 +1178,18 @@ window.bindDriverMobileShell = function () {
         });
     }
 
+    function tripTerminalEventClosesWaitingUnload(events, latestDowntime, activeFlow) {
+        if (String(activeFlow || "") !== "waiting_unload") return null;
+        var latestDowntimeSequence = latestDowntime ? Number(latestDowntime.sequence || 0) : 0;
+        return (events || []).slice().reverse().find(function (event) {
+            return (
+                (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1
+                && Number(event.sequence || 0) > latestDowntimeSequence
+            );
+        }) || null;
+    }
+
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
         var ordered = (events || []).filter(function (event) {
@@ -1255,14 +1267,30 @@ window.bindDriverMobileShell = function () {
                 return (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
                     && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1;
             });
-        if (latestDowntime) {
+        var latestDowntimeReasonButton = null;
+        var projectedDowntimeFlow = downtimeCard && downtimeCard.dataset.driverActiveDowntimeFlow || "";
+        if (latestDowntime && latestDowntime.event_type === "driver.downtime.started") {
+            var latestDowntimeReasonId = String(latestDowntime.payload && latestDowntime.payload.reason_id || "");
+            latestDowntimeReasonButton = current.querySelector(
+                '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + latestDowntimeReasonId + '"]'
+            );
+            projectedDowntimeFlow = latestDowntimeReasonButton && latestDowntimeReasonButton.dataset.driverDowntimeFlow || projectedDowntimeFlow;
+        }
+        var tripTerminalEvent = tripTerminalEventClosesWaitingUnload(ordered, latestDowntime, projectedDowntimeFlow);
+        if (tripTerminalEvent) {
+            snapshotDriverDowntimeTimer(Date.parse(tripTerminalEvent.occurred_at || ""));
+            clearDriverActiveDowntime({
+                shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0,
+                calculated_at: tripTerminalEvent.occurred_at || ""
+            });
+        } else if (latestDowntime) {
             if (latestDowntime.event_type === "driver.downtime.ended") {
                 clearDriverActiveDowntime({
                     shift_total_seconds: downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds || 0
                 });
             } else {
                 var reasonId = String(latestDowntime.payload && latestDowntime.payload.reason_id || "");
-                var reasonButton = current.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
+                var reasonButton = latestDowntimeReasonButton || current.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + reasonId + '"]');
                 applyDriverActiveDowntime({
                     active: true,
                     event_id: "local:" + latestDowntime.event_id,
@@ -1572,20 +1600,43 @@ window.bindDriverMobileShell = function () {
     }
 
     function startDriverDowntimeTimer(payload) {
-        clearDriverDowntimeTimer();
         payload = payload || {};
-        syncDriverReasonTotals(payload);
         var activeReasonId = String(payload.reason_id || "");
+        var eventId = String(payload.event_id || "");
+        var existing = window.driverDowntimeClock;
+        if (existing && eventId && existing.eventId === eventId && existing.activeReasonId === activeReasonId) {
+            /* Тот же самый простой (тот же event_id и причина) — не
+               перезапускаем отсчёт. Раньше любое фоновое обновление экрана
+               (опрос раз в ~2 с, подмена фрагмента) заново вызывало эту
+               функцию с оптимистичным/устаревшим payload.elapsed_seconds
+               (обычно 0) и просто обнуляло видимый таймер каждые несколько
+               секунд, хотя простой всё это время оставался тем же самым
+               (пойман на бою 27.09.2026, v358). Освежаем только видимые
+               накопленные секунды по причинам — они могли поменяться. */
+            syncDriverReasonTotals(payload);
+            return;
+        }
+        clearDriverDowntimeTimer();
+        syncDriverReasonTotals(payload);
         /* Отсчёт ведётся от собственных часов телефона в момент получения ответа,
            а не от серверной отметки времени. Сервер присылает уже накопленные
            секунды; складывать их с разницей «серверное время минус время
            телефона» нельзя: на телефоне с вручную выставленными часами эта
            разница и есть сдвиг, и водитель видел трёхчасовой обед вместо
-           десяти минут. В базе при этом всё верно — там время приёма сервером. */
+           десяти минут. В базе при этом всё верно — там время приёма сервером.
+           Базовое число секунд считается от started_at активного простоя (а
+           не от присланного elapsed_seconds — тот бывает нулевым или
+           устаревшим снимком), чтобы редкий неизбежный перезапуск (первая
+           загрузка экрана, смена причины) не терял накопленное время. */
         var syncedAtMs = Date.now();
+        var startedAtMs = Date.parse(payload.started_at || "");
+        var baseActiveElapsedSeconds = Number.isFinite(startedAtMs)
+            ? Math.max(0, Math.floor((syncedAtMs - startedAtMs) / 1000))
+            : Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0));
         var clock = {
             activeReasonId: activeReasonId,
-            baseActiveElapsedSeconds: Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0)),
+            eventId: eventId,
+            baseActiveElapsedSeconds: baseActiveElapsedSeconds,
             baseShiftSeconds: Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0)),
             syncedAtMs: syncedAtMs
         };

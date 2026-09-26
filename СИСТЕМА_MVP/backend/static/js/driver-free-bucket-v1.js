@@ -467,7 +467,7 @@
             button.innerHTML = '<strong class="driver-free-bucket-tile-number"></strong>'
                 + '<span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status></span>';
             button.querySelector(".driver-free-bucket-tile-number").textContent = item.label;
-            button.querySelector("[data-driver-free-bucket-tile-status]").textContent = tileStatusLabel(item, false, state);
+            button.querySelector("[data-driver-free-bucket-tile-status]").textContent = tileStatusLabel(item, false);
             if (item.is_primary || !item.available) {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");
@@ -566,7 +566,7 @@
             shell.dataset.driverFreeBucketActive = active ? "true" : "false";
             if (trigger) {
                 trigger.classList.toggle("is-current", !!active);
-                trigger.classList.toggle("is-local", !!active && (state.sync_mode === "local" || state.sync_mode === "review"));
+                trigger.classList.toggle("is-local", !!active && state.sync_mode === "local");
                 trigger.classList.remove("is-review");
                 trigger.setAttribute("aria-haspopup", "dialog");
                 trigger.setAttribute("aria-controls", "driver-free-bucket-dialog");
@@ -593,11 +593,11 @@
             var sync = shell.querySelector("[data-driver-free-bucket-sync-state]");
             if (sync) {
                 sync.classList.remove("is-review");
-                sync.textContent = state.sync_mode === "review" || state.sync_mode === "local"
-                        ? "Действие сохранено"
-                        : state.status === "accepted"
-                            ? "Принят машинистом"
-                            : state.status === "used" ? "Погружен" : "Ожидание приёма машинистом";
+                sync.textContent = state.sync_mode === "local"
+                    ? "Действие сохранено"
+                    : state.status === "accepted"
+                        ? "Принят машинистом"
+                        : state.status === "used" ? "Погружен" : "Ожидание приёма машинистом";
             }
             var remove = shell.querySelector("[data-driver-free-bucket-remove]");
             if (remove) remove.hidden = !active || state.status === "used";
@@ -679,17 +679,26 @@
 
         function cancel() {
             if (!outbox || !state.active || state.status === "used") return Promise.resolve(null);
-            if (typeof windowObject.createDriverFreeBucketCancelledEvent !== "function") return Promise.reject(new Error("offline_runtime_unavailable"));
             setMessage("Сохраняю отмену на телефоне…", false);
             return outbox.pending().then(function (events) {
                 var request = (events || []).slice().reverse().find(function (event) {
                     return event.event_type === "driver.free_bucket.selected"
                         && event.event_id === state.acceptance_local_id;
                 });
+                var requestRejected = !!request && ["conflict", "auth_required", "invalid"].indexOf(request.state) >= 0;
+                if (requestRejected && !state.acceptance_id) {
+                    // Сервер так и не принял выбор — отменять на сервере
+                    // нечего. Ставить dependsOn на отклонённое событие давало
+                    // dependency_rejected и снова полевое предупреждение по кругу
+                    // (26.09.2026, боевой afb373a5); теперь гасим локально
+                    // без сетевого запроса.
+                    return null;
+                }
+                if (typeof windowObject.createDriverFreeBucketCancelledEvent !== "function") throw new Error("offline_runtime_unavailable");
                 return outbox.enqueue(windowObject.createDriverFreeBucketCancelledEvent({
                     acceptanceId: state.acceptance_id,
                     acceptanceLocalId: state.acceptance_local_id,
-                    dependsOn: request ? [request.event_id] : []
+                    dependsOn: (request && !requestRejected) ? [request.event_id] : []
                 }));
             }).then(function (event) {
                 state = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
@@ -706,8 +715,25 @@
         function project(events) {
             expireStateIfDue();
             var projected = normalizeState(state);
+            if (projected.sync_mode === "review") {
+                // Хранилище/предыдущая установка ещё держит зависшее «на
+                // сверке» состояние с ДО этой правки (26.09.2026) — сервер
+                // его уже отклонил, ковша нет, гасим сразу же, до разбора
+                // новых событий.
+                projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
+            }
             (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); }).forEach(function (event) {
+                var rejected = ["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0;
                 if (event.event_type === "driver.free_bucket.selected" && positive(event.payload && event.payload.truck_id) === positive(truckId)) {
+                    if (rejected) {
+                        // Сервер не принял выбор — ковша нет и никогда не было.
+                        // Раньше это всё равно оставляло active:true с
+                        // sync_mode "review" с полевым предупреждением — самосвал
+                        // застревал навсегда, ни выбрать заново, ни отменить
+                        // было нельзя (26.09.2026, боевой afb373a5).
+                        projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
+                        return;
+                    }
                     var item = itemFromEvent(event, catalog);
                     if (!item) return;
                     var occurredAt = text(event.occurred_at);
@@ -717,7 +743,7 @@
                         status: "requested",
                         can_cancel: true,
                         selection: item,
-                        sync_mode: ["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0 ? "review" : "local",
+                        sync_mode: "local",
                         version: Number(event.payload && event.payload.catalog_version || 0),
                         generated_at: occurredAt,
                         catalog_version: Number(event.payload && event.payload.catalog_version || 0),
@@ -836,11 +862,11 @@
                         )
                     );
                     if (!projected.active || !cancelsCurrent) return;
-                    if (["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0) {
-                        projected.sync_mode = "review";
-                    } else {
-                        projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
-                    }
+                    // Намерение водителя отменить — истина, даже если сама
+                    // отмена не подтверждена сервером (в т.ч. dependency_rejected
+                    // на уже отклонённый выбор — правило 1, замкнутый круг с
+                    // "review" больше не создаётся).
+                    projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
                 }
             });
             state = projected;
@@ -946,7 +972,7 @@
         };
     }
 
-    function tileStatusLabel(item, selected, currentState) {
+    function tileStatusLabel(item, selected) {
         if (selected) return "Выбран";
         return item && item.available === false ? "Недоступно" : "";
     }

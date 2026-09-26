@@ -726,6 +726,48 @@ test("parallel flush calls share one request and preserve order and dependency",
     assert.equal(calls, 1);
 });
 
+test("a due terminal action pulls its locally pending dependency into the same batch", async () => {
+    const batches = [];
+    let call = 0;
+    const box = runtime({send: async batch => {
+        batches.push(batch.events.map(event => event.event_id));
+        call += 1;
+        if (call === 1) {
+            return {results: [{
+                event_id: "point-before-unload",
+                status: "retry",
+                code: "temporary",
+                message: "retry parent",
+            }]};
+        }
+        return {results: batch.events.map(event => ({
+            event_id: event.event_id,
+            status: "accepted",
+        }))};
+    }});
+    await box.enqueue({
+        event_id: "point-before-unload",
+        event_type: "driver.trip.dump_point_changed",
+        trip_id: 91,
+        payload: {dump_point_id: 4},
+    });
+    await box.flush();
+    await box.enqueue({
+        event_id: "unload-after-point",
+        event_type: "driver.trip.unloaded",
+        trip_id: 91,
+        depends_on: ["point-before-unload"],
+        payload: {trip_id: 91},
+    });
+    await box.flush();
+
+    assert.deepEqual(batches, [
+        ["point-before-unload"],
+        ["point-before-unload", "unload-after-point"],
+    ]);
+    assert.deepEqual(await box.pending(), []);
+});
+
 test("parallel gestures receive a stable monotonic order", async () => {
     const box = runtime();
     await Promise.all([

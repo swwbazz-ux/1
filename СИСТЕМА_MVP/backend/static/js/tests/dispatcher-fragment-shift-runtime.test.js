@@ -11,10 +11,28 @@ const {dispatcherScreenSource} = require("./dispatcher-screen-source");
 const RUNTIME_SOURCE = [
     "dispatcher-control-v1.js",
     "dispatcher-board-v1.js",
+    "dispatcher-board-actions-v1.js",
+    "dispatcher-board-dnd-v1.js",
     "dispatcher-detail-v1.js",
 ].map((name) => fs.readFileSync(path.resolve(__dirname, "..", name), "utf8")).join("\n");
 const REALTIME_SOURCE = fs.readFileSync(
     path.resolve(__dirname, "..", "dispatcher-realtime-v1.js"),
+    "utf8"
+);
+const RECONCILER_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-fragment-reconciler-v1.js"),
+    "utf8"
+);
+const ASSIGNMENT_STATE_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-haul-assignment-state-v1.js"),
+    "utf8"
+);
+const MUTATIONS_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-mutations-v1.js"),
+    "utf8"
+);
+const DND_SOURCE = fs.readFileSync(
+    path.resolve(__dirname, "..", "dispatcher-board-dnd-v1.js"),
     "utf8"
 );
 const TEMPLATE_SOURCE = dispatcherScreenSource();
@@ -180,54 +198,58 @@ function createRuntime(initialShiftOpen, freshShiftOpen) {
         "function syncDispatcherShiftRuntime(freshBoard)",
         "Dispatcher shift runtime sync"
     );
-    const bindDragSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDragTile(tile)",
-        "Dispatcher drag source bind"
+    const assignmentStateFactorySource = extractBraceBlock(
+        ASSIGNMENT_STATE_SOURCE,
+        "function createDispatcherHaulAssignmentState()",
+        "Haul assignment state factory"
     );
-    const bindDropSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDispatcherComplexDrop(zone)",
-        "Dispatcher complex drop bind"
-    );
-    const assignmentStateSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function haulAssignmentStateId(node)",
-        "Haul assignment state helper"
-    );
-    const bindAllSource = extractBraceBlock(
-        RUNTIME_SOURCE,
-        "function bindDispatcherDesktopInteractions()",
-        "Dispatcher desktop interactions bind"
+    const dndFactorySource = extractBraceBlock(
+        DND_SOURCE,
+        "function createDispatcherBoardDnD(options)",
+        "Dispatcher drag-and-drop factory"
     );
     vm.runInNewContext(
         `
         var dispatcherShiftOpen = ${initialShiftOpen ? "true" : "false"};
         function dispatcherShiftIsOpen() { return dispatcherShiftOpen; }
-        var draggedTile = null;
         var board = null;
-        var excavatorGarage = null;
-        var dragGhost = null;
         var dispatcherAssignTruckUrl = "/dispatcher/assign-truck/";
-        function clearDragGhost() {}
+        var dispatcherMoveExcavatorUrl = "/dispatcher/excavator/move/";
         function bindEquipmentCardTrigger() {}
-        function normalizeComplexGrid() {}
-        function refreshExcavatorGarage() {}
-        function refreshTruckGarage() {}
-        function refreshAllComplexTruckRacks() {}
-        function bindDispatcherExcavatorGarageDrop() {}
-        function bindDispatcherTruckGarageDrop() {}
         function dispatcherPost() {
             fetchCount += 1;
             return Promise.resolve({});
         }
         function applyDesktopTruckAction(response) { return response; }
         function showDispatcherDnDError(error) { throw error; }
+        function handleDesktopOptimisticBoardError(error) { throw error; }
+        function refreshDesktopBoardAfterStructuralAction(response) { return Promise.resolve(response); }
+        function activateDesktopComplexFromExcavatorTile() {}
+        function moveDesktopComplexToExcavatorGarage() {}
         ${syncSource}
-        ${assignmentStateSource}
-        ${bindDragSource}
-        ${bindDropSource}
-        ${bindAllSource}
+        ${assignmentStateFactorySource}
+        ${dndFactorySource}
+        var dispatcherHaulAssignmentState = createDispatcherHaulAssignmentState();
+        var dispatcherDnD = createDispatcherBoardDnD({
+            document: document,
+            post: dispatcherPost,
+            moveExcavatorUrl: dispatcherMoveExcavatorUrl,
+            assignTruckUrl: dispatcherAssignTruckUrl,
+            getShiftOpen: dispatcherShiftIsOpen,
+            getBoard: function () { return board; },
+            getAssignmentStateId: dispatcherHaulAssignmentState.getStateId,
+            collectComplexAssignmentStates: dispatcherHaulAssignmentState.collectComplexStates,
+            applyHaulAssignmentStates: dispatcherHaulAssignmentState.applyStates,
+            applyDesktopTruckAction: applyDesktopTruckAction,
+            refreshDesktopBoardAfterStructuralAction: refreshDesktopBoardAfterStructuralAction,
+            activateDesktopComplexFromExcavatorTile: activateDesktopComplexFromExcavatorTile,
+            moveDesktopComplexToExcavatorGarage: moveDesktopComplexToExcavatorGarage,
+            handleStructuralError: handleDesktopOptimisticBoardError,
+            showError: showDispatcherDnDError
+        });
+        function bindDispatcherDesktopInteractions() {
+            dispatcherDnD.bind();
+        }
         `,
         context,
         {filename: "templates/trips/dispatcher_control.html#dispatcher-shift-runtime"}
@@ -362,6 +384,176 @@ test("open to closed fragment blocks dispatcher drag-and-drop with fetch count z
 });
 
 
+test("fallback расформирования сохраняет новые версии назначений до переноса плиток", async () => {
+    const bindDropSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function bindDispatcherExcavatorGarageDrop(garage)",
+        "Dispatcher excavator garage drop bind"
+    );
+    const structuralRefreshSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function refreshDesktopBoardAfterStructuralAction(response, localFallback)",
+        "Dispatcher structural refresh"
+    );
+    const assignmentStateFactorySource = extractBraceBlock(
+        ASSIGNMENT_STATE_SOURCE,
+        "function createDispatcherHaulAssignmentState()",
+        "Haul assignment state factory"
+    );
+    const garage = new ElementStub();
+    const truck = new ElementStub({
+        dataset: {equipmentId: "17", haulAssignmentStateId: "41", complexTruck: "true"},
+    });
+    const complexCard = new ElementStub({
+        dataset: {dispatcherDrag: "complex", equipmentId: "3", equipmentName: "3"},
+    });
+    complexCard.querySelectorAll = () => [truck];
+    const movedTokens = [];
+    const posted = [];
+    const context = {
+        Promise,
+        dispatcherMoveExcavatorUrl: "/dispatcher/excavator/move/",
+        draggedTile: complexCard,
+        dispatcherPost(url, payload, options) {
+            posted.push({url, payload, options});
+            return Promise.resolve({assignment_state_ids: {17: 99}});
+        },
+        refreshDispatcherDesktopBoardFromServer() {
+            return Promise.resolve(false);
+        },
+        requestDispatcherDesktopDangerConfirmation(options) {
+            options.action();
+        },
+        moveDesktopComplexToExcavatorGarage() {
+            movedTokens.push(truck.dataset.haulAssignmentStateId);
+        },
+        handleDesktopOptimisticBoardError(error) {
+            throw error;
+        },
+    };
+    vm.runInNewContext(
+        `
+        ${assignmentStateFactorySource}
+        var dispatcherHaulAssignmentState = createDispatcherHaulAssignmentState();
+        var collectComplexAssignmentStates = dispatcherHaulAssignmentState.collectComplexStates;
+        var applyHaulAssignmentStates = dispatcherHaulAssignmentState.applyStates;
+        ${structuralRefreshSource}
+        ${bindDropSource}
+        `,
+        context,
+        {filename: "dispatcher-board-v1.js#inactive-complex-fallback"}
+    );
+
+    context.bindDispatcherExcavatorGarageDrop(garage);
+    garage.dispatch("drop");
+    await new Promise((resolve) => setImmediate(resolve));
+    await Promise.resolve();
+
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].payload.expected_assignment_states["17"], "41");
+    assert.deepEqual(Object.keys(posted[0].payload.expected_assignment_states), ["17"]);
+    assert.equal(posted[0].options.queueOnNetworkFailure, false);
+    assert.deepEqual(movedTokens, ["99"]);
+});
+
+test("empty complex fallback clears stale plan markers before the next fragment", () => {
+    const resetSource = extractBraceBlock(
+        MUTATIONS_SOURCE,
+        "function resetDesktopComplexCardToEmpty(complexCard)",
+        "Dispatcher empty complex reset"
+    );
+    const clearPlanSource = extractBraceBlock(
+        MUTATIONS_SOURCE,
+        "function clearComplexPlanPresentation(complexCard)",
+        "Dispatcher empty complex plan presentation reset"
+    );
+    const styleValues = {
+        "--complex-progress": "74%",
+        "--complex-total-progress": "174%",
+    };
+    const removedAttributes = [];
+    const complexCard = {
+        className: "dispatcher-complex-card status-orange is-plan-overrun",
+        dataset: {
+            zoneId: "82",
+            zoneLabel: "K-530",
+            dispatcherDrag: "complex",
+            equipmentId: "530",
+            placementZone: "active",
+            planStatus: "in_progress",
+            planPercent: "74",
+            planLoopPercent: "34",
+            planCompletedLoops: "3",
+            planProgressPhase: "amber",
+            planMode: "loops",
+            planValue: "400",
+            planFact: "296",
+            planUnit: "м³",
+            planGroup: "Смена 1",
+        },
+        style: {
+            setProperty(name, value) {
+                styleValues[name] = value;
+            },
+        },
+        classList: {remove() {}},
+        removeAttribute(name) {
+            removedAttributes.push(name);
+        },
+        innerHTML: "",
+    };
+    const context = {complexCard};
+
+    vm.runInNewContext(`${clearPlanSource}\n${resetSource}\nresetDesktopComplexCardToEmpty(complexCard);`, context, {
+        filename: "dispatcher-board-mutations-v1.js#empty-complex-plan-reset",
+    });
+
+    assert.equal(complexCard.className, "dispatcher-complex-card status-empty");
+    assert.equal(complexCard.dataset.zoneId, "82");
+    assert.equal(complexCard.dataset.dispatcherDrop, "complex");
+    assert.equal(complexCard.dataset.placementZone, undefined);
+    [
+        "planStatus",
+        "planPercent",
+        "planLoopPercent",
+        "planCompletedLoops",
+        "planProgressPhase",
+        "planMode",
+        "planValue",
+        "planFact",
+        "planUnit",
+        "planGroup",
+    ].forEach((key) => assert.equal(complexCard.dataset[key], undefined, key));
+    assert.equal(styleValues["--complex-progress"], "0%");
+    assert.equal(styleValues["--complex-total-progress"], "0%");
+    assert.deepEqual(removedAttributes.sort(), ["draggable", "role", "tabindex"]);
+});
+
+test("ошибка структурного переноса не оставляет необработанное отклонение при недоступном refresh", async () => {
+    const errorHandlerSource = extractBraceBlock(
+        RUNTIME_SOURCE,
+        "function handleDesktopOptimisticBoardError(error)",
+        "Dispatcher structural error handler"
+    );
+    const shown = [];
+    const context = {
+        Promise,
+        showDispatcherDnDError(error) {
+            shown.push(error.message);
+        },
+        refreshDispatcherDesktopBoardFromServer() {
+            return Promise.reject(new Error("refresh offline"));
+        },
+    };
+    vm.runInNewContext(errorHandlerSource, context);
+
+    const result = await context.handleDesktopOptimisticBoardError(new Error("move offline"));
+
+    assert.equal(result, null);
+    assert.deepEqual(shown, ["move offline"]);
+});
+
+
 test("assignment conflict refreshes the dispatcher board once after the notice closes", async () => {
     const runtime = createConflictRecoveryRuntime();
 
@@ -463,7 +655,7 @@ test("fragment refresh synchronizes shift runtime before replacement and rebind"
 
 test("dispatcher fragment reconciliation is keyed by equipment and complex identity", () => {
     const reconcileSource = extractBraceBlock(
-        REALTIME_SOURCE,
+        RECONCILER_SOURCE,
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
         "Dispatcher keyed board reconciliation"
     );
@@ -489,7 +681,7 @@ test("one changed truck replaces only that keyed tile", () => {
         "function reconcileDispatcherDesktopBoard(currentBoard, freshBoard)",
     ];
     const helpers = helperNames.map((signature) => (
-        extractBraceBlock(REALTIME_SOURCE, signature, signature)
+        extractBraceBlock(RECONCILER_SOURCE, signature, signature)
     )).join("\n");
     function node(markup, dataset = {}) {
         return {
