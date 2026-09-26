@@ -87,7 +87,28 @@ window.applyOperationalStateRefresh = function (context) {
                 && refreshEventsAreOwnDowntime(context);
             if (unchanged || ownDowntimeOnly) {
                 window.driverAppliedFragmentSnapshot = freshSnapshot;
-                if (ownDowntimeOnly) window.driverDomBehindBaseline = true;
+                if (ownDowntimeOnly) {
+                    window.driverDomBehindBaseline = true;
+                    /* Пропуск экономит дорогую подмену «Работы», но карточка состояния
+                       простоя на скрытой вкладке «Простои» не должна пережить закрытие
+                       смены — иначе барабан подсвечивает причину ещё несуществующей
+                       смены (пойман на реальном полевом тесте 26.09.2026). Синхронизируем
+                       только эту маленькую карточку, не трогая остальной экран. */
+                    var liveStateCard = oldShell.querySelector("[data-driver-active-downtime-id]");
+                    var freshStateCard = freshShell.querySelector("[data-driver-active-downtime-id]");
+                    if (liveStateCard && freshStateCard) {
+                        [
+                            "data-driver-active-downtime-id", "data-driver-active-reason-id",
+                            "data-driver-active-downtime-flow", "data-driver-active-started-at",
+                            "data-driver-active-elapsed-seconds", "data-driver-shift-downtime-seconds",
+                            "data-driver-downtime-calculated-at", "class", "aria-label"
+                        ].forEach(function (name) {
+                            var value = freshStateCard.getAttribute(name);
+                            if (value === null) liveStateCard.removeAttribute(name);
+                            else liveStateCard.setAttribute(name, value);
+                        });
+                    }
+                }
                 if (window.DriverFreeBucket && typeof window.DriverFreeBucket.receiveFragment === "function") {
                     window.DriverFreeBucket.receiveFragment(
                         payload.driver_free_bucket_catalog,

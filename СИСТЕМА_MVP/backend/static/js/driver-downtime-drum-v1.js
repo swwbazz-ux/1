@@ -37,7 +37,15 @@
     function allCards() { var c = cylinder(); return c ? all("[data-driver-drum-card]:not([data-driver-drum-clone])", c) : []; }
     function dial() { return q(".driver-work-dial"); }
     function stateCard() { return q("[data-driver-active-downtime-id]"); }
+    function hasOpenShift() {
+        var shell = q("[data-driver-shell]");
+        return !!(shell && shell.dataset.driverShiftId);
+    }
     function activeReasonId() {
+        // Без открытой смены простоя быть не может: барабан не должен подсвечивать
+        // причину, если карточка состояния отстала от закрытия смены (см. фрагмент-
+        // оптимизатор, который иногда пропускает обновление вкладки «Простои»).
+        if (!hasOpenShift()) return "";
         var card = stateCard();
         return card ? String(card.dataset.driverActiveReasonId || "") : "";
     }
@@ -806,6 +814,7 @@
             return m.type === "childList" || (m.target && m.target.hasAttribute && (
                 m.target.hasAttribute("data-driver-active-downtime-id")
                 || m.target.hasAttribute("data-driver-reason-duration")
+                || m.target.hasAttribute("data-driver-shell")
             ));
         });
         // Любая правка экрана может сдвинуть круг и грани без изменения их размера
@@ -821,7 +830,7 @@
         syncTotals();
         reconcileQuick();
         syncActive();
-        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden"] });
+        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id"] });
         root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
         if (root.ResizeObserver) {
             var w = dial();

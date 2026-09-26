@@ -293,13 +293,6 @@
         api.startManualLoadAtPoint(pointId);
     }
 
-    // Как круг подпишет себя, когда рейс сойдёт с него (syncDial ниже): тот же текст,
-    // что у обычной разгрузки, «сохранено локально, отправляем» — а не гадать прежнюю
-    // подпись круга, которая могла быть уже чем угодно (пойманный на телефоне баг
-    // 26.09.2026: после пары ручных рейсов подряд круг показывал «—» вместо номера
-    // экскаватора, потому что запоминал подпись с предыдущего, ещё не досинхронного цикла).
-    var lastManualOutcome = "complete";
-
     function recallPoint() {
         var api = engine();
         if (!api || typeof api.cancelActiveManualLoad !== "function") {
@@ -307,7 +300,6 @@
             return;
         }
         haptic([70, 45, 35]); click(1.3);
-        lastManualOutcome = "cancel";
         api.cancelActiveManualLoad();
     }
 
@@ -373,13 +365,13 @@
             return;
         }
         if (button.dataset.driverManualDial !== "true") return;
-        /* Рейс завершён или отменён. Настоящее подтверждение сервера придёт отдельным
-           обновлением экрана (может занять до минуты) и само перерисует круг верно —
-           здесь важно не соврать: не гадать, каким был круг ДО ручного рейса (тот
-           текст мог сам оказаться устаревшим от предыдущего цикла — так родился баг
-           с «—» вместо номера экскаватора, пойманный на телефоне 26.09.2026), а
-           честно показать то же «сохранено, ждём подтверждения», что и у обычной
-           разгрузки (driver-shift-v1.js, applyDriverOfflineProjection). */
+        /* Рейс завершён или отменён. Куда ехать дальше телефон знает сам: назначение
+           на экскаватор ручной разгрузкой не снимается. Раньше здесь держали
+           заглушку «ожидание синхронизации» до ответа сервера (до минуты на
+           нестабильной связи) — берём номер экскаватора не с экрана (тот текст мог
+           быть устаревшим от предыдущего цикла — так родился баг с «—» вместо
+           номера, пойманный на телефоне 26.09.2026), а из свежего атрибута карточки
+           ручного режима, который сервер обновляет при каждой отрисовке. */
         delete button.dataset.driverManualDial;
         delete button.dataset.driverManualDialLabel;
         button.disabled = true;
@@ -390,10 +382,18 @@
         setUnloadWait(button, false);
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
-        var savedLabel = lastManualOutcome === "cancel" ? "ОТМЕНА СОХРАНЕНА" : "РАЗГРУЗКА СОХРАНЕНА";
+        var manualWorkspace = q("[data-driver-manual-workspace]");
+        var nextExcavatorLabel = manualWorkspace
+            ? String(
+                manualWorkspace.dataset.driverManualExcavatorLabel
+                || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                || ""
+            )
+            : "";
+        var savedLabel = nextExcavatorLabel || "НА ЗАГРУЗКУ";
         var savedNote = q(".driver-work-note");
-        if (savedNote && savedNote.textContent.trim() !== "ОЖИДАНИЕ СИНХРОНИЗАЦИИ") {
-            savedNote.textContent = "ОЖИДАНИЕ СИНХРОНИЗАЦИИ";
+        if (savedNote && savedNote.textContent.trim() !== "НА ЗАГРУЗКУ") {
+            savedNote.textContent = "НА ЗАГРУЗКУ";
         }
         setDialLabel(savedLabel);
         // Страховка от того же кадра: если geometry круга ещё не готова прямо сейчас
@@ -416,7 +416,6 @@
             if (button) button.classList.remove("is-pending");
             refresh();
         }
-        lastManualOutcome = "complete";
         api.completeActiveManualLoad().then(function (saved) {
             if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); }
         }).catch(function () {

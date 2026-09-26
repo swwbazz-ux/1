@@ -21,7 +21,9 @@
                     </span>
                 </button>
             {% empty %}
-                <div class="driver-inline-note">Экскаватору не назначены точки разгрузки.</div>
+                {% if open_shift %}
+                    <div class="driver-inline-note">Экскаватору не назначены точки разгрузки.</div>
+                {% endif %}
             {% endfor %}
             {% endwith %}
         </div>

@@ -971,10 +971,6 @@ test("local guards reject ungranted or incomplete driver actions before storage"
         /offline_downtime_reason_required/
     );
     await assert.rejects(
-        box.enqueue({event_id: "end", event_type: "driver.downtime.ended", payload: {local_downtime_id: "start"}}),
-        /offline_downtime_reference_required/
-    );
-    await assert.rejects(
         box.enqueue({event_id: "access", event_type: "driver.downtime.started", access_id: 8, payload: {reason_id: 1}}),
         /offline_event_access_mismatch/
     );
@@ -999,6 +995,21 @@ test("local guards reject ungranted or incomplete driver actions before storage"
         /offline_free_bucket_acceptance_ambiguous/
     );
     assert.equal((await box.pending()).length, 0);
+});
+
+test("closing a downtime is always queued, even with no reference to its start yet", async () => {
+    // Раньше здесь требовали ссылку на начало простоя до постановки закрытия в
+    // очередь — водитель мог остаться без возможности завершить простой на
+    // нестабильной связи. Телефон обязан принять закрытие всегда; сервер сам
+    // свяжет его с началом, когда оно синхронизуется.
+    const box = runtime();
+    const queued = await box.enqueue({
+        event_id: "end-no-reference",
+        event_type: "driver.downtime.ended",
+        payload: {}
+    });
+    assert.equal(queued.event_id, "end-no-reference");
+    assert.equal((await box.pending()).length, 1);
 });
 
 test("auth classifier recognizes status redirect to root and login HTML", () => {

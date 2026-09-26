@@ -181,13 +181,11 @@
         if (event.event_type === "driver.downtime.started" && event.local_downtime_id !== event.event_id) {
             throw new Error("offline_downtime_local_id_mismatch");
         }
-        if (event.event_type === "driver.downtime.ended") {
-            var serverId = number(event.payload.downtime_id || event.payload.downtime_event_id);
-            var localId = String(event.payload.local_downtime_id || "");
-            if (!serverId && (!localId || event.depends_on.indexOf(localId) < 0)) {
-                throw new Error("offline_downtime_reference_required");
-            }
-        }
+        /* Раньше здесь требовали ссылку на начало простоя (server id или
+           local_downtime_id) до того, как поставить закрытие в очередь —
+           телефон должен принимать закрытие простоя всегда, без исключений.
+           Сервер сам свяжет закрытие с началом, когда оно появится
+           (offline_sync.py: 'downtime_reference_pending'). */
     }
     function createDriverManualLoadEvent(options) {
         options = options || {};
@@ -402,7 +400,12 @@
         options = options || {};
         var pendingStartId = String(options.pendingStartId || "");
         var serverId = number(options.serverId);
-        if (!pendingStartId && !serverId) throw new Error("offline_downtime_reference_required");
+        /* Ссылки на начало простоя может ещё не быть (само начало не успело
+           дойти до сервера или его локальная запись потерялась) — водитель всё
+           равно жмёт «завершить», и телефон обязан поставить это в очередь, а
+           не отказать. Сервер сам свяжет закрытие с началом, когда оно
+           появится (offline_sync.py: 'downtime_reference_pending' — это ретрай,
+           не отказ), либо закроет активный простой техники напрямую. */
         return {
             event_id: String(options.eventId || randomId("driver-downtime-close")),
             event_type: "driver.downtime.ended",

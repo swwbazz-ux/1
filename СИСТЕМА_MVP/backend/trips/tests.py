@@ -2717,6 +2717,35 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         trip.refresh_from_db()
         self.assertTrue(trip.is_carryover)
 
+    def test_handover_credits_completed_trip_to_the_loading_driver_not_the_unloader(self):
+        # Дневной водитель грузится, не разгружается и закрывает смену; сменщик
+        # получает самосвал гружёным и разгружает его. Рейс обязан остаться за
+        # тем, кто грузил, — а не перейти на того, кто нажал «разгрузка».
+        loading_driver = self.driver
+        self.truck_shift.closed_at = timezone.now()
+        self.truck_shift.save(update_fields=['closed_at'])
+        handover_driver, _, handover_shift = self.create_registered_driver_shift(
+            self.truck, full_name='Сидоров С.С.', access_code='200001',
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            driver=loading_driver,
+            loading_shift=self.truck_shift,
+            excavator_operator=self.operator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            volume_m3='40.00',
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+
+        finalize_trip_unloaded(trip, driver=handover_driver, unloading_shift=handover_shift)
+
+        trip.refresh_from_db()
+        self.assertEqual(trip.driver_id, loading_driver.id)
+        self.assertEqual(trip.unloading_shift_id, handover_shift.id)
+
     def test_excavator_suspicious_close_requires_confirmation_without_mutation(self):
         shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
         response = self.client.post(

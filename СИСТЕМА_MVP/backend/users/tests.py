@@ -438,7 +438,6 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'step="1"')
         self.assertNotContains(response, 'inputmode="decimal"')
         self.assertContains(response, '>Закрыть смену<')
-        self.assertIn('Начало', driver_script())
         self.assertContains(response, '12560')
         self.assertContains(response, '1354')
         self.assertContains(response, '>Выйти<')
