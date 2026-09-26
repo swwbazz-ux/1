@@ -314,6 +314,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             (dispatcher_static / name).read_text(encoding='utf-8')
             for name in (
                 'dispatcher-transport-v1.js',
+                'dispatcher-detail-charts-v1.js',
                 'dispatcher-detail-v1.js',
                 'dispatcher-board-v1.js',
                 'dispatcher-realtime-v1.js',
@@ -323,6 +324,7 @@ class DispatcherSharedShiftStartTests(TestCase):
 
         self.assertContains(response, 'js/dispatcher-control-v1.js')
         self.assertContains(response, 'js/dispatcher-transport-v1.js')
+        self.assertContains(response, 'js/dispatcher-detail-charts-v1.js')
         self.assertContains(response, 'js/dispatcher-detail-v1.js')
         self.assertContains(response, 'js/dispatcher-board-v1.js')
         self.assertContains(response, 'js/dispatcher-realtime-v1.js')
@@ -376,7 +378,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v144')
+        self.assertContains(response, 'dispatcher-desktop-shell-v145')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -387,12 +389,12 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v144',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v145',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v144',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v145',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)

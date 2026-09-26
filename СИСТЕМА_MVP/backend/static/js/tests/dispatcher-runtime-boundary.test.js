@@ -22,6 +22,10 @@ const DISPATCHER_DETAIL = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-detail-v1.js"),
     "utf8"
 );
+const DISPATCHER_DETAIL_CHARTS = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-detail-charts-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -60,7 +64,7 @@ const PRODUCTION_MANIFEST = fs.readFileSync(
 );
 
 test("desktop runtime содержит только контур Диспетчера", () => {
-    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
+    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
     for (const mobileContract of [
         "function bindMiningMasterMobileScreens()",
         "function refreshMobileBoardFromServer(options)",
@@ -162,9 +166,15 @@ test("desktop-приглашение уведомлений живёт в отд
 });
 
 test("карточка и desktop-доска физически отделены от оркестратора", () => {
+    assert.match(DISPATCHER_DETAIL_CHARTS, /function createDispatcherDetailCharts\(options\)/);
+    assert.match(DISPATCHER_DETAIL_CHARTS, /global\.createDispatcherDetailCharts = createDispatcherDetailCharts;/);
+    assert.match(DISPATCHER_DETAIL_CHARTS, /function renderDetailChart\(chart\)/);
     assert.match(DISPATCHER_DETAIL, /function createDispatcherDetail\(options\)/);
     assert.match(DISPATCHER_DETAIL, /global\.createDispatcherDetail = createDispatcherDetail;/);
     assert.match(DISPATCHER_DETAIL, /function openEquipmentCard\(cardId, trigger\)/);
+    assert.match(DISPATCHER_DETAIL, /global\.createDispatcherDetailCharts\(\{/);
+    assert.doesNotMatch(DISPATCHER_DETAIL, /function buildDetailChartShell\(chart\)/);
+    assert.doesNotMatch(DISPATCHER_DETAIL, /function renderDetailChart\(chart\)/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
     assert.match(DISPATCHER_BOARD, /function bindDispatcherDesktopInteractions\(\)/);
@@ -176,6 +186,7 @@ test("карточка и desktop-доска физически отделены
 
 test("transport загружается перед основным runtime и входит в PWA shell", () => {
     const transportIndex = SHARED_TEMPLATE.indexOf("dispatcher-transport-v1.js");
+    const detailChartsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-charts-v1.js");
     const detailIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
@@ -184,7 +195,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(transportIndex >= 0, "transport script отсутствует в шаблоне");
     assert.ok(controlIndex > transportIndex, "transport должен загрузиться до основного runtime");
     assert.match(DISPATCHER_TRANSPORT, /global\.createDispatcherTransport = createDispatcherTransport;/);
-    assert.ok(detailIndex > transportIndex, "detail must load after transport");
+    assert.ok(detailChartsIndex > transportIndex, "detail charts must load after transport");
+    assert.ok(detailIndex > detailChartsIndex, "detail must load after its chart presenter");
     assert.ok(boardIndex > detailIndex, "board must load after detail");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
@@ -192,10 +204,12 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherTransport\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherRealtime\(\{/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-transport-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-charts-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-charts-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
