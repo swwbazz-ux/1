@@ -986,23 +986,11 @@ def _historical_excavator_assignment(*, access, shift, truck_id, requested_assig
     )
     if not resolved:
         # Ни запрошенное, ни вообще какое-либо назначение для этой пары
-        # техники не найдено. Прежде чем завести недостающее назначение по
-        # факту погрузки, проверяем: самосвал не числится ОТКРЫТО назначенным
-        # на ДРУГОЙ экскаватор прямо сейчас. Если числится — это уже не спор
-        # о времени одной пары техники, а конфликт с чужим действующим
-        # назначением на пульте диспетчера (самосвал «переехал» бы на доске);
-        # это решает диспетчер, не эта функция. Плюс на truck висит уникальный
-        # индекс «один открытый ACCEPTED/PENDING на самосвал» — тихое создание
-        # второго уронило бы транзакцию IntegrityError.
-        conflicting_open = (
-            HaulAssignment.objects.select_for_update(of=('self',))
-            .filter(truck_id=truck_id, ended_at__isnull=True)
-            .exclude(excavator_id=shift.equipment_id)
-            .exclude(status=AssignmentStatus.CANCELLED)
-            .exists()
-        )
-        if conflicting_open:
-            _conflict('assignment_context_changed', 'Назначение из события не найдено.')
+        # техники не найдено — восстановить нечего. Вызывающая сторона уже
+        # проверила, что самосвал не числится открыто за ДРУГИМ экскаватором
+        # (тот случай уходит через свободный ковш, см.
+        # _process_excavator_loaded_via_free_bucket) — здесь безопасно
+        # завести недостающее назначение по факту этой погрузки.
         resolved = HaulAssignment.objects.create(
             truck_id=truck_id, excavator_id=shift.equipment_id,
             action=HaulAssignmentAction.ASSIGN, status=AssignmentStatus.ACCEPTED,
@@ -1682,8 +1670,125 @@ def _process_late_excavator_load(
     }, {'trip': trip, 'shift': shift, 'equipment': truck}
 
 
+def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, excavator, truck):
+    """Самосвал открыто числится за ДРУГИМ экскаватором — грузим через «Свободный ковш».
+
+    Решение пользователя 2026-09-26: это не отказ и не переезд самосвала на
+    пульте диспетчера — основной HaulAssignment не трогаем (та же гарантия,
+    что и у обычного свободного ковша, trips/free_bucket.py). Приём заводится
+    и сразу расходуется одним действием — как если бы машинист успел и
+    запросить, и погрузить одним касанием.
+    """
+    from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
+    from downtimes.models import DowntimeEvent
+    from shifts.models import EmployeeShift
+    from trips.free_bucket import resolve_free_bucket_load_context
+    from trips.models import (
+        FreeBucketAcceptance, FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip, TripClientAction,
+    )
+    from trips.trip_creation import create_loaded_waiting_unload_trip
+    from trips.views import notify_driver_truck_loaded, reconcile_excavator_waiting_for_trucks
+
+    payload = normalized['payload']
+    if Trip.objects.select_for_update().filter(truck=truck, status__in=OPEN_TRIP_STATUSES).exists():
+        _conflict('open_trip_exists', 'Самосвал уже находится в незавершённом рейсе.')
+    truck_downtime = (
+        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
+        .filter(equipment=truck, ended_at__isnull=True).order_by('-started_at', '-id').first()
+    )
+    excavator_downtimes = list(
+        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
+        .filter(equipment=excavator, ended_at__isnull=True).order_by('id')
+    )
+    if (
+        (truck_downtime and truck_downtime.started_at <= normalized['occurred_at'])
+        or any(
+            item.reason.is_critical and item.started_at <= normalized['occurred_at']
+            for item in excavator_downtimes
+        )
+    ):
+        _conflict('equipment_downtime_active', 'Погрузка невозможна: на технике открыт блокирующий простой.')
+    acceptance = FreeBucketAcceptance.objects.create(
+        client_acceptance_id=normalized['event_id'],
+        truck=truck,
+        excavator=excavator,
+        operator=access.employee,
+        loading_shift=shift,
+        primary_assignment=_free_bucket_primary_assignment(truck),
+        status=FreeBucketAcceptanceStatus.ACCEPTED,
+        occurred_at=normalized['occurred_at'],
+        received_at=normalized['received_at'],
+        accepted_at=normalized['occurred_at'],
+        work_context_snapshot=_free_bucket_work_context_snapshot(excavator),
+    )
+    try:
+        load_context = resolve_free_bucket_load_context(acceptance, payload)
+    except ValidationError as error:
+        _conflict('trip_validation_failed', '; '.join(error.messages))
+    dump_point = load_context['dump_point']
+    rock_type = load_context['rock_type']
+    driver_shift = (
+        EmployeeShift.objects.select_for_update(of=('self',))
+        .filter(equipment_id=truck.id, opened_at__lte=normalized['occurred_at'])
+        .filter(Q(closed_at__isnull=True) | Q(closed_at__gte=normalized['occurred_at']))
+        .filter(Q(workplace_code='driver') | Q(workplace_code='', equipment__equipment_type__name='Самосвал'))
+        .order_by('-opened_at', '-id').first()
+    )
+    manual_control = payload.get('manual_control') is True or not bool(driver_shift)
+    participation = {
+        'shift': driver_shift,
+        'control_shift': None if manual_control else driver_shift,
+        'passive': manual_control,
+        'code': 'free_bucket_manual' if manual_control else 'free_bucket_driver_shift',
+        'label': '',
+    }
+    try:
+        trip = create_loaded_waiting_unload_trip(
+            assignment=None, truck=truck, excavator=excavator, free_bucket_acceptance=acceptance,
+            excavator_operator=access.employee, loading_shift=shift, rock_type=rock_type, dump_point=dump_point,
+            planned_volume_m3=payload.get('planned_volume_m3') or None,
+            loading_horizon=load_context['loading_horizon'],
+            loading_block=load_context['loading_block'],
+            transport_distance_km=load_context['transport_distance_km'],
+            downtime_text=payload.get('downtime_text'),
+            note=str(payload.get('note') or 'Свободный ковш (назначение занято другим экскаватором)')[:1000],
+            participation=participation,
+            occurred_at=normalized['occurred_at'], resolve_assignment_transition=False,
+        )
+    except ValidationError as error:
+        _conflict('trip_validation_failed', '; '.join(error.messages))
+    acceptance.status = FreeBucketAcceptanceStatus.USED
+    acceptance.used_at = normalized['occurred_at']
+    acceptance.used_trip = trip
+    acceptance.save(update_fields=['status', 'used_at', 'used_trip'])
+    TripClientAction.objects.create(
+        action_type='free_bucket_loaded', client_action_id=normalized['event_id'], trip=trip, actor=access.employee,
+    )
+    close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
+    reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
+    _log_discrepancy(
+        access=access, code='assignment_context_changed', process='Погрузка экскаватором',
+        description=(
+            f'Самосвал {truck} на момент погрузки ({normalized["occurred_at"]}) открыто числился за '
+            f'другим экскаватором. Погрузка машиниста принята через свободный ковш (приём #{acceptance.id}, '
+            f'сразу использован), основное назначение самосвала на пульте не тронуто.'
+        ),
+    )
+    state = bump_operational_state(
+        'OfflineFieldEvent:excavator_trip_loaded_free_bucket_fallback', event_type='trip_changed',
+        object_type='Trip', object_id=trip.id,
+        payload={'action': 'free_bucket_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
+                 'excavator_id': trip.excavator_id, 'free_bucket_acceptance_id': acceptance.id},
+    )
+    transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
+    return {
+        'server_ids': {'trip_id': trip.id, 'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
+        'version': state.version,
+    }, {'trip': trip, 'shift': shift, 'equipment': truck}
+
+
 def _process_excavator_loaded(access, normalized):
-    from assignments.models import AssignmentStatus
+    from assignments.models import AssignmentStatus, HaulAssignment
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from references.models import DumpPoint, RockType
@@ -1711,6 +1816,23 @@ def _process_excavator_loaded(access, normalized):
         _conflict(
             'free_bucket_acceptance_required',
             'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
+        )
+    truck_claimed_elsewhere = (
+        HaulAssignment.objects.select_for_update(of=('self',))
+        .filter(truck_id=truck_id, ended_at__isnull=True, assigned_at__lte=normalized['occurred_at'])
+        .exclude(excavator_id=shift.equipment_id)
+        .exclude(status=AssignmentStatus.CANCELLED)
+        .exists()
+    )
+    if truck_claimed_elsewhere:
+        # Самосвал открыто числится за ДРУГИМ экскаватором прямо сейчас —
+        # машинист истина по погрузке, отказа быть не должно, но и основное
+        # назначение на пульте диспетчера трогать нельзя (правило: свободный
+        # ковш не меняет HaulAssignment). Решение пользователя 2026-09-26:
+        # это ровно случай «Свободный ковш» — проводим через существующую
+        # механику trips/free_bucket.py, а не через обычное назначение.
+        return _process_excavator_loaded_via_free_bucket(
+            access, normalized, shift=shift, excavator=excavator, truck=truck,
         )
     assignment = _historical_excavator_assignment(
         access=access, shift=shift, truck_id=truck_id, requested_assignment_id=assignment_id,

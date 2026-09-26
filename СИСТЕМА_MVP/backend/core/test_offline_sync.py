@@ -2018,22 +2018,43 @@ class OfflineEventSyncTests(TestCase):
     def test_historical_assignment_is_used_and_event_after_end_is_still_accepted(self):
         """Машинист — истина по погрузке даже если назначение уже формально истекло.
 
-        Сервер не отклоняет: берёт последнее известное назначение этой пары
-        техники и принимает погрузку с тем экскаватором, что прислал телефон
-        (через смену), расхождение — только в лог.
+        Пока другой экскаватор ещё не принял самосвал (по времени) — сервер
+        берёт последнее известное назначение этой пары техники, расхождение
+        только в лог. Как только другой экскаватор его уже принял на момент
+        нажатия — это уже реальное «чужой самосвал», и погрузка идёт через
+        свободный ковш (решение пользователя 2026-09-26), не через назначение.
         """
+        from trips.free_bucket import canonical_free_bucket_work_context_snapshot
+
         occurred_at = timezone.now()
         ended_at = occurred_at + timedelta(seconds=2)
         HaulAssignment.objects.filter(pk=self.assignment.id).update(
             status=AssignmentStatus.CANCELLED,
             ended_at=ended_at,
         )
-        HaulAssignment.objects.create(
+        other_assignment = HaulAssignment.objects.create(
             truck=self.truck,
             excavator=self.other_excavator,
             status=AssignmentStatus.ACCEPTED,
             accepted_at=ended_at,
         )
+        # assigned_at is auto_now_add — .create() cannot backdate it, so set it explicitly.
+        HaulAssignment.objects.filter(pk=other_assignment.pk).update(assigned_at=ended_at)
+        other_assignment.refresh_from_db()
+        placement, _ = ExcavatorPlacement.objects.update_or_create(
+            excavator=self.excavator,
+            defaults={
+                'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'work_rock_type': self.rock,
+                'work_dump_point': self.dump_point,
+                'changed_by': self.operator,
+            },
+        )
+        ExcavatorDumpPointSetting.objects.update_or_create(
+            placement=placement, dump_point=self.dump_point,
+            defaults={'position': 1, 'changed_by': self.operator},
+        )
+        self.assertTrue(canonical_free_bucket_work_context_snapshot(self.excavator))
 
         historical = self.load_event('historical-load', 1, occurred_at=occurred_at)
         accepted = self.sync([historical]).json()['results'][0]
@@ -2050,6 +2071,11 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(result['status'], 'accepted', result)
         second_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
         self.assertEqual(second_trip.excavator_id, self.excavator.id)
+        acceptance = FreeBucketAcceptance.objects.get(pk=result['server_ids']['free_bucket_acceptance_id'])
+        self.assertEqual(acceptance.used_trip_id, second_trip.id)
+        self.assertEqual(acceptance.primary_assignment_id, other_assignment.id)
+        other_assignment.refresh_from_db()
+        self.assertIsNone(other_assignment.ended_at)
 
     def test_load_accepted_when_no_assignment_ever_existed_for_the_pair(self):
         """Для пары техники вообще нет ни одного назначения — сервер всё равно не отклоняет.
@@ -2070,28 +2096,53 @@ class OfflineEventSyncTests(TestCase):
             HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).exists()
         )
 
-    def test_load_stays_a_conflict_when_truck_openly_assigned_to_another_excavator(self):
-        """Самосвал открыто числится за ДРУГИМ экскаватором — не заводим второе назначение.
+    def test_load_of_truck_openly_assigned_elsewhere_goes_through_free_bucket(self):
+        """Самосвал открыто числится за ДРУГИМ экскаватором — грузим через свободный ковш.
 
-        Иначе самосвал «переехал» бы на пульте диспетчера под этот экскаватор
-        мимо диспетчера, а уникальный индекс на один открытый ACCEPTED на
-        самосвал уронил бы транзакцию.
+        Решение пользователя 2026-09-26: не отказ, не второе назначение (это
+        и уронило бы уникальный индекс на truck), и не переезд на пульте —
+        основное назначение остаётся за другим экскаватором, рейс идёт через
+        уже существующую механику FreeBucketAcceptance.
         """
+        from trips.free_bucket import canonical_free_bucket_work_context_snapshot
+
         HaulAssignment.objects.filter(truck=self.truck, excavator=self.excavator).delete()
-        HaulAssignment.objects.create(
+        other_assignment = HaulAssignment.objects.create(
             truck=self.truck, excavator=self.other_excavator,
             action=HaulAssignmentAction.ASSIGN, status=AssignmentStatus.ACCEPTED,
             accepted_at=timezone.now() - timedelta(minutes=5),
         )
+        placement, _ = ExcavatorPlacement.objects.update_or_create(
+            excavator=self.excavator,
+            defaults={
+                'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'work_rock_type': self.rock,
+                'work_dump_point': self.dump_point,
+                'changed_by': self.operator,
+            },
+        )
+        ExcavatorDumpPointSetting.objects.update_or_create(
+            placement=placement, dump_point=self.dump_point,
+            defaults={'position': 1, 'changed_by': self.operator},
+        )
+        self.assertTrue(canonical_free_bucket_work_context_snapshot(self.excavator))
 
         event = self.load_event('load-truck-claimed-by-other-excavator', 1)
         response = self.sync([event])
 
         self.assertEqual(response.status_code, 200, response.content)
         result = response.json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'assignment_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.excavator.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        acceptance = FreeBucketAcceptance.objects.get(pk=result['server_ids']['free_bucket_acceptance_id'])
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(acceptance.used_trip_id, trip.id)
+        self.assertEqual(acceptance.primary_assignment_id, other_assignment.id)
+        other_assignment.refresh_from_db()
+        self.assertIsNone(other_assignment.ended_at)
+        self.assertEqual(other_assignment.status, AssignmentStatus.ACCEPTED)
 
     def test_delayed_load_keeps_driver_shift_from_occurrence_not_new_shift(self):
         occurred_at = timezone.now()
