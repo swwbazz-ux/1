@@ -1578,20 +1578,72 @@ window.bindDriverMobileShell = function () {
         });
     }
 
+    /* Признак «это тот же самый простой» — причина + время начала, округлённое
+       до секунды (секунды в started_at не зависят от того, каким кодом путём
+       карточка узнала о простое, а event_id зависит: локальный ("local:<uuid>")
+       становится серверным числовым в момент синхронизации). */
+    function driverDowntimeIdentityKey(reasonId, startedAt) {
+        var startedAtMs = Date.parse(startedAt || "");
+        if (!Number.isFinite(startedAtMs)) return "";
+        return String(reasonId || "") + "|" + Math.floor(startedAtMs / 1000);
+    }
+
+    /* Простои, закрытые ЭТИМ телефоном (клик «завершить» или honest server
+       truth), не должны воскресать из более старого локального снимка/
+       фрагмента — под нагрузкой (много техники меняет состояние в ту же
+       секунду) экран перерисовывается заметно чаще, и устаревшая запись
+       «простой начат», которая ещё не успела уступить место записи
+       «завершён» в локальном списке офлайн-событий, повторно применялась как
+       активная — мигала окантовка, простой «оживал» на долю секунды между
+       обновлениями (боевой 27.09.2026, v359). Список короткий и живёт только
+       в памяти вкладки — переживать перезагрузку страницы ему не нужно:
+       после перезагрузки экран целиком строится с нуля из честного
+       серверного снимка. Список живёт на window, а не в замыкании этой
+       функции: полная подмена оболочки (driverMorphShell не справился,
+       oldShell.replaceWith(freshShell)) заново запускает bindDriverMobileShell
+       на свежем узле — локальный var потерял бы память о закрытых простоях
+       ровно в момент, когда она нужнее всего. */
+    function markDriverDowntimeInstanceClosed(reasonId, startedAt) {
+        var key = driverDowntimeIdentityKey(reasonId, startedAt);
+        if (!key) return;
+        var list = (window.driverDowntimeClosedInstances || []).filter(function (item) { return item !== key; });
+        list.push(key);
+        if (list.length > 8) list.shift();
+        window.driverDowntimeClosedInstances = list;
+    }
+    function driverDowntimeInstanceIsClosed(reasonId, startedAt) {
+        var key = driverDowntimeIdentityKey(reasonId, startedAt);
+        return !!key && (window.driverDowntimeClosedInstances || []).indexOf(key) >= 0;
+    }
+
     function startDriverDowntimeTimer(payload) {
         payload = payload || {};
         var activeReasonId = String(payload.reason_id || "");
         var eventId = String(payload.event_id || "");
+        var identityKey = driverDowntimeIdentityKey(activeReasonId, payload.started_at);
         var existing = window.driverDowntimeClock;
-        if (existing && eventId && existing.eventId === eventId && existing.activeReasonId === activeReasonId) {
-            /* Тот же самый простой (тот же event_id и причина) — не
-               перезапускаем отсчёт. Раньше любое фоновое обновление экрана
-               (опрос раз в ~2 с, подмена фрагмента) заново вызывало эту
-               функцию с оптимистичным/устаревшим payload.elapsed_seconds
-               (обычно 0) и просто обнуляло видимый таймер каждые несколько
-               секунд, хотя простой всё это время оставался тем же самым
-               (пойман на бою 27.09.2026, v358). Освежаем только видимые
-               накопленные секунды по причинам — они могли поменяться. */
+        var sameInstance = existing && existing.activeReasonId === activeReasonId && (
+            /* identityKey (причина + started_at) — основной признак: он не
+               меняется, когда офлайн-запись простоя синхронизируется и её
+               event_id переходит из локального вида ("local:<uuid>") в
+               серверный числовой ID — под нагрузкой (много техники меняет
+               состояние в ту же секунду) это переключение ловится КАЖДЫМ
+               фоновым обновлением, и сравнение только по event_id ловило
+               ложное «это другой простой» и обнуляло таймер (боевой
+               27.09.2026, v359). event_id остаётся запасным признаком на
+               случай, если started_at не пришёл вовсе. */
+            (identityKey && existing.identityKey === identityKey)
+            || (!identityKey && eventId && existing.eventId === eventId)
+        );
+        if (sameInstance) {
+            /* Тот же самый простой — не перезапускаем отсчёт. Раньше любое
+               фоновое обновление экрана (опрос раз в ~2 с, подмена
+               фрагмента) заново вызывало эту функцию с оптимистичным/
+               устаревшим payload.elapsed_seconds (обычно 0) и просто
+               обнуляло видимый таймер каждые несколько секунд, хотя простой
+               всё это время оставался тем же самым (пойман на бою
+               27.09.2026, v358/v359). Освежаем только видимые накопленные
+               секунды по причинам — они могли поменяться. */
             syncDriverReasonTotals(payload);
             return;
         }
@@ -1615,6 +1667,7 @@ window.bindDriverMobileShell = function () {
         var clock = {
             activeReasonId: activeReasonId,
             eventId: eventId,
+            identityKey: identityKey,
             baseActiveElapsedSeconds: baseActiveElapsedSeconds,
             baseShiftSeconds: Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0)),
             syncedAtMs: syncedAtMs
@@ -1725,6 +1778,26 @@ window.bindDriverMobileShell = function () {
         if (!downtimeCard || !payload || !payload.event_id) {
             return false;
         }
+        if (driverDowntimeInstanceIsClosed(payload.reason_id, payload.started_at)) {
+            /* Этот телефон уже закрыл именно этот простой (та же причина и
+               started_at) — источник, вызвавший этот payload (устаревший
+               локальный список офлайн-событий или запоздавший серверный
+               снимок), просто ещё не узнал об этом. Не воскрешаем. */
+            if (downtimeCard.classList.contains("is-active") || downtimeCard.dataset.driverActiveReasonId) {
+                /* Карточку уже успели вернуть в активное состояние НАПРЯМУЮ,
+                   в обход этой функции — driver-shift-refresh-v1.js
+                   (ownDowntimeOnly) копирует весь набор data-driver-active-*
+                   атрибутов и весь class карточки прямо с фрагмента, не
+                   спрашивая applyDriverActiveDowntime/clearDriverActiveDowntime.
+                   Если во фрагменте оказался более старый (запоздавший)
+                   снимок — окантовка/мигание успевали вернуться ДО того, как
+                   эта проверка вообще срабатывала. Раз воскрешать нельзя —
+                   приводим карточку обратно к неактивной, а не просто
+                   отказываемся её трогать (боевой 27.09.2026, v359). */
+                clearDriverActiveDowntime({shift_total_seconds: downtimeCard.dataset.driverShiftDowntimeSeconds});
+            }
+            return false;
+        }
         downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
         downtimeCard.dataset.driverActiveReasonId = String(payload.reason_id || "");
         downtimeCard.dataset.driverActiveDowntimeFlow = payload.workflow || "";
@@ -1747,6 +1820,12 @@ window.bindDriverMobileShell = function () {
     }
 
     function clearDriverActiveDowntime(payload) {
+        if (downtimeCard && downtimeCard.dataset.driverActiveReasonId) {
+            markDriverDowntimeInstanceClosed(
+                downtimeCard.dataset.driverActiveReasonId,
+                downtimeCard.dataset.driverActiveStartedAt
+            );
+        }
         clearDriverDowntimeTimer();
         window.driverDowntimeActiveEventId = "";
         if (downtimeTitle) downtimeTitle.textContent = "Простоя нет";

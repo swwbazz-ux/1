@@ -186,12 +186,116 @@ function loadUnloadGestureBinder() {
 }
 
 
+function loadActiveDowntimeRuntime() {
+    const signatures = [
+        "function formatDriverDowntimeDuration(seconds)",
+        "function clearDriverDowntimeTimer()",
+        "function renderDriverReasonDuration(button, totalSeconds, isActive)",
+        "function syncDriverReasonTotals(payload)",
+        "function setDriverDowntimeStatusClass(statusKey)",
+        "function driverDowntimeIdentityKey(reasonId, startedAt)",
+        "function markDriverDowntimeInstanceClosed(reasonId, startedAt)",
+        "function driverDowntimeInstanceIsClosed(reasonId, startedAt)",
+        "function startDriverDowntimeTimer(payload)",
+        "function applyDriverActiveDowntime(payload)",
+        "function clearDriverActiveDowntime(payload)",
+    ];
+    const source = signatures.map((signature) => extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)).join("\n");
+    let nowMs = Date.parse("2026-09-27T01:00:00.000Z");
+    let intervalCallback = null;
+    const duration = () => ({hidden: true, textContent: ""});
+    const makeButton = (id, baseSeconds) => {
+        const reasonDuration = duration();
+        return {
+            dataset: {
+                driverDowntimeReasonId: String(id),
+                driverReasonSeconds: String(baseSeconds),
+                driverReasonLabel: `Reason ${id}`,
+            },
+            classList: createClassList(),
+            getAttribute() { return null; },
+            setAttribute() {},
+            querySelector(selector) {
+                return selector === "[data-driver-reason-duration]" ? reasonDuration : null;
+            },
+            reasonDuration,
+        };
+    };
+    const buttons = [makeButton(1, 10), makeButton(2, 3)];
+    const downtimeCard = {dataset: {driverShiftDowntimeSeconds: "0", driverActiveElapsedSeconds: "0"}, classList: createClassList()};
+    const downtimeDuration = {textContent: ""};
+    const downtimeTitle = {textContent: ""};
+    const downtimeReason = {textContent: ""};
+    const downtimeClose = {disabled: true, classList: createClassList(["is-disabled"]), setAttribute() {}, removeAttribute() {}};
+    const runtimeWindow = {
+        driverDowntimeTimerId: null,
+        driverDowntimeClock: null,
+        driverDowntimeActiveEventId: "",
+        setInterval(callback) {
+            intervalCallback = callback;
+            return 17;
+        },
+        clearInterval() {
+            intervalCallback = null;
+        },
+    };
+    const shell = {
+        querySelector(selector) {
+            const match = selector.match(/driver-downtime-reason-id="([^"]+)"/);
+            return match ? buttons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
+        },
+    };
+    const RuntimeDate = {
+        now: () => nowMs,
+        parse: Date.parse,
+    };
+    const context = {};
+    vm.runInNewContext(
+        `${source}\n`
+        + `context.apply = applyDriverActiveDowntime;\n`
+        + `context.clear = clearDriverActiveDowntime;\n`
+        + `context.start = startDriverDowntimeTimer;`,
+        {
+            context,
+            Date: RuntimeDate,
+            Math,
+            Number,
+            String,
+            Array,
+            Object,
+            downtimeCard,
+            downtimeDuration,
+            downtimeTitle,
+            downtimeReason,
+            downtimeClose,
+            downtimeReasonButtons: buttons,
+            shell,
+            window: runtimeWindow,
+            applyDriverWaitingMode(payload) {
+                const flow = String((payload && payload.workflow) || "");
+                return flow === "waiting_loading" || flow === "waiting_unload";
+            },
+        },
+        {filename: "templates/users/driver_shift.html#active-downtime"}
+    );
+    return {
+        buttons,
+        context,
+        downtimeCard,
+        downtimeDuration,
+        setNow(value) { nowMs = Date.parse(value); },
+        tick() { assert.ok(intervalCallback); intervalCallback(); },
+    };
+}
+
+
 function loadDowntimeTimerRuntime() {
     const signatures = [
         "function formatDriverDowntimeDuration(seconds)",
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
         "function syncDriverReasonTotals(payload)",
+        "function driverDowntimeIdentityKey(reasonId, startedAt)",
         "function startDriverDowntimeTimer(payload)",
         "function snapshotDriverDowntimeTimer(atMs)",
     ];
@@ -441,6 +545,111 @@ test("the timer's base always counts from started_at, ignoring a zero or stale e
     runtime.setNow("2026-09-17T01:00:30.000Z");
     runtime.tick();
     assert.equal(runtime.downtimeDuration.textContent, "00:00:30");
+});
+
+test("a local downtime syncing to a server-confirmed numeric id does not reset the timer", () => {
+    // Боевой 27.09.2026 (v359), под нагрузкой (много техники меняет
+    // состояние каждые секунды — версия сервера растёт часто): офлайн-запись
+    // простоя синхронизируется, её event_id переходит из "local:<uuid>" в
+    // серверный числовой ID, и КАЖДОЕ фоновое обновление после этого
+    // сравнивало старый и новый вид ID как «другой простой» — таймер
+    // обнулялся. started_at не меняется при синхронизации, поэтому именно
+    // он — правильный признак «тот же простой».
+    const runtime = loadActiveDowntimeRuntime();
+    runtime.context.apply({
+        event_id: "local:driver-downtime-uuid-1",
+        reason_id: 1,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+    });
+    runtime.setNow("2026-09-27T01:00:04.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:04");
+
+    // Тот же простой, но теперь под серверным числовым ID — та же причина,
+    // тот же started_at, "свежий" elapsed_seconds: 0.
+    runtime.context.apply({
+        event_id: "55",
+        reason_id: 1,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:04.000Z",
+    });
+    runtime.setNow("2026-09-27T01:00:09.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:09");
+});
+
+test("a downtime closed on this phone cannot be resurrected by a stale local snapshot", () => {
+    // Боевой 27.09.2026 (v359): после закрытия простоя ("завершить" или
+    // честная разгрузка) более старая запись «простой начат», ещё не
+    // вытесненная в локальном списке офлайн-событий записью «завершён»,
+    // повторно применялась как активная при следующей же перерисовке — под
+    // нагрузкой это окно ловилось часто (мигание окантовки, простой
+    // «оживал»). Правило 1: локальное закрытие — истина, более старый снимок
+    // его не отменяет.
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        event_id: "local:driver-downtime-uuid-2",
+        reason_id: 2,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "red",
+    };
+    runtime.context.apply(payload);
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+
+    runtime.context.clear({shift_total_seconds: 0});
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+
+    // Устаревший снимок того же простоя приходит ПОСЛЕ закрытия.
+    const resurrectionAttempt = runtime.context.apply(payload);
+    assert.equal(resurrectionAttempt, false);
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+    assert.equal(runtime.downtimeCard.dataset.driverActiveReasonId, "");
+});
+
+test("a stale fragment that writes is-active directly onto the card gets corrected back, not just ignored", () => {
+    // driver-shift-refresh-v1.js (ownDowntimeOnly-подмена и общий
+    // driverMorphShell) копирует набор data-driver-active-* атрибутов И ВЕСЬ
+    // class карточки состояния прямо с фрагмента — в обход
+    // applyDriverActiveDowntime/clearDriverActiveDowntime. Если фрагмент
+    // оказался запоздавшим снимком ДО закрытия, класс is-active и мигание
+    // (driver-downtime-drum-v1.js читает ту же карточку) успевают вернуться
+    // раньше, чем эта функция вообще заметит попытку воскрешения. Отказ
+    // должен не просто "не применять" новое состояние, а АКТИВНО откатить
+    // уже случившуюся прямую правку DOM.
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        event_id: "local:driver-downtime-uuid-3",
+        reason_id: 3,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "red",
+    };
+    runtime.context.apply(payload);
+    runtime.context.clear({shift_total_seconds: 0});
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+
+    // Имитация прямой правки фрагмента: атрибуты и class вернулись напрямую,
+    // в обход applyDriverActiveDowntime.
+    runtime.downtimeCard.classList.add("is-active");
+    runtime.downtimeCard.dataset.driverActiveReasonId = String(payload.reason_id);
+    runtime.downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+    runtime.downtimeCard.dataset.driverActiveStartedAt = payload.started_at;
+
+    // То, что обычно вызывает syncDriverDowntimeTimerFromCard после любого
+    // обновления экрана, — повторное применение того же payload.
+    runtime.context.apply(payload);
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+    assert.equal(runtime.downtimeCard.dataset.driverActiveReasonId, "");
 });
 
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {
