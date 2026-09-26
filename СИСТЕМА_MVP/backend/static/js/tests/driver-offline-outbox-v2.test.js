@@ -635,9 +635,41 @@ test("acknowledged identity tombstone prevents incompatible id reuse", async () 
     await assert.rejects(box.enqueue({...original, trip_id: 2, payload: {trip_id: 2}}), /offline_event_id_reused/);
 });
 
-test("retry backoff is bounded", () => {
+test("retry backoff is bounded to 5-10s while online, not the old 5-minute cap", () => {
+    // Раньше пауза между повторами росла до 5 минут (backoff(20) === 300000) —
+    // на нестабильной, но живой связи водитель мог не увидеть подтверждение
+    // своих действий у машиниста/на пульте минутами (26.09.2026).
     assert.equal(backoff(1), 5000);
-    assert.equal(backoff(20), 300000);
+    assert.equal(backoff(20), 8000);
+});
+
+test("regaining connectivity retries immediately instead of waiting out a stale backoff", async () => {
+    // Раньше 'online' просто звал flush(), а flush() пропускает события, чьё
+    // next_retry_at ещё не наступило — назначенное офлайн-попытками на минуты
+    // вперёд время пережидалось полностью, хотя связь уже вернулась.
+    let attempts = 0;
+    const box = runtime({
+        send: async () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error("offline");
+            return {results: [{event_id: "reconnect-1", status: "accepted"}]};
+        },
+    });
+    await box.enqueue({
+        event_id: "reconnect-1",
+        event_type: "driver.trip.unloaded",
+        trip_id: 1,
+        payload: {trip_id: 1},
+    });
+    await box.flush();
+    assert.equal(attempts, 1);
+    const [scheduled] = await box.pending();
+    assert.ok(Number(scheduled.next_retry_at) > Date.now());
+
+    await box.retryNow();
+
+    assert.equal(attempts, 2);
+    assert.equal((await box.pending()).length, 0);
 });
 
 test("accepted callback runs only after durable removal and published zero state", async () => {

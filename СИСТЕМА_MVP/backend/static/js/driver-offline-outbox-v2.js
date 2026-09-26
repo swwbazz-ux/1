@@ -539,7 +539,13 @@
     }
 
     function backoff(attempt) {
-        return Math.min(5 * 60 * 1000, 5000 * Math.pow(2, Math.min(6, Math.max(0, attempt - 1))));
+        /* Раньше пауза между повторами росла до 5 минут — на нестабильной, но
+           формально живой связи водитель мог не увидеть подтверждение своей
+           разгрузки или простоя на пульте/у машиниста минутами. Телефон
+           обязан пробовать снова не реже раза в 5-10 с, пока связь вообще
+           есть; при настоящем офлайне 'online' форсирует немедленный повтор
+           отдельно (см. ниже), так что долгий бэкофф тут не нужен. */
+        return Math.min(8000, 5000 * Math.pow(2, Math.min(6, Math.max(0, attempt - 1))));
     }
 
     function createDriverOfflineOutbox(options) {
@@ -987,13 +993,25 @@
             }
             options.localStorage.removeItem(legacyKey);
         }
+        async function retryNow() {
+            /* Возврат связи обязан пробовать отправить очередь сразу, а не
+               ждать, пока истечёт бэкофф, назначенный ещё в офлайне (мог
+               быть выставлен на несколько минут вперёд) — иначе водитель
+               физически на связи, а разгрузка/простой у машиниста и на
+               пульте всё ещё не долетели. */
+            var items = await listAll();
+            await Promise.all(items
+                .filter(function (item) { return item.state === "pending" && Number(item.next_retry_at || 0) > Date.now(); })
+                .map(function (item) { return update(item, {next_retry_at: 0}); }));
+            return flush();
+        }
         function bindLifecycle() {
             if (!root.addEventListener) return;
-            root.addEventListener("online", function () { flush().catch(function () {}); });
-            root.addEventListener("pageshow", function () { flush().catch(function () {}); });
+            root.addEventListener("online", function () { retryNow().catch(function () {}); });
+            root.addEventListener("pageshow", function () { retryNow().catch(function () {}); });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
-                    if (!root.document.hidden) flush().catch(function () {});
+                    if (!root.document.hidden) retryNow().catch(function () {});
                 });
             }
         }
@@ -1009,6 +1027,7 @@
             initialize: initialize,
             enqueue: enqueue,
             flush: flush,
+            retryNow: retryNow,
             pending: listAll,
             publish: publish,
             setBindings: setBindings,
