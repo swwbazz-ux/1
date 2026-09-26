@@ -34,6 +34,10 @@ const DISPATCHER_EQUIPMENT_SEARCH = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-equipment-search-v1.js"),
     "utf8"
 );
+const DISPATCHER_COMPLEX_TRUCK_RACKS = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-complex-truck-racks-v1.js"),
+    "utf8"
+);
 const DISPATCHER_BOARD = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
     "utf8"
@@ -72,7 +76,7 @@ const PRODUCTION_MANIFEST = fs.readFileSync(
 );
 
 test("desktop runtime содержит только контур Диспетчера", () => {
-    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_EQUIPMENT_SEARCH, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
+    const desktopModules = [DISPATCHER_RUNTIME, DISPATCHER_TRANSPORT, DISPATCHER_DETAIL_SETTINGS, DISPATCHER_DETAIL_CHARTS, DISPATCHER_DETAIL, DISPATCHER_EQUIPMENT_SEARCH, DISPATCHER_COMPLEX_TRUCK_RACKS, DISPATCHER_BOARD, DISPATCHER_REALTIME].join("\n");
     for (const mobileContract of [
         "function bindMiningMasterMobileScreens()",
         "function refreshMobileBoardFromServer(options)",
@@ -190,6 +194,11 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_DETAIL, /function renderDetailChart\(chart\)/);
     assert.match(DISPATCHER_EQUIPMENT_SEARCH, /function createDispatcherEquipmentSearch\(\)/);
     assert.match(DISPATCHER_EQUIPMENT_SEARCH, /global\.createDispatcherEquipmentSearch = createDispatcherEquipmentSearch;/);
+    assert.match(DISPATCHER_COMPLEX_TRUCK_RACKS, /function createDispatcherComplexTruckRacks\(options\)/);
+    assert.match(DISPATCHER_COMPLEX_TRUCK_RACKS, /global\.createDispatcherComplexTruckRacks = createDispatcherComplexTruckRacks;/);
+    assert.match(DISPATCHER_COMPLEX_TRUCK_RACKS, /function refreshAll\(\)/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function complexTileForGrid\(/);
+    assert.doesNotMatch(DISPATCHER_BOARD, /function watchComplexTruckRacks\(/);
     assert.doesNotMatch(DISPATCHER_BOARD, /function bindDispatcherEquipmentSearch\(\)/);
     assert.match(DISPATCHER_BOARD, /function createDispatcherBoard\(options\)/);
     assert.match(DISPATCHER_BOARD, /global\.createDispatcherBoard = createDispatcherBoard;/);
@@ -197,7 +206,9 @@ test("карточка и desktop-доска физически отделены
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function openEquipmentCard\(/);
     assert.doesNotMatch(DISPATCHER_RUNTIME, /function bindDispatcherDesktopInteractions\(/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherDetail\(\{/);
+    assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherComplexTruckRacks\(\{/);
     assert.match(DISPATCHER_RUNTIME, /window\.createDispatcherBoard\(\{/);
+    assert.match(DISPATCHER_RUNTIME, /complexTruckRacks: dispatcherComplexTruckRacks/);
 });
 
 test("transport загружается перед основным runtime и входит в PWA shell", () => {
@@ -206,6 +217,7 @@ test("transport загружается перед основным runtime и в
     const detailChartsIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-charts-v1.js");
     const detailIndex = SHARED_TEMPLATE.indexOf("dispatcher-detail-v1.js");
     const equipmentSearchIndex = SHARED_TEMPLATE.indexOf("dispatcher-equipment-search-v1.js");
+    const complexTruckRacksIndex = SHARED_TEMPLATE.indexOf("dispatcher-complex-truck-racks-v1.js");
     const boardIndex = SHARED_TEMPLATE.indexOf("dispatcher-board-v1.js");
     const realtimeIndex = SHARED_TEMPLATE.indexOf("dispatcher-realtime-v1.js");
     const controlIndex = SHARED_TEMPLATE.indexOf("dispatcher-control-v1.js");
@@ -217,7 +229,8 @@ test("transport загружается перед основным runtime и в
     assert.ok(detailChartsIndex > detailSettingsIndex, "detail charts must load after detail settings");
     assert.ok(detailIndex > detailChartsIndex, "detail must load after its chart presenter");
     assert.ok(equipmentSearchIndex > detailIndex, "equipment search must load after detail");
-    assert.ok(boardIndex > equipmentSearchIndex, "board must load after equipment search");
+    assert.ok(complexTruckRacksIndex > equipmentSearchIndex, "complex racks must load after equipment search");
+    assert.ok(boardIndex > complexTruckRacksIndex, "board must load after complex racks");
     assert.ok(realtimeIndex > boardIndex, "realtime must load after board");
     assert.ok(controlIndex > realtimeIndex, "realtime must load before the main runtime");
     assert.match(DISPATCHER_REALTIME, /global\.createDispatcherRealtime = createDispatcherRealtime;/);
@@ -228,6 +241,7 @@ test("transport загружается перед основным runtime и в
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-charts-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-detail-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-equipment-search-v1\.js"/);
+    assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-complex-truck-racks-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-board-v1\.js"/);
     assert.match(DISPATCHER_PWA, /"\/static\/js\/dispatcher-realtime-v1\.js"/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-transport-v1\.js/);
@@ -235,8 +249,20 @@ test("transport загружается перед основным runtime и в
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-charts-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-detail-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-equipment-search-v1\.js/);
+    assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-complex-truck-racks-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-board-v1\.js/);
     assert.match(PRODUCTION_MANIFEST, /static\/js\/dispatcher-realtime-v1\.js/);
+});
+
+test("модуль раскладки самосвалов упакован ровно один раз", () => {
+    const runtimeName = "dispatcher-complex-truck-racks-v1.js";
+    const manifestPath = "СИСТЕМА_MVP/backend/static/js/dispatcher-complex-truck-racks-v1.js";
+    assert.equal((SHARED_TEMPLATE.match(new RegExp(runtimeName, "g")) || []).length, 1);
+    assert.equal((DISPATCHER_PWA.match(/\/static\/js\/dispatcher-complex-truck-racks-v1\.js/g) || []).length, 1);
+    assert.equal(
+        PRODUCTION_MANIFEST.split(/\r?\n/).filter((line) => line === manifestPath).length,
+        1
+    );
 });
 
 test("offline queue физически отделена, но сохраняет production-контракт", () => {

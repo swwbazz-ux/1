@@ -25,8 +25,12 @@ const {dispatcherStyleSource} = require("./dispatcher-style-source");
 
 const BACKEND = path.resolve(__dirname, "..", "..", "..");
 const TEMPLATE = dispatcherScreenSource();
-const SCRIPT = fs.readFileSync(
+const BOARD_RUNTIME = fs.readFileSync(
     path.join(BACKEND, "static", "js", "dispatcher-board-v1.js"),
+    "utf8"
+);
+const SCRIPT = fs.readFileSync(
+    path.join(BACKEND, "static", "js", "dispatcher-complex-truck-racks-v1.js"),
     "utf8"
 );
 const CSS = dispatcherStyleSource();
@@ -146,7 +150,7 @@ test("плитка не становится вертикальной: кори�
 
 test("размер плитки один на всей доске", () => {
     for (const source of [TEMPLATE, SCRIPT]) {
-        assert.match(source, /function refreshAllComplexTruckRacks/);
+        assert.match(source, /function refresh(?:AllComplexTruckRacks|All)\(/);
         assert.match(source, /if \(!common \|\| \(size\.w \* size\.h\) < \(common\.w \* common\.h\)\)/);
         assert.match(source, /applyComplexTruckLayout\(m\.rack, m\.tiles, m\.empty, common/);
     }
@@ -274,7 +278,7 @@ test("карточка, собранная скриптом в пустой зо
        мобильного контура; на настольном пульте она растворяется, иначе
        области сетки head/info не находят своих элементов. */
     assert.match(CSS, /> \.complex-work-head \{[^}]*display: contents;/s);
-    for (const source of [TEMPLATE, SCRIPT]) {
+    for (const source of [TEMPLATE, BOARD_RUNTIME]) {
         const from = source.indexOf('targetCard.innerHTML =');
         assert.notEqual(from, -1, "сборщик карточки не найден");
         const builder = source.slice(from, source.indexOf("tile.remove();", from));
@@ -286,4 +290,13 @@ test("карточка, собранная скриптом в пустой зо
         /* Полоса — только на настольном пульте, у горного мастера её нет. */
         assert.match(builder, /mining-master-mobile-screen/);
     }
+});
+
+test("desktop-доска делегирует раскладку отдельному владельцу", () => {
+    assert.match(SCRIPT, /function createDispatcherComplexTruckRacks\(options\)/);
+    assert.match(SCRIPT, /global\.createDispatcherComplexTruckRacks = createDispatcherComplexTruckRacks/);
+    assert.match(SCRIPT, /sortEquipmentList\(rack, "\.complex-truck-tile"\)/);
+    assert.doesNotMatch(BOARD_RUNTIME, /function complexTileForGrid\(/);
+    assert.doesNotMatch(BOARD_RUNTIME, /function watchComplexTruckRacks\(/);
+    assert.match(BOARD_RUNTIME, /var complexTruckRacks = options\.complexTruckRacks \|\| \{\}/);
 });

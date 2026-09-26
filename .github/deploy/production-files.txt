@@ -29,6 +29,7 @@
 СИСТЕМА_MVP/backend/static/js/dispatcher-detail-charts-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-detail-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-equipment-search-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-complex-truck-racks-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js
 СИСТЕМА_MVP/backend/static/js/dispatcher-sounds-v1.js

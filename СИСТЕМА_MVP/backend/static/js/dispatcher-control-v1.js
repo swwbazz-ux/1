@@ -98,11 +98,22 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var dispatcherEquipmentSearch = window.createDispatcherEquipmentSearch();
     dispatcherEquipmentSearch.bind();
+    if (typeof window.createDispatcherComplexTruckRacks !== "function") {
+        throw new Error("Dispatcher complex truck racks module is not loaded");
+    }
     if (typeof window.createDispatcherBoard !== "function") {
         throw new Error("Dispatcher board module is not loaded");
     }
     var dispatcherRealtime = null;
-    var dispatcherBoard = window.createDispatcherBoard({
+    var dispatcherBoard = null;
+    var dispatcherComplexTruckRacks = window.createDispatcherComplexTruckRacks({
+        sortEquipmentList: function (container, selector) {
+            if (dispatcherBoard && typeof dispatcherBoard.sortEquipmentList === "function") {
+                return dispatcherBoard.sortEquipmentList(container, selector);
+            }
+        }
+    });
+    dispatcherBoard = window.createDispatcherBoard({
         post: dispatcherPost,
         moveExcavatorUrl: dispatcherMoveExcavatorUrl,
         assignTruckUrl: dispatcherAssignTruckUrl,
@@ -117,6 +128,7 @@ document.addEventListener("DOMContentLoaded", function () {
         neutralEquipmentIcon: dispatcherDetail.neutralEquipmentIcon,
         setNodeEquipmentState: dispatcherDetail.setNodeEquipmentState,
         rebindEquipmentSearch: dispatcherEquipmentSearch.bind,
+        complexTruckRacks: dispatcherComplexTruckRacks,
         refreshBoardFromServer: function (refreshOptions) {
             return dispatcherRealtime.refreshBoardFromServer(refreshOptions);
         },
