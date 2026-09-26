@@ -1,8 +1,10 @@
 import json
 from types import SimpleNamespace
 from datetime import timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
+from django.db.models.query import QuerySet
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -540,6 +542,47 @@ class ManualTripAutoReconcileTests(TestCase):
         self.assertEqual(trip.driver, original_driver)
         self.assertEqual(trip.driver_control_shift, self.truck_shift)
         self.assertEqual(trip.unloading_shift, replacement_shift)
+
+    def test_driver_trip_actions_lock_only_trip_across_nullable_control_shift_join(self):
+        self.presence('online')
+        loaded = self.send(action='driver-lock-scope-load')
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.id)
+
+        driver_client = Client()
+        session = driver_client.session
+        session['employee_access_id'] = self.driver_access.pk
+        session.save()
+
+        original_select_for_update = QuerySet.select_for_update
+        trip_lock_scopes = []
+
+        def record_lock_scope(queryset, *args, **kwargs):
+            if queryset.model is Trip:
+                trip_lock_scopes.append(tuple(kwargs.get('of') or ()))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, 'select_for_update', new=record_lock_scope):
+            changed = driver_client.post(
+                reverse('driver_change_unload_point', args=[trip.pk]),
+                {
+                    'client_action_id': 'driver-lock-scope-point',
+                    'dump_point': self.dump_point.pk,
+                },
+            )
+            point_lock_scopes = list(trip_lock_scopes)
+            trip_lock_scopes.clear()
+            unloaded = driver_client.post(
+                reverse('driver_complete_trip', args=[trip.pk]),
+                {'client_action_id': 'driver-lock-scope-unload'},
+            )
+            unload_lock_scopes = list(trip_lock_scopes)
+
+        self.assertEqual(changed.status_code, 302, changed.content)
+        self.assertEqual(unloaded.status_code, 302, unloaded.content)
+        self.assertIn(('self',), point_lock_scopes, point_lock_scopes)
+        self.assertIn(('self',), unload_lock_scopes, unload_lock_scopes)
 
     def test_legacy_closed_control_shift_without_carryover_marker_still_expires(self):
         self.presence('online')

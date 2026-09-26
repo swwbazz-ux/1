@@ -7240,7 +7240,9 @@ def driver_complete_trip_view(request, trip_id):
             )
         trip = (
             Trip.objects
-            .select_for_update()
+            # trip_driver_control_filter joins nullable driver_control_shift;
+            # PostgreSQL may lock only the Trip side of that LEFT JOIN.
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=(*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED))
             .first()
@@ -7386,7 +7388,9 @@ def driver_change_unload_point_view(request, trip_id):
             dump_point_id = 0
         trip = (
             Trip.objects
-            .select_for_update()
+            # Keep the same PostgreSQL-safe lock scope as trip completion:
+            # driver_control_shift is nullable and therefore not lockable.
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=OPEN_TRIP_STATUSES)
             .first()

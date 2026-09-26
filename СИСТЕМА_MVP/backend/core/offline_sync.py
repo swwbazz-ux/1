@@ -600,7 +600,11 @@ def _process_free_bucket_accepted(access, normalized):
     _validate_free_bucket_participants(excavator, truck)
     event_at = normalized['occurred_at']
     existing = (
-        FreeBucketAcceptance.objects.select_for_update()
+        # Nullable loading/requesting shifts and used_trip are read for
+        # chronology, but only the acceptance row is production state that
+        # must be locked.  Without ``of=('self',)`` PostgreSQL tries to lock
+        # the nullable side of these LEFT JOINs and rejects the query.
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
         .select_related('used_trip', 'requesting_shift', 'loading_shift')
         .filter(
             truck=truck,

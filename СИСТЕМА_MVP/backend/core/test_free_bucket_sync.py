@@ -3,11 +3,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from decimal import Decimal
 from threading import Barrier
+from unittest.mock import patch
 
 from django.apps import apps
 from django.core.management.color import no_style
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Sum
+from django.db.models.query import QuerySet
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -1204,6 +1206,37 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assignment.refresh_from_db()
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
+
+    def test_excavator_acceptance_locks_only_the_base_row_with_nullable_context(self):
+        selected = self.select_event(event_id='driver-request-before-lock-scope')
+        selected_result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(selected_result['status'], 'accepted', selected_result)
+
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(event_id='operator-accept-lock-scope', **identity)
+        original_select_for_update = QuerySet.select_for_update
+        acceptance_lock_scopes = []
+
+        def record_lock_scope(queryset, *args, **kwargs):
+            if queryset.model is FreeBucketAcceptance:
+                acceptance_lock_scopes.append(tuple(kwargs.get('of') or ()))
+            return original_select_for_update(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, 'select_for_update', new=record_lock_scope):
+            accepted_result = self.sync(
+                [accepted],
+                client=other_client,
+                actor=identity['actor'],
+                access=identity['access'],
+                device_id='free-bucket-lock-scope-device',
+            ).json()['results'][0]
+
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        self.assertTrue(acceptance_lock_scopes)
+        self.assertTrue(
+            all(scope == ('self',) for scope in acceptance_lock_scopes),
+            acceptance_lock_scopes,
+        )
 
     def test_driver_shift_close_keeps_used_acceptance_and_loaded_trip(self):
         selected = self.select_event(event_id='driver-free-before-used-shift-close')
