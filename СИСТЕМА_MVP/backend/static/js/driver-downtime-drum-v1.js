@@ -771,7 +771,10 @@
         // Над кругом стоит барабан точек разгрузки: контур — одна замкнутая кривая на оба
         // горлышка (верхняя рамка → правая дуга → нижняя рамка → левая дуга → верхняя
         // рамка), поэтому при простое он мигает целиком, как единый элемент.
-        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center");
+        // Без назначения барабан точек показывает пустую серую грань вместо настоящей
+        // карточки (driver_point_drum.html) — у неё нет data-driver-point-card, только
+        // класс, но контур-горлышко должен стоять на месте и в этом состоянии.
+        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
         var tr = top ? top.getBoundingClientRect() : null;
         var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
         if (halfT && halfT < r) {

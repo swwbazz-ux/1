@@ -84,15 +84,28 @@ test("templates classify labels by character length, matching CSS tiers", () => 
     );
 });
 
-test("without an open shift, the top drum stays a real card slot instead of collapsing to nothing", () => {
-    // Раньше пустой цикл {% for point in drum_points %} без смены не рисовал вообще
-    // ничего — барабан «схлопывался» в пустое место. Теперь пустая грань того же
-    // класса .driver-drum-card стоит на месте всегда, просто серая — как барабан
-    // простоев без смены. Текст «не назначены точки» — только когда смена ОТКРЫТА,
-    // но назначения на экскаватор нет (это другая, осмысленная причина показать
-    // предупреждение). Пойман на реальном полевом тесте 26.09.2026.
-    assert.match(POINT_TEMPLATE, /\{% empty %\}[\s\S]*?driver-drum-card driver-drum-card-empty/);
+test("without an open shift, the top drum keeps its full three-card shape and outline instead of collapsing", () => {
+    // Первая попытка чинить это оставляла одну серую грань без окантовки — координатор
+    // поймал по скриншоту: у барабана точек пропадала рамка-«горлышко» к кругу (она
+    // ищет .is-center у настоящей карточки), и было видно только одну грань вместо
+    // трёх (центр + два бока), хотя со сменой барабан всегда так и выглядит. Теперь
+    // пустых граней три, на тех же углах (--drum-step), и у центральной свой класс
+    // is-drum-empty-center — не .is-center, чтобы не словить жёлтую CSS-подсветку,
+    // но контур её всё равно находит (driver-downtime-drum-v1.js). Пойман на реальном
+    // полевом тесте 26-27.09.2026.
+    const emptyBlock = POINT_TEMPLATE.split("{% empty %}")[1].split("{% endfor %}")[0];
+    const emptyCardCount = (emptyBlock.match(/driver-drum-card driver-drum-card-empty/g) || []).length;
+    assert.equal(emptyCardCount, 3);
+    assert.match(emptyBlock, /is-drum-empty-center/);
+    assert.doesNotMatch(emptyBlock, /driver-drum-card-empty is-center/);
+    assert.match(emptyBlock, /--card-angle:\s*calc\(-1 \* var\(--drum-step\)\)/);
+    assert.match(emptyBlock, /--card-angle:\s*var\(--drum-step\)/);
     assert.match(POINT_TEMPLATE, /\{% if open_shift %\}[\s\S]*?Экскаватору не назначены точки разгрузки/);
+});
+
+test("the keyhole outline still finds the top drum's empty center card", () => {
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /\[data-driver-point-drum\]\s*\.driver-drum-card-empty\.is-drum-empty-center/);
 });
 
 test("downtime drum front card is never highlighted yellow without an open shift", () => {
