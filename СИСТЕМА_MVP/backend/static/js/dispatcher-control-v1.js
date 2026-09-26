@@ -171,7 +171,7 @@ document.addEventListener("DOMContentLoaded", function () {
         getEquipmentCards: dispatcherDetail.getCards,
         setEquipmentCards: dispatcherDetail.setCards,
         getDetailLayer: dispatcherDetail.getLayer,
-        equipmentCardTrigger: dispatcherEquipmentCardTrigger,
+        openEquipmentCard: dispatcherDetail.openEquipmentCard,
         resetBoardDragSession: dispatcherBoard.resetDragSession,
         bindBoardInteractions: dispatcherBoard.bindInteractions,
         refreshBoardIntegrity: dispatcherBoard.refreshIntegrity,
