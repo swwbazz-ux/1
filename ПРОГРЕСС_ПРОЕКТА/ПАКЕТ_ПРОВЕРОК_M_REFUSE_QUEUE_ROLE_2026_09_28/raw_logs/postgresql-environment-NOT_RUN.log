@@ -1,0 +1,15 @@
+PASSPORT_R2_POSTGRESQL_STATUS=NOT_RUN
+CHECKED_AT_LOCAL=2026-09-28 Asia/Vladivostok
+COMMANDS=Get-Command psql,docker,podman,wsl; Test-NetConnection 127.0.0.1 -Port 5432; wsl --list --quiet; boolean-only POSTGRES_* environment presence
+psql=NOT_FOUND
+docker=NOT_FOUND
+podman=NOT_FOUND
+wsl=C:\WINDOWS\system32\wsl.exe
+wsl_distribution=NOT_INSTALLED
+tcp_127.0.0.1_5432=False
+POSTGRES_DB_SET=False
+POSTGRES_USER_SET=False
+POSTGRES_HOST_SET=False
+POSTGRES_PORT_SET=False
+POSTGRES_PASSWORD=[NOT_LOGGED]
+CONCLUSION=No reachable or locally runnable isolated PostgreSQL environment was available. The PostgreSQL runner was not executed.
