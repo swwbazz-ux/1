@@ -645,6 +645,9 @@ window.bindDriverMobileShell = function () {
         core.classList.toggle("has-multiline-label", lines.length > 1);
         var maxSize = preferredDriverDialFontSize(coreWidth, lines.length, textLength);
         var minSize = Math.min(maxSize, minimumDriverDialFontSize(lines.length, textLength));
+        /* «РАЗГРУЖЕНО» в «засчитано» — одно длинное слово: при обычном нижнем
+           пределе 34px оно не влезало в круг узкого телефона и обрезалось. */
+        if (label.closest(".is-confirmed")) minSize = Math.min(minSize, 22);
         var low = minSize;
         var high = maxSize;
         var best = minSize;
@@ -1240,6 +1243,9 @@ window.bindDriverMobileShell = function () {
 
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
+        /* Круг показывает «засчитано» — проекцию применит сам показ, когда
+           закончится (showDriverDialConfirmed), иначе она съела бы подтверждение. */
+        if (Number(window.driverDialConfirmUntil || 0) > Date.now()) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         var activeTripId = String(current.dataset.driverActiveTripId || "");
         var manualTrip = String(current.dataset.driverActiveTripOrigin || "") === "driver_manual";
@@ -1377,15 +1383,9 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
-                // Ручной рейс, завершённый на круге, озвучивается так же, как обычная разгрузка.
-                if (
-                    (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
-                    && !window.driverOfflineConfirmationCueScheduled
-                ) {
-                    window.driverOfflineConfirmationCueScheduled = true;
-                    playDriverVoice("action_ok", "voice_trip_finished");
-                    window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
-                }
+                /* Разгрузку и завершение ручного рейса голос подтверждает сразу, по
+                   записи на телефоне (showDriverDialConfirmed). Ответ сервера приходит
+                   позже, иногда пачкой — второй голос тогда звучал бы невпопад. */
                 if (
                     event.event_type === "driver.trip.loaded"
                     && window.DriverManualExcavatorWorkspace
@@ -2229,7 +2229,7 @@ window.bindDriverMobileShell = function () {
                когда движок ручного рейса сообщит о завершении. */
             if (holdButton.dataset.driverManualDial === "true") {
                 if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
-                var started = window.DriverPointDrum.completeFromDial();
+                var started = window.DriverPointDrum.completeFromDial(showDriverDialConfirmed);
                 /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
                    иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
                 if (started) {
@@ -2291,10 +2291,12 @@ window.bindDriverMobileShell = function () {
                 });
             }).then(function (savedEvent) {
                 unloadRecovery.recover({type: "queued"});
+                /* Разгрузка записана на телефоне — это и есть факт (телефон решает
+                   сам). Круг сначала показывает «засчитано», и только потом
+                   проекция переводит его в следующее состояние: проекция ниже
+                   выждет конец показа (см. showDriverDialConfirmed). */
+                showDriverDialConfirmed();
                 applyDriverOfflineProjection(shell, driverOfflineEvents);
-                /* The state projection owns the visible result: after a durable
-                   local save the dial immediately becomes the quiet inactive
-                   instrument.  No completion animation may imply server sync. */
                 showDriverToast("Разгрузка сохранена на телефоне.");
                 /* Delivery is best-effort. A flush error must never turn a successful
                    durable enqueue into a false "save failed" message or restore the trip. */
@@ -2341,19 +2343,66 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(24);
             }, totalMs / HOLD_SEGMENTS);
         }
+        /* «Засчитано»: после того как разгрузка (или завершение ручного рейса)
+           записана на телефоне, круг ~0,9 с горит цветом успеха с галочкой и
+           надписью «РАЗГРУЖЕНО», звучит голос — и только потом переходит в
+           следующее состояние («ЭКС-1 / НА ЗАГРУЗКУ»). Раньше проекция
+           перестраивала круг в тот же миг, и водитель не понимал, засчитался ли
+           рейс (владелец, 28.09.2026). Пока показ идёт, местная проекция и
+           подмена фрагмента с сервера ждут (driverDialConfirmUntil проверяют
+           applyDriverOfflineProjection и isDriverOperationalRefreshUnsafe);
+           окно ограничено временем, поэтому залипнуть не может. Голос звучит
+           здесь, по факту записи на телефоне, а не по ответу сервера: ответ
+           мог прийти через секунды или минуты, когда водитель уже уехал. */
+        var DRIVER_DIAL_CONFIRM_MS = 900;
+        var driverDialConfirmTimer = null;
+        function showDriverDialConfirmed() {
+            var button = document.querySelector("[data-driver-hold-button]") || holdButton;
+            var label = button.querySelector("[data-driver-dial-label]");
+            window.clearTimeout(driverDialConfirmTimer);
+            window.driverDialConfirmUntil = Date.now() + DRIVER_DIAL_CONFIRM_MS;
+            button.classList.remove("is-holding", "is-pending", "is-loaded");
+            button.classList.add("is-confirmed");
+            button.disabled = true;
+            if (label) {
+                renderDriverDialLabel(label, "РАЗГРУЖЕНО");
+                // Синхронно, в этом же кадре — иначе один кадр слово рисуется прежним кеглем.
+                window.fitDriverDialLabelNow(label);
+            }
+            playDriverVoice("action_ok", "voice_trip_finished");
+            driverDialConfirmTimer = window.setTimeout(function () {
+                driverDialConfirmTimer = null;
+                window.driverDialConfirmUntil = 0;
+                var current = document.querySelector("[data-driver-shell]");
+                var confirmed = current && current.querySelector("[data-driver-hold-button].is-confirmed");
+                if (confirmed) confirmed.classList.remove("is-confirmed");
+                if (current) applyDriverOfflineProjection(current, driverOfflineEvents);
+                if (window.DriverPointDrum && typeof window.DriverPointDrum.refresh === "function") {
+                    window.DriverPointDrum.refresh();
+                }
+            }, DRIVER_DIAL_CONFIRM_MS);
+        }
+        /* Удержание завершено: сброс удержания после этого (восстановление
+           формы, отмена) не должен глушить длинный отклик завершения. */
+        var unloadHoldCompleted = false;
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
-               чтобы случайное касание не отправило рейс, и не утомляет за смену. */
+               чтобы случайное касание не отправило рейс, и не утомляет за смену.
+               Кольцо в CSS (driver-shift-v1.css, driver-hold-right/left) набирается
+               ровно за это же время: две половины по 250 мс. */
             holdMs: 500,
             onStart: function () {
+                unloadHoldCompleted = false;
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
-                driverVibrate(0);
+                if (!unloadHoldCompleted) driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
+                // Круг показывает «засчитано» — его подпись не трогаем, дальше круг ведёт показ.
+                if (holdButton.classList.contains("is-confirmed")) return;
                 // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
                 if (!holdButton.disabled) holdButton.classList.add("is-loaded");
                 // После обычного отпускания подпись и так исходная — подгонка текста
@@ -2366,6 +2415,7 @@ window.bindDriverMobileShell = function () {
             },
             onComplete: function () {
                 stopHoldSegmentFeedback();
+                unloadHoldCompleted = true;
                 driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();

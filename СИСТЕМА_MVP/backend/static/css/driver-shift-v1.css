@@ -763,7 +763,7 @@ body.driver-mobile-screen .driver-work-dial-svg {
    поворачиваются трансформацией, и композитор рисует это сам. На бою кольца
    набирались conic-gradient'ом с маской и drop-shadow, который скрипт перекрашивал
    каждый кадр: на телефоне водителя это 19 кадров в секунду и кадры по 280 мс.
-   Длительности анимаций (500 + 500 мс) равны holdMs: 1000 в скрипте удержания. */
+   Длительности анимаций (250 + 250 мс) равны holdMs: 500 в скрипте удержания. */
 body.driver-mobile-screen .driver-work-hold-ring {
     position: absolute;
     /* Внешний край секций — внешний край больших делений (кольцо делений: inset 3%,
@@ -824,17 +824,75 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
     opacity: 1;
 }
 
+/* Обе половины вместе — ровно holdMs: 500 разгрузки (driver-shift-v1.js). Раньше
+   половины шли по 500 мс (кольцо на 1 с), а действие срабатывало через 500 мс —
+   в миг срабатывания кольцо было заполнено наполовину (владелец, 28.09.2026). */
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
-    animation: driver-hold-right 500ms steps(6, end) forwards;
+    animation: driver-hold-right 250ms steps(6, end) forwards;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
-    animation: driver-hold-left 500ms steps(6, end) 500ms forwards;
+    animation: driver-hold-left 250ms steps(6, end) 250ms forwards;
 }
 
-/* Удержание завершено — все двенадцать секций горят до ответа. */
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
+/* Удержание завершено — все двенадцать секций горят до ответа и во время «засчитано». */
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill,
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill,
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
+
+/* «Засчитано» (~0,9 с после записи разгрузки на телефоне, showDriverDialConfirmed):
+   полное кольцо и подпись цветом успеха, над подписью — галочка. Цвет задан
+   явно, а не через --driver-green: в ручном режиме и при свободном ковше тот
+   перекрашен в цвет режима, а «засчитано» одинаково во всех режимах. Всё
+   статично — ни анимаций, ни фильтров. */
+/* Кнопка на время показа выключена (второе удержание не пройдёт), но общий
+   вид выключенной кнопки (button:disabled — прозрачность и серый фильтр)
+   гасил бы подтверждение. */
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed,
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed:disabled {
+    color: #8cff2e;
+    opacity: 1;
+    filter: none;
+    pointer-events: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-svg { opacity: 0; }
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-ring { opacity: 1; }
+
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-percent,
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-progress-loop,
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-note {
+    display: none;
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-core {
+    border-color: rgba(140, 255, 46, .7);
+    box-shadow:
+        inset 0 12px 22px rgba(255,255,255,0.08),
+        inset 0 -26px 36px rgba(0,0,0,0.52),
+        inset 0 0 40px rgba(140, 255, 46, .16),
+        0 10px 26px rgba(0,0,0,0.42),
+        0 0 34px rgba(140, 255, 46, .28);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-core::after {
+    content: "";
+    order: -1;
+    position: relative;
+    z-index: 1;
+    width: 15%;
+    aspect-ratio: 1 / 2;
+    margin-top: -6%;
+    border: solid #8cff2e;
+    border-width: 0 clamp(5px, 1.6vw, 8px) clamp(5px, 1.6vw, 8px) 0;
+    border-radius: 2px;
+    transform: rotate(45deg);
+}
+
+body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-label {
+    color: #8cff2e;
+}
 
 @keyframes driver-hold-right {
     from { transform: rotate(-180deg); }
