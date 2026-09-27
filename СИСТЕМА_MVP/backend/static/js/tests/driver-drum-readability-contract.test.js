@@ -90,23 +90,28 @@ test("line layout keeps every word whole and picks the split that gives the bigg
 test("active-downtime timer is not tied to the reason-name tier and reads clearly on its own", () => {
     // Таймер простоя — всегда короткая цифровая строка независимо от того, как длинно
     // называется причина; раньше кегль доходил до 22px — таймер читался крупнее
-    // самого названия (владелец, 28.09.2026). Таймер стоит в своей отдельной полосе
-    // фиксированной высоты (--drum-timer-strip-h) — крупнее прежнего (владелец,
-    // 28.09.2026: «может быть крупнее — снизу места достаточно»), но кегль всё равно
-    // от высоты полосы, а не от длины названия причины.
+    // самого названия (владелец, 28.09.2026). Кегль таймера — от высоты карточки,
+    // один на всех карточках, не от длины названия причины.
     assert.doesNotMatch(CSS, /\.driver-drum-card-total\.is-drum-label-medium/);
     assert.doesNotMatch(CSS, /\.driver-drum-card-total\.is-drum-label-long/);
-    assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*clamp\(13px, calc\(var\(--drum-timer-strip-h\) \* 0\.62\), 21px\)/s);
-    assert.match(CSS, /--drum-timer-strip-h:\s*clamp\(22px, calc\(var\(--drum-card-h\) \* 0\.26\), 36px\)/);
+    assert.match(CSS, /--drum-timer-fs:\s*clamp\(14px, calc\(var\(--drum-card-h\) \* 0\.19\), 23px\)/);
+    assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*var\(--drum-timer-fs\)/s);
 });
 
-test("the timer strip stays reserved along the card's bottom edge even without an active downtime", () => {
-    // Полоса таймера — свой отдельный ряд грида фиксированной высоты, не общий с
-    // названием: без него ряд бы схлопнулся ([hidden] обычно display:none), область
-    // над ним выросла бы на его высоту, и текст прыгнул бы при каждом старте и
-    // завершении простоя (владелец, 28.09.2026: «...ничего не прыгает»).
-    assert.match(CSS, /\.driver-drum-card-body\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) var\(--drum-timer-strip-h\)/s);
-    assert.match(CSS, /\.driver-drum-card-total\[hidden\]\s*\{\s*display:\s*flex;\s*visibility:\s*hidden;\s*\}/);
+test("the text group is centered on the whole card and the timer is pinned to its bottom edge", () => {
+    // Группа «ОЖИДАНИЕ + название» центрируется по ВСЕЙ карточке, таймер прижат к
+    // нижней кромке с минимальным зазором (владелец, 28.09.2026). Подпись
+    // резервирует высоту таймера симметрично сверху и снизу — центр группы
+    // совпадает с центром карточки, а название уменьшается формулой кегля, а не
+    // наезжает на таймер. Резерв есть всегда — без простоя текст не прыгает.
+    assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(var\(--drum-timer-gap\) - 8px\)/s);
+    assert.match(CSS, /--drum-timer-reserve:\s*max\(0px, calc\(var\(--drum-timer-gap\) \+ var\(--drum-timer-fs\) - 8px\)\)/);
+    assert.match(CSS, /\.driver-downtime-drum \.driver-drum-card-label,[^{]*\{[^}]*padding-block:\s*var\(--drum-timer-reserve\)/s);
+    // Резерв не зависит от того, показан ли таймер: [hidden] просто убирает его.
+    assert.match(CSS, /\.driver-drum-card-total\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
+    // У барабана точек разгрузки таймера нет — резерва тоже нет.
+    const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
+    assert.doesNotMatch(pointCss, /drum-timer-reserve/);
 });
 
 test("dump-point tiles in the change-point sheet match the excavator face-settings card look", () => {
