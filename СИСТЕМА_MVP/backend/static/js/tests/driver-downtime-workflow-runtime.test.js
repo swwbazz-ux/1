@@ -82,6 +82,15 @@ function extractBraceBlock(source, signature, label, fromIndex = 0) {
 }
 
 
+function extractRawSnippet(source, startMarker, endMarker, label) {
+    const start = source.indexOf(startMarker);
+    assert.notEqual(start, -1, `${label} start marker was not found.`);
+    const endMarkerIndex = source.indexOf(endMarker, start);
+    assert.notEqual(endMarkerIndex, -1, `${label} end marker was not found.`);
+    return source.slice(start, endMarkerIndex + endMarker.length);
+}
+
+
 function createClassList(initial = []) {
     const values = new Set(initial);
     return {
@@ -1053,6 +1062,188 @@ test("a full shell replacement does not freeze the timer on a detached node", ()
     assert.equal(freshShell.duration.textContent, "00:00:03");
     // Старый (отсоединённый) узел больше не должен как-либо использоваться.
     assert.equal(staleShell.duration.textContent, "00:00:00");
+});
+
+function loadDriverDowntimeRefreshHandlerRuntime() {
+    const registrationSnippet = extractRawSnippet(
+        DRIVER_TEMPLATE_SOURCE,
+        "/* После подмены разметки с сервера местная проекция",
+        'window.addEventListener("operational-state-refresh-applied", window.driverDowntimeRefreshHandler);',
+        "operational-state-refresh-applied registration"
+    );
+    const signatures = [
+        "function formatDriverDowntimeDuration(seconds)",
+        "function clearDriverDowntimeTimer()",
+        "function renderDriverReasonDuration(button, totalSeconds, isActive)",
+        "function syncDriverReasonTotals(payload, skipReasonId)",
+        "function setDriverDowntimeStatusClass(statusKey)",
+        "function driverDowntimeCanonicalEventId(eventId)",
+        "function driverDowntimeIdentityKey(reasonId, startedAt)",
+        "function driverDowntimeClosedKeys(reasonId, startedAt, eventId)",
+        "function markDriverDowntimeInstanceClosed(reasonId, startedAt, eventId)",
+        "function driverDowntimeInstanceIsClosed(reasonId, startedAt, eventId)",
+        "function startDriverDowntimeTimer(payload)",
+        "function applyDriverActiveDowntime(payload)",
+        "function clearDriverActiveDowntime(payload)",
+        "function syncDriverDowntimeTimerFromCard()",
+    ];
+    const functionSource = "var driverDowntimeCardBlankTimer = null;\nvar driverDowntimeCardBlankConfirmed = false;\n"
+        + signatures.map((signature) => extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)).join("\n");
+
+    function createEventBus() {
+        const listeners = [];
+        return {
+            addEventListener(type, fn) { listeners.push({type, fn}); },
+            removeEventListener(type, fn) {
+                const index = listeners.findIndex((entry) => entry.type === type && entry.fn === fn);
+                if (index >= 0) listeners.splice(index, 1);
+            },
+            dispatch(type) { listeners.filter((entry) => entry.type === type).forEach((entry) => entry.fn()); },
+            count(type) { return listeners.filter((entry) => entry.type === type).length; },
+        };
+    }
+
+    const runtimeWindow = Object.assign(createEventBus(), {
+        driverDowntimeTimerId: null,
+        driverDowntimeClock: null,
+        driverDowntimeActiveEventId: "",
+        setInterval() { return 1; },
+        clearInterval() {},
+        setTimeout(callback) { pendingTimeouts.push(callback); return pendingTimeouts.length; },
+        clearTimeout(id) { pendingTimeouts[id - 1] = null; },
+    });
+    let pendingTimeouts = [];
+    const fireAllTimeouts = () => {
+        const callbacks = pendingTimeouts.filter(Boolean);
+        pendingTimeouts = [];
+        callbacks.forEach((callback) => callback());
+    };
+
+    const makeButton = (id) => ({
+        dataset: {driverDowntimeReasonId: String(id), driverReasonSeconds: "0", driverReasonLabel: `Reason ${id}`},
+        classList: createClassList(),
+        getAttribute() { return null; },
+        setAttribute() {},
+        querySelector(selector) {
+            return selector === "[data-driver-reason-duration]" ? {hidden: true, textContent: ""} : null;
+        },
+    });
+    const makeShell = () => {
+        const buttons = [makeButton(9)];
+        const downtimeCard = {
+            dataset: {driverShiftDowntimeSeconds: "0", driverActiveElapsedSeconds: "0"},
+            classList: createClassList(),
+            className: "",
+        };
+        return {
+            downtimeCard,
+            buttons,
+            querySelector(selector) {
+                if (selector === "[data-driver-active-downtime-id]") return downtimeCard;
+                const match = selector.match(/driver-downtime-reason-id="([^"]+)"/);
+                return match ? buttons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
+            },
+            querySelectorAll(selector) {
+                return selector === "[data-driver-downtime-reason-button]" ? buttons : [];
+            },
+        };
+    };
+
+    let currentShell = makeShell();
+    const runtimeDocument = {
+        querySelector(selector) { return selector === "[data-driver-shell]" ? currentShell : null; },
+    };
+
+    function runBind(shellForThisBind) {
+        const context = {};
+        vm.runInNewContext(
+            `${functionSource}\n${registrationSnippet}\n`
+            + `context.apply = applyDriverActiveDowntime;\n`
+            + `context.clear = clearDriverActiveDowntime;\n`,
+            {
+                context,
+                Date,
+                Math,
+                Number,
+                String,
+                Array,
+                Object,
+                document: runtimeDocument,
+                shell: shellForThisBind,
+                downtimeCard: shellForThisBind.downtimeCard,
+                downtimeDuration: {textContent: ""},
+                downtimeTitle: {textContent: ""},
+                downtimeReason: {textContent: ""},
+                downtimeClose: {disabled: true, classList: createClassList(["is-disabled"]), setAttribute() {}, removeAttribute() {}},
+                downtimeReasonButtons: shellForThisBind.buttons,
+                driverOfflineEvents: [],
+                window: runtimeWindow,
+                applyDriverWaitingMode() { return false; },
+            },
+            {filename: "templates/users/driver_shift.html#downtime-refresh-handler"}
+        );
+        return context;
+    }
+
+    return {
+        runBind,
+        currentShell: () => currentShell,
+        replaceShell() { currentShell = makeShell(); return currentShell; },
+        window: runtimeWindow,
+        fireAllTimeouts,
+    };
+}
+
+test("a full shell replacement does not leave a stale operational-state-refresh-applied listener that can clear a live downtime", () => {
+    // Боевой 27.09.2026 (v362, реальный телефон владельца через adb reverse +
+    // обычный Chrome, снято трассировкой CDP): таймер вставал на несколько
+    // секунд и сам оживал через один-два фоновых цикла, при этом ВИДИМАЯ
+    // карточка простоя ни разу не гасла (проверено ловушкой на setAttribute/
+    // removeAttribute живого узла). Причина: window.addEventListener(
+    // "operational-state-refresh-applied", ...) стоял БЕЗ снятия предыдущего
+    // обработчика внутри bindDriverMobileShell — при каждой полной подмене
+    // оболочки на window копился ещё один обработчик, держащий замыкание с
+    // downtimeCard от СВОЕГО, уже отсоединённого узла (пустого, потому что
+    // тот узел устарел раньше, чем начался текущий простой). На каждое
+    // событие срабатывали ВСЕ накопленные обработчики: устаревший видел
+    // пустую карточку у себя, через 700 мс (#113) подтверждал "закрытие" и
+    // гасил ОБЩИЙ window.driverDowntimeClock — настоящий, ещё идущий простой,
+    // хотя видимый (живой) DOM он никогда не трогал (писал в узел-призрак).
+    const runtime = loadDriverDowntimeRefreshHandlerRuntime();
+
+    // Первая подмена оболочки — устаревший обработчик регистрируется на
+    // пустой (ещё без простоя) карточке.
+    const staleShell = runtime.currentShell();
+    const staleBind = runtime.runBind(staleShell);
+    assert.equal(runtime.window.count("operational-state-refresh-applied"), 1);
+
+    // Вторая подмена оболочки — простой уже идёт на НОВОЙ карточке.
+    const freshShell = runtime.replaceShell();
+    const freshBind = runtime.runBind(freshShell);
+    // Ровно один обработчик остаётся — от последней подмены, не два.
+    assert.equal(runtime.window.count("operational-state-refresh-applied"), 1);
+
+    freshBind.apply({
+        event_id: "56",
+        reason_id: "9",
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "yellow",
+    });
+    assert.equal(freshShell.downtimeCard.classList.contains("is-active"), true);
+    const clockAfterStart = runtime.window.driverDowntimeClock;
+    assert.ok(clockAfterStart);
+
+    // Фоновое обновление экрана — раньше это будило и устаревший обработчик
+    // тоже, а его собственная (навсегда пустая) карточка запускала гашение
+    // общего состояния через 700 мс.
+    runtime.window.dispatch("operational-state-refresh-applied");
+    runtime.fireAllTimeouts();
+
+    assert.equal(freshShell.downtimeCard.classList.contains("is-active"), true);
+    assert.strictEqual(runtime.window.driverDowntimeClock, clockAfterStart);
 });
 
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {

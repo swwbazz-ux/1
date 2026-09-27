@@ -1135,12 +1135,30 @@ window.bindDriverMobileShell = function () {
 
     /* После подмены разметки с сервера местная проекция неотправленных действий
        обязана лечь поверх заново — иначе снятая с сервера разметка вернула бы
-       на круг рейс, разгрузку которого телефон ещё не доставил. */
-    window.addEventListener("operational-state-refresh-applied", function () {
+       на круг рейс, разгрузку которого телефон ещё не доставил.
+
+       Полная подмена оболочки заново запускает весь bindDriverMobileShell, а
+       значит и эту строку — без удаления прежнего обработчика они копятся на
+       window НАВСЕГДА, по одному на каждую полную подмену. Старый обработчик
+       держит замыкание с downtimeCard от СВОЕГО, уже отсоединённого узла —
+       он навсегда пуст (простой начался уже ПОСЛЕ того как этот узел устарел).
+       syncDriverDowntimeTimerFromCard в этом устаревшем замыкании видела
+       пустую карточку, ждала 700 мс (подтверждение "пустой карточки", #113)
+       и гасила НАСТОЯЩИЙ, ещё идущий простой через общий window.driverDowntimeClock
+       — при этом видимая (живая) карточка оставалась нетронутой, потому что
+       запись шла в отсоединённый узел-призрак. Отсюда и "встал на N секунд,
+       потом сам ожил" на бою (27.09.2026, v362): портил не видимый DOM, а
+       общее состояние, и через один нормальный цикл живой обработчик сам
+       чинил его назад. Держим ровно один обработчик — от последней подмены. */
+    if (window.driverDowntimeRefreshHandler) {
+        window.removeEventListener("operational-state-refresh-applied", window.driverDowntimeRefreshHandler);
+    }
+    window.driverDowntimeRefreshHandler = function () {
         var current = document.querySelector("[data-driver-shell]");
         if (current && driverOfflineEvents.length) applyDriverOfflineProjection(current, driverOfflineEvents);
         syncDriverDowntimeTimerFromCard();
-    });
+    };
+    window.addEventListener("operational-state-refresh-applied", window.driverDowntimeRefreshHandler);
 
     /* Фоновое обновление раз в ~20 с меняет атрибуты карточки состояния простоя
        через послойную подмену (syncAttributes), но сам JS-таймер (замыкание
