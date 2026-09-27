@@ -1,0 +1,476 @@
+name: SSE QA disposable Linux validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full immutable commit SHA containing the reviewed package and this workflow
+        required: true
+        type: string
+      confirmation:
+        description: Type DISPOSABLE_SSE_QA_ONLY
+        required: true
+        type: string
+      actions_quota_confirmation:
+        description: Type AVAILABLE_ACTIONS_QUOTA_CONFIRMED after checking that no paid capacity is needed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sse-qa-disposable-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  disposable-linux:
+    name: Disposable ubuntu-24.04 normal, fault and cancel cycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PACKAGE_ROOT: deployment/sse-qa-install
+      EVIDENCE_ROOT: ${{ github.workspace }}/sse-qa-linux-evidence
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Validate manual dispatch contract
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          QUOTA_CONFIRMATION: ${{ inputs.actions_quota_confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
+          test "${GITHUB_SHA,,}" = "${REQUESTED_SHA,,}"
+          test "$CONFIRMATION" = DISPOSABLE_SSE_QA_ONLY
+          test "$QUOTA_CONFIRMATION" = AVAILABLE_ACTIONS_QUOTA_CONFIRMED
+
+      - name: Checkout exact reviewed SHA
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          clean: true
+
+      - name: Prove exact source and isolation boundary
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "${REQUESTED_SHA,,}"
+          test -f "$PACKAGE_ROOT/scripts/linux_disposable_cycle.sh"
+          test ! -e /srv/accounting-mvp
+          test ! -e /etc/accounting-mvp.env
+          mkdir -p "$EVIDENCE_ROOT/meta" "$EVIDENCE_ROOT/raw" "$EVIDENCE_ROOT/cgroup"
+          sudo install -o root -g root -m 0600 /dev/null /run/sse-qa-disposable-test
+          {
+            printf 'source_sha=%s\n' "$actual_sha"
+            printf 'run_id=%s\nrun_attempt=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'started_utc=%s\n' "$(date -u +%FT%TZ)"
+          } > "$EVIDENCE_ROOT/meta/source.txt"
+
+      - name: Install disposable runner prerequisites
+        id: dependencies
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          trap 'status=$?; printf "RESULT=INFRA_BLOCKED/NOT_RUN\nreason=dependency_setup\nexit_code=%s\n" "$status" > "$EVIDENCE_ROOT/meta/result.txt"; exit "$status"' ERR
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            postgresql-16 postgresql-client-16 redis-server nginx python3.12 \
+            python3.12-venv python3-pip jq zip unzip openssl curl ca-certificates \
+            util-linux e2fsprogs iproute2 iptables apache2-utils
+          python3.12 --version
+          psql --version
+          redis-server --version
+          nginx -v
+
+      - name: Verify disposable Linux capabilities
+        id: infrastructure
+        if: steps.dependencies.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          fail_infra() {
+            printf 'RESULT=INFRA_BLOCKED/NOT_RUN\nreason=%s\nexit_code=78\n' "$1" > "$EVIDENCE_ROOT/meta/result.txt"
+            exit 78
+          }
+          test "$(ps -p 1 -o comm= | xargs)" = systemd || fail_infra systemd_not_pid1
+          test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs || fail_infra cgroup_v2_missing
+          controllers="$(cat /sys/fs/cgroup/cgroup.controllers)"
+          for controller in cpu memory io pids; do
+            grep -qw "$controller" <<<"$controllers" || fail_infra "cgroup_${controller}_missing"
+          done
+          test -e /dev/loop-control || fail_infra loop_control_missing
+          test "$(python3.12 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = 3.12 || fail_infra python_3_12_missing
+          psql --version | grep -Eq ' 16\.' || fail_infra postgresql_16_missing
+          redis-server --version | grep -Eq 'v=7\.' || fail_infra redis_7_missing
+          command -v nginx >/dev/null || fail_infra nginx_missing
+          losetup -f >/dev/null || fail_infra no_free_loop_device
+          available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
+          test "$available_kb" -ge 8388608 || fail_infra disk_below_8_gib
+          memory_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          test "$memory_kb" -ge 3145728 || fail_infra memory_below_3_gib
+          for port in 18080 18082 55432 6381; do
+            if ss -H -ltn "sport = :$port" | grep -q .; then fail_infra "port_${port}_busy"; fi
+          done
+          for managed in \
+            /var/lib/sse-qa /srv/sse-qa /etc/sse-qa \
+            /etc/systemd/system/sse-qa.slice /run/systemd/system/sse-qa.slice \
+            /etc/systemd/system/sse-qa.target /etc/systemd/system/redis-sse-qa.service \
+            /etc/systemd/system/sse-qa-wsgi.service /etc/systemd/system/sse-qa-asgi.service \
+            /etc/systemd/system/sse-qa-reconcile.service \
+            '/etc/systemd/system/srv-sse\x2dqa.mount' /etc/postgresql/16/sseqa \
+            /etc/nginx/sites-enabled/sse-qa.conf /etc/nginx/sites-available/sse-qa.conf; do
+            if test -e "$managed" || test -L "$managed"; then fail_infra managed_path_present; fi
+          done
+          probe_cgroup="$(sudo systemd-run --system --quiet --wait --pipe --collect \
+            --unit=sse-qa-capability-probe.service /bin/sh -c 'cat /proc/self/cgroup')" \
+            || fail_infra transient_systemd_run_failed
+          grep -Eq '^0::/system\.slice/sse-qa-capability-probe\.service$' <<<"$probe_cgroup" \
+            || fail_infra transient_systemd_cgroup_mismatch
+          {
+            uname -a
+            cat /etc/os-release
+            systemd --version
+            printf 'cgroup_filesystem=%s\n' "$(stat -fc %T /sys/fs/cgroup)"
+            printf 'cgroup_controllers=%s\n' "$controllers"
+            printf 'available_root_kb=%s\n' "$available_kb"
+            printf 'memory_available_kb=%s\n' "$memory_kb"
+            printf 'transient_probe_cgroup=%s\n' "$probe_cgroup"
+            python3.12 --version
+            psql --version
+            redis-server --version
+            nginx -v 2>&1
+          } > "$EVIDENCE_ROOT/meta/runner.txt"
+          printf 'RESULT=PRECHECK_OK\n' > "$EVIDENCE_ROOT/meta/result.txt"
+
+      - name: Build immutable Linux package and run package tests
+        id: package_tests
+        if: steps.infrastructure.outcome == 'success'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test_venv="$RUNNER_TEMP/sse-qa-package-tests-venv"
+          test_python="$test_venv/bin/python"
+          rm -rf "$PACKAGE_ROOT/generated/wheelhouse" "$PACKAGE_ROOT/generated/wheelhouse.sha256"
+          rm -rf "$test_venv"
+          (cd "$PACKAGE_ROOT/generated" && sha256sum -c runtime.sha256) | tee "$EVIDENCE_ROOT/raw/runtime-sha256.log"
+          mkdir -p "$PACKAGE_ROOT/generated/wheelhouse"
+          tar -xOf "$PACKAGE_ROOT/generated/runtime.tar.gz" backend/requirements.txt > "$RUNNER_TEMP/sse-qa-requirements.txt"
+          python3.12 -m pip download --only-binary=:all: \
+            --dest "$PACKAGE_ROOT/generated/wheelhouse" \
+            -r "$RUNNER_TEMP/sse-qa-requirements.txt" 'uvicorn==0.37.0' \
+            > "$EVIDENCE_ROOT/raw/wheelhouse-build.log" 2>&1
+          (cd "$PACKAGE_ROOT/generated/wheelhouse" && sha256sum --text *.whl > ../wheelhouse.sha256)
+          python3.12 -m venv "$test_venv"
+          "$test_python" -m pip install --no-index \
+            --find-links="$PACKAGE_ROOT/generated/wheelhouse" \
+            -r "$RUNNER_TEMP/sse-qa-requirements.txt" 'uvicorn==0.37.0' \
+            > "$EVIDENCE_ROOT/raw/test-venv-install.log" 2>&1
+          "$test_python" "$PACKAGE_ROOT/scripts/finalize_package.py" "$PACKAGE_ROOT" \
+            | tee "$EVIDENCE_ROOT/raw/package-finalize.log"
+          "$test_python" "$PACKAGE_ROOT/scripts/package_self_check.py" "$PACKAGE_ROOT" \
+            | tee "$EVIDENCE_ROOT/raw/package-self-check.log"
+          set +e
+          "$test_python" -m unittest discover -s "$PACKAGE_ROOT/tests" -p 'test_*.py' -v \
+            > "$EVIDENCE_ROOT/raw/package-tests.log" 2>&1
+          test_status=$?
+          set -e
+          test "$test_status" -eq 0
+          ! grep -Eq 'skipped=[1-9]|OK \(skipped=' "$EVIDENCE_ROOT/raw/package-tests.log"
+          (cd "$PACKAGE_ROOT/generated/wheelhouse" && sha256sum -c ../wheelhouse.sha256) \
+            | tee "$EVIDENCE_ROOT/raw/wheelhouse-sha256.log"
+          "$test_python" "$PACKAGE_ROOT/scripts/package_self_check.py" "$PACKAGE_ROOT" \
+            | tee "$EVIDENCE_ROOT/raw/package-self-check-after-tests.log"
+
+      - name: Start disposable runner nginx prerequisite
+        id: nginx_ready
+        if: ${{ success() && steps.infrastructure.outcome == 'success' && steps.package_tests.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo systemctl start nginx
+          systemctl is-active --quiet nginx
+          {
+            printf 'checked_utc=%s\n' "$(date -u +%FT%TZ)"
+            printf 'active_state=%s\n' "$(systemctl is-active nginx)"
+            systemctl show nginx -p ActiveState -p SubState -p MainPID
+          } > "$EVIDENCE_ROOT/meta/nginx-prerequisite.txt"
+
+      - name: Create synthetic runner-only secrets
+        id: synthetic_secrets
+        if: ${{ success() && steps.nginx_ready.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          secrets_file=/run/sse-qa-disposable-secrets.json
+          sudo install -o root -g root -m 0600 /dev/null "$secrets_file"
+          django_key="$(openssl rand -hex 32)"
+          pg_app="$(openssl rand -hex 24)"
+          pg_maint="$(openssl rand -hex 24)"
+          redis_value="$(openssl rand -hex 24)"
+          basic_password="$(openssl rand -hex 18)"
+          basic_hash="$(htpasswd -nbBC 12 reviewer "$basic_password" | sed 's/^reviewer://')"
+          for generated_secret in \
+            "$django_key" "$pg_app" "$pg_maint" "$redis_value" \
+            "$basic_password" "$basic_hash" 135791 246802; do
+            printf '::add-mask::%s\n' "$generated_secret"
+          done
+          jq -n \
+            --arg basic_auth_line "reviewer:$basic_hash" \
+            --arg django_secret_key "$django_key" \
+            --arg postgres_app_password "$pg_app" \
+            --arg postgres_maint_password "$pg_maint" \
+            --arg redis_password "$redis_value" \
+            '{schema:1,allow_cidr:"127.0.0.1/32",basic_auth_line:$basic_auth_line,django_secret_key:$django_secret_key,postgres_app_password:$postgres_app_password,postgres_maint_password:$postgres_maint_password,redis_password:$redis_password,driver_pin:"135791",excavator_pin:"246802"}' \
+            | sudo tee "$secrets_file" >/dev/null
+          sudo chmod 0600 "$secrets_file"
+          network_file=/run/sse-qa-network-smoke.json
+          sudo install -o root -g root -m 0600 /dev/null "$network_file"
+          jq -n \
+            --arg basic_auth_password "$basic_password" \
+            '{basic_auth_password:$basic_auth_password,driver_pin:"135791",excavator_pin:"246802"}' \
+            | sudo tee "$network_file" >/dev/null
+          sudo chmod 0600 "$network_file"
+          unset django_key pg_app pg_maint redis_value basic_hash basic_password
+          printf '127.0.0.1 sse-qa.driverform.ru driverform.ru www.driverform.ru # sse-qa-disposable\n' \
+            | sudo tee -a /etc/hosts >/dev/null
+
+      - name: Run real normal, fault and phase-aware cancel cycle
+        id: cycle
+        if: ${{ success() && steps.synthetic_secrets.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          evidence="$EVIDENCE_ROOT"
+          cycle_log="$evidence/raw/disposable-cycle.log"
+          sampler_log="$evidence/raw/cgroup-sampler.log"
+          orchestration_unit=codex-disposable-validation.service
+          orchestration_exit=/run/codex-disposable-validation.exit
+          stop_cycle_on_wrapper_error() {
+            status=$?
+            trap - EXIT
+            if systemctl is-active --quiet "$orchestration_unit"; then
+              sudo systemctl stop "$orchestration_unit" 2>/dev/null || true
+              for _ in $(seq 1 120); do
+                systemctl is-active --quiet "$orchestration_unit" || break
+                sleep 0.25
+              done
+              if systemctl is-active --quiet "$orchestration_unit"; then
+                sudo systemctl kill --signal=SIGKILL --kill-who=all "$orchestration_unit" || true
+              fi
+            fi
+            sudo systemctl reset-failed "$orchestration_unit" 2>/dev/null || true
+            sudo rm -f "$orchestration_exit"
+            exit "$status"
+          }
+          trap stop_cycle_on_wrapper_error EXIT
+          : | sudo tee /run/sse-qa-egress-uids >/dev/null
+          for account in postgres www-data; do
+            account_uid="$(id -u "$account")"
+            sudo iptables -I OUTPUT 1 ! -o lo -m owner --uid-owner "$account_uid" -j REJECT
+            sudo ip6tables -I OUTPUT 1 ! -o lo -m owner --uid-owner "$account_uid" -j REJECT
+            sudo iptables -C OUTPUT ! -o lo -m owner --uid-owner "$account_uid" -j REJECT
+            sudo ip6tables -C OUTPUT ! -o lo -m owner --uid-owner "$account_uid" -j REJECT
+            echo "$account_uid" | sudo tee -a /run/sse-qa-egress-uids >/dev/null
+            if sudo runuser -u "$account" -- curl -fsS --max-time 2 http://1.1.1.1 >/dev/null 2>&1; then
+              echo "outbound isolation failed for $account" >&2
+              exit 1
+            fi
+          done
+          sudo rm -f "$orchestration_exit"
+          sudo systemd-run --system --quiet --no-block --collect --service-type=exec \
+            --unit="$orchestration_unit" --property=KillMode=control-group \
+            --property=TimeoutStopSec=120s \
+            /usr/bin/bash -c \
+            'set +e; /usr/bin/bash "$1" "$2" "$3" "$4" "$5"; rc=$?; printf "%s\n" "$rc" >"$6"; exit "$rc"' \
+            _ "$GITHUB_WORKSPACE/$PACKAGE_ROOT/scripts/linux_disposable_cycle.sh" \
+            "$GITHUB_WORKSPACE/$PACKAGE_ROOT" /run/sse-qa-disposable-secrets.json \
+            /run/sse-qa-network-smoke.json "$EVIDENCE_ROOT/cycle" "$orchestration_exit"
+          sample_number=0
+          poll_number=0
+          deadline=$((SECONDS + 4800))
+          while test ! -f "$orchestration_exit" && ((SECONDS < deadline)); do
+            poll_number=$((poll_number + 1))
+            if getent passwd sseqa >/dev/null; then
+              sseqa_uid="$(id -u sseqa)"
+              if ! grep -qxF "$sseqa_uid" /run/sse-qa-egress-uids; then
+                sudo iptables -I OUTPUT 1 ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+                sudo ip6tables -I OUTPUT 1 ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+                sudo iptables -C OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+                sudo ip6tables -C OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+                echo "$sseqa_uid" | sudo tee -a /run/sse-qa-egress-uids >/dev/null
+                if sudo runuser -u sseqa -- curl -fsS --max-time 2 http://1.1.1.1 >/dev/null 2>&1; then
+                  echo 'outbound isolation failed for sseqa' >&2
+                  exit 1
+                fi
+                printf '%s outbound_block_installed uid=%s\n' "$(date -u +%FT%TZ)" "$sseqa_uid" >> "$sampler_log"
+              fi
+            fi
+            if systemctl is-active --quiet sse-qa-install.service \
+              && test $((poll_number % 4)) -eq 1 && test "$sample_number" -lt 90; then
+              sample_number=$((sample_number + 1))
+              sample_dir="$evidence/cgroup/sample-$(printf '%04d' "$sample_number")"
+              mkdir -p "$sample_dir"
+              date -u +%FT%TZ > "$sample_dir/time.txt"
+              systemctl show sse-qa.slice sse-qa-install.service \
+                -p Id -p ActiveState -p MainPID -p Slice -p ControlGroup \
+                -p CPUQuotaPerSecUSec -p CPUQuotaPeriodUSec -p MemoryHigh \
+                -p MemoryMax -p MemorySwapMax -p TasksMax > "$sample_dir/systemctl-show.txt"
+              parent="$(systemctl show sse-qa.slice -p ControlGroup --value)"
+              if test "$parent" = /sse.slice/sse-qa.slice && test -d "/sys/fs/cgroup$parent"; then
+                for metric in cpu.stat memory.current memory.events pids.current io.stat; do
+                  sudo cp "/sys/fs/cgroup$parent/$metric" "$sample_dir/${metric//./-}.txt"
+                done
+              fi
+              ps -eo pid,ppid,user,stat,comm,cgroup --sort=pid > "$sample_dir/process-tree.txt"
+              for unit in postgresql@16-sseqa.service redis-sse-qa.service; do
+                systemctl show "$unit" -p Id -p ActiveState -p MainPID -p Slice -p ControlGroup \
+                  >> "$sample_dir/children.txt" 2>/dev/null || true
+              done
+            fi
+            sleep 0.5
+          done
+          test -f "$orchestration_exit"
+          for _ in $(seq 1 120); do
+            systemctl is-active --quiet "$orchestration_unit" || break
+            sleep 0.25
+          done
+          ! systemctl is-active --quiet "$orchestration_unit"
+          cycle_status="$(sudo cat "$orchestration_exit")"
+          [[ "$cycle_status" =~ ^[0-9]+$ ]]
+          journalctl --no-pager -o short-iso-precise -u "$orchestration_unit" > "$cycle_log"
+          sudo systemctl reset-failed "$orchestration_unit" 2>/dev/null || true
+          orchestration_load_state=''
+          for _ in $(seq 1 40); do
+            orchestration_load_state="$(systemctl show "$orchestration_unit" -p LoadState --value 2>/dev/null || true)"
+            if test -z "$orchestration_load_state" || test "$orchestration_load_state" = not-found; then break; fi
+            sleep 0.25
+          done
+          printf 'load_state=%s\n' "${orchestration_load_state:-not-found}" \
+            > "$evidence/meta/orchestration-unit.txt"
+          test -z "$orchestration_load_state" || test "$orchestration_load_state" = not-found
+          sudo rm -f "$orchestration_exit"
+          trap - EXIT
+          printf 'exit_code=%s\nended_utc=%s\n' "$cycle_status" "$(date -u +%FT%TZ)" \
+            > "$evidence/meta/cycle-result.txt"
+          test "$cycle_status" -eq 0
+          grep -Fq 'SSE_QA_DISPOSABLE_CYCLE_OK normal=1 faults=2 cancel=1 zero_residue=4 production_access=0 load_clients=0' "$cycle_log"
+          grep -Fq 'SSE_QA_BUSINESS_SMOKE_OK' "$cycle_log"
+          test "$sample_number" -gt 0
+
+      - name: Guaranteed cleanup and independent residue scan
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          ctl="$PACKAGE_ROOT/scripts/sse_qa_ctl.py"
+          if test -f /var/lib/sse-qa/OWNERSHIP.json && test -f "$ctl"; then
+            sudo python3.12 "$ctl" disable --bundle-root "$PACKAGE_ROOT" >> "$EVIDENCE_ROOT/raw/final-cleanup.log" 2>&1
+            sudo python3.12 "$ctl" remove --bundle-root "$PACKAGE_ROOT" >> "$EVIDENCE_ROOT/raw/final-cleanup.log" 2>&1
+          fi
+          sudo systemctl stop sse-qa-install.service sse-qa-enable.service sse-qa-verify.service \
+            sse-qa-smoke.service sse-qa.target redis-sse-qa.service \
+            postgresql@16-sseqa.service 'srv-sse\x2dqa.mount' sse-qa.slice \
+            >> "$EVIDENCE_ROOT/raw/final-cleanup.log" 2>&1
+          sudo systemctl stop codex-disposable-validation.service \
+            >> "$EVIDENCE_ROOT/raw/final-cleanup.log" 2>&1
+          sudo systemctl reset-failed codex-disposable-validation.service \
+            >> "$EVIDENCE_ROOT/raw/final-cleanup.log" 2>&1
+          sudo rm -f /run/systemd/system/sse-qa.slice \
+            /run/sse-qa-disposable-secrets.json /run/sse-qa-network-smoke.json \
+            /run/codex-disposable-validation.exit
+          sudo rm -f /etc/letsencrypt/live/sse-qa.driverform.ru/fullchain.pem \
+            /etc/letsencrypt/live/sse-qa.driverform.ru/privkey.pem
+          sudo rmdir /etc/letsencrypt/live/sse-qa.driverform.ru 2>/dev/null
+          if test -f /run/sse-qa-egress-uids; then
+            while IFS= read -r qa_uid; do
+              while sudo iptables -C OUTPUT ! -o lo -m owner --uid-owner "$qa_uid" -j REJECT 2>/dev/null; do
+                sudo iptables -D OUTPUT ! -o lo -m owner --uid-owner "$qa_uid" -j REJECT
+              done
+              while sudo ip6tables -C OUTPUT ! -o lo -m owner --uid-owner "$qa_uid" -j REJECT 2>/dev/null; do
+                sudo ip6tables -D OUTPUT ! -o lo -m owner --uid-owner "$qa_uid" -j REJECT
+              done
+            done < /run/sse-qa-egress-uids
+            sudo rm -f /run/sse-qa-egress-uids
+          elif getent passwd sseqa >/dev/null; then
+            sseqa_uid="$(id -u sseqa)"
+            while sudo iptables -C OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT 2>/dev/null; do
+              sudo iptables -D OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+            done
+            while sudo ip6tables -C OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT 2>/dev/null; do
+              sudo ip6tables -D OUTPUT ! -o lo -m owner --uid-owner "$sseqa_uid" -j REJECT
+            done
+          fi
+          sudo sed -i '/# sse-qa-disposable$/d' /etc/hosts
+          sudo systemctl daemon-reload
+          set -e
+          set +e
+          if test -f /run/sse-qa-disposable-test; then
+            sudo bash "$PACKAGE_ROOT/scripts/linux_zero_residue_scan.sh" \
+              "$EVIDENCE_ROOT" workflow-final
+            scan_status=$?
+          else
+            mkdir -p "$EVIDENCE_ROOT/zero-residue/workflow-final"
+            echo 'ZERO_RESIDUE_NOT_RUN marker_absent=1' \
+              > "$EVIDENCE_ROOT/zero-residue/workflow-final/result.txt"
+            scan_status=1
+          fi
+          sudo rm -f /run/sse-qa-disposable-test
+          sudo chown -R "$(id -u):$(id -g)" "$EVIDENCE_ROOT"
+          exit "$scan_status"
+
+      - name: Seal sanitized evidence
+        id: sanitize
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$EVIDENCE_ROOT/meta"
+          printf 'ended_utc=%s\n' "$(date -u +%FT%TZ)" >> "$EVIDENCE_ROOT/meta/source.txt"
+          bash "$PACKAGE_ROOT/scripts/seal_evidence.sh" "$EVIDENCE_ROOT"
+
+      - name: Emit sanitized evidence to job log
+        if: ${{ always() && steps.sanitize.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f "$EVIDENCE_ROOT/SHA256SUMS"
+          while IFS= read -r relative; do
+            file="$EVIDENCE_ROOT/${relative#./}"
+            sha="$(sha256sum "$file" | awk '{print $1}')"
+            size="$(stat -c %s "$file")"
+            printf '===== SSE_QA_EVIDENCE_BEGIN path=%s sha256=%s size=%s =====\n' "$relative" "$sha" "$size"
+            cat "$file"
+            printf '\n===== SSE_QA_EVIDENCE_END path=%s =====\n' "$relative"
+          done < <(cd "$EVIDENCE_ROOT" && find . -type f ! -name SHA256SUMS | sort)
+          echo '===== SSE_QA_EVIDENCE_MANIFEST_BEGIN ====='
+          cat "$EVIDENCE_ROOT/SHA256SUMS"
+          echo '===== SSE_QA_EVIDENCE_MANIFEST_END ====='
+
+      - name: Enforce fail-closed result
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if test "${{ steps.dependencies.outcome }}" != success || test "${{ steps.infrastructure.outcome }}" != success; then
+            echo 'INFRA_BLOCKED/NOT_RUN'
+            exit 1
+          fi
+          test "${{ steps.package_tests.outcome }}" = success
+          test "${{ steps.nginx_ready.outcome }}" = success
+          test "${{ steps.synthetic_secrets.outcome }}" = success
+          test "${{ steps.cycle.outcome }}" = success
+          test "${{ steps.sanitize.outcome }}" = success
+          grep -F 'ZERO_RESIDUE_OK scenario=workflow-final' \
+            "$EVIDENCE_ROOT/zero-residue/workflow-final/result.txt"
+          echo 'SSE_QA_DISPOSABLE_LINUX_PASS'
