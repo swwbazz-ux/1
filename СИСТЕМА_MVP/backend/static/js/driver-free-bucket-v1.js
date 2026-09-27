@@ -269,6 +269,9 @@
             button.dataset.rockType = item.rock_type;
             button.dataset.dumpPoint = item.dump_point;
             button.dataset.isPrimary = item.is_primary ? "true" : "false";
+            // Длина номера — для подгонки кегля по ширине плитки (CSS), длинные подрядные
+            // номера вроде «ЭКС-ПОДР-12» не должны переноситься по буквам.
+            button.style.setProperty("--fb-len", String(String(item.label || "").length || 5));
             button.innerHTML = '<strong class="driver-free-bucket-tile-number"></strong>'
                 + '<span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status></span>';
             button.querySelector(".driver-free-bucket-tile-number").textContent = item.label;
@@ -424,8 +427,16 @@
             if (open) {
                 returnFocus = document.activeElement;
                 windowObject.requestAnimationFrame(function () {
-                    var focus = sheet.querySelector(".driver-free-bucket-tile.is-current, [data-driver-free-bucket-option], [data-driver-free-bucket-close]");
+                    /* Сначала выбранная плитка: querySelector со списком селекторов вернул бы
+                       первую по порядку в разметке (обычно ЭКС-1), а не выбранную. */
+                    var focus = sheet.querySelector(".driver-free-bucket-tile.is-current")
+                        || sheet.querySelector("[data-driver-free-bucket-option], [data-driver-free-bucket-close]");
                     focusWithoutScroll(focus);
+                    /* Экскаваторов может быть много и сетка прокручивается внутри окна:
+                       выбранная плитка при открытии должна быть на виду (владелец, 28.09.2026). */
+                    if (focus && focus.classList.contains("is-current") && typeof focus.scrollIntoView === "function") {
+                        try { focus.scrollIntoView({block: "center", inline: "nearest"}); } catch (error) { focus.scrollIntoView(); }
+                    }
                 });
             } else if (returnFocus && typeof returnFocus.focus === "function") {
                 focusWithoutScroll(returnFocus);

@@ -70,7 +70,8 @@ body.driver-mobile-screen .driver-free-bucket-dialog {
     margin: 0;
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 18px;
+    /* Верхний отступ несёт закреплённая шапка (.driver-free-bucket-top). */
+    padding: 0 18px 18px;
     border: 1px solid rgba(var(--fb-rgb), .55);
     border-radius: 18px;
     color: #edf7f8;
@@ -78,6 +79,19 @@ body.driver-mobile-screen .driver-free-bucket-dialog {
         linear-gradient(145deg, rgba(21, 43, 50, .98), rgba(4, 17, 22, .99) 62%),
         #07151a;
     box-shadow: 0 24px 64px rgba(0, 0, 0, .62), inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+/* Закреплённая шапка: заголовок, строка состояния и «закрыть» остаются на месте,
+   пока сетка из до десяти плиток прокручивается под ними. Фон непрозрачный, той
+   же основы, что окно; тонкая нижняя кромка цветом режима. */
+body.driver-mobile-screen .driver-free-bucket-top {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    margin: 0 -18px 12px;
+    padding: 18px 18px 10px;
+    background: linear-gradient(145deg, rgb(21, 43, 50), rgb(11, 28, 34) 70%);
+    border-bottom: 1px solid rgba(var(--fb-rgb), .22);
 }
 
 body.driver-mobile-screen .driver-free-bucket-close {
@@ -97,7 +111,7 @@ body.driver-mobile-screen .driver-free-bucket-close {
 body.driver-mobile-screen .driver-free-bucket-head {
     display: grid;
     gap: 6px;
-    margin: 0 42px 16px 0;
+    margin: 0 42px 0 0;
     padding: 0;
     text-transform: none;
 }
@@ -128,8 +142,8 @@ body.driver-mobile-screen .driver-free-bucket-current {
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 4px 12px;
-    margin: 0 0 14px;
-    padding: 12px 13px;
+    margin: 10px 0 0;
+    padding: 10px 13px;
     border: 1px solid rgba(var(--fb-rgb), .45);
     border-radius: 12px;
     background: rgba(var(--fb-rgb), .1);
@@ -189,11 +203,14 @@ body.driver-mobile-screen .driver-free-bucket-tile {
     position: relative;
     min-width: 0;
     width: 100%;
-    min-height: 104px;
+    /* До десяти плиток по две в ряд: на узком экране кнопка ужимается, но не ниже
+       ~64px — чтобы попадать пальцем. Сетка при нехватке места прокручивается. */
+    min-height: clamp(64px, 26vw, 104px);
+    container-type: inline-size;
     display: grid;
     place-items: center;
     align-content: center;
-    gap: clamp(4px, 1.6vw, 8px);
+    gap: clamp(3px, 1.4vw, 8px);
     padding: clamp(10px, 2.8vw, 14px) clamp(8px, 2.4vw, 12px) clamp(18px, 4.4vw, 22px);
     border: 0;
     border-radius: 6px;
@@ -299,12 +316,17 @@ body.driver-mobile-screen .driver-free-bucket-tile:disabled {
     opacity: .8;
 }
 
+/* Номер: кегль подгоняется по ширине плитки от длины номера (--fb-len ставят
+   шаблон и driver-free-bucket-v1.js) — длинный подрядный номер вроде «ЭКС-ПОДР-12»
+   ужимается целиком, без переноса по буквам, как подписи в барабанах. Средняя
+   ширина знака в этом шрифте (заглавные, цифры, дефис) ≈ 0.56em — замерено на
+   телефоне: «ЭКС-ПОДР-12» при 0.64 занимал 119px из 157 доступных. */
 body.driver-mobile-screen .driver-free-bucket-tile-number {
     position: relative;
     max-width: 100%;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
     color: inherit;
-    font-size: clamp(24px, 7.6vw, 32px);
+    font-size: min(clamp(24px, 7.6vw, 32px), calc(90cqw / (var(--fb-len, 5) * 0.56)));
     font-weight: 900;
     line-height: 1.02;
     text-transform: none;
@@ -404,9 +426,18 @@ body.driver-mobile-screen .driver-free-bucket-remove:focus-visible {
     }
 }
 
+/* Узкий экран: по-прежнему две в ряд, только иконка и номер чуть меньше. */
 @media (max-width: 350px) {
     body.driver-mobile-screen .driver-free-bucket-grid {
-        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    body.driver-mobile-screen .driver-free-bucket-tile::before {
+        width: clamp(34px, 12vw, 44px);
+    }
+
+    body.driver-mobile-screen .driver-free-bucket-tile-number {
+        font-size: clamp(20px, 7vw, 26px);
     }
 }
 
