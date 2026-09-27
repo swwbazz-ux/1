@@ -55,7 +55,9 @@ dispatcher-assign-atomicity
 
 ## 4. Адресный PostgreSQL PASS на окончательном SHA
 
-Фактически проверенные байты: `a1fff67010007089899fe0e35b5e23cd43b0d151`.
+Проверяемый PR head: `a1fff67010007089899fe0e35b5e23cd43b0d151`.
+
+**Уточнение Астры после первичной проверки Actions:** фактический checkout адресного job — synthetic PR merge `60e0d2900cf4dd15d6a4d0ef856fe8f68ac2d2a1`, а не сам head. Git trees head и merge совпадают: `567e069d976881cfc5db888177b9b87a662db27b`; следовательно, проверенные байты совпадают. Base — `0fe60543de59bf7cbeca4868fc17e8e00689d2ba`. Это точность атрибуции CI, не новая причина повторять прогон.
 
 - workflow: Project quality gate;
 - run: [36340395051](https://github.com/swwbazz-ux/1/actions/runs/36340395051), `success`;
@@ -73,7 +75,7 @@ dispatcher-assign-atomicity
 
 ## 5. Обязательные gates и полный nightly
 
-На том же SHA `a1fff67010007089899fe0e35b5e23cd43b0d151`:
+Проверки, привязанные к тому же PR head `a1fff67010007089899fe0e35b5e23cd43b0d151` (фактический checkout адресного job указан в § 4):
 
 - `Required quality gate`: [job 108682294784](https://github.com/swwbazz-ux/1/actions/runs/36340395051/job/108682294784) — PASS;
 - все SQLite-группы — PASS;
