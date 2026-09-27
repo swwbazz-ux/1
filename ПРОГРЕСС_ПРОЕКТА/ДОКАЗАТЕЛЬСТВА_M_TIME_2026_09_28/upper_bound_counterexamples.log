@@ -1,0 +1,6 @@
+Standalone arithmetic model; application/DB/device tests NOT_RUN.
+C1: same anchor [09:59:50,10:00:20], receipts 10:00:05/10:00:15 -> deadlines 10:05:05/10:05:15 (different).
+C2: causality is valid; upper-parent 10:04:00 > upper-child 10:01:10. Tighten parent to 10:01:10; do not inflate child to 10:04:00.
+C3: freezing before new evidence keeps 10:09:00; processing the complete evidence first gives 10:06:10. Duplicate evidence is idempotent; new evidence can refine the estimate.
+C4: a deadline derived from the same immutable anchor upper bound alone is 10:05:20 in both deliveries. This does not settle the no-anchor policy.
+4 arithmetic checks completed; counterexamples confirmed. No integration acceptance asserted.
