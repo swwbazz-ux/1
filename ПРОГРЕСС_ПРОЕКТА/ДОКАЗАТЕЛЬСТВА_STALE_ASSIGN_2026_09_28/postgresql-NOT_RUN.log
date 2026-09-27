@@ -1,0 +1,14 @@
+STATUS=NOT_RUN
+CHECKED_AT=2026-09-28 Asia/Vladivostok
+SOURCE_BASE_SHA=0fe60543de59bf7cbeca4868fc17e8e00689d2ba
+CANDIDATE_SHA=57fe2971b9d14118a05610514b978043e9bd7759
+TEST=trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests.test_competing_assigns_commit_one_target_without_loser_side_effects
+DJANGO_DB_ENGINE=postgres
+REQUIRED_TEST_DATABASE=isolated PostgreSQL test database
+psql=NOT_FOUND
+docker=NOT_FOUND
+podman=NOT_FOUND
+wsl_distribution=NOT_INSTALLED
+tcp_127.0.0.1_5432=False
+POSTGRES_CONNECTION_ENVIRONMENT=NOT_CONFIGURED
+RESULT=The concurrency test was packaged and collected, but skipped on SQLite. It was not executed against PostgreSQL.

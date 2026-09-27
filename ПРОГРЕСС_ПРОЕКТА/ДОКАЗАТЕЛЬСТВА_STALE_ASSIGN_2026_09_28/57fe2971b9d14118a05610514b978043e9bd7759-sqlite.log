@@ -1,0 +1,257 @@
+SOURCE_BASE_SHA=0fe60543de59bf7cbeca4868fc17e8e00689d2ba CANDIDATE_SHA=57fe2971b9d14118a05610514b978043e9bd7759 BRANCH=codex/stale-assign-atomic-20260928 DJANGO_DB_ENGINE=sqlite DATABASE_VENDOR=sqlite TEST_DATABASE=Django isolated in-memory alias default POSTGRESQL_CONCURRENCY=NOT_RUN COMMAND=manage.py test trips.test_dispatcher_topology_commands assignments.tests.HaulAssignmentTransactionTests trips.tests.DispatcherAssignmentRealtimeTests trips.test_dispatcher_assignment_commands --verbosity 2
+TEST_EXIT_CODE=0
+python.exe : Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+At line:2 char:1090
++ ... estOutput = & $python manage.py test trips.test_dispatcher_topology_c ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Creating test d...che=shared')...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Found 32 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying users.0001_initial... OK
+  Applying references.0001_initial... OK
+  Applying users.0002_driverprimaryregistration... OK
+  Applying users.0003_employee_comment_employee_dismissed_at_and_more... OK
+  Applying users.0004_remove_driverprimaryregistration_shift_type_and_more... OK
+  Applying users.0005_employee_position... OK
+  Applying users.0006_remove_global_unique_access_code... OK
+  Applying users.0007_deduplicate_employee_accesses... OK
+  Applying users.0008_remove_employeeaccess_unique_employee_role_access... OK
+  Applying shifts.0001_initial... OK
+  Applying trips.0001_initial... OK
+  Applying trips.0002_trip_downtime_text_trip_loading_block_and_more... OK
+  Applying shifts.0002_employeeshift_end_engine_hours_and_more... OK
+  Applying assignments.0001_initial... OK
+  Applying trips.0003_dispatcheractionlog... OK
+  Applying trips.0004_dispatcheractionlog_reason... OK
+  Applying trips.0005_truck_loaded_action... OK
+  Applying references.0002_equipmentstate... OK
+  Applying trips.0006_trip_actual_dump_point_trip_assigned_dump_point... OK
+  Applying trips.0007_alter_trip_status... OK
+  Applying trips.0008_trip_cancelled_at... OK
+  Applying users.0009_employee_oup_fields_and_audit_target... OK
+  Applying users.0010_normalize_activated_employee_status... OK
+  Applying users.0011_adminactionlog_reversal... OK
+  Applying references.0003_remove_in_transit_and_rename_free... OK
+  Applying shifts.0003_shiftplan_equipmentshiftplan... OK
+  Applying shifts.0004_shiftplan_plan_scope... OK
+  Applying shifts.0005_employeeshift_plan_assigned_at_and_more... OK
+  Applying shifts.0006_reconcile_equipment_plan_groups... OK
+  Applying references.0004_update_free_color_semantics... OK
+  Applying shifts.0007_achievementprize_achievementunlock... OK
+  Applying shifts.0008_employeeshift_unique_open_shift_per_employee_and_more... OK
+  Applying references.0005_equipmentmodel_fuel_capacity_limit_l... OK
+  Applying references.0006_assign_excavator_fuel_limit_models... OK
+  Applying shifts.0009_shiftclientaction_shiftreadingcorrection... OK
+  Applying shifts.0010_alter_shiftreadingcorrection_employee_and_more... OK
+  Applying shifts.0011_employeeshift_workplace_code... OK
+  Applying references.0007_assign_truck_fuel_limits... OK
+  Applying users.0012_personnel_positions_and_temporary_transfers... OK
+  Applying users.0013_normalize_department_work_schedule... OK
+  Applying users.0014_allow_work_schedules_without_brigades... OK
+  Applying users.0015_seed_rotation_roles... OK
+  Applying users.0016_watchcomposition_employee_watch_composition... OK
+  Applying users.0017_employee_sex... OK
+  Applying shifts.0012_watchperiod_watch_composition... OK
+  Applying shifts.0013_unique_open_oup_period... OK
+  Applying shifts.0014_watch_period_brigade_phases... OK
+  Applying shifts.0015_brigade_phase_actor_accesses... OK
+  Applying assignments.0002_excavatorplacement... OK
+  Applying assignments.0003_excavatorplacement_loading_block_and_more... OK
+  Applying assignments.0004_haulassignment_action_haulassignment_effective_at... OK
+  Applying assignments.0005_equipmentassignment_ended_by_and_more... OK
+  Applying assignments.0006_crewplan_crewplanslot_and_more... OK
+  Applying assignments.0007_equipment_assignment_provenance... OK
+  Applying assignments.0008_crew_plan_secondary_employee... OK
+  Applying assignments.0009_excavatorplacement_transport_distance_km... OK
+  Applying assignments.0010_excavatordumppointsetting... OK
+  Applying assignments.0011_haul_assignment_open_state_constraints... OK
+  Applying assignments.0012_haul_assignment_handoff... OK
+  Applying assignments.0013_numbered_shift_labels... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying users.0018_employee_watch_profile_guard... OK
+  Applying users.0019_activeapplicationsession... OK
+  Applying users.0020_pushnotification_webpushsubscription... OK
+  Applying users.0021_client_error_report... OK
+  Applying users.0022_employee_protected_card... OK
+  Applying users.0023_activeapplicationsession_presence... OK
+  Applying users.0024_employee_contractor_access_from_and_more... OK
+  Applying references.0008_equipment_contractor_organization... OK
+  Applying trips.0009_unique_open_trip_per_truck... OK
+  Applying trips.0010_dispatcher_manual_trip_action... OK
+  Applying shifts.0016_numbered_shift_labels... OK
+  Applying shifts.0017_drivershiftreadingconfirmation... OK
+  Applying references.0009_link_legacy_rock_capacity_rules... OK
+  Applying references.0010_remove_obsolete_cargo_aliases... OK
+  Applying shifts.0018_excavatorshiftreadingconfirmation... OK
+  Applying trips.0011_manual_loading_participation... OK
+  Applying trips.0012_trip_offline_loading_times... OK
+  Applying shifts.0019_employeeshift_service_close_kind... OK
+  Applying downtimes.0001_initial... OK
+  Applying downtimes.0002_seed_mechanic_reasons... OK
+  Applying downtimes.0003_alter_downtimereason_options_and_more... OK
+  Applying downtimes.0004_update_downtime_reason_state_semantics... OK
+  Applying downtimes.0005_downtime_actor_subject... OK
+  Applying core.0001_initial... OK
+  Applying core.0002_operationalstateevent... OK
+  Applying core.0003_offline_field_event... OK
+  Applying portal.0001_initial... OK
+  Applying portal.0002_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0003_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0004_publication_portal_public_story_requires_consent_and_more... OK
+  Applying reports.0001_initial... OK
+  Applying reports.0002_reporttemplate_filters... OK
+  Applying reports.0003_reporttemplate_group_by... OK
+  Applying reports.0004_reporttemplate_column_labels... OK
+  Applying reports.0005_pilotfeedback... OK
+  Applying reports.0006_driver_shift_passport_snapshots... OK
+  Applying reports.0007_ratingperiod... OK
+  Applying reports.0008_ratingperiod_nominal_starts_on... OK
+  Applying reports.0009_driver_rating_period_materialized_snapshot... OK
+  Applying reports.0010_driverratingperiodmaterializedsnapshot_participant_group_snapshots... OK
+  Applying reports.0011_driver_rating_materialized_group_key... OK
+  Applying reports.0012_numbered_shift_labels... OK
+  Applying settlement.0001_initial... OK
+  Applying settlement.0002_settlementrevision_accommodationanchor_and_more... OK
+  Applying settlement.0003_employeebedoccupancy... OK
+  Applying settlement.0004_employeebedoccupancy_temporal_fields... OK
+  Applying settlement.0005_physical_room_sex_restriction... OK
+  Applying settlement.0006_remove_legacy_occupancy_constraints... OK
+  Applying settlement.0007_settlement_control_lease_and_event... OK
+  Applying settlement.0008_m4_calendar_slots_and_bindings... OK
+  Applying settlement.0009_m5_authoritative_cohorts... OK
+  Applying settlement.0010_settlement_residents... OK
+  Applying settlement.0011_resident_subject_transition... OK
+  Applying settlement.0012_m7_saved_previews... OK
+  Applying settlement.0013_resident_occupancy_subject... OK
+  Applying settlement.0014_m8_apply_provenance... OK
+  Applying settlement.0015_cohort_member_work_shift... OK
+  Applying settlement.0016_shift_scoped_apply_and_occupancy... OK
+  Applying settlement.0017_m9_preview_corrections... OK
+  Applying rotations.0001_initial... OK
+  Applying rotations.0002_arrival_roster_versions... OK
+  Applying rotations.0003_arrival_roster_manual_review... OK
+  Applying rotations.0004_arrival_roster_employee_pool... OK
+  Applying rotations.0005_arrival_roster_confirmation... OK
+  Applying rotations.0006_arrival_roster_excel_revision... OK
+  Applying rotations.0007_arrival_roster_routing... OK
+  Applying rotations.0008_employee_watch_profile_change... OK
+  Applying rotations.0009_numbered_shift_labels... OK
+  Applying sessions.0001_initial... OK
+  Applying settlement.0018_arrival_roster_cohort_provenance... OK
+  Applying settlement.0019_cohort_member_watch_profile_provenance... OK
+  Applying shifts.0020_shiftclientaction_request_signature... OK
+  Applying trips.0013_free_bucket_acceptance... OK
+  Applying trips.0014_free_bucket_acceptance_active_constraint... OK
+  Applying trips.0015_free_bucket_driver_request... OK
+  Applying trips.0016_trip_driver_device_load_time... OK
+  Applying users.0025_employeeaccess_driver_quick_reasons... OK
+test_stale_assign_does_not_create_missing_placement (trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomi
+cityTests.test_stale_assign_does_not_create_missing_placement) ... ok
+test_stale_assign_keeps_existing_inactive_placement_unchanged (trips.test_dispatcher_topology_commands.DispatcherAssign
+TruckAtomicityTests.test_stale_assign_keeps_existing_inactive_placement_unchanged) ... ok
+test_successful_assign_and_repeat_remain_idempotent (trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomi
+cityTests.test_successful_assign_and_repeat_remain_idempotent) ... ok
+test_move_to_garage_is_atomic_and_idempotent (trips.test_dispatcher_topology_commands.DispatcherMoveExcavatorCommandTes
+ts.test_move_to_garage_is_atomic_and_idempotent) ... ok
+test_assign_facade_injects_views_patch_seams (trips.test_dispatcher_topology_commands.DispatcherTopologyFacadeDelegatio
+nTests.test_assign_facade_injects_views_patch_seams) ... ok
+test_move_facade_injects_views_patch_seams (trips.test_dispatcher_topology_commands.DispatcherTopologyFacadeDelegationT
+ests.test_move_facade_injects_views_patch_seams) ... ok
+test_bulk_release_is_atomic_when_one_visible_state_is_stale 
+(trips.tests.DispatcherAssignmentRealtimeTests.test_bulk_release_is_atomic_when_one_visible_state_is_stale) ... ok
+test_dispatcher_assign_truck_reuses_same_pending_action 
+(trips.tests.DispatcherAssignmentRealtimeTests.test_dispatcher_assign_truck_reuses_same_pending_action) ... ok
+test_dispatcher_assignment_retry_returns_saved_response_without_second_command (trips.tests.DispatcherAssignmentRealtim
+eTests.test_dispatcher_assignment_retry_returns_saved_response_without_second_command) ... ok
+test_dispatcher_control_renders_duplicate_active_truck_assignment_once 
+(trips.tests.DispatcherAssignmentRealtimeTests.test_dispatcher_control_renders_duplicate_active_truck_assignment_once) 
+... ok
+test_dispatcher_rejects_same_action_id_with_different_payload 
+(trips.tests.DispatcherAssignmentRealtimeTests.test_dispatcher_rejects_same_action_id_with_different_payload) ... ok
+test_release_complex_emits_assignment_changed_event_without_moving_excavator (trips.tests.DispatcherAssignmentRealtimeT
+ests.test_release_complex_emits_assignment_changed_event_without_moving_excavator) ... ok
+test_repeated_realtime_fragments_keep_pending_truck_on_dispatcher_target (trips.tests.DispatcherAssignmentRealtimeTests
+.test_repeated_realtime_fragments_keep_pending_truck_on_dispatcher_target) ... ok
+test_second_stale_tab_cannot_overwrite_newer_dispatcher_assignment 
+(trips.tests.DispatcherAssignmentRealtimeTests.test_second_stale_tab_cannot_overwrite_newer_dispatcher_assignment) ... 
+ok
+test_facade_injects_views_patch_seams (trips.test_dispatcher_assignment_commands.DispatcherAssignmentFacadeDelegationTe
+sts.test_facade_injects_views_patch_seams) ... ok
+test_accepted_assignment_schedules_release_and_logs_new_state (trips.test_dispatcher_assignment_commands.DispatcherCanc
+elAssignmentCommandTests.test_accepted_assignment_schedules_release_and_logs_new_state) ... ok
+test_closed_dispatcher_shift_blocks_assignment_mutation (trips.test_dispatcher_assignment_commands.DispatcherCancelAssi
+gnmentCommandTests.test_closed_dispatcher_shift_blocks_assignment_mutation) ... ok
+test_get_preserves_filters_and_does_not_mutate_assignment (trips.test_dispatcher_assignment_commands.DispatcherCancelAs
+signmentCommandTests.test_get_preserves_filters_and_does_not_mutate_assignment) ... ok
+test_manager_role_keeps_original_role_home_redirect (trips.test_dispatcher_assignment_commands.DispatcherCancelAssignme
+ntCommandTests.test_manager_role_keeps_original_role_home_redirect) ... ok
+test_missing_assignment_returns_original_error_message (trips.test_dispatcher_assignment_commands.DispatcherCancelAssig
+nmentCommandTests.test_missing_assignment_returns_original_error_message) ... ok
+test_pending_assignment_is_cancelled_immediately_and_logged (trips.test_dispatcher_assignment_commands.DispatcherCancel
+AssignmentCommandTests.test_pending_assignment_is_cancelled_immediately_and_logged) ... ok
+test_stale_accepted_assignment_returns_error_without_log (trips.test_dispatcher_assignment_commands.DispatcherCancelAss
+ignmentCommandTests.test_stale_accepted_assignment_returns_error_without_log) ... ok
+test_competing_assigns_commit_one_target_without_loser_side_effects (trips.test_dispatcher_topology_commands.Dispatcher
+AssignTruckPostgreSQLConcurrencyTests.test_competing_assigns_commit_one_target_without_loser_side_effects) ... skipped 
+'Requires isolated PostgreSQL test database'
+test_public_views_are_thin_topology_command_facades (trips.test_dispatcher_topology_commands.DispatcherTopologyCommandB
+oundaryTests.test_public_views_are_thin_topology_command_facades) ... ok
+test_public_views_keep_post_guard_before_command_execution (trips.test_dispatcher_topology_commands.DispatcherTopologyC
+ommandBoundaryTests.test_public_views_keep_post_guard_before_command_execution) ... ok
+test_views_reexport_optimistic_state_parsers (trips.test_dispatcher_topology_commands.DispatcherTopologyCommandBoundary
+Tests.test_views_reexport_optimistic_state_parsers) ... ok
+test_apply_pending_haul_assignment_opens_its_own_transaction 
+(assignments.tests.HaulAssignmentTransactionTests.test_apply_pending_haul_assignment_opens_its_own_transaction)
+Вызов напрямую, без обёртки вызывающей стороны — функция должна сама ... ok
+test_database_rejects_duplicate_open_accepted_and_pending_states 
+(assignments.tests.HaulAssignmentTransactionTests.test_database_rejects_duplicate_open_accepted_and_pending_states) 
+... ok
+test_reconcile_applies_a_due_assignment_without_crashing 
+(assignments.tests.HaulAssignmentTransactionTests.test_reconcile_applies_a_due_assignment_without_crashing) ... ok
+test_schedule_haul_assignment_opens_its_own_transaction 
+(assignments.tests.HaulAssignmentTransactionTests.test_schedule_haul_assignment_opens_its_own_transaction) ... ok
+test_public_view_is_thin_assignment_command_facade (trips.test_dispatcher_assignment_commands.DispatcherAssignmentComma
+ndBoundaryTests.test_public_view_is_thin_assignment_command_facade) ... ok
+test_url_keeps_public_views_facade (trips.test_dispatcher_assignment_commands.DispatcherAssignmentCommandBoundaryTests.
+test_url_keeps_public_views_facade) ... ok
+
+----------------------------------------------------------------------
+Ran 32 tests in 0.974s
+
+OK (skipped=1)
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+
+  Applying users.0026_native_push_device... OK
+System check identified no issues (0 silenced).
+
+CHECK_EXIT_CODE=0
+System check identified no issues (0 silenced).
+
+MAKEMIGRATIONS_EXIT_CODE=0
+No changes detected
+
