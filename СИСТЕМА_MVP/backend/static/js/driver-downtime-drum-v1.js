@@ -829,13 +829,18 @@
        геометрия сдвинулась). */
     var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;
     var lastArrowVars = "";
-    function arrowFor(gap) {
-        var h = Math.max(ARROW_MIN_H, Math.min(ARROW_MAX_H, gap - 2 * ARROW_CLEAR));
-        return { h: h, lift: Math.max(ARROW_CLEAR, (gap - h) / 2) };
+    function fitH(gap) {
+        return Math.max(ARROW_MIN_H, Math.min(ARROW_MAX_H, gap - 2 * ARROW_CLEAR));
     }
     function syncSlotArrows(dr, cr, tr) {
-        var bottom = arrowFor(cr.top - dr.bottom);
-        var top = tr && tr.height ? arrowFor(dr.top - tr.bottom) : arrowFor(0);
+        // Обе стрелки ОДНОГО размера — наибольшего, что влезает в оба зазора (по
+        // меньшему), на любом экране (владелец, 28.09.2026: «разного размера»).
+        // Каждая стоит посередине своего зазора.
+        var gapBottom = cr.top - dr.bottom;
+        var gapTop = tr && tr.height ? dr.top - tr.bottom : gapBottom;
+        var h = Math.min(fitH(gapBottom), fitH(gapTop));
+        var bottom = { h: h, lift: Math.max(ARROW_CLEAR, (gapBottom - h) / 2) };
+        var top = { h: h, lift: Math.max(ARROW_CLEAR, (gapTop - h) / 2) };
         var vars = [bottom.h, bottom.lift, top.h, top.lift].map(function (v) { return v.toFixed(1); }).join(",");
         if (vars === lastArrowVars) return;
         lastArrowVars = vars;

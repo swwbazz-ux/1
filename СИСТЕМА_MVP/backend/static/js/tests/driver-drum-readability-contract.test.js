@@ -259,6 +259,8 @@ test("the swipe arrow is a fixed slot outside the card, sized from the real gap 
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
     assert.match(drumJs, /var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;/);
     assert.match(drumJs, /function syncSlotArrows\(dr, cr, tr\)/);
+    // Обе стрелки одного размера — по меньшему из двух зазоров, на любом экране.
+    assert.match(drumJs, /var h = Math\.min\(fitH\(gapBottom\), fitH\(gapTop\)\);[\s\S]{0,200}var bottom = \{ h: h,[\s\S]{0,120}var top = \{ h: h,/);
     // Считается вместе с контуром — вне жеста и только при сдвиге геометрии.
     assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0\);/);
     // Цвет верхней стрелки мигает той же переменной, что и грань точки.
