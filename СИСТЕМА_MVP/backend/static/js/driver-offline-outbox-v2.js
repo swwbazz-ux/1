@@ -663,9 +663,16 @@
                     removed_at: nowIso()
                 };
                 try { await repo.setMeta("annihilated-manual-load:" + pairIds[0], record); } catch (error) {}
-                root.driverOfflineAnnihilatedPairs = (root.driverOfflineAnnihilatedPairs || []).concat([record]).slice(-20);
-                if (root.console && typeof root.console.warn === "function") {
-                    root.console.warn("driver_offline_outbox: unsent manual load and its cancel removed locally", record);
+                /* Два listAll() при старте страницы идут одновременно и оба видят пару:
+                   повторное удаление безвредно, а запись в журнале — одна. */
+                var already = (root.driverOfflineAnnihilatedPairs || []).some(function (item) {
+                    return item && item.load_event_id === record.load_event_id;
+                });
+                if (!already) {
+                    root.driverOfflineAnnihilatedPairs = (root.driverOfflineAnnihilatedPairs || []).concat([record]).slice(-20);
+                    if (root.console && typeof root.console.warn === "function") {
+                        root.console.warn("driver_offline_outbox: unsent manual load and its cancel removed locally", record);
+                    }
                 }
             }
             return removed;
