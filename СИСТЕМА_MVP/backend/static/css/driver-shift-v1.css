@@ -840,16 +840,19 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
 
 /* Слой «засчитано» (driver-shift-v1.js, showDriverDialConfirmed). Лежит на body
-   поверх круга и получает его прямоугольник при показе: сам круг, кольцо и
-   сердцевина под ним не меняются ни на пиксель, а сверка после разгрузки может
-   заменить оболочку целиком — слой это переживает. Внутри: полное зелёное кольцо
-   на месте кольца удержания со вспышкой свечения, непрозрачная сердцевина того же
-   вида, что настоящая (под ней уже готово следующее состояние), мягкий зелёный
-   ореол, галочка, которая прорисовывается, и «РАЗГРУЖЕНО» шрифтом приложения.
-   Цвет успеха задан явно, а не через --driver-green: тот в ручном режиме и при
-   свободном ковше перекрашен в цвет режима. Анимируются только opacity слоёв и
-   stroke-dashoffset маленького SVG галочки; ни фильтров, ни теней на живом круге.
-   Размеры — в cqw от ширины круга (container-type: size на слое). */
+   поверх СЕРДЦЕВИНЫ круга (внутреннего кружка с подписью) и получает её
+   прямоугольник при показе: ни сама сердцевина, ни кольцо удержания, ни что-либо
+   снаружи не меняются ни на пиксель — кольцо после срабатывания само возвращается
+   в исходный вид (владелец, 28.09.2026: всё подтверждение строго внутри
+   сердцевины). Сверка после разгрузки может заменить оболочку целиком — слой на
+   body это переживает. Внутри: непрозрачная основа того же вида, что настоящая
+   сердцевина (под ней уже готово следующее состояние), мягкий зелёный ореол от
+   центра со вспышкой, тонкая зелёная кромка по краю, галочка, которая
+   прорисовывается, и «РАЗГРУЖЕНО» шрифтом приложения. Цвет успеха задан явно, а
+   не через --driver-green: тот в ручном режиме и при свободном ковше перекрашен
+   в цвет режима. Анимируются только opacity слоёв и stroke-dashoffset маленького
+   SVG галочки; ни фильтров, ни теней на живом круге. Размеры — в cqw от ширины
+   сердцевины (container-type: size на слое). */
 body.driver-mobile-screen .driver-work-confirm {
     position: fixed;
     left: 0;
@@ -857,9 +860,19 @@ body.driver-mobile-screen .driver-work-confirm {
     width: 0;
     height: 0;
     z-index: 150;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 3cqw;
     border-radius: 50%;
+    overflow: hidden;
     container-type: size;
     color: #8cff2e;
+    background:
+        radial-gradient(circle at 50% 24%, rgba(188, 215, 211, .2), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgb(63, 88, 90), rgb(27, 49, 53) 62%, rgb(8, 20, 24));
+    /* Тонкая кромка по краю сердцевины — внутрь, наружу ничего не выходит. */
+    box-shadow: inset 0 0 0 1.5px rgba(140, 255, 46, .55);
     visibility: hidden;
     opacity: 0;
     pointer-events: none;
@@ -879,72 +892,24 @@ body.driver-mobile-screen .driver-work-confirm.is-showing.is-leaving {
     transition: opacity 450ms ease;
 }
 
-/* Кольцо — те же двенадцать секций и та же маска, что у кольца удержания
-   (.driver-work-hold-fill), только сразу полное; зазоры 3° на больших делениях. */
-body.driver-mobile-screen .driver-work-confirm-ring,
-body.driver-mobile-screen .driver-work-confirm-ring-glow {
-    position: absolute;
-    inset: 7.7%;
-    border-radius: 50%;
-    background: repeating-conic-gradient(from -1.5deg, transparent 0deg 3deg, currentColor 3deg 30deg);
-    opacity: 0;
-    will-change: opacity;
-}
-
-body.driver-mobile-screen .driver-work-confirm-ring {
-    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
-    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
-}
-
-/* Свечение — то же кольцо чуть шире, с растушёванной маской вместо filter: blur. */
-body.driver-mobile-screen .driver-work-confirm-ring-glow {
-    inset: 4.5%;
-    -webkit-mask: radial-gradient(farthest-side, transparent 80%, rgba(0, 0, 0, .75) 90%, rgba(0, 0, 0, .75) 95%, transparent 100%);
-    mask: radial-gradient(farthest-side, transparent 80%, rgba(0, 0, 0, .75) 90%, rgba(0, 0, 0, .75) 95%, transparent 100%);
-}
-
-body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring {
-    animation: driver-confirm-fade-in 150ms ease-out forwards;
-}
-
-body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring-glow {
-    animation: driver-confirm-flash 700ms ease-out forwards;
-}
-
-/* Сердцевина: тот же размер (74% круга) и та же основа, что у .driver-work-dial-core,
-   непрозрачная — она закрывает подпись под собой до конца показа. */
-body.driver-mobile-screen .driver-work-confirm-core {
-    position: absolute;
-    inset: 13%;
-    display: grid;
-    place-items: center;
-    align-content: center;
-    gap: 2cqw;
-    border-radius: 50%;
-    border: 1px solid rgba(140, 255, 46, .5);
-    background:
-        radial-gradient(circle at 50% 24%, rgba(188, 215, 211, .2), transparent 38%),
-        radial-gradient(circle at 50% 46%, rgb(63, 88, 90), rgb(27, 49, 53) 62%, rgb(8, 20, 24));
-    overflow: hidden;
-}
-
+/* Ореол со вспышкой — радиальный градиент от центра, только внутри сердцевины. */
 body.driver-mobile-screen .driver-work-confirm-halo {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    background: radial-gradient(circle at 50% 52%, rgba(140, 255, 46, .36), rgba(140, 255, 46, .12) 46%, transparent 74%);
+    background: radial-gradient(circle at 50% 50%, rgba(140, 255, 46, .42), rgba(140, 255, 46, .14) 48%, rgba(140, 255, 46, .04) 78%, transparent 100%);
     opacity: 0;
     will-change: opacity;
 }
 
 body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo {
-    animation: driver-confirm-fade-in 320ms ease-out forwards;
+    animation: driver-confirm-flash 700ms ease-out forwards;
 }
 
 body.driver-mobile-screen .driver-work-confirm-check {
     position: relative;
-    width: 26cqw;
-    height: 26cqw;
+    width: 32cqw;
+    height: 32cqw;
     overflow: visible;
 }
 
@@ -999,8 +964,6 @@ body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-t
 }
 
 @media (prefers-reduced-motion: reduce) {
-    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring,
-    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring-glow,
     body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo,
     body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-text {
         animation: none;

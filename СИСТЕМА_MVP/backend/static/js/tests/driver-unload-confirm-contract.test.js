@@ -48,12 +48,19 @@ test("a saved unload shows the confirmation layer with voice, for the hold and t
     assert.ok(total >= 4500 && total <= 5500, "confirmation lasts ~5 s");
     assert.ok(fade >= 300 && fade <= 600, "it fades out, not snaps");
     assert.match(helper, /DRIVER_DIAL_CONFIRM_MS - DRIVER_DIAL_CONFIRM_FADE_MS/);
-    // Слой создаётся на body и содержит кольцо, ореол, галочку и подпись.
+    // Слой создаётся на body и содержит ореол, галочку и подпись — и ничего снаружи
+    // сердцевины: ни кольца на месте кольца удержания, ни свечения вокруг него.
     const layer = SHIFT.match(/function driverDialConfirmLayer\(\) \{[\s\S]*?\n        \}\n/)[0];
     assert.match(layer, /document\.body\.appendChild\(layer\)/);
-    ["driver-work-confirm-ring-glow", "driver-work-confirm-ring", "driver-work-confirm-halo", "driver-work-confirm-check", "driver-work-confirm-text"].forEach((cls) => {
+    ["driver-work-confirm-halo", "driver-work-confirm-check", "driver-work-confirm-text"].forEach((cls) => {
         assert.match(layer, new RegExp(cls));
     });
+    assert.doesNotMatch(layer, /confirm-ring/);
+    assert.doesNotMatch(CSS, /driver-work-confirm-ring/);
+    // Прямоугольник слоя — прямоугольник сердцевины, не всей кнопки.
+    const place = SHIFT.match(/function placeDriverDialConfirmLayer\(\) \{[\s\S]*?\n        \}\n/)[0];
+    assert.match(place, /querySelector\("\.driver-work-dial-core"\)/);
+    assert.match(place, /var rect = core\.getBoundingClientRect\(\)/);
     assert.match(layer, /pathLength="100"/);
     assert.match(layer, /РАЗГРУЖЕНО/);
     // Показ — только после записи на телефоне, и для обычной, и для ручной разгрузки.

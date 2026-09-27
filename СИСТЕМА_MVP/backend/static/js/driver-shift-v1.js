@@ -2365,24 +2365,24 @@ window.bindDriverMobileShell = function () {
             layer.className = "driver-work-confirm";
             layer.setAttribute("data-driver-work-confirm", "");
             layer.setAttribute("aria-hidden", "true");
+            /* Только сердцевина: ни кольца удержания, ни свечения снаружи неё
+               (владелец, 28.09.2026) — кольцо после срабатывания само возвращается
+               в исходный вид. */
             layer.innerHTML = ''
-                + '<span class="driver-work-confirm-ring-glow"></span>'
-                + '<span class="driver-work-confirm-ring"></span>'
-                + '<span class="driver-work-confirm-core">'
-                +   '<span class="driver-work-confirm-halo"></span>'
-                +   '<svg class="driver-work-confirm-check" viewBox="0 0 100 100" aria-hidden="true">'
-                +     '<path d="M26 53 L44 70 L75 34" pathLength="100"></path>'
-                +   '</svg>'
-                +   '<b class="driver-work-confirm-text">РАЗГРУЖЕНО</b>'
-                + '</span>';
+                + '<span class="driver-work-confirm-halo"></span>'
+                + '<svg class="driver-work-confirm-check" viewBox="0 0 100 100" aria-hidden="true">'
+                +   '<path d="M26 53 L44 70 L75 34" pathLength="100"></path>'
+                + '</svg>'
+                + '<b class="driver-work-confirm-text">РАЗГРУЖЕНО</b>';
             document.body.appendChild(layer);
             return layer;
         }
         function placeDriverDialConfirmLayer() {
             var layer = document.querySelector("[data-driver-work-confirm]");
             var button = document.querySelector("[data-driver-hold-button]");
-            if (!layer || !button || !layer.classList.contains("is-showing")) return;
-            var rect = button.getBoundingClientRect();
+            var core = button && button.querySelector(".driver-work-dial-core");
+            if (!layer || !core || !layer.classList.contains("is-showing")) return;
+            var rect = core.getBoundingClientRect();
             if (!(rect.width > 0)) return;
             layer.style.left = rect.left.toFixed(1) + "px";
             layer.style.top = rect.top.toFixed(1) + "px";
