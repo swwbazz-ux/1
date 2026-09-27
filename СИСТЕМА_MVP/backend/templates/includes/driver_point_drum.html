@@ -8,7 +8,6 @@
 точку назначает экскаваторщик, барабан притушен. Логика: static/js/driver-point-drum-v1.js.
 {% endcomment %}
 <div class="driver-point-drum" data-driver-point-drum role="group" aria-label="Барабан точек разгрузки: в ручном режиме проведите влево или вправо, чтобы выбрать точку, и вниз на круг, чтобы отправиться на неё">
-    <b class="driver-free-bucket-chip" data-driver-free-bucket-chip{% if not driver_free_bucket_state.active %} hidden{% endif %}{% if driver_free_bucket_state.selection %} title="Свободный ковш · {{ driver_free_bucket_state.selection.label }}"{% endif %}>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</b>
     <div class="driver-downtime-drum-stage">
         <div class="driver-downtime-drum-track" data-driver-point-drum-track>
             {% with drum_points=driver_manual_workspace.event_context.dump_points|default:driver_manual_workspace.base_event_context.dump_points %}

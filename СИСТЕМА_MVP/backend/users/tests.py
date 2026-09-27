@@ -316,8 +316,10 @@ class AccessLoginTests(TestCase):
         # а порода и забой видны на скрытом экране ручного режима (проверка ниже).
         main_card = html.split('data-driver-point-drum', 1)[1].split('class="driver-work-dial-zone"', 1)[0]
         compact_label = f'Свободный ковш · {state["selection"]["label"]}'
-        self.assertIn('data-driver-free-bucket-chip', main_card)
-        self.assertIn(compact_label, main_card)
+        # Плашки «Свободный ковш · …» над барабаном больше нет (владелец, 28.09.2026):
+        # признак режима — сама угловая кнопка свободного ковша, яркая, когда он включён.
+        self.assertNotIn('data-driver-free-bucket-chip', main_card)
+        self.assertNotIn(compact_label, main_card)
         self.assertIn('data-driver-point-name="Immutable dump"', main_card)
         self.assertNotIn('Current placement rock', main_card)
         manual_workspace = html.split('<section class="driver-manual-workspace"', 1)[1].split(
@@ -572,7 +574,7 @@ class AccessLoginTests(TestCase):
         self.assertNotContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, 'data-driver-point-drum')
         self.assertIn('--driver-work-column: min(100%, 720px)', driver_stylesheet())
-        self.assertContains(response, 'data-driver-free-bucket-chip')
+        self.assertNotContains(response, 'data-driver-free-bucket-chip')
         self.assertNotContains(response, 'function enhanceDriverContextLine()')
         self.assertContains(response, 'class="driver-work-ticks"')
         self.assertContains(response, 'data-driver-dial-label')

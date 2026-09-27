@@ -503,13 +503,6 @@ body.driver-mobile-screen .driver-work-screen.is-active {
     overflow: hidden;
 }
 
-body.driver-mobile-screen .driver-free-bucket-chip {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    z-index: 2;
-}
-
 body.driver-mobile-screen .driver-work-context-card {
     grid-area: context;
     position: relative;

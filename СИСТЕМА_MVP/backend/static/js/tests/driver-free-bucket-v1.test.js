@@ -407,7 +407,8 @@ test("free-bucket projection keeps the dial label short and renders a compact mo
     assert.match(source, /setDialLabel\(item\.label\)/);
     assert.doesNotMatch(source, /setDialLabel\("Свободный ковш · " \+ item\.label\)/);
     assert.match(source, /chip\.textContent = active \? "Свободный ковш · " \+ state\.selection\.label : ""/);
-    assert.match(template, /data-driver-free-bucket-chip/);
+    // Плашки режима над барабаном больше нет — признак режима сама угловая кнопка.
+    assert.doesNotMatch(template, /data-driver-free-bucket-chip/);
     assert.match(styles, /\.driver-free-bucket-sheet\s*\{[\s\S]*?z-index:\s*170;/);
     assert.match(source, /node\.dataset\.driverDialRaw = label/);
     assert.match(source, /scheduleDriverDialLabelFit\(true\)/);

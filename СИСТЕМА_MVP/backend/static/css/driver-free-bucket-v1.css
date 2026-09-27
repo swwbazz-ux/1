@@ -1,6 +1,28 @@
-body.driver-mobile-screen .mobile-dial-action--free-bucket.is-current {
-    filter: brightness(1.12);
+/* Угловая кнопка свободного ковша — сама и есть признак режима (плашку
+   «Свободный ковш · …» над барабаном убрали, владелец, 28.09.2026): выключен —
+   обычная приглушённая кнопка; включён (is-current, ставит driver-free-bucket-v1.js)
+   — яркая, насыщенным цветом режима, со светящейся рамкой и значком, как
+   активная кнопка «рука» ручного режима (.mobile-dial-action--manual.is-on). */
+body.driver-mobile-screen .mobile-dial-action--free-bucket:not(.is-current) .mobile-dial-action__face {
+    stroke-opacity: .42;
 }
+
+body.driver-mobile-screen .mobile-dial-action--free-bucket:not(.is-current) .mobile-dial-action__icon {
+    opacity: .55;
+}
+
+body.driver-mobile-screen .mobile-dial-action--free-bucket.is-current .mobile-dial-action__face {
+    fill: #221b33;
+    stroke-opacity: 1;
+    stroke-width: 2.4;
+}
+
+body.driver-mobile-screen .mobile-dial-action--free-bucket.is-current .mobile-dial-action__icon {
+    filter:
+        drop-shadow(0 0 5px rgba(var(--mobile-dial-accent-rgb), .75))
+        drop-shadow(0 1px 1px rgba(0, 0, 0, .6));
+}
+
 body.driver-mobile-screen .mobile-dial-action--free-bucket.is-local .mobile-dial-action__face {
     stroke-dasharray: 5 4;
 }
@@ -14,26 +36,6 @@ body.driver-mobile-screen .driver-work-context-heading {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-}
-
-body.driver-mobile-screen .driver-free-bucket-chip {
-    min-width: 0;
-    max-width: 64%;
-    overflow: hidden;
-    padding: 3px 7px;
-    border: 1px solid rgba(var(--driver-free-bucket-accent-rgb, 172, 156, 199), .5);
-    border-radius: 999px;
-    color: rgb(var(--driver-free-bucket-accent-rgb, 172, 156, 199));
-    background: rgba(var(--driver-free-bucket-accent-rgb, 172, 156, 199), .14);
-    font-size: clamp(8px, 2vw, 10px);
-    font-weight: 800;
-    line-height: 1;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-body.driver-mobile-screen .driver-free-bucket-chip[hidden] {
-    display: none;
 }
 
 /* Окно выбора свободного ковша — в общем стиле окон водителя: то же окно, что
@@ -167,10 +169,16 @@ body.driver-mobile-screen .driver-free-bucket-grid {
     margin: 0;
 }
 
-/* Плитка — просто крупный номер экскаватора (горизонт/блок/порода/точка убраны
-   раньше: водителю на смене важнее разглядеть номер). Вид — как у плиток точек
-   разгрузки: плоский тёмный фон, простая рамка, их скругление. Статус
-   («Выбран»/«Недоступно») — короткой строкой под номером. */
+/* Плитка — крупный номер экскаватора (горизонт/блок/порода/точка убраны раньше:
+   водителю на смене важнее разглядеть номер). Форма — как у плиток точек
+   разгрузки (их скругление, плоская основа). Доступная плитка «живая»: чёткая
+   рамка и лёгкая подсветка цветом режима, яркий номер, заметная реакция на
+   нажатие; выбранная — толще рамка со свечением; недоступная (забой не
+   заполнен или основное закрепление) — явно приглушена, чтобы доступные на её
+   фоне читались сразу (владелец, 28.09.2026: «выглядит неактивной, мёртвой»).
+   Номер стоит ровно по центру плитки по обеим осям: строка статуса вынесена
+   из потока к нижней кромке и центр номера не сдвигает; line-height ~1 — та
+   же компенсация под заглавные, что у подписей барабанов. */
 body.driver-mobile-screen .driver-free-bucket-tile {
     position: relative;
     min-width: 0;
@@ -178,29 +186,46 @@ body.driver-mobile-screen .driver-free-bucket-tile {
     min-height: 82px;
     display: grid;
     place-items: center;
-    align-content: center;
-    gap: 4px;
-    padding: clamp(8px, 2.4vw, 14px);
-    border: 1px solid rgba(142, 169, 181, .26);
+    padding: clamp(8px, 2.4vw, 14px) clamp(8px, 2.4vw, 14px) clamp(14px, 3.4vw, 18px);
+    border: 1.5px solid rgba(var(--fb-rgb), .62);
     border-radius: clamp(9px, 2.4vw, 13px);
-    color: #aab7bd;
+    color: #eef5f7;
     text-align: center;
     text-transform: none;
-    background: rgba(7, 18, 23, .96);
-    box-shadow: none;
-    transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .16), transparent 70%),
+        rgba(9, 20, 26, .96);
+    box-shadow: inset 0 0 14px rgba(var(--fb-rgb), .08);
+    transition: border-color .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease, transform .08s ease;
+}
+
+body.driver-mobile-screen .driver-free-bucket-tile:not(:disabled):active {
+    transform: scale(.97);
+    border-color: rgb(var(--fb-rgb));
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .3), transparent 75%),
+        rgba(9, 20, 26, .96);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile.is-current {
-    border-color: rgb(var(--fb-rgb));
-    background: rgba(var(--fb-rgb), .16);
+    border: 2.5px solid rgb(var(--fb-rgb));
     color: rgb(var(--fb-rgb));
-    box-shadow: inset 0 0 18px rgba(var(--fb-rgb), .1);
+    background:
+        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .3), transparent 75%),
+        rgba(var(--fb-rgb), .1);
+    box-shadow:
+        0 0 0 1px rgba(var(--fb-rgb), .35),
+        0 0 16px rgba(var(--fb-rgb), .4),
+        inset 0 0 18px rgba(var(--fb-rgb), .14);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:disabled {
     cursor: default;
-    opacity: .5;
+    border: 1px dashed rgba(142, 169, 181, .22);
+    color: #5e6f75;
+    background: rgba(7, 16, 20, .7);
+    box-shadow: none;
+    opacity: .7;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-number {
@@ -208,19 +233,27 @@ body.driver-mobile-screen .driver-free-bucket-tile-number {
     overflow-wrap: anywhere;
     color: inherit;
     font-size: clamp(22px, 7vw, 30px);
-    font-weight: 800;
-    line-height: 1.05;
+    font-weight: 900;
+    line-height: 1.02;
     text-transform: none;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-status {
-    min-height: 13px;
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: clamp(5px, 1.4vw, 8px);
     color: inherit;
-    opacity: .8;
-    font-size: 11px;
-    font-weight: 700;
+    opacity: .85;
+    font-size: 10px;
+    font-weight: 800;
     letter-spacing: .06em;
+    line-height: 1;
     text-transform: uppercase;
+}
+
+body.driver-mobile-screen .driver-free-bucket-tile-status:empty {
+    display: none;
 }
 
 body.driver-mobile-screen .driver-free-bucket-message,
