@@ -1,0 +1,14 @@
+SOURCE docs_base=b74729f87d2b6efc42c378845a8267e16bb04dd4
+SOURCE release=0fe60543de59bf7cbeca4868fc17e8e00689d2ba
+COMMAND & .\run.ps1 -ReleaseWorktree C:\codex-tmp\passport-proof-rel-0fe605
+EVIDENCE_TRANSPORT dispatcher_fresh_online {"first_path":"direct","client_action_id":"mm-1000000-004189374bc6a7f","locally_saved_before_send":false,"queue_after_response":0,"server_response":"MOCK"}
+EVIDENCE_TRANSPORT dispatcher_lost_response_retry_MOCK {"mock_acceptance":true,"same_client_action_id":true,"same_payload":true,"queue_record_id":"sync-2000000-0083126e978d4fe","createdAt":2000000,"attempts_before_retry":0,"queue_after_retry":0}
+EVIDENCE_TRANSPORT dispatcher_reverse_direct_MOCK {"call_order":["A","B"],"mock_completion_order":["B","A"],"locally_serialized":false,"ui_double_action_reachability":"NOT_RUN"}
+EVIDENCE_TRANSPORT dispatcher_restart {"queue_record_id":"sync-4000000-0083126e978d4fe","same_local_record_id":true,"same_client_action_id":true,"createdAt_preserved":4000000,"automatic_OS_restart_delivery":"NOT_RUN"}
+EVIDENCE_TRANSPORT master_fresh_online {"first_path":"queue","locally_saved_before_send":true,"queue_record_id":"sync-5000000-0083126e978d4fe","client_action_id":"mm-5000000-004189374bc6a7f","createdAt":5000000,"queue_after_response":0,"server_response":"MOCK"}
+EVIDENCE_TRANSPORT master_lost_response_retry_MOCK {"mock_acceptance":true,"same_queue_record_id":true,"same_client_action_id":true,"same_payload":true,"attempts_after_loss":1,"queue_after_retry":0}
+EVIDENCE_TRANSPORT master_restart {"queue_record_id":"sync-7000000-0083126e978d4fe","same_local_record_id":true,"same_client_action_id":true,"createdAt_preserved":7000000,"startup_schedule_present_in_template":true,"installed_app_restart":"NOT_RUN"}
+EVIDENCE_TRANSPORT master_coalesce {"old_queue_record_id":"sync-8000000-0083126e978d4fe","new_queue_record_id":"sync-8010000-010624dd2f1a9fc","client_action_id_replaced":true,"payload_replaced":true,"old_createdAt_preserved_for_new_command":true}
+EVIDENCE_TRANSPORT temporal_fields {"local_master_createdAt":9000000,"transmitted":["client_action_id","action","truck_id","excavator_id"],"not_transmitted":["queue_record_id","createdAt","attempts","occurred_at","format_version"],"clock_source":"Date.now wall clock"}
+RESULT tests=9 pass=9 fail=0 skipped=0
+LIMITATION server_response=MOCK postgresql=NOT_RUN browser=NOT_RUN installed_app=NOT_RUN os_restart=NOT_RUN
