@@ -1,0 +1,26 @@
+EVIDENCE_TRANSPORT dispatcher_fresh_online {"first_path":"direct","client_action_id":"mm-1000000-004189374bc6a7f","locally_saved_before_send":false,"queue_after_response":0,"server_response":"MOCK"}
+✔ dispatcher fresh online command is direct-first and is not locally durable (4.076771ms)
+EVIDENCE_TRANSPORT dispatcher_lost_response_retry_MOCK {"mock_acceptance":true,"same_client_action_id":true,"same_payload":true,"queue_record_id":"sync-2000000-0083126e978d4fe","createdAt":2000000,"attempts_before_retry":0,"queue_after_retry":0}
+EVIDENCE_TRANSPORT dispatcher_reverse_direct_MOCK {"call_order":["A","B"],"mock_completion_order":["B","A"],"locally_serialized":false,"ui_double_action_reachability":"NOT_RUN"}
+✔ dispatcher lost response queues the same payload and retries the same action id (4.165415ms)
+✔ dispatcher permits two direct first sends to complete in reverse order (0.968992ms)
+EVIDENCE_TRANSPORT dispatcher_restart {"queue_record_id":"sync-4000000-0083126e978d4fe","same_local_record_id":true,"same_client_action_id":true,"createdAt_preserved":4000000,"automatic_OS_restart_delivery":"NOT_RUN"}
+✔ dispatcher queued fallback survives runtime restart (1.873286ms)
+EVIDENCE_TRANSPORT master_fresh_online {"first_path":"queue","locally_saved_before_send":true,"queue_record_id":"sync-5000000-0083126e978d4fe","client_action_id":"mm-5000000-004189374bc6a7f","createdAt":5000000,"queue_after_response":0,"server_response":"MOCK"}
+✔ master fresh online command is queue-first, then actual flush sends it (2.491059ms)
+EVIDENCE_TRANSPORT master_lost_response_retry_MOCK {"mock_acceptance":true,"same_queue_record_id":true,"same_client_action_id":true,"same_payload":true,"attempts_after_loss":1,"queue_after_retry":0}
+✔ master lost response keeps and retries the same queued command (2.094791ms)
+EVIDENCE_TRANSPORT master_restart {"queue_record_id":"sync-7000000-0083126e978d4fe","same_local_record_id":true,"same_client_action_id":true,"createdAt_preserved":7000000,"startup_schedule_present_in_template":true,"installed_app_restart":"NOT_RUN"}
+EVIDENCE_TRANSPORT master_coalesce {"old_queue_record_id":"sync-8000000-0083126e978d4fe","new_queue_record_id":"sync-8010000-010624dd2f1a9fc","client_action_id_replaced":true,"payload_replaced":true,"old_createdAt_preserved_for_new_command":true}
+✔ master queued command survives runtime restart (2.220421ms)
+✔ master coalescing replaces identity and payload but keeps the earlier createdAt (1.546864ms)
+EVIDENCE_TRANSPORT temporal_fields {"local_master_createdAt":9000000,"transmitted":["client_action_id","action","truck_id","excavator_id"],"not_transmitted":["queue_record_id","createdAt","attempts","occurred_at","format_version"],"clock_source":"Date.now wall clock"}
+✔ local temporal metadata is not transmitted in either role payload (3.401041ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.062625
