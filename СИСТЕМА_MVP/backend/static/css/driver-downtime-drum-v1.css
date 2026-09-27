@@ -76,9 +76,17 @@ body.driver-mobile-screen .driver-drum-card {
     --drum-fade: 1;
     --card-shade: 1;
     --card-angle: 0deg;
-    --drum-accent: rgba(150, 166, 172, .5);
+    /* Цвет по умолчанию для граней без статуса причины (барабан точек разгрузки
+       переопределяет его синим ниже, барабан простоев — по status-* классу). */
+    --drum-reason-accent: rgba(150, 166, 172, .9);
+    --drum-accent: color-mix(in srgb, var(--drum-reason-accent) 45%, transparent);
     --drum-face-top: #1b2d34;
     --drum-face-bottom: #0c181e;
+    /* Полоса таймера — фиксированной высоты и ВСЕГДА зарезервирована (даже без
+       активного простоя, полоса просто пустая): иначе при старте/остановке
+       простоя область над ней меняет размер и текстовая группа прыгает
+       (владелец, 28.09.2026: «полоса таймера... ничего не прыгает»). */
+    --drum-timer-strip-h: clamp(22px, calc(var(--drum-card-h) * 0.26), 36px);
     position: absolute;
     left: calc(var(--drum-card-w) / -2);
     top: calc(var(--drum-card-h) / -2);
@@ -87,12 +95,16 @@ body.driver-mobile-screen .driver-drum-card {
     margin: 0;
     padding: 8px 10px;
     display: grid;
-    align-content: center;
+    /* Единственный (неявный) ряд — сама .driver-drum-card-body — растянут на всю
+       высоту карточки, а не по размеру содержимого: иначе у подписи нет реального
+       бюджета высоты для двоичного сужения, и она садится куда мельче, чем
+       карточка на самом деле позволяет (владелец, 28.09.2026: «текст мелкий»). */
+    grid-template-rows: 1fr;
     justify-items: center;
     border: 0;
     border-radius: 22px;
     background: transparent;
-    color: #8fa0a6;
+    color: color-mix(in srgb, var(--drum-reason-accent) 62%, #8fa0a6);
     font-weight: 900;
     line-height: 1.12;
     text-transform: uppercase;
@@ -135,10 +147,20 @@ body.driver-mobile-screen .driver-drum-card.is-lifting {
 }
 
 body.driver-mobile-screen .driver-drum-card.is-center {
-    --drum-accent: var(--driver-yellow);
+    --drum-accent: var(--drum-reason-accent);
     --drum-face-top: #223439;
-    color: var(--driver-yellow);
+    color: var(--drum-reason-accent);
 }
+
+/* Цвет грани — по статусу причины простоя, тот же признак и та же палитра,
+   что и во вкладке «Простои» (.driver-downtime-list button.status-*,
+   driver-shift-v1.css): активная/центральная грань — этим цветом целиком,
+   боковые (см. --drum-accent/color на .driver-drum-card выше) — приглушённый
+   тон того же цвета, чтобы было видно, какая причина какого цвета, даже пока
+   она не по центру. Статусные цвета не менять — берём готовые токены. */
+body.driver-mobile-screen .driver-drum-card.status-yellow { --drum-reason-accent: var(--driver-yellow); }
+body.driver-mobile-screen .driver-drum-card.status-orange { --drum-reason-accent: #fb923c; }
+body.driver-mobile-screen .driver-drum-card.status-red { --drum-reason-accent: #ff5a47; }
 
 /* Грань — один слой. Выпуклость цилиндра даёт градиент: блик по центру, тень к боковым
    кромкам; верх и низ срезаны общей «этикеточной» дугой. Ни filter, ни вложенных 3D-слоёв:
@@ -171,9 +193,16 @@ body.driver-mobile-screen .driver-drum-card-face {
 body.driver-mobile-screen .driver-drum-card-body {
     position: relative;
     opacity: calc(.35 + .65 * var(--drum-fade));
+    /* Строки грида задаёт конкретный барабан ниже (у простоев — два ряда с
+       полосой таймера, у точек разгрузки таймера нет вовсе — один ряд на всю
+       высоту): один и тот же ряд-с-таймером на ОБЕИХ карточках сдвигал текст
+       точки разгрузки вверх от истинного центра карточки — полоса резервировалась
+       вхолостую, никогда не показывая таймер (владелец, 28.09.2026: «не по
+       центру — в обоих барабанах»). */
     display: grid;
     justify-items: center;
-    gap: 4px;
+    row-gap: 2px;
+    height: 100%;
     transform: translateZ(3px);
     text-shadow: 0 1px 2px rgba(0, 0, 0, .7);
     /* Сетка без явной ширины сжимает ряд под собственное содержимое: и грид-ряд, и
@@ -186,42 +215,120 @@ body.driver-mobile-screen .driver-drum-card-body {
     width: calc(var(--drum-card-w) - 20px);
 }
 
-/* Кегль подписи — по длине текста, а не по одной формуле на всех: карточка на телефоне
-   заметно шире, чем нужно короткому слову вроде «ККД», и старая формула (13% высоты,
-   потолок 18px) держала его нечитаемо мелким. Порог — по числу символов, тот же приём,
-   что и у карточек точки в ручном режиме (dumpNameSizeClass в
-   driver-manual-excavator-workspace-v1.js): «короткая» без класса, «средняя»/«длинная» —
-   классом из шаблона (driver_downtime_drum.html, driver_point_drum.html). */
+/* Барабан простоев: два ряда — верхний это вся область НАД полосой таймера (в
+   ней центрируется текстовая группа «ОЖИДАНИЕ + название» как одно целое),
+   нижний — полоса таймера ФИКСИРОВАННОЙ высоты, зарезервированная всегда, даже
+   без активного простоя (пустая, но не схлопывается) — иначе при старте/
+   остановке простоя верхняя область меняет размер и текст прыгает (владелец,
+   28.09.2026: «таймер закрепить навсегда вдоль нижней границы... ничего не
+   прыгает»). У барабана точек разгрузки таймера нет вовсе — свой один ряд на
+   всю высоту, driver-point-drum-v1.css. */
+body.driver-mobile-screen .driver-downtime-drum .driver-drum-card-body {
+    grid-template-rows: minmax(0, 1fr) var(--drum-timer-strip-h);
+}
+
+/* Кегль подписи подгоняет driver-drum-label-fit-v1.js: максимально крупно,
+   насколько позволяет карточка, перенос только по словам, никогда не рвём
+   слово посередине. Раньше кегль решался по числу символов во всей подписи
+   (короткая/средняя/длинная классом из шаблона) — «ОФР» вставало крупно, а
+   «Ожидание погрузки» держали мелким, хотя карточка та же ширина; при этом
+   overflow-wrap: anywhere (унаследован от .driver-drum-card) резал длинное
+   слово посередине, если класс всё равно не помещался («ОЖИДАН/ИЕ»,
+   владелец, 27.09.2026). Теперь «Ожидание X» — второстепенное слово сверху
+   мелким фиксированным кеглем (.driver-drum-card-label-minor), главное слово —
+   отдельной строкой (.driver-drum-card-label-main), которая занимает ВЕСЬ
+   остаток высоты карточки (грид-ряд body выше), а не долю по формуле —
+   первая попытка (доля высоты) всё равно держала имя мельче, чем реально
+   позволяет карточка (владелец, 28.09.2026). Одиночные подписи («ОФР»,
+   «Обед») — сразу главная строка без второй. */
 body.driver-mobile-screen .driver-drum-card-label {
     /* Своя ширина по той же причине и тем же способом, что у .driver-drum-card-body выше. */
     width: calc(var(--drum-card-w) - 20px);
-    font-size: clamp(12px, calc(var(--drum-card-h) * 0.28), 32px);
+    /* Высота — 100% своего ряда грида (вся область над полосой таймера, ряд
+       выше не делится с таймером — у него теперь своя отдельная полоса): группа
+       «ОЖИДАНИЕ + название» центрируется в этой стабильной области, а не по
+       высоте всей карточки (владелец, 28.09.2026). */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
 }
 
-body.driver-mobile-screen .driver-drum-card-label.is-drum-label-medium {
-    font-size: clamp(12px, calc(var(--drum-card-h) * 0.20), 24px);
+/* Главное слово — всегда во втором ряду грида выше, даже без второстепенного:
+   так пустой первый ряд не отнимает место, а место резервирует сам грид, а не
+   явный отступ. */
+body.driver-mobile-screen .driver-drum-card-label-main {
+    display: block;
+    width: 100%;
+    /* Высота — по содержимому: JS ставит явный бюджет только на время подбора
+       кегля (driver-drum-label-fit-v1.js, fitOne) и снимает его сразу после,
+       чтобы блок вернулся к естественному размеру для центрирования группы. */
+    overflow: hidden;
+    /* Потолок кегля — не жёсткий предел (владелец просил «максимально крупно»):
+       JS находит наибольший размер, при котором строка помещается в реальную
+       высоту ряда; clamp здесь — только стартовая точка двоичного поиска и
+       аварийный потолок на очень высоких карточках. */
+    font-size: clamp(22px, calc(var(--drum-card-h) * 0.42), 46px);
+    font-weight: 900;
+    /* line-height близко к 1: у прописных без выносных элементов (весь текст
+       заглавный, text-transform: uppercase выше по дереву) обычный интерлиньяж
+       добавляет невидимый глазу отступ снизу больше, чем сверху, — строка
+       читается смещённой вверх от геометрического центра карточки (владелец,
+       28.09.2026: «не по центру, центрируй по видимым границам букв»). */
+    line-height: 1.02;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
 }
 
-body.driver-mobile-screen .driver-drum-card-label.is-drum-label-long {
-    font-size: clamp(11px, calc(var(--drum-card-h) * 0.13), 18px);
+/* Второстепенное слово — один фиксированный, всегда мелкий кегль на всех
+   карточках: разница в размере читается по главному слову, не по этой строке. */
+body.driver-mobile-screen .driver-drum-card-label-minor {
+    display: block;
+    font-size: clamp(10px, calc(var(--drum-card-h) * 0.11), 13px);
+    font-weight: 700;
+    letter-spacing: .04em;
+    opacity: .72;
+    line-height: 1;
 }
 
 body.driver-mobile-screen .driver-drum-card-total {
-    /* Таймер — всегда короткая цифровая строка («00:14:08», «12ч 30м»), она не рискует
-       переносом, в отличие от подписи причины, поэтому кегль не зависит от длины
-       названия причины — только от высоты карточки. Раньше был не крупнее подписи
-       у длинных причин (≤18px даже на крупной карточке) — таймер активного простоя
-       читался хуже самой подписи, хотя место в карточке для него было. */
-    margin-top: 2px;
-    font-size: clamp(14px, calc(var(--drum-card-h) * 0.20), 22px);
+    /* Таймер — свой ряд грида (полоса фиксированной высоты вдоль нижней границы
+       карточки, .driver-drum-card-body выше), не делит область с названием: можно
+       крупнее, чем раньше, но всё равно заметно мельче названия — ориентир
+       владельца ~50-60% от размера имени, здесь даём чуть больше места для
+       читаемости (владелец, 28.09.2026: «таймер... может быть крупнее — снизу
+       достаточно места»). Один и тот же кегль на всех карточках, от высоты
+       полосы, а не от длины названия причины. */
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(13px, calc(var(--drum-timer-strip-h) * 0.62), 21px);
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     letter-spacing: .03em;
     color: #d9e4e7;
 }
 
+/* Таймер светится цветом самой причины — тот же признак, что у рамки и названия
+   карточки (--drum-reason-accent), не отдельный хардкод (владелец, 28.09.2026:
+   «таймер должен светиться тем же цветом, что и сам простой»). */
 body.driver-mobile-screen .driver-drum-card.is-center .driver-drum-card-total {
-    color: #fff3b0;
+    color: var(--drum-reason-accent);
+}
+
+/* Полоса таймера зарезервирована ВСЕГДА, даже когда простоя нет (driver_is_used
+   ложь — шаблон ставит [hidden]): [hidden] по умолчанию даёт display:none и
+   схлопывает ряд грида, а текстовая группа над ней тогда занимает всю карточку
+   и прыгает вверх/вниз при старте и остановке простоя. Оставляем ряд, прячем
+   только содержимое. */
+body.driver-mobile-screen .driver-drum-card-total[hidden] {
+    display: flex;
+    visibility: hidden;
 }
 
 /* Копия передней грани для жеста: сцена барабана всегда обрезана по своей рамке (иначе боковые
@@ -408,14 +515,21 @@ body.driver-mobile-screen .driver-drum-link-active-layer {
     will-change: opacity;
 }
 
+/* Цвет мигания контура — по статусу АКТИВНОЙ причины простоя (та же палитра,
+   что и цвет карточки): жёлтый как раньше, но для красной причины (поломка,
+   авария) контур и центр круга должны мигать красным, а не жёлтым — иначе
+   водитель не отличит "жду погрузку" от "сломался" по одному миганию
+   (владелец, 28.09.2026). Переменную ставит driver-downtime-drum-v1.js на
+   <html> (syncActive) — тот же приём, что и у --link-path: цвет известен
+   заранее, кадр мигания меняет только прозрачность готового слоя. */
 body.driver-mobile-screen .driver-drum-link-glow {
-    stroke: rgba(255, 209, 42, .3);
+    stroke: color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 30%, transparent);
     stroke-width: 9;
     opacity: .7;
 }
 
 body.driver-mobile-screen .driver-drum-link-live {
-    stroke: var(--driver-yellow);
+    stroke: var(--driver-downtime-accent, var(--driver-yellow));
     stroke-width: 2.5;
 }
 
@@ -435,9 +549,14 @@ body.driver-mobile-screen .driver-downtime-drum.is-active ~ .driver-drum-link-ac
    класс ставится в том же кадре). Слой тона готов заранее — мигает только его
    прозрачность, как и у контура. */
 body.driver-mobile-screen .driver-work-dial.is-downtime-active .driver-work-wait-tint {
-    border: 2px solid rgba(250, 204, 21, .95);
-    background: radial-gradient(circle at 50% 50%, rgba(250, 204, 21, .30) 0%, rgba(250, 204, 21, .44) 62%, rgba(250, 204, 21, .62) 100%);
-    box-shadow: inset 0 0 36px rgba(250, 204, 21, .55), 0 0 26px rgba(250, 204, 21, .45);
+    border: 2px solid color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 95%, transparent);
+    background: radial-gradient(circle at 50% 50%,
+        color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 30%, transparent) 0%,
+        color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 44%, transparent) 62%,
+        color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 62%, transparent) 100%);
+    box-shadow:
+        inset 0 0 36px color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 55%, transparent),
+        0 0 26px color-mix(in srgb, var(--driver-downtime-accent, var(--driver-yellow)) 45%, transparent);
     animation: driver-downtime-blink 1.2s steps(1, end) infinite;
 }
 

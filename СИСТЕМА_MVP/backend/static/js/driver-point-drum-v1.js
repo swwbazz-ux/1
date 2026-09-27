@@ -121,7 +121,13 @@
         if (!c) return false;
         var selected = all("[data-driver-point-card]:not([data-driver-point-clone])", c);
         var signature = signatureOf(c);
-        if (geo.built === c && geo.signature === signature && cards().length === geo.n && geo.n) return true;
+        if (geo.built === c && geo.signature === signature && cards().length === geo.n && geo.n) {
+            // Тот же набор точек — геометрию не трогаем, но кегль мог остаться
+            // неподогнанным: барабан был скрыт (0×0) в момент последней подгонки
+            // (та же причина, что у барабана простоев, driver-downtime-drum-v1.js).
+            fitLabels(c);
+            return true;
+        }
         all("[data-driver-point-card][data-driver-point-clone]", c).forEach(function (clone) { clone.parentNode.removeChild(clone); });
         if (!selected.length) { geo.n = 0; geo.built = c; geo.signature = signature; return false; }
         // Кольцо всегда полное: точки повторяются по кругу целое число раз.
@@ -155,7 +161,15 @@
         });
         if (!keepTheta) geo.theta = 0;
         lastFront = -1;
+        fitLabels(c);
         return true;
+    }
+
+    // Кегль подписи — driver-drum-label-fit-v1.js, тот же модуль, что у барабана
+    // простоев. Карточка новой сборки может ещё не иметь ширины (скрытая вкладка,
+    // первая отрисовка) — модуль сам не сдаётся при нулевой ширине.
+    function fitLabels(c) {
+        if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
     function frontIndex(theta) {
@@ -227,7 +241,14 @@
             // Пока грань доезжает, контур не сверяется (driver-downtime-drum-v1.js).
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
-            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLink(); }, 370);
+            c.__snapTimer = root.setTimeout(function () {
+                c.__snapUntil = 0;
+                syncLink();
+                // Тот же приём, что у барабана простоев: боковые грани подгоняются по
+                // фактической видимой в 3D ширине, центральная — во всю плоскую. После
+                // фиксации пересчитываем разово (владелец, 28.09.2026).
+                fitLabels(c);
+            }, 370);
         }
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
@@ -641,6 +662,10 @@
         var fresh = !!(c && geo.built !== c);
         if (fresh) healStaleStyles();
         if (build()) render(false);
+        // Без назначения build() выше не запускается вовсе (нет граней для сборки) —
+        // текст пустой грани («Экскаватору не назначены точки разгрузки») подгоняем
+        // отдельно, тем же вызовом, что и настоящие точки.
+        else if (fresh) fitLabels(c);
         syncModeControls();
         syncAssigned();
         syncDial();
@@ -708,8 +733,28 @@
         if (root.ResizeObserver) {
             var w = dial();
             if (w) new root.ResizeObserver(function () { syncLink(); }).observe(w);
+            // Барабан скрыт (0×0) на вкладке «Простои»: переход на «Работу» — ресайз
+            // с 0 на реальный размер, тем же сигналом перезапускаем подгонку кегля
+            // (см. build() выше и driver-downtime-drum-v1.js).
+            var drumEl = drum();
+            if (drumEl) {
+                var lastDrumW = 0;
+                new root.ResizeObserver(function (entries) {
+                    var w2 = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : drumEl.clientWidth;
+                    if (w2 > 0 && lastDrumW <= 0) fitLabels();
+                    lastDrumW = w2;
+                }).observe(drumEl);
+            }
         }
         root.setTimeout(refresh, 300);
+        // Подгонка меряет ширину по факту загруженного шрифта — если жирный кегль ещё
+        // не подгрузился (медленная сеть), замер идёт по запасному шрифту (обычно уже
+        // настоящего) и после подгрузки название перестаёт помещаться в уже
+        // посчитанный размер (см. тот же фикс и комментарий в driver-downtime-drum-v1.js,
+        // владелец, 28.09.2026).
+        if (root.document && root.document.fonts && root.document.fonts.ready) {
+            root.document.fonts.ready.then(fitLabels);
+        }
     }
 
     root.DriverPointDrum = Object.freeze({

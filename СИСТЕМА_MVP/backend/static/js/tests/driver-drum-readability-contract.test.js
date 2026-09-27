@@ -33,18 +33,54 @@ test("drum card label and body get an explicit pixel width, not a percentage", (
     assert.match(CSS, /\.driver-drum-card-label\s*\{[^}]*width:\s*calc\(var\(--drum-card-w\) - 20px\)/s);
 });
 
-test("drum label font size scales by text-length tier, short reads much larger than the old flat cap", () => {
-    assert.match(CSS, /\.driver-drum-card-label\s*\{[^}]*font-size:\s*clamp\(12px, calc\(var\(--drum-card-h\) \* 0\.28\), 32px\)/s);
-    assert.match(CSS, /\.driver-drum-card-label\.is-drum-label-medium\s*\{\s*font-size:\s*clamp\(12px, calc\(var\(--drum-card-h\) \* 0\.20\), 24px\)/);
-    assert.match(CSS, /\.driver-drum-card-label\.is-drum-label-long\s*\{\s*font-size:\s*clamp\(11px, calc\(var\(--drum-card-h\) \* 0\.13\), 18px\)/);
+test("drum label font size is fit by JS (driver-drum-label-fit-v1.js), not a text-length tier", () => {
+    // Кегль по числу символов во всей подписи давал «пляшущий» размер: «ОФР»
+    // (короткое слово) вставало крупно, а «Ожидание погрузки» держали мелким
+    // классом, хотя карточка та же ширина. Теперь размер ищет JS двоичным
+    // сужением (driver-drum-label-fit-v1.js) — здесь только коробка и потолок
+    // высоты под одну-две строки, посчитанный долей высоты карточки.
+    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*font-size:\s*clamp\(22px, calc\(var\(--drum-card-h\) \* 0\.42\), 46px\)/s);
+    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*overflow-wrap:\s*normal/s);
+    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*word-break:\s*normal/s);
+    assert.match(CSS, /\.driver-drum-card-label-minor\s*\{[^}]*font-size:\s*clamp\(10px, calc\(var\(--drum-card-h\) \* 0\.11\), 13px\)/s);
+    assert.doesNotMatch(CSS, /\.driver-drum-card-label\.is-drum-label-medium/);
+    assert.doesNotMatch(CSS, /\.driver-drum-card-label\.is-drum-label-long/);
+});
+
+test("drum name never sits below the readability floor (22px) unless wrap and squeeze are exhausted", () => {
+    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
+    assert.match(fitJs, /var FLOOR_PX = 22;/);
+    assert.match(fitJs, /var MIN_SQUEEZE = 0\.85;/);
+    // Порядок уступок: одна строка -> перенос по словам -> сжатие -> крайняя мера.
+    assert.match(fitJs, /Ступень 1[\s\S]*Ступень 2[\s\S]*Ступень 3[\s\S]*Ступень 4/);
+});
+
+test("neighbouring drum cards don't jump more than 25% apart in name size", () => {
+    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
+    assert.match(fitJs, /var ALIGN_RATIO = 1\.25;/);
+    assert.match(fitJs, /function fitAll\(container, selector\)/);
 });
 
 test("active-downtime timer is not tied to the reason-name tier and reads clearly on its own", () => {
     // Таймер простоя — всегда короткая цифровая строка независимо от того, как длинно
-    // называется причина; раньше кегль совпадал с самой мелкой подписью (≤18px).
+    // называется причина; раньше кегль доходил до 22px — таймер читался крупнее
+    // самого названия (владелец, 28.09.2026). Таймер стоит в своей отдельной полосе
+    // фиксированной высоты (--drum-timer-strip-h) — крупнее прежнего (владелец,
+    // 28.09.2026: «может быть крупнее — снизу места достаточно»), но кегль всё равно
+    // от высоты полосы, а не от длины названия причины.
     assert.doesNotMatch(CSS, /\.driver-drum-card-total\.is-drum-label-medium/);
     assert.doesNotMatch(CSS, /\.driver-drum-card-total\.is-drum-label-long/);
-    assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*clamp\(14px, calc\(var\(--drum-card-h\) \* 0\.20\), 22px\)/s);
+    assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*clamp\(13px, calc\(var\(--drum-timer-strip-h\) \* 0\.62\), 21px\)/s);
+    assert.match(CSS, /--drum-timer-strip-h:\s*clamp\(22px, calc\(var\(--drum-card-h\) \* 0\.26\), 36px\)/);
+});
+
+test("the timer strip stays reserved along the card's bottom edge even without an active downtime", () => {
+    // Полоса таймера — свой отдельный ряд грида фиксированной высоты, не общий с
+    // названием: без него ряд бы схлопнулся ([hidden] обычно display:none), область
+    // над ним выросла бы на его высоту, и текст прыгнул бы при каждом старте и
+    // завершении простоя (владелец, 28.09.2026: «...ничего не прыгает»).
+    assert.match(CSS, /\.driver-drum-card-body\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) var\(--drum-timer-strip-h\)/s);
+    assert.match(CSS, /\.driver-drum-card-total\[hidden\]\s*\{\s*display:\s*flex;\s*visibility:\s*hidden;\s*\}/);
 });
 
 test("dump-point tiles in the change-point sheet match the excavator face-settings card look", () => {
@@ -73,15 +109,28 @@ test("dial label multiline width stays large — the loaded trip's dump point na
     assert.match(css, /\.driver-work-label\.is-three-line\s*\{\s*width:\s*80%;\s*max-width:\s*80%/);
 });
 
-test("templates classify labels by character length, matching CSS tiers", () => {
-    assert.match(
-        DOWNTIME_TEMPLATE,
-        /driver-drum-card-label\{% if reason\.button_label\|length > 14 %\} is-drum-label-long\{% elif reason\.button_label\|length > 6 %\} is-drum-label-medium\{% endif %\}/
-    );
-    assert.match(
-        POINT_TEMPLATE,
-        /driver-drum-card-label\{% if point\.name\|length > 14 %\} is-drum-label-long\{% elif point\.name\|length > 6 %\} is-drum-label-medium\{% endif %\}/
-    );
+test("templates mark drum labels for JS fitting instead of classifying by character length", () => {
+    assert.doesNotMatch(DOWNTIME_TEMPLATE, /is-drum-label-long|is-drum-label-medium/);
+    assert.doesNotMatch(POINT_TEMPLATE, /is-drum-label-long|is-drum-label-medium/);
+    assert.match(DOWNTIME_TEMPLATE, /driver-drum-card-label"\s+data-driver-drum-label>\{\{ reason\.button_label \}\}/);
+    assert.match(POINT_TEMPLATE, /driver-drum-card-label"\s+data-driver-drum-label>\{\{ point\.name \}\}/);
+    // Цвет грани простоя — по статусу причины (та же палитра, что во вкладке
+    // «Простои»), не хардкод по названию.
+    assert.match(DOWNTIME_TEMPLATE, /driver-drum-card status-\{\{ reason\.effective_color_group \}\}/);
+});
+
+test("downtime link/halo blink color follows the active reason's status, not a hardcoded yellow", () => {
+    // Красная причина (поломка, авария) должна мигать красным, а не жёлтым —
+    // иначе мигание само по себе не отличает «жду» от «сломался» (владелец,
+    // 28.09.2026). Цвет ставит JS на <html> заранее (тот же приём, что и
+    // --link-path) — кадр мигания меняет только прозрачность готового слоя.
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /DOWNTIME_ACCENT_BY_STATUS\s*=\s*\{\s*orange:\s*"#fb923c",\s*red:\s*"#ff5a47"\s*\}/);
+    assert.match(drumJs, /function syncDowntimeAccent\(active\)/);
+    assert.match(drumJs, /documentElement\.style\.setProperty\("--driver-downtime-accent", accent\)/);
+    assert.match(CSS, /\.driver-drum-link-live\s*\{[^}]*stroke:\s*var\(--driver-downtime-accent,\s*var\(--driver-yellow\)\)/s);
+    assert.match(CSS, /\.driver-drum-link-glow\s*\{[^}]*stroke:\s*color-mix\(in srgb, var\(--driver-downtime-accent, var\(--driver-yellow\)\)/s);
+    assert.match(CSS, /\.driver-work-dial\.is-downtime-active \.driver-work-wait-tint\s*\{[^}]*color-mix\(in srgb, var\(--driver-downtime-accent, var\(--driver-yellow\)\)/s);
 });
 
 test("without an open shift, the top drum keeps its full three-card shape and outline instead of collapsing", () => {
@@ -117,4 +166,25 @@ test("downtime drum front card is never highlighted yellow without an open shift
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
     assert.match(drumJs, /var isCenter = index === front && hasOpenShift\(\);/);
     assert.match(drumJs, /function hasOpenShift\(\)/);
+});
+
+test("starting a downtime from the hidden drum tab still fits the label once the drum becomes visible", () => {
+    // Простой стартовал со вкладки «Простои», пока барабан на «Работе» скрыт
+    // (clientWidth/clientHeight = 0) — driver-drum-label-fit-v1.js не сдаётся при
+    // нулевой ширине (не пишет размер вовсе), но раньше НИЧЕГО не перезапускало
+    // подгонку, когда барабан снова становился видимым: build()/refresh() при том
+    // же составе карточек выходили раньше вызова fitLabels(). Текст оставался на
+    // необрезанном по ширине CSS-потолке (clamp по высоте, без учёта ширины) —
+    // «шрифт огромный, слово обрезано с обеих сторон, таймер вытолкнут за карточку»
+    // (владелец, 28.09.2026). Чинится двумя путями: явный fitLabels() и на пути
+    // «состав карточек не изменился», и ResizeObserver на самом барабане — переход
+    // вкладки на «Работу» это ресайз барабана с 0 на реальный размер.
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
+    [drumJs, pointJs].forEach((src) => {
+        // Тот же состав — ранний return, но кегль всё равно подгоняется.
+        assert.match(src, /if \(geo\.built === c[\s\S]{0,160}\)\s*\{[\s\S]{0,600}fitLabels\(c\);[\s\S]{0,40}return true;/);
+        // ResizeObserver на самом барабане: 0 → реальный размер перезапускает подгонку.
+        assert.match(src, /new root\.ResizeObserver\(function \(entries\) \{[\s\S]{0,260}if \(w2 > 0 && lastDrumW <= 0\) fitLabels\(\);/);
+    });
 });

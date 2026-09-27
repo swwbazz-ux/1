@@ -107,6 +107,7 @@
         geo.built = c;
         lastFront = -1;
         render(false);
+        fitLabels(c);
         return true;
     }
 
@@ -115,7 +116,15 @@
         if (!c) return false;
         // Копии от прошлой сборки убираем и собираем кольцо заново из выбранных причин.
         var selected = all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c);
-        if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) return true;
+        if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) {
+            // Тот же состав — геометрию не трогаем, но кегль подписи мог остаться
+            // неподогнанным: простой стартовал со вкладки «Простои», пока барабан
+            // на «Работе» был скрыт (clientWidth/clientHeight = 0), и без этого
+            // вызова подгонка никогда не повторится (владелец, 28.09.2026: «шрифт
+            // огромный... если включить с самого барабана — всё нормально»).
+            fitLabels(c);
+            return true;
+        }
         var signature = drumSignature(c);
         if (geo.n && geo.signature === signature && !all("[data-driver-drum-card][data-driver-drum-clone]", c).length) {
             // Новая копия экрана с тем же составом: клонируем грани заново, но без замеров.
@@ -166,7 +175,15 @@
             card.dataset.driverDrumIndex = String(index);
             card.style.setProperty("--card-angle", (index * step).toFixed(3) + "deg");
         });
+        fitLabels(c);
         return true;
+    }
+
+    // Кегль подписи — driver-drum-label-fit-v1.js. Карточка новой сборки может ещё не
+    // иметь ширины (первая отрисовка, скрытая вкладка) — модуль сам не сдаётся при
+    // нулевой ширине, здесь достаточно просто вызвать его после каждой пересборки.
+    function fitLabels(c) {
+        if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
     function frontIndex(theta) {
@@ -225,7 +242,17 @@
             // Пока идёт анимация фиксации, грань ещё движется — контур дорисуем по её окончании.
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
-            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
+            c.__snapTimer = root.setTimeout(function () {
+                c.__snapUntil = 0;
+                syncLinkVars();
+                // Подгонка кегля игнорирует центральную грань (ей можно во всю плоскую
+                // ширину), боковые — по фактической видимой в 3D ширине (см.
+                // driver-drum-label-fit-v1.js, computeVisibleWidthBudget). После
+                // фиксации новая центральная грань должна пересчитаться на полную
+                // ширину, а прежняя центральная — на боковую: разово по завершении
+                // вращения, не на каждом кадре свайпа (владелец, 28.09.2026).
+                fitLabels(c);
+            }, 370);
         }
         /* Радиус задан шириной грани, а ширина — единицами контейнера, поэтому
            замер при сборке может прийтись на момент, когда контейнер ещё без
@@ -314,6 +341,36 @@
         } finally { rebuilding = false; }
     }
 
+    // Цвет мигания контура и центра круга — по статусу активной причины (та же
+    // палитра, что и цвет карточки, .driver-drum-card.status-*): жёлтый как
+    // раньше, а для красной причины (поломка, авария) — красный, чтобы мигание
+    // само по себе отличало «жду» от «сломался» (владелец, 28.09.2026). Пишем
+    // переменную на <html> — тот же приём, что и у --link-path (setLinkPath):
+    // цвет известен заранее, кадр мигания меняет только прозрачность готового
+    // слоя (найдено 19.09.2026, перекраска в момент анимации стоит секунды).
+    var DOWNTIME_ACCENT_BY_STATUS = { orange: "#fb923c", red: "#ff5a47" };
+    var lastDowntimeAccent = "";
+    function syncDowntimeAccent(active) {
+        // Класс на <html> — не завязан на конкретный цвет (жёлтый вообще не пишет
+        // переменную, см. ниже), но нужен как отдельный флаг «простой идёт» для
+        // правил вроде центральной карточки точки разгрузки в верхнем барабане
+        // (владелец, 28.09.2026: та же окантовка и цвет, что у контура/центра круга).
+        if (doc.documentElement.classList.contains("is-driver-downtime-active") !== active) {
+            doc.documentElement.classList.toggle("is-driver-downtime-active", active);
+        }
+        var accent = "";
+        if (active) {
+            var card = stateCard();
+            var match = card && card.className.match(/status-(\w+)/);
+            var status = match ? match[1] : "yellow";
+            accent = DOWNTIME_ACCENT_BY_STATUS[status] || ""; // жёлтый — пусто, берём CSS-умолчание
+        }
+        if (accent === lastDowntimeAccent) return;
+        lastDowntimeAccent = accent;
+        if (accent) doc.documentElement.style.setProperty("--driver-downtime-accent", accent);
+        else doc.documentElement.style.removeProperty("--driver-downtime-accent");
+    }
+
     function syncActive() {
         var id = activeReasonId();
         var d = drum(), w = dial();
@@ -344,6 +401,7 @@
         if (w && w.classList.contains("is-downtime-active") !== (id !== "")) {
             w.classList.toggle("is-downtime-active", id !== "");
         }
+        syncDowntimeAccent(id !== "");
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
         if (activeIndex >= 0 && !drag && frontIndex(geo.theta) !== activeIndex) rotateTo(activeIndex, true);
@@ -870,9 +928,36 @@
             if (w) ro.observe(w);
             // Круг зажат по высоте: при смене ширины экрана он не меняет размер, а сдвигается.
             ro.observe(doc.body);
+            // Барабан скрыт (0×0), пока водитель на вкладке «Простои»: если простой
+            // запущен оттуда, подгонка кегля при этом не может измерить карточки и
+            // ничего не подгоняет (см. build() выше). Переход вкладки на «Работа» —
+            // это ресайз барабана с 0 на реальный размер, тот же сигнал переиспользуем.
+            var drumEl = drum();
+            if (drumEl) {
+                var lastDrumW = 0;
+                var roDrum = new root.ResizeObserver(function (entries) {
+                    var w2 = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : drumEl.clientWidth;
+                    if (w2 > 0 && lastDrumW <= 0) fitLabels();
+                    lastDrumW = w2;
+                });
+                roDrum.observe(drumEl);
+            }
         }
         root.addEventListener("operational-state-refresh-applied", scheduleLink);
-        root.setTimeout(function () { render(false); }, 300);
+        // Первая отрисовка бывает раньше, чем карточка получает реальную ширину
+        // (скрытая вкладка, только что открытая смена) — подгонка кегля выше уже
+        // не сдаётся сама при нулевой ширине, но повторный явный вызов кадром
+        // позже подстраховывает тот же случай, что и render ниже.
+        root.setTimeout(function () { render(false); fitLabels(); }, 300);
+        // Подгонка меряет ширину текста по факту загруженного шрифта: если жирный
+        // кегль ещё не подгрузился (медленная сеть на телефоне), замер идёт по
+        // запасному системному шрифту — он обычно уже, чем настоящий, и после
+        // подгрузки настоящего слово перестаёт помещаться в уже посчитанный
+        // размер («ПОЛОМК…», реальный телефон, владелец, 28.09.2026). Пересчёт
+        // после document.fonts.ready ловит именно этот случай.
+        if (root.document && root.document.fonts && root.document.fonts.ready) {
+            root.document.fonts.ready.then(function () { fitLabels(); });
+        }
     }
 
     // Барабан точек разгрузки над кругом просит перерисовать кольцо, когда его грань
