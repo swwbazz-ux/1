@@ -98,15 +98,15 @@ test("active-downtime timer is not tied to the reason-name tier and reads clearl
     assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*font-size:\s*var\(--drum-timer-fs\)/s);
 });
 
-test("the text group is centered on the whole card and the timer is pinned to its bottom edge", () => {
-    // Группа «ОЖИДАНИЕ + название» центрируется по ВСЕЙ карточке, таймер прижат к
-    // нижней кромке с минимальным зазором (владелец, 28.09.2026). Подпись
-    // резервирует высоту таймера симметрично сверху и снизу — центр группы
-    // совпадает с центром карточки, а название уменьшается формулой кегля, а не
-    // наезжает на таймер. Резерв есть всегда — без простоя текст не прыгает.
+test("the timer is pinned to the card's bottom edge and the text group is centered above it", () => {
+    // Таймер прижат к нижней кромке с минимальным зазором; группа «ОЖИДАНИЕ +
+    // название» центрируется в области НАД таймером (владелец, 28.09.2026:
+    // центрирование по всей карточке посмотрел и вернул прежнее положение).
+    // Подпись резервирует высоту таймера снизу — название уменьшается формулой
+    // кегля, а не наезжает на таймер. Резерв есть всегда — текст не прыгает.
     assert.match(CSS, /\.driver-drum-card-total\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*calc\(var\(--drum-timer-gap\) - 8px\)/s);
     assert.match(CSS, /--drum-timer-reserve:\s*max\(0px, calc\(var\(--drum-timer-gap\) \+ var\(--drum-timer-fs\) - 8px\)\)/);
-    assert.match(CSS, /\.driver-downtime-drum \.driver-drum-card-label,[^{]*\{[^}]*padding-block:\s*var\(--drum-timer-reserve\)/s);
+    assert.match(CSS, /\.driver-downtime-drum \.driver-drum-card-label,[^{]*\{[^}]*padding-block:\s*0 calc\(var\(--drum-timer-reserve\) \+ 2px\)/s);
     // Резерв не зависит от того, показан ли таймер: [hidden] просто убирает его.
     assert.match(CSS, /\.driver-drum-card-total\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
     // У барабана точек разгрузки таймера нет — резерва тоже нет.
