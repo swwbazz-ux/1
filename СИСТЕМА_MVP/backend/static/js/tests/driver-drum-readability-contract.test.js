@@ -239,7 +239,7 @@ test("the point card blinks with the outline from one shared ancestor animation,
     assert.match(pointCss, /\.driver-work-screen:has\(\.driver-downtime-drum\.is-active\)\s*\{\s*animation:\s*driver-point-blink-color 1\.2s steps\(1, end\) infinite;/);
     assert.match(CSS, /\.driver-downtime-drum\.is-active ~ \.driver-drum-link-active-layer\s*\{\s*animation:\s*driver-downtime-blink 1\.2s steps\(1, end\) infinite;/);
     // Фаза как у контура: 0% — горит (цвет простоя), 50% — погас (голубой).
-    assert.match(pointCss, /@keyframes driver-point-blink-color\s*\{\s*0%\s*\{\s*--driver-blink-color:\s*var\(--driver-downtime-accent, var\(--driver-yellow\)\);\s*\}\s*50%\s*\{\s*--driver-blink-color:\s*rgba\(104, 205, 242, \.9\);\s*\}\s*\}/);
+    assert.match(pointCss, /@keyframes driver-point-blink-color\s*\{\s*0%\s*\{\s*--driver-blink-color:\s*var\(--driver-downtime-accent, var\(--driver-yellow\)\);\s*\}\s*50%\s*\{\s*--driver-blink-color:\s*rgba\(var\(--driver-mode-rgb\), \.9\);\s*\}\s*\}/);
     // Карточка берёт цвет из переменной и без собственного transition — иначе
     // текст «загорался плавно», а контур — резко.
     assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-card\.is-center\s*\{[^}]*--drum-reason-accent:\s*var\(--driver-blink-color\);[^}]*transition:\s*none;/s);

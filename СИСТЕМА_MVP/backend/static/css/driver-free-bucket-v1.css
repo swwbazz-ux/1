@@ -21,10 +21,10 @@ body.driver-mobile-screen .driver-free-bucket-chip {
     max-width: 64%;
     overflow: hidden;
     padding: 3px 7px;
-    border: 1px solid rgba(188, 168, 242, .42);
+    border: 1px solid rgba(var(--driver-free-bucket-accent-rgb, 172, 156, 199), .5);
     border-radius: 999px;
-    color: #c9b8f2;
-    background: rgba(97, 74, 139, .22);
+    color: rgb(var(--driver-free-bucket-accent-rgb, 172, 156, 199));
+    background: rgba(var(--driver-free-bucket-accent-rgb, 172, 156, 199), .14);
     font-size: clamp(8px, 2vw, 10px);
     font-weight: 800;
     line-height: 1;
@@ -36,16 +36,25 @@ body.driver-mobile-screen .driver-free-bucket-chip[hidden] {
     display: none;
 }
 
+/* Окно выбора свободного ковша — в общем стиле окон водителя: то же окно, что
+   у выбора точки разгрузки (.driver-unload-sheet / -dialog / -tile,
+   mobile-dial-actions-v1.css): окно по центру, скругление 18px, плоские тёмные
+   карточки со скруглением как у плиток точек, простая рамка по цвету состояния,
+   те же кнопки «закрыть» и «отмена». Акцент окна и выбранной карточки — цвет
+   режима «свободный ковш», тот же токен, что у его угловой кнопки
+   (--driver-free-bucket-accent-rgb) (владелец, 28.09.2026: окно было «чужим» —
+   свои скругления и палитра). Номер экскаватора остаётся крупным. */
 body.driver-mobile-screen .driver-free-bucket-sheet {
+    --fb-rgb: var(--driver-free-bucket-accent-rgb, 172, 156, 199);
     position: fixed;
     inset: 0;
     z-index: 170;
+    overflow: auto;
     display: grid;
-    align-items: end;
-    padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
-    background: rgba(0, 8, 12, .76);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    place-items: center;
+    padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
+    background: rgba(0, 7, 10, .78);
+    overscroll-behavior: contain;
 }
 
 body.driver-mobile-screen .driver-free-bucket-sheet[hidden] {
@@ -54,19 +63,19 @@ body.driver-mobile-screen .driver-free-bucket-sheet[hidden] {
 
 body.driver-mobile-screen .driver-free-bucket-dialog {
     position: relative;
-    width: min(100%, 540px);
-    max-height: min(78dvh, 650px);
-    margin: 0 auto;
+    width: min(100%, 430px);
+    max-height: min(86dvh, 680px);
+    margin: 0;
     overflow: auto;
     overscroll-behavior: contain;
-    padding: 22px 16px 16px;
-    border: 1px solid rgba(169, 155, 213, .55);
-    border-radius: 24px;
-    color: #edf8fa;
+    padding: 18px;
+    border: 1px solid rgba(var(--fb-rgb), .55);
+    border-radius: 18px;
+    color: #edf7f8;
     background:
-        radial-gradient(circle at 88% 4%, rgba(169, 155, 213, .18), transparent 35%),
-        linear-gradient(155deg, rgba(18, 37, 43, .99), rgba(4, 18, 24, .99));
-    box-shadow: 0 22px 58px rgba(0, 0, 0, .58), inset 0 1px rgba(255, 255, 255, .08);
+        linear-gradient(145deg, rgba(21, 43, 50, .98), rgba(4, 17, 22, .99) 62%),
+        #07151a;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .62), inset 0 1px 0 rgba(255, 255, 255, .06);
 }
 
 body.driver-mobile-screen .driver-free-bucket-close {
@@ -75,133 +84,159 @@ body.driver-mobile-screen .driver-free-bucket-close {
     right: 12px;
     width: 44px;
     height: 44px;
-    border: 1px solid rgba(187, 211, 217, .28);
+    border: 1px solid rgba(151, 181, 190, .28);
     border-radius: 50%;
-    color: #d9e7ea;
-    background: rgba(5, 18, 23, .82);
-    font: 300 31px/1 system-ui, sans-serif;
+    background: rgba(255, 255, 255, .05);
+    color: #cad8dc;
+    font-size: 26px;
+    line-height: 1;
 }
 
 body.driver-mobile-screen .driver-free-bucket-head {
-    padding-right: 48px;
-}
-
-body.driver-mobile-screen .driver-free-bucket-kicker,
-body.driver-mobile-screen .driver-free-bucket-head p,
-body.driver-mobile-screen .driver-free-bucket-current span,
-body.driver-mobile-screen .driver-free-bucket-current small {
-    color: #91a9af;
-}
-
-body.driver-mobile-screen .driver-free-bucket-kicker {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .12em;
-    text-transform: uppercase;
+    display: grid;
+    gap: 6px;
+    margin: 0 42px 16px 0;
+    padding: 0;
+    text-transform: none;
 }
 
 body.driver-mobile-screen .driver-free-bucket-head h2 {
     margin: 0;
-    font-size: clamp(24px, 7vw, 34px);
-    line-height: 1.05;
+    color: rgb(var(--fb-rgb));
+    font-size: clamp(21px, 5.8vw, 27px);
+    line-height: 1.1;
 }
 
 body.driver-mobile-screen .driver-free-bucket-head p {
-    margin: 9px 0 0;
-    font-size: 13px;
+    margin: 0;
+    color: #9bb1b8;
+    font-size: 14px;
     line-height: 1.35;
 }
 
 body.driver-mobile-screen .driver-free-bucket-head .driver-free-bucket-primary {
-    color: #bfd0d4;
+    color: #9bb1b8;
 }
 
 body.driver-mobile-screen .driver-free-bucket-primary strong {
-    color: #ffe19a;
+    color: #edf7f8;
 }
 
 body.driver-mobile-screen .driver-free-bucket-current {
     display: grid;
-    gap: 3px;
-    margin-top: 15px;
-    padding: 12px 14px;
-    border: 1px solid rgba(169, 155, 213, .38);
-    border-radius: 15px;
-    background: rgba(169, 155, 213, .1);
+    grid-template-columns: 1fr auto;
+    gap: 4px 12px;
+    margin: 0 0 14px;
+    padding: 12px 13px;
+    border: 1px solid rgba(var(--fb-rgb), .45);
+    border-radius: 12px;
+    background: rgba(var(--fb-rgb), .1);
 }
 
 body.driver-mobile-screen .driver-free-bucket-current[hidden] {
     display: none;
 }
 
+body.driver-mobile-screen .driver-free-bucket-current span {
+    color: #8fa7ae;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
 body.driver-mobile-screen .driver-free-bucket-current strong {
-    font-size: 16px;
+    grid-column: 1 / -1;
+    color: #f2f7f8;
+    font-size: 20px;
+    overflow-wrap: anywhere;
+}
+
+body.driver-mobile-screen .driver-free-bucket-current small {
+    grid-column: 1 / -1;
+    color: rgb(var(--fb-rgb));
+    font-size: 13px;
 }
 
 body.driver-mobile-screen .driver-free-bucket-current small.is-review {
-    color: #ffad8c;
+    color: #f59e8b;
 }
 
 body.driver-mobile-screen .driver-free-bucket-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
-    margin-top: 14px;
+    gap: 10px;
+    margin: 0;
 }
 
-/* Плитка — просто крупный номер экскаватора: горизонт/блок/порода/точка убраны,
-   они тут не нужны и мешали разглядеть сам номер (водитель на смене, крупный текст
-   важнее подробностей). Статус («Выбран»/«Недоступно») остаётся — короткой строкой
-   под номером, а не абзацем описания. */
+/* Плитка — просто крупный номер экскаватора (горизонт/блок/порода/точка убраны
+   раньше: водителю на смене важнее разглядеть номер). Вид — как у плиток точек
+   разгрузки: плоский тёмный фон, простая рамка, их скругление. Статус
+   («Выбран»/«Недоступно») — короткой строкой под номером. */
 body.driver-mobile-screen .driver-free-bucket-tile {
+    position: relative;
     min-width: 0;
-    min-height: 76px;
+    width: 100%;
+    min-height: 82px;
     display: grid;
+    place-items: center;
     align-content: center;
-    justify-items: center;
     gap: 4px;
-    padding: 12px 8px;
-    border: 1px solid rgba(139, 177, 187, .3);
-    border-radius: 16px;
-    color: #eaf5f7;
+    padding: clamp(8px, 2.4vw, 14px);
+    border: 1px solid rgba(142, 169, 181, .26);
+    border-radius: clamp(9px, 2.4vw, 13px);
+    color: #aab7bd;
     text-align: center;
-    background: linear-gradient(145deg, rgba(18, 38, 44, .95), rgba(7, 22, 28, .96));
-    box-shadow: inset 0 1px rgba(255, 255, 255, .05);
+    text-transform: none;
+    background: rgba(7, 18, 23, .96);
+    box-shadow: none;
+    transition: border-color .15s ease, background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile.is-current {
-    border-color: rgba(169, 155, 213, .9);
-    background: linear-gradient(145deg, rgba(55, 47, 83, .94), rgba(21, 27, 43, .97));
+    border-color: rgb(var(--fb-rgb));
+    background: rgba(var(--fb-rgb), .16);
+    color: rgb(var(--fb-rgb));
+    box-shadow: inset 0 0 18px rgba(var(--fb-rgb), .1);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:disabled {
     cursor: default;
-    opacity: .68;
+    opacity: .5;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-number {
+    max-width: 100%;
     overflow-wrap: anywhere;
+    color: inherit;
     font-size: clamp(22px, 7vw, 30px);
-    font-weight: 900;
-    letter-spacing: .01em;
+    font-weight: 800;
+    line-height: 1.05;
+    text-transform: none;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-status {
     min-height: 13px;
-    color: #c5b9ed;
+    color: inherit;
+    opacity: .8;
     font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .07em;
+    font-weight: 700;
+    letter-spacing: .06em;
     text-transform: uppercase;
 }
 
 body.driver-mobile-screen .driver-free-bucket-message,
 body.driver-mobile-screen .driver-free-bucket-empty {
-    color: #9fb2b7;
+    color: #9bb1b8;
     font-size: 13px;
     line-height: 1.35;
+}
+
+body.driver-mobile-screen .driver-free-bucket-empty {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 18px;
+    border: 1px dashed rgba(137, 169, 180, .28);
+    border-radius: 12px;
+    text-align: center;
 }
 
 body.driver-mobile-screen .driver-free-bucket-message {
@@ -210,36 +245,41 @@ body.driver-mobile-screen .driver-free-bucket-message {
 }
 
 body.driver-mobile-screen .driver-free-bucket-message.is-error {
-    color: #ffad8c;
+    color: #f59e8b;
 }
 
 body.driver-mobile-screen .driver-free-bucket-cancel,
 body.driver-mobile-screen .driver-free-bucket-remove {
     width: 100%;
     min-height: 48px;
-    margin-top: 8px;
-    border-radius: 14px;
+    margin-top: 13px;
+    border-radius: 12px;
     font-size: 14px;
-    font-weight: 800;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 body.driver-mobile-screen .driver-free-bucket-cancel {
-    border: 1px solid rgba(156, 185, 192, .28);
-    color: #c3d3d7;
-    background: rgba(8, 24, 30, .72);
+    border: 1px solid rgba(137, 169, 180, .3);
+    background: rgba(255, 255, 255, .05);
+    color: #b6c7cc;
 }
 
 body.driver-mobile-screen .driver-free-bucket-remove {
-    border: 1px solid rgba(255, 156, 118, .38);
-    color: #ffc0a8;
-    background: rgba(96, 39, 28, .25);
+    border: 1px solid rgba(245, 158, 139, .45);
+    background: rgba(245, 158, 139, .08);
+    color: #f59e8b;
+}
+
+body.driver-mobile-screen .driver-free-bucket-remove + .driver-free-bucket-cancel {
+    margin-top: 8px;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:focus-visible,
 body.driver-mobile-screen .driver-free-bucket-close:focus-visible,
 body.driver-mobile-screen .driver-free-bucket-cancel:focus-visible,
 body.driver-mobile-screen .driver-free-bucket-remove:focus-visible {
-    outline: 3px solid rgba(169, 155, 213, .7);
+    outline: 3px solid rgba(var(--fb-rgb), .7);
     outline-offset: 2px;
 }
 

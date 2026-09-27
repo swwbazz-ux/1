@@ -81,13 +81,51 @@ body.driver-mobile-screen .driver-point-drum .driver-drum-card-body {
     grid-template-rows: minmax(0, 1fr);
 }
 
-/* Точки разгрузки — синие, тем же синим, что кнопка ручного режима, когда он
-   включён (.mobile-dial-action--manual.is-on, #68cdf2): раньше центральная
+/* Цвет режима. У каждого режима свой цвет, и всё, что относится к режиму,
+   окрашено им (владелец, 28.09.2026): ручной режим — голубой кнопки «рука»,
+   свободный ковш — сиреневый его угловой кнопки (тот же токен, что у кнопки,
+   --driver-free-bucket-accent-rgb). Одна переменная на экране «Работа» —
+   --driver-mode-rgb — красит грани точек разгрузки, их стрелку, базовый цвет
+   их мигания при простое и большой круг ручного рейса; при свободном ковше
+   (shell[data-driver-free-bucket-active="true"], ставит driver-free-bucket-v1.js)
+   она переключается на сиреневый. Светлые и тёмные оттенки круга — свои
+   переменные: у голубого это прежние значения один в один, у сиреневого —
+   те же оттенки, повёрнутые в его тон. */
+body.driver-mobile-screen {
+    --driver-manual-accent-rgb: 104, 205, 242;
+    --driver-free-bucket-accent-rgb: 172, 156, 199;
+}
+
+body.driver-mobile-screen .driver-work-screen {
+    --driver-mode-rgb: var(--driver-manual-accent-rgb);
+    --driver-mode-light-rgb: 150, 222, 255;
+    --driver-mode-pale-rgb: 230, 246, 255;
+    --driver-mode-pale2-rgb: 200, 238, 255;
+    --driver-mode-pale3-rgb: 240, 250, 255;
+    --driver-mode-deep-rgb: 14, 40, 54;
+    --driver-mode-deep2-rgb: 18, 46, 62;
+    --driver-mode-deep3-rgb: 10, 70, 102;
+}
+
+body.driver-mobile-screen [data-driver-free-bucket-active="true"] .driver-work-screen {
+    --driver-mode-rgb: var(--driver-free-bucket-accent-rgb);
+    --driver-mode-light-rgb: 200, 188, 226;
+    --driver-mode-pale-rgb: 243, 238, 252;
+    --driver-mode-pale2-rgb: 228, 219, 246;
+    --driver-mode-pale3-rgb: 249, 246, 254;
+    --driver-mode-deep-rgb: 36, 30, 54;
+    --driver-mode-deep2-rgb: 42, 35, 62;
+    --driver-mode-deep3-rgb: 60, 42, 96;
+}
+
+/* Точки разгрузки — цвета режима (голубые, как кнопка ручного режима, когда он
+   включён: .mobile-dial-action--manual.is-on, #68cdf2; сиреневые при свободном
+   ковше — см. выше). Раньше центральная
    грань шла жёлтой по общему правилу .driver-drum-card.is-center — тот же
    цвет, что и активный простой, хотя это два разных признака. Своего статуса
    у точки нет, поэтому цвет один на весь барабан, не по status-* классу. */
 body.driver-mobile-screen .driver-point-drum .driver-drum-card {
-    --drum-reason-accent: rgba(104, 205, 242, .9);
+    --drum-reason-accent: rgba(var(--driver-mode-rgb), .9);
 }
 
 /* Активный простой: центральная карточка точки разгрузки переходит на цвет
@@ -119,7 +157,7 @@ body.driver-mobile-screen .driver-work-screen:has(.driver-downtime-drum.is-activ
 /* Фаза — как у контура (driver-downtime-blink: 0% горит, 50% погас). */
 @keyframes driver-point-blink-color {
     0% { --driver-blink-color: var(--driver-downtime-accent, var(--driver-yellow)); }
-    50% { --driver-blink-color: rgba(104, 205, 242, .9); }
+    50% { --driver-blink-color: rgba(var(--driver-mode-rgb), .9); }
 }
 
 html.is-driver-downtime-active body.driver-mobile-screen .driver-point-drum .driver-drum-card.is-center {
@@ -142,7 +180,7 @@ body.driver-mobile-screen .driver-point-drum .driver-drum-slot-arrow {
     bottom: auto;
     top: calc(50% + var(--drum-card-h) / 2 + var(--slot-lift));
     clip-path: polygon(0 0, 100% 0, 50% 100%);
-    color: rgba(104, 205, 242, .9);
+    color: rgba(var(--driver-mode-rgb), .9);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-point-drum:has(.driver-drum-card.is-center) .driver-drum-slot-arrow {
@@ -182,54 +220,54 @@ body.driver-mobile-screen .mobile-dial-action--manual.is-on .mobile-dial-action_
 
 /* Круг без рейса в ручном режиме: кольцо подсвечено синим, чтобы режим был виден всегда. */
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-empty .driver-work-progress {
-    stroke: rgba(104, 205, 242, .62);
+    stroke: rgba(var(--driver-mode-rgb), .62);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-empty::after {
-    border-color: rgba(104, 205, 242, .34);
+    border-color: rgba(var(--driver-mode-rgb), .34);
 }
 
 /* Круг с ручным рейсом: те же слои, что у загруженного круга, только синие. */
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded {
-    --driver-green: #68cdf2;
+    --driver-green: rgb(var(--driver-mode-rgb));
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded::before {
     box-shadow:
-        0 0 34px rgba(104, 205, 242, .24),
-        inset 0 0 34px rgba(104, 205, 242, .13);
+        0 0 34px rgba(var(--driver-mode-rgb), .24),
+        inset 0 0 34px rgba(var(--driver-mode-rgb), .13);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded::after {
-    border-color: rgba(104, 205, 242, .34);
+    border-color: rgba(var(--driver-mode-rgb), .34);
     box-shadow:
-        inset 0 0 28px rgba(104, 205, 242, .08),
-        0 0 28px rgba(104, 205, 242, .14);
+        inset 0 0 28px rgba(var(--driver-mode-rgb), .08),
+        0 0 28px rgba(var(--driver-mode-rgb), .14);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-halo {
-    box-shadow: 0 0 0 1px rgba(104, 205, 242, .78), 0 0 48px rgba(104, 205, 242, .34);
+    box-shadow: 0 0 0 1px rgba(var(--driver-mode-rgb), .78), 0 0 48px rgba(var(--driver-mode-rgb), .34);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-loaded-tint {
-    border-color: rgba(104, 205, 242, .78);
-    box-shadow: inset 0 12px 22px rgba(230, 246, 255, .10), inset 0 0 44px rgba(104, 205, 242, .16);
+    border-color: rgba(var(--driver-mode-rgb), .78);
+    box-shadow: inset 0 12px 22px rgba(var(--driver-mode-pale-rgb), .10), inset 0 0 44px rgba(var(--driver-mode-rgb), .16);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label {
-    border-top-color: rgba(104, 205, 242, .18);
+    border-top-color: rgba(var(--driver-mode-rgb), .18);
     background:
-        linear-gradient(180deg, rgba(150, 222, 255, .08), rgba(14, 40, 54, .22) 48%, rgba(3, 14, 22, .34)),
-        linear-gradient(90deg, transparent, rgba(18, 46, 62, .36) 18%, rgba(18, 46, 62, .36) 82%, transparent);
+        linear-gradient(180deg, rgba(var(--driver-mode-light-rgb), .08), rgba(var(--driver-mode-deep-rgb), .22) 48%, rgba(3, 14, 22, .34)),
+        linear-gradient(90deg, transparent, rgba(var(--driver-mode-deep2-rgb), .36) 18%, rgba(var(--driver-mode-deep2-rgb), .36) 82%, transparent);
     box-shadow:
-        inset 0 1px 0 rgba(200, 238, 255, .12),
+        inset 0 1px 0 rgba(var(--driver-mode-pale2-rgb), .12),
         inset 0 -2px 3px rgba(0, 0, 0, .32),
         0 5px 12px rgba(0, 0, 0, .20);
-    text-shadow: 0 0 18px rgba(104, 205, 242, .36);
+    text-shadow: 0 0 18px rgba(var(--driver-mode-rgb), .36);
 }
 
 html.is-driver-dial-manual body.driver-mobile-screen .driver-work-dial-button.is-loaded .driver-work-label-line {
     text-shadow:
-        0 -1px 0 rgba(240, 250, 255, .48),
-        0 2px 0 rgba(10, 70, 102, .78);
+        0 -1px 0 rgba(var(--driver-mode-pale3-rgb), .48),
+        0 2px 0 rgba(var(--driver-mode-deep3-rgb), .78);
 }
