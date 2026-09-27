@@ -169,73 +169,146 @@ body.driver-mobile-screen .driver-free-bucket-grid {
     margin: 0;
 }
 
-/* Плитка — крупный номер экскаватора (горизонт/блок/порода/точка убраны раньше:
-   водителю на смене важнее разглядеть номер). Форма — как у плиток точек
-   разгрузки (их скругление, плоская основа). Доступная плитка «живая»: чёткая
-   рамка и лёгкая подсветка цветом режима, яркий номер, заметная реакция на
-   нажатие; выбранная — толще рамка со свечением; недоступная (забой не
-   заполнен или основное закрепление) — явно приглушена, чтобы доступные на её
-   фоне читались сразу (владелец, 28.09.2026: «выглядит неактивной, мёртвой»).
-   Номер стоит ровно по центру плитки по обеим осям: строка статуса вынесена
-   из потока к нижней кромке и центр номера не сдвигает; line-height ~1 — та
-   же компенсация под заглавные, что у подписей барабанов. */
+/* Плитка экскаватора — настоящая объёмная кнопка в языке карточек барабанов
+   (.driver-drum-card-face, driver-downtime-drum-v1.css): тот же радиус 6px, та
+   же рамка — 2px вставная окантовка цветом режима, тот же градиент сверху вниз
+   с бликом по верхней кромке и затемнением по краям, тень под кнопкой.
+   Внутри — иконка экскаватора (тот же силуэт, что в шапке машиниста:
+   img/equipment/excavator-*.png, через маску, окрашен в цвет свободного ковша)
+   и крупный номер, оба по центру плитки. Нажатие — кнопка «проседает»:
+   сдвиг на 2px и затемнение отдельным слоем (только transform/opacity, без
+   перерисовки теней и фильтров); выбранная «горит»: полная окантовка и
+   свечение; недоступная (забой не заполнен или основное закрепление) —
+   плоская и приглушённая, без свечения, чтобы доступные читались сразу
+   (владелец, 28.09.2026: «плоские 2D-зоны», «выглядит мёртвой»). Строка
+   статуса вынесена к нижней кромке и центр не сдвигает; line-height ~1 — та же
+   компенсация под заглавные, что у подписей барабанов. */
 body.driver-mobile-screen .driver-free-bucket-tile {
+    --fb-frame: rgba(var(--fb-rgb), .58);
+    --fb-icon: rgba(var(--fb-rgb), .92);
     position: relative;
     min-width: 0;
     width: 100%;
-    min-height: 82px;
+    min-height: 104px;
     display: grid;
     place-items: center;
-    padding: clamp(8px, 2.4vw, 14px) clamp(8px, 2.4vw, 14px) clamp(14px, 3.4vw, 18px);
-    border: 1.5px solid rgba(var(--fb-rgb), .62);
-    border-radius: clamp(9px, 2.4vw, 13px);
+    align-content: center;
+    gap: clamp(4px, 1.6vw, 8px);
+    padding: clamp(10px, 2.8vw, 14px) clamp(8px, 2.4vw, 12px) clamp(18px, 4.4vw, 22px);
+    border: 0;
+    border-radius: 6px;
     color: #eef5f7;
     text-align: center;
     text-transform: none;
     background:
-        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .16), transparent 70%),
-        rgba(9, 20, 26, .96);
-    box-shadow: inset 0 0 14px rgba(var(--fb-rgb), .08);
-    transition: border-color .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease, transform .08s ease;
+        linear-gradient(90deg,
+            rgba(0, 0, 0, .5) 0%,
+            rgba(0, 0, 0, .22) 12%,
+            rgba(0, 0, 0, 0) 32%,
+            rgba(255, 255, 255, .05) 50%,
+            rgba(0, 0, 0, 0) 68%,
+            rgba(0, 0, 0, .22) 88%,
+            rgba(0, 0, 0, .5) 100%),
+        linear-gradient(180deg, rgba(var(--fb-rgb), .18), transparent 58%),
+        linear-gradient(180deg, #1b2d34, #0c181e 72%);
+    box-shadow:
+        inset 0 2px 0 var(--fb-frame),
+        inset 0 -2px 0 var(--fb-frame),
+        inset 2px 0 0 var(--fb-frame),
+        inset -2px 0 0 var(--fb-frame),
+        inset 0 6px 12px rgba(255, 255, 255, .05),
+        inset 0 -10px 16px rgba(0, 0, 0, .4),
+        0 5px 12px rgba(0, 0, 0, .55),
+        0 0 12px rgba(var(--fb-rgb), .14);
+    filter: none;
+    transition: transform .08s ease;
+}
+
+/* Иконка: силуэт экскаватора через маску, окрашен в цвет режима. */
+body.driver-mobile-screen .driver-free-bucket-tile::before {
+    content: "";
+    width: clamp(44px, 14vw, 58px);
+    aspect-ratio: 35 / 24;
+    background: var(--fb-icon);
+    -webkit-mask: url(../img/equipment/excavator-gray.png) center / contain no-repeat;
+    mask: url(../img/equipment/excavator-gray.png) center / contain no-repeat;
+}
+
+/* Слой затемнения при нажатии — включается только прозрачностью. */
+body.driver-mobile-screen .driver-free-bucket-tile::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(0, 0, 0, .22);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .08s ease;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:not(:disabled):active {
-    transform: scale(.97);
-    border-color: rgb(var(--fb-rgb));
-    background:
-        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .3), transparent 75%),
-        rgba(9, 20, 26, .96);
+    transform: translateY(2px) scale(.985);
+}
+
+body.driver-mobile-screen .driver-free-bucket-tile:not(:disabled):active::after {
+    opacity: 1;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile.is-current {
-    border: 2.5px solid rgb(var(--fb-rgb));
+    --fb-frame: rgb(var(--fb-rgb));
+    --fb-icon: rgb(var(--fb-rgb));
     color: rgb(var(--fb-rgb));
     background:
-        radial-gradient(120% 90% at 50% 0%, rgba(var(--fb-rgb), .3), transparent 75%),
-        rgba(var(--fb-rgb), .1);
+        linear-gradient(90deg,
+            rgba(0, 0, 0, .5) 0%,
+            rgba(0, 0, 0, .22) 12%,
+            rgba(0, 0, 0, 0) 32%,
+            rgba(255, 255, 255, .05) 50%,
+            rgba(0, 0, 0, 0) 68%,
+            rgba(0, 0, 0, .22) 88%,
+            rgba(0, 0, 0, .5) 100%),
+        linear-gradient(180deg, rgba(var(--fb-rgb), .34), rgba(var(--fb-rgb), .08) 62%),
+        linear-gradient(180deg, #1b2d34, #0c181e 72%);
     box-shadow:
-        0 0 0 1px rgba(var(--fb-rgb), .35),
-        0 0 16px rgba(var(--fb-rgb), .4),
-        inset 0 0 18px rgba(var(--fb-rgb), .14);
+        inset 0 2px 0 var(--fb-frame),
+        inset 0 -2px 0 var(--fb-frame),
+        inset 2px 0 0 var(--fb-frame),
+        inset -2px 0 0 var(--fb-frame),
+        inset 0 6px 12px rgba(255, 255, 255, .06),
+        inset 0 -10px 16px rgba(0, 0, 0, .4),
+        inset 0 0 22px rgba(var(--fb-rgb), .18),
+        0 5px 12px rgba(0, 0, 0, .55),
+        0 0 0 1px rgba(var(--fb-rgb), .4),
+        0 0 18px rgba(var(--fb-rgb), .5);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:disabled {
+    --fb-frame: rgba(142, 169, 181, .16);
+    --fb-icon: rgba(120, 140, 148, .55);
     cursor: default;
-    border: 1px dashed rgba(142, 169, 181, .22);
-    color: #5e6f75;
-    background: rgba(7, 16, 20, .7);
-    box-shadow: none;
-    opacity: .7;
+    color: #6b7c82;
+    background:
+        linear-gradient(90deg, rgba(0, 0, 0, .4) 0%, rgba(0, 0, 0, 0) 30%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, .4) 100%),
+        linear-gradient(180deg, #14232a, #0a151a 72%);
+    box-shadow:
+        inset 0 2px 0 var(--fb-frame),
+        inset 0 -2px 0 var(--fb-frame),
+        inset 2px 0 0 var(--fb-frame),
+        inset -2px 0 0 var(--fb-frame),
+        inset 0 -10px 16px rgba(0, 0, 0, .3);
+    opacity: .8;
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-number {
+    position: relative;
     max-width: 100%;
     overflow-wrap: anywhere;
     color: inherit;
-    font-size: clamp(22px, 7vw, 30px);
+    font-size: clamp(24px, 7.6vw, 32px);
     font-weight: 900;
     line-height: 1.02;
     text-transform: none;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, .7);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile-status {
