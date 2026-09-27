@@ -77,3 +77,28 @@ Ubuntu 24.04 VM с marker `/run/sse-qa-disposable-test`, без production paths
   `already_absent`; ошибка запроса, пустой или неизвестный ответ завершаются
   fail-closed. После неуспешного stop успех возможен только при подтверждённом
   исчезновении unit, а сбой повторного запроса не скрывает `stop_exit`.
+
+## Локальная правка cancel после run 36348860671 — 28.09.2026
+
+- Первый SIGTERM устанавливает одноразовую отмену. До начала rollback повторные
+  сигналы уже не создают новое исключение; при переходе к rollback SIGTERM
+  дополнительно переводится в `SIG_IGN` и прежний обработчик всегда
+  восстанавливается в `finally`.
+- Rollback после отмены и после обычной ошибки установки использует один путь.
+  Исходная ошибка сохраняется, настоящая ошибка cleanup выдаётся отдельно.
+  `SSE_QA_INSTALL_ROLLBACK_OK reason=cancelled|failed` появляется только после
+  фактического завершения ownership-checked cleanup.
+- Cancel-harness принимает только единственный `reason=cancelled`, точный
+  `SSE_QA_FAIL install cancelled`, отсутствие `cleanup incomplete` и успешный
+  собственный zero-residue. Только после этих условий записываются
+  `cleanup_exit=0` и `CANCEL_MARKER_OK`.
+- Per-attempt cleanup и аварийный EXIT cleanup больше не перезаписывают друг
+  друга: используются `cleanup-result.txt` и
+  `emergency-cleanup-result.txt`, а общий run metadata содержит отдельные
+  `per_attempt_cleanup_exit` и `emergency_cleanup_exit`.
+- Детерминированные проверки выполняют реальные Python SIGTERM в отдельном
+  дочернем процессе. Второй сигнал посылается после подтверждённого входа в
+  cleanup; случайные задержки не используются.
+
+Локальная проверка не заменяет disposable Linux/systemd gate. Новый workflow
+run не выполнялся и требует отдельного разрешения после независимого ревью.

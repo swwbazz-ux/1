@@ -1228,6 +1228,47 @@ def cleanup_owned_installation(state: dict[str, object], *, remove_complete: boo
     run(["systemctl", "daemon-reload"], check=False, timeout=INSTALL_TIMEOUTS["systemd"])
 
 
+def _install_cancel_handler(cancel_state: dict[str, bool]):
+    """Return the one-shot SIGTERM handler used by the real installer.
+
+    The first signal starts cancellation.  Once cancellation was requested or
+    rollback began, later signals are deliberately absorbed so they cannot
+    re-enter or interrupt ownership-checked cleanup.
+    """
+
+    def cancel_install(_signum, _frame):
+        if cancel_state["cancel_requested"] or cancel_state["rollback_started"]:
+            return
+        cancel_state["cancel_requested"] = True
+        raise QaCancelled("install cancelled")
+
+    return cancel_install
+
+
+def _rollback_failed_install(
+    state: dict[str, object],
+    failure: BaseException,
+    cancel_state: dict[str, bool],
+    *,
+    cleanup=None,
+) -> None:
+    """Run install rollback once while preserving the original failure."""
+
+    cancel_state["rollback_started"] = True
+    # The one-shot handler already ignores repeats, but replacing it before
+    # destructive cleanup also closes the small transition window explicitly.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    cleanup = cleanup_owned_installation if cleanup is None else cleanup
+    try:
+        cleanup(state, remove_complete=False)
+    except Exception as cleanup_exc:
+        raise QaError(
+            f"install failed ({type(failure).__name__}); cleanup incomplete: {cleanup_exc}"
+        ) from failure
+    reason = "cancelled" if isinstance(failure, QaCancelled) else "failed"
+    print(f"SSE_QA_INSTALL_ROLLBACK_OK reason={reason}", flush=True)
+
+
 def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
     if os.geteuid() != 0:
         raise QaError("install requires root receiver")
@@ -1250,11 +1291,8 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
     state = new_ownership()
     save_ownership(state)
     previous_sigterm = signal.getsignal(signal.SIGTERM)
-
-    def cancel_install(_signum, _frame):
-        raise QaCancelled("install cancelled")
-
-    signal.signal(signal.SIGTERM, cancel_install)
+    cancel_state = {"cancel_requested": False, "rollback_started": False}
+    signal.signal(signal.SIGTERM, _install_cancel_handler(cancel_state))
     try:
         run(["useradd", "--system", "--home", str(APP_ROOT), "--shell", "/usr/sbin/nologin", "sseqa"], step="user-create")
         state["user_created"] = True
@@ -1348,10 +1386,7 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
         state["phase"] = "complete_disabled"
         save_ownership(state)
     except BaseException as exc:
-        try:
-            cleanup_owned_installation(state, remove_complete=False)
-        except Exception as cleanup_exc:
-            raise QaError(f"install failed ({type(exc).__name__}); cleanup incomplete: {cleanup_exc}") from exc
+        _rollback_failed_install(state, exc, cancel_state)
         raise
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)

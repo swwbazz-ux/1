@@ -60,7 +60,13 @@ class InstallDiagnosticBashTests(unittest.TestCase):
             cleanup.index('sseqa_diag_capture_post_stop "$SSEQA_DIAG_CURRENT_LABEL"'),
             cleanup.index('systemctl reset-failed "$INSTALL_UNIT"'),
         )
-        self.assertIn("primary_exit=%s\\ndiagnostic_exit=%s\\ncleanup_exit=%s", on_exit)
+        self.assertIn(
+            "primary_exit=%s\\ndiagnostic_exit=%s\\nper_attempt_cleanup_exit=%s"
+            "\\nemergency_cleanup_exit=%s\\ncleanup_exit=%s",
+            on_exit,
+        )
+        self.assertIn("sseqa_diag_record_emergency_cleanup", cleanup)
+        self.assertNotIn("sseqa_diag_record_cleanup", cleanup)
 
     def run_harness(self, body: str) -> tuple[subprocess.CompletedProcess[str], Path, tempfile.TemporaryDirectory]:
         temporary = tempfile.TemporaryDirectory()

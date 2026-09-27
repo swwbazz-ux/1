@@ -1,0 +1,15 @@
+test_cancel_failure_line_must_be_exact (test_cancel_rollback.CancelHarnessTests.test_cancel_failure_line_must_be_exact) ... ok
+test_cleanup_incomplete_text_cannot_pass_and_emergency_is_separate (test_cancel_rollback.CancelHarnessTests.test_cleanup_incomplete_text_cannot_pass_and_emergency_is_separate) ... ok
+test_failed_own_zero_residue_cannot_emit_cancel_success (test_cancel_rollback.CancelHarnessTests.test_failed_own_zero_residue_cannot_emit_cancel_success) ... ok
+test_missing_rollback_marker_cannot_emit_cancel_success (test_cancel_rollback.CancelHarnessTests.test_missing_rollback_marker_cannot_emit_cancel_success) ... ok
+test_run_metadata_separates_cleanup_results (test_cancel_rollback.CancelHarnessTests.test_run_metadata_separates_cleanup_results) ... ok
+test_success_is_recorded_only_after_own_zero_residue (test_cancel_rollback.CancelHarnessTests.test_success_is_recorded_only_after_own_zero_residue) ... ok
+test_cleanup_error_has_no_success_marker (test_cancel_rollback.InstallSignalTests.test_cleanup_error_has_no_success_marker) ... ok
+test_one_sigterm_cancels_and_rolls_back_once (test_cancel_rollback.InstallSignalTests.test_one_sigterm_cancels_and_rolls_back_once) ... ok
+test_repeated_sigterm_during_rollback_is_absorbed (test_cancel_rollback.InstallSignalTests.test_repeated_sigterm_during_rollback_is_absorbed) ... ok
+test_sigterm_during_ordinary_failure_rollback_preserves_original (test_cancel_rollback.InstallSignalTests.test_sigterm_during_ordinary_failure_rollback_preserves_original) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.907s
+
+OK

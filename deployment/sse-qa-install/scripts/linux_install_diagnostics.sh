@@ -188,6 +188,14 @@ sseqa_diag_record_cleanup() {
     >"$directory/cleanup-result.txt"
 }
 
+sseqa_diag_record_emergency_cleanup() {
+  local label="${1:?label required}" status="${2:?status required}" directory
+  directory="$(sseqa_diag_attempt_dir "$label")"
+  printf 'emergency_cleanup\n' >>"$directory/capture-order.log"
+  printf 'emergency_cleanup_exit=%s\nrecorded_utc=%s\n' "$status" "$(date -u +%FT%TZ)" \
+    >"$directory/emergency-cleanup-result.txt"
+}
+
 sseqa_wait_install_checkpoint() {
   local expected_phase="${1:?phase required}" timeout_seconds="${2:-300}" grace_seconds="${3:-3}"
   local label="${SSEQA_DIAG_CURRENT_LABEL:?diagnostic attempt not started}"

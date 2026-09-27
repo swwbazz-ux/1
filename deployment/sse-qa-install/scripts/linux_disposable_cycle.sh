@@ -309,6 +309,42 @@ collect_install_result() {
   return "$status"
 }
 
+validate_cancel_rollback_journal() {
+  local journal="${1:?journal required}" rollback_count cancel_count
+  test -s "$journal" || return 1
+  rollback_count="$(grep -Ec 'SSE_QA_INSTALL_ROLLBACK_OK reason=cancelled$' "$journal" || true)"
+  cancel_count="$(grep -Ec 'SSE_QA_FAIL install cancelled$' "$journal" || true)"
+  test "$rollback_count" -eq 1 || return 1
+  test "$cancel_count" -eq 1 || return 1
+  ! grep -Fq 'cleanup incomplete' "$journal" || return 1
+  ! grep -Fq 'SSE_QA_INSTALL_OK' "$journal" || return 1
+}
+
+finalize_cancel_attempt() {
+  local journal="${1:?journal required}" marker_file="${2:?marker file required}"
+  local rollback_status=0 zero_status=0 cleanup_status=0 attempt_dir
+  if ! validate_cancel_rollback_journal "$journal"; then
+    rollback_status=1
+  fi
+  if run_logged cancel-zero-residue /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" cancel; then
+    zero_status=0
+  else
+    zero_status=$?
+  fi
+  if test "$rollback_status" -ne 0 || test "$zero_status" -ne 0; then
+    cleanup_status=1
+  fi
+  attempt_dir="$(sseqa_diag_attempt_dir cancel)"
+  printf 'rollback_marker_exit=%s\nown_zero_residue_exit=%s\ncleanup_exit=%s\nrecorded_utc=%s\n' \
+    "$rollback_status" "$zero_status" "$cleanup_status" "$(date -u +%FT%TZ)" \
+    >"$attempt_dir/rollback-result.txt"
+  sseqa_diag_record_cleanup cancel "$cleanup_status"
+  test "$cleanup_status" -eq 0 || return 1
+  printf 'CANCEL_MARKER_OK active=1 main_pid=1 phase=dependencies_started cgroup=%s success_marker=0 rollback=1 zero_residue=1\n' \
+    "$QA_CGROUP/$INSTALL_UNIT" | tee "$marker_file"
+  SSEQA_DIAG_CURRENT_LABEL=''
+}
+
 run_scoped() {
   local unit="${1:?unit required}"
   local operation="${2:?operation required}"
@@ -440,7 +476,7 @@ cleanup_partial() {
   rm -f "$EXIT_DIR"/*.exit "$EXIT_DIR"/*.invocation "$EXIT_DIR"/release-*
   rmdir "$EXIT_DIR" >/dev/null 2>&1
   if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
-    sseqa_diag_record_cleanup "$SSEQA_DIAG_CURRENT_LABEL" "$cleanup_status" || cleanup_status=1
+    sseqa_diag_record_emergency_cleanup "$SSEQA_DIAG_CURRENT_LABEL" "$cleanup_status" || cleanup_status=1
   fi
   set -e
   return "$cleanup_status"
@@ -449,6 +485,7 @@ cleanup_partial() {
 FINALIZED=0
 on_exit() {
   local status=$? diagnostic_status=0 cleanup_status=0 zero_status=0 final_status
+  local per_attempt_cleanup_status=not_run cleanup_result=''
   trap - EXIT
   set +e
   if test "$FINALIZED" -ne 1 && test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
@@ -460,6 +497,13 @@ on_exit() {
       || diagnostic_status=1
   fi
   cleanup_partial || cleanup_status=$?
+  if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
+    cleanup_result="$(sseqa_diag_attempt_dir "$SSEQA_DIAG_CURRENT_LABEL")/cleanup-result.txt"
+    if test -s "$cleanup_result"; then
+      per_attempt_cleanup_status="$(sed -n 's/^cleanup_exit=//p' "$cleanup_result" | head -n 1)"
+      [[ "$per_attempt_cleanup_status" =~ ^[0-9]+$ ]] || per_attempt_cleanup_status=invalid
+    fi
+  fi
   if test "$diagnostic_status" -eq 0 && test "$SSEQA_DIAG_POST_STOP_STATUS" -ne 0; then
     diagnostic_status="$SSEQA_DIAG_POST_STOP_STATUS"
   fi
@@ -470,8 +514,9 @@ on_exit() {
   if test "$final_status" -eq 0 && { test "$cleanup_status" -ne 0 || test "$zero_status" -ne 0; }; then
     final_status=1
   fi
-  printf 'utc_end=%s\nprimary_exit=%s\ndiagnostic_exit=%s\ncleanup_exit=%s\nzero_residue_exit=%s\nexit=%s\n' \
-    "$(date -u +%FT%TZ)" "$status" "$diagnostic_status" "$cleanup_status" "$zero_status" "$final_status" \
+  printf 'utc_end=%s\nprimary_exit=%s\ndiagnostic_exit=%s\nper_attempt_cleanup_exit=%s\nemergency_cleanup_exit=%s\ncleanup_exit=%s\nzero_residue_exit=%s\nexit=%s\n' \
+    "$(date -u +%FT%TZ)" "$status" "$diagnostic_status" "$per_attempt_cleanup_status" \
+    "$cleanup_status" "$cleanup_status" "$zero_status" "$final_status" \
     >>"$EVIDENCE_ROOT/metadata/run.txt"
   exit "$final_status"
 }
@@ -558,21 +603,13 @@ case "$cancel_state" in inactive|failed|'') ;; *) exit 1 ;; esac
 test -z "$cancel_pid" || test "$cancel_pid" = 0
 export_install_journal cancel short-iso-precise \
   "$EVIDENCE_ROOT/raw/cancel.journal.log"
-grep -Fq 'install cancelled' "$EVIDENCE_ROOT/raw/cancel.journal.log"
-if grep -Fq 'SSE_QA_INSTALL_OK' "$EVIDENCE_ROOT/raw/cancel.journal.log"; then
-  echo 'cancelled install incorrectly reported success' >&2
-  exit 1
-fi
 cleanup_install_slice 1
 sseqa_diag_capture_post_stop cancel || true
 systemctl reset-failed "$INSTALL_UNIT" >/dev/null 2>&1 || true
 rm -f "$EXIT_DIR"/*.exit "$EXIT_DIR"/*.invocation "$EXIT_DIR"/release-*
 rmdir "$EXIT_DIR"
-sseqa_diag_record_cleanup cancel 0
-SSEQA_DIAG_CURRENT_LABEL=''
-printf 'CANCEL_MARKER_OK active=1 main_pid=1 phase=dependencies_started cgroup=%s success_marker=0\n' \
-  "$QA_CGROUP/$INSTALL_UNIT" | tee "$EVIDENCE_ROOT/raw/cancel.marker.log"
-run_logged cancel-zero-residue /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" cancel
+finalize_cancel_attempt "$EVIDENCE_ROOT/raw/cancel.journal.log" \
+  "$EVIDENCE_ROOT/raw/cancel.marker.log"
 
 rm -f "$NETWORK_SMOKE_JSON"
 find "$EVIDENCE_ROOT/raw" "$EVIDENCE_ROOT/cgroup" -type f -print0 \

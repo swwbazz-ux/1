@@ -1,0 +1,8 @@
+warning: in the working copy of 'deployment/sse-qa-install/REQUIRED_FILES.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/REVIEW_FIXES.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/scripts/linux_disposable_cycle.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/scripts/linux_install_diagnostics.sh', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/scripts/sse_qa_ctl.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/tests/test_install_diagnostics.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'РџР РћР“Р Р•РЎРЎ_РџР РћР•РљРўРђ/01_РўР•РљРЈР©Р•Р•_РЎРћРЎРўРћРЇРќРР•.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'РџР РћР“Р Р•РЎРЎ_РџР РћР•РљРўРђ/04_Р‘Р›РР–РђР™РЁРР•_Р—РђР”РђР§Р.md', LF will be replaced by CRLF the next time Git touches it
