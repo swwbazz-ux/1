@@ -821,34 +821,51 @@
         doc.documentElement.style.setProperty("--link-path", 'path("' + path + '")');
     }
 
-    /* Размер стрелок-слотов «свайп к кругу» (.driver-drum-slot-arrow) — от
-       фактического зазора между центральной гранью и кругом: вдвое крупнее
-       прежних 8px, если влезает, иначе сколько влезает, с просветом 2px и до
-       грани, и до круга; стрелка стоит посередине зазора. Считается здесь же,
-       вместе с контуром: те же замеры, тот же момент (вне жеста, только когда
-       геометрия сдвинулась). */
-    var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;
+    /* Стрелки-слоты «свайп к кругу» (.driver-drum-slot-arrow): обе 24×16 (вдвое
+       против прежних 8px) и с ОДИНАКОВЫМ расстоянием до своей грани; ориентир —
+       верхняя, она стоит посередине своего зазора до круга (владелец,
+       28.09.2026). Нижний зазор уже верхнего, поэтому нижний барабан целиком
+       (грань и его часть контура — контур строится от фактического положения
+       грани) сдвигается вниз ровно настолько, чтобы нижняя стрелка встала так
+       же, как верхняя, — но не дальше, чем позволяет низ экрана «Работа»: там
+       должна поместиться нижняя рамка контура с её свечением. Если места не
+       хватает — обе стрелки одинаково уменьшаются. Сдвиг считается от
+       НЕсдвинутого положения грани (текущий сдвиг вычитается), иначе каждый
+       пересчёт менял бы его заново. Считается вместе с контуром: те же замеры,
+       тот же момент (вне жеста, только когда геометрия сдвинулась). */
+    var ARROW_H = 16, ARROW_MIN_H = 8, ARROW_MIN_CLEAR = 1;
+    // Нижняя рамка контура: отступ от грани (pad в syncLinkVars) + половина
+    // толщины яркой линии + половина толщины свечения (driver-downtime-drum-v1.css).
+    var OUTLINE_BELOW_CARD = 5 + 1.25 + 4.5;
     var lastArrowVars = "";
-    function fitH(gap) {
-        return Math.max(ARROW_MIN_H, Math.min(ARROW_MAX_H, gap - 2 * ARROW_CLEAR));
-    }
-    function syncSlotArrows(dr, cr, tr) {
-        // Обе стрелки ОДНОГО размера — наибольшего, что влезает в оба зазора (по
-        // меньшему), на любом экране (владелец, 28.09.2026: «разного размера»).
-        // Каждая стоит посередине своего зазора.
-        var gapBottom = cr.top - dr.bottom;
-        var gapTop = tr && tr.height ? dr.top - tr.bottom : gapBottom;
-        var h = Math.min(fitH(gapBottom), fitH(gapTop));
-        var bottom = { h: h, lift: Math.max(ARROW_CLEAR, (gapBottom - h) / 2) };
-        var top = { h: h, lift: Math.max(ARROW_CLEAR, (gapTop - h) / 2) };
-        var vars = [bottom.h, bottom.lift, top.h, top.lift].map(function (v) { return v.toFixed(1); }).join(",");
+    var bottomShift = 0;
+    function syncSlotArrows(dr, cr, tr, box) {
+        var cardTop0 = cr.top - bottomShift, cardBottom0 = cr.bottom - bottomShift;
+        var gapBottom0 = cardTop0 - dr.bottom;
+        var gapTop = tr && tr.height ? dr.top - tr.bottom : gapBottom0;
+        var h = Math.max(ARROW_MIN_H, Math.min(ARROW_H, gapTop - 2 * ARROW_MIN_CLEAR));
+        var lift = (gapTop - h) / 2;
+        var need = Math.max(0, 2 * lift + h - gapBottom0);
+        var room = box ? Math.max(0, box.bottom - (cardBottom0 + OUTLINE_BELOW_CARD)) : 0;
+        var shift = Math.min(need, room);
+        var gapBottom = gapBottom0 + shift;
+        if (2 * lift + h > gapBottom) {
+            // Не хватило места даже со сдвигом: уменьшаем обе стрелки одинаково,
+            // сохраняя их одинаковое расстояние до граней.
+            h = Math.max(ARROW_MIN_H, Math.min(h, gapBottom - 2 * ARROW_MIN_CLEAR));
+            lift = Math.max(ARROW_MIN_CLEAR, Math.min((gapTop - h) / 2, (gapBottom - h) / 2));
+        }
+        var vars = [h, lift, shift].map(function (v) { return v.toFixed(1); }).join(",");
         if (vars === lastArrowVars) return;
         lastArrowVars = vars;
+        bottomShift = Math.round(shift * 10) / 10;
+        root.__driverDrumArrowReport = { h: h, lift: lift, shift: shift, need: need, room: room };
         var s = doc.documentElement.style;
-        s.setProperty("--drum-arrow-h-bottom", bottom.h.toFixed(1) + "px");
-        s.setProperty("--drum-arrow-lift-bottom", bottom.lift.toFixed(1) + "px");
-        s.setProperty("--drum-arrow-h-top", top.h.toFixed(1) + "px");
-        s.setProperty("--drum-arrow-lift-top", top.lift.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-h-bottom", h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-bottom", lift.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-h-top", h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-top", lift.toFixed(1) + "px");
+        s.setProperty("--drum-bottom-shift", bottomShift.toFixed(1) + "px");
     }
 
     var linkFrame = 0;
@@ -896,7 +913,7 @@
         if (inputs === lastLinkInputs) return;
         lastLinkInputs = inputs;
         root.__driverDrumLinkCalls = (root.__driverDrumLinkCalls || 0) + 1;
-        syncSlotArrows(dr, cr, tr0);
+        syncSlotArrows(dr, cr, tr0, box);
         var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
         // Кольцо — в зазоре между кольцом циферблата (48.5% стороны) и угловыми кнопками (51%).

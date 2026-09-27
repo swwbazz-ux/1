@@ -19,6 +19,10 @@ body.driver-mobile-screen .driver-downtime-drum {
     --drum-step: 25.714deg;
     grid-area: drum;
     position: relative;
+    /* Сдвиг вниз, чтобы нижняя стрелка «свайп к кругу» встала на том же
+       расстоянии от грани, что и верхняя; величину считает
+       driver-downtime-drum-v1.js (syncSlotArrows) от места до низа экрана. */
+    translate: 0 var(--drum-bottom-shift, 0px);
     width: var(--driver-work-column);
     justify-self: center;
     align-self: stretch;

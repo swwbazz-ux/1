@@ -257,12 +257,18 @@ test("the swipe arrow is a fixed slot outside the card, sized from the real gap 
     assert.match(CSS, /\.driver-downtime-drum \.driver-drum-card-arrow,\s*body\.driver-mobile-screen \.driver-point-drum \.driver-drum-card-arrow\s*\{\s*display:\s*none;/);
     assert.match(CSS, /\.driver-drum-slot-arrow\s*\{[^}]*bottom:\s*calc\(50% \+ var\(--drum-card-h\) \/ 2 \+ var\(--slot-lift\)\)/s);
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
-    assert.match(drumJs, /var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;/);
-    assert.match(drumJs, /function syncSlotArrows\(dr, cr, tr\)/);
-    // Обе стрелки одного размера — по меньшему из двух зазоров, на любом экране.
-    assert.match(drumJs, /var h = Math\.min\(fitH\(gapBottom\), fitH\(gapTop\)\);[\s\S]{0,200}var bottom = \{ h: h,[\s\S]{0,120}var top = \{ h: h,/);
+    assert.match(drumJs, /var ARROW_H = 16, ARROW_MIN_H = 8, ARROW_MIN_CLEAR = 1;/);
+    assert.match(drumJs, /function syncSlotArrows\(dr, cr, tr, box\)/);
+    // Обе стрелки одного размера и на одном расстоянии от своей грани (ориентир —
+    // верхняя); нижний барабан сдвигается вниз, насколько позволяет место до
+    // низа экрана, а сдвиг считается от несдвинутого положения грани.
+    assert.match(drumJs, /var cardTop0 = cr\.top - bottomShift, cardBottom0 = cr\.bottom - bottomShift;/);
+    assert.match(drumJs, /var shift = Math\.min\(need, room\);/);
+    assert.match(drumJs, /s\.setProperty\("--drum-arrow-h-top", h\.toFixed\(1\) \+ "px"\);/);
+    assert.match(drumJs, /s\.setProperty\("--drum-arrow-h-bottom", h\.toFixed\(1\) \+ "px"\);/);
+    assert.match(CSS, /\.driver-downtime-drum\s*\{[^}]*translate:\s*0 var\(--drum-bottom-shift, 0px\);/s);
     // Считается вместе с контуром — вне жеста и только при сдвиге геометрии.
-    assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0\);/);
+    assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0, box\);/);
     // Цвет верхней стрелки мигает той же переменной, что и грань точки.
     const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
     assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-slot-arrow\s*\{\s*color:\s*var\(--driver-blink-color\);/);
