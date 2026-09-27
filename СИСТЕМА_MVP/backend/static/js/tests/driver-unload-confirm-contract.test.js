@@ -4,8 +4,11 @@
    holdMs: 500. Сразу после срабатывания проекция перестраивала круг в «ЭКС-1 / НА
    ЗАГРУЗКУ», голос звучал только по ответу сервера (иногда через секунды) — было
    непонятно, засчитался ли рейс. Теперь: кольцо полное ровно в миг срабатывания,
-   затем ~0,9 с «засчитано» (галочка, «РАЗГРУЖЕНО», голос), и только потом новое
-   состояние; перерисовка и подмена фрагмента в это окно ждут. */
+   затем ~5 с поверх круга лежит отдельный слой «засчитано» (кольцо со вспышкой,
+   галочка прорисовывается, «РАЗГРУЖЕНО», ореол, затухание), голос сразу. Слой
+   лежит на body и берёт прямоугольник круга: сам круг не меняется ни на пиксель,
+   под слоем экран живёт как обычно (проекция, очередь, сверка ничего не ждут),
+   касание закрывает показ досрочно. */
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -31,29 +34,61 @@ test("hold ring fills completely exactly when the unload hold fires", () => {
     const leftDelay = ms(left[3], left[4]);
     assert.equal(leftDelay, rightMs, "left half starts when the right half is full");
     assert.equal(rightMs + leftMs, holdMs, "ring completes at the same instant the action fires");
-    // Полное кольцо держится и во время «засчитано».
-    assert.match(CSS, /\.is-confirmed \.driver-work-hold-half\.is-left \.driver-work-hold-fill \{ transform: rotate\(180deg\); \}/);
 });
 
-test("a saved unload shows a timed confirmation with voice before the next state", () => {
+test("a saved unload shows the confirmation layer with voice, for the hold and the manual dial alike", () => {
     const helper = SHIFT.match(/function showDriverDialConfirmed\(\) \{[\s\S]*?\n        \}\n/)[0];
-    assert.match(helper, /classList\.add\("is-confirmed"\)/);
-    assert.match(helper, /"РАЗГРУЖЕНО"/);
+    assert.match(helper, /classList\.add\("is-showing"\)/);
+    assert.match(helper, /placeDriverDialConfirmLayer\(\)/);
     assert.match(helper, /playDriverVoice\("action_ok", "voice_trip_finished"\)/);
-    assert.match(helper, /driverDialConfirmUntil = Date\.now\(\) \+ DRIVER_DIAL_CONFIRM_MS/);
-    // По окончании показа — проекция и ручной барабан переводят круг дальше.
-    assert.match(helper, /setTimeout\(function \(\) \{[\s\S]*?driverDialConfirmUntil = 0;[\s\S]*?applyDriverOfflineProjection\(current, driverOfflineEvents\)[\s\S]*?DriverPointDrum\.refresh\(\)/);
-    const confirmMs = Number(SHIFT.match(/var DRIVER_DIAL_CONFIRM_MS = (\d+);/)[1]);
-    assert.ok(confirmMs >= 800 && confirmMs <= 1000, "confirmation lasts ~0.8–1 s");
+    // Касание закрывает досрочно; слой сам касаний не ловит.
+    assert.match(helper, /document\.addEventListener\("pointerdown", dismissDriverDialConfirmed, true\)/);
+    const total = Number(SHIFT.match(/var DRIVER_DIAL_CONFIRM_MS = (\d+);/)[1]);
+    const fade = Number(SHIFT.match(/var DRIVER_DIAL_CONFIRM_FADE_MS = (\d+);/)[1]);
+    assert.ok(total >= 4500 && total <= 5500, "confirmation lasts ~5 s");
+    assert.ok(fade >= 300 && fade <= 600, "it fades out, not snaps");
+    assert.match(helper, /DRIVER_DIAL_CONFIRM_MS - DRIVER_DIAL_CONFIRM_FADE_MS/);
+    // Слой создаётся на body и содержит кольцо, ореол, галочку и подпись.
+    const layer = SHIFT.match(/function driverDialConfirmLayer\(\) \{[\s\S]*?\n        \}\n/)[0];
+    assert.match(layer, /document\.body\.appendChild\(layer\)/);
+    ["driver-work-confirm-ring-glow", "driver-work-confirm-ring", "driver-work-confirm-halo", "driver-work-confirm-check", "driver-work-confirm-text"].forEach((cls) => {
+        assert.match(layer, new RegExp(cls));
+    });
+    assert.match(layer, /pathLength="100"/);
+    assert.match(layer, /РАЗГРУЖЕНО/);
     // Показ — только после записи на телефоне, и для обычной, и для ручной разгрузки.
     assert.match(SHIFT, /unloadRecovery\.recover\(\{type: "queued"\}\);[\s\S]*?showDriverDialConfirmed\(\);\s*applyDriverOfflineProjection\(shell, driverOfflineEvents\);/);
+    assert.match(SHIFT, /completeFromDial\(showDriverDialConfirmed\)/);
     assert.match(DRUM, /if \(!saved\) \{[^\n]*return; \}\s*if \(typeof onSaved === "function"\) onSaved\(\);/);
 });
 
-test("nothing repaints the dial while the confirmation is shown", () => {
-    assert.match(SHIFT, /function applyDriverOfflineProjection\(current, events\) \{\s*if \(!current\) return;[\s\S]{0,300}?if \(Number\(window\.driverDialConfirmUntil \|\| 0\) > Date\.now\(\)\) return;/);
-    assert.match(VOICE, /Number\(window\.driverDialConfirmUntil \|\| 0\) > Date\.now\(\)\s*\) return busy\("dial_confirmed"\);/);
-    assert.match(DRUM, /function syncDial\(\) \{[\s\S]{0,400}?if \(button\.classList\.contains\("is-confirmed"\)\) return;/);
+test("the layer never touches the dial: geometry under it is untouched and nothing waits for it", () => {
+    // Никаких правил «засчитано» на самой кнопке, кольце или сердцевине.
+    assert.doesNotMatch(CSS, /\.driver-work-dial-button\.is-confirmed/);
+    assert.doesNotMatch(SHIFT, /classList\.add\("is-confirmed"\)/);
+    // Проекция, сверка и барабан точек показ не ждут.
+    assert.doesNotMatch(SHIFT, /driverDialConfirmUntil/);
+    assert.doesNotMatch(VOICE, /dial_confirmed/);
+    assert.doesNotMatch(DRUM, /is-confirmed/);
+    // Слой: fixed на body, вне потока, касаний не ловит, размеры в cqw от круга.
+    const layerRule = CSS.match(/\.driver-work-confirm \{([\s\S]*?)\}/)[1];
+    assert.match(layerRule, /position: fixed;/);
+    assert.match(layerRule, /pointer-events: none;/);
+    assert.match(layerRule, /container-type: size;/);
+    assert.match(layerRule, /visibility: hidden;/);
+    // Анимируются только прозрачность и штрих галочки; ни фильтров, ни теней в кадрах.
+    const keyframes = CSS.match(/@keyframes driver-confirm-[\s\S]*?\}\n\}/g) || [];
+    assert.ok(keyframes.length >= 3, "fade-in, flash and draw keyframes exist");
+    keyframes.forEach((block) => {
+        assert.doesNotMatch(block, /filter|box-shadow|background|width|height|inset|border/);
+        assert.match(block, /opacity|stroke-dashoffset/);
+    });
+    const draw = CSS.match(/\.driver-work-confirm\.is-showing \.driver-work-confirm-check path \{\s*animation: driver-confirm-draw ([\d.]+)ms/);
+    assert.ok(draw && Number(draw[1]) >= 250 && Number(draw[1]) <= 400, "check mark draws in ~300 ms");
+    // Только объявления, без комментариев: там filter упоминается как отвергнутый вариант.
+    const overlayRules = CSS.match(/\.driver-work-confirm[\s\S]*?@keyframes driver-confirm-fade-in/)[0]
+        .replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.doesNotMatch(overlayRules, /filter:/);
 });
 
 test("the completion buzz is not cancelled by the post-hold reset", () => {

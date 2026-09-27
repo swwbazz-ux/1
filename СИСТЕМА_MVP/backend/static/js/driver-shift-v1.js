@@ -645,9 +645,6 @@ window.bindDriverMobileShell = function () {
         core.classList.toggle("has-multiline-label", lines.length > 1);
         var maxSize = preferredDriverDialFontSize(coreWidth, lines.length, textLength);
         var minSize = Math.min(maxSize, minimumDriverDialFontSize(lines.length, textLength));
-        /* «РАЗГРУЖЕНО» в «засчитано» — одно длинное слово: при обычном нижнем
-           пределе 34px оно не влезало в круг узкого телефона и обрезалось. */
-        if (label.closest(".is-confirmed")) minSize = Math.min(minSize, 22);
         var low = minSize;
         var high = maxSize;
         var best = minSize;
@@ -1243,9 +1240,6 @@ window.bindDriverMobileShell = function () {
 
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
-        /* Круг показывает «засчитано» — проекцию применит сам показ, когда
-           закончится (showDriverDialConfirmed), иначе она съела бы подтверждение. */
-        if (Number(window.driverDialConfirmUntil || 0) > Date.now()) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         var activeTripId = String(current.dataset.driverActiveTripId || "");
         var manualTrip = String(current.dataset.driverActiveTripOrigin || "") === "driver_manual";
@@ -2343,45 +2337,96 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(24);
             }, totalMs / HOLD_SEGMENTS);
         }
-        /* «Засчитано»: после того как разгрузка (или завершение ручного рейса)
-           записана на телефоне, круг ~0,9 с горит цветом успеха с галочкой и
-           надписью «РАЗГРУЖЕНО», звучит голос — и только потом переходит в
-           следующее состояние («ЭКС-1 / НА ЗАГРУЗКУ»). Раньше проекция
-           перестраивала круг в тот же миг, и водитель не понимал, засчитался ли
-           рейс (владелец, 28.09.2026). Пока показ идёт, местная проекция и
-           подмена фрагмента с сервера ждут (driverDialConfirmUntil проверяют
-           applyDriverOfflineProjection и isDriverOperationalRefreshUnsafe);
-           окно ограничено временем, поэтому залипнуть не может. Голос звучит
-           здесь, по факту записи на телефоне, а не по ответу сервера: ответ
-           мог прийти через секунды или минуты, когда водитель уже уехал. */
-        var DRIVER_DIAL_CONFIRM_MS = 900;
+        /* «Засчитано»: как только разгрузка (или завершение ручного рейса) записана
+           на телефоне, поверх круга ~5 с лежит отдельный слой — полное зелёное
+           кольцо со вспышкой, галочка, которая прорисовывается, «РАЗГРУЖЕНО» и
+           мягкий ореол; звучит голос. Под слоем экран живёт как обычно: проекция,
+           очередь, опрос и подмена фрагмента ничего не ждут, и к концу показа
+           следующее состояние («ЭКС-1 / НА ЗАГРУЗКУ») уже готово — слой просто
+           гаснет. Касание по экрану закрывает показ досрочно. Раньше проекция
+           перестраивала круг в тот же миг, и водитель, у которого во время
+           удержания экран закрыт рукой, не понимал, засчитался ли рейс
+           (владелец, 28.09.2026).
+           Слой лежит на body, а не внутри круга: сверка после разгрузки приходит
+           через 1–2 с и заменяет или послойно перестраивает оболочку целиком —
+           слой внутри неё исчез бы посреди показа. Геометрию берём с самой
+           кнопки круга при показе; сама кнопка и сердцевина не меняются ни на
+           пиксель. Голос звучит здесь, по факту записи на телефоне, а не по
+           ответу сервера: ответ мог прийти через секунды или минуты, когда
+           водитель уже уехал. */
+        var DRIVER_DIAL_CONFIRM_MS = 5000;
+        var DRIVER_DIAL_CONFIRM_FADE_MS = 450;
         var driverDialConfirmTimer = null;
-        function showDriverDialConfirmed() {
-            var button = document.querySelector("[data-driver-hold-button]") || holdButton;
-            var label = button.querySelector("[data-driver-dial-label]");
+        var driverDialConfirmFadeTimer = null;
+        function driverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            if (layer) return layer;
+            layer = document.createElement("div");
+            layer.className = "driver-work-confirm";
+            layer.setAttribute("data-driver-work-confirm", "");
+            layer.setAttribute("aria-hidden", "true");
+            layer.innerHTML = ''
+                + '<span class="driver-work-confirm-ring-glow"></span>'
+                + '<span class="driver-work-confirm-ring"></span>'
+                + '<span class="driver-work-confirm-core">'
+                +   '<span class="driver-work-confirm-halo"></span>'
+                +   '<svg class="driver-work-confirm-check" viewBox="0 0 100 100" aria-hidden="true">'
+                +     '<path d="M26 53 L44 70 L75 34" pathLength="100"></path>'
+                +   '</svg>'
+                +   '<b class="driver-work-confirm-text">РАЗГРУЖЕНО</b>'
+                + '</span>';
+            document.body.appendChild(layer);
+            return layer;
+        }
+        function placeDriverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            var button = document.querySelector("[data-driver-hold-button]");
+            if (!layer || !button || !layer.classList.contains("is-showing")) return;
+            var rect = button.getBoundingClientRect();
+            if (!(rect.width > 0)) return;
+            layer.style.left = rect.left.toFixed(1) + "px";
+            layer.style.top = rect.top.toFixed(1) + "px";
+            layer.style.width = rect.width.toFixed(1) + "px";
+            layer.style.height = rect.height.toFixed(1) + "px";
+        }
+        function hideDriverDialConfirmed(fade) {
+            var layer = document.querySelector("[data-driver-work-confirm]");
             window.clearTimeout(driverDialConfirmTimer);
-            window.driverDialConfirmUntil = Date.now() + DRIVER_DIAL_CONFIRM_MS;
-            button.classList.remove("is-holding", "is-pending", "is-loaded");
-            button.classList.add("is-confirmed");
-            button.disabled = true;
-            if (label) {
-                renderDriverDialLabel(label, "РАЗГРУЖЕНО");
-                // Синхронно, в этом же кадре — иначе один кадр слово рисуется прежним кеглем.
-                window.fitDriverDialLabelNow(label);
+            window.clearTimeout(driverDialConfirmFadeTimer);
+            driverDialConfirmTimer = null;
+            driverDialConfirmFadeTimer = null;
+            document.removeEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.removeEventListener("resize", placeDriverDialConfirmLayer);
+            if (!layer || !layer.classList.contains("is-showing")) return;
+            if (!fade) {
+                layer.classList.remove("is-showing", "is-leaving");
+                return;
             }
+            layer.classList.add("is-leaving");
+            driverDialConfirmFadeTimer = window.setTimeout(function () {
+                driverDialConfirmFadeTimer = null;
+                layer.classList.remove("is-showing", "is-leaving");
+            }, DRIVER_DIAL_CONFIRM_FADE_MS);
+        }
+        // Слой не ловит касаний (pointer-events: none): касание доходит до экрана как обычно.
+        function dismissDriverDialConfirmed() { hideDriverDialConfirmed(true); }
+        function showDriverDialConfirmed() {
+            var layer = driverDialConfirmLayer();
+            hideDriverDialConfirmed(false);
+            // Повторный показ подряд: сброс классов и принудительная раскладка перезапускают анимации.
+            void layer.offsetWidth;
+            layer.classList.add("is-showing");
+            placeDriverDialConfirmLayer();
+            window.driverDialConfirmShownAt = Date.now();
             playDriverVoice("action_ok", "voice_trip_finished");
+            document.addEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.addEventListener("resize", placeDriverDialConfirmLayer);
             driverDialConfirmTimer = window.setTimeout(function () {
                 driverDialConfirmTimer = null;
-                window.driverDialConfirmUntil = 0;
-                var current = document.querySelector("[data-driver-shell]");
-                var confirmed = current && current.querySelector("[data-driver-hold-button].is-confirmed");
-                if (confirmed) confirmed.classList.remove("is-confirmed");
-                if (current) applyDriverOfflineProjection(current, driverOfflineEvents);
-                if (window.DriverPointDrum && typeof window.DriverPointDrum.refresh === "function") {
-                    window.DriverPointDrum.refresh();
-                }
-            }, DRIVER_DIAL_CONFIRM_MS);
+                hideDriverDialConfirmed(true);
+            }, DRIVER_DIAL_CONFIRM_MS - DRIVER_DIAL_CONFIRM_FADE_MS);
         }
+        window.showDriverDialConfirmed = showDriverDialConfirmed;
         /* Удержание завершено: сброс удержания после этого (восстановление
            формы, отмена) не должен глушить длинный отклик завершения. */
         var unloadHoldCompleted = false;
@@ -2401,8 +2446,6 @@ window.bindDriverMobileShell = function () {
                 if (!unloadHoldCompleted) driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
-                // Круг показывает «засчитано» — его подпись не трогаем, дальше круг ведёт показ.
-                if (holdButton.classList.contains("is-confirmed")) return;
                 // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
                 if (!holdButton.disabled) holdButton.classList.add("is-loaded");
                 // После обычного отпускания подпись и так исходная — подгонка текста

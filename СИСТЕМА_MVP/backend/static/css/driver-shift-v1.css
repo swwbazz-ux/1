@@ -835,63 +835,181 @@ body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-
     animation: driver-hold-left 250ms steps(6, end) 250ms forwards;
 }
 
-/* Удержание завершено — все двенадцать секций горят до ответа и во время «засчитано». */
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill,
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill,
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
+/* Удержание завершено — все двенадцать секций горят до ответа. */
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
+body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
 
-/* «Засчитано» (~0,9 с после записи разгрузки на телефоне, showDriverDialConfirmed):
-   полное кольцо и подпись цветом успеха, над подписью — галочка. Цвет задан
-   явно, а не через --driver-green: в ручном режиме и при свободном ковше тот
-   перекрашен в цвет режима, а «засчитано» одинаково во всех режимах. Всё
-   статично — ни анимаций, ни фильтров. */
-/* Кнопка на время показа выключена (второе удержание не пройдёт), но общий
-   вид выключенной кнопки (button:disabled — прозрачность и серый фильтр)
-   гасил бы подтверждение. */
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed,
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed:disabled {
+/* Слой «засчитано» (driver-shift-v1.js, showDriverDialConfirmed). Лежит на body
+   поверх круга и получает его прямоугольник при показе: сам круг, кольцо и
+   сердцевина под ним не меняются ни на пиксель, а сверка после разгрузки может
+   заменить оболочку целиком — слой это переживает. Внутри: полное зелёное кольцо
+   на месте кольца удержания со вспышкой свечения, непрозрачная сердцевина того же
+   вида, что настоящая (под ней уже готово следующее состояние), мягкий зелёный
+   ореол, галочка, которая прорисовывается, и «РАЗГРУЖЕНО» шрифтом приложения.
+   Цвет успеха задан явно, а не через --driver-green: тот в ручном режиме и при
+   свободном ковше перекрашен в цвет режима. Анимируются только opacity слоёв и
+   stroke-dashoffset маленького SVG галочки; ни фильтров, ни теней на живом круге.
+   Размеры — в cqw от ширины круга (container-type: size на слое). */
+body.driver-mobile-screen .driver-work-confirm {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    z-index: 150;
+    border-radius: 50%;
+    container-type: size;
     color: #8cff2e;
-    opacity: 1;
-    filter: none;
+    visibility: hidden;
+    opacity: 0;
     pointer-events: none;
+    will-change: opacity;
+    transition: opacity 400ms ease, visibility 0s linear 400ms;
 }
 
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-svg { opacity: 0; }
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-hold-ring { opacity: 1; }
-
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-percent,
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-progress-loop,
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-note {
-    display: none;
+body.driver-mobile-screen .driver-work-confirm.is-showing {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 120ms ease;
 }
 
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-core {
-    border-color: rgba(140, 255, 46, .7);
-    box-shadow:
-        inset 0 12px 22px rgba(255,255,255,0.08),
-        inset 0 -26px 36px rgba(0,0,0,0.52),
-        inset 0 0 40px rgba(140, 255, 46, .16),
-        0 10px 26px rgba(0,0,0,0.42),
-        0 0 34px rgba(140, 255, 46, .28);
+/* Затухание: по концу показа или по касанию; под слоем уже следующее состояние. */
+body.driver-mobile-screen .driver-work-confirm.is-showing.is-leaving {
+    opacity: 0;
+    transition: opacity 450ms ease;
 }
 
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-dial-core::after {
-    content: "";
-    order: -1;
+/* Кольцо — те же двенадцать секций и та же маска, что у кольца удержания
+   (.driver-work-hold-fill), только сразу полное; зазоры 3° на больших делениях. */
+body.driver-mobile-screen .driver-work-confirm-ring,
+body.driver-mobile-screen .driver-work-confirm-ring-glow {
+    position: absolute;
+    inset: 7.7%;
+    border-radius: 50%;
+    background: repeating-conic-gradient(from -1.5deg, transparent 0deg 3deg, currentColor 3deg 30deg);
+    opacity: 0;
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-confirm-ring {
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px), #000 calc(100% - 1px), transparent 100%);
+}
+
+/* Свечение — то же кольцо чуть шире, с растушёванной маской вместо filter: blur. */
+body.driver-mobile-screen .driver-work-confirm-ring-glow {
+    inset: 4.5%;
+    -webkit-mask: radial-gradient(farthest-side, transparent 80%, rgba(0, 0, 0, .75) 90%, rgba(0, 0, 0, .75) 95%, transparent 100%);
+    mask: radial-gradient(farthest-side, transparent 80%, rgba(0, 0, 0, .75) 90%, rgba(0, 0, 0, .75) 95%, transparent 100%);
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring {
+    animation: driver-confirm-fade-in 150ms ease-out forwards;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring-glow {
+    animation: driver-confirm-flash 700ms ease-out forwards;
+}
+
+/* Сердцевина: тот же размер (74% круга) и та же основа, что у .driver-work-dial-core,
+   непрозрачная — она закрывает подпись под собой до конца показа. */
+body.driver-mobile-screen .driver-work-confirm-core {
+    position: absolute;
+    inset: 13%;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 2cqw;
+    border-radius: 50%;
+    border: 1px solid rgba(140, 255, 46, .5);
+    background:
+        radial-gradient(circle at 50% 24%, rgba(188, 215, 211, .2), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgb(63, 88, 90), rgb(27, 49, 53) 62%, rgb(8, 20, 24));
+    overflow: hidden;
+}
+
+body.driver-mobile-screen .driver-work-confirm-halo {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 52%, rgba(140, 255, 46, .36), rgba(140, 255, 46, .12) 46%, transparent 74%);
+    opacity: 0;
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo {
+    animation: driver-confirm-fade-in 320ms ease-out forwards;
+}
+
+body.driver-mobile-screen .driver-work-confirm-check {
     position: relative;
-    z-index: 1;
-    width: 15%;
-    aspect-ratio: 1 / 2;
-    margin-top: -6%;
-    border: solid #8cff2e;
-    border-width: 0 clamp(5px, 1.6vw, 8px) clamp(5px, 1.6vw, 8px) 0;
-    border-radius: 2px;
-    transform: rotate(45deg);
+    width: 26cqw;
+    height: 26cqw;
+    overflow: visible;
 }
 
-body.driver-mobile-screen .driver-work-dial-button.is-confirmed .driver-work-label {
-    color: #8cff2e;
+body.driver-mobile-screen .driver-work-confirm-check path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-check path {
+    animation: driver-confirm-draw 300ms cubic-bezier(.2, .7, .2, 1) 90ms forwards;
+}
+
+body.driver-mobile-screen .driver-work-confirm-text {
+    position: relative;
+    max-width: 92%;
+    color: currentColor;
+    font-weight: 900;
+    font-size: 8.2cqw;
+    line-height: 1;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, .7),
+        0 0 12px rgba(140, 255, 46, .35);
+    opacity: 0;
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-text {
+    animation: driver-confirm-fade-in 220ms ease-out 260ms forwards;
+}
+
+@keyframes driver-confirm-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes driver-confirm-flash {
+    0% { opacity: 0; }
+    30% { opacity: 1; }
+    100% { opacity: .55; }
+}
+
+@keyframes driver-confirm-draw {
+    to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring,
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-ring-glow,
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo,
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-text {
+        animation: none;
+        opacity: 1;
+    }
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-check path {
+        animation: none;
+        stroke-dashoffset: 0;
+    }
 }
 
 @keyframes driver-hold-right {
