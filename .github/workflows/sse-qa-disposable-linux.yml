@@ -3,10 +3,6 @@ name: SSE QA disposable Linux validation
 on:
   workflow_dispatch:
     inputs:
-      source_sha:
-        description: Full immutable commit SHA containing the reviewed package and this workflow
-        required: true
-        type: string
       confirmation:
         description: Type DISPOSABLE_SSE_QA_ONLY
         required: true
@@ -36,33 +32,28 @@ jobs:
       - name: Validate manual dispatch contract
         shell: bash
         env:
-          REQUESTED_SHA: ${{ inputs.source_sha }}
           CONFIRMATION: ${{ inputs.confirmation }}
           QUOTA_CONFIRMATION: ${{ inputs.actions_quota_confirmation }}
         run: |
           set -Eeuo pipefail
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
-          [[ "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
-          test "${GITHUB_SHA,,}" = "${REQUESTED_SHA,,}"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$CONFIRMATION" = DISPOSABLE_SSE_QA_ONLY
           test "$QUOTA_CONFIRMATION" = AVAILABLE_ACTIONS_QUOTA_CONFIRMED
 
       - name: Checkout exact reviewed SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_sha }}
           fetch-depth: 1
           persist-credentials: false
           clean: true
 
       - name: Prove exact source and isolation boundary
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.source_sha }}
         run: |
           set -Eeuo pipefail
           actual_sha="$(git rev-parse HEAD)"
-          test "$actual_sha" = "${REQUESTED_SHA,,}"
+          test "$actual_sha" = "$GITHUB_SHA"
           test -f "$PACKAGE_ROOT/scripts/linux_disposable_cycle.sh"
           test ! -e /srv/accounting-mvp
           test ! -e /etc/accounting-mvp.env
