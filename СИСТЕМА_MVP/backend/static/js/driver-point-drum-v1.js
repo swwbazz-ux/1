@@ -497,6 +497,9 @@
         g.style.top = (r.top - box.top) + "px";
         g.style.width = r.width + "px";
         g.style.height = r.height + "px";
+        // См. тот же комментарий в driver-downtime-drum-v1.js (makeGhost).
+        g.style.setProperty("--drum-card-w", r.width + "px");
+        g.style.setProperty("--drum-card-h", r.height + "px");
         g.style.transform = "translateY(0px)";
         screen.appendChild(g);
         var w = dial();
@@ -734,34 +737,10 @@
         if (root.ResizeObserver) {
             var w = dial();
             if (w) new root.ResizeObserver(function () { syncLink(); }).observe(w);
-            // Барабан скрыт (0×0) на вкладке «Простои»: переход на «Работу» — ресайз
-            // с 0 на реальный размер, тем же сигналом перезапускаем подгонку кегля
-            // (см. build() выше и driver-downtime-drum-v1.js).
-            var drumEl = drum();
-            if (drumEl) {
-                // Только контейнер барабана и только реальная смена размера >1px
-                // (см. тот же наблюдатель и комментарий в driver-downtime-drum-v1.js).
-                var lastFitW = -1, lastFitH = -1;
-                new root.ResizeObserver(function (entries) {
-                    var rect = entries[0] && entries[0].contentRect;
-                    var w2 = rect ? rect.width : drumEl.clientWidth;
-                    var h2 = rect ? rect.height : drumEl.clientHeight;
-                    if (w2 <= 0 || h2 <= 0) return;
-                    if (Math.abs(w2 - lastFitW) <= 1 && Math.abs(h2 - lastFitH) <= 1) return;
-                    lastFitW = w2; lastFitH = h2;
-                    fitLabels();
-                }).observe(drumEl);
-            }
         }
+        // Кегль подписей считает CSS сам (driver-drum-label-fit-v1.js) — повторные
+        // подгонки при появлении барабана, ресайзе и загрузке шрифтов не нужны.
         root.setTimeout(refresh, 300);
-        // Подгонка меряет ширину по факту загруженного шрифта — если жирный кегль ещё
-        // не подгрузился (медленная сеть), замер идёт по запасному шрифту (обычно уже
-        // настоящего) и после подгрузки название перестаёт помещаться в уже
-        // посчитанный размер (см. тот же фикс и комментарий в driver-downtime-drum-v1.js,
-        // владелец, 28.09.2026).
-        if (root.document && root.document.fonts && root.document.fonts.ready) {
-            root.document.fonts.ready.then(fitLabels);
-        }
     }
 
     root.DriverPointDrum = Object.freeze({

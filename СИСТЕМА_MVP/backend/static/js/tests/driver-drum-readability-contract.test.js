@@ -33,32 +33,58 @@ test("drum card label and body get an explicit pixel width, not a percentage", (
     assert.match(CSS, /\.driver-drum-card-label\s*\{[^}]*width:\s*calc\(var\(--drum-card-w\) - 20px\)/s);
 });
 
-test("drum label font size is fit by JS (driver-drum-label-fit-v1.js), not a text-length tier", () => {
-    // Кегль по числу символов во всей подписи давал «пляшущий» размер: «ОФР»
-    // (короткое слово) вставало крупно, а «Ожидание погрузки» держали мелким
-    // классом, хотя карточка та же ширина. Теперь размер ищет JS двоичным
-    // сужением (driver-drum-label-fit-v1.js) — здесь только коробка и потолок
-    // высоты под одну-две строки, посчитанный долей высоты карточки.
-    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*font-size:\s*clamp\(22px, calc\(var\(--drum-card-h\) \* 0\.42\), 46px\)/s);
-    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*overflow-wrap:\s*normal/s);
-    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*word-break:\s*normal/s);
-    assert.match(CSS, /\.driver-drum-card-label-minor\s*\{[^}]*font-size:\s*clamp\(10px, calc\(var\(--drum-card-h\) \* 0\.11\), 13px\)/s);
+test("drum name size is pure CSS from the label container, not a JS measurement", () => {
+    // Подгонка по живой раскладке (двоичный поиск по scrollWidth, ResizeObserver,
+    // fonts.ready, пересчёт после вращения) на телефоне оставляла подпись на
+    // сыром CSS-потолке после подмены фрагмента или простоя со скрытой вкладки —
+    // огромный кегль, обрезанное слово — и давала лаги с «прыгающим» размером
+    // (владелец, 28.09.2026). Теперь подпись — контейнер размеров, а кегль —
+    // min(ширина / самая длинная строка в em, высота / число строк), браузер
+    // применяет его сам при любой раскладке.
+    assert.match(CSS, /\.driver-drum-card-label\s*\{[^}]*container-type:\s*size/s);
+    assert.match(CSS, /\.driver-drum-card-label-main\s*\{[^}]*font-size:\s*min\(\s*calc\(100cqw \/ \(var\(--lw\) \* 1\.04\)\),\s*calc\(\(100cqh - 2px - var\(--has-minor\) \* \(clamp\(9px, 16cqh, 14px\) \+ 2px\)\) \/ \(var\(--ln\) \* 1\.02\)\),\s*46px\s*\)/s);
+    // Мелкая строка «ОЖИДАНИЕ» — ровно та высота, которую вычитает главное слово.
+    assert.match(CSS, /\.driver-drum-card-label-minor\s*\{[^}]*font-size:\s*clamp\(9px, 16cqh, 14px\)/s);
+    // Переносит не браузер, а разметка по строкам: каждая строка — блок без
+    // переноса, слово не разрывается никогда.
+    assert.match(CSS, /\.driver-drum-card-label-line\s*\{[^}]*white-space:\s*nowrap[^}]*word-break:\s*keep-all[^}]*hyphens:\s*none/s);
     assert.doesNotMatch(CSS, /\.driver-drum-card-label\.is-drum-label-medium/);
     assert.doesNotMatch(CSS, /\.driver-drum-card-label\.is-drum-label-long/);
+    // Модуль подписи не меряет раскладку страницы вовсе (проверяем код, не
+    // комментарии — в шапке файла описано, почему от этого отказались).
+    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    assert.doesNotMatch(fitJs, /scrollWidth|clientWidth|clientHeight|getBoundingClientRect|offsetWidth|ResizeObserver|fonts\.ready/);
 });
 
-test("drum name never sits below the readability floor (22px) unless wrap and squeeze are exhausted", () => {
-    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
-    assert.match(fitJs, /var FLOOR_PX = 22;/);
-    assert.match(fitJs, /var MIN_SQUEEZE = 0\.85;/);
-    // Порядок уступок: одна строка -> перенос по словам -> сжатие -> крайняя мера.
-    assert.match(fitJs, /Ступень 1[\s\S]*Ступень 2[\s\S]*Ступень 3[\s\S]*Ступень 4/);
-});
-
-test("neighbouring drum cards don't jump more than 25% apart in name size", () => {
-    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
-    assert.match(fitJs, /var ALIGN_RATIO = 1\.25;/);
-    assert.match(fitJs, /function fitAll\(container, selector\)/);
+test("line layout keeps every word whole and picks the split that gives the biggest name", () => {
+    // Модуль без canvas (как в node) берёт запасную оценку ширины — для выбора
+    // раскладки этого достаточно; размер всё равно решает CSS по фактической рамке.
+    const sandbox = { globalThis: null };
+    sandbox.globalThis = sandbox;
+    const vm = require("node:vm");
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8"), sandbox);
+    const { chooseLayout } = sandbox.DriverDrumLabelFit;
+    const cases = [
+        ["Склад окисленной руды", 1.45],
+        ["Чистка кузова", 2.2],
+        ["погрузки", 3.0],
+        ["Поломка", 2.2],
+        ["ККД", 1.45],
+    ];
+    cases.forEach(([text, ratio]) => {
+        const layout = chooseLayout(text, ratio, null);
+        // Строки склеиваются обратно ровно в исходный текст: ни одно слово не
+        // разорвано и не потеряно.
+        assert.equal(layout.lines.join(" "), text);
+        layout.lines.forEach((line) => assert.ok(line.length > 0));
+        assert.ok(layout.ln >= 1 && layout.ln <= 3);
+        assert.ok(layout.lw > 0);
+    });
+    // Длинное название точки на узкой карточке — по строке на слово, а не одной
+    // строкой в микроскопическом кегле.
+    assert.equal(chooseLayout("Склад окисленной руды", 1.45, null).ln, 3);
+    assert.equal(chooseLayout("Поломка", 2.2, null).ln, 1);
 });
 
 test("active-downtime timer is not tied to the reason-name tier and reads clearly on its own", () => {
@@ -168,70 +194,33 @@ test("downtime drum front card is never highlighted yellow without an open shift
     assert.match(drumJs, /function hasOpenShift\(\)/);
 });
 
-test("starting a downtime from the hidden drum tab still fits the label once the drum becomes visible", () => {
-    // Простой стартовал со вкладки «Простои», пока барабан на «Работе» скрыт
-    // (clientWidth/clientHeight = 0) — driver-drum-label-fit-v1.js не сдаётся при
-    // нулевой ширине (не пишет размер вовсе), но раньше НИЧЕГО не перезапускало
-    // подгонку, когда барабан снова становился видимым: build()/refresh() при том
-    // же составе карточек выходили раньше вызова fitLabels(). Текст оставался на
-    // необрезанном по ширине CSS-потолке (clamp по высоте, без учёта ширины) —
-    // «шрифт огромный, слово обрезано с обеих сторон, таймер вытолкнут за карточку»
-    // (владелец, 28.09.2026). Чинится двумя путями: явный fitLabels() и на пути
-    // «состав карточек не изменился», и ResizeObserver на самом барабане — переход
-    // вкладки на «Работу» это ресайз барабана с 0 на реальный размер.
+test("labels are laid out only when a card is built, never on spin, resize observers or font loads", () => {
+    // Кегль считает CSS сам, поэтому никаких повторных «подгонок» больше нет:
+    // ни ResizeObserver на барабане, ни document.fonts.ready, ни пересчёта после
+    // фиксации вращения, ни на раннем выходе build()/refresh() (который
+    // дёргается на любую относящуюся мутацию). Разметка строк строится при сборке
+    // барабана и при подмене фрагмента (reapply) — один раз на текст.
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
     const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
     [drumJs, pointJs].forEach((src) => {
-        // Тот же состав — ранний return БЕЗ подгонки: первый вариант фикса вызывал
-        // fitLabels() и здесь, а build()/refresh() дёргаются на любую относящуюся
-        // мутацию (на телефоне — часто) — барабан тормозил, кегль «прыгал»
-        // (владелец, 28.09.2026). Подгонку при появлении скрытого барабана ловит
-        // только узкий сигнал ниже.
         const earlyReturn = src.match(/if \(geo\.built === c[\s\S]{0,160}\)\s*\{([\s\S]{0,900}?)return true;/);
         assert.ok(earlyReturn, "early-return branch of build() not found");
         assert.doesNotMatch(earlyReturn[1], /fitLabels\(/);
-        // ResizeObserver — только на контейнере барабана, только реальная смена
-        // размера >1px против последней подгонки, и тогда подгонка.
-        assert.match(src, /new root\.ResizeObserver\(function \(entries\) \{[\s\S]{0,400}Math\.abs\(w2 - lastFitW\) <= 1 && Math\.abs\(h2 - lastFitH\) <= 1\) return;[\s\S]{0,120}fitLabels\(\);/);
-        assert.match(src, /\}\)\.observe\(drumEl\)|roDrum\.observe\(drumEl\)/);
-    });
-});
-
-test("labels are never re-fit per frame: no fit call inside render() or the drag handlers", () => {
-    // Во время вращения/свайпа подписи не пересчитываются вообще (владелец,
-    // 28.09.2026): render() зовётся на каждый кадр, pointermove — на каждое
-    // движение пальца. Подгонка разрешена только по событиям (сборка, появление
-    // скрытого барабана, шрифты, ресайз с задержкой, фиксация после вращения).
-    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
-    const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
-    [drumJs, pointJs].forEach((src) => {
         // Файлы с CRLF — конец функции ищем с необязательным \r.
         const render = src.match(/function render\(snapping\) \{([\s\S]*?)\r?\n    \}\r?\n/);
         assert.ok(render, "render() not found");
-        // Нигде внутри render() — включая таймер фиксации после остановки
-        // вращения: кегль не зависит от того, какая грань встала в центр, и
-        // «ушедшая на бок» грань несёт тот же кегль, что имела в центре.
         assert.doesNotMatch(render[1], /fitLabels\(/);
-    });
-    // Положение грани (центр/бок) не входит в подпись кэша подгонки и никакого
-    // бюджета «по видимой в перспективе ширине» больше нет — иначе те же
-    // «Отвал»/«Склад…» получали то 26px, то 12px после каждой фиксации.
-    const fitJsNoBudget = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
-    assert.doesNotMatch(fitJsNoBudget, /function computeVisibleWidthBudget/);
-    assert.match(fitJsNoBudget, /function fitSignature\(labelRoot, card\) \{/);
-    assert.doesNotMatch(fitJsNoBudget.match(/function fitSignature\(labelRoot, card\) \{([\s\S]*?)\r?\n    \}/)[1], /is-center/);
-    [drumJs, pointJs].forEach((src) => {
         const pointerMove = src.match(/doc\.addEventListener\("pointermove"[\s\S]*?\}, \{ passive: false, capture: true \}\);/);
         assert.ok(pointerMove, "pointermove handler not found");
         assert.doesNotMatch(pointerMove[0], /fitLabels\(/);
+        assert.doesNotMatch(src, /fonts\.ready/);
+        assert.doesNotMatch(src, /lastFitW|roDrum/);
         // Ресайз окна — с задержкой, не серией полных пересборок подряд.
         assert.match(src, /root\.addEventListener\("resize", function \(\) \{\s*root\.clearTimeout\(resizeTimer\);/);
+        // Летящая копия грани живёт вне барабана — ей переносятся размеры грани,
+        // иначе подпись-контейнер схлопнулась бы и текст в копии пропал.
+        assert.match(src, /g\.style\.setProperty\("--drum-card-w", r\.width \+ "px"\);/);
     });
-    // Повторный вызов с теми же входами — без записи в DOM (кэш по тексту и
-    // размерам карточки, не подписи — её ширину пишет сама подгонка).
-    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
-    assert.match(fitJs, /function fitSignature\(labelRoot, card\)/);
-    assert.match(fitJs, /labelRoot\.dataset\.driverDrumFitSig === sig && labelRoot\.dataset\.driverDrumFitOk === "1"/);
 });
 
 test("the shared outline is stationary: never recomputed while either drum is being dragged", () => {

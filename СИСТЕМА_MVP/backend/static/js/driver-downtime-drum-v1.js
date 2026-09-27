@@ -528,6 +528,11 @@
         g.style.top = (r.top - box.top) + "px";
         g.style.width = r.width + "px";
         g.style.height = r.height + "px";
+        // Копия живёт вне барабана, где --drum-card-w/-h не заданы, а подпись —
+        // контейнер размеров от них (driver-downtime-drum-v1.css): без этих двух
+        // строк её ширина схлопывалась бы в 0 и текст в летящей копии пропадал.
+        g.style.setProperty("--drum-card-w", r.width + "px");
+        g.style.setProperty("--drum-card-h", r.height + "px");
         g.style.transform = "translateY(0px)";
         screen.appendChild(g);
         var w = dial();
@@ -954,43 +959,13 @@
             if (w) ro.observe(w);
             // Круг зажат по высоте: при смене ширины экрана он не меняет размер, а сдвигается.
             ro.observe(doc.body);
-            // Наблюдаем ТОЛЬКО за контейнером барабана (не за карточками и не за
-            // подписями — их размеры пишет сама подгонка, и это замкнуло бы петлю),
-            // и реагируем только на реальную смену его размера больше 1px против
-            // последней подгонки: так ловится и «барабан был скрыт (0×0) на вкладке
-            // «Простои», а простой стартовал оттуда» — переход на «Работу» это
-            // ресайз с 0 на реальный размер, — и не ловятся собственные правки
-            // подгонки (владелец, 28.09.2026: «тормозит, текст прыгает»).
-            var drumEl = drum();
-            if (drumEl) {
-                var lastFitW = -1, lastFitH = -1;
-                var roDrum = new root.ResizeObserver(function (entries) {
-                    var rect = entries[0] && entries[0].contentRect;
-                    var w2 = rect ? rect.width : drumEl.clientWidth;
-                    var h2 = rect ? rect.height : drumEl.clientHeight;
-                    if (w2 <= 0 || h2 <= 0) return;
-                    if (Math.abs(w2 - lastFitW) <= 1 && Math.abs(h2 - lastFitH) <= 1) return;
-                    lastFitW = w2; lastFitH = h2;
-                    fitLabels();
-                });
-                roDrum.observe(drumEl);
-            }
         }
+        // Кегль подписей больше не требует повторных подгонок (скрытая вкладка,
+        // ресайз, шрифты): его считает CSS от размеров контейнера при каждой
+        // раскладке сам (driver-drum-label-fit-v1.js). JS только строит разметку
+        // строк при сборке барабана — здесь больше нечего перезапускать.
         root.addEventListener("operational-state-refresh-applied", scheduleLink);
-        // Первая отрисовка бывает раньше, чем карточка получает реальную ширину
-        // (скрытая вкладка, только что открытая смена) — подгонка кегля выше уже
-        // не сдаётся сама при нулевой ширине, но повторный явный вызов кадром
-        // позже подстраховывает тот же случай, что и render ниже.
-        root.setTimeout(function () { render(false); fitLabels(); }, 300);
-        // Подгонка меряет ширину текста по факту загруженного шрифта: если жирный
-        // кегль ещё не подгрузился (медленная сеть на телефоне), замер идёт по
-        // запасному системному шрифту — он обычно уже, чем настоящий, и после
-        // подгрузки настоящего слово перестаёт помещаться в уже посчитанный
-        // размер («ПОЛОМК…», реальный телефон, владелец, 28.09.2026). Пересчёт
-        // после document.fonts.ready ловит именно этот случай.
-        if (root.document && root.document.fonts && root.document.fonts.ready) {
-            root.document.fonts.ready.then(function () { fitLabels(); });
-        }
+        root.setTimeout(function () { render(false); }, 300);
     }
 
     // Барабан точек разгрузки над кругом просит перерисовать кольцо, когда его грань
