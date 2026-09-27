@@ -1,0 +1,10 @@
+P28_VOICE_EVIDENCE {"announcements":[{"point":{"eventVersion":10,"tripId":501,"dumpPointId":1,"dumpPointName":"P1"}}],"pointOnlySelected":false,"dedupeKey":"dump:501"}
+✔ actual voice functions announce first load once and ignore same-trip/version-only point changes (5.285926ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 92.295303
