@@ -262,11 +262,15 @@ test("the swipe arrow is a fixed slot outside the card, sized from the real gap 
     // Обе стрелки одного размера и на одном расстоянии от своей грани (ориентир —
     // верхняя); нижний барабан сдвигается вниз, насколько позволяет место до
     // низа экрана, а сдвиг считается от несдвинутого положения грани.
-    assert.match(drumJs, /var cardTop0 = cr\.top - bottomShift, cardBottom0 = cr\.bottom - bottomShift;/);
-    assert.match(drumJs, /var shift = Math\.min\(need, room\);/);
+        assert.match(drumJs, /var shift = Math\.min\(need, room\);/);
     assert.match(drumJs, /s\.setProperty\("--drum-arrow-h-top", h\.toFixed\(1\) \+ "px"\);/);
     assert.match(drumJs, /s\.setProperty\("--drum-arrow-h-bottom", h\.toFixed\(1\) \+ "px"\);/);
-    assert.match(CSS, /\.driver-downtime-drum\s*\{[^}]*translate:\s*0 var\(--drum-bottom-shift, 0px\);/s);
+    assert.match(CSS, /\.driver-downtime-drum\s*\{[^}]*translate:\s*0 calc\(var\(--drum-bottom-shift, 0px\) \+ var\(--driver-work-assembly-shift, 0px\)\);/s);
+    // Вся сборка центруется в экране «Работа» одним общим сдвигом (барабан
+    // точек, круг, барабан простоев); меньше полпикселя — не двигается.
+    assert.match(CSS, /\.driver-work-screen \.driver-point-drum,\s*body\.driver-mobile-screen \.driver-work-screen \.driver-work-dial-zone\s*\{\s*translate:\s*0 var\(--driver-work-assembly-shift, 0px\);/);
+    assert.match(drumJs, /var ASSEMBLY_MIN_SHIFT = 0\.5;/);
+    assert.match(drumJs, /var cardTop0 = cr\.top - bottomShift - a, cardBottom0 = cr\.bottom - bottomShift - a;/);
     // Считается вместе с контуром — вне жеста и только при сдвиге геометрии.
     assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0, box\);/);
     // Цвет верхней стрелки мигает той же переменной, что и грань точки.

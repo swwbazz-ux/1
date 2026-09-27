@@ -839,15 +839,36 @@
     var OUTLINE_BELOW_CARD = 5 + 1.25 + 4.5;
     var lastArrowVars = "";
     var bottomShift = 0;
+    // Сдвиг всей сборки (оба барабана и круг с угловыми кнопками) по вертикали —
+    // чтобы она стояла ровно посередине экрана «Работа» (а он — посередине между
+    // шапкой и таб-баром). Сетка экрана заканчивается пустой строкой «assign»,
+    // которая всё равно добавляет один промежуток сетки под нижним барабаном, —
+    // на маленьких экранах из-за этого сборка сидела на несколько пикселей выше
+    // середины (владелец, 28.09.2026). Меньше полпикселя не двигаем: на телефоне
+    // владельца сборка и так по центру, там ничего не должно сдвинуться.
+    var assemblyShift = 0;
+    var ASSEMBLY_MIN_SHIFT = 0.5;
     function syncSlotArrows(dr, cr, tr, box) {
-        var cardTop0 = cr.top - bottomShift, cardBottom0 = cr.bottom - bottomShift;
-        var gapBottom0 = cardTop0 - dr.bottom;
-        var gapTop = tr && tr.height ? dr.top - tr.bottom : gapBottom0;
+        // Все замеры — в НЕсдвинутых координатах: вычитаем текущие сдвиги, иначе
+        // каждый пересчёт менял бы их заново.
+        var a = assemblyShift;
+        var dialTop0 = dr.top - a, dialBottom0 = dr.bottom - a;
+        var cardTop0 = cr.top - bottomShift - a, cardBottom0 = cr.bottom - bottomShift - a;
+        var topCardTop0 = tr && tr.height ? tr.top - a : null;
+        var topCardBottom0 = tr && tr.height ? tr.bottom - a : null;
+        var gapBottom0 = cardTop0 - dialBottom0;
+        var gapTop = topCardBottom0 !== null ? dialTop0 - topCardBottom0 : gapBottom0;
         var h = Math.max(ARROW_MIN_H, Math.min(ARROW_H, gapTop - 2 * ARROW_MIN_CLEAR));
         var lift = (gapTop - h) / 2;
         var need = Math.max(0, 2 * lift + h - gapBottom0);
-        var room = box ? Math.max(0, box.bottom - (cardBottom0 + OUTLINE_BELOW_CARD)) : 0;
+        // Место под сдвиг нижнего барабана — всё свободное место экрана «Работа»
+        // сверху и снизу сборки: после сдвига сборка всё равно центруется ниже.
+        var spareTop = box && topCardTop0 !== null ? Math.max(0, (topCardTop0 - OUTLINE_BELOW_CARD) - box.top) : 0;
+        var spareBottom = box ? Math.max(0, box.bottom - (cardBottom0 + OUTLINE_BELOW_CARD)) : 0;
+        var room = spareTop + spareBottom;
         var shift = Math.min(need, room);
+        var center = (spareBottom - shift - spareTop) / 2;
+        var newAssembly = Math.abs(center) >= ASSEMBLY_MIN_SHIFT ? Math.round(center * 10) / 10 : 0;
         var gapBottom = gapBottom0 + shift;
         if (2 * lift + h > gapBottom) {
             // Не хватило места даже со сдвигом: уменьшаем обе стрелки одинаково,
@@ -855,12 +876,14 @@
             h = Math.max(ARROW_MIN_H, Math.min(h, gapBottom - 2 * ARROW_MIN_CLEAR));
             lift = Math.max(ARROW_MIN_CLEAR, Math.min((gapTop - h) / 2, (gapBottom - h) / 2));
         }
-        var vars = [h, lift, shift].map(function (v) { return v.toFixed(1); }).join(",");
+        var vars = [h, lift, shift, newAssembly].map(function (v) { return v.toFixed(1); }).join(",");
         if (vars === lastArrowVars) return;
         lastArrowVars = vars;
         bottomShift = Math.round(shift * 10) / 10;
-        root.__driverDrumArrowReport = { h: h, lift: lift, shift: shift, need: need, room: room };
+        assemblyShift = newAssembly;
+        root.__driverDrumArrowReport = { h: h, lift: lift, shift: shift, need: need, room: room, assembly: newAssembly };
         var s = doc.documentElement.style;
+        s.setProperty("--driver-work-assembly-shift", assemblyShift.toFixed(1) + "px");
         s.setProperty("--drum-arrow-h-bottom", h.toFixed(1) + "px");
         s.setProperty("--drum-arrow-lift-bottom", lift.toFixed(1) + "px");
         s.setProperty("--drum-arrow-h-top", h.toFixed(1) + "px");
