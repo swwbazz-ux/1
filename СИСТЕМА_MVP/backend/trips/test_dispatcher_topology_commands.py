@@ -5,6 +5,8 @@ from threading import Barrier
 from unittest import skipUnless
 from unittest.mock import patch
 
+from django.apps import apps
+from django.core.management.color import no_style
 from django.db import close_old_connections, connection
 from django.http import JsonResponse
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
@@ -428,6 +430,9 @@ class DispatcherAssignTruckPostgreSQLConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 
     def setUp(self):
+        with connection.cursor() as cursor:
+            for sql in connection.ops.sequence_reset_sql(no_style(), apps.get_models()):
+                cursor.execute(sql)
         role = Role.objects.create(code='dispatcher', name='Диспетчер')
         self.dispatcher = Employee.objects.create(
             full_name='Диспетчер конкурентного назначения',
