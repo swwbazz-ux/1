@@ -143,28 +143,18 @@
        чистый common-mode масштаб). Центральную грань (is-center) не трогаем —
        её ширины эта проверка не должна урезать, там результат совпадает с
        обычным clientWidth (владелец: «центральная карточка — как сейчас»). */
-    var STAGE_MASK_SAFE_RATIO = 0.08;
-    function computeVisibleWidthBudget(labelRoot) {
-        var card = labelRoot.closest ? labelRoot.closest(".driver-drum-card") : null;
-        if (!card || card.classList.contains("is-center")) return null;
-        var cardClientW = Number(card.clientWidth || 0);
-        if (cardClientW <= 0) return null;
-        var cardRect = card.getBoundingClientRect();
-        if (cardRect.width <= 0) return null;
-        var scale = cardRect.width / cardClientW;
-        if (!(scale > 0)) return null;
-        var left = cardRect.left, right = cardRect.right;
-        var stage = card.closest ? card.closest(".driver-downtime-drum-stage") : null;
-        if (stage) {
-            var stageRect = stage.getBoundingClientRect();
-            var safe = stageRect.width * STAGE_MASK_SAFE_RATIO;
-            left = Math.max(left, stageRect.left + safe);
-            right = Math.min(right, stageRect.right - safe);
-        }
-        var visible = right - left;
-        if (visible <= 0) return null;
-        return visible / scale;
-    }
+    /* НЕ подгоняем боковые грани под их видимую в перспективе ширину. Такая
+       попытка была (бюджет от getBoundingClientRect грани с вычетом маски
+       сцены): она делала размер текста зависимым от УГЛОВОГО СЛОТА, в котором
+       грань стоит в момент подгонки, — после каждой фиксации барабана те же
+       «Отвал»/«Склад…» получали то 26px (в центре), то 12px (сбоку, узкая
+       проекция), и кегль «прыгал» при каждом повороте, а сама подгонка гонялась
+       на каждую фиксацию (владелец, 28.09.2026: «текст постоянно прыгает в
+       размере», «во время вращения подписи не пересчитываются вообще»). Грань и
+       текст в ней сжимает ОДНА и та же 3D-трансформация — их отношение не
+       меняется, из собственной рамки текст не выходит; подгоняем один раз под
+       центральный слот, боковые грани несут тот же кегль. Обрезка у самого края
+       сцены её маской — отдельный, не текстовый эффект. */
 
     /* Подгонка одного главного слова. Возвращает {fontPx, deferred} — deferred,
        если у элемента ещё нет реальной ширины/бюджета высоты (карточка скрыта/не
@@ -312,13 +302,14 @@
        «прыгал» без всякой видимой причины (владелец, 28.09.2026: «тормозит,
        текст прыгает»). Подпись берём из входов, которые сама подгонка не
        трогает (ширина/высота КАРТОЧКИ, не подписи — её ширину мы же и пишем). */
-    function fitSignature(labelRoot, card, visibleWidthBudget) {
+    function fitSignature(labelRoot, card) {
+        // Только текст и размер КАРТОЧКИ: положение грани (центр/бок) в подпись
+        // намеренно не входит — иначе каждая фиксация барабана перекраивала бы
+        // кегль (см. комментарий выше).
         return [
             labelRoot.dataset.driverDrumLabelText || "",
             card ? card.clientWidth : 0,
-            card ? card.clientHeight : 0,
-            card && card.classList.contains("is-center") ? 1 : 0,
-            visibleWidthBudget ? Math.round(visibleWidthBudget) : 0
+            card ? card.clientHeight : 0
         ].join("|");
     }
 
@@ -326,16 +317,19 @@
         if (!labelRoot) return null;
         var main = ensureMarkup(labelRoot);
         var card = labelRoot.closest ? labelRoot.closest(".driver-drum-card") : null;
-        var visibleWidthBudget = computeVisibleWidthBudget(labelRoot);
-        var sig = fitSignature(labelRoot, card, visibleWidthBudget);
-        if (labelRoot.dataset.driverDrumFitSig === sig && labelRoot.dataset.driverDrumFitOk === "1") {
+        var sig = fitSignature(labelRoot, card);
+        // Кэш засчитываем, только если результат подгонки ФИЗИЧЕСКИ на месте
+        // (inline font-size у главного слова). Подмена фрагмента с сервера
+        // переносит data-атрибуты (в т.ч. эти метки кэша), а inline-стиль
+        // берёт серверный — пустой: метка говорила «уже подогнано», а кегль
+        // стоял на сыром CSS-потолке (39px), и длинные названия снова вылезали
+        // из карточки после каждого ~20-секундного обновления экрана (поймано
+        // на телефоне 28.09.2026 счётчиком: 7 вызовов подгонки без единой записи).
+        if (labelRoot.dataset.driverDrumFitSig === sig && labelRoot.dataset.driverDrumFitOk === "1"
+            && main.style && main.style.fontSize) {
             return { deferred: false, fontPx: null, cached: true };
         }
-        if (visibleWidthBudget) {
-            setImportant(labelRoot, "width", Math.min(visibleWidthBudget, labelRoot.clientWidth || visibleWidthBudget) + "px");
-        } else if (labelRoot.style) {
-            labelRoot.style.removeProperty("width");
-        }
+        if (labelRoot.style) labelRoot.style.removeProperty("width");
         var budget = computeMainBudget(labelRoot);
         var result = fitOne(main, budget);
         labelRoot.dataset.driverDrumFitSig = sig;
@@ -352,6 +346,20 @@
     function fitAll(container, selector) {
         var nodes = container ? Array.prototype.slice.call(container.querySelectorAll(selector || "[data-driver-drum-label]")) : [];
         var results = nodes.map(fit);
+        /* Часть карточек могла не иметь размера в момент вызова (подмена фрагмента
+           с сервера: новые узлы уже в DOM, но ещё не разложены — подпись кэша
+           «ККД|0|0», ok=0, поймано на телефоне 28.09.2026: после каждого
+           ~20-секундного обновления экрана длинные названия стояли на сыром
+           CSS-потолке и вылезали из карточки, а повторить подгонку было некому).
+           Одна повторная попытка кадром позже — не цикл: если и она отложена,
+           дальше ждём следующего настоящего события (появление барабана, ресайз). */
+        if (results.some(function (r) { return r && r.deferred; }) && !container.__driverDrumFitRetry && root.requestAnimationFrame) {
+            container.__driverDrumFitRetry = true;
+            root.requestAnimationFrame(function () {
+                container.__driverDrumFitRetry = false;
+                fitAll(container, selector);
+            });
+        }
         var settled = [];
         results.forEach(function (result, index) {
             if (result && !result.deferred && !result.belowFloor) settled.push({node: nodes[index], fontPx: result.fontPx});

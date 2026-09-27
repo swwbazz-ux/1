@@ -208,10 +208,19 @@ test("labels are never re-fit per frame: no fit call inside render() or the drag
         // Файлы с CRLF — конец функции ищем с необязательным \r.
         const render = src.match(/function render\(snapping\) \{([\s\S]*?)\r?\n    \}\r?\n/);
         assert.ok(render, "render() not found");
-        // Единственный допустимый вызов внутри render() — из таймера фиксации
-        // (__snapTimer), который срабатывает уже ПОСЛЕ остановки вращения.
-        const renderBody = render[1].replace(/__snapTimer = root\.setTimeout\(function \(\) \{[\s\S]*?\}, 370\);/, "");
-        assert.doesNotMatch(renderBody, /fitLabels\(/);
+        // Нигде внутри render() — включая таймер фиксации после остановки
+        // вращения: кегль не зависит от того, какая грань встала в центр, и
+        // «ушедшая на бок» грань несёт тот же кегль, что имела в центре.
+        assert.doesNotMatch(render[1], /fitLabels\(/);
+    });
+    // Положение грани (центр/бок) не входит в подпись кэша подгонки и никакого
+    // бюджета «по видимой в перспективе ширине» больше нет — иначе те же
+    // «Отвал»/«Склад…» получали то 26px, то 12px после каждой фиксации.
+    const fitJsNoBudget = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
+    assert.doesNotMatch(fitJsNoBudget, /function computeVisibleWidthBudget/);
+    assert.match(fitJsNoBudget, /function fitSignature\(labelRoot, card\) \{/);
+    assert.doesNotMatch(fitJsNoBudget.match(/function fitSignature\(labelRoot, card\) \{([\s\S]*?)\r?\n    \}/)[1], /is-center/);
+    [drumJs, pointJs].forEach((src) => {
         const pointerMove = src.match(/doc\.addEventListener\("pointermove"[\s\S]*?\}, \{ passive: false, capture: true \}\);/);
         assert.ok(pointerMove, "pointermove handler not found");
         assert.doesNotMatch(pointerMove[0], /fitLabels\(/);
@@ -221,7 +230,7 @@ test("labels are never re-fit per frame: no fit call inside render() or the drag
     // Повторный вызов с теми же входами — без записи в DOM (кэш по тексту и
     // размерам карточки, не подписи — её ширину пишет сама подгонка).
     const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
-    assert.match(fitJs, /function fitSignature\(labelRoot, card, visibleWidthBudget\)/);
+    assert.match(fitJs, /function fitSignature\(labelRoot, card\)/);
     assert.match(fitJs, /labelRoot\.dataset\.driverDrumFitSig === sig && labelRoot\.dataset\.driverDrumFitOk === "1"/);
 });
 

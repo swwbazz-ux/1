@@ -243,14 +243,8 @@
             // Пока грань доезжает, контур не сверяется (driver-downtime-drum-v1.js).
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
-            c.__snapTimer = root.setTimeout(function () {
-                c.__snapUntil = 0;
-                syncLink();
-                // Тот же приём, что у барабана простоев: боковые грани подгоняются по
-                // фактической видимой в 3D ширине, центральная — во всю плоскую. После
-                // фиксации пересчитываем разово (владелец, 28.09.2026).
-                fitLabels(c);
-            }, 370);
+            // Подгонку после фиксации не вызываем (см. driver-downtime-drum-v1.js).
+            c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLink(); }, 370);
         }
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
         if (liveCardW && geo.step && Math.abs(liveCardW - (geo.cardW || 0)) >= 2) {
