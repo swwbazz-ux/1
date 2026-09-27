@@ -131,6 +131,36 @@ html.is-driver-downtime-active body.driver-mobile-screen .driver-point-drum .dri
     transition: none;
 }
 
+/* Стрелка-слот верхнего барабана (см. .driver-drum-slot-arrow в
+   driver-downtime-drum-v1.css): под центральной гранью, остриём вниз к кругу;
+   видна только в ручном режиме, как и была. Точка уже в круге — остриё вверх
+   («вытянуть обратно»). Цвет — цвет центральной грани: голубой, а при простое
+   мигает той же переменной, что и сама грань, — в такт контуру. */
+body.driver-mobile-screen .driver-point-drum .driver-drum-slot-arrow {
+    --slot-h: var(--drum-arrow-h-top, 8px);
+    --slot-lift: var(--drum-arrow-lift-top, 3px);
+    bottom: auto;
+    top: calc(50% + var(--drum-card-h) / 2 + var(--slot-lift));
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+    color: rgba(104, 205, 242, .9);
+}
+
+html.is-driver-dial-manual body.driver-mobile-screen .driver-point-drum:has(.driver-drum-card.is-center) .driver-drum-slot-arrow {
+    opacity: .9;
+}
+
+body.driver-mobile-screen .driver-point-drum.is-assigned .driver-drum-slot-arrow {
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+body.driver-mobile-screen .driver-point-drum:has(.driver-drum-card.is-lifting, .driver-drum-card.is-dropping) .driver-drum-slot-arrow {
+    visibility: hidden;
+}
+
+html.is-driver-downtime-active body.driver-mobile-screen .driver-point-drum .driver-drum-slot-arrow {
+    color: var(--driver-blink-color);
+}
+
 /* Мигание — сигнал состояния, как и контур: работает и при «уменьшить анимацию». */
 @media (prefers-reduced-motion: reduce) {
     body.driver-mobile-screen .driver-work-screen:has(.driver-downtime-drum.is-active) {

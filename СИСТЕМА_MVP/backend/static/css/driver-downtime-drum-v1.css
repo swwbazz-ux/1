@@ -435,6 +435,62 @@ body.driver-mobile-screen .driver-downtime-drum.is-active .driver-drum-card.is-c
     border-top: 8px solid currentColor;
 }
 
+/* На гранях внутри барабанов стрелки больше нет — её место занял неподвижный
+   слот ниже (.driver-drum-slot-arrow). Своя стрелка остаётся только у летящей
+   копии грани во время жеста (копия живёт вне барабана). */
+body.driver-mobile-screen .driver-downtime-drum .driver-drum-card-arrow,
+body.driver-mobile-screen .driver-point-drum .driver-drum-card-arrow {
+    display: none;
+}
+
+/* Стрелка «свайп к кругу» — неподвижный слот у центральной грани, в зазоре
+   между гранью и кругом. Раньше стрелка сидела на самой грани внутри сцены
+   барабана, а сцена обрезает всё, что дальше ~11px от грани, — крупнее 8px
+   стрелку было не сделать (владелец, 28.09.2026: «в 2 раза больше и
+   заметнее»). Слот — ребёнок самого барабана (overflow: visible), вне обрезки
+   сцены. Центральная грань всегда стоит по центру барабана по вертикали, так
+   что её кромка — 50% ± половина высоты грани. Высоту стрелки и отступ от
+   кромки ставит driver-downtime-drum-v1.js (syncLinkVars) от фактического
+   зазора до круга: не больше 16px (вдвое против прежних 8px), с просветом
+   2px и до грани, и до круга; вне жеста, не на каждом кадре. Треугольник —
+   clip-path по прямоугольнику цвета currentColor, остриё к кругу. */
+body.driver-mobile-screen .driver-drum-slot-arrow {
+    --slot-h: var(--drum-arrow-h-bottom, 8px);
+    --slot-lift: var(--drum-arrow-lift-bottom, 3px);
+    position: absolute;
+    left: 50%;
+    bottom: calc(50% + var(--drum-card-h) / 2 + var(--slot-lift));
+    width: calc(var(--slot-h) * 1.5);
+    height: var(--slot-h);
+    transform: translateX(-50%);
+    background: currentColor;
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+    color: rgba(150, 166, 172, .9);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+/* Видна, пока есть центральная грань (без смены её нет); во время жеста
+   прячется — стрелку несёт летящая копия грани. */
+body.driver-mobile-screen .driver-downtime-drum:has(.driver-drum-card.is-center) .driver-drum-slot-arrow {
+    opacity: .9;
+}
+
+body.driver-mobile-screen .driver-downtime-drum:has(.driver-drum-card.is-lifting, .driver-drum-card.is-dropping) .driver-drum-slot-arrow {
+    visibility: hidden;
+}
+
+/* Идёт простой — стрелка вниз («потяни вниз, чтобы завершить»). */
+body.driver-mobile-screen .driver-downtime-drum.is-active .driver-drum-slot-arrow {
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* Цвет — цвет центральной грани: тот же статус причины, что и у её рамки. */
+body.driver-mobile-screen .driver-downtime-drum:has(.driver-drum-card.is-center.status-yellow) .driver-drum-slot-arrow { color: var(--driver-yellow); }
+body.driver-mobile-screen .driver-downtime-drum:has(.driver-drum-card.is-center.status-orange) .driver-drum-slot-arrow { color: #fb923c; }
+body.driver-mobile-screen .driver-downtime-drum:has(.driver-drum-card.is-center.status-red) .driver-drum-slot-arrow { color: #ff5a47; }
+
 /* Звёздочка на причине (вкладка «Простои»): причина в барабане быстрого доступа.
    Без кружка: жёлтая заполненная — в барабане, серый контур — нет. Зона нажатия 28px,
    сама звезда 14px. Селектор с .driver-downtime-list перебивает общее правило кнопок списка. */

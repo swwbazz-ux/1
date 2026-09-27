@@ -821,6 +821,31 @@
         doc.documentElement.style.setProperty("--link-path", 'path("' + path + '")');
     }
 
+    /* Размер стрелок-слотов «свайп к кругу» (.driver-drum-slot-arrow) — от
+       фактического зазора между центральной гранью и кругом: вдвое крупнее
+       прежних 8px, если влезает, иначе сколько влезает, с просветом 2px и до
+       грани, и до круга; стрелка стоит посередине зазора. Считается здесь же,
+       вместе с контуром: те же замеры, тот же момент (вне жеста, только когда
+       геометрия сдвинулась). */
+    var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;
+    var lastArrowVars = "";
+    function arrowFor(gap) {
+        var h = Math.max(ARROW_MIN_H, Math.min(ARROW_MAX_H, gap - 2 * ARROW_CLEAR));
+        return { h: h, lift: Math.max(ARROW_CLEAR, (gap - h) / 2) };
+    }
+    function syncSlotArrows(dr, cr, tr) {
+        var bottom = arrowFor(cr.top - dr.bottom);
+        var top = tr && tr.height ? arrowFor(dr.top - tr.bottom) : arrowFor(0);
+        var vars = [bottom.h, bottom.lift, top.h, top.lift].map(function (v) { return v.toFixed(1); }).join(",");
+        if (vars === lastArrowVars) return;
+        lastArrowVars = vars;
+        var s = doc.documentElement.style;
+        s.setProperty("--drum-arrow-h-bottom", bottom.h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-bottom", bottom.lift.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-h-top", top.h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-top", top.lift.toFixed(1) + "px");
+    }
+
     var linkFrame = 0;
     function scheduleLink() {
         if (linkFrame) return;
@@ -866,6 +891,7 @@
         if (inputs === lastLinkInputs) return;
         lastLinkInputs = inputs;
         root.__driverDrumLinkCalls = (root.__driverDrumLinkCalls || 0) + 1;
+        syncSlotArrows(dr, cr, tr0);
         var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
         // Кольцо — в зазоре между кольцом циферблата (48.5% стороны) и угловыми кнопками (51%).

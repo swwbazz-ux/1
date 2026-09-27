@@ -247,6 +247,25 @@ test("the point card blinks with the outline from one shared ancestor animation,
     assert.doesNotMatch(pointCss, /\.driver-drum-card[^{]*\{[^}]*animation:/);
 });
 
+test("the swipe arrow is a fixed slot outside the card, sized from the real gap to the dial", () => {
+    // Стрелка «свайп к кругу» — неподвижный слот на самом барабане, вне обрезки
+    // сцены, в зазоре между центральной гранью и кругом; вдвое крупнее прежних
+    // 8px, если зазор позволяет, иначе сколько влезает, с просветом 2px до грани
+    // и до круга (владелец, 28.09.2026). На гранях внутри барабанов стрелки нет.
+    assert.match(DOWNTIME_TEMPLATE, /<span class="driver-drum-slot-arrow" aria-hidden="true"><\/span>/);
+    assert.match(POINT_TEMPLATE, /<span class="driver-drum-slot-arrow" aria-hidden="true"><\/span>/);
+    assert.match(CSS, /\.driver-downtime-drum \.driver-drum-card-arrow,\s*body\.driver-mobile-screen \.driver-point-drum \.driver-drum-card-arrow\s*\{\s*display:\s*none;/);
+    assert.match(CSS, /\.driver-drum-slot-arrow\s*\{[^}]*bottom:\s*calc\(50% \+ var\(--drum-card-h\) \/ 2 \+ var\(--slot-lift\)\)/s);
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    assert.match(drumJs, /var ARROW_MAX_H = 16, ARROW_MIN_H = 8, ARROW_CLEAR = 2;/);
+    assert.match(drumJs, /function syncSlotArrows\(dr, cr, tr\)/);
+    // Считается вместе с контуром — вне жеста и только при сдвиге геометрии.
+    assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0\);/);
+    // Цвет верхней стрелки мигает той же переменной, что и грань точки.
+    const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
+    assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-slot-arrow\s*\{\s*color:\s*var\(--driver-blink-color\);/);
+});
+
 test("the shared outline is stationary: never recomputed while either drum is being dragged", () => {
     // Контур — стационарный элемент, как большая круглая кнопка: во время
     // вращения is-center уже мог перескочить на соседнюю грань (по угловой
