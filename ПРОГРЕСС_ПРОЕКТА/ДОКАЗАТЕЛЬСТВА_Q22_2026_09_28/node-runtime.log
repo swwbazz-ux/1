@@ -1,0 +1,12 @@
+✔ stored before readonly: retained, flush sends nothing (1.89665ms)
+✔ new enqueue while readonly: rejected without changing an existing queue (0.611442ms)
+✔ explicit coalesceKey replaces payload and ID while retaining original createdAt (0.66957ms)
+✔ desktop post network fallback creates two entries without coalesceKey (0.938976ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77.369376
