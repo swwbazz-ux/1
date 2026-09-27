@@ -108,6 +108,19 @@ test("per-reason downtime timer survives close and marks every used reason", () 
             return match ? downtimeReasonButtons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
         },
     };
+    const runtimeDocumentShell = {
+        querySelector(selector) {
+            return selector === "[data-driver-active-duration]" ? downtimeDuration : null;
+        },
+        querySelectorAll(selector) {
+            return selector === "[data-driver-downtime-reason-button]" ? downtimeReasonButtons : [];
+        },
+    };
+    const runtimeDocument = {
+        querySelector(selector) {
+            return selector === "[data-driver-shell]" ? runtimeDocumentShell : null;
+        },
+    };
     const context = {start: null, sync: null};
     vm.runInNewContext(
         `${source}\ncontext.start = startDriverDowntimeTimer; context.sync = syncDriverReasonTotals;`,
@@ -118,6 +131,7 @@ test("per-reason downtime timer survives close and marks every used reason", () 
             Number,
             Object,
             String,
+            document: runtimeDocument,
             downtimeDuration,
             downtimeReasonButtons,
             shell,

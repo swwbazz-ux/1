@@ -1757,12 +1757,27 @@ window.bindDriverMobileShell = function () {
         };
         window.driverDowntimeClock = clock;
         syncDriverReasonTotals(payload, activeReasonId);
+        /* tick() НЕ держит ссылки на downtimeDuration/downtimeReasonButtons из
+           замыкания этого вызова: при полной подмене <main data-driver-shell>
+           (оболочка отстала от структуры для послойного обновления — см.
+           driverMorphShell) bindDriverMobileShell перепривязывается на НОВОМ
+           узле, а «тот же простой» (sameInstance выше) намеренно не
+           перезапускает интервал — он продолжает жить на window. Раньше это
+           означало, что тикающий интервал писал в уже отсоединённые от
+           документа узлы СТАРОГО замыкания: видимый текст замирал и менялся
+           только со следующей полной подменой, принёсшей свежее серверное
+           значение (боевой 27.09.2026, v361: "2:56" → через 20 с сразу
+           "3:18"). Каждый тик ищет живые узлы заново — тогда подмена оболочки
+           между тиками не имеет значения. */
         function tick() {
+            var liveShell = document.querySelector("[data-driver-shell]");
+            var liveDuration = liveShell && liveShell.querySelector("[data-driver-active-duration]");
+            var liveReasonButtons = liveShell ? liveShell.querySelectorAll("[data-driver-downtime-reason-button]") : [];
             var liveSeconds = Math.max(0, Math.floor((Date.now() - clock.startedAtMs) / 1000));
-            if (downtimeDuration) {
-                downtimeDuration.textContent = formatDriverDowntimeDuration(clock.priorShiftSeconds + liveSeconds);
+            if (liveDuration) {
+                liveDuration.textContent = formatDriverDowntimeDuration(clock.priorShiftSeconds + liveSeconds);
             }
-            downtimeReasonButtons.forEach(function (button) {
+            Array.prototype.forEach.call(liveReasonButtons, function (button) {
                 var reasonId = String(button.dataset.driverDowntimeReasonId || "");
                 if (reasonId === activeReasonId) {
                     renderDriverReasonDuration(button, clock.priorReasonSeconds + liveSeconds, true);
