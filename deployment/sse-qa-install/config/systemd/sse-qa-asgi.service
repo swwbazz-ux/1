@@ -1,0 +1,36 @@
+[Unit]
+Description=Isolated SSE QA ASGI
+PartOf=sse-qa.target
+After=postgresql@16-sseqa.service redis-sse-qa.service
+Requires=postgresql@16-sseqa.service redis-sse-qa.service
+RequiresMountsFor=/srv/sse-qa
+
+[Service]
+Type=simple
+User=sseqa
+Group=sseqa
+Slice=sse-qa.slice
+WorkingDirectory=/srv/sse-qa/current/backend
+EnvironmentFile=/etc/sse-qa/app.env
+ExecStart=/srv/sse-qa/venv/bin/uvicorn config.sse_asgi:application --host 127.0.0.1 --port 18082 --workers 1 --lifespan off --proxy-headers --forwarded-allow-ips=127.0.0.1
+StandardOutput=append:/srv/sse-qa/log/asgi.log
+StandardError=append:/srv/sse-qa/log/asgi.log
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+CPUAccounting=yes
+CPUQuota=25%
+MemoryAccounting=yes
+MemoryMax=384M
+MemorySwapMax=0
+TasksMax=48
+LimitNOFILE=1024
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sse-qa/log /srv/sse-qa/metrics
+UMask=0027
+
+[Install]
+WantedBy=sse-qa.target

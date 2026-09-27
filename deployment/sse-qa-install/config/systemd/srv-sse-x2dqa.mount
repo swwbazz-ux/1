@@ -1,0 +1,15 @@
+[Unit]
+Description=Fixed-size filesystem for isolated SSE QA
+Before=sse-qa.target
+ConditionPathExists=/var/lib/sse-qa/sse-qa.img
+
+[Mount]
+What=/var/lib/sse-qa/sse-qa.img
+Where=/srv/sse-qa
+Type=ext4
+Options=loop,nodev,nosuid,noatime
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target
+

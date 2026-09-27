@@ -1,0 +1,36 @@
+[Unit]
+Description=Isolated SSE QA reconciliation
+PartOf=sse-qa.target
+After=postgresql@16-sseqa.service redis-sse-qa.service
+Requires=postgresql@16-sseqa.service redis-sse-qa.service
+RequiresMountsFor=/srv/sse-qa
+
+[Service]
+Type=simple
+User=sseqa
+Group=sseqa
+Slice=sse-qa.slice
+WorkingDirectory=/srv/sse-qa/current/backend
+EnvironmentFile=/etc/sse-qa/app.env
+ExecStart=/srv/sse-qa/venv/bin/python manage.py run_operational_reconciliation --tick-seconds 1
+StandardOutput=append:/srv/sse-qa/log/reconcile.log
+StandardError=append:/srv/sse-qa/log/reconcile.log
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+CPUAccounting=yes
+CPUQuota=10%
+MemoryAccounting=yes
+MemoryMax=192M
+MemorySwapMax=0
+TasksMax=32
+LimitNOFILE=512
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sse-qa/log
+UMask=0027
+
+[Install]
+WantedBy=sse-qa.target

@@ -1,0 +1,33 @@
+[Unit]
+Description=Dedicated Redis for isolated SSE QA
+PartOf=sse-qa.target
+After=network.target srv-sse\x2dqa.mount
+Requires=srv-sse\x2dqa.mount
+
+[Service]
+Type=notify
+User=sseqa
+Group=sseqa
+Slice=sse-qa.slice
+RuntimeDirectory=sse-qa-redis
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/redis-server /etc/sse-qa/redis.conf --supervised systemd
+ExecStop=/bin/kill -s TERM $MAINPID
+Restart=on-failure
+RestartSec=5
+CPUAccounting=yes
+CPUQuota=5%
+MemoryAccounting=yes
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=24
+LimitNOFILE=256
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/sse-qa-redis /srv/sse-qa/redis /srv/sse-qa/log
+UMask=0077
+
+[Install]
+WantedBy=sse-qa.target

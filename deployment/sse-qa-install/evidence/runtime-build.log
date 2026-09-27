@@ -1,0 +1,3 @@
+﻿COMMAND: python scripts/build_runtime.py --repo-root <worktree> --package-root deployment/sse-qa-install --r3-zip source/r3-backend-overlay.zip --output generated/runtime.tar.gz
+EXIT: 0
+SSE_QA_RUNTIME_OK sha256=286E1B15AF70271EAC98DAC7D806423AF48E38665B858E6A0BBFCAF403D7433D

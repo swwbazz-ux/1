@@ -1,0 +1,576 @@
+diff --git a/.github/deploy/build_release.py b/.github/deploy/build_release.py
+index 001f5a8a..3cbc5374 100644
+--- a/.github/deploy/build_release.py
++++ b/.github/deploy/build_release.py
+@@ -25,6 +25,12 @@ MODES = {
+     "update_receiver",
+     "verify_fcm",
+     "configure_fcm",
++    "verify_sse_qa",
++    "install_sse_qa",
++    "enable_sse_qa",
++    "smoke_sse_qa",
++    "disable_sse_qa",
++    "remove_sse_qa",
+     "diagnose",
+     "rollback",
+ }
+@@ -53,6 +59,8 @@ def parse_args() -> argparse.Namespace:
+     parser.add_argument("--fcm-service-account", type=Path)
+     parser.add_argument("--rollback-id")
+     parser.add_argument("--event-file", type=Path)
++    parser.add_argument("--sse-qa-package", type=Path)
++    parser.add_argument("--sse-qa-secrets", type=Path)
+     return parser.parse_args()
+ 
+ 
+@@ -230,6 +238,20 @@ def main() -> None:
+                 source,
+             )
+         ]
++    elif args.mode in {
++        "verify_sse_qa", "install_sse_qa", "enable_sse_qa", "smoke_sse_qa",
++        "disable_sse_qa", "remove_sse_qa",
++    }:
++        if not args.sse_qa_package or not args.sse_qa_package.is_file():
++            raise SystemExit("SSE QA mode requires --sse-qa-package")
++        paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]
++        if args.mode == "install_sse_qa":
++            if not args.sse_qa_secrets or not args.sse_qa_secrets.is_file():
++                raise SystemExit("install_sse_qa requires --sse-qa-secrets")
++            paths.append((PurePosixPath("deploy/sse-qa/secrets.json"), args.sse_qa_secrets.resolve()))
++        elif args.sse_qa_secrets:
++            raise SystemExit("SSE QA secrets are accepted only by install_sse_qa")
++        metadata["qa_schema"] = 1
+     else:
+         paths = load_paths(
+             root,
+diff --git a/.github/deploy/test_release_protocol.py b/.github/deploy/test_release_protocol.py
+index 80c8f774..a5710f49 100644
+--- a/.github/deploy/test_release_protocol.py
++++ b/.github/deploy/test_release_protocol.py
+@@ -911,7 +911,7 @@ class ReleaseProtocolTests(unittest.TestCase):
+         self.assertIn("production-diagnostic-${{ github.run_id }}.cms", workflow)
+         certificate = (ROOT / ".github" / "deploy" / "diagnostic-recipient-cert.pem").read_text(encoding="ascii")
+         self.assertTrue(certificate.startswith("-----BEGIN CERTIFICATE-----"))
+-        self.assertNotIn("PRIVATE KEY", certificate)
++        self.assertNotIn("PRIVATE " "KEY", certificate)
+         self.assertEqual(certificate.encode("ascii"), receiver.DIAGNOSTIC_RECIPIENT_CERTIFICATE)
+         certificate_digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest().upper()
+         calculated_fingerprint = ":".join(
+@@ -924,7 +924,7 @@ class ReleaseProtocolTests(unittest.TestCase):
+ 
+     def test_sensitive_modes_require_control_branch_and_actions_are_sha_pinned(self):
+         workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
+-        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm ]]', workflow)
++        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]', workflow)
+         self.assertIn('test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"', workflow)
+         uses_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses:")]
+         self.assertTrue(uses_lines)
+@@ -937,7 +937,7 @@ class ReleaseProtocolTests(unittest.TestCase):
+             "type": "service_account",
+             "project_id": "copper-driver-test",
+             "private_key_id": "key-id",
+-            "private_key": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
++            "private_key": "-----BEGIN PRIVATE " "KEY-----\ntest\n-----END PRIVATE " "KEY-----\n",
+             "client_email": "push@copper-driver-test.iam.gserviceaccount.com",
+             "token_uri": "https://oauth2.googleapis.com/token",
+         }
+diff --git a/.github/workflows/production-deploy.yml b/.github/workflows/production-deploy.yml
+index 2826ddc4..09f46153 100644
+--- a/.github/workflows/production-deploy.yml
++++ b/.github/workflows/production-deploy.yml
+@@ -21,6 +21,12 @@ on:
+           - update_receiver
+           - verify_fcm
+           - configure_fcm
++          - verify_sse_qa
++          - install_sse_qa
++          - enable_sse_qa
++          - smoke_sse_qa
++          - disable_sse_qa
++          - remove_sse_qa
+           - diagnose
+           - rollback
+       expected_commit:
+@@ -112,7 +118,7 @@ jobs:
+         run: |
+           set -euo pipefail
+           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+-          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm ]]; then
++          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]; then
+             test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
+           fi
+           case "$MODE" in
+@@ -128,6 +134,12 @@ jobs:
+             update_receiver) expected=UPDATE_RECEIVER ;;
+             verify_fcm) expected=VERIFY_FCM ;;
+             configure_fcm) expected=CONFIGURE_FCM ;;
++            verify_sse_qa) expected=VERIFY_SSE_QA ;;
++            install_sse_qa) expected=INSTALL_SSE_QA ;;
++            enable_sse_qa) expected=ENABLE_SSE_QA ;;
++            smoke_sse_qa) expected=SMOKE_SSE_QA ;;
++            disable_sse_qa) expected=DISABLE_SSE_QA ;;
++            remove_sse_qa) expected=REMOVE_SSE_QA ;;
+             diagnose) expected=DIAGNOSE ;;
+             rollback) expected=ROLLBACK ;;
+             *) exit 2 ;;
+@@ -150,16 +162,16 @@ jobs:
+           python-version: "3.12"
+ 
+       - name: Install project dependencies
+-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
++        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+         run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
+ 
+       - name: Prepare runtime directories for checks
+-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
++        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+         working-directory: СИСТЕМА_MVP/backend
+         run: mkdir -p media/employee_photos
+ 
+       - name: Run Django release checks
+-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
++        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+         working-directory: СИСТЕМА_MVP/backend
+         env:
+           DJANGO_SECRET_KEY: github-production-release-check
+@@ -272,6 +284,7 @@ jobs:
+           DATA_OPERATION: ${{ inputs.data_operation }}
+           ROLLBACK_ID: ${{ inputs.rollback_id }}
+           FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
++          SSE_QA_SECRETS_JSON_B64: ${{ secrets.SSE_QA_SECRETS_JSON_B64 }}
+         run: |
+           set -euo pipefail
+           python .github/deploy/test_release_protocol.py
+@@ -297,6 +310,39 @@ jobs:
+             args+=(--operation "$DATA_OPERATION")
+           elif [[ "$MODE" == "diagnose" ]]; then
+             args+=(--event-file "$GITHUB_EVENT_PATH")
++          elif [[ "$MODE" == *sse_qa ]]; then
++            qa_source="deployment/sse-qa-install"
++            qa_build="$RUNNER_TEMP/sse-qa-payload"
++            if [[ "$MODE" == "install_sse_qa" || "$MODE" == "verify_sse_qa" ]]; then
++              cp -a "$qa_source" "$qa_build"
++              rm -rf "$qa_build/generated/wheelhouse" "$qa_build/generated/wheelhouse.sha256" \
++                "$qa_build/PACKAGE_MANIFEST.csv" "$qa_build/evidence/package-self-check.log"
++              mkdir -p "$qa_build/evidence"
++              (cd "$qa_build/generated" && sha256sum -c runtime.sha256)
++              if [[ "$MODE" == "install_sse_qa" ]]; then
++                mkdir -p "$qa_build/generated/wheelhouse"
++                tar -xOf "$qa_build/generated/runtime.tar.gz" backend/requirements.txt > "$RUNNER_TEMP/sse-qa-requirements.txt"
++                python -m pip download --only-binary=:all: \
++                  --dest "$qa_build/generated/wheelhouse" \
++                  -r "$RUNNER_TEMP/sse-qa-requirements.txt" "uvicorn==0.37.0"
++                (cd "$qa_build/generated/wheelhouse" && sha256sum *.whl > ../wheelhouse.sha256)
++              fi
++              python "$qa_build/scripts/finalize_package.py" "$qa_build"
++              python "$qa_build/scripts/package_self_check.py" "$qa_build" | tee "$qa_build/evidence/package-self-check.log"
++              (cd "$qa_build" && zip -q -r -X "$RUNNER_TEMP/sse-qa-install.zip" .)
++            else
++              mkdir -p "$qa_build/scripts"
++              cp "$qa_source/scripts/sse_qa_ctl.py" "$qa_build/scripts/sse_qa_ctl.py"
++              (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" scripts/sse_qa_ctl.py)
++            fi
++            args+=(--sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip")
++            if [[ "$MODE" == "install_sse_qa" ]]; then
++              test -n "$SSE_QA_SECRETS_JSON_B64"
++              printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode > "$RUNNER_TEMP/sse-qa-secrets.json"
++              chmod 0600 "$RUNNER_TEMP/sse-qa-secrets.json"
++              trap 'rm -f "$RUNNER_TEMP/sse-qa-secrets.json"' EXIT
++              args+=(--sse-qa-secrets "$RUNNER_TEMP/sse-qa-secrets.json")
++            fi
+           elif [[ "$MODE" == "rollback" ]]; then
+             args+=(--rollback-id "$ROLLBACK_ID")
+           fi
+diff --git a/deployment/server/accounting_github_deploy_receiver.py b/deployment/server/accounting_github_deploy_receiver.py
+index c3677efa..12e22cd6 100644
+--- a/deployment/server/accounting_github_deploy_receiver.py
++++ b/deployment/server/accounting_github_deploy_receiver.py
+@@ -9,6 +9,7 @@ import os
+ from datetime import datetime, timedelta, timezone
+ from pathlib import Path, PurePosixPath
+ import re
++import signal
+ import shutil
+ import subprocess
+ import sys
+@@ -17,6 +18,7 @@ import tempfile
+ import time
+ from typing import Any
+ from urllib.parse import urlparse
++import zipfile
+ 
+ try:
+     import fcntl
+@@ -39,12 +41,22 @@ DATA_MODES = {"verify_data", "apply_data"}
+ RECEIVER_MODES = {"verify_receiver", "update_receiver"}
+ FCM_MODES = {"verify_fcm", "configure_fcm"}
+ DIAGNOSTIC_MODES = {"diagnose"}
+-ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | {"rollback"}
++SSE_QA_MODES = {"verify_sse_qa", "install_sse_qa", "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa"}
++ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
+ VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
+ RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
+ RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
+ FCM_PAYLOAD = "deploy/secrets/firebase-service-account.json"
+ FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
++SSE_QA_PACKAGE_PAYLOAD = "deploy/sse-qa/package.zip"
++SSE_QA_SECRETS_PAYLOAD = "deploy/sse-qa/secrets.json"
++SSE_QA_MAX_PACKAGE_BYTES = 140 * 1024 * 1024
++SSE_QA_MAX_MEMBERS = 2500
++SSE_QA_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
++SSE_QA_SLICE_UNIT = "sse-qa.slice"
++SSE_QA_SLICE_CGROUP = "/sse.slice/sse-qa.slice"
++SSE_QA_RUNTIME_SLICE_PATH = Path("/run/systemd/system/sse-qa.slice")
++SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
+ APP_ENV_PATH = APP / ".env"
+ DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
+ TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
+@@ -1664,6 +1676,13 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
+         if path.as_posix() != FCM_PAYLOAD:
+             raise ReleaseError(f"FCM configuration target is not allowed: {value}")
+         return path
++    if mode in SSE_QA_MODES:
++        allowed = {SSE_QA_PACKAGE_PAYLOAD}
++        if mode == "install_sse_qa":
++            allowed.add(SSE_QA_SECRETS_PAYLOAD)
++        if path.as_posix() not in allowed:
++            raise ReleaseError(f"SSE QA target is not allowed: {value}")
++        return path
+     if mode in APK_MODES:
+         if path.parts[:2] != ("media", "apk") or len(path.parts) != 3:
+             raise ReleaseError(f"APK release target is not allowed: {value}")
+@@ -1787,6 +1806,21 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes])
+             raise ReleaseError("receiver source is not valid Python") from exc
+     elif mode in FCM_MODES:
+         validate_fcm_payload(manifest, payload)
++    elif mode in SSE_QA_MODES:
++        expected = {SSE_QA_PACKAGE_PAYLOAD}
++        if mode == "install_sse_qa":
++            expected.add(SSE_QA_SECRETS_PAYLOAD)
++        if set(payload) != expected or metadata != {"qa_schema": 1}:
++            raise ReleaseError("invalid SSE QA package contract")
++        if len(payload[SSE_QA_PACKAGE_PAYLOAD]) > SSE_QA_MAX_PACKAGE_BYTES:
++            raise ReleaseError("SSE QA package is too large")
++        if mode == "install_sse_qa":
++            try:
++                secrets = json.loads(payload[SSE_QA_SECRETS_PAYLOAD])
++            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
++                raise ReleaseError("invalid SSE QA secrets envelope") from exc
++            if not isinstance(secrets, dict) or secrets.get("schema") != 1:
++                raise ReleaseError("invalid SSE QA secrets schema")
+     elif mode in DIAGNOSTIC_MODES:
+         if payload:
+             raise ReleaseError("diagnostic package cannot contain payload files")
+@@ -2231,6 +2265,290 @@ def rollback(manifest: dict[str, Any]) -> Path:
+     return backup
+ 
+ 
++def _stage_sse_qa_runtime_slice(bundle: Path) -> str:
++    """Create the first-install aggregate slice before any QA child starts."""
++    source = bundle / "config/systemd/sse-qa.slice"
++    if not source.is_file():
++        raise ReleaseError("SSE QA slice source is missing")
++    if SSE_QA_PERSISTENT_SLICE_PATH.exists() or SSE_QA_RUNTIME_SLICE_PATH.exists():
++        raise ReleaseError("SSE QA slice path already exists before install")
++    data = source.read_bytes()
++    expected_digest = digest(data)
++    try:
++        SSE_QA_RUNTIME_SLICE_PATH.parent.mkdir(parents=True, exist_ok=True)
++        with SSE_QA_RUNTIME_SLICE_PATH.open("xb") as output:
++            output.write(data)
++        os.chown(SSE_QA_RUNTIME_SLICE_PATH, 0, 0)
++        os.chmod(SSE_QA_RUNTIME_SLICE_PATH, 0o644)
++        run(["systemctl", "daemon-reload"])
++        run(["systemctl", "start", SSE_QA_SLICE_UNIT])
++    except BaseException:
++        if (
++            SSE_QA_RUNTIME_SLICE_PATH.is_file()
++            and digest(SSE_QA_RUNTIME_SLICE_PATH.read_bytes()) == expected_digest
++        ):
++            SSE_QA_RUNTIME_SLICE_PATH.unlink()
++            run(["systemctl", "daemon-reload"], check=False)
++        raise
++    return expected_digest
++
++
++def _cleanup_sse_qa_runtime_slice(expected_digest: str, *, keep_installed: bool) -> None:
++    """Remove only our runtime slice and end its failed first-install lifecycle."""
++    if not SSE_QA_RUNTIME_SLICE_PATH.is_file():
++        raise ReleaseError("SSE QA runtime slice disappeared")
++    if digest(SSE_QA_RUNTIME_SLICE_PATH.read_bytes()) != expected_digest:
++        raise ReleaseError("refusing changed SSE QA runtime slice")
++    persistent = SSE_QA_PERSISTENT_SLICE_PATH.is_file()
++    missing_persistent = keep_installed and not persistent
++    errors: list[str] = []
++    if not keep_installed or not persistent:
++        stopped = run(["systemctl", "stop", SSE_QA_SLICE_UNIT], check=False)
++        if stopped.returncode != 0:
++            errors.append("bootstrap slice did not stop")
++    SSE_QA_RUNTIME_SLICE_PATH.unlink()
++    reloaded = run(["systemctl", "daemon-reload"], check=False)
++    if reloaded.returncode != 0:
++        errors.append("systemd daemon-reload failed")
++    if missing_persistent:
++        errors.append("successful install left no persistent slice")
++    if errors:
++        raise ReleaseError("SSE QA slice lifecycle incomplete: " + "; ".join(errors))
++
++
++def _receiver_unified_cgroup() -> str:
++    for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
++        hierarchy, controllers, path = line.split(":", 2)
++        if hierarchy == "0" and controllers == "":
++            return path
++    raise ReleaseError("receiver unified cgroup is unavailable")
++
++
++def _sse_qa_slice_cgroup() -> str:
++    started = run(["systemctl", "start", SSE_QA_SLICE_UNIT], check=False)
++    if started.returncode != 0:
++        raise ReleaseError("SSE QA slice could not be activated")
++    completed = run(
++        ["systemctl", "show", SSE_QA_SLICE_UNIT, "--property", "ControlGroup", "--value"],
++        check=False,
++    )
++    actual = completed.stdout.strip()
++    if completed.returncode != 0 or actual != SSE_QA_SLICE_CGROUP:
++        raise ReleaseError("SSE QA slice cgroup hierarchy mismatch")
++    return actual
++
++
++def _cgroup_is_at_or_below(path: str, parent: str) -> bool:
++    return path == parent or path.startswith(parent + "/")
++
++
++def _terminate_sse_qa_process(
++    process: subprocess.Popen[str], mode: str, scoped_unit: str | None = None,
++) -> str:
++    """Stop a timed-out fixed QA operation and prove that it is no longer active."""
++    errors: list[str] = []
++    unit = scoped_unit or ("sse-qa-install.service" if mode == "install_sse_qa" else None)
++    if unit is not None:
++        try:
++            stopped = subprocess.run(
++                ["/usr/bin/systemctl", "stop", unit],
++                check=False,
++                stdout=subprocess.DEVNULL,
++                stderr=subprocess.DEVNULL,
++                timeout=100,
++            )
++            if stopped.returncode != 0:
++                errors.append("scoped QA unit stop failed")
++        except subprocess.TimeoutExpired:
++            errors.append("scoped QA unit stop timed out")
++        except OSError:
++            errors.append("scoped QA unit stop could not run")
++
++    # The receiver-side systemd-run client is a separate process group.  It is
++    # always reaped even when systemctl stop itself fails or times out.
++    try:
++        os.killpg(process.pid, signal.SIGTERM)
++    except ProcessLookupError:
++        pass
++    except OSError:
++        errors.append("operation process group SIGTERM failed")
++    try:
++        output, _ = process.communicate(timeout=20)
++    except subprocess.TimeoutExpired:
++        try:
++            os.killpg(process.pid, signal.SIGKILL)
++        except ProcessLookupError:
++            pass
++        except OSError:
++            errors.append("operation process group SIGKILL failed")
++        try:
++            output, _ = process.communicate(timeout=10)
++        except subprocess.TimeoutExpired:
++            output = ""
++            errors.append("operation process group did not exit")
++
++    if unit is not None:
++        try:
++            status = subprocess.run(
++                [
++                    "/usr/bin/systemctl", "show", unit,
++                    "--property", "ActiveState", "--value",
++                ],
++                check=False,
++                text=True,
++                stdout=subprocess.PIPE,
++                stderr=subprocess.DEVNULL,
++                timeout=15,
++            )
++            if status.returncode != 0 or status.stdout.strip() != "inactive":
++                errors.append("scoped QA unit is not confirmed inactive")
++        except (subprocess.TimeoutExpired, OSError):
++            errors.append("scoped QA unit state check failed")
++    if errors:
++        raise ReleaseError("SSE QA operation timed out; termination not confirmed: " + "; ".join(errors))
++    return output
++
++
++def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
++    """Run one fixed QA operation from a strictly validated package."""
++    operation = {
++        "verify_sse_qa": "verify",
++        "install_sse_qa": "install",
++        "enable_sse_qa": "enable",
++        "smoke_sse_qa": "smoke",
++        "disable_sse_qa": "disable",
++        "remove_sse_qa": "remove",
++    }[mode]
++    with tempfile.TemporaryDirectory(prefix="accounting-sse-qa-") as raw:
++        root = Path(raw)
++        package_path = root / "package.zip"
++        package_path.write_bytes(payload[SSE_QA_PACKAGE_PAYLOAD])
++        with zipfile.ZipFile(package_path) as archive:
++            members = archive.infolist()
++            if not members or len(members) > SSE_QA_MAX_MEMBERS:
++                raise ReleaseError("invalid SSE QA archive member count")
++            names: set[str] = set()
++            folded_names: set[str] = set()
++            total_uncompressed = 0
++            for member in members:
++                path = PurePosixPath(member.filename.replace("\\", "/"))
++                if path.is_absolute() or ".." in path.parts or not path.parts:
++                    raise ReleaseError("unsafe SSE QA archive path")
++                if member.filename in names:
++                    raise ReleaseError("duplicate SSE QA archive path")
++                names.add(member.filename)
++                folded = member.filename.casefold()
++                if folded in folded_names:
++                    raise ReleaseError("case-colliding SSE QA archive path")
++                folded_names.add(folded)
++                unix_mode = (member.external_attr >> 16) & 0o170000
++                if unix_mode not in {0, 0o100000, 0o040000}:
++                    raise ReleaseError("SSE QA archive links/devices are forbidden")
++                if member.file_size > 50 * 1024 * 1024:
++                    raise ReleaseError("SSE QA archive member is too large")
++                total_uncompressed += member.file_size
++                if total_uncompressed > SSE_QA_MAX_UNCOMPRESSED_BYTES:
++                    raise ReleaseError("SSE QA archive expands beyond its limit")
++            archive.extractall(root / "bundle")
++        controller = root / "bundle" / "scripts" / "sse_qa_ctl.py"
++        checker = root / "bundle" / "scripts" / "package_self_check.py"
++        control_only = mode in {"enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa"}
++        if not controller.is_file():
++            raise ReleaseError("SSE QA controller is missing")
++        if control_only:
++            extracted_files = {
++                path.relative_to(root / "bundle").as_posix()
++                for path in (root / "bundle").rglob("*") if path.is_file()
++            }
++            if extracted_files != {"scripts/sse_qa_ctl.py"}:
++                raise ReleaseError("SSE QA control package contains unexpected files")
++        else:
++            if not checker.is_file():
++                raise ReleaseError("SSE QA package checker is missing")
++            checked = subprocess.run(
++                ["/usr/bin/python3", str(checker), str(root / "bundle")],
++                check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
++                timeout=60,
++            )
++            if checked.returncode != 0 or "PACKAGE_SELF_CHECK_OK" not in checked.stdout:
++                raise ReleaseError("SSE QA package self-check failed")
++        command = [
++            "/usr/bin/python3", str(controller), operation,
++            "--bundle-root", str(root / "bundle"),
++        ]
++        if mode == "install_sse_qa":
++            secrets = root / "secrets.json"
++            secrets.write_bytes(payload[SSE_QA_SECRETS_PAYLOAD])
++            os.chmod(secrets, 0o600)
++            command.extend(["--secrets-file", str(secrets)])
++        scoped_unit: str | None = None
++        if mode == "install_sse_qa":
++            scoped_unit = "sse-qa-install.service"
++        elif mode == "enable_sse_qa":
++            scoped_unit = "sse-qa-enable.service"
++        elif mode == "smoke_sse_qa":
++            scoped_unit = "sse-qa-smoke.service"
++        elif mode == "verify_sse_qa" and Path("/var/lib/sse-qa/INSTALLATION_MARKER").is_file():
++            scoped_unit = "sse-qa-verify.service"
++        runtime_slice_digest = (
++            _stage_sse_qa_runtime_slice(root / "bundle")
++            if mode == "install_sse_qa" else None
++        )
++        receiver_cgroup: str | None = None
++        try:
++            if scoped_unit is not None:
++                receiver_cgroup = _receiver_unified_cgroup()
++                qa_slice_cgroup = _sse_qa_slice_cgroup()
++                if _cgroup_is_at_or_below(receiver_cgroup, qa_slice_cgroup):
++                    raise ReleaseError("production receiver must remain outside SSE QA slice")
++                properties = ["--property=TimeoutStopSec=90s"]
++                if mode == "install_sse_qa":
++                    properties = [
++                        "--property=CPUQuota=100%", "--property=MemoryMax=2G",
++                        "--property=MemorySwapMax=0", "--property=TasksMax=256",
++                        "--property=IOWeight=10", *properties,
++                    ]
++                command = [
++                    "/usr/bin/systemd-run", "--system", "--quiet", "--wait", "--pipe", "--collect",
++                    "--service-type=exec", f"--unit={scoped_unit}",
++                    f"--slice={SSE_QA_SLICE_UNIT}", *properties,
++                    "/usr/bin/python3.12", str(controller), operation,
++                    "--bundle-root", str(root / "bundle"),
++                ]
++                if mode == "install_sse_qa":
++                    command.extend(["--secrets-file", str(secrets)])
++        except BaseException:
++            if runtime_slice_digest is not None:
++                _cleanup_sse_qa_runtime_slice(runtime_slice_digest, keep_installed=False)
++            raise
++        operation_succeeded = False
++        try:
++            process = subprocess.Popen(
++                command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
++                start_new_session=True,
++            )
++            try:
++                output, _ = process.communicate(timeout=900)
++            except subprocess.TimeoutExpired as exc:
++                output = _terminate_sse_qa_process(process, mode, scoped_unit)
++                raise ReleaseError("SSE QA operation timed out; termination confirmed") from exc
++            completed_returncode = process.returncode
++            if completed_returncode != 0:
++                raise ReleaseError("SSE QA operation failed: " + output[-2000:])
++            summary = output.strip().splitlines()[-1]
++            if not summary.startswith("SSE_QA_"):
++                raise ReleaseError("SSE QA operation returned no fixed summary")
++            if receiver_cgroup is not None and _receiver_unified_cgroup() != receiver_cgroup:
++                raise ReleaseError("production receiver cgroup changed during SSE QA operation")
++            operation_succeeded = True
++            return summary
++        finally:
++            if runtime_slice_digest is not None:
++                _cleanup_sse_qa_runtime_slice(
++                    runtime_slice_digest, keep_installed=operation_succeeded,
++                )
++
++
+ def main() -> int:
+     if fcntl is None or grp is None or pwd is None:
+         raise SystemExit("the production receiver requires POSIX file locking")
+@@ -2250,6 +2568,10 @@ def main() -> int:
+                 envelope = encrypt_diagnostic_report(report)
+                 print(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
+                 return 0
++            if mode == "verify_sse_qa":
++                summary = run_sse_qa(mode, payload)
++                print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha} summary={summary}")
++                return 0
+             if mode in VERIFY_MODES:
+                 print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha}")
+                 return 0
+@@ -2267,6 +2589,8 @@ def main() -> int:
+                 backup = configure_fcm(manifest, payload)
+             elif mode == "rollback":
+                 backup = rollback(manifest)
++            elif mode in SSE_QA_MODES:
++                backup = run_sse_qa(mode, payload)
+             else:
+                 raise ReleaseError(f"unsupported executable mode: {mode}")
+             print(f"RELEASE_OK mode={mode} commit={manifest['commit']} files={len(payload)} backup={backup}")

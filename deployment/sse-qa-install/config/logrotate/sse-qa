@@ -1,0 +1,21 @@
+/srv/sse-qa/log/*.log /srv/sse-qa/metrics/*.jsonl {
+    daily
+    rotate 3
+    size 5M
+    missingok
+    notifempty
+    compress
+    copytruncate
+    create 0640 sseqa sseqa
+}
+
+/srv/sse-qa/log/postgresql/*.log {
+    daily
+    rotate 3
+    size 5M
+    missingok
+    notifempty
+    compress
+    copytruncate
+    create 0640 postgres postgres
+}

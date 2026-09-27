@@ -1,0 +1,20 @@
+[Unit]
+Description=Aggregate resource boundary for isolated SSE QA
+Before=slices.target
+
+[Slice]
+CPUAccounting=yes
+CPUQuota=100%
+CPUQuotaPeriodSec=100ms
+MemoryAccounting=yes
+MemoryHigh=1792M
+MemoryMax=2G
+MemorySwapMax=0
+TasksAccounting=yes
+TasksMax=256
+IOAccounting=yes
+IOWeight=10
+
+[Install]
+WantedBy=slices.target
+

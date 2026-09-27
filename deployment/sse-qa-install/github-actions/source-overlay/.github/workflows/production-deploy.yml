@@ -1,0 +1,510 @@
+name: Production deploy through GitHub
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Safe production operation"
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - deploy
+          - verify_migrations
+          - deploy_migrations
+          - verify_apk
+          - publish_apk
+          - verify_data
+          - apply_data
+          - verify_receiver
+          - update_receiver
+          - verify_fcm
+          - configure_fcm
+          - verify_sse_qa
+          - install_sse_qa
+          - enable_sse_qa
+          - smoke_sse_qa
+          - disable_sse_qa
+          - remove_sse_qa
+          - diagnose
+          - rollback
+      expected_commit:
+        description: "Full 40-character commit SHA selected for this run"
+        required: true
+        type: string
+      confirmation:
+        description: "Exact confirmation word for the selected mode"
+        required: true
+        type: string
+      apk_profile:
+        description: "APK role for verify_apk/publish_apk"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - driver
+          - excavator
+      data_operation:
+        description: "Target path deploy/data_updates/name.py for data modes"
+        required: false
+        type: string
+      rollback_id:
+        description: "Exact github-... rollback directory for rollback mode"
+        required: false
+        type: string
+      diagnostic_operation:
+        description: "Fixed read-only operation for diagnose mode"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - trip_accounting_incident_v1
+          - infra_capacity_v1
+      diagnostic_equipment:
+        description: "Exact or canonical garage number for diagnose mode"
+        required: false
+        type: string
+      diagnostic_from_utc:
+        description: "UTC start for diagnose mode (YYYY-MM-DDTHH:MM:SSZ)"
+        required: false
+        type: string
+      diagnostic_to_utc:
+        description: "UTC end for diagnose mode (YYYY-MM-DDTHH:MM:SSZ, max 24h)"
+        required: false
+        type: string
+      diagnostic_max_rows:
+        description: "Total encrypted report row limit"
+        required: false
+        default: "500"
+        type: choice
+        options:
+          - "100"
+          - "250"
+          - "500"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accounting-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    environment: production
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout selected revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate manual confirmation and revision
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          DATA_OPERATION: ${{ inputs.data_operation }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]; then
+            test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
+          fi
+          case "$MODE" in
+            verify) expected=VERIFY ;;
+            deploy) expected=DEPLOY ;;
+            verify_migrations) expected=VERIFY_MIGRATIONS ;;
+            deploy_migrations) expected=DEPLOY_MIGRATIONS ;;
+            verify_apk) expected=VERIFY_APK ;;
+            publish_apk) expected=PUBLISH_APK ;;
+            verify_data) expected=VERIFY_DATA ;;
+            apply_data) expected=APPLY_DATA ;;
+            verify_receiver) expected=VERIFY_RECEIVER ;;
+            update_receiver) expected=UPDATE_RECEIVER ;;
+            verify_fcm) expected=VERIFY_FCM ;;
+            configure_fcm) expected=CONFIGURE_FCM ;;
+            verify_sse_qa) expected=VERIFY_SSE_QA ;;
+            install_sse_qa) expected=INSTALL_SSE_QA ;;
+            enable_sse_qa) expected=ENABLE_SSE_QA ;;
+            smoke_sse_qa) expected=SMOKE_SSE_QA ;;
+            disable_sse_qa) expected=DISABLE_SSE_QA ;;
+            remove_sse_qa) expected=REMOVE_SSE_QA ;;
+            diagnose) expected=DIAGNOSE ;;
+            rollback) expected=ROLLBACK ;;
+            *) exit 2 ;;
+          esac
+          test "$CONFIRMATION" = "$expected"
+          if [[ "$MODE" == *apk ]]; then
+            [[ "$APK_PROFILE" == "driver" || "$APK_PROFILE" == "excavator" ]]
+          fi
+          if [[ "$MODE" == *data ]]; then
+            [[ "$DATA_OPERATION" =~ ^deploy/data_updates/[A-Za-z0-9._-]+\.py$ ]]
+          fi
+          if [[ "$MODE" == "rollback" ]]; then
+            [[ "$ROLLBACK_ID" =~ ^github-[A-Za-z0-9._-]+$ ]]
+          fi
+
+      - name: Set up Python
+        if: ${{ !contains(inputs.mode, 'apk') }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install project dependencies
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
+
+      - name: Prepare runtime directories for checks
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        working-directory: СИСТЕМА_MVP/backend
+        run: mkdir -p media/employee_photos
+
+      - name: Run Django release checks
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        working-directory: СИСТЕМА_MVP/backend
+        env:
+          DJANGO_SECRET_KEY: github-production-release-check
+          DJANGO_DEBUG: "True"
+          DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+
+      - name: Set up Java for signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: mobile/capacitor-shell/android/**/*.gradle*
+
+      - name: Set up Node for signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/capacitor-shell/package-lock.json
+
+      - name: Build and verify signed APK
+        if: ${{ contains(inputs.mode, 'apk') }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          RELEASE_CERT_SHA256: ${{ secrets.ANDROID_RELEASE_CERT_SHA256 }}
+          DRIVER_GOOGLE_SERVICES_JSON: ${{ secrets.DRIVER_GOOGLE_SERVICES_JSON }}
+          EXCAVATOR_GOOGLE_SERVICES_JSON: ${{ secrets.EXCAVATOR_GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_STORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          test -n "$RELEASE_KEY_PASSWORD"
+          keystore="$RUNNER_TEMP/copper-release.jks"
+          credentials="$RUNNER_TEMP/keystore-credentials.txt"
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          chmod 0600 "$keystore"
+          {
+            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$RELEASE_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$RELEASE_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$RELEASE_KEY_PASSWORD"
+          } > "$credentials"
+          chmod 0600 "$credentials"
+          export COPPER_RELEASE_KEYSTORE_PROPERTIES="$credentials"
+          if [[ "$APK_PROFILE" == "driver" ]]; then
+            test -n "$DRIVER_GOOGLE_SERVICES_JSON"
+            printf '%s' "$DRIVER_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            chmod 0600 android/app/google-services.json
+            trap 'rm -f android/app/google-services.json' EXIT
+          elif [[ "$APK_PROFILE" == "excavator" ]]; then
+            test -n "$EXCAVATOR_GOOGLE_SERVICES_JSON"
+            printf '%s' "$EXCAVATOR_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            chmod 0600 android/app/google-services.json
+            trap 'rm -f android/app/google-services.json' EXIT
+          fi
+          npm ci
+          npm test
+          chmod +x android/gradlew
+          npm run "android:release:$APK_PROFILE"
+          apk="dist/$APK_PROFILE-release.apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          "$apksigner" verify --verbose "$apk"
+          actual_cert="$($apksigner verify --print-certs "$apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          current_manifest="$RUNNER_TEMP/$APK_PROFILE-current-update.json"
+          current_apk="$RUNNER_TEMP/$APK_PROFILE-current.apk"
+          curl --fail --silent --show-error "https://driverform.ru/media/apk/$APK_PROFILE-update.json" -o "$current_manifest"
+          current_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["apkUrl"])' "$current_manifest")"
+          curl --fail --silent --show-error --location "$current_url" -o "$current_apk"
+          expected_cert="$($apksigner verify --print-certs "$current_apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          echo "Built certificate: $actual_cert"
+          echo "Production certificate: $expected_cert"
+          test -n "$actual_cert"
+          test -n "$expected_cert"
+          test "$actual_cert" = "$expected_cert"
+
+      - name: Reject non-incrementing APK version
+        if: ${{ inputs.mode == 'publish_apk' }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          profile = os.environ["APK_PROFILE"]
+          new = json.load(open(f"dist/{profile}-update.json", encoding="utf-8"))
+          with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json") as response:
+              current = json.load(response)
+          if int(new["versionCode"]) <= int(current["versionCode"]):
+              raise SystemExit(
+                  f"versionCode must increase: current={current['versionCode']} new={new['versionCode']}"
+              )
+          PY
+
+      - name: Build deterministic release package
+        env:
+          MODE: ${{ inputs.mode }}
+          APK_PROFILE: ${{ inputs.apk_profile }}
+          DATA_OPERATION: ${{ inputs.data_operation }}
+          ROLLBACK_ID: ${{ inputs.rollback_id }}
+          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+          SSE_QA_SECRETS_JSON_B64: ${{ secrets.SSE_QA_SECRETS_JSON_B64 }}
+        run: |
+          set -euo pipefail
+          python .github/deploy/test_release_protocol.py
+          args=(
+            --root .
+            --files .github/deploy/production-files.txt
+            --output "$RUNNER_TEMP/accounting-release.tar.gz"
+            --commit "${{ github.sha }}"
+            --mode "$MODE"
+          )
+          if [[ "$MODE" == *apk ]]; then
+            args+=(--apk-dist mobile/capacitor-shell/dist --apk-profile "$APK_PROFILE")
+          elif [[ "$MODE" == *receiver ]]; then
+            args+=(--receiver-source deployment/server/accounting_github_deploy_receiver.py)
+          elif [[ "$MODE" == *fcm ]]; then
+            test -n "$FCM_SERVICE_ACCOUNT_JSON"
+            fcm_credentials="$RUNNER_TEMP/firebase-service-account.json"
+            printf '%s' "$FCM_SERVICE_ACCOUNT_JSON" > "$fcm_credentials"
+            chmod 0600 "$fcm_credentials"
+            trap 'rm -f "$fcm_credentials"' EXIT
+            args+=(--fcm-service-account "$fcm_credentials")
+          elif [[ "$MODE" == *data ]]; then
+            args+=(--operation "$DATA_OPERATION")
+          elif [[ "$MODE" == "diagnose" ]]; then
+            args+=(--event-file "$GITHUB_EVENT_PATH")
+          elif [[ "$MODE" == *sse_qa ]]; then
+            qa_source="deployment/sse-qa-install"
+            qa_build="$RUNNER_TEMP/sse-qa-payload"
+            if [[ "$MODE" == "install_sse_qa" || "$MODE" == "verify_sse_qa" ]]; then
+              cp -a "$qa_source" "$qa_build"
+              rm -rf "$qa_build/generated/wheelhouse" "$qa_build/generated/wheelhouse.sha256" \
+                "$qa_build/PACKAGE_MANIFEST.csv" "$qa_build/evidence/package-self-check.log"
+              mkdir -p "$qa_build/evidence"
+              (cd "$qa_build/generated" && sha256sum -c runtime.sha256)
+              if [[ "$MODE" == "install_sse_qa" ]]; then
+                mkdir -p "$qa_build/generated/wheelhouse"
+                tar -xOf "$qa_build/generated/runtime.tar.gz" backend/requirements.txt > "$RUNNER_TEMP/sse-qa-requirements.txt"
+                python -m pip download --only-binary=:all: \
+                  --dest "$qa_build/generated/wheelhouse" \
+                  -r "$RUNNER_TEMP/sse-qa-requirements.txt" "uvicorn==0.37.0"
+                (cd "$qa_build/generated/wheelhouse" && sha256sum *.whl > ../wheelhouse.sha256)
+              fi
+              python "$qa_build/scripts/finalize_package.py" "$qa_build"
+              python "$qa_build/scripts/package_self_check.py" "$qa_build" | tee "$qa_build/evidence/package-self-check.log"
+              (cd "$qa_build" && zip -q -r -X "$RUNNER_TEMP/sse-qa-install.zip" .)
+            else
+              mkdir -p "$qa_build/scripts"
+              cp "$qa_source/scripts/sse_qa_ctl.py" "$qa_build/scripts/sse_qa_ctl.py"
+              (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" scripts/sse_qa_ctl.py)
+            fi
+            args+=(--sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip")
+            if [[ "$MODE" == "install_sse_qa" ]]; then
+              test -n "$SSE_QA_SECRETS_JSON_B64"
+              printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode > "$RUNNER_TEMP/sse-qa-secrets.json"
+              chmod 0600 "$RUNNER_TEMP/sse-qa-secrets.json"
+              trap 'rm -f "$RUNNER_TEMP/sse-qa-secrets.json"' EXIT
+              args+=(--sse-qa-secrets "$RUNNER_TEMP/sse-qa-secrets.json")
+            fi
+          elif [[ "$MODE" == "rollback" ]]; then
+            args+=(--rollback-id "$ROLLBACK_ID")
+          fi
+          python .github/deploy/build_release.py "${args[@]}"
+
+      - name: Configure pinned SSH transport
+        env:
+          PROD_DEPLOY_KEY: ${{ secrets.PROD_DEPLOY_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$PROD_DEPLOY_KEY" > "$HOME/.ssh/production_deploy"
+          chmod 0600 "$HOME/.ssh/production_deploy"
+          printf '%s\n' "$PROD_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/known_hosts"
+
+      - name: Send release to the restricted production receiver
+        if: ${{ inputs.mode != 'diagnose' }}
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP/accounting-release.tar.gz" | \
+            ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 -i "$HOME/.ssh/production_deploy" \
+              "$PROD_USER@$PROD_HOST"
+
+      - name: Send diagnostic request without logging plaintext
+        id: diagnostic_receiver
+        if: ${{ inputs.mode == 'diagnose' }}
+        timeout-minutes: 3
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+        run: |
+          set +e
+          cat "$RUNNER_TEMP/accounting-release.tar.gz" | \
+            ssh -T -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o ConnectTimeout=20 -i "$HOME/.ssh/production_deploy" \
+              "$PROD_USER@$PROD_HOST" \
+              > "$RUNNER_TEMP/production-diagnostic-envelope.json" \
+              2> "$RUNNER_TEMP/production-diagnostic-receiver-error.txt"
+          status=$?
+          set -e
+          printf 'receiver_status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+
+      - name: Validate server-encrypted diagnostic artifact
+        id: validate_diagnostic
+        if: ${{ inputs.mode == 'diagnose' && always() }}
+        env:
+          RECEIVER_STATUS: ${{ steps.diagnostic_receiver.outputs.receiver_status }}
+        run: |
+          set -euo pipefail
+          envelope="$RUNNER_TEMP/production-diagnostic-envelope.json"
+          receiver_error="$RUNNER_TEMP/production-diagnostic-receiver-error.txt"
+          encrypted="$RUNNER_TEMP/production-diagnostic-${{ github.run_id }}.cms"
+          trap 'rm -f "$envelope" "$receiver_error"' EXIT
+          if [[ "$RECEIVER_STATUS" == "0" ]]; then
+            set +e
+            python - "$envelope" "$encrypted" <<'PY'
+          import base64
+          import hashlib
+          import json
+          import sys
+          try:
+              report = json.load(open(sys.argv[1], encoding="utf-8"))
+          except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+              raise SystemExit("invalid diagnostic envelope")
+          expected_keys = {
+              "schema", "kind", "operation", "summary", "ciphertext_format",
+              "recipient_fingerprint", "ciphertext_sha256", "ciphertext_base64",
+          }
+          if set(report) != expected_keys or report.get("schema") != 1:
+              raise SystemExit("invalid diagnostic envelope contract")
+          if report.get("kind") != "production_diagnostic_ciphertext":
+              raise SystemExit("invalid diagnostic envelope kind")
+          operation = report.get("operation")
+          summary = report.get("summary") or {}
+          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1"}:
+              raise SystemExit("unexpected diagnostic operation")
+          if report.get("ciphertext_format") != "CMS-DER":
+              raise SystemExit("unexpected diagnostic ciphertext format")
+          if report.get("recipient_fingerprint") != "36:65:5B:1C:BD:66:01:2A:15:2C:97:8B:CF:79:AC:FE:E8:46:5A:7A:1C:50:FD:FD:5C:F7:52:2C:A2:BD:59:6D":
+              raise SystemExit("unexpected diagnostic recipient")
+          rows = summary.get("row_count")
+          truncated = summary.get("truncated")
+          if set(summary) != {"row_count", "truncated"}:
+              raise SystemExit("invalid diagnostic summary")
+          if isinstance(rows, bool) or not isinstance(rows, int) or rows < 0 or rows > 500 or not isinstance(truncated, bool):
+              raise SystemExit("invalid diagnostic summary")
+          try:
+              ciphertext = base64.b64decode(report.get("ciphertext_base64", ""), validate=True)
+          except (ValueError, TypeError):
+              raise SystemExit("invalid diagnostic ciphertext encoding")
+          actual_sha = hashlib.sha256(ciphertext).hexdigest()
+          if not ciphertext or len(ciphertext) > 589824 or actual_sha != report.get("ciphertext_sha256"):
+              raise SystemExit("invalid diagnostic ciphertext")
+          with open(sys.argv[2], "wb") as output:
+              output.write(ciphertext)
+          print(f"DIAGNOSTIC_CAPTURED operation={operation} rows={rows} truncated={str(truncated).lower()}")
+          print(f"DIAGNOSTIC_CIPHERTEXT_SHA256={actual_sha}")
+          PY
+            report_code=$?
+            set -e
+            if [[ "$report_code" == "0" ]]; then
+              report_status=ok
+            else
+              report_status=invalid
+              echo "DIAGNOSTIC_ENVELOPE_INVALID"
+            fi
+          else
+            report_status=receiver_error
+            echo "DIAGNOSTIC_FAILURE_CAPTURED receiver_status=$RECEIVER_STATUS"
+            if [[ -f "$receiver_error" ]]; then
+              echo "DIAGNOSTIC_ERROR_SHA256=$(sha256sum "$receiver_error" | cut -d' ' -f1)"
+            fi
+          fi
+          printf 'report_status=%s\n' "$report_status" >> "$GITHUB_OUTPUT"
+
+      - name: Upload encrypted diagnostic artifact
+        if: ${{ inputs.mode == 'diagnose' && always() && steps.validate_diagnostic.outputs.report_status == 'ok' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/production-diagnostic-${{ github.run_id }}.cms
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Fail after preserving encrypted diagnostic error
+        if: ${{ inputs.mode == 'diagnose' && always() && steps.validate_diagnostic.outputs.report_status != 'ok' }}
+        run: |
+          echo "Restricted production diagnostic request failed before a valid encrypted artifact was produced."
+          exit 1
+
+      - name: Verify public web health
+        if: ${{ inputs.mode == 'deploy' || inputs.mode == 'deploy_migrations' || inputs.mode == 'apply_data' || inputs.mode == 'rollback' }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/ >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/driver-sw.js >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 --retry-all-errors https://driverform.ru/excavator-sw.js >/dev/null
+
+      - name: Verify published APK and manifest
+        if: ${{ inputs.mode == 'publish_apk' }}
+        working-directory: mobile/capacitor-shell
+        env:
+          APK_PROFILE: ${{ inputs.apk_profile }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os, urllib.request
+          profile = os.environ["APK_PROFILE"]
+          expected = json.load(open(f"dist/{profile}-update.json", encoding="utf-8"))
+          with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json") as response:
+              published = json.load(response)
+          if published != expected:
+              raise SystemExit("published APK manifest differs from the release")
+          with urllib.request.urlopen(published["apkUrl"]) as response:
+              apk = response.read()
+          if hashlib.sha256(apk).hexdigest() != published["sha256"]:
+              raise SystemExit("published APK SHA-256 mismatch")
+          PY

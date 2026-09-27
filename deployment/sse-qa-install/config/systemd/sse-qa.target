@@ -1,0 +1,9 @@
+[Unit]
+Description=Isolated SSE QA services
+Requires=srv-sse\x2dqa.mount
+After=srv-sse\x2dqa.mount
+Wants=postgresql@16-sseqa.service redis-sse-qa.service
+
+[Install]
+WantedBy=multi-user.target
+
