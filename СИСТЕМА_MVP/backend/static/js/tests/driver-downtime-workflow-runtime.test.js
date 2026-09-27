@@ -201,8 +201,10 @@ function loadActiveDowntimeRuntime() {
         "function startDriverDowntimeTimer(payload)",
         "function applyDriverActiveDowntime(payload)",
         "function clearDriverActiveDowntime(payload)",
+        "function syncDriverDowntimeTimerFromCard()",
     ];
-    const source = signatures.map((signature) => extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)).join("\n");
+    const source = "var driverDowntimeCardBlankTimer = null;\nvar driverDowntimeCardBlankConfirmed = false;\n"
+        + signatures.map((signature) => extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)).join("\n");
     let nowMs = Date.parse("2026-09-27T01:00:00.000Z");
     let intervalCallback = null;
     const duration = () => ({hidden: true, textContent: ""});
@@ -224,11 +226,13 @@ function loadActiveDowntimeRuntime() {
         };
     };
     const buttons = [makeButton(1, 10), makeButton(2, 3)];
-    const downtimeCard = {dataset: {driverShiftDowntimeSeconds: "0", driverActiveElapsedSeconds: "0"}, classList: createClassList()};
+    const downtimeCard = {dataset: {driverShiftDowntimeSeconds: "0", driverActiveElapsedSeconds: "0"}, classList: createClassList(), className: ""};
     const downtimeDuration = {textContent: ""};
     const downtimeTitle = {textContent: ""};
     const downtimeReason = {textContent: ""};
     const downtimeClose = {disabled: true, classList: createClassList(["is-disabled"]), setAttribute() {}, removeAttribute() {}};
+    let nextTimeoutId = 100;
+    const pendingTimeouts = new Map();
     const runtimeWindow = {
         driverDowntimeTimerId: null,
         driverDowntimeClock: null,
@@ -240,6 +244,19 @@ function loadActiveDowntimeRuntime() {
         clearInterval() {
             intervalCallback = null;
         },
+        setTimeout(callback) {
+            const id = nextTimeoutId++;
+            pendingTimeouts.set(id, callback);
+            return id;
+        },
+        clearTimeout(id) {
+            pendingTimeouts.delete(id);
+        },
+    };
+    const fireAllTimeouts = () => {
+        const callbacks = [...pendingTimeouts.values()];
+        pendingTimeouts.clear();
+        callbacks.forEach((callback) => callback());
     };
     const shell = {
         querySelector(selector) {
@@ -256,7 +273,8 @@ function loadActiveDowntimeRuntime() {
         `${source}\n`
         + `context.apply = applyDriverActiveDowntime;\n`
         + `context.clear = clearDriverActiveDowntime;\n`
-        + `context.start = startDriverDowntimeTimer;`,
+        + `context.start = startDriverDowntimeTimer;\n`
+        + `context.syncFromCard = syncDriverDowntimeTimerFromCard;`,
         {
             context,
             Date: RuntimeDate,
@@ -288,6 +306,7 @@ function loadActiveDowntimeRuntime() {
         window: runtimeWindow,
         setNow(value) { nowMs = Date.parse(value); },
         tick() { assert.ok(intervalCallback); intervalCallback(); },
+        fireAllTimeouts,
     };
 }
 
@@ -699,6 +718,86 @@ test("a stale fragment that writes is-active directly onto the card gets correct
     runtime.context.apply(payload);
     assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
     assert.equal(runtime.downtimeCard.dataset.driverActiveReasonId, "");
+});
+
+test("a transient blank card from a background reconcile does not reset the timer or drop the border", () => {
+    // Боевой 27.09.2026 (v359): фоновое обновление раз в ~20 с иногда
+    // приносит карточку состояния простоя без data-driver-active-reason-id
+    // / data-driver-active-downtime-id, хотя простой реально ещё идёт —
+    // syncDriverDowntimeTimerFromCard (её вызывает каждое обновление экрана)
+    // раньше читала это как «простоя нет» и сразу гасила таймер и
+    // окантовку. Пустое значение само по себе не доказательство закрытия:
+    // гасим только если оно ПОДТВЕРДИТСЯ ещё раз чуть позже, а не с первого
+    // наблюдения.
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        event_id: "local:driver-downtime-uuid-4",
+        reason_id: 4,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "red",
+    };
+    runtime.context.apply(payload);
+    // Обычный первый вызов после привязки экрана — синхронизирует
+    // window.driverDowntimeActiveEventId с уже применённым простоем.
+    runtime.context.syncFromCard();
+    const clockBeforeBlank = runtime.window.driverDowntimeClock;
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+
+    // Имитация подмены карточки без атрибутов активного простоя (core/
+    // ownDowntimeOnly-снимок), в обход apply/clear — как это делает
+    // driver-shift-refresh-v1.js напрямую через setAttribute.
+    runtime.downtimeCard.dataset.driverActiveReasonId = "";
+    runtime.downtimeCard.dataset.driverActiveDowntimeId = "";
+
+    runtime.context.syncFromCard();
+    // Одно пустое наблюдение — ещё не закрытие: таймер и окантовка целы.
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+    assert.strictEqual(runtime.window.driverDowntimeClock, clockBeforeBlank);
+
+    // Следующее обычное обновление (через ~2 с) снова приносит верные
+    // атрибуты — ровно так это и происходило на бою между 20-секундными
+    // реконсайлами.
+    runtime.downtimeCard.dataset.driverActiveReasonId = String(payload.reason_id);
+    runtime.downtimeCard.dataset.driverActiveDowntimeId = payload.event_id;
+    runtime.context.syncFromCard();
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+    assert.strictEqual(runtime.window.driverDowntimeClock, clockBeforeBlank);
+
+    // Отложенная проверка (700 мс) срабатывает уже на восстановленной
+    // карточке — подтверждения закрытия так и не случилось.
+    runtime.fireAllTimeouts();
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+    assert.strictEqual(runtime.window.driverDowntimeClock, clockBeforeBlank);
+});
+
+test("a card that stays blank through the confirmation window is treated as a genuine closure", () => {
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        event_id: "local:driver-downtime-uuid-5",
+        reason_id: 5,
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "red",
+    };
+    runtime.context.apply(payload);
+    runtime.context.syncFromCard();
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+
+    runtime.downtimeCard.dataset.driverActiveReasonId = "";
+    runtime.downtimeCard.dataset.driverActiveDowntimeId = "";
+    runtime.context.syncFromCard();
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), true);
+
+    // Карточка так и осталась пустой к моменту подтверждения — теперь это
+    // считается настоящим закрытием.
+    runtime.fireAllTimeouts();
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+    assert.equal(runtime.window.driverDowntimeClock, null);
 });
 
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {

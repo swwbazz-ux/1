@@ -1151,14 +1151,40 @@ window.bindDriverMobileShell = function () {
        переустанавливаем таймер отдельно, сверяя его с реальным содержимым
        карточки на каждое обновление, а не только при собственном касании
        водителя. */
+    var driverDowntimeCardBlankTimer = null;
+    var driverDowntimeCardBlankConfirmed = false;
     function syncDriverDowntimeTimerFromCard() {
         if (!downtimeCard) return;
         var cardReasonId = String(downtimeCard.dataset.driverActiveReasonId || "");
+        var cardDowntimeId = String(downtimeCard.dataset.driverActiveDowntimeId || "");
         var clock = window.driverDowntimeClock;
         var clockReasonId = clock ? String(clock.activeReasonId || "") : "";
-        var cardEventId = String(downtimeCard.dataset.driverActiveDowntimeId || "");
+        var cardEventId = cardDowntimeId;
         var clockEventId = window.driverDowntimeActiveEventId || "";
-        if (cardReasonId === clockReasonId && cardEventId === clockEventId) return;
+        if (cardReasonId === clockReasonId && cardEventId === clockEventId) {
+            if (driverDowntimeCardBlankTimer) { window.clearTimeout(driverDowntimeCardBlankTimer); driverDowntimeCardBlankTimer = null; }
+            driverDowntimeCardBlankConfirmed = false;
+            return;
+        }
+        if (!cardReasonId && !cardDowntimeId && clock && !driverDowntimeCardBlankConfirmed) {
+            /* Пустая карточка, хотя таймер только что показывал активный простой, —
+               подозрительно: некоторые обновления фрагмента (реконсайл раз в ~20 с)
+               на короткое время теряют состояние простоя в карточке, хотя простой
+               реально не закрывался (боевой 27.09.2026, v359) — окантовка гасла и
+               мигала, таймер обнулялся на пустом месте. Пустое значение само по себе
+               не доказательство закрытия — гасим только если оно ПОДТВЕРДИТСЯ ещё
+               раз чуть позже, а не по одному наблюдению. */
+            if (!driverDowntimeCardBlankTimer) {
+                driverDowntimeCardBlankTimer = window.setTimeout(function () {
+                    driverDowntimeCardBlankTimer = null;
+                    driverDowntimeCardBlankConfirmed = true;
+                    syncDriverDowntimeTimerFromCard();
+                    driverDowntimeCardBlankConfirmed = false;
+                }, 700);
+            }
+            return;
+        }
+        if (driverDowntimeCardBlankTimer) { window.clearTimeout(driverDowntimeCardBlankTimer); driverDowntimeCardBlankTimer = null; }
         window.driverDowntimeActiveEventId = cardEventId;
         if (!cardReasonId) {
             clearDriverActiveDowntime({
