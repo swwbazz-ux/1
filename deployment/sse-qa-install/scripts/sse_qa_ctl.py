@@ -84,6 +84,72 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"django_secret_key|password|secret|token|authorization|cookie|pin|"
     r"basic_auth(?:_line|_password)?)\b\s*[:=]\s*[^\s,;]+"
 )
+_PACKAGING_BOOTSTRAP_WHEEL = re.compile(
+    r"^packaging-[0-9][A-Za-z0-9_.!+]*-py3-none-any\.whl$",
+    re.IGNORECASE,
+)
+_WHEEL_COMPATIBILITY_CHECK = r"""
+import json
+import sys
+
+
+def emit(payload, status=0):
+    print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    raise SystemExit(status)
+
+
+try:
+    bootstrap_wheel = sys.argv[1]
+    sys.path.insert(0, bootstrap_wheel)
+    from packaging.tags import Tag, sys_tags
+    from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+except Exception:
+    emit({"ok": False, "error": "validator_dependency_unavailable"}, 70)
+
+try:
+    request = json.load(sys.stdin)
+    wheel_names = request["wheel_names"]
+    requested_tags = request.get("target_tags")
+    if not isinstance(wheel_names, list) or not all(
+        isinstance(name, str) for name in wheel_names
+    ):
+        raise ValueError("invalid wheel_names")
+    if requested_tags is None:
+        supported_tags = set(sys_tags())
+    else:
+        if not isinstance(requested_tags, list):
+            raise ValueError("invalid target_tags")
+        supported_tags = {
+            Tag(*parts)
+            for parts in requested_tags
+            if isinstance(parts, list)
+            and len(parts) == 3
+            and all(isinstance(part, str) and part for part in parts)
+        }
+        if len(supported_tags) != len(requested_tags):
+            raise ValueError("invalid target tag tuple")
+except Exception:
+    emit({"ok": False, "error": "validator_request_invalid"}, 64)
+
+rejected = []
+for wheel_name in wheel_names:
+    try:
+        _, _, _, wheel_tags = parse_wheel_filename(wheel_name)
+    except InvalidWheelFilename:
+        rejected.append(
+            {"filename": wheel_name, "reason": "invalid_wheel_filename"}
+        )
+        continue
+    if not wheel_tags.intersection(supported_tags):
+        rejected.append(
+            {
+                "filename": wheel_name,
+                "reason": "no_supported_python_abi_platform_tag",
+            }
+        )
+
+emit({"ok": not rejected, "rejected": rejected})
+"""
 
 
 class QaError(RuntimeError):
@@ -712,7 +778,106 @@ def install_local_layout(
     owned_write(ETC_ROOT / "secrets.json", json.dumps(secrets, sort_keys=True) + "\n", 0o600)
 
 
-def validate_wheelhouse(bundle: Path) -> Path:
+def _validate_wheel_compatibility(
+    wheels: list[Path],
+    *,
+    target_tags: set[tuple[str, str, str]] | None = None,
+    target_python: str | Path | None = None,
+) -> None:
+    bootstrap = [
+        wheel for wheel in wheels
+        if _PACKAGING_BOOTSTRAP_WHEEL.fullmatch(wheel.name)
+    ]
+    if len(bootstrap) != 1:
+        raise QaError(
+            "wheel compatibility validator dependency unavailable before "
+            "application venv: expected exactly one "
+            "packaging-*-py3-none-any.whl"
+        )
+
+    python = str(target_python) if target_python is not None else "/usr/bin/python3.12"
+    if not Path(python).is_file():
+        raise QaError(
+            "wheel compatibility target interpreter unavailable: "
+            "/usr/bin/python3.12 is required"
+        )
+    request = {
+        "wheel_names": [wheel.name for wheel in wheels],
+        "target_tags": (
+            None
+            if target_tags is None
+            else [list(tag) for tag in sorted(target_tags)]
+        ),
+    }
+    try:
+        completed = subprocess.run(
+            [
+                python, "-I", "-S", "-c", _WHEEL_COMPATIBILITY_CHECK,
+                str(bootstrap[0]),
+            ],
+            input=json.dumps(request, sort_keys=True),
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        kind = "timeout" if isinstance(exc, subprocess.TimeoutExpired) else "unavailable"
+        raise QaError(
+            f"wheel compatibility validator {kind} before application venv"
+        ) from None
+
+    try:
+        result = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError):
+        result = None
+    if not isinstance(result, dict):
+        raise QaError(
+            "wheel compatibility validator returned invalid structured result"
+        )
+    if completed.returncode != 0 or result.get("error"):
+        if result.get("error") == "validator_dependency_unavailable":
+            raise QaError(
+                "wheel compatibility validator dependency unavailable before "
+                "application venv"
+            )
+        raise QaError(
+            "wheel compatibility validator failed closed before application venv"
+        )
+    rejected = result.get("rejected")
+    if not isinstance(rejected, list) or result.get("ok") not in {True, False}:
+        raise QaError("wheel compatibility validator returned inconsistent result")
+    if rejected:
+        if result.get("ok") is not False:
+            raise QaError("wheel compatibility validator returned inconsistent result")
+        first = rejected[0]
+        if not isinstance(first, dict):
+            raise QaError("wheel compatibility validator returned inconsistent result")
+        filename = first.get("filename")
+        reason = first.get("reason")
+        known_names = {wheel.name for wheel in wheels}
+        if filename not in known_names or reason not in {
+            "invalid_wheel_filename",
+            "no_supported_python_abi_platform_tag",
+        }:
+            raise QaError("wheel compatibility validator returned inconsistent result")
+        explanation = {
+            "invalid_wheel_filename": "invalid wheel filename",
+            "no_supported_python_abi_platform_tag": (
+                "no supported Python/ABI/platform tag"
+            ),
+        }[reason]
+        raise QaError(f"incompatible wheel {filename}: {explanation}")
+    if result.get("ok") is not True:
+        raise QaError("wheel compatibility validator returned inconsistent result")
+
+
+def validate_wheelhouse(
+    bundle: Path,
+    *,
+    target_tags: set[tuple[str, str, str]] | None = None,
+    target_python: str | Path | None = None,
+) -> Path:
     wheelhouse = bundle / "generated/wheelhouse"
     manifest = bundle / "generated/wheelhouse.sha256"
     if not wheelhouse.is_dir() or not manifest.is_file():
@@ -729,12 +894,11 @@ def validate_wheelhouse(bundle: Path) -> Path:
     actual = {path.name: digest(path) for path in wheels}
     if actual != expected:
         raise QaError("wheelhouse hash mismatch")
-    incompatible = [
-        name for name in actual
-        if any(tag != "312" for tag in re.findall(r"-cp(\d{2,3})-", name))
-    ]
-    if incompatible:
-        raise QaError("wheelhouse contains non-CPython-3.12 artifacts")
+    _validate_wheel_compatibility(
+        wheels,
+        target_tags=target_tags,
+        target_python=target_python,
+    )
     return wheelhouse
 
 

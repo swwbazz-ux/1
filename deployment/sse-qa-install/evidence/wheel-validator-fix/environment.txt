@@ -1,0 +1,6 @@
+﻿checked_utc=2026-09-27T18:24:04.1210807Z
+os=Microsoft Windows NT 10.0.27924.0
+python=Python 3.12.10
+packaging=26.3
+baseline=0d733461d569003fe6fcab4d61b57c38df77bdef
+linux_integration=NOT_RUN

@@ -1,0 +1,15 @@
+test_accepts_cp311_abi3_problem_wheel_and_supported_cp312 (test_wheel_compatibility.WheelCompatibilityTests.test_accepts_cp311_abi3_problem_wheel_and_supported_cp312) ... ok
+test_accepts_universal_and_composite_tags (test_wheel_compatibility.WheelCompatibilityTests.test_accepts_universal_and_composite_tags) ... ok
+test_default_uses_isolated_exact_python312_and_target_sys_tags (test_wheel_compatibility.WheelCompatibilityTests.test_default_uses_isolated_exact_python312_and_target_sys_tags) ... ok
+test_rejects_duplicate_manifest_entry (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_duplicate_manifest_entry) ... ok
+test_rejects_hash_mismatch_before_compatibility_check (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_hash_mismatch_before_compatibility_check) ... ok
+test_rejects_invalid_wheel_filename (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_invalid_wheel_filename) ... ok
+test_rejects_malformed_manifest (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_malformed_manifest) ... ok
+test_rejects_missing_validator_dependency_before_application_venv (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_missing_validator_dependency_before_application_venv) ... ok
+test_rejects_unimportable_validator_dependency_without_fallback (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_unimportable_validator_dependency_without_fallback) ... ok
+test_rejects_wrong_python_abi_or_platform_with_safe_reason (test_wheel_compatibility.WheelCompatibilityTests.test_rejects_wrong_python_abi_or_platform_with_safe_reason) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.812s
+
+OK

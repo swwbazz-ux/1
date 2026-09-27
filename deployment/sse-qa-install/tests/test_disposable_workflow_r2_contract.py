@@ -58,7 +58,9 @@ class DisposableWorkflowR2ContractTests(unittest.TestCase):
                 "sha256sum --text *.whl > ../wheelhouse.sha256"
             )
             subprocess.run([bash_path(), "-lc", command], check=True)
-            self.assertEqual(ctl.validate_wheelhouse(bundle), wheelhouse)
+            with mock.patch.object(ctl, "_validate_wheel_compatibility") as compatibility:
+                self.assertEqual(ctl.validate_wheelhouse(bundle), wheelhouse)
+            compatibility.assert_called_once()
 
     def test_package_tests_use_fresh_venv_and_offline_wheelhouse(self):
         for required in (

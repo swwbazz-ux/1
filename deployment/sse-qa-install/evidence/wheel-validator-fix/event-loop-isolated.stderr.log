@@ -1,0 +1,6 @@
+test_event_loop_sampler_writes_same_loop_samples (test_package_contract.PackageContractTests.test_event_loop_sampler_writes_same_loop_samples) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.219s
+
+OK
