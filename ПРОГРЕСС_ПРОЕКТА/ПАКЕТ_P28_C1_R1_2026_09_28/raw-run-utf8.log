@@ -1,0 +1,202 @@
+P28_R1_BACKEND=C:\codex-tmp\p28-c1-rel-f2248\СИСТЕМА_MVP\backend
+P28_R1_BACKEND_EXISTS=True
+P28_R1_SOURCE_SHA=f2248cb79c737e98b580e784abea394335a2700b
+P28_R1_SOURCE_CLEAN=true
+Found 10 test(s).
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying users.0001_initial... OK
+  Applying references.0001_initial... OK
+  Applying users.0002_driverprimaryregistration... OK
+  Applying users.0003_employee_comment_employee_dismissed_at_and_more... OK
+  Applying users.0004_remove_driverprimaryregistration_shift_type_and_more... OK
+  Applying users.0005_employee_position... OK
+  Applying users.0006_remove_global_unique_access_code... OK
+  Applying users.0007_deduplicate_employee_accesses... OK
+  Applying users.0008_remove_employeeaccess_unique_employee_role_access... OK
+  Applying shifts.0001_initial... OK
+  Applying trips.0001_initial... OK
+  Applying trips.0002_trip_downtime_text_trip_loading_block_and_more... OK
+  Applying shifts.0002_employeeshift_end_engine_hours_and_more... OK
+  Applying assignments.0001_initial... OK
+  Applying trips.0003_dispatcheractionlog... OK
+  Applying trips.0004_dispatcheractionlog_reason... OK
+  Applying trips.0005_truck_loaded_action... OK
+  Applying references.0002_equipmentstate... OK
+  Applying trips.0006_trip_actual_dump_point_trip_assigned_dump_point... OK
+  Applying trips.0007_alter_trip_status... OK
+  Applying trips.0008_trip_cancelled_at... OK
+  Applying users.0009_employee_oup_fields_and_audit_target... OK
+  Applying users.0010_normalize_activated_employee_status... OK
+  Applying users.0011_adminactionlog_reversal... OK
+  Applying references.0003_remove_in_transit_and_rename_free... OK
+  Applying shifts.0003_shiftplan_equipmentshiftplan... OK
+  Applying shifts.0004_shiftplan_plan_scope... OK
+  Applying shifts.0005_employeeshift_plan_assigned_at_and_more... OK
+  Applying shifts.0006_reconcile_equipment_plan_groups... OK
+  Applying references.0004_update_free_color_semantics... OK
+  Applying shifts.0007_achievementprize_achievementunlock... OK
+  Applying shifts.0008_employeeshift_unique_open_shift_per_employee_and_more... OK
+  Applying references.0005_equipmentmodel_fuel_capacity_limit_l... OK
+  Applying references.0006_assign_excavator_fuel_limit_models... OK
+  Applying shifts.0009_shiftclientaction_shiftreadingcorrection... OK
+  Applying shifts.0010_alter_shiftreadingcorrection_employee_and_more... OK
+  Applying shifts.0011_employeeshift_workplace_code... OK
+  Applying references.0007_assign_truck_fuel_limits... OK
+  Applying users.0012_personnel_positions_and_temporary_transfers... OK
+  Applying users.0013_normalize_department_work_schedule... OK
+  Applying users.0014_allow_work_schedules_without_brigades... OK
+  Applying users.0015_seed_rotation_roles... OK
+  Applying users.0016_watchcomposition_employee_watch_composition... OK
+  Applying users.0017_employee_sex... OK
+  Applying shifts.0012_watchperiod_watch_composition... OK
+  Applying shifts.0013_unique_open_oup_period... OK
+  Applying shifts.0014_watch_period_brigade_phases... OK
+  Applying shifts.0015_brigade_phase_actor_accesses... OK
+  Applying assignments.0002_excavatorplacement... OK
+  Applying assignments.0003_excavatorplacement_loading_block_and_more... OK
+  Applying assignments.0004_haulassignment_action_haulassignment_effective_at... OK
+  Applying assignments.0005_equipmentassignment_ended_by_and_more... OK
+  Applying assignments.0006_crewplan_crewplanslot_and_more... OK
+  Applying assignments.0007_equipment_assignment_provenance... OK
+  Applying assignments.0008_crew_plan_secondary_employee... OK
+  Applying assignments.0009_excavatorplacement_transport_distance_km... OK
+  Applying assignments.0010_excavatordumppointsetting... OK
+  Applying assignments.0011_haul_assignment_open_state_constraints... OK
+  Applying assignments.0012_haul_assignment_handoff... OK
+  Applying assignments.0013_numbered_shift_labels... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying users.0018_employee_watch_profile_guard... OK
+  Applying users.0019_activeapplicationsession... OK
+  Applying users.0020_pushnotification_webpushsubscription... OK
+  Applying users.0021_client_error_report... OK
+  Applying users.0022_employee_protected_card... OK
+  Applying users.0023_activeapplicationsession_presence... OK
+  Applying users.0024_employee_contractor_access_from_and_more... OK
+  Applying references.0008_equipment_contractor_organization... OK
+  Applying trips.0009_unique_open_trip_per_truck... OK
+  Applying trips.0010_dispatcher_manual_trip_action... OK
+  Applying shifts.0016_numbered_shift_labels... OK
+  Applying shifts.0017_drivershiftreadingconfirmation... OK
+  Applying references.0009_link_legacy_rock_capacity_rules... OK
+  Applying references.0010_remove_obsolete_cargo_aliases... OK
+  Applying shifts.0018_excavatorshiftreadingconfirmation... OK
+  Applying trips.0011_manual_loading_participation... OK
+  Applying trips.0012_trip_offline_loading_times... OK
+  Applying shifts.0019_employeeshift_service_close_kind... OK
+  Applying downtimes.0001_initial... OK
+  Applying downtimes.0002_seed_mechanic_reasons... OK
+  Applying downtimes.0003_alter_downtimereason_options_and_more... OK
+  Applying downtimes.0004_update_downtime_reason_state_semantics... OK
+  Applying downtimes.0005_downtime_actor_subject... OK
+  Applying core.0001_initial... OK
+  Applying core.0002_operationalstateevent... OK
+  Applying core.0003_offline_field_event... OK
+  Applying portal.0001_initial... OK
+  Applying portal.0002_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0003_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0004_publication_portal_public_story_requires_consent_and_more... OK
+  Applying reports.0001_initial... OK
+  Applying reports.0002_reporttemplate_filters... OK
+  Applying reports.0003_reporttemplate_group_by... OK
+  Applying reports.0004_reporttemplate_column_labels... OK
+  Applying reports.0005_pilotfeedback... OK
+  Applying reports.0006_driver_shift_passport_snapshots... OK
+  Applying reports.0007_ratingperiod... OK
+  Applying reports.0008_ratingperiod_nominal_starts_on... OK
+  Applying reports.0009_driver_rating_period_materialized_snapshot... OK
+  Applying reports.0010_driverratingperiodmaterializedsnapshot_participant_group_snapshots... OK
+  Applying reports.0011_driver_rating_materialized_group_key... OK
+  Applying reports.0012_numbered_shift_labels... OK
+  Applying settlement.0001_initial... OK
+  Applying settlement.0002_settlementrevision_accommodationanchor_and_more... OK
+  Applying settlement.0003_employeebedoccupancy... OK
+  Applying settlement.0004_employeebedoccupancy_temporal_fields... OK
+  Applying settlement.0005_physical_room_sex_restriction... OK
+  Applying settlement.0006_remove_legacy_occupancy_constraints... OK
+  Applying settlement.0007_settlement_control_lease_and_event... OK
+  Applying settlement.0008_m4_calendar_slots_and_bindings... OK
+  Applying settlement.0009_m5_authoritative_cohorts... OK
+  Applying settlement.0010_settlement_residents... OK
+  Applying settlement.0011_resident_subject_transition... OK
+  Applying settlement.0012_m7_saved_previews... OK
+  Applying settlement.0013_resident_occupancy_subject... OK
+  Applying settlement.0014_m8_apply_provenance... OK
+  Applying settlement.0015_cohort_member_work_shift... OK
+  Applying settlement.0016_shift_scoped_apply_and_occupancy... OK
+  Applying settlement.0017_m9_preview_corrections... OK
+  Applying rotations.0001_initial... OK
+  Applying rotations.0002_arrival_roster_versions... OK
+  Applying rotations.0003_arrival_roster_manual_review... OK
+  Applying rotations.0004_arrival_roster_employee_pool... OK
+  Applying rotations.0005_arrival_roster_confirmation... OK
+  Applying rotations.0006_arrival_roster_excel_revision... OK
+  Applying rotations.0007_arrival_roster_routing... OK
+  Applying rotations.0008_employee_watch_profile_change... OK
+  Applying rotations.0009_numbered_shift_labels... OK
+  Applying sessions.0001_initial... OK
+  Applying settlement.0018_arrival_roster_cohort_provenance... OK
+  Applying settlement.0019_cohort_member_watch_profile_provenance... OK
+  Applying shifts.0020_shiftclientaction_request_signature... OK
+  Applying trips.0013_free_bucket_acceptance... OK
+  Applying trips.0014_free_bucket_acceptance_active_constraint... OK
+  Applying trips.0015_free_bucket_driver_request... OK
+  Applying trips.0016_trip_driver_device_load_time... OK
+  Applying users.0025_employeeaccess_driver_quick_reasons... OK
+  Applying users.0026_native_push_device... OK
+System check identified no issues (0 silenced).
+test_00_vendor_and_isolated_test_database (p28_c1_r1_django.P28R1EnvironmentTest.test_00_vendor_and_isolated_test_database) ... P28_R1_EVIDENCE {"label": "environment", "test_database": "file:memorydb_default?mode=memory&cache=shared", "vendor": "sqlite"}
+ok
+test_accepted_unload_closes_used_then_direct_ordinary_load_is_real (p28_c1_r1_django.P28R1FreeBucketTests.test_accepted_unload_closes_used_then_direct_ordinary_load_is_real) ... P28_R1_EVIDENCE {"acceptance": "closed", "assignment_id": 1, "label": "accepted_unload_then_direct", "old_trip": {"actual_dump_point_id": 1, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "completed", "superseded_by_id": null}, "ordinary": {"error": "Возвращается к экскаватору · 10 мин.", "load_block_reason_code": "post_unload_cooldown", "load_block_reason_label": "Возвращается к экскаватору · 10 мин.", "ok": false}, "unload": {"code": "", "device_clock_adjusted": true, "device_occurred_at": "2026-09-27T23:26:53.566016+00:00", "effective_occurred_at": "2026-09-27T23:27:53.606820+00:00", "event_id": "r1-accepted-direct-unload", "message": "", "retryable": false, "server_ids": {"event_receipt_id": 3, "shift_id": 1, "trip_id": 1}, "server_received_at": "2026-09-27T23:27:53.606820+00:00", "status": "accepted", "time_source": "server_receipt", "version": 30}}
+ok
+test_accepted_unload_closes_used_then_offline_ordinary_load_is_real (p28_c1_r1_django.P28R1FreeBucketTests.test_accepted_unload_closes_used_then_offline_ordinary_load_is_real) ... P28_R1_EVIDENCE {"acceptance": "closed", "assignment_id": 1, "label": "accepted_unload_then_offline", "old_trip": {"actual_dump_point_id": 1, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "completed", "superseded_by_id": null}, "ordinary": {"code": "post_unload_cooldown", "event_id": "r1-after-accepted-offline", "message": "Возвращается к экскаватору · 10 мин.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:53.730560+00:00", "status": "conflict", "version": null}, "unload": {"code": "", "device_clock_adjusted": true, "device_occurred_at": "2026-09-27T23:26:53.682560+00:00", "effective_occurred_at": "2026-09-27T23:27:53.713557+00:00", "event_id": "r1-accepted-offline-unload", "message": "", "retryable": false, "server_ids": {"event_receipt_id": 3, "shift_id": 1, "trip_id": 1}, "server_received_at": "2026-09-27T23:27:53.713557+00:00", "status": "accepted", "time_source": "server_receipt", "version": 30}}
+ok
+test_delayed_unload_direct_obstacles_before_on_and_after_used_boundary (p28_c1_r1_django.P28R1FreeBucketTests.test_delayed_unload_direct_obstacles_before_on_and_after_used_boundary) ... P28_R1_EVIDENCE {"acceptance": "closed", "after": {"code": "trip_changed", "error": "Рейс изменился. Обновите экран.", "ok": false}, "assignment_id": 1, "before": {"code": "free_bucket_acceptance_required", "error": "Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.", "ok": false}, "deadline": "2026-09-27 23:32:53.785604+00:00", "label": "delayed_unload_direct_boundary", "on": {"code": "trip_changed", "error": "Рейс изменился. Обновите экран.", "ok": false}, "trip": {"actual_dump_point_id": null, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "loaded_waiting_unload", "superseded_by_id": null}}
+ok
+test_delayed_unload_offline_obstacles_before_on_and_after_used_boundary (p28_c1_r1_django.P28R1FreeBucketTests.test_delayed_unload_offline_obstacles_before_on_and_after_used_boundary) ... offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Машинист грузит самосвал Самосвал 21, но открытый рейс #1 на сервере не совпал с ожидаемым (#—). Погрузка принята, старый рейс закрыт как непроконтролированный (uncontrolled), засчитан тому, кто грузил.
+offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_cannot_be_replaced) employee=1 role=6 — Машинист грузит самосвал Самосвал 21 поверх действующего рейса #1, хотя по правилам замены рейс нельзя заменять. Погрузка машиниста принята как истина, старый рейс закрыт как непроконтролированный, засчитан тому, кто грузил.
+offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Машинист грузит самосвал Самосвал 21, но открытый рейс #1 на сервере не совпал с ожидаемым (#—). Погрузка принята, старый рейс закрыт как непроконтролированный (uncontrolled), засчитан тому, кто грузил.
+offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_cannot_be_replaced) employee=1 role=6 — Машинист грузит самосвал Самосвал 21 поверх действующего рейса #1, хотя по правилам замены рейс нельзя заменять. Погрузка машиниста принята как истина, старый рейс закрыт как непроконтролированный, засчитан тому, кто грузил.
+P28_R1_EVIDENCE {"acceptance": "closed", "after": {"code": "active_trip", "event_id": "r1-offline-after", "message": "Самосвал уже находится в незакрытом рейсе.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:53.962645+00:00", "status": "conflict", "version": null}, "assignment_id": 1, "before": {"code": "free_bucket_acceptance_required", "event_id": "r1-offline-before", "message": "Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:53.937930+00:00", "status": "conflict", "version": null}, "deadline": "2026-09-27 23:32:53.910888+00:00", "label": "delayed_unload_offline_boundary", "on": {"code": "active_trip", "event_id": "r1-offline-on", "message": "Самосвал уже находится в незакрытом рейсе.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:53.950172+00:00", "status": "conflict", "version": null}, "trip": {"actual_dump_point_id": null, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "loaded_waiting_unload", "superseded_by_id": null}}
+ok
+test_driver_p2_then_direct_and_offline_y_are_both_observed (p28_c1_r1_django.P28R1DriverBranchesTests.test_driver_p2_then_direct_and_offline_y_are_both_observed) ... offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Машинист грузит самосвал Самосвал 21, но открытый рейс #1 на сервере не совпал с ожидаемым (#—). Погрузка принята, старый рейс закрыт как непроконтролированный (uncontrolled), засчитан тому, кто грузил.
+offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_cannot_be_replaced) employee=1 role=6 — Машинист грузит самосвал Самосвал 21 поверх действующего рейса #1, хотя по правилам замены рейс нельзя заменять. Погрузка машиниста принята как истина, старый рейс закрыт как непроконтролированный, засчитан тому, кто грузил.
+P28_R1_EVIDENCE {"direct": {"code": "trip_changed", "error": "Рейс изменился. Обновите экран.", "ok": false}, "direct_status": 409, "label": "p2_then_y_paths", "offline": {"code": "active_trip", "event_id": "r1-p2-offline-y", "message": "Самосвал уже находится в незакрытом рейсе.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:54.066868+00:00", "status": "conflict", "version": null}, "trip_count": 1, "x": {"actual_dump_point_id": 2, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 2, "id": 1, "status": "loaded_waiting_unload", "superseded_by_id": null}}
+ok
+test_dump_point_refusal_registry_and_uncontrolled_branch (p28_c1_r1_django.P28R1DriverBranchesTests.test_dump_point_refusal_registry_and_uncontrolled_branch) ... P28_R1_EVIDENCE {"label": "driver_point_refusals", "stale": {"code": "stale_dump_point_change", "event_id": "r1-point-stale", "message": "После этого действия точка разгрузки уже менялась.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:54.183893+00:00", "status": "conflict", "version": null}, "state_changed": {"code": "dump_point_state_changed", "event_id": "r1-state-changed", "message": "Текущая точка разгрузки уже отличается от сохранённого состояния.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:54.159556+00:00", "status": "conflict", "version": null}, "trip": {"actual_dump_point_id": null, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "uncontrolled", "superseded_by_id": null}, "trip_not_editable": {"code": "trip_not_editable", "event_id": "r1-point-uncontrolled", "message": "Рейс изменился или уже завершён.", "retryable": false, "server_ids": {}, "server_received_at": "2026-09-27T23:27:54.197893+00:00", "status": "conflict", "version": null}}
+ok
+test_legacy_recorded_false_x_keeps_p2_after_real_y_cancel_and_reconcile (p28_c1_r1_django.P28R1DriverBranchesTests.test_legacy_recorded_false_x_keeps_p2_after_real_y_cancel_and_reconcile) ... P28_R1_EVIDENCE {"cancel": {"dump_point_id": 1, "equipment_state": "assigned", "ok": true, "status": "cancelled", "status_key": "blue", "status_label": "Назначена", "trip_id": 2, "truck_id": 1, "version": 36}, "label": "recorded_false_restore_with_p2", "p2": {"code": "", "event_id": "r1-legacy-x-p2", "message": "", "retryable": false, "server_ids": {"dump_point_id": 2, "event_receipt_id": 1, "shift_id": 1, "trip_id": 1}, "server_received_at": "2026-09-27T23:27:54.270224+00:00", "status": "accepted", "version": 27}, "reconcile_ids": [], "visible_immediately": true, "x": {"actual_dump_point_id": 2, "assigned_dump_point_id": 1, "driver_participation_recorded": false, "dump_point_id": 2, "id": 1, "status": "loaded_waiting_unload", "superseded_by_id": null}, "y": {"actual_dump_point_id": null, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 2, "status": "cancelled", "superseded_by_id": null}}
+ok
+test_recorded_false_is_outside_reconcile_while_true_expires_at_boundary (p28_c1_r1_django.P28R1DriverBranchesTests.test_recorded_false_is_outside_reconcile_while_true_expires_at_boundary) ... P28_R1_EVIDENCE {"at_boundary": [1], "before": [], "label": "recorded_false_reconcile", "recorded_false": {"actual_dump_point_id": 1, "assigned_dump_point_id": 1, "driver_participation_recorded": false, "dump_point_id": 1, "id": 2, "status": "loaded_waiting_unload", "superseded_by_id": null}, "recorded_true": {"actual_dump_point_id": 1, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 1, "id": 1, "status": "uncontrolled", "superseded_by_id": null}}
+ok
+test_real_server_projections_follow_p1_p2_unload_p3 (p28_c1_r1_django.P28R1ProjectionTests.test_real_server_projections_follow_p1_p2_unload_p3) ... P28_R1_EVIDENCE {"dispatcher": {"active_trip_count": 0, "completed_trip_count": 1, "completed_trip_id_not_exposed_by_panel_builder": true, "correction_actor_id": 3, "correction_reason": "P28-C1-R1 причина P3", "correction_trip_id": 1}, "driver": {"after_unload_active_trip": null, "loaded_trip_id": 1, "p2_point_id": 2, "p2_trip_id": 1}, "excavator": {"after_unload_open_trip_id": "", "loaded_open_trip_id": 1}, "label": "real_server_projections", "trip": {"actual_dump_point_id": 3, "assigned_dump_point_id": 1, "driver_participation_recorded": true, "dump_point_id": 2, "id": 1, "status": "completed", "superseded_by_id": null}}
+ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.355s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+P28_R1_EXIT_CODE=0
