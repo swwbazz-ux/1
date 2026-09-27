@@ -122,10 +122,11 @@
         var selected = all("[data-driver-point-card]:not([data-driver-point-clone])", c);
         var signature = signatureOf(c);
         if (geo.built === c && geo.signature === signature && cards().length === geo.n && geo.n) {
-            // Тот же набор точек — геометрию не трогаем, но кегль мог остаться
-            // неподогнанным: барабан был скрыт (0×0) в момент последней подгонки
-            // (та же причина, что у барабана простоев, driver-downtime-drum-v1.js).
-            fitLabels(c);
+            // Тот же набор точек — геометрию не трогаем. Подгонку здесь НЕ дёргаем:
+            // build()/refresh() вызываются на любую относящуюся мутацию, часто —
+            // и пересчёт на каждый такой случай грузил телефон и «прыгал» размером
+            // текста (владелец, 28.09.2026). Случай «барабан был скрыт» ловит
+            // отдельный узкий сигнал — ResizeObserver на самом барабане ниже.
             return true;
         }
         all("[data-driver-point-card][data-driver-point-clone]", c).forEach(function (clone) { clone.parentNode.removeChild(clone); });
@@ -169,6 +170,7 @@
     // простоев. Карточка новой сборки может ещё не иметь ширины (скрытая вкладка,
     // первая отрисовка) — модуль сам не сдаётся при нулевой ширине.
     function fitLabels(c) {
+        root.__driverDrumFitCalls = (root.__driverDrumFitCalls || 0) + 1;
         if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
@@ -724,7 +726,12 @@
         doc.documentElement.classList.toggle(MANUAL_CLASS, manualTrip || readStoredMode());
         refresh();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-trip-origin", "data-driver-manual-active-point-id"] });
-        root.addEventListener("resize", function () { geo.built = null; refresh(); });
+        // Смена размера окна/ориентации — с задержкой (см. driver-downtime-drum-v1.js).
+        var resizeTimer = 0;
+        root.addEventListener("resize", function () {
+            root.clearTimeout(resizeTimer);
+            resizeTimer = root.setTimeout(function () { geo.built = null; refresh(); }, 150);
+        });
         // Движок ручного рейса сообщает о каждой погрузке, отмене и завершении.
         root.addEventListener("driver-manual-trip-changed", function (event) {
             if (event.detail && event.detail.pointId && !isManual()) setManual(true);
@@ -738,11 +745,17 @@
             // (см. build() выше и driver-downtime-drum-v1.js).
             var drumEl = drum();
             if (drumEl) {
-                var lastDrumW = 0;
+                // Только контейнер барабана и только реальная смена размера >1px
+                // (см. тот же наблюдатель и комментарий в driver-downtime-drum-v1.js).
+                var lastFitW = -1, lastFitH = -1;
                 new root.ResizeObserver(function (entries) {
-                    var w2 = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : drumEl.clientWidth;
-                    if (w2 > 0 && lastDrumW <= 0) fitLabels();
-                    lastDrumW = w2;
+                    var rect = entries[0] && entries[0].contentRect;
+                    var w2 = rect ? rect.width : drumEl.clientWidth;
+                    var h2 = rect ? rect.height : drumEl.clientHeight;
+                    if (w2 <= 0 || h2 <= 0) return;
+                    if (Math.abs(w2 - lastFitW) <= 1 && Math.abs(h2 - lastFitH) <= 1) return;
+                    lastFitW = w2; lastFitH = h2;
+                    fitLabels();
                 }).observe(drumEl);
             }
         }
@@ -758,7 +771,10 @@
     }
 
     root.DriverPointDrum = Object.freeze({
-        refresh: refresh, isManual: isManual, setManual: setManual, completeFromDial: completeFromDial
+        refresh: refresh, isManual: isManual, setManual: setManual, completeFromDial: completeFromDial,
+        // Барабан простоев не пересчитывает общий контур, пока крутят ЭТОТ барабан
+        // (driver-downtime-drum-v1.js, syncLinkVars).
+        isDragging: function () { return !!drag; }
     });
 
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", init);

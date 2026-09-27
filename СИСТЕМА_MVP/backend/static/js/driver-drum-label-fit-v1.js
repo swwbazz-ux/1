@@ -304,17 +304,43 @@
         return mainEl;
     }
 
+    /* Повторный вызов с теми же входами (тот же текст, та же карточка того же
+       размера, в том же положении — центр/бок) ничего не переписывает в DOM:
+       раньше build()/refresh() дёргались на любую относящуюся мутацию (что на
+       телефоне бывает часто) и КАЖДЫЙ раз заново гоняли двоичный поиск и
+       множественные reflow по всем карточкам — барабан тормозил, а кегль
+       «прыгал» без всякой видимой причины (владелец, 28.09.2026: «тормозит,
+       текст прыгает»). Подпись берём из входов, которые сама подгонка не
+       трогает (ширина/высота КАРТОЧКИ, не подписи — её ширину мы же и пишем). */
+    function fitSignature(labelRoot, card, visibleWidthBudget) {
+        return [
+            labelRoot.dataset.driverDrumLabelText || "",
+            card ? card.clientWidth : 0,
+            card ? card.clientHeight : 0,
+            card && card.classList.contains("is-center") ? 1 : 0,
+            visibleWidthBudget ? Math.round(visibleWidthBudget) : 0
+        ].join("|");
+    }
+
     function fit(labelRoot) {
         if (!labelRoot) return null;
         var main = ensureMarkup(labelRoot);
+        var card = labelRoot.closest ? labelRoot.closest(".driver-drum-card") : null;
         var visibleWidthBudget = computeVisibleWidthBudget(labelRoot);
+        var sig = fitSignature(labelRoot, card, visibleWidthBudget);
+        if (labelRoot.dataset.driverDrumFitSig === sig && labelRoot.dataset.driverDrumFitOk === "1") {
+            return { deferred: false, fontPx: null, cached: true };
+        }
         if (visibleWidthBudget) {
             setImportant(labelRoot, "width", Math.min(visibleWidthBudget, labelRoot.clientWidth || visibleWidthBudget) + "px");
         } else if (labelRoot.style) {
             labelRoot.style.removeProperty("width");
         }
         var budget = computeMainBudget(labelRoot);
-        return fitOne(main, budget);
+        var result = fitOne(main, budget);
+        labelRoot.dataset.driverDrumFitSig = sig;
+        labelRoot.dataset.driverDrumFitOk = result && !result.deferred ? "1" : "0";
+        return result;
     }
 
     /* Подгоняет каждую подпись контейнера независимо, затем выравнивает набор:

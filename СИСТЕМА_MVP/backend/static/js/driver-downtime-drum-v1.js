@@ -117,12 +117,13 @@
         // Копии от прошлой сборки убираем и собираем кольцо заново из выбранных причин.
         var selected = all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c);
         if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) {
-            // Тот же состав — геометрию не трогаем, но кегль подписи мог остаться
-            // неподогнанным: простой стартовал со вкладки «Простои», пока барабан
-            // на «Работе» был скрыт (clientWidth/clientHeight = 0), и без этого
-            // вызова подгонка никогда не повторится (владелец, 28.09.2026: «шрифт
-            // огромный... если включить с самого барабана — всё нормально»).
-            fitLabels(c);
+            // Тот же состав — геометрию не трогаем. Пересчёт кегля НЕ вызываем здесь:
+            // build() дёргается на любую относящуюся к барабану мутацию (в т.ч. часто
+            // на телефоне), и вызов подгонки на каждый такой случай грузил телефон и
+            // «прыгал» размером текста без всякой причины (владелец, 28.09.2026:
+            // «тормозит, текст прыгает»). Случай «простой стартовал, пока барабан
+            // был скрыт» ловит отдельный, куда более узкий сигнал — ResizeObserver
+            // на самом барабане (0 → реальный размер, см. init() ниже).
             return true;
         }
         var signature = drumSignature(c);
@@ -183,6 +184,7 @@
     // иметь ширины (первая отрисовка, скрытая вкладка) — модуль сам не сдаётся при
     // нулевой ширине, здесь достаточно просто вызвать его после каждой пересборки.
     function fitLabels(c) {
+        root.__driverDrumFitCalls = (root.__driverDrumFitCalls || 0) + 1;
         if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
@@ -812,6 +814,9 @@
        стили экрана, а сверить строку ничего не стоит. Поэтому контур можно сверять
        после каждого обновления экрана и любого сдвига — и он не отстаёт от граней. */
     var lastLinkPath = "";
+    // Подпись геометрических входов последнего пересчёта контура (syncLinkVars):
+    // повторный вызов с теми же входами не строит путь заново.
+    var lastLinkInputs = "";
     function setLinkPath(path) {
         if (path === lastLinkPath) return;
         lastLinkPath = path;
@@ -825,6 +830,15 @@
     }
 
     function syncLinkVars() {
+        // Контур — стационарный элемент, как большая круглая кнопка, и во время
+        // вращения ЛЮБОГО из барабанов не пересчитывается вовсе: центральная грань в
+        // этот момент ещё едет, is-center уже мог перескочить на соседнюю (по
+        // угловой близости, а не по фактическому положению), и контур, посчитанный
+        // от такой грани, «прыгал» вместе с прокруткой (владелец, 28.09.2026:
+        // «перестраивается при каждой прокрутке»). После отпускания и фиксации
+        // контур дорисует таймер фиксации (render → __snapTimer).
+        if (drag) return;
+        if (root.DriverPointDrum && typeof root.DriverPointDrum.isDragging === "function" && root.DriverPointDrum.isDragging()) return;
         // Грань ещё доезжает на место (анимация фиксации) — контур дорисуют по окончании.
         var own = cylinder();
         if (own && own.__snapUntil > Date.now()) return;
@@ -841,6 +855,19 @@
         var cr = card.getBoundingClientRect();
         var box = screen.getBoundingClientRect();
         if (!dr.width || !cr.width) return;
+        // Ничего из входов не сдвинулось — и считать нечего. scheduleLink() дёргается
+        // наблюдателем на любую правку экрана (тик таймера, подмена фрагмента —
+        // на телефоне это десятки раз в минуту), и раньше каждый раз строился и
+        // сравнивался весь путь. Подпись входов — с точностью до 0,5px, чтобы
+        // субпиксельный шум округления не считался движением.
+        var topEl = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
+        var tr0 = topEl ? topEl.getBoundingClientRect() : null;
+        function k(v) { return Math.round(v * 2); }
+        var inputs = [k(dr.left), k(dr.top), k(dr.width), k(dr.height), k(cr.left), k(cr.bottom), k(cr.width), k(box.left), k(box.top),
+            tr0 ? k(tr0.top) : -1, tr0 ? k(tr0.width) : -1].join(",");
+        if (inputs === lastLinkInputs) return;
+        lastLinkInputs = inputs;
+        root.__driverDrumLinkCalls = (root.__driverDrumLinkCalls || 0) + 1;
         var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
         // Кольцо — в зазоре между кольцом циферблата (48.5% стороны) и угловыми кнопками (51%).
@@ -921,24 +948,37 @@
         reconcileQuick();
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id"] });
-        root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
+        // Смена размера окна/ориентации — с задержкой: серия resize-событий при
+        // повороте экрана иначе даёт серию полных пересборок подряд.
+        var resizeTimer = 0;
+        root.addEventListener("resize", function () {
+            root.clearTimeout(resizeTimer);
+            resizeTimer = root.setTimeout(function () { geo.built = null; build(); render(false); }, 150);
+        });
         if (root.ResizeObserver) {
             var w = dial();
             var ro = new root.ResizeObserver(function () { scheduleLink(); });
             if (w) ro.observe(w);
             // Круг зажат по высоте: при смене ширины экрана он не меняет размер, а сдвигается.
             ro.observe(doc.body);
-            // Барабан скрыт (0×0), пока водитель на вкладке «Простои»: если простой
-            // запущен оттуда, подгонка кегля при этом не может измерить карточки и
-            // ничего не подгоняет (см. build() выше). Переход вкладки на «Работа» —
-            // это ресайз барабана с 0 на реальный размер, тот же сигнал переиспользуем.
+            // Наблюдаем ТОЛЬКО за контейнером барабана (не за карточками и не за
+            // подписями — их размеры пишет сама подгонка, и это замкнуло бы петлю),
+            // и реагируем только на реальную смену его размера больше 1px против
+            // последней подгонки: так ловится и «барабан был скрыт (0×0) на вкладке
+            // «Простои», а простой стартовал оттуда» — переход на «Работу» это
+            // ресайз с 0 на реальный размер, — и не ловятся собственные правки
+            // подгонки (владелец, 28.09.2026: «тормозит, текст прыгает»).
             var drumEl = drum();
             if (drumEl) {
-                var lastDrumW = 0;
+                var lastFitW = -1, lastFitH = -1;
                 var roDrum = new root.ResizeObserver(function (entries) {
-                    var w2 = entries[0] && entries[0].contentRect ? entries[0].contentRect.width : drumEl.clientWidth;
-                    if (w2 > 0 && lastDrumW <= 0) fitLabels();
-                    lastDrumW = w2;
+                    var rect = entries[0] && entries[0].contentRect;
+                    var w2 = rect ? rect.width : drumEl.clientWidth;
+                    var h2 = rect ? rect.height : drumEl.clientHeight;
+                    if (w2 <= 0 || h2 <= 0) return;
+                    if (Math.abs(w2 - lastFitW) <= 1 && Math.abs(h2 - lastFitH) <= 1) return;
+                    lastFitW = w2; lastFitH = h2;
+                    fitLabels();
                 });
                 roDrum.observe(drumEl);
             }

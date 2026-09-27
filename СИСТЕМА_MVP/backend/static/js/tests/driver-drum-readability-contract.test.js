@@ -182,9 +182,56 @@ test("starting a downtime from the hidden drum tab still fits the label once the
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
     const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
     [drumJs, pointJs].forEach((src) => {
-        // Тот же состав — ранний return, но кегль всё равно подгоняется.
-        assert.match(src, /if \(geo\.built === c[\s\S]{0,160}\)\s*\{[\s\S]{0,600}fitLabels\(c\);[\s\S]{0,40}return true;/);
-        // ResizeObserver на самом барабане: 0 → реальный размер перезапускает подгонку.
-        assert.match(src, /new root\.ResizeObserver\(function \(entries\) \{[\s\S]{0,260}if \(w2 > 0 && lastDrumW <= 0\) fitLabels\(\);/);
+        // Тот же состав — ранний return БЕЗ подгонки: первый вариант фикса вызывал
+        // fitLabels() и здесь, а build()/refresh() дёргаются на любую относящуюся
+        // мутацию (на телефоне — часто) — барабан тормозил, кегль «прыгал»
+        // (владелец, 28.09.2026). Подгонку при появлении скрытого барабана ловит
+        // только узкий сигнал ниже.
+        const earlyReturn = src.match(/if \(geo\.built === c[\s\S]{0,160}\)\s*\{([\s\S]{0,900}?)return true;/);
+        assert.ok(earlyReturn, "early-return branch of build() not found");
+        assert.doesNotMatch(earlyReturn[1], /fitLabels\(/);
+        // ResizeObserver — только на контейнере барабана, только реальная смена
+        // размера >1px против последней подгонки, и тогда подгонка.
+        assert.match(src, /new root\.ResizeObserver\(function \(entries\) \{[\s\S]{0,400}Math\.abs\(w2 - lastFitW\) <= 1 && Math\.abs\(h2 - lastFitH\) <= 1\) return;[\s\S]{0,120}fitLabels\(\);/);
+        assert.match(src, /\}\)\.observe\(drumEl\)|roDrum\.observe\(drumEl\)/);
     });
+});
+
+test("labels are never re-fit per frame: no fit call inside render() or the drag handlers", () => {
+    // Во время вращения/свайпа подписи не пересчитываются вообще (владелец,
+    // 28.09.2026): render() зовётся на каждый кадр, pointermove — на каждое
+    // движение пальца. Подгонка разрешена только по событиям (сборка, появление
+    // скрытого барабана, шрифты, ресайз с задержкой, фиксация после вращения).
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
+    [drumJs, pointJs].forEach((src) => {
+        // Файлы с CRLF — конец функции ищем с необязательным \r.
+        const render = src.match(/function render\(snapping\) \{([\s\S]*?)\r?\n    \}\r?\n/);
+        assert.ok(render, "render() not found");
+        // Единственный допустимый вызов внутри render() — из таймера фиксации
+        // (__snapTimer), который срабатывает уже ПОСЛЕ остановки вращения.
+        const renderBody = render[1].replace(/__snapTimer = root\.setTimeout\(function \(\) \{[\s\S]*?\}, 370\);/, "");
+        assert.doesNotMatch(renderBody, /fitLabels\(/);
+        const pointerMove = src.match(/doc\.addEventListener\("pointermove"[\s\S]*?\}, \{ passive: false, capture: true \}\);/);
+        assert.ok(pointerMove, "pointermove handler not found");
+        assert.doesNotMatch(pointerMove[0], /fitLabels\(/);
+        // Ресайз окна — с задержкой, не серией полных пересборок подряд.
+        assert.match(src, /root\.addEventListener\("resize", function \(\) \{\s*root\.clearTimeout\(resizeTimer\);/);
+    });
+    // Повторный вызов с теми же входами — без записи в DOM (кэш по тексту и
+    // размерам карточки, не подписи — её ширину пишет сама подгонка).
+    const fitJs = fs.readFileSync(path.resolve(__dirname, "../driver-drum-label-fit-v1.js"), "utf8");
+    assert.match(fitJs, /function fitSignature\(labelRoot, card, visibleWidthBudget\)/);
+    assert.match(fitJs, /labelRoot\.dataset\.driverDrumFitSig === sig && labelRoot\.dataset\.driverDrumFitOk === "1"/);
+});
+
+test("the shared outline is stationary: never recomputed while either drum is being dragged", () => {
+    // Контур — стационарный элемент, как большая круглая кнопка: во время
+    // вращения is-center уже мог перескочить на соседнюю грань (по угловой
+    // близости, не по фактическому положению), и контур, посчитанный от неё,
+    // «прыгал» вместе с прокруткой (владелец, 28.09.2026).
+    const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
+    const pointJs = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
+    assert.match(drumJs, /function syncLinkVars\(\) \{[\s\S]{0,900}if \(drag\) return;[\s\S]{0,200}root\.DriverPointDrum\.isDragging\(\)\) return;/);
+    assert.match(pointJs, /isDragging: function \(\) \{ return !!drag; \}/);
 });
