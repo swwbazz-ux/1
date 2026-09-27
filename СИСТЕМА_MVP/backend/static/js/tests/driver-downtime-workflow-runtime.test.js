@@ -191,7 +191,7 @@ function loadActiveDowntimeRuntime() {
         "function formatDriverDowntimeDuration(seconds)",
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
-        "function syncDriverReasonTotals(payload)",
+        "function syncDriverReasonTotals(payload, skipReasonId)",
         "function setDriverDowntimeStatusClass(statusKey)",
         "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
@@ -316,7 +316,7 @@ function loadDowntimeTimerRuntime() {
         "function formatDriverDowntimeDuration(seconds)",
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
-        "function syncDriverReasonTotals(payload)",
+        "function syncDriverReasonTotals(payload, skipReasonId)",
         "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
         "function startDriverDowntimeTimer(payload)",
@@ -797,6 +797,108 @@ test("a card that stays blank through the confirmation window is treated as a ge
     // считается настоящим закрытием.
     runtime.fireAllTimeouts();
     assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+    assert.equal(runtime.window.driverDowntimeClock, null);
+});
+
+test("loading the page with a server-confirmed active downtime ticks with no local start event", () => {
+    // Боевой 27.09.2026 (v360, реальный телефон владельца, Capacitor): после
+    // очистки данных приложения очередь пустая, сервер знает активный простой
+    // «Ожидание погрузки» — таймер отрисовался с серверным elapsed (00:07:40)
+    // и НЕ тикал. Это ровно то, что делает bindDriverMobileShell при первой
+    // отрисовке страницы: startDriverDowntimeTimer вызывается НАПРЯМУЮ с
+    // атрибутами уже отрендеренной карточки, без единого локального события
+    // в очереди.
+    const runtime = loadActiveDowntimeRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "56",
+        reason_id: "18",
+        started_at: "2026-09-27T00:52:20.000Z",
+        elapsed_seconds: "460",
+        shift_total_seconds: "460",
+        calculated_at: "2026-09-27T01:00:00.000Z",
+    });
+    assert.equal(runtime.downtimeDuration.textContent, "00:07:40");
+
+    runtime.setNow("2026-09-27T01:00:05.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:07:45");
+
+    runtime.setNow("2026-09-27T01:00:11.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:07:51");
+});
+
+test("ten fragment resyncs in a minute never roll the timer back", () => {
+    // Дополнение координатора 27.09.2026: после перезапуска простоя на живом
+    // телефоне таймер несколько раз "затупил", откатился назад и снова
+    // пошёл — источник тот же класс багов, что и "не тикает": повторный
+    // вызов с тем же простоем (каждая фоновая сверка фрагмента раз в ~20 с,
+    // здесь смоделировано десятью подряд за минуту) не должен трогать точку
+    // отсчёта вовсе.
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        active: true,
+        event_id: "56",
+        reason_id: "18",
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: "0",
+        shift_total_seconds: "0",
+        calculated_at: "2026-09-27T01:00:00.000Z",
+    };
+    runtime.context.start(payload);
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:00");
+
+    const readings = [];
+    const startMs = Date.parse("2026-09-27T01:00:00.000Z");
+    for (let i = 1; i <= 10; i += 1) {
+        runtime.setNow(new Date(startMs + i * 6000).toISOString());
+        runtime.tick();
+        // Та же самая фоновая сверка фрагмента, тот же payload — как повторный
+        // вызов startDriverDowntimeTimer из syncDriverDowntimeTimerFromCard.
+        runtime.context.start(payload);
+        readings.push(runtime.downtimeDuration.textContent);
+    }
+    assert.deepEqual(readings, [
+        "00:00:06", "00:00:12", "00:00:18", "00:00:24", "00:00:30",
+        "00:00:36", "00:00:42", "00:00:48", "00:00:54", "00:01:00",
+    ]);
+    for (let i = 1; i < readings.length; i += 1) {
+        const toSeconds = (text) => text.split(":").reduce((total, part) => total * 60 + Number(part), 0);
+        assert.ok(
+            toSeconds(readings[i]) > toSeconds(readings[i - 1]),
+            `reading ${i} (${readings[i]}) must be strictly greater than reading ${i - 1} (${readings[i - 1]})`
+        );
+    }
+});
+
+test("closing the downtime stops the display for good and a stale resync cannot revive it", () => {
+    const runtime = loadActiveDowntimeRuntime();
+    const payload = {
+        event_id: "local:driver-downtime-uuid-6",
+        reason_id: "18",
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+        status_key: "red",
+    };
+    runtime.context.apply(payload);
+    runtime.setNow("2026-09-27T01:00:05.000Z");
+    runtime.tick();
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:05");
+
+    runtime.context.clear({shift_total_seconds: 5});
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:05");
+    assert.equal(runtime.window.driverDowntimeClock, null);
+
+    // Устаревшая фоновая сверка (тот же простой) приходит уже ПОСЛЕ закрытия
+    // — applyDriverActiveDowntime отказывает через реестр закрытых простоев,
+    // отсчёт не воскресает.
+    const resurrectionAttempt = runtime.context.apply(payload);
+    assert.equal(resurrectionAttempt, false);
+    assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
+    assert.equal(runtime.downtimeDuration.textContent, "00:00:05");
     assert.equal(runtime.window.driverDowntimeClock, null);
 });
 

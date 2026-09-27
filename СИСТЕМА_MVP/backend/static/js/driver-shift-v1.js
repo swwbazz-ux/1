@@ -1581,12 +1581,18 @@ window.bindDriverMobileShell = function () {
         }
     }
 
-    function syncDriverReasonTotals(payload) {
+    function syncDriverReasonTotals(payload, skipReasonId) {
         payload = payload || {};
         var reasonTotals = payload.reason_totals;
         var activeReasonId = payload.active ? String(payload.reason_id || "") : "";
         downtimeReasonButtons.forEach(function (button) {
             var reasonId = String(button.dataset.driverDowntimeReasonId || "");
+            if (skipReasonId && reasonId === String(skipReasonId)) {
+                /* Эта кнопка тикает своим отсчётом (now - started_at) — снимок
+                   сервера её не трогает, чтобы не сбить чистую функцию времени
+                   посторонним значением между двумя тиками. */
+                return;
+            }
             if (
                 reasonTotals
                 && typeof reasonTotals === "object"
@@ -1697,57 +1703,70 @@ window.bindDriverMobileShell = function () {
             || (identityKey && existing.identityKey === identityKey)
         );
         if (sameInstance) {
-            /* Тот же самый простой — не перезапускаем отсчёт. Раньше любое
-               фоновое обновление экрана (опрос раз в ~2 с, подмена
-               фрагмента) заново вызывало эту функцию с оптимистичным/
-               устаревшим payload.elapsed_seconds (обычно 0) и просто
-               обнуляло видимый таймер каждые несколько секунд, хотя простой
-               всё это время оставался тем же самым (пойман на бою
-               27.09.2026, v358/v359). Освежаем только видимые накопленные
-               секунды по причинам — они могли поменяться. */
-            syncDriverReasonTotals(payload);
+            /* Тот же самый простой — не перезапускаем отсчёт вообще: ни точку
+               отсчёта, ни интервал. Отображение — чистая функция времени
+               (now - started_at), у неё нет накопленного состояния, которое
+               можно было бы "обновить" или сбить повторным вызовом. Раньше
+               именно накопление (baseShiftSeconds/syncedAtMs, пересчитываемые
+               при каждом перезапуске) и давало рывки/откаты таймера на каждой
+               фоновой сверке фрагмента (координатор, 27.09.2026, v360: "тупит,
+               пошёл, снова остановился, откатился назад"). Освежаем только
+               неактивные причины — у активной идёт tick() от той же точки
+               отсчёта. */
+            syncDriverReasonTotals(payload, activeReasonId);
             return;
         }
         clearDriverDowntimeTimer();
-        syncDriverReasonTotals(payload);
-        /* Отсчёт ведётся от собственных часов телефона в момент получения ответа,
-           а не от серверной отметки времени. Сервер присылает уже накопленные
-           секунды; складывать их с разницей «серверное время минус время
-           телефона» нельзя: на телефоне с вручную выставленными часами эта
-           разница и есть сдвиг, и водитель видел трёхчасовой обед вместо
-           десяти минут. В базе при этом всё верно — там время приёма сервером.
-           Базовое число секунд считается от started_at активного простоя (а
-           не от присланного elapsed_seconds — тот бывает нулевым или
-           устаревшим снимком), чтобы редкий неизбежный перезапуск (первая
-           загрузка экрана, смена причины) не терял накопленное время. */
-        var syncedAtMs = Date.now();
+        /* Отсчёт — чистая функция ОДНОЙ неподвижной точки: started_at (уже
+           скорректированный сервером под часы телефона; для локального
+           старта — собственное время нажатия). Никакого "накопленного"
+           elapsed и "времени последней синхронизации" не храним — сам факт
+           их существования и был источником рывков/откатов: каждый повторный
+           вызов (даже безобидный, для той же причины) пересчитывал базу
+           заново от чуть другого мгновения. Здесь эта точка вычисляется
+           один-единственный раз — при СМЕНЕ простоя, не при каждой сверке. */
+        /* shift_total_seconds и reason_totals[reason] от сервера уже ВКЛЮЧАЮТ
+           текущий (ещё идущий) отрезок простоя по состоянию на calculated_at
+           (driver_shift_downtime_seconds_by_reason считает открытое событие
+           до "сейчас"). Вычитая elapsed_seconds того же снимка, получаем
+           фиксированную базу "всё, что накопилось ДО этого отрезка" — и
+           дальше просто прибавляем к ней тикающие now-started_at секунды. */
+        var reportedShiftTotal = Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0));
+        var reportedElapsed = Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0));
         var startedAtMs = Date.parse(payload.started_at || "");
-        var baseActiveElapsedSeconds = Number.isFinite(startedAtMs)
-            ? Math.max(0, Math.floor((syncedAtMs - startedAtMs) / 1000))
-            : Math.max(0, Math.floor(Number(payload.elapsed_seconds) || 0));
+        if (!Number.isFinite(startedAtMs)) {
+            /* Нет started_at (устаревший вызов без этого поля) — считаем, что
+               простой начался elapsed_seconds назад от текущего момента,
+               чтобы отсчёт сразу продолжился с уже накопленного значения,
+               а не с нуля. */
+            startedAtMs = Date.now() - reportedElapsed * 1000;
+        }
+        var activeReasonButtonAtStart = shell.querySelector(
+            '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + activeReasonId + '"]'
+        );
+        var reportedReasonTotal = activeReasonButtonAtStart
+            ? Math.max(0, Math.floor(Number(activeReasonButtonAtStart.dataset.driverReasonSeconds) || 0))
+            : 0;
         var clock = {
             activeReasonId: activeReasonId,
             eventId: eventId,
             identityKey: identityKey,
-            baseActiveElapsedSeconds: baseActiveElapsedSeconds,
-            baseShiftSeconds: Math.max(0, Math.floor(Number(payload.shift_total_seconds) || 0)),
-            syncedAtMs: syncedAtMs
+            startedAtMs: startedAtMs,
+            priorShiftSeconds: Math.max(0, reportedShiftTotal - reportedElapsed),
+            priorReasonSeconds: Math.max(0, reportedReasonTotal - reportedElapsed)
         };
         window.driverDowntimeClock = clock;
+        syncDriverReasonTotals(payload, activeReasonId);
         function tick() {
-            var liveSeconds = Math.max(0, Math.floor((Date.now() - clock.syncedAtMs) / 1000));
+            var liveSeconds = Math.max(0, Math.floor((Date.now() - clock.startedAtMs) / 1000));
             if (downtimeDuration) {
-                downtimeDuration.textContent = formatDriverDowntimeDuration(clock.baseShiftSeconds + liveSeconds);
+                downtimeDuration.textContent = formatDriverDowntimeDuration(clock.priorShiftSeconds + liveSeconds);
             }
             downtimeReasonButtons.forEach(function (button) {
                 var reasonId = String(button.dataset.driverDowntimeReasonId || "");
-                var baseSeconds = Math.max(0, Math.floor(Number(button.dataset.driverReasonSeconds) || 0));
-                var reasonIsActive = !!activeReasonId && reasonId === activeReasonId;
-                renderDriverReasonDuration(
-                    button,
-                    baseSeconds + (reasonIsActive ? liveSeconds : 0),
-                    reasonIsActive
-                );
+                if (reasonId === activeReasonId) {
+                    renderDriverReasonDuration(button, clock.priorReasonSeconds + liveSeconds, true);
+                }
             });
         }
         tick();
@@ -1760,20 +1779,21 @@ window.bindDriverMobileShell = function () {
             return Math.max(0, Math.floor(Number(downtimeCard && downtimeCard.dataset.driverShiftDowntimeSeconds) || 0));
         }
         atMs = Number.isFinite(Number(atMs)) ? Number(atMs) : Date.now();
-        var liveSeconds = Math.max(0, Math.floor((atMs - clock.syncedAtMs) / 1000));
-        var shiftTotalSeconds = clock.baseShiftSeconds + liveSeconds;
+        /* Чистое чтение чистой функции времени — снимок ничего не накапливает
+           и не двигает точку отсчёта, поэтому его можно звать сколько угодно
+           раз подряд (например, дважды при отправке действия) без риска
+           сдвинуть ещё идущий таймер. */
+        var liveSeconds = Math.max(0, Math.floor((atMs - clock.startedAtMs) / 1000));
+        var shiftTotalSeconds = clock.priorShiftSeconds + liveSeconds;
         var activeReasonButton = shell.querySelector(
             '[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + clock.activeReasonId + '"]'
         );
         if (activeReasonButton) {
-            var reasonTotalSeconds = Math.max(0, Math.floor(Number(activeReasonButton.dataset.driverReasonSeconds) || 0)) + liveSeconds;
+            var reasonTotalSeconds = clock.priorReasonSeconds + liveSeconds;
             activeReasonButton.dataset.driverReasonSeconds = String(reasonTotalSeconds);
             renderDriverReasonDuration(activeReasonButton, reasonTotalSeconds, true);
         }
-        clock.baseShiftSeconds = shiftTotalSeconds;
-        clock.baseActiveElapsedSeconds += liveSeconds;
-        clock.syncedAtMs = atMs;
-        downtimeCard.dataset.driverActiveElapsedSeconds = String(clock.baseActiveElapsedSeconds);
+        downtimeCard.dataset.driverActiveElapsedSeconds = String(liveSeconds);
         downtimeCard.dataset.driverShiftDowntimeSeconds = String(shiftTotalSeconds);
         if (downtimeDuration) {
             downtimeDuration.textContent = formatDriverDowntimeDuration(shiftTotalSeconds);
