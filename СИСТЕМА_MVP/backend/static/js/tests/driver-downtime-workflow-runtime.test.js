@@ -264,6 +264,20 @@ function loadActiveDowntimeRuntime() {
             return match ? buttons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
         },
     };
+    const runtimeDocument = {
+        querySelector(selector) {
+            if (selector === "[data-driver-shell]") return runtimeDocumentShell;
+            return null;
+        },
+    };
+    const runtimeDocumentShell = {
+        querySelector(selector) {
+            return selector === "[data-driver-active-duration]" ? downtimeDuration : null;
+        },
+        querySelectorAll(selector) {
+            return selector === "[data-driver-downtime-reason-button]" ? buttons : [];
+        },
+    };
     const RuntimeDate = {
         now: () => nowMs,
         parse: Date.parse,
@@ -283,6 +297,7 @@ function loadActiveDowntimeRuntime() {
             String,
             Array,
             Object,
+            document: runtimeDocument,
             downtimeCard,
             downtimeDuration,
             downtimeTitle,
@@ -365,6 +380,19 @@ function loadDowntimeTimerRuntime() {
             return match ? buttons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
         },
     };
+    const runtimeDocumentShell = {
+        querySelector(selector) {
+            return selector === "[data-driver-active-duration]" ? downtimeDuration : null;
+        },
+        querySelectorAll(selector) {
+            return selector === "[data-driver-downtime-reason-button]" ? buttons : [];
+        },
+    };
+    const runtimeDocument = {
+        querySelector(selector) {
+            return selector === "[data-driver-shell]" ? runtimeDocumentShell : null;
+        },
+    };
     const RuntimeDate = {
         now: () => nowMs,
         parse: Date.parse,
@@ -379,6 +407,7 @@ function loadDowntimeTimerRuntime() {
             Number,
             Object,
             String,
+            document: runtimeDocument,
             downtimeCard,
             downtimeDuration,
             downtimeReasonButtons: buttons,
@@ -900,6 +929,130 @@ test("closing the downtime stops the display for good and a stale resync cannot 
     assert.equal(runtime.downtimeCard.classList.contains("is-active"), false);
     assert.equal(runtime.downtimeDuration.textContent, "00:00:05");
     assert.equal(runtime.window.driverDowntimeClock, null);
+});
+
+function loadDowntimeTimerAcrossShellReplacementRuntime() {
+    const signatures = [
+        "function formatDriverDowntimeDuration(seconds)",
+        "function clearDriverDowntimeTimer()",
+        "function renderDriverReasonDuration(button, totalSeconds, isActive)",
+        "function syncDriverReasonTotals(payload, skipReasonId)",
+        "function driverDowntimeCanonicalEventId(eventId)",
+        "function driverDowntimeIdentityKey(reasonId, startedAt)",
+        "function startDriverDowntimeTimer(payload)",
+    ];
+    const source = signatures.map((signature) => extractBraceBlock(DRIVER_TEMPLATE_SOURCE, signature, signature)).join("\n");
+    let nowMs = Date.parse("2026-09-27T01:00:00.000Z");
+    let intervalCallback = null;
+    const makeButton = (id) => ({
+        dataset: {driverDowntimeReasonId: String(id), driverReasonSeconds: "0", driverReasonLabel: `Reason ${id}`},
+        classList: createClassList(),
+        getAttribute() { return null; },
+        setAttribute() {},
+        querySelector(selector) {
+            return selector === "[data-driver-reason-duration]" ? {hidden: true, textContent: ""} : null;
+        },
+    });
+    const makeShell = () => {
+        const buttons = [makeButton(18)];
+        const duration = {textContent: ""};
+        return {
+            duration,
+            buttons,
+            querySelector(selector) {
+                if (selector === "[data-driver-active-duration]") return duration;
+                return null;
+            },
+            querySelectorAll(selector) {
+                return selector === "[data-driver-downtime-reason-button]" ? buttons : [];
+            },
+        };
+    };
+    let currentShell = makeShell();
+    const runtimeDocument = {
+        querySelector(selector) {
+            return selector === "[data-driver-shell]" ? currentShell : null;
+        },
+    };
+    const runtimeWindow = {
+        driverDowntimeTimerId: null,
+        driverDowntimeClock: null,
+        setInterval(callback) {
+            intervalCallback = callback;
+            return 17;
+        },
+        clearInterval() {
+            intervalCallback = null;
+        },
+    };
+    const RuntimeDate = {
+        now: () => nowMs,
+        parse: Date.parse,
+    };
+    const context = {};
+    vm.runInNewContext(
+        `${source}\ncontext.start = startDriverDowntimeTimer;`,
+        {
+            context,
+            Date: RuntimeDate,
+            Math,
+            Number,
+            String,
+            Array,
+            Object,
+            document: runtimeDocument,
+            shell: currentShell,
+            downtimeReasonButtons: currentShell.buttons,
+            window: runtimeWindow,
+        },
+        {filename: "templates/users/driver_shift.html#downtime-timer-shell-replacement"}
+    );
+    return {
+        context,
+        window: runtimeWindow,
+        currentShell: () => currentShell,
+        replaceShell() { currentShell = makeShell(); return currentShell; },
+        setNow(value) { nowMs = Date.parse(value); },
+        tick() { assert.ok(intervalCallback); intervalCallback(); },
+    };
+}
+
+test("a full shell replacement does not freeze the timer on a detached node", () => {
+    // Боевой 27.09.2026 (v361): владелец видел таймер "2:56", а следующим
+    // обновлением (ровно один цикл ~20 с) он стал "3:18" — не тикал плавно,
+    // а замирал и потом скачком показывал уже верное значение. Причина:
+    // полная подмена <main data-driver-shell> создаёт новую оболочку и
+    // заново вызывает bindDriverMobileShell, но "тот же простой" (v362 —
+    // startDriverDowntimeTimer) намеренно не перезапускает интервал — он
+    // продолжает жить на window. Раньше tick() держал ссылки на
+    // downtimeDuration/downtimeReasonButtons из ЗАМЫКАНИЯ того вызова
+    // bindDriverMobileShell, где интервал впервые стартовал, — эти узлы
+    // после подмены отсоединены от документа, и видимый (новый) узел
+    // переставал обновляться вовсе.
+    const runtime = loadDowntimeTimerAcrossShellReplacementRuntime();
+    runtime.context.start({
+        active: true,
+        event_id: "56",
+        reason_id: "18",
+        started_at: "2026-09-27T01:00:00.000Z",
+        elapsed_seconds: 0,
+        shift_total_seconds: 0,
+        calculated_at: "2026-09-27T01:00:00.000Z",
+    });
+    const staleShell = runtime.currentShell();
+    assert.equal(staleShell.duration.textContent, "00:00:00");
+
+    // Полная подмена оболочки: bindDriverMobileShell перепривязывается на
+    // НОВОМ узле (новая карточка, новая кнопка причины), интервал остаётся
+    // тем же самым (window.driverDowntimeTimerId не менялся).
+    const freshShell = runtime.replaceShell();
+
+    runtime.setNow("2026-09-27T01:00:03.000Z");
+    runtime.tick();
+
+    assert.equal(freshShell.duration.textContent, "00:00:03");
+    // Старый (отсоединённый) узел больше не должен как-либо использоваться.
+    assert.equal(staleShell.duration.textContent, "00:00:00");
 });
 
 test("active downtime reason is a no-op and offline switches keep chronological dependencies", () => {
