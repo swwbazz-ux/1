@@ -78,7 +78,7 @@ test("per-reason downtime timer survives close and marks every used reason", () 
         "function formatDriverDowntimeDuration(seconds)",
         "function clearDriverDowntimeTimer()",
         "function renderDriverReasonDuration(button, totalSeconds, isActive)",
-        "function syncDriverReasonTotals(payload)",
+        "function syncDriverReasonTotals(payload, skipReasonId)",
         "function driverDowntimeCanonicalEventId(eventId)",
         "function driverDowntimeIdentityKey(reasonId, startedAt)",
         "function startDriverDowntimeTimer(payload)",
@@ -102,6 +102,12 @@ test("per-reason downtime timer survives close and marks every used reason", () 
     class FakeDate extends Date {
         static now() { return now; }
     }
+    const shell = {
+        querySelector(selector) {
+            const match = selector.match(/driver-downtime-reason-id="([^"]+)"/);
+            return match ? downtimeReasonButtons.find((button) => button.dataset.driverDowntimeReasonId === match[1]) || null : null;
+        },
+    };
     const context = {start: null, sync: null};
     vm.runInNewContext(
         `${source}\ncontext.start = startDriverDowntimeTimer; context.sync = syncDriverReasonTotals;`,
@@ -114,6 +120,7 @@ test("per-reason downtime timer survives close and marks every used reason", () 
             String,
             downtimeDuration,
             downtimeReasonButtons,
+            shell,
             window: runtimeWindow,
         },
         {filename: "templates/users/driver_shift.html#driver-downtime-history"}
