@@ -50,12 +50,6 @@ function isDriverOperationalRefreshUnsafe(shell) {
         typeof window !== "undefined" &&
         Number(window.driverRefreshBypassBusyUntil || 0) > Date.now()
     ) return false;
-    /* Круг показывает «засчитано» (~0,9 с, driver-shift-v1.js showDriverDialConfirmed):
-       подмена разметки в этот миг съела бы подтверждение. Окно ограничено временем. */
-    if (
-        typeof window !== "undefined" &&
-        Number(window.driverDialConfirmUntil || 0) > Date.now()
-    ) return busy("dial_confirmed");
     if (
         typeof window !== "undefined" &&
         Number(window.driverOfflineBlockingCount || 0) > 0

@@ -382,8 +382,6 @@
         var button = holdButton();
         var wrap = dial();
         if (!button || !wrap) return;
-        // Круг показывает «засчитано» — по окончании показа driver-shift-v1.js вызовет refresh().
-        if (button.classList.contains("is-confirmed")) return;
         var id = isManual() ? assignedPointId() : "";
         if (id) {
             var name = pointName(id) || "РУЧНОЙ РЕЙС";
@@ -404,9 +402,6 @@
             return;
         }
         if (button.dataset.driverManualDial !== "true") return;
-        /* Завершение с круга ещё записывается: круг ждёт показа «засчитано»
-           (completeFromDial → onSaved), а при сбое undoPending снимет is-pending сам. */
-        if (button.classList.contains("is-pending")) return;
         /* Рейс завершён или отменён. Куда ехать дальше телефон знает сам: назначение
            на экскаватор ручной разгрузкой не снимается. Раньше здесь держали
            заглушку «ожидание синхронизации» до ответа сервера (до минуты на
@@ -447,7 +442,7 @@
     }
 
     // Удержание круга с ручным рейсом (вызывает driver-shift-v1.js вместо разгрузки).
-    // onSaved — показ «засчитано» на круге, как у обычной разгрузки: только после записи на телефоне.
+    // onSaved — слой «засчитано» поверх круга, как у обычной разгрузки: только после записи на телефоне.
     function completeFromDial(onSaved) {
         var api = engine();
         if (!api || typeof api.completeActiveManualLoad !== "function") {
