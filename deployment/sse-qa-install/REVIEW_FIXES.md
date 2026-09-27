@@ -58,3 +58,22 @@ Ubuntu 24.04 VM с marker `/run/sse-qa-disposable-test`, без production paths
 |---|---|---|
 | R3-1 | parent cgroup читается из live `ControlGroup` и обязан точно равняться `/sse.slice/sse-qa.slice`; child/process — только `parent/unit`; receiver использует сегментную at-or-below проверку и не принимает похожий prefix | `test_operation_scope_rejects_process_outside_real_systemd_hierarchy`, `test_unit_cgroup_rejects_similar_but_non_child_path`, `test_receiver_rejects_actual_qa_slice_and_similar_prefix_is_not_a_child`, `test_receiver_reads_exact_slice_control_group_and_disposable_checks_child` |
 | R3-2 | весь `enable_sse_qa` выполняется как фиксированный `sse-qa-enable.service` внутри parent slice; обе внутренние проверки и Django subprocess наследуют тот же бюджет; ошибка вызывает подтверждаемый rollback | `test_enable_process_is_child_of_shared_slice`, `test_enable_verifies_before_and_after_start_and_rolls_back_on_error` |
+# Локальная доработка переходов между disposable-сценариями — 28.09.2026
+
+- Строгий bind на фиксированные порты `18080`, `18082`, `55432`, `6381`
+  сохранён без `SO_REUSEADDR`. Между normal/fault/cancel используется один
+  монотонный deadline 90 секунд; повторяется только `EADDRINUSE`.
+- При первом занятом порте и по deadline журналируются только номер порта,
+  errno/символическое имя и ограниченные TCP-состояния этих четырёх портов.
+  Процессы, argv, credentials и общая сетевая таблица не выводятся.
+- Повторная очистка различает `already_absent`, успешный `stopped` и реальный
+  `stop_failed`. Per-attempt cleanup, общий cleanup и zero-residue остаются
+  отдельными результатами.
+- Историческая причина отказа bind порта 18080 в run `36342464518` остаётся
+  неизвестной. TIME_WAIT подтверждён независимым ревью только как возможный
+  воспроизводимый механизм, а не как установленная причина того запуска.
+- Cleanup installer unit теперь сохраняет exit status каждого
+  `systemctl show`. Только явный `LoadState=not-found` при exit 0 считается
+  `already_absent`; ошибка запроса, пустой или неизвестный ответ завершаются
+  fail-closed. После неуспешного stop успех возможен только при подтверждённом
+  исчезновении unit, а сбой повторного запроса не скрывает `stop_exit`.

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 from decimal import Decimal, InvalidOperation
 import hashlib
 import ipaddress
@@ -34,6 +35,8 @@ STATE_ROOT = Path("/var/lib/sse-qa")
 ETC_ROOT = Path("/etc/sse-qa")
 OWNERSHIP_PATH = STATE_ROOT / "OWNERSHIP.json"
 PORTS = (18080, 18082, 55432, 6381)
+PORT_RELEASE_TIMEOUT_SECONDS = 90.0
+PORT_RELEASE_POLL_SECONDS = 0.25
 SECRET_KEYS = {
     "schema", "allow_cidr", "basic_auth_line", "django_secret_key",
     "postgres_app_password", "postgres_maint_password", "redis_password",
@@ -358,15 +361,105 @@ def render(template: str, replacements: dict[str, str]) -> str:
     return result
 
 
-def port_is_free(port: int) -> bool:
+def strict_loopback_bind_probe(port: int) -> tuple[bool, int | None, str | None]:
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         probe.bind(("127.0.0.1", port))
-        return True
-    except OSError:
-        return False
+        return True, None, None
+    except OSError as exc:
+        number = exc.errno if isinstance(exc.errno, int) else -1
+        name = "EADDRINUSE" if number == errno.EADDRINUSE else errno.errorcode.get(number, "UNKNOWN")
+        return False, number, name
     finally:
         probe.close()
+
+
+def port_is_free(port: int) -> bool:
+    return strict_loopback_bind_probe(port)[0]
+
+
+def _fixed_port_tcp_states(ports: tuple[int, ...]) -> list[str]:
+    """Return bounded socket-state evidence without process or command data."""
+    try:
+        completed = subprocess.run(
+            ["ss", "-H", "-tan"], check=False, capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ["snapshot_status=unavailable"]
+    if completed.returncode != 0:
+        return [f"snapshot_status=failed exit={completed.returncode}"]
+    wanted = {str(port) for port in ports}
+    lines: list[str] = []
+    for raw in completed.stdout.splitlines():
+        fields = raw.split()
+        if not fields:
+            continue
+        if any(re.search(rf":{re.escape(port)}$", field) for port in wanted for field in fields):
+            state = re.sub(r"[^A-Za-z0-9_-]", "_", fields[0])[:32]
+            matched = sorted(port for port in wanted if any(field.endswith(f":{port}") for field in fields))
+            lines.append(f"state={state} ports={','.join(matched)}")
+            if len(lines) >= 64:
+                break
+    return lines or ["snapshot_status=no_matching_rows"]
+
+
+def wait_for_qa_ports(
+    evidence_path: Path,
+    *,
+    ports: tuple[int, ...] = PORTS,
+    timeout_seconds: float = PORT_RELEASE_TIMEOUT_SECONDS,
+    poll_seconds: float = PORT_RELEASE_POLL_SECONDS,
+    probe=strict_loopback_bind_probe,
+    monotonic=time.monotonic,
+    sleeper=time.sleep,
+    snapshot=_fixed_port_tcp_states,
+    reporter=lambda line: None,
+) -> None:
+    deadline = monotonic() + timeout_seconds
+    first_busy_written = False
+    records: list[str] = [
+        f"ports={','.join(str(port) for port in ports)}",
+        f"deadline_seconds={timeout_seconds:g}",
+    ]
+    while True:
+        busy: list[tuple[int, int, str]] = []
+        for port in ports:
+            ok, number, name = probe(port)
+            if ok:
+                continue
+            number = -1 if number is None else number
+            name = name or "UNKNOWN"
+            if number != errno.EADDRINUSE:
+                records.append(f"result=probe_error port={port} errno={number} name={name}")
+                reporter(records[-1])
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                evidence_path.write_text("\n".join(records) + "\n", encoding="utf-8")
+                raise QaError(f"loopback port probe failed: port={port} errno={number} name={name}")
+            busy.append((port, number, name))
+        if not busy:
+            records.append("result=ready")
+            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+            evidence_path.write_text("\n".join(records) + "\n", encoding="utf-8")
+            return
+        if not first_busy_written:
+            records.append("first_busy=" + ",".join(f"{p}:{n}:{name}" for p, n, name in busy))
+            records.extend("first_" + line for line in snapshot(ports))
+            for line in records[2:]:
+                reporter(line)
+            first_busy_written = True
+        now = monotonic()
+        if now >= deadline:
+            records.append("timeout_busy=" + ",".join(f"{p}:{n}:{name}" for p, n, name in busy))
+            timeout_snapshot = ["timeout_" + line for line in snapshot(ports)]
+            records.extend(timeout_snapshot)
+            records.append("result=timeout")
+            for line in [records[-len(timeout_snapshot) - 2], *timeout_snapshot, records[-1]]:
+                reporter(line)
+            evidence_path.parent.mkdir(parents=True, exist_ok=True)
+            evidence_path.write_text("\n".join(records) + "\n", encoding="utf-8")
+            port, number, name = busy[0]
+            raise QaError(f"loopback port release timeout: port={port} errno={number} name={name}")
+        sleeper(min(poll_seconds, max(0.0, deadline - now)))
 
 
 def preflight(root: Path, installed_ok: bool = False) -> list[str]:
@@ -420,8 +513,11 @@ def preflight(root: Path, installed_ok: bool = False) -> list[str]:
     elif not installed_ok:
         raise QaError("partial or complete QA ownership journal already exists")
     for port in PORTS:
-        if not port_is_free(port) and not (installed_ok and marker.is_file()):
-            raise QaError(f"loopback port conflict: {port}")
+        ok, number, name = strict_loopback_bind_probe(port)
+        if not ok and not (installed_ok and marker.is_file()):
+            if number == errno.EADDRINUSE:
+                raise QaError(f"loopback port conflict: {port} errno={number} name={name}")
+            raise QaError(f"loopback port probe failed: port={port} errno={number} name={name}")
     checks.append("ports_18080_18082_55432_6381")
 
     forbidden = (
@@ -1427,7 +1523,7 @@ def real_smoke() -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("preflight", "verify", "install", "enable", "smoke", "disable", "remove", "render-test"))
+    parser.add_argument("operation", choices=("preflight", "wait-ports", "verify", "install", "enable", "smoke", "disable", "remove", "render-test"))
     parser.add_argument("--bundle-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--secrets-file", type=Path)
     parser.add_argument("--test-root", type=Path)
@@ -1447,6 +1543,15 @@ def main(argv: list[str] | None = None) -> int:
             verify_linux_units(bundle, runtime_ready=False)
         checks = preflight(root, installed_ok=rooted(root, OWNERSHIP_PATH).is_file())
         print("SSE_QA_PREFLIGHT_OK " + ",".join(checks))
+        return 0
+    if args.operation == "wait-ports":
+        if root != REAL_ROOT:
+            raise QaError("wait-ports requires real mode")
+        wait_for_qa_ports(
+            Path("/run/sse-qa-port-readiness.txt"),
+            reporter=lambda line: print("SSE_QA_PORT_DIAGNOSTIC " + line),
+        )
+        print("SSE_QA_PORTS_READY_OK ports=18080,18082,55432,6381 deadline=90")
         return 0
     if args.operation == "verify":
         if root == REAL_ROOT:

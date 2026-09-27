@@ -108,6 +108,7 @@ evidence/diagnostic-fix/diff-check.exit.txt
 evidence/diagnostic-fix/input/SSE_QA_first_Linux_run_review_and_diagnostic_task.md
 WHEEL_COMPATIBILITY_VALIDATOR.md
 tests/test_wheel_compatibility.py
+tests/test_port_transition_cleanup.py
 evidence/wheel-validator-fix/REPORT.md
 evidence/wheel-validator-fix/COMMANDS.md
 evidence/wheel-validator-fix/targeted.stderr.log

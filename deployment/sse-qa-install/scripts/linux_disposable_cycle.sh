@@ -333,10 +333,96 @@ remove_disposable_tls() {
   rmdir "$TLS_DIR" 2>/dev/null || true
 }
 
+wait_ports_ready() {
+  local label="${1:?label required}"
+  local status=0
+  set +e
+  run_logged "ports-ready-$label" /usr/bin/python3.12 "$CTL" wait-ports \
+    --bundle-root "$PACKAGE_ROOT" || status=$?
+  set -e
+  rm -f /run/sse-qa-port-readiness.txt
+  return "$status"
+}
+
+start_install_after_port_readiness() {
+  local label="${1:?label required}"
+  local fault_point="${2:-}"
+  local hold_point="${3:-}"
+  wait_ports_ready "$label" || return $?
+  start_install_async "$label" "$fault_point" "$hold_point"
+}
+
+cleanup_install_unit() {
+  local evidence_file load_state active_state stop_status=0 after_load status
+  local load_query_exit=0 active_query_exit=0 after_load_query_exit=not_run
+  if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
+    evidence_file="$(sseqa_diag_attempt_dir "$SSEQA_DIAG_CURRENT_LABEL")/cleanup-install-unit.txt"
+  else
+    evidence_file="$EVIDENCE_ROOT/metadata/cleanup-install-unit.txt"
+  fi
+  mkdir -p "$(dirname "$evidence_file")"
+  if load_state="$(systemctl show "$INSTALL_UNIT" -p LoadState --value 2>/dev/null)"; then
+    load_query_exit=0
+  else
+    load_query_exit=$?
+  fi
+  if active_state="$(systemctl show "$INSTALL_UNIT" -p ActiveState --value 2>/dev/null)"; then
+    active_query_exit=0
+  else
+    active_query_exit=$?
+  fi
+  case "$load_state" in loaded|not-found|masked|stub|error) ;; '') load_state=empty ;; *) load_state=unknown ;; esac
+  case "$active_state" in active|inactive|failed|activating|deactivating|reloading) ;; '') active_state=empty ;; *) active_state=unknown ;; esac
+  if test "$load_query_exit" -ne 0; then
+    printf 'status=state_query_failed\nload_state=%s\nactive_state=%s\nload_query_exit=%s\nactive_query_exit=%s\nstop_exit=not_run\npost_load_state=not_run\npost_load_query_exit=not_run\nexit=%s\n' \
+      "$load_state" "$active_state" "$load_query_exit" "$active_query_exit" "$load_query_exit" >"$evidence_file"
+    return "$load_query_exit"
+  fi
+  case "$load_state" in
+    not-found)
+      printf 'status=already_absent\nload_state=%s\nactive_state=%s\nload_query_exit=0\nactive_query_exit=%s\nstop_exit=not_run\npost_load_state=not_run\npost_load_query_exit=not_run\nexit=0\n' \
+        "$load_state" "$active_state" "$active_query_exit" >"$evidence_file"
+      return 0
+      ;;
+    empty|unknown)
+      printf 'status=state_unknown\nload_state=%s\nactive_state=%s\nload_query_exit=0\nactive_query_exit=%s\nstop_exit=not_run\npost_load_state=not_run\npost_load_query_exit=not_run\nexit=1\n' \
+        "$load_state" "$active_state" "$active_query_exit" >"$evidence_file"
+      return 1
+      ;;
+  esac
+  systemctl stop "$INSTALL_UNIT" >/dev/null 2>&1 || stop_status=$?
+  if test "$stop_status" -eq 0; then
+    printf 'status=stopped\nload_state=%s\nactive_state=%s\nload_query_exit=0\nactive_query_exit=%s\nstop_exit=0\npost_load_state=not_run\npost_load_query_exit=not_run\nexit=0\n' \
+      "$load_state" "$active_state" "$active_query_exit" >"$evidence_file"
+    return 0
+  fi
+  if after_load="$(systemctl show "$INSTALL_UNIT" -p LoadState --value 2>/dev/null)"; then
+    after_load_query_exit=0
+  else
+    after_load_query_exit=$?
+  fi
+  case "$after_load" in loaded|not-found|masked|stub|error) ;; '') after_load=empty ;; *) after_load=unknown ;; esac
+  if test "$after_load_query_exit" -eq 0 && test "$after_load" = not-found; then
+    printf 'status=already_absent_after_stop\nload_state=%s\nactive_state=%s\nload_query_exit=0\nactive_query_exit=%s\nstop_exit=%s\npost_load_state=%s\npost_load_query_exit=0\nexit=0\n' \
+      "$load_state" "$active_state" "$active_query_exit" "$stop_status" "$after_load" >"$evidence_file"
+    return 0
+  fi
+  if test "$after_load_query_exit" -ne 0; then
+    status=stop_failed_post_query_failed
+  elif test "$after_load" = empty || test "$after_load" = unknown; then
+    status=stop_failed_post_state_unknown
+  else
+    status=stop_failed
+  fi
+  printf 'status=%s\nload_state=%s\nactive_state=%s\nload_query_exit=0\nactive_query_exit=%s\nstop_exit=%s\npost_load_state=%s\npost_load_query_exit=%s\nexit=%s\n' \
+    "$status" "$load_state" "$active_state" "$active_query_exit" "$stop_status" "$after_load" "$after_load_query_exit" "$stop_status" >"$evidence_file"
+  return "$stop_status"
+}
+
 cleanup_partial() {
   local cleanup_status=0
   set +e
-  systemctl stop "$INSTALL_UNIT" >/dev/null 2>&1 || cleanup_status=1
+  cleanup_install_unit || cleanup_status=1
   if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
     sseqa_diag_capture_post_stop "$SSEQA_DIAG_CURRENT_LABEL" || true
   fi
@@ -345,6 +431,7 @@ cleanup_partial() {
     /usr/bin/python3.12 "$CTL" remove --bundle-root "$PACKAGE_ROOT" >/dev/null 2>&1 || cleanup_status=1
   fi
   rm -f "$NETWORK_SMOKE_JSON"
+  rm -f /run/sse-qa-port-readiness.txt
   remove_disposable_tls
   systemctl stop sse-qa.slice >/dev/null 2>&1
   rm -f "$RUNTIME_SLICE"
@@ -441,7 +528,7 @@ run_logged normal-zero-residue /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" norma
 # Both fixed install fault points must fail and independently pass cleanup.
 for point in after_image_before_marker after_postgres_redis_start; do
   label="fault-$point"
-  start_install_async "$label" "$point"
+  start_install_after_port_readiness "$label" "$point"
   set +e
   collect_install_result "$label"
   fault_status=$?
@@ -458,7 +545,7 @@ for point in after_image_before_marker after_postgres_redis_start; do
 done
 
 # Cancellation waits for active/MainPID/ownership phase/exact cgroup, not time.
-start_install_async cancel '' dependencies_started
+start_install_after_port_readiness cancel '' dependencies_started
 wait_install_checkpoint dependencies_started
 export_install_journal cancel cat "$EVIDENCE_ROOT/raw/cancel-before-stop.journal.log"
 grep -Fq 'SSE_QA_CANCEL_HOLD_READY point=dependencies_started' \
