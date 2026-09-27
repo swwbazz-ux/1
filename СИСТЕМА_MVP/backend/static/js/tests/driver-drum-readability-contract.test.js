@@ -228,6 +228,25 @@ test("labels are laid out only when a card is built, never on spin, resize obser
     });
 });
 
+test("the point card blinks with the outline from one shared ancestor animation, hard on/off", () => {
+    // Анимация висит на общем предке (экран «Работа») и стартует тем же событием,
+    // что и контур (is-active на барабане простоев); карточка только наследует
+    // переменную — поворот барабана и смена центральной грани фазу не сбивают
+    // (прежние попытки с анимацией на самой карточке расходились с контуром,
+    // владелец, 28.09.2026). Те же длительность, шаги и фаза, что у контура.
+    const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
+    assert.match(pointCss, /@property --driver-blink-color\s*\{[^}]*syntax:\s*"<color>";[^}]*inherits:\s*true;/s);
+    assert.match(pointCss, /\.driver-work-screen:has\(\.driver-downtime-drum\.is-active\)\s*\{\s*animation:\s*driver-point-blink-color 1\.2s steps\(1, end\) infinite;/);
+    assert.match(CSS, /\.driver-downtime-drum\.is-active ~ \.driver-drum-link-active-layer\s*\{\s*animation:\s*driver-downtime-blink 1\.2s steps\(1, end\) infinite;/);
+    // Фаза как у контура: 0% — горит (цвет простоя), 50% — погас (голубой).
+    assert.match(pointCss, /@keyframes driver-point-blink-color\s*\{\s*0%\s*\{\s*--driver-blink-color:\s*var\(--driver-downtime-accent, var\(--driver-yellow\)\);\s*\}\s*50%\s*\{\s*--driver-blink-color:\s*rgba\(104, 205, 242, \.9\);\s*\}\s*\}/);
+    // Карточка берёт цвет из переменной и без собственного transition — иначе
+    // текст «загорался плавно», а контур — резко.
+    assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-card\.is-center\s*\{[^}]*--drum-reason-accent:\s*var\(--driver-blink-color\);[^}]*transition:\s*none;/s);
+    // На самой карточке своей анимации нет.
+    assert.doesNotMatch(pointCss, /\.driver-drum-card[^{]*\{[^}]*animation:/);
+});
+
 test("the shared outline is stationary: never recomputed while either drum is being dragged", () => {
     // Контур — стационарный элемент, как большая круглая кнопка: во время
     // вращения is-center уже мог перескочить на соседнюю грань (по угловой
