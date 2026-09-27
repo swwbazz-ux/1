@@ -26,9 +26,11 @@ body.driver-mobile-screen .driver-point-drum {
 }
 
 /* Стрелка на нижней кромке передней грани — вниз, к кругу: «отправиться на точку». */
+/* Снаружи карточки, под нижней кромкой (круг снизу) — см. комментарий у
+   .driver-drum-card-arrow в driver-downtime-drum-v1.css. */
 body.driver-mobile-screen .driver-point-drum .driver-drum-card-arrow {
     top: auto;
-    bottom: 5px;
+    bottom: -10px;
     border-bottom: 0;
     border-top: 8px solid currentColor;
 }
