@@ -644,6 +644,8 @@ class PackageContractTests(unittest.TestCase):
 
     def test_disposable_cycle_has_executable_normal_fault_cancel_evidence_gates(self):
         disposable = (ROOT / "scripts/linux_disposable_cycle.sh").read_text(encoding="utf-8")
+        diagnostics = (ROOT / "scripts/linux_install_diagnostics.sh").read_text(encoding="utf-8")
+        executable_cycle = disposable + "\n" + diagnostics
         for required in (
             "wait_install_checkpoint dependencies_started",
             "ActiveState --value",
@@ -659,7 +661,7 @@ class PackageContractTests(unittest.TestCase):
             "linux_redis_metrics.py",
             "emergency-exit",
         ):
-            self.assertIn(required, disposable)
+            self.assertIn(required, executable_cycle)
         self.assertNotIn("sleep 2", disposable)
         self.assertNotIn("ps -eo pid=,ppid=,user=,cgroup=,args=", disposable)
 

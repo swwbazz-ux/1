@@ -77,6 +77,13 @@ INSTALL_TIMEOUTS = {
     "collectstatic": 180,
     "systemd": 60,
 }
+_DIAGNOSTIC_SECRET_VALUES: set[str] = set()
+_DIAGNOSTIC_STEP = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_SENSITIVE_ASSIGNMENT = re.compile(
+    r"(?i)\b(?:postgres_app_password|postgres_maint_password|redis_password|"
+    r"django_secret_key|password|secret|token|authorization|cookie|pin|"
+    r"basic_auth(?:_line|_password)?)\b\s*[:=]\s*[^\s,;]+"
+)
 
 
 class QaError(RuntimeError):
@@ -87,12 +94,63 @@ class QaCancelled(QaError):
     pass
 
 
+def _set_diagnostic_secret_values(values) -> None:
+    global _DIAGNOSTIC_SECRET_VALUES
+    _DIAGNOSTIC_SECRET_VALUES = {
+        str(value) for value in values if isinstance(value, (str, int)) and len(str(value)) >= 4
+    }
+
+
+def _diagnostic_excerpt(value: str | bytes | None) -> str:
+    if value is None:
+        return "<empty>"
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    for secret in sorted(_DIAGNOSTIC_SECRET_VALUES, key=len, reverse=True):
+        value = value.replace(secret, "<redacted>")
+    value = _SENSITIVE_ASSIGNMENT.sub("sensitive=<redacted>", value)
+    value = "".join(character if character in "\n\t" or character.isprintable() else "?" for character in value)
+    value = value.replace("\r", "").strip()
+    if len(value) > 1024:
+        value = value[:1024] + "<truncated>"
+    return value or "<empty>"
+
+
+def _emit_command_diagnostic(*, step: str, kind: str, exit_value: int | str,
+                             stdout: str | bytes | None, stderr: str | bytes | None) -> None:
+    if not _DIAGNOSTIC_STEP.fullmatch(step):
+        step = "invalid-step"
+    payload = {
+        "event": "SSE_QA_COMMAND_FAILED",
+        "step": step,
+        "kind": kind,
+        "exit": exit_value,
+        "stdout": _diagnostic_excerpt(stdout),
+        "stderr": _diagnostic_excerpt(stderr),
+    }
+    print(json.dumps(payload, sort_keys=True, ensure_ascii=True), file=sys.stderr)
+
+
 def run(command: list[str], *, input_text: str | None = None, check: bool = True,
         env: dict[str, str] | None = None, cwd: str | Path | None = None,
-        timeout: int | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(command, input=input_text, text=True, check=check,
-                          capture_output=True, env=env, cwd=cwd,
-                          timeout=timeout or INSTALL_TIMEOUTS["default"])
+        timeout: int | None = None, step: str = "subprocess") -> subprocess.CompletedProcess:
+    effective_timeout = timeout or INSTALL_TIMEOUTS["default"]
+    try:
+        return subprocess.run(command, input=input_text, text=True, check=check,
+                              capture_output=True, env=env, cwd=cwd,
+                              timeout=effective_timeout)
+    except subprocess.TimeoutExpired as exc:
+        _emit_command_diagnostic(
+            step=step, kind="timeout", exit_value=effective_timeout,
+            stdout=exc.stdout, stderr=exc.stderr,
+        )
+        raise
+    except subprocess.CalledProcessError as exc:
+        _emit_command_diagnostic(
+            step=step, kind="exit", exit_value=exc.returncode,
+            stdout=exc.stdout, stderr=exc.stderr,
+        )
+        raise
 
 
 def digest(path: Path) -> str:
@@ -920,7 +978,10 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
     validate_runtime_archive(runtime)
     wheelhouse = validate_wheelhouse(bundle)
     verify_linux_units(bundle, runtime_ready=False)
-    python_version = run(["/usr/bin/python3.12", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"]).stdout.strip()
+    python_version = run(
+        ["/usr/bin/python3.12", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+        step="python-version",
+    ).stdout.strip()
     if python_version != "3.12":
         raise QaError("target interpreter must be Python 3.12")
     assert_install_scope()
@@ -935,22 +996,22 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
 
     signal.signal(signal.SIGTERM, cancel_install)
     try:
-        run(["useradd", "--system", "--home", str(APP_ROOT), "--shell", "/usr/sbin/nologin", "sseqa"])
+        run(["useradd", "--system", "--home", str(APP_ROOT), "--shell", "/usr/sbin/nologin", "sseqa"], step="user-create")
         state["user_created"] = True
         state["phase"] = "user_created"
         save_ownership(state)
-        run(["fallocate", "-l", "6G", str(STATE_ROOT / "sse-qa.img")])
-        run(["mkfs.ext4", "-F", "-L", "SSE_QA_V2", str(STATE_ROOT / "sse-qa.img")])
+        run(["fallocate", "-l", "6G", str(STATE_ROOT / "sse-qa.img")], step="image-allocate")
+        run(["mkfs.ext4", "-F", "-L", "SSE_QA_V2", str(STATE_ROOT / "sse-qa.img")], step="image-format")
         state["phase"] = "image_created"
         save_ownership(state)
         fault_injection("after_image_before_marker")
 
         for relative, target_text in SYSTEMD_SOURCE_TARGETS:
             _copy_owned(bundle / "config/systemd" / relative, target_text, state)
-        run(["systemctl", "daemon-reload"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run(["systemctl", "daemon-reload"], timeout=INSTALL_TIMEOUTS["systemd"], step="systemd-reload")
         state["mount_started"] = True
         save_ownership(state)
-        run(["systemctl", "start", "srv-sse\\x2dqa.mount"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run(["systemctl", "start", "srv-sse\\x2dqa.mount"], timeout=INSTALL_TIMEOUTS["systemd"], step="mount-start")
         if _mount_status() != "match":
             raise QaError("mounted QA filesystem does not match owned image")
         state["phase"] = "mounted"
@@ -970,30 +1031,31 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
 
         release = APP_ROOT / "releases/r3"
         release.mkdir(parents=True, exist_ok=False)
-        run(["tar", "-xzf", str(runtime), "-C", str(release), "--no-same-owner", "--no-same-permissions"])
+        run(["tar", "-xzf", str(runtime), "-C", str(release), "--no-same-owner", "--no-same-permissions"], step="runtime-extract")
         (APP_ROOT / "current").symlink_to(release, target_is_directory=True)
         for writable in (release / "backend/media", release / "backend/private_media"):
             writable.mkdir(parents=True, exist_ok=True)
             shutil.chown(writable, user="sseqa", group="sseqa")
-        run(["/usr/bin/python3.12", "-m", "venv", str(APP_ROOT / "venv")])
+        run(["/usr/bin/python3.12", "-m", "venv", str(APP_ROOT / "venv")], step="venv-create")
         run(
             [str(APP_ROOT / "venv/bin/pip"), "install", "--no-index", "--find-links", str(wheelhouse),
              "-r", str(APP_ROOT / "current/backend/requirements.txt"), "uvicorn==0.37.0"],
             timeout=INSTALL_TIMEOUTS["pip"],
+            step="pip-install",
         )
         verify_linux_units(bundle, runtime_ready=True)
 
         state["postgres_cluster_created"] = True
         save_ownership(state)
-        run(["pg_createcluster", "16", "sseqa", "--port", "55432", "--datadir", str(APP_ROOT / "postgres/data"), "--start-conf", "manual"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run(["pg_createcluster", "16", "sseqa", "--port", "55432", "--datadir", str(APP_ROOT / "postgres/data"), "--start-conf", "manual"], timeout=INSTALL_TIMEOUTS["systemd"], step="postgres-create")
         state["phase"] = "postgres_created"
         save_ownership(state)
         shutil.copy2("/etc/sse-qa/postgresql.conf", "/etc/postgresql/16/sseqa/postgresql.conf")
         shutil.copy2("/etc/sse-qa/pg_hba.conf", "/etc/postgresql/16/sseqa/pg_hba.conf")
         (APP_ROOT / "log/postgresql").mkdir(parents=True, exist_ok=True)
         shutil.chown(APP_ROOT / "log/postgresql", user="postgres", group="postgres")
-        run(["systemctl", "daemon-reload"], timeout=INSTALL_TIMEOUTS["systemd"])
-        run(["systemctl", "start", "postgresql@16-sseqa.service"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run(["systemctl", "daemon-reload"], timeout=INSTALL_TIMEOUTS["systemd"], step="postgres-reload")
+        run(["systemctl", "start", "postgresql@16-sseqa.service"], timeout=INSTALL_TIMEOUTS["systemd"], step="postgres-start")
         sql = (
             "CREATE ROLE sseqa_app LOGIN CONNECTION LIMIT 8 PASSWORD '" + str(secrets["postgres_app_password"]).replace("'", "''") + "';\n"
             "CREATE ROLE sseqa_maint LOGIN CONNECTION LIMIT 2 PASSWORD '" + str(secrets["postgres_maint_password"]).replace("'", "''") + "';\n"
@@ -1001,8 +1063,8 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
             "REVOKE ALL ON DATABASE sseqa FROM PUBLIC;\n"
             "GRANT CONNECT ON DATABASE sseqa TO sseqa_app, sseqa_maint;\n"
         )
-        run(["runuser", "-u", "postgres", "--", "psql", "-p", "55432", "-d", "postgres", "-v", "ON_ERROR_STOP=1"], input_text=sql)
-        run(["systemctl", "start", "redis-sse-qa.service"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run(["runuser", "-u", "postgres", "--", "psql", "-p", "55432", "-d", "postgres", "-v", "ON_ERROR_STOP=1"], input_text=sql, step="postgres-bootstrap")
+        run(["systemctl", "start", "redis-sse-qa.service"], timeout=INSTALL_TIMEOUTS["systemd"], step="redis-start")
         for unit in ("postgresql@16-sseqa.service", "redis-sse-qa.service"):
             _assert_unit_in_qa_slice(unit)
         state["redis_started"] = True
@@ -1016,11 +1078,11 @@ def real_install(bundle: Path, secrets: dict[str, str | int]) -> None:
                 key, value = line.split("=", 1)
                 env[key] = value
         backend = APP_ROOT / "current/backend"
-        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "migrate", "--noinput"], cwd=backend, env=env, timeout=INSTALL_TIMEOUTS["migrate"])
-        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "seed_sse_qa"], cwd=backend, env=env)
-        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "seed_sse_qa", "--verify-only"], cwd=backend, env=env)
-        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "collectstatic", "--noinput"], cwd=backend, env=env, timeout=INSTALL_TIMEOUTS["collectstatic"])
-        run(["systemctl", "stop", "redis-sse-qa.service", "postgresql@16-sseqa.service"], timeout=INSTALL_TIMEOUTS["systemd"])
+        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "migrate", "--noinput"], cwd=backend, env=env, timeout=INSTALL_TIMEOUTS["migrate"], step="django-migrate")
+        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "seed_sse_qa"], cwd=backend, env=env, step="django-seed")
+        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "seed_sse_qa", "--verify-only"], cwd=backend, env=env, step="django-seed-verify")
+        run([str(APP_ROOT / "venv/bin/python"), "manage.py", "collectstatic", "--noinput"], cwd=backend, env=env, timeout=INSTALL_TIMEOUTS["collectstatic"], step="django-collectstatic")
+        run(["systemctl", "stop", "redis-sse-qa.service", "postgresql@16-sseqa.service"], timeout=INSTALL_TIMEOUTS["systemd"], step="dependencies-stop")
         write_private(STATE_ROOT / "INSTALLATION_MARKER", MARKER + "\n", 0o600)
         state["complete"] = True
         state["phase"] = "complete_disabled"
@@ -1240,7 +1302,11 @@ def main(argv: list[str] | None = None) -> int:
             install_local_layout(bundle, root, secrets)
             print("SSE_QA_RENDER_TEST_OK")
             return 0
-        real_install(bundle, secrets)
+        _set_diagnostic_secret_values(secrets.values())
+        try:
+            real_install(bundle, secrets)
+        finally:
+            _set_diagnostic_secret_values(())
         return 0
     if root != REAL_ROOT:
         raise QaError("state-changing test-root operation is forbidden")
@@ -1260,4 +1326,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except QaError as exc:
         print(f"SSE_QA_FAIL {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        print("SSE_QA_FAIL child command failed; see fixed command diagnostic", file=sys.stderr)
         raise SystemExit(2)

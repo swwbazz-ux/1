@@ -6,6 +6,7 @@ POSTGRESQL_ISOLATION.md
 PREFLIGHT_AND_CONFLICTS.md
 FIRST_RUN_PLAN.md
 DISPOSABLE_LINUX_RUN.md
+DIAGNOSTIC_FAIL_PATH.md
 config/app.env.template
 config/systemd/sse-qa.slice
 config/systemd/srv-sse-x2dqa.mount
@@ -34,6 +35,7 @@ scripts/linux_zero_residue_scan.sh
 scripts/linux_network_login_smoke.py
 scripts/linux_redis_metrics.py
 scripts/linux_install_journal.py
+scripts/linux_install_diagnostics.sh
 scripts/seal_evidence.sh
 app-overlay/config/sse_asgi.py
 app-overlay/config/sse_event_loop_lag.py
@@ -49,6 +51,7 @@ tests/test_seed_business_smoke.py
 tests/test_shutdown_contract.py
 tests/test_disposable_workflow_contract.py
 tests/test_disposable_workflow_r2_contract.py
+tests/test_install_diagnostics.py
 github-actions/control-channel.patch
 github-actions/sse-qa-disposable-linux.yml
 github-actions/source-overlay/.github/deploy/build_release.py
@@ -92,3 +95,14 @@ evidence/r3-codeql/workflow-r2-to-r3.patch
 evidence/r3-codeql/dispatch-runs-query.json
 evidence/r3-codeql/registration-remote-ref.json
 evidence/r3-codeql/candidate-remote-ref-query.txt
+evidence/diagnostic-fix/REPORT.md
+evidence/diagnostic-fix/COMMANDS.md
+evidence/diagnostic-fix/targeted-tests.log
+evidence/diagnostic-fix/targeted-tests.exit.txt
+evidence/diagnostic-fix/full-package-tests.log
+evidence/diagnostic-fix/full-package-tests.exit.txt
+evidence/diagnostic-fix/syntax-and-compile.log
+evidence/diagnostic-fix/syntax-and-compile.exit.txt
+evidence/diagnostic-fix/diff-check.log
+evidence/diagnostic-fix/diff-check.exit.txt
+evidence/diagnostic-fix/input/SSE_QA_first_Linux_run_review_and_diagnostic_task.md

@@ -16,6 +16,7 @@ ZERO_SCAN="$PACKAGE_ROOT/scripts/linux_zero_residue_scan.sh"
 NETWORK_SMOKE="$PACKAGE_ROOT/scripts/linux_network_login_smoke.py"
 REDIS_METRICS="$PACKAGE_ROOT/scripts/linux_redis_metrics.py"
 JOURNAL_HELPER="$PACKAGE_ROOT/scripts/linux_install_journal.py"
+DIAGNOSTIC_HELPER="$PACKAGE_ROOT/scripts/linux_install_diagnostics.sh"
 RUNTIME_SLICE=/run/systemd/system/sse-qa.slice
 PERSISTENT_SLICE=/etc/systemd/system/sse-qa.slice
 QA_CGROUP=/sse.slice/sse-qa.slice
@@ -29,6 +30,7 @@ test -f /run/sse-qa-disposable-test
 test -f "$CTL"
 test -f "$ZERO_SCAN"
 test -f "$JOURNAL_HELPER"
+test -f "$DIAGNOSTIC_HELPER"
 test -f "$SECRETS_JSON"
 test "$NETWORK_SMOKE_JSON" = /run/sse-qa-network-smoke.json
 test -f "$NETWORK_SMOKE_JSON"
@@ -42,6 +44,9 @@ test ! -e "$TLS_DIR"
 mkdir -p "$EVIDENCE_ROOT"/{raw,cgroup,metadata,zero-residue}
 chmod 0700 "$EVIDENCE_ROOT"
 umask 077
+
+# shellcheck source=linux_install_diagnostics.sh
+source "$DIAGNOSTIC_HELPER"
 
 exec > >(tee -a "$EVIDENCE_ROOT/raw/cycle.stdout.log") \
   2> >(tee -a "$EVIDENCE_ROOT/raw/cycle.stderr.log" >&2)
@@ -148,24 +153,7 @@ PY
 }
 
 wait_install_checkpoint() {
-  local expected_phase="${1:?phase required}"
-  local deadline=$((SECONDS + 300)) active='' pid='' phase='' proc_cgroup=''
-  while ((SECONDS < deadline)); do
-    active="$(systemctl show "$INSTALL_UNIT" -p ActiveState --value 2>/dev/null || true)"
-    pid="$(systemctl show "$INSTALL_UNIT" -p MainPID --value 2>/dev/null || true)"
-    phase="$(ownership_phase)"
-    if test "$active" = active && [[ "$pid" =~ ^[1-9][0-9]*$ ]] && test "$phase" = "$expected_phase"; then
-      assert_slice_child "$INSTALL_UNIT"
-      proc_cgroup="$(awk -F: '$1 == "0" { print $3 }' "/proc/$pid/cgroup")"
-      test "$proc_cgroup" = "$QA_CGROUP/$INSTALL_UNIT"
-      printf 'INSTALL_CHECKPOINT_OK active=%s main_pid=%s phase=%s cgroup=%s\n' \
-        "$active" "$pid" "$phase" "$proc_cgroup"
-      return 0
-    fi
-    sleep 0.25
-  done
-  echo "install checkpoint timeout: phase=$expected_phase active=$active pid=$pid observed_phase=$phase" >&2
-  return 1
+  sseqa_wait_install_checkpoint "$@"
 }
 
 capture_install_invocation() {
@@ -176,11 +164,13 @@ capture_install_invocation() {
     invocation="$(systemctl show "$INSTALL_UNIT" -p InvocationID --value 2>/dev/null || true)"
     if [[ "$invocation" =~ ^[0-9a-fA-F]{32}$ ]]; then
       printf '%s\n' "${invocation,,}" >"$destination"
+      sseqa_diag_record_invocation "$label" "$invocation"
       return 0
     fi
     sleep 0.05
   done
   echo "install InvocationID unavailable: label=$label" >&2
+  sseqa_diag_record_invocation "$label" '' || true
   return 1
 }
 
@@ -188,7 +178,7 @@ export_install_journal() {
   local label="${1:?label required}"
   local output_format="${2:?output format required}"
   local destination="${3:?destination required}"
-  local invocation_file="$EXIT_DIR/$label.invocation"
+  local invocation_file="$(sseqa_diag_attempt_dir "$label")/invocation.txt"
   local invocation
   test -s "$invocation_file"
   invocation="$(cat "$invocation_file")"
@@ -243,6 +233,7 @@ start_install_async() {
   local env_args=()
   install -d -o root -g root -m 0700 "$EXIT_DIR"
   rm -f "$exit_file"
+  sseqa_diag_begin_attempt "$label"
   if test -n "$fault_point"; then
     env_args+=(--setenv=SSE_QA_FAULT_INJECTION=1 "--setenv=SSE_QA_FAULT_AT=$fault_point")
   fi
@@ -295,13 +286,22 @@ collect_install_result() {
     inactive|failed|'') ;;
     *) echo "install unit did not finish after exit marker: $active" >&2; return 1 ;;
   esac
+  if test "$status" -ne 0; then
+    if test ! -s "$(sseqa_diag_attempt_dir "$label")/primary-failure.txt"; then
+      sseqa_diag_record_primary "$label" installer_exit "$status" "$(ownership_phase)" failed
+    fi
+    sseqa_diag_capture_attempt "$label" installer-finished "$status" || journal_status=$?
+  fi
   export_install_journal "$label" short-iso-precise \
     "$EVIDENCE_ROOT/raw/$label.journal.log" || journal_status=$?
   printf '%s\n' "$status" >"$EVIDENCE_ROOT/raw/$label.exit"
   cleanup_install_slice "$status"
+  sseqa_diag_capture_post_stop "$label" || journal_status=$?
   systemctl reset-failed "$INSTALL_UNIT" >/dev/null 2>&1 || true
   rm -f "$exit_file" "$EXIT_DIR/$label.invocation" "$EXIT_DIR"/release-*
   rmdir "$EXIT_DIR"
+  sseqa_diag_record_cleanup "$label" 0
+  SSEQA_DIAG_CURRENT_LABEL=''
   if test "$journal_status" -ne 0; then
     echo "install journal export failed: label=$label exit=$journal_status" >&2
     return 254
@@ -334,11 +334,15 @@ remove_disposable_tls() {
 }
 
 cleanup_partial() {
+  local cleanup_status=0
   set +e
-  systemctl stop "$INSTALL_UNIT" >/dev/null 2>&1
+  systemctl stop "$INSTALL_UNIT" >/dev/null 2>&1 || cleanup_status=1
+  if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
+    sseqa_diag_capture_post_stop "$SSEQA_DIAG_CURRENT_LABEL" || true
+  fi
   if test -f /var/lib/sse-qa/OWNERSHIP.json; then
-    /usr/bin/python3.12 "$CTL" disable --bundle-root "$PACKAGE_ROOT" >/dev/null 2>&1
-    /usr/bin/python3.12 "$CTL" remove --bundle-root "$PACKAGE_ROOT" >/dev/null 2>&1
+    /usr/bin/python3.12 "$CTL" disable --bundle-root "$PACKAGE_ROOT" >/dev/null 2>&1 || cleanup_status=1
+    /usr/bin/python3.12 "$CTL" remove --bundle-root "$PACKAGE_ROOT" >/dev/null 2>&1 || cleanup_status=1
   fi
   rm -f "$NETWORK_SMOKE_JSON"
   remove_disposable_tls
@@ -348,19 +352,41 @@ cleanup_partial() {
   systemctl reset-failed "$INSTALL_UNIT" >/dev/null 2>&1
   rm -f "$EXIT_DIR"/*.exit "$EXIT_DIR"/*.invocation "$EXIT_DIR"/release-*
   rmdir "$EXIT_DIR" >/dev/null 2>&1
+  if test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
+    sseqa_diag_record_cleanup "$SSEQA_DIAG_CURRENT_LABEL" "$cleanup_status" || cleanup_status=1
+  fi
   set -e
+  return "$cleanup_status"
 }
 
 FINALIZED=0
 on_exit() {
-  local status=$?
+  local status=$? diagnostic_status=0 cleanup_status=0 zero_status=0 final_status
   trap - EXIT
-  cleanup_partial
-  if test "$FINALIZED" -ne 1; then
-    /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" emergency-exit || status=1
+  set +e
+  if test "$FINALIZED" -ne 1 && test -n "$SSEQA_DIAG_CURRENT_LABEL"; then
+    if test ! -s "$(sseqa_diag_attempt_dir "$SSEQA_DIAG_CURRENT_LABEL")/primary-failure.txt"; then
+      sseqa_diag_record_primary "$SSEQA_DIAG_CURRENT_LABEL" harness_failure "$status" \
+        "$SSEQA_DIAG_LAST_PHASE" failed || diagnostic_status=1
+    fi
+    sseqa_diag_capture_attempt "$SSEQA_DIAG_CURRENT_LABEL" pre-cleanup "$status" \
+      || diagnostic_status=1
   fi
-  printf 'utc_end=%s\nexit=%s\n' "$(date -u +%FT%TZ)" "$status" >>"$EVIDENCE_ROOT/metadata/run.txt"
-  exit "$status"
+  cleanup_partial || cleanup_status=$?
+  if test "$diagnostic_status" -eq 0 && test "$SSEQA_DIAG_POST_STOP_STATUS" -ne 0; then
+    diagnostic_status="$SSEQA_DIAG_POST_STOP_STATUS"
+  fi
+  if test "$FINALIZED" -ne 1; then
+    /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" emergency-exit || zero_status=$?
+  fi
+  final_status="$status"
+  if test "$final_status" -eq 0 && { test "$cleanup_status" -ne 0 || test "$zero_status" -ne 0; }; then
+    final_status=1
+  fi
+  printf 'utc_end=%s\nprimary_exit=%s\ndiagnostic_exit=%s\ncleanup_exit=%s\nzero_residue_exit=%s\nexit=%s\n' \
+    "$(date -u +%FT%TZ)" "$status" "$diagnostic_status" "$cleanup_status" "$zero_status" "$final_status" \
+    >>"$EVIDENCE_ROOT/metadata/run.txt"
+  exit "$final_status"
 }
 trap on_exit EXIT
 
@@ -451,9 +477,12 @@ if grep -Fq 'SSE_QA_INSTALL_OK' "$EVIDENCE_ROOT/raw/cancel.journal.log"; then
   exit 1
 fi
 cleanup_install_slice 1
+sseqa_diag_capture_post_stop cancel || true
 systemctl reset-failed "$INSTALL_UNIT" >/dev/null 2>&1 || true
 rm -f "$EXIT_DIR"/*.exit "$EXIT_DIR"/*.invocation "$EXIT_DIR"/release-*
 rmdir "$EXIT_DIR"
+sseqa_diag_record_cleanup cancel 0
+SSEQA_DIAG_CURRENT_LABEL=''
 printf 'CANCEL_MARKER_OK active=1 main_pid=1 phase=dependencies_started cgroup=%s success_marker=0\n' \
   "$QA_CGROUP/$INSTALL_UNIT" | tee "$EVIDENCE_ROOT/raw/cancel.marker.log"
 run_logged cancel-zero-residue /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" cancel
