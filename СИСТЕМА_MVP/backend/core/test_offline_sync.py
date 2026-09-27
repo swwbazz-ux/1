@@ -2271,6 +2271,33 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(downtime.started_at, receipt.received_at)
         self.assertEqual(DowntimeEvent.objects.filter(reason=reason).count(), 1)
 
+    def test_driver_unload_wait_is_accepted_even_if_server_sees_empty_truck(self):
+        from downtimes.driver_workflow import driver_downtime_requires_loaded_trip
+
+        reason, _ = DowntimeReason.objects.get_or_create(
+            name='Ожидание разгрузки',
+            defaults={'equipment_type': self.truck_type, 'show_for_truck_driver': True},
+        )
+        self.assertTrue(driver_downtime_requires_loaded_trip(reason))
+        event = {
+            'event_id': 'driver-unload-wait-empty-on-server',
+            'event_type': 'driver.downtime.started',
+            'format_version': 1,
+            'occurred_at': timezone.now().isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-unload-wait-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(DowntimeEvent.objects.filter(reason=reason, ended_at__isnull=True).exists())
+
     def driver_downtime_event(self, *, event_id, sequence, reason, occurred_at, depends_on=()):
         return {
             'event_id': event_id,

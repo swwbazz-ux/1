@@ -3928,13 +3928,16 @@ def _process_downtime(access, normalized, *, role_code, close):
                 ),
             )
         if role_code == 'driver':
-            # Гружёный / пустой самосвал и точка рейса — общие правила driver_workflow.
+            # The phone already offers only the downtimes allowed for its own
+            # loaded/empty state; the server's view of the truck may lag behind
+            # (offline trips, late delivery), so a mismatch is logged, not refused.
             start_conflict = driver_downtime_start_conflict(reason, equipment)
             if start_conflict:
                 code, message = start_conflict
-                if code == 'loaded_trip_required':
-                    message = 'Этот простой доступен только после погрузки.'
-                _conflict(code, message)
+                _log_discrepancy(
+                    access=access, code=code, process='Начало простоя водителя',
+                    description=f'{message} Простой принят по решению водителя.',
+                )
         open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
             equipment=equipment, ended_at__isnull=True,
         ).order_by('-started_at', '-id').first()

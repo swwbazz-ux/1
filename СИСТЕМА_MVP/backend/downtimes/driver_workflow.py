@@ -152,7 +152,7 @@ def driver_downtime_start_conflict(reason, truck):
     from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
 
     open_trip = (
-        Trip.objects.select_for_update()
+        Trip.objects.select_for_update(of=('self',))
         .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
         .select_related('dump_point', 'actual_dump_point')
         .order_by('-created_at')

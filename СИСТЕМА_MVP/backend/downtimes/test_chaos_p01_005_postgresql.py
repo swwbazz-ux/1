@@ -326,6 +326,34 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
             result,
         )
 
+    def test_driver_workflow_downtime_start_check_runs_on_postgresql(self):
+        # PostgreSQL rejects FOR UPDATE over the nullable dump point joins unless
+        # the lock is limited to the trip row itself.
+        from django.db import transaction
+
+        from downtimes.driver_workflow import (
+            TRUCK_WAITING_LOADING_REASON_NAME,
+            driver_downtime_start_conflict,
+        )
+
+        truck = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            model=self.truck_model,
+            garage_number='CHAOS-PG-005-FOR-UPDATE-TRUCK',
+        )
+        Trip.objects.create(
+            excavator=self.excavator,
+            truck=truck,
+            excavator_operator=self.operator,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+        )
+        reason, _ = DowntimeReason.objects.get_or_create(name=TRUCK_WAITING_LOADING_REASON_NAME)
+        with transaction.atomic():
+            conflict = driver_downtime_start_conflict(reason, truck)
+        self.assertEqual(conflict[0], 'empty_truck_required')
+
     def test_two_mechanics_create_only_one_open_downtime(self):
         first_session = self.session_key_for_access(self.mechanic_one_access)
         second_session = self.session_key_for_access(self.mechanic_two_access)

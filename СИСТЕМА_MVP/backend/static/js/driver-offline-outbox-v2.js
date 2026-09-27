@@ -756,6 +756,20 @@
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));
+                        var confirmedDowntimeId = result.server_ids.downtime_event_id || result.server_ids.downtime_id;
+                        if (event.event_type === "driver.downtime.started" && confirmedDowntimeId) {
+                            /* Синхронно, в момент подтверждения — событие тут же
+                               удаляется из очереди (см. repo.remove ниже), и
+                               driver-shift-v1.js больше не сможет узнать связь
+                               "local:<uuid>" ↔ серверный числовой ID из самой
+                               очереди. Без этого алиаса опознавание того же
+                               простоя после синхронизации падало на started_at,
+                               а на телефоне со сбитыми часами сервер хранит уже
+                               скорректированное время — начало «того же» простоя
+                               считалось другим (координатор, 27.09.2026). */
+                            root.driverDowntimeIdAliases = root.driverDowntimeIdAliases || {};
+                            root.driverDowntimeIdAliases[String(event.event_id)] = String(confirmedDowntimeId);
+                        }
                     }
                     var downtimeReceiptKey = downtimeProjectionReceiptKey(event.shift_id, event.equipment_id);
                     if (downtimeReceiptKey && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")) {

@@ -96,7 +96,25 @@ window.applyOperationalStateRefresh = function (context) {
                        только эту маленькую карточку, не трогая остальной экран. */
                     var liveStateCard = oldShell.querySelector("[data-driver-active-downtime-id]");
                     var freshStateCard = freshShell.querySelector("[data-driver-active-downtime-id]");
-                    if (liveStateCard && freshStateCard) {
+                    /* Пустое значение атрибутов активного простоя во фрагменте — не
+                       доказательство закрытия (боевой 27.09.2026, v359): раз в ~20 с
+                       реконсайл иногда приносит карточку без active-reason-id, хотя
+                       простой реально ещё идёт. Прямая построчная подмена атрибутов и
+                       ВСЕГО class отсюда уже успевала погасить окантовку и обнулить
+                       таймер раньше, чем что-либо ниже по цепочке это заметит и
+                       поправит. Раз явного признака закрытия здесь нет — карточку не
+                       трогаем вовсе, оставляя решение обычному пути (локальное
+                       событие закрытия или следующее обновление, где сервер явно
+                       подтвердит "активного простоя нет"). */
+                    var freshHasActiveDowntime = !!freshStateCard && !!(
+                        freshStateCard.getAttribute("data-driver-active-reason-id")
+                        || freshStateCard.getAttribute("data-driver-active-downtime-id")
+                    );
+                    var liveHasActiveDowntime = !!liveStateCard && !!(
+                        liveStateCard.getAttribute("data-driver-active-reason-id")
+                        || liveStateCard.getAttribute("data-driver-active-downtime-id")
+                    );
+                    if (liveStateCard && freshStateCard && (freshHasActiveDowntime || !liveHasActiveDowntime)) {
                         [
                             "data-driver-active-downtime-id", "data-driver-active-reason-id",
                             "data-driver-active-downtime-flow", "data-driver-active-started-at",
