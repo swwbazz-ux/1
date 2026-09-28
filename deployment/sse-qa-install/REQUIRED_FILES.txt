@@ -182,7 +182,6 @@ evidence/installer-secrets-fix/syntax-diff-check.exit.txt
 evidence/installer-secrets-fix/codeql-status.txt
 evidence/installer-secrets-fix/runtime-build.log
 evidence/installer-secrets-fix/runtime-build.exit.txt
-evidence/installer-secrets-fix/baseline/sse_qa_ctl.py
 evidence/installer-secrets-fix/baseline/codeql-python.sarif.json.gz
 evidence/installer-secrets-fix/input/SSE_QA_preflight_PASS_and_installer_secrets_task.md
 evidence/installer-secrets-r2/REPORT.md

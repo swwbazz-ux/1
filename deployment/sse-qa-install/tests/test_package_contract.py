@@ -270,13 +270,17 @@ class PackageContractTests(unittest.TestCase):
             self.assertEqual(manifest["metadata"], qa_metadata())
             self.assertEqual(set(payload), {receiver.SSE_QA_PACKAGE_PAYLOAD})
 
-            secrets = temp / "secrets.json"
-            secrets.write_text(json.dumps(valid_secrets()), encoding="utf-8")
             output2 = temp / "install.tar.gz"
             command[command.index("verify_sse_qa")] = "install_sse_qa"
             command[command.index(str(output))] = str(output2)
-            command.extend(["--sse-qa-secrets", str(secrets)])
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            command.append("--sse-qa-secrets-stdin")
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                input=json.dumps(valid_secrets()),
+            )
             _, payload2 = receiver.load_release(output2)
             self.assertEqual(
                 set(payload2),
@@ -286,8 +290,7 @@ class PackageContractTests(unittest.TestCase):
             output3 = temp / "smoke.tar.gz"
             command[command.index("install_sse_qa")] = "smoke_sse_qa"
             command[command.index(str(output2))] = str(output3)
-            secrets_flag = command.index("--sse-qa-secrets")
-            del command[secrets_flag:secrets_flag + 2]
+            command.remove("--sse-qa-secrets-stdin")
             subprocess.run(command, check=True, capture_output=True, text=True)
             manifest3, payload3 = receiver.load_release(output3)
             self.assertEqual(manifest3["mode"], "smoke_sse_qa")

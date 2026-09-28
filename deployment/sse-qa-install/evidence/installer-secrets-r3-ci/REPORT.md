@@ -24,3 +24,10 @@ controller `scripts/sse_qa_ctl.py` остался
 POSIX-тест остаётся обязательным к исполнению без skip на disposable Linux/CI.
 Commit, push, PR, CodeQL и disposable Linux на момент этого отчёта ещё не
 выполнялись.
+
+Первый security gate source PR выявил три high alerts не в рабочем controller:
+два — в приложенной старой baseline-копии до исправления, один — в тестовом
+создании plaintext-файла с синтетическим JSON. Для повторной проверки старая
+исполняемая baseline-копия исключена из поставки (исходный SARIF и его хеш
+сохранены), а тест переведён на фактический stdin-контракт builder. Exclusion и
+CodeQL suppression не добавлялись; рабочий controller не менялся.
