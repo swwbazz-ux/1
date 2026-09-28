@@ -31,7 +31,10 @@ from users.models import Employee, EmployeeAccess, Role
 class RouteProjectionCoreProvenanceTests(SimpleTestCase):
     def test_transferred_r1_core_has_the_accepted_git_blob(self):
         path = Path(__file__).with_name('route_projection_core.py')
-        content = path.read_bytes()
+        # Git stores the accepted source with LF.  A Windows checkout may
+        # materialize the same committed blob with CRLF; compare logical source
+        # bytes so the provenance guard does not depend on core.autocrlf.
+        content = path.read_bytes().replace(b'\r\n', b'\n')
         git_blob = hashlib.sha1(
             f'blob {len(content)}\0'.encode('ascii') + content,
         ).hexdigest()
@@ -184,6 +187,89 @@ class RouteProjectionAdapterTests(TestCase):
             error_message=code,
             result_payload=result or {'server_ids': {'trip_id': trip.pk}},
         )
+
+    def local_receipt(self, *, event_id, sequence, actor, access, device, local_trip_id,
+                      status, trip=None, event_type='driver.trip.dump_point_changed'):
+        return OfflineFieldEvent.objects.create(
+            event_id=event_id,
+            event_type=event_type,
+            format_version=1,
+            actor=actor,
+            access=access,
+            role_code='driver',
+            device_id=device,
+            sequence=sequence,
+            depends_on=[],
+            occurred_at=timezone.now(),
+            received_at=timezone.now(),
+            shift=self.truck_shift if actor == self.driver else None,
+            equipment=self.truck,
+            trip=trip,
+            local_trip_id=local_trip_id,
+            payload={'dump_point_id': self.other_dump.pk},
+            fingerprint=f'fingerprint-{event_id}',
+            status=status,
+            retryable=status == OfflineFieldEventStatus.RETRY,
+            error_code='trip_reference_pending' if status == OfflineFieldEventStatus.RETRY else '',
+            error_message='',
+            result_payload=(
+                {'server_ids': {'trip_id': trip.pk}} if trip else {}
+            ),
+        )
+
+    def operator_load_event(self, *, event_id, sequence, occurred_at=None):
+        occurred_at = occurred_at or timezone.now()
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.trip.loaded',
+            'format_version': 1,
+            'actor_id': self.operator.pk,
+            'access_id': self.access.pk,
+            'role_code': 'excavator_operator',
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': self.shift.pk,
+            'equipment_id': self.excavator.pk,
+            'local_trip_id': f'local-{event_id}',
+            'context_snapshot': {
+                'actor_id': self.operator.pk,
+                'access_id': self.access.pk,
+                'role_code': 'excavator_operator',
+            },
+            'payload': {
+                'truck_id': self.truck.pk,
+                'assignment_id': self.assignment.pk,
+                'dump_point_id': self.dump_point.pk,
+                'rock_type_id': self.rock.pk,
+                'manual_control': True,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            },
+        }
+
+    def sync_operator(self, events, *, device_id='p28-i2-operator'):
+        return self.client.post(
+            reverse('offline_events_sync'),
+            data=json.dumps({
+                'protocol_version': 1,
+                'actor_id': self.operator.pk,
+                'access_id': self.access.pk,
+                'role_code': 'excavator_operator',
+                'device_id': device_id,
+                'events': events,
+            }),
+            content_type='application/json',
+        )
+
+    def assert_select_only(self, captured):
+        mutating = [
+            query['sql'] for query in captured.captured_queries
+            if query['sql'].lstrip().upper().startswith(
+                ('INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'ALTER', 'CREATE', 'DROP')
+            )
+        ]
+        self.assertEqual(mutating, [])
 
     def test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event(self):
         trip = self.factory_trip()
@@ -344,6 +430,282 @@ class RouteProjectionAdapterTests(TestCase):
             for item in z_evidence.sources
         ))
         self.assertEqual(z_before, z_after)
+
+    def test_cross_event_type_reuse_is_an_explicit_integrity_conflict_with_full_envelopes(self):
+        trip = self.factory_trip()
+        event_id = 'p28-cross-event-type-id'
+        route_command = self.driver_event(
+            trip,
+            event_id=event_id,
+            sequence=1,
+            point=self.other_dump,
+        )
+        accepted = self.sync_driver(
+            [route_command], device_id='p28-cross-event-type-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted['status'], 'accepted')
+        trip.refresh_from_db()
+        unload_command = self.driver_event(
+            trip,
+            event_id=event_id,
+            sequence=2,
+            event_type='driver.trip.unloaded',
+            occurred_at=trip.loaded_at + timedelta(minutes=1),
+        )
+        rejected = self.sync_driver(
+            [unload_command], device_id='p28-cross-event-type-device',
+        ).json()['results'][0]
+        self.assertEqual(rejected['status'], 'conflict')
+        self.assertEqual(rejected['code'], 'event_id_reused')
+
+        with CaptureQueriesContext(connection) as captured:
+            evidence = read_trip_route_evidence(trip.pk)
+        self.assert_select_only(captured)
+
+        self.assertEqual(evidence.projection.status, 'integrity_conflict')
+        self.assertIn(f'id_collision:{event_id}', evidence.projection.diagnostics)
+        conflict = next(
+            item for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event_conflict'
+            and item['attempted_event_id'] == event_id
+        )
+        self.assertEqual(
+            conflict['existing_event']['event_type'],
+            route_projection_adapter.ROUTE_EVENT_TYPE,
+        )
+        self.assertEqual(conflict['submitted_event']['event_type'], 'driver.trip.unloaded')
+        self.assertEqual(conflict['existing_event']['payload'], route_command['payload'])
+        self.assertEqual(conflict['submitted_event']['payload'], unload_command['payload'])
+        integrity = next(
+            item for item in evidence.integrity_conflicts
+            if item['event_id'] == event_id
+        )
+        self.assertEqual(
+            integrity['existing_event_type'], route_projection_adapter.ROUTE_EVENT_TYPE,
+        )
+        self.assertEqual(integrity['submitted_event_type'], 'driver.trip.unloaded')
+        self.assertNotEqual(
+            integrity['existing_fingerprint'], integrity['submitted_fingerprint'],
+        )
+        self.assertFalse(any(
+            item['source_kind'] == 'offline_field_event_conflict'
+            for item in evidence.normalized_route_inputs
+        ))
+
+    def test_local_trip_reference_is_scoped_by_authenticated_actor_and_device(self):
+        trip_x = self.factory_trip()
+        trip_y = self.legacy_trip(truck=self.other_truck)
+        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
+            self.other_truck,
+            full_name='P28 I2 R1 other driver',
+            access_code='928111',
+        )
+        local_trip_id = 'p28-local-same-text'
+        self.local_receipt(
+            event_id='p28-map-x', sequence=1,
+            actor=self.driver, access=self.driver_access,
+            device='p28-device-a', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip=trip_x, event_type='driver.trip.loaded',
+        )
+        own_pending = self.local_receipt(
+            event_id='p28-pending-x', sequence=2,
+            actor=self.driver, access=self.driver_access,
+            device='p28-device-a', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.RETRY,
+        )
+        self.local_receipt(
+            event_id='p28-map-y', sequence=1,
+            actor=other_driver, access=other_access,
+            device='p28-device-b', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip=trip_y, event_type='driver.trip.loaded',
+        )
+        foreign_pending = self.local_receipt(
+            event_id='p28-pending-y', sequence=2,
+            actor=other_driver, access=other_access,
+            device='p28-device-b', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.RETRY,
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            evidence = read_trip_route_evidence(trip_x.pk)
+        self.assert_select_only(captured)
+        source_pks = {
+            item['source_pk'] for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event'
+        }
+        self.assertIn(own_pending.pk, source_pks)
+        self.assertNotIn(foreign_pending.pk, source_pks)
+        self.assertEqual(evidence.local_reference_bindings, ({
+            'actor_id': self.driver.pk,
+            'device_id': 'p28-device-a',
+            'local_trip_id': local_trip_id,
+            'mapping_event_ids': ('p28-map-x',),
+            'mapped_trip_ids': (trip_x.pk,),
+            'resolution': 'resolved_to_this_trip',
+        },))
+
+    def test_local_trip_reference_mapping_to_multiple_trips_stays_ambiguous(self):
+        trip_x = self.factory_trip()
+        trip_y = self.legacy_trip(truck=self.other_truck)
+        local_trip_id = 'p28-local-ambiguous'
+        common = {
+            'actor': self.driver,
+            'access': self.driver_access,
+            'device': 'p28-ambiguous-device',
+            'local_trip_id': local_trip_id,
+            'status': OfflineFieldEventStatus.ACCEPTED,
+            'event_type': 'driver.trip.loaded',
+        }
+        self.local_receipt(event_id='p28-map-ambiguous-x', sequence=1, trip=trip_x, **common)
+        self.local_receipt(event_id='p28-map-ambiguous-y', sequence=2, trip=trip_y, **common)
+        pending = self.local_receipt(
+            event_id='p28-pending-ambiguous', sequence=3,
+            actor=self.driver, access=self.driver_access,
+            device='p28-ambiguous-device', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.RETRY,
+        )
+
+        evidence = read_trip_route_evidence(trip_x.pk)
+
+        source_pks = {
+            item['source_pk'] for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event'
+        }
+        self.assertNotIn(pending.pk, source_pks)
+        self.assertEqual(
+            evidence.local_reference_bindings[0]['resolution'],
+            'ambiguous_multiple_trips',
+        )
+        self.assertEqual(
+            evidence.local_reference_bindings[0]['mapped_trip_ids'],
+            tuple(sorted((trip_x.pk, trip_y.pk))),
+        )
+        self.assertIn('local_trip_binding_ambiguous', evidence.incomplete_reasons)
+
+    def test_conflicting_local_reference_keeps_authenticated_and_claimed_authors_separate(self):
+        trip_x = self.factory_trip()
+        trip_y = self.legacy_trip(truck=self.other_truck)
+        local_trip_id = 'p28-local-conflict'
+        self.local_receipt(
+            event_id='p28-map-conflict-x', sequence=1,
+            actor=self.driver, access=self.driver_access,
+            device='p28-conflict-local-device', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip=trip_x, event_type='driver.trip.loaded',
+        )
+        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
+            self.other_truck,
+            full_name='P28 I2 R1 claimed driver',
+            access_code='928112',
+        )
+        existing = self.local_receipt(
+            event_id='p28-local-conflict-id', sequence=1,
+            actor=other_driver, access=other_access,
+            device='p28-other-device', local_trip_id='other-local',
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip=trip_y, event_type='driver.trip.unloaded',
+        )
+        conflict = OfflineFieldEventConflict.objects.create(
+            attempted_event_id=existing.event_id,
+            actor=self.driver,
+            access=self.driver_access,
+            role_code='driver',
+            device_id='p28-conflict-local-device',
+            fingerprint='p28-submitted-conflict-fingerprint',
+            code='event_id_reused',
+            submitted_event={
+                'event_id': existing.event_id,
+                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
+                'role_code': 'driver',
+                'claimed_actor_id': other_driver.pk,
+                'claimed_access_id': other_access.pk,
+                'local_trip_id': local_trip_id,
+                'occurred_at': timezone.now().isoformat(),
+                'payload': {'dump_point_id': self.other_dump.pk},
+            },
+            existing_event=existing,
+        )
+
+        evidence = read_trip_route_evidence(trip_x.pk)
+
+        source = next(
+            item for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event_conflict'
+            and item['source_pk'] == conflict.pk
+        )
+        self.assertEqual(source['evidence_association'], 'resolved_local_trip_reference')
+        self.assertEqual(source['actor_id'], self.driver.pk)
+        self.assertEqual(source['submitted_claimed_actor_id'], other_driver.pk)
+        self.assertEqual(source['submitted_local_trip_id'], local_trip_id)
+        self.assertEqual(source['existing_event']['actor_id'], other_driver.pk)
+        self.assertEqual(evidence.projection.status, 'integrity_conflict')
+
+    def test_original_loading_origin_requires_matching_receipt_action_time_and_actor(self):
+        event = self.operator_load_event(
+            event_id='p28-proven-loading-origin',
+            sequence=1,
+            occurred_at=timezone.now() - timedelta(seconds=1),
+        )
+        result = self.sync_operator([event]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted')
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        action = TripClientAction.objects.get(
+            trip=trip,
+            client_action_id=event['event_id'],
+            action_type='truck_loaded',
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            evidence = read_trip_route_evidence(trip.pk)
+        self.assert_select_only(captured)
+
+        self.assertFalse(
+            evidence.loading_reference['synthetic'],
+            evidence.to_dict(),
+        )
+        self.assertEqual(evidence.loading_reference['value'], event['event_id'])
+        self.assertEqual(evidence.loading_reference['proof_source_pk'], action.pk)
+        self.assertEqual(evidence.loading_reference['proof_action_type'], 'truck_loaded')
+        self.assertEqual(evidence.author_context['loading_actor_id'], str(self.operator.pk))
+        source = next(
+            item for item in evidence.sources
+            if item.get('event_id') == event['event_id']
+        )
+        self.assertEqual(source['effect_disposition'], 'accepted_effect_recorded')
+        self.assertTrue(source['applied_effect_proven_by_client_action'])
+
+    def test_normalization_is_stable_when_source_lists_are_reversed(self):
+        trip = self.factory_trip()
+        first = self.driver_event(
+            trip, event_id='p28-order-a', sequence=1, point=self.other_dump,
+        )
+        self.assertEqual(self.sync_driver([first]).json()['results'][0]['status'], 'accepted')
+        trip.refresh_from_db()
+        second = self.driver_event(
+            trip, event_id='p28-order-b', sequence=2, point=self.dump_point,
+        )
+        self.assertEqual(self.sync_driver([second]).json()['results'][0]['status'], 'accepted')
+        receipts = list(OfflineFieldEvent.objects.filter(trip=trip))
+        actions = list(TripClientAction.objects.filter(trip=trip))
+
+        forward = route_projection_adapter._normalize_route_evidence(
+            receipts=receipts,
+            conflicts=[],
+            actions=actions,
+            loading_event_id=f'source:trip:{trip.pk}:loading_snapshot',
+        )
+        reverse = route_projection_adapter._normalize_route_evidence(
+            receipts=list(reversed(receipts)),
+            conflicts=[],
+            actions=list(reversed(actions)),
+            loading_event_id=f'source:trip:{trip.pk}:loading_snapshot',
+        )
+
+        self.assertEqual(forward[0].snapshot(), reverse[0].snapshot())
+        self.assertEqual(forward[1], reverse[1])
+        self.assertEqual(forward[2], reverse[2])
 
     def test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload(self):
         trip = self.legacy_trip(actual_dump_point=self.other_dump)

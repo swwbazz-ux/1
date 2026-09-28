@@ -11,7 +11,7 @@ be one historical snapshot when concurrent writes happen.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping
 
 from django.db.models import Q
@@ -28,6 +28,14 @@ LOAD_EVENT_TYPES = frozenset({
     'excavator.trip.loaded',
     'excavator.free_bucket.loaded',
 })
+IDENTITY_CONFLICT_CODES = frozenset({'event_id_reused', 'sequence_reused'})
+EFFECT_ACTION_TYPES = {
+    'driver.trip.dump_point_changed': frozenset({'change_actual_unload_point'}),
+    'driver.trip.unloaded': frozenset({'trip_unloaded'}),
+    'driver.trip.loaded': frozenset({'driver_manual_loaded'}),
+    'excavator.trip.loaded': frozenset({'truck_loaded'}),
+    'excavator.free_bucket.loaded': frozenset({'free_bucket_loaded'}),
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,8 @@ class TripRouteEvidence:
     loading_reference: dict[str, Any]
     author_context: dict[str, Any]
     lifecycle_detail: dict[str, Any]
+    local_reference_bindings: tuple[dict[str, Any], ...]
+    integrity_conflicts: tuple[dict[str, Any], ...]
     projection: Projection
     read_consistency: str = 'multiple_selects_database_default_isolation_no_snapshot_claim'
 
@@ -95,7 +105,7 @@ def _receipt_trip_ids(receipt: OfflineFieldEvent) -> tuple[int, ...]:
     return tuple(sorted(ids))
 
 
-def _receipt_disposition(receipt: OfflineFieldEvent) -> str:
+def _receipt_disposition(receipt: OfflineFieldEvent, *, effect_proven: bool = False) -> str:
     result = receipt.result_payload if isinstance(receipt.result_payload, Mapping) else {}
     if receipt.status != OfflineFieldEventStatus.ACCEPTED:
         return receipt.status
@@ -103,10 +113,31 @@ def _receipt_disposition(receipt: OfflineFieldEvent) -> str:
         return 'accepted_no_effect'
     if result.get('no_change'):
         return 'accepted_no_change'
-    return 'accepted_effect_recorded'
+    return 'accepted_effect_recorded' if effect_proven else 'accepted_effect_unproven'
 
 
-def _receipt_source(receipt: OfflineFieldEvent) -> dict[str, Any]:
+def _effect_proven(receipt: OfflineFieldEvent, action_pairs: set[tuple[str, str]]) -> bool:
+    return any(
+        (action_type, receipt.event_id) in action_pairs
+        for action_type in EFFECT_ACTION_TYPES.get(receipt.event_type, ())
+    )
+
+
+def _receipt_effective_occurred_at(receipt: OfflineFieldEvent) -> str | None:
+    result = receipt.result_payload if isinstance(receipt.result_payload, Mapping) else {}
+    effective = result.get('effective_occurred_at')
+    if effective not in (None, ''):
+        return str(effective)
+    return _iso(receipt.occurred_at)
+
+
+def _receipt_source(
+    receipt: OfflineFieldEvent,
+    *,
+    action_pairs: set[tuple[str, str]],
+    association: str = 'direct_trip_reference',
+) -> dict[str, Any]:
+    effect_proven = _effect_proven(receipt, action_pairs)
     return {
         'source_kind': 'offline_field_event',
         'source_pk': receipt.pk,
@@ -122,7 +153,9 @@ def _receipt_source(receipt: OfflineFieldEvent) -> dict[str, Any]:
         'device_id': receipt.device_id,
         'sequence': receipt.sequence,
         'depends_on': tuple(receipt.depends_on or ()),
+        'local_trip_id': receipt.local_trip_id,
         'occurred_at': _iso(receipt.occurred_at),
+        'effective_occurred_at': _receipt_effective_occurred_at(receipt),
         'received_at': _iso(receipt.received_at),
         'payload': receipt.payload or {},
         'context_snapshot': receipt.context_snapshot or {},
@@ -132,13 +165,34 @@ def _receipt_source(receipt: OfflineFieldEvent) -> dict[str, Any]:
         'error_code': receipt.error_code,
         'error_message': receipt.error_message,
         'result_payload': receipt.result_payload or {},
-        'effect_disposition': _receipt_disposition(receipt),
+        'effect_disposition': _receipt_disposition(receipt, effect_proven=effect_proven),
+        'applied_effect_proven_by_client_action': effect_proven,
+        'evidence_association': association,
     }
 
 
-def _conflict_source(conflict: OfflineFieldEventConflict) -> dict[str, Any]:
+def _submitted_local_trip_id(submitted: Mapping[str, Any] | None) -> str:
+    submitted = submitted if isinstance(submitted, Mapping) else {}
+    payload = submitted.get('payload') if isinstance(submitted.get('payload'), Mapping) else {}
+    return str(submitted.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128]
+
+
+def _conflict_source(
+    conflict: OfflineFieldEventConflict,
+    *,
+    action_pairs: set[tuple[str, str]],
+    association: str = 'direct_trip_reference',
+) -> dict[str, Any]:
     submitted = conflict.submitted_event if isinstance(conflict.submitted_event, Mapping) else {}
     submitted_trip_ids = _mapping_trip_ids(submitted)
+    existing_source = (
+        _receipt_source(
+            conflict.existing_event,
+            action_pairs=action_pairs,
+            association='conflict_original_event',
+        )
+        if conflict.existing_event_id else None
+    )
     return {
         'source_kind': 'offline_field_event_conflict',
         'source_pk': conflict.pk,
@@ -148,12 +202,18 @@ def _conflict_source(conflict: OfflineFieldEventConflict) -> dict[str, Any]:
         'existing_event_id': conflict.existing_event.event_id if conflict.existing_event_id else None,
         'existing_trip_id': conflict.existing_event.trip_id if conflict.existing_event_id else None,
         'submitted_trip_ids': submitted_trip_ids,
+        'submitted_local_trip_id': _submitted_local_trip_id(submitted),
         'actor_id': conflict.actor_id,
         'access_id': conflict.access_id,
         'role_code': conflict.role_code,
         'device_id': conflict.device_id,
         'fingerprint': conflict.fingerprint,
+        'submitted_claimed_actor_id': submitted.get('claimed_actor_id'),
+        'submitted_claimed_access_id': submitted.get('claimed_access_id'),
+        'submitted_claimed_role_code': submitted.get('claimed_role_code'),
         'submitted_event': dict(submitted),
+        'existing_event': existing_source,
+        'evidence_association': association,
         'received_at': _iso(conflict.received_at),
     }
 
@@ -224,6 +284,144 @@ def _target_point_id(value: Mapping[str, Any]) -> int | None:
     result = value.get('result_payload') if isinstance(value.get('result_payload'), Mapping) else {}
     server_ids = result.get('server_ids') if isinstance(result.get('server_ids'), Mapping) else {}
     return _positive_int(payload.get('dump_point_id')) or _positive_int(server_ids.get('dump_point_id'))
+
+
+def _receipt_local_scope(receipt: OfflineFieldEvent) -> tuple[int, str, str] | None:
+    local_trip_id = str(receipt.local_trip_id or '').strip()
+    if not local_trip_id:
+        return None
+    return receipt.actor_id, receipt.device_id, local_trip_id
+
+
+def _receipt_scope_query(scopes: set[tuple[int, str, str]]) -> Q:
+    query = Q(pk__in=[])
+    for actor_id, device_id, local_trip_id in sorted(scopes):
+        query |= Q(actor_id=actor_id, device_id=device_id, local_trip_id=local_trip_id)
+    return query
+
+
+def _conflict_scope_query(scopes: set[tuple[int, str, str]]) -> Q:
+    query = Q(pk__in=[])
+    for actor_id, device_id, local_trip_id in sorted(scopes):
+        query |= (
+            Q(
+                actor_id=actor_id,
+                device_id=device_id,
+                submitted_event__local_trip_id=local_trip_id,
+            )
+            | Q(
+                actor_id=actor_id,
+                device_id=device_id,
+                submitted_event__payload__local_trip_id=local_trip_id,
+            )
+        )
+    return query
+
+
+def _proven_loading_origins(
+    trip: Trip,
+    *,
+    receipts: list[OfflineFieldEvent],
+    actions: list[TripClientAction],
+) -> list[tuple[OfflineFieldEvent, TripClientAction]]:
+    actions_by_pair = {
+        (item.action_type, item.client_action_id): item
+        for item in actions
+    }
+    proven: list[tuple[OfflineFieldEvent, TripClientAction]] = []
+    for receipt in receipts:
+        if (
+            receipt.trip_id != trip.pk
+            or receipt.event_type not in LOAD_EVENT_TYPES
+            or receipt.status != OfflineFieldEventStatus.ACCEPTED
+            or (receipt.result_payload or {}).get('no_effect')
+            or (receipt.result_payload or {}).get('no_change')
+            or trip.loaded_at is None
+            or _receipt_effective_occurred_at(receipt) != _iso(trip.loaded_at)
+        ):
+            continue
+        expected_actions = EFFECT_ACTION_TYPES.get(receipt.event_type, ())
+        matching = [
+            actions_by_pair[(action_type, receipt.event_id)]
+            for action_type in expected_actions
+            if (action_type, receipt.event_id) in actions_by_pair
+        ]
+        if len(matching) != 1 or matching[0].trip_id != trip.pk:
+            continue
+        action = matching[0]
+        if action.actor_id not in (None, receipt.actor_id):
+            continue
+        if receipt.event_type.startswith('excavator.'):
+            if trip.excavator_operator_id != receipt.actor_id:
+                continue
+        elif receipt.event_type == 'driver.trip.loaded' and trip.driver_id != receipt.actor_id:
+            continue
+        proven.append((receipt, action))
+    return sorted(proven, key=lambda item: (item[0].event_id, item[0].pk))
+
+
+def _normalize_route_evidence(
+    *,
+    receipts: list[OfflineFieldEvent],
+    conflicts: list[OfflineFieldEventConflict],
+    actions: list[TripClientAction],
+    loading_event_id: str,
+) -> tuple[RouteLedger, list[dict[str, Any]], set[int]]:
+    action_pairs = {(item.action_type, item.client_action_id) for item in actions}
+    ledger = RouteLedger()
+    normalized_inputs: list[dict[str, Any]] = []
+    appended_receipts: set[int] = set()
+    applied_receipt_pks: set[int] = set()
+    for receipt in sorted(receipts, key=lambda item: (item.event_id, item.pk)):
+        route = _route_from_receipt(receipt, loading_event_id=loading_event_id)
+        effect_proven = _effect_proven(receipt, action_pairs)
+        applied = bool(
+            route is not None
+            and receipt.trip_id is not None
+            and receipt.status == OfflineFieldEventStatus.ACCEPTED
+            and _receipt_disposition(receipt, effect_proven=effect_proven) == 'accepted_effect_recorded'
+        )
+        if applied:
+            ledger.append(route)
+            appended_receipts.add(receipt.pk)
+            applied_receipt_pks.add(receipt.pk)
+            normalized_inputs.append({
+                'event': route.to_record(),
+                'source_kind': 'offline_field_event',
+                'source_pk': receipt.pk,
+                'applied_effect_proven_by_client_action': True,
+                'depends_on_preserved_as_queue_metadata': tuple(receipt.depends_on or ()),
+                'observed_ancestors_proven': False,
+                'raw_fingerprint': receipt.fingerprint,
+            })
+
+    for conflict in sorted(conflicts, key=lambda item: (item.attempted_event_id, item.pk)):
+        original_receipt = conflict.existing_event
+        original = (
+            _route_from_receipt(original_receipt, loading_event_id=loading_event_id)
+            if original_receipt is not None else None
+        )
+        incoming = _route_from_submitted(conflict, loading_event_id=loading_event_id)
+        if original is None or incoming is None:
+            continue
+        if original_receipt.pk not in appended_receipts:
+            ledger.append(original)
+            appended_receipts.add(original_receipt.pk)
+        ledger.append(incoming)
+        normalized_inputs.append({
+            'event': incoming.to_record(),
+            'source_kind': 'offline_field_event_conflict',
+            'source_pk': conflict.pk,
+            'applied_effect_proven_by_client_action': False,
+            'collision_with_event_id': original.event_id,
+            'observed_ancestors_proven': False,
+            'raw_fingerprint': conflict.fingerprint,
+        })
+
+    normalized_inputs.sort(key=lambda item: (
+        str(item['event']['event_id']), item['source_kind'], int(item['source_pk']),
+    ))
+    return ledger, normalized_inputs, applied_receipt_pks
 
 
 def _route_from_receipt(receipt: OfflineFieldEvent, *, loading_event_id: str):
@@ -361,13 +559,79 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         | Q(context_snapshot__trip_id=trip.pk)
         | Q(context_snapshot__trip_id=trip_id_text)
     )
-    receipts = list(
+    direct_receipts = list(
         OfflineFieldEvent.objects
         .filter(receipt_filter)
         .select_related('actor', 'access', 'shift', 'equipment', 'trip')
         .distinct()
         .order_by('event_id', 'pk')
     )
+    direct_receipt_pks = {item.pk for item in direct_receipts}
+    linked_scopes = {
+        scope
+        for item in direct_receipts
+        if (
+            item.trip_id == trip.pk
+            and item.event_type in LOAD_EVENT_TYPES
+            and item.status == OfflineFieldEventStatus.ACCEPTED
+            and (scope := _receipt_local_scope(item)) is not None
+        )
+    }
+    scope_mappings = list(
+        OfflineFieldEvent.objects
+        .filter(
+            _receipt_scope_query(linked_scopes),
+            event_type__in=LOAD_EVENT_TYPES,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip__isnull=False,
+        )
+        .select_related('actor', 'access', 'shift', 'equipment', 'trip')
+        .order_by('actor_id', 'device_id', 'local_trip_id', 'sequence', 'pk')
+    ) if linked_scopes else []
+    mappings_by_scope: dict[tuple[int, str, str], list[OfflineFieldEvent]] = {
+        scope: [] for scope in linked_scopes
+    }
+    for mapping in scope_mappings:
+        scope = _receipt_local_scope(mapping)
+        if scope in mappings_by_scope:
+            mappings_by_scope[scope].append(mapping)
+    local_reference_bindings: list[dict[str, Any]] = []
+    resolved_scopes: set[tuple[int, str, str]] = set()
+    for scope in sorted(linked_scopes):
+        mappings = mappings_by_scope.get(scope, [])
+        mapped_trip_ids = tuple(sorted({item.trip_id for item in mappings if item.trip_id}))
+        resolution = (
+            'resolved_to_this_trip'
+            if mapped_trip_ids == (trip.pk,)
+            else 'ambiguous_multiple_trips'
+        )
+        if resolution == 'resolved_to_this_trip':
+            resolved_scopes.add(scope)
+        local_reference_bindings.append({
+            'actor_id': scope[0],
+            'device_id': scope[1],
+            'local_trip_id': scope[2],
+            'mapping_event_ids': tuple(item.event_id for item in mappings),
+            'mapped_trip_ids': mapped_trip_ids,
+            'resolution': resolution,
+        })
+    locally_bound_receipts = list(
+        OfflineFieldEvent.objects
+        .filter(_receipt_scope_query(resolved_scopes))
+        .select_related('actor', 'access', 'shift', 'equipment', 'trip')
+        .order_by('event_id', 'pk')
+    ) if resolved_scopes else []
+    receipt_by_pk = {item.pk: item for item in direct_receipts}
+    receipt_by_pk.update({item.pk: item for item in locally_bound_receipts})
+    receipts = sorted(receipt_by_pk.values(), key=lambda item: (item.event_id, item.pk))
+    receipt_associations = {
+        item.pk: (
+            'direct_trip_reference'
+            if item.pk in direct_receipt_pks
+            else 'resolved_local_trip_reference'
+        )
+        for item in receipts
+    }
     conflict_filter = (
         Q(existing_event__trip_id=trip.pk)
         | Q(submitted_event__trip_id=trip.pk)
@@ -377,13 +641,34 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         | Q(submitted_event__context_snapshot__trip_id=trip.pk)
         | Q(submitted_event__context_snapshot__trip_id=trip_id_text)
     )
-    conflicts = list(
+    direct_conflicts = list(
         OfflineFieldEventConflict.objects
         .filter(conflict_filter)
         .select_related('existing_event', 'actor', 'access')
         .distinct()
         .order_by('attempted_event_id', 'pk')
     )
+    direct_conflict_pks = {item.pk for item in direct_conflicts}
+    locally_bound_conflicts = list(
+        OfflineFieldEventConflict.objects
+        .filter(_conflict_scope_query(resolved_scopes))
+        .select_related('existing_event', 'actor', 'access')
+        .distinct()
+        .order_by('attempted_event_id', 'pk')
+    ) if resolved_scopes else []
+    conflict_by_pk = {item.pk: item for item in direct_conflicts}
+    conflict_by_pk.update({item.pk: item for item in locally_bound_conflicts})
+    conflicts = sorted(
+        conflict_by_pk.values(), key=lambda item: (item.attempted_event_id, item.pk),
+    )
+    conflict_associations = {
+        item.pk: (
+            'direct_trip_reference'
+            if item.pk in direct_conflict_pks
+            else 'resolved_local_trip_reference'
+        )
+        for item in conflicts
+    }
     actions = list(
         TripClientAction.objects
         .filter(trip_id=trip.pk)
@@ -414,9 +699,15 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         and item.event_type in LOAD_EVENT_TYPES
         and item.status == OfflineFieldEventStatus.ACCEPTED
         and not (item.result_payload or {}).get('no_effect')
+        and not (item.result_payload or {}).get('no_change')
     ]
-    if len(accepted_load_receipts) == 1:
-        loading_receipt = accepted_load_receipts[0]
+    proven_loading_origins = _proven_loading_origins(
+        trip,
+        receipts=receipts,
+        actions=actions,
+    )
+    if len(proven_loading_origins) == 1:
+        loading_receipt, loading_action = proven_loading_origins[0]
         loading_event_id = loading_receipt.event_id
         loading_actor_id = str(loading_receipt.actor_id)
         loading_reference = {
@@ -424,6 +715,11 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
             'source_kind': 'offline_field_event',
             'source_pk': loading_receipt.pk,
             'synthetic': False,
+            'proof_source_kind': 'trip_client_action',
+            'proof_source_pk': loading_action.pk,
+            'proof_action_type': loading_action.action_type,
+            'raw_occurred_at': _iso(loading_receipt.occurred_at),
+            'effective_occurred_at': _receipt_effective_occurred_at(loading_receipt),
         }
     else:
         loading_receipt = None
@@ -434,69 +730,69 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
             'source_kind': 'trip_snapshot',
             'source_pk': trip.pk,
             'synthetic': True,
+            'accepted_load_receipt_ids': tuple(
+                item.event_id for item in accepted_load_receipts
+            ),
+            'proven_origin_event_ids': tuple(
+                item.event_id for item, _action in proven_loading_origins
+            ),
         }
 
+    action_pairs = {(item.action_type, item.client_action_id) for item in actions}
     receipt_ids = {item.event_id for item in receipts}
     sources: list[dict[str, Any]] = [_trip_snapshot(trip)]
-    sources.extend(_receipt_source(item) for item in receipts)
-    sources.extend(_conflict_source(item) for item in conflicts)
+    sources.extend(
+        _receipt_source(
+            item,
+            action_pairs=action_pairs,
+            association=receipt_associations[item.pk],
+        )
+        for item in receipts
+    )
+    sources.extend(
+        _conflict_source(
+            item,
+            action_pairs=action_pairs,
+            association=conflict_associations[item.pk],
+        )
+        for item in conflicts
+    )
     sources.extend(_action_source(item, receipt_ids=receipt_ids) for item in actions)
     sources.extend(_dispatcher_source(item) for item in logs)
 
-    matching_actions = {
-        item.client_action_id
-        for item in actions
-        if item.action_type == 'change_actual_unload_point'
-    }
-    ledger = RouteLedger()
-    normalized_inputs: list[dict[str, Any]] = []
-    appended_receipts: set[int] = set()
-    applied_receipt_pks: set[int] = set()
-    for receipt in receipts:
-        route = _route_from_receipt(receipt, loading_event_id=loading_event_id)
-        applied = bool(
-            route is not None
-            and receipt.trip_id is not None
-            and receipt.status == OfflineFieldEventStatus.ACCEPTED
-            and _receipt_disposition(receipt) == 'accepted_effect_recorded'
-            and receipt.event_id in matching_actions
-        )
-        if applied:
-            ledger.append(route)
-            appended_receipts.add(receipt.pk)
-            applied_receipt_pks.add(receipt.pk)
-            normalized_inputs.append({
-                'event': route.to_record(),
-                'source_kind': 'offline_field_event',
-                'source_pk': receipt.pk,
-                'applied_effect_proven_by_client_action': True,
-                'depends_on_preserved_as_queue_metadata': tuple(receipt.depends_on or ()),
-                'observed_ancestors_proven': False,
-                'raw_fingerprint': receipt.fingerprint,
-            })
-
-    for conflict in conflicts:
-        original_receipt = conflict.existing_event
-        original = (
-            _route_from_receipt(original_receipt, loading_event_id=loading_event_id)
-            if original_receipt is not None else None
-        )
-        incoming = _route_from_submitted(conflict, loading_event_id=loading_event_id)
-        if original is None or incoming is None:
-            continue
-        if original_receipt.pk not in appended_receipts:
-            ledger.append(original)
-            appended_receipts.add(original_receipt.pk)
-        ledger.append(incoming)
-        normalized_inputs.append({
-            'event': incoming.to_record(),
+    integrity_conflicts = [
+        {
             'source_kind': 'offline_field_event_conflict',
-            'source_pk': conflict.pk,
-            'applied_effect_proven_by_client_action': False,
-            'collision_with_event_id': original.event_id,
-            'observed_ancestors_proven': False,
-            'raw_fingerprint': conflict.fingerprint,
-        })
+            'source_pk': item.pk,
+            'code': item.code,
+            'event_id': item.attempted_event_id,
+            'existing_event_id': (
+                item.existing_event.event_id if item.existing_event_id else None
+            ),
+            'existing_event_type': (
+                item.existing_event.event_type if item.existing_event_id else None
+            ),
+            'existing_trip_id': (
+                item.existing_event.trip_id if item.existing_event_id else None
+            ),
+            'existing_fingerprint': (
+                item.existing_event.fingerprint if item.existing_event_id else None
+            ),
+            'submitted_event_type': str((item.submitted_event or {}).get('event_type') or ''),
+            'submitted_trip_ids': _mapping_trip_ids(item.submitted_event),
+            'submitted_local_trip_id': _submitted_local_trip_id(item.submitted_event),
+            'submitted_fingerprint': item.fingerprint,
+            'evidence_association': conflict_associations[item.pk],
+        }
+        for item in conflicts
+        if item.code in IDENTITY_CONFLICT_CODES
+    ]
+    ledger, normalized_inputs, applied_receipt_pks = _normalize_route_evidence(
+        receipts=receipts,
+        conflicts=conflicts,
+        actions=actions,
+        loading_event_id=loading_event_id,
+    )
 
     route_receipts_with_effect = {
         item.event_id for item in receipts
@@ -528,8 +824,15 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
     }
     if not accepted_load_receipts:
         incomplete_reasons.add('loading_event_not_recorded')
-    elif len(accepted_load_receipts) > 1:
+    elif not proven_loading_origins:
+        incomplete_reasons.add('loading_origin_not_proven')
+    elif len(proven_loading_origins) > 1:
         incomplete_reasons.add('loading_event_ambiguous')
+    if any(
+        item['resolution'] == 'ambiguous_multiple_trips'
+        for item in local_reference_bindings
+    ):
+        incomplete_reasons.add('local_trip_binding_ambiguous')
     if legacy_actual_origin in {
         'legacy_direct_action_without_value_payload',
         'trip_snapshot_origin_unknown',
@@ -571,6 +874,23 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         legacy_actual_origin=legacy_actual_origin,
     )
     projection = ledger.project(context, lifecycle)
+    if integrity_conflicts:
+        collision_ids = {
+            item['event_id'] for item in integrity_conflicts if item['event_id']
+        }
+        projection = replace(
+            projection,
+            status='integrity_conflict',
+            selected_point_id=None,
+            selected_event_id=None,
+            selection_reason='event_integrity_not_proven',
+            causal_maxima=(),
+            diagnostics=tuple(sorted({
+                *projection.diagnostics,
+                *(f'id_collision:{event_id}' for event_id in collision_ids),
+            })),
+            notification_key=None,
+        )
     author_context = {
         'loading_actor_id': loading_actor_id or None,
         'loading_actor_source': loading_reference,
@@ -613,5 +933,10 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         loading_reference=loading_reference,
         author_context=author_context,
         lifecycle_detail=lifecycle_detail,
+        local_reference_bindings=tuple(local_reference_bindings),
+        integrity_conflicts=tuple(sorted(
+            integrity_conflicts,
+            key=lambda item: (str(item['event_id']), int(item['source_pk'])),
+        )),
         projection=projection,
     )
