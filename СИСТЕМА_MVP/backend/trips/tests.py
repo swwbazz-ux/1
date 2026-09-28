@@ -1152,6 +1152,62 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
 
+    def test_inactive_truck_plan_uses_seven_to_seven_period_without_dispatcher_shift(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
+        self.shift.save(update_fields=['opened_at'])
+        self.create_plan_group(
+            equipment=self.assigned_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='4.00',
+            name='Самосвалы без смены диспетчера',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        completed_trip = self.create_completed_trip(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+        )
+        Trip.objects.filter(pk=completed_trip.pk).update(
+            created_at=self.FIXED_DAY_SHIFT_OPENED_AT + timedelta(minutes=5),
+            completed_at=self.FIXED_DAY_SHIFT_OPENED_AT + timedelta(minutes=10),
+        )
+
+        with patch(
+            'core.production_time.timezone.now',
+            return_value=self.FIXED_DAY_SHIFT_OPENED_AT + timedelta(hours=1),
+        ):
+            dashboard = build_dispatcher_dashboard_context(
+                dispatcher_shift=None,
+                active_trips=Trip.objects.none(),
+                pending_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.PENDING),
+                accepted_assignments=HaulAssignment.objects.filter(status=AssignmentStatus.ACCEPTED),
+                recent_completed_trips=Trip.objects.none(),
+                open_shifts=EmployeeShift.objects.none(),
+                open_mechanic_downtimes=DowntimeEvent.objects.none(),
+                trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
+                excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
+                recent_dispatcher_actions=[],
+            )
+
+        assigned_tile = next(
+            tile
+            for card in dashboard['complex_cards']
+            for tile in card['active_truck_tiles']
+            if tile['name'] == '13'
+        )
+        self.assertFalse(assigned_tile['has_current_shift'])
+        self.assertEqual(assigned_tile['plan_group_name'], 'Самосвалы без смены диспетчера')
+        self.assertEqual(assigned_tile['plan_fact_value'], '1')
+        self.assertEqual(assigned_tile['percent'], 25)
+        self.assertTrue(assigned_tile['plan_inactive_fill'])
+
     def test_dispatcher_dashboard_returns_excavator_snapshot_plan_progress(self):
         self.create_plan_group(
             equipment=self.excavator,
