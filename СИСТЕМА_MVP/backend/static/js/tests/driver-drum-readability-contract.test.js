@@ -185,7 +185,10 @@ test("without an open shift, the top drum keeps its full three-card shape and ou
 
 test("the keyhole outline still finds the top drum's empty center card", () => {
     const drumJs = fs.readFileSync(path.resolve(__dirname, "../driver-downtime-drum-v1.js"), "utf8");
-    assert.match(drumJs, /\[data-driver-point-drum\]\s*\.driver-drum-card-empty\.is-drum-empty-center/);
+    // Слот верхнего барабана меряется по любой грани, включая пустую центральную
+    // (.driver-drum-card-empty тоже .driver-drum-card) — контур стоит и без точек.
+    assert.match(drumJs, /slotRect\(q\("\[data-driver-point-drum\]"\), "\.driver-drum-card"\)/);
+    assert.match(drumJs, /var card = drumEl\.querySelector\(cardSelector\);[\s\S]*?offsetWidth/);
 });
 
 test("downtime drum front card is never highlighted yellow without an open shift", () => {
@@ -272,7 +275,11 @@ test("the swipe arrow is a fixed slot outside the card, sized from the real gap 
     assert.match(drumJs, /var ASSEMBLY_MIN_SHIFT = 0\.5;/);
     assert.match(drumJs, /var cardTop0 = cr\.top - bottomShift - a, cardBottom0 = cr\.bottom - bottomShift - a;/);
     // Считается вместе с контуром — вне жеста и только при сдвиге геометрии.
-    assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,120}syncSlotArrows\(dr, cr, tr0, box\);/);
+    assert.match(drumJs, /lastLinkInputs = inputs;[\s\S]{0,600}syncSlotArrows\(dr, cr, tr0, box\);/);
+    // Контур — от неподвижных слотов (сцена + размер грани без 3D), не от текущей грани.
+    assert.match(drumJs, /var cr = slotRect\(q\("\[data-driver-downtime-drum\]"\), "\[data-driver-drum-card\]"\);/);
+    assert.match(drumJs, /var tr0 = slotRect\(q\("\[data-driver-point-drum\]"\), "\.driver-drum-card"\);/);
+    assert.doesNotMatch(drumJs.match(/function syncLinkVars\(\) \{[\s\S]*?\n {4}\}\n/)[0], /centerCard\(\)|\.is-center/);
     // Цвет верхней стрелки мигает той же переменной, что и грань точки.
     const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
     assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-slot-arrow\s*\{\s*color:\s*var\(--driver-blink-color\);/);

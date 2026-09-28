@@ -170,14 +170,35 @@ window.driverMorphShell = function (live, fresh) {
         mine.forEach(function (name) { a.classList.add(name); });
     }
 
+    /* Первое структурное расхождение, из-за которого послойное обновление
+       отказало, — в window.__driverMorphDivergence (журнал подмен в
+       driver-shift-refresh-v1.js): по нему видно, какие узлы «с рейсом/без
+       рейса» отличаются и не дают обойтись без полной подмены. */
+    function describe(node) {
+        if (!node) return "(нет узла)";
+        if (node.nodeType === 3) return "текст «" + String(node.nodeValue || "").trim().slice(0, 24) + "»";
+        if (node.nodeType !== 1) return "узел типа " + node.nodeType;
+        var id = node.id ? "#" + node.id : "";
+        var cls = node.className && typeof node.className === "string" ? "." + node.className.trim().split(/\s+/).slice(0, 2).join(".") : "";
+        var data = "";
+        for (var i = 0; i < node.attributes.length; i += 1) {
+            if (node.attributes[i].name.indexOf("data-driver-") === 0) { data = "[" + node.attributes[i].name + "]"; break; }
+        }
+        return node.tagName.toLowerCase() + id + cls + data;
+    }
+    function diverged(a, b) {
+        window.__driverMorphDivergence = describe(a) + " ≠ " + describe(b);
+        return false;
+    }
+
     function morph(a, b) {
-        if (a.nodeType !== b.nodeType) return false;
+        if (a.nodeType !== b.nodeType) return diverged(a, b);
         if (a.nodeType === 3 || a.nodeType === 8) {
             if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
             return true;
         }
         if (a.nodeType !== 1) return true;
-        if (a.tagName !== b.tagName) return false;
+        if (a.tagName !== b.tagName) return diverged(a, b);
         if (a.matches && a.matches(OPAQUE)) {
             /* Барабан: сменился состав причин — обновление послойно невозможно, нужен
                полный пересбор. Остальные клиентские области просто не трогаем. */
@@ -207,10 +228,12 @@ window.driverMorphShell = function (live, fresh) {
             an = an.nextSibling;
             bn = bn.nextSibling;
         }
-        return !an && !bn;
+        if (an || bn) return diverged(an || a, bn || b);
+        return true;
     }
 
     try {
+        window.__driverMorphDivergence = "";
         return morph(live, fresh);
     } catch (error) {
         return false;

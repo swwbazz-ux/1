@@ -891,6 +891,24 @@
         s.setProperty("--drum-bottom-shift", bottomShift.toFixed(1) + "px");
     }
 
+    /* Слот центральной позиции барабана: прямоугольник грани, стоящей ровно в
+       центре сцены, — от сцены (она неподвижна) и размера грани без 3D-преобразования.
+       Возвращает DOMRect-подобный объект в координатах экрана; null, если барабана
+       или граней нет. Сцена уже несёт сдвиги (translate барабана и сборки), так что
+       слот, как и раньше грань, меряется в сдвинутых координатах. */
+    function slotRect(drumEl, cardSelector) {
+        if (!drumEl) return null;
+        var stage = drumEl.querySelector(".driver-downtime-drum-stage");
+        var card = drumEl.querySelector(cardSelector);
+        if (!stage || !card) return null;
+        var sr = stage.getBoundingClientRect();
+        var cw = card.offsetWidth, ch = card.offsetHeight;
+        if (!sr.width || !cw || !ch) return null;
+        var left = sr.left + sr.width / 2 - cw / 2;
+        var top = sr.top + sr.height / 2 - ch / 2;
+        return {left: left, top: top, right: left + cw, bottom: top + ch, width: cw, height: ch};
+    }
+
     var linkFrame = 0;
     function scheduleLink() {
         if (linkFrame) return;
@@ -913,29 +931,39 @@
         var topTrack = q("[data-driver-point-drum-track]");
         if (topTrack && topTrack.__snapUntil > Date.now()) return;
         var w = dial();
-        var card = centerCard();
         var link = q("[data-driver-drum-link]");
-        if (!w || !card || !link) return;
+        if (!w || !link) return;
         var screen = link.parentElement;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!screen) return;
         var dr = w.getBoundingClientRect();
-        var cr = card.getBoundingClientRect();
         var box = screen.getBoundingClientRect();
-        if (!dr.width || !cr.width) return;
+        /* Контур строится от НЕПОДВИЖНЫХ слотов, а не от текущей центральной грани:
+           слот — центр сцены барабана и размер грани без 3D-преобразования
+           (offsetWidth/Height; все грани одинаковы). Грань в центре при прокрутке,
+           смене состояния, подмене оболочки или старте простоя — другая, её
+           прямоугольник чуть иной (перспектива, ещё не доехала, ещё не построена),
+           и контур пересчитывался и «вздрагивал» (владелец, 28.09.2026: при
+           прокрутке, погрузке, разгрузке, отмене, простое). Слот от всего этого не
+           зависит; на телефоне он совпадает с гранью в центре с точностью 0,3px. */
+        var cr = slotRect(q("[data-driver-downtime-drum]"), "[data-driver-drum-card]");
+        if (!dr.width || !cr) return;
         // Ничего из входов не сдвинулось — и считать нечего. scheduleLink() дёргается
         // наблюдателем на любую правку экрана (тик таймера, подмена фрагмента —
         // на телефоне это десятки раз в минуту), и раньше каждый раз строился и
         // сравнивался весь путь. Подпись входов — с точностью до 0,5px, чтобы
         // субпиксельный шум округления не считался движением.
-        var topEl = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
-        var tr0 = topEl ? topEl.getBoundingClientRect() : null;
+        var tr0 = slotRect(q("[data-driver-point-drum]"), ".driver-drum-card");
         function k(v) { return Math.round(v * 2); }
         var inputs = [k(dr.left), k(dr.top), k(dr.width), k(dr.height), k(cr.left), k(cr.bottom), k(cr.width), k(box.left), k(box.top),
             tr0 ? k(tr0.top) : -1, tr0 ? k(tr0.width) : -1].join(",");
         if (inputs === lastLinkInputs) return;
         lastLinkInputs = inputs;
         root.__driverDrumLinkCalls = (root.__driverDrumLinkCalls || 0) + 1;
+        // Журнал настоящих пересчётов со стеком — по нему видно, кто позвал.
+        root.__driverDrumLinkLog = (root.__driverDrumLinkLog || []).concat([{
+            at: Date.now(), inputs: inputs, stack: String(new Error().stack || "").split("\n").slice(1, 6).join(" | ")
+        }]).slice(-30);
         syncSlotArrows(dr, cr, tr0, box);
         var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
@@ -953,8 +981,8 @@
         // Без назначения барабан точек показывает пустую серую грань вместо настоящей
         // карточки (driver_point_drum.html) — у неё нет data-driver-point-card, только
         // класс, но контур-горлышко должен стоять на месте и в этом состоянии.
-        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
-        var tr = top ? top.getBoundingClientRect() : null;
+        // Тот же неподвижный слот верхнего барабана, что и в подписи входов.
+        var tr = tr0;
         var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
         if (halfT && halfT < r) {
             var xLt = cx - halfT, xRt = cx + halfT;
