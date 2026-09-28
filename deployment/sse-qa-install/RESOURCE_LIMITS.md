@@ -21,9 +21,10 @@
 До первого запуска receiver временно устанавливает точную копию slice unit в
 `/run/systemd/system`, запускает installer внутри неё, а после успешной установки
 удаляет runtime-копию и оставляет marker-owned unit в `/etc/systemd/system`.
-При ошибке runtime slice останавливается и удаляется. `enable`, установленный
-`verify` и `smoke` также запускаются как `sse-qa-enable.service`,
-`sse-qa-verify.service` и `sse-qa-smoke.service` внутри того же parent slice.
+При ошибке runtime slice останавливается и удаляется. `enable` и `smoke`
+запускаются как `sse-qa-enable.service` и `sse-qa-smoke.service` внутри того же
+parent slice. Начальный `verify_sse_qa` является no-service preflight и намеренно
+не входит в slice и не запускает transient unit.
 Receiver не переносится в
 QA cgroup и остаётся в своей действующей группе.
 Slice намеренно не включается в boot target. После reboot receiver перед каждым
@@ -35,7 +36,8 @@ Controller fail-closed сверяет live `CPUQuotaPerSecUSec=1s`, период
 `MemoryHigh=1879048192`, `MemoryMax=2147483648`, `MemorySwapMax=0`,
 `TasksMax=256`, parent
 `ControlGroup=/sse.slice/sse-qa.slice` и фактические `ControlGroup` installer,
-PostgreSQL, Redis, enable, installed verify/smoke.
+PostgreSQL, Redis, enable и smoke. Installed runtime checks выполняются внутри
+отдельно разрешённого install/enable lifecycle, а не начального preflight.
 
 На измеренном сервере это не более одного из 8 logical CPU и примерно 12.8%
 из 15.57 GiB RAM. Свободный диск в пятисекундном снимке был 122.84 GiB, но

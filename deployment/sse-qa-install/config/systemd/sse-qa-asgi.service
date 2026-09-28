@@ -12,6 +12,9 @@ Group=sseqa
 Slice=sse-qa.slice
 WorkingDirectory=/srv/sse-qa/current/backend
 EnvironmentFile=/etc/sse-qa/app.env
+LoadCredentialEncrypted=django_secret_key:/etc/credstore.encrypted/sse-qa/django_secret_key.cred
+LoadCredentialEncrypted=postgres_app_password:/etc/credstore.encrypted/sse-qa/postgres_app_password.cred
+LoadCredentialEncrypted=redis_password:/etc/credstore.encrypted/sse-qa/redis_password.cred
 ExecStart=/srv/sse-qa/venv/bin/uvicorn config.sse_asgi:application --host 127.0.0.1 --port 18082 --workers 1 --lifespan off --proxy-headers --forwarded-allow-ips=127.0.0.1
 StandardOutput=append:/srv/sse-qa/log/asgi.log
 StandardError=append:/srv/sse-qa/log/asgi.log

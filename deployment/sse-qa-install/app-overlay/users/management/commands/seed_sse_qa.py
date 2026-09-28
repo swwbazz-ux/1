@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import json
 import threading
 import time
@@ -11,6 +10,7 @@ import uuid
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
+from django.conf import settings
 from django.db import connection, transaction
 from django.test import Client
 from django.urls import reverse
@@ -93,8 +93,10 @@ class Command(BaseCommand):
         self._validate_database_target()
 
         pins = {
-            "driver": os.getenv("SSE_QA_DRIVER_PIN", "").strip(),
-            "excavator_operator": os.getenv("SSE_QA_EXCAVATOR_PIN", "").strip(),
+            "driver": str(getattr(settings, "SSE_QA_DRIVER_PIN", "")).strip(),
+            "excavator_operator": str(
+                getattr(settings, "SSE_QA_EXCAVATOR_PIN", "")
+            ).strip(),
         }
         if any(len(pin) != 6 or not pin.isdigit() for pin in pins.values()):
             raise CommandError("both QA PIN values must contain exactly six digits")

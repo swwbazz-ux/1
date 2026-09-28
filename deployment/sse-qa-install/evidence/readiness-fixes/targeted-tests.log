@@ -1,0 +1,104 @@
+﻿python.exe : test_initial_receiver_preflight_never_enters_slice_or_starts_services (tests.test_readiness_fixes.Accepted
+CandidateProvenanceTests.test_initial_receiver_preflight_never_enters_slice_or_starts_services) ... ok
+At line:2 char:131
++ ... tests.log'; & $py -B -m unittest -v tests.test_readiness_fixes tests. ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_initial_re...ervices) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_receiver_rejects_candidate_or_hash_metadata_mismatch (tests.test_readiness_fixes.AcceptedCandidateProvenanceTests.
+test_receiver_rejects_candidate_or_hash_metadata_mismatch) ... ok
+test_receiver_rejects_controller_or_runtime_content_mismatch_before_process (tests.test_readiness_fixes.AcceptedCandida
+teProvenanceTests.test_receiver_rejects_controller_or_runtime_content_mismatch_before_process) ... ok
+test_workflow_keeps_control_checkout_and_fetches_only_fixed_candidate (tests.test_readiness_fixes.AcceptedCandidateProv
+enanceTests.test_workflow_keeps_control_checkout_and_fetches_only_fixed_candidate) ... ok
+test_clean_identity_queries_report_all_three_absence_checks 
+(tests.test_readiness_fixes.StrictInitialPreflightTests.test_clean_identity_queries_report_all_three_absence_checks) 
+... ok
+test_clean_initial_preflight_is_strict_and_marker_or_journal_blocks_it (tests.test_readiness_fixes.StrictInitialPreflig
+htTests.test_clean_initial_preflight_is_strict_and_marker_or_journal_blocks_it) ... ok
+test_query_failures_are_not_treated_as_absence 
+(tests.test_readiness_fixes.StrictInitialPreflightTests.test_query_failures_are_not_treated_as_absence) ... ok
+test_user_group_and_cluster_conflicts_fail_closed 
+(tests.test_readiness_fixes.StrictInitialPreflightTests.test_user_group_and_cluster_conflicts_fail_closed) ... ok
+test_bootstrap_slice_lifecycle_preserves_only_successful_install 
+(tests.test_package_contract.PackageContractTests.test_bootstrap_slice_lifecycle_preserves_only_successful_install) 
+... ok
+test_cleanup_changed_owned_file_fails_before_destructive_calls 
+(tests.test_package_contract.PackageContractTests.test_cleanup_changed_owned_file_fails_before_destructive_calls) ... 
+ok
+test_cleanup_foreign_mount_fails_before_destructive_calls 
+(tests.test_package_contract.PackageContractTests.test_cleanup_foreign_mount_fails_before_destructive_calls) ... ok
+test_cleanup_rechecks_guard_after_stopping_services 
+(tests.test_package_contract.PackageContractTests.test_cleanup_rechecks_guard_after_stopping_services) ... ok
+test_control_package_needs_no_runtime_or_package_index 
+(tests.test_package_contract.PackageContractTests.test_control_package_needs_no_runtime_or_package_index) ... ok
+test_disposable_cycle_has_executable_normal_fault_cancel_evidence_gates (tests.test_package_contract.PackageContractTes
+ts.test_disposable_cycle_has_executable_normal_fault_cancel_evidence_gates) ... ok
+test_enable_process_is_child_of_shared_slice 
+(tests.test_package_contract.PackageContractTests.test_enable_process_is_child_of_shared_slice) ... ok
+test_event_loop_sampler_writes_same_loop_samples 
+(tests.test_package_contract.PackageContractTests.test_event_loop_sampler_writes_same_loop_samples) ... ok
+test_exact_parent_budget_rejects_wrong_cpu_quota 
+(tests.test_package_contract.PackageContractTests.test_exact_parent_budget_rejects_wrong_cpu_quota) ... ok
+test_fault_injection_is_fail_closed 
+(tests.test_package_contract.PackageContractTests.test_fault_injection_is_fail_closed) ... ok
+test_install_enable_and_smoke_use_shared_parent_slice_but_preflight_does_not (tests.test_package_contract.PackageContra
+ctTests.test_install_enable_and_smoke_use_shared_parent_slice_but_preflight_does_not) ... ok
+test_installed_smoke_process_is_child_of_shared_slice 
+(tests.test_package_contract.PackageContractTests.test_installed_smoke_process_is_child_of_shared_slice) ... ok
+test_installer_postgres_and_redis_share_exact_parent_budget 
+(tests.test_package_contract.PackageContractTests.test_installer_postgres_and_redis_share_exact_parent_budget) ... ok
+test_local_installed_verification_checks_hashes_and_phase 
+(tests.test_package_contract.PackageContractTests.test_local_installed_verification_checks_hashes_and_phase) ... ok
+test_local_render_has_no_placeholders_and_no_production_paths 
+(tests.test_package_contract.PackageContractTests.test_local_render_has_no_placeholders_and_no_production_paths) ... ok
+test_mount_unit_conflict_copy_verify_remove_uses_exact_linux_name 
+(tests.test_package_contract.PackageContractTests.test_mount_unit_conflict_copy_verify_remove_uses_exact_linux_name) 
+... skipped 'literal backslash filenames require POSIX'
+test_network_login_gate_has_fixed_synthetic_roles_and_no_secret_output (tests.test_package_contract.PackageContractTest
+s.test_network_login_gate_has_fixed_synthetic_roles_and_no_secret_output) ... ok
+test_nginx_is_closed_and_first_stage_is_two_sse_clients 
+(tests.test_package_contract.PackageContractTests.test_nginx_is_closed_and_first_stage_is_two_sse_clients) ... ok
+test_operation_scope_rejects_process_outside_real_systemd_hierarchy 
+(tests.test_package_contract.PackageContractTests.test_operation_scope_rejects_process_outside_real_systemd_hierarchy) 
+... ok
+test_owned_file_guard_refuses_changed_object 
+(tests.test_package_contract.PackageContractTests.test_owned_file_guard_refuses_changed_object) ... ok
+test_patch_secret_scan_ignores_removed_lines_but_checks_added_lines 
+(tests.test_package_contract.PackageContractTests.test_patch_secret_scan_ignores_removed_lines_but_checks_added_lines) 
+... ok
+test_preflight_rejects_every_managed_path_before_writing 
+(tests.test_package_contract.PackageContractTests.test_preflight_rejects_every_managed_path_before_writing) ... ok
+test_preinstall_systemd_verify_substitutes_only_runtime_dependencies (tests.test_package_contract.PackageContractTests.
+test_preinstall_systemd_verify_substitutes_only_runtime_dependencies) ... ok
+test_real_mutations_are_not_available_under_test_root 
+(tests.test_package_contract.PackageContractTests.test_real_mutations_are_not_available_under_test_root) ... ok
+test_receiver_accepts_only_fixed_sse_qa_targets 
+(tests.test_package_contract.PackageContractTests.test_receiver_accepts_only_fixed_sse_qa_targets) ... ok
+test_receiver_contract_rejects_extra_payload_or_metadata 
+(tests.test_package_contract.PackageContractTests.test_receiver_contract_rejects_extra_payload_or_metadata) ... ok
+test_receiver_reads_exact_slice_control_group_and_disposable_checks_child (tests.test_package_contract.PackageContractT
+ests.test_receiver_reads_exact_slice_control_group_and_disposable_checks_child) ... ok
+test_receiver_rejects_actual_qa_slice_and_similar_prefix_is_not_a_child (tests.test_package_contract.PackageContractTes
+ts.test_receiver_rejects_actual_qa_slice_and_similar_prefix_is_not_a_child) ... ok
+test_redis_acl_permissions_and_canonical_equipment_types 
+(tests.test_package_contract.PackageContractTests.test_redis_acl_permissions_and_canonical_equipment_types) ... ok
+test_release_builder_emits_only_fixed_qa_payloads 
+(tests.test_package_contract.PackageContractTests.test_release_builder_emits_only_fixed_qa_payloads) ... ok
+test_resource_limits_are_hard_and_bounded 
+(tests.test_package_contract.PackageContractTests.test_resource_limits_are_hard_and_bounded) ... ok
+test_rooted_preserves_literal_posix_backslash 
+(tests.test_package_contract.PackageContractTests.test_rooted_preserves_literal_posix_backslash) ... ok
+test_runtime_archive_is_backend_only_and_rejects_traversal 
+(tests.test_package_contract.PackageContractTests.test_runtime_archive_is_backend_only_and_rejects_traversal) ... ok
+test_secret_contract_is_exact (tests.test_package_contract.PackageContractTests.test_secret_contract_is_exact) ... ok
+test_unit_cgroup_rejects_similar_but_non_child_path 
+(tests.test_package_contract.PackageContractTests.test_unit_cgroup_rejects_similar_but_non_child_path) ... ok
+test_zero_residue_gate_covers_all_fixed_resource_classes_without_argv (tests.test_package_contract.PackageContractTests
+.test_zero_residue_gate_covers_all_fixed_resource_classes_without_argv) ... ok
+
+----------------------------------------------------------------------
+Ran 44 tests in 1.325s
+
+OK (skipped=1)

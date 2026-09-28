@@ -1,5 +1,14 @@
 # Изолированный SSE-QA на существующем сервере
 
+> Обновление хранения секретов: постоянные plaintext `app.env`, `secrets.json`
+> и Redis ACL удалены. Используются host-bound systemd encrypted credentials,
+> Redis memfd ACL и временный nginx verifier в `/run`. Полный контракт и
+> ограничения приведены в `SECRET_STORAGE.md`. Для этой версии новый Linux
+> lifecycle пока не выполнялся.
+> R2 также закрепляет реальный receiver `stdin=PIPE`, повторный enable после
+> disable/очистки `/run`, transport archive `0600` без перезаписи и его
+> обязательное удаление после передачи или ошибки.
+
 Статус пакета: **только локально подготовлен и проверен**. Он ничего не
 устанавливает сам по себе. Сервер, production, существующий QA, DNS, Firebase и
 база данных в ходе подготовки не изменялись.
@@ -69,9 +78,9 @@ python scripts/package_self_check.py .
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-На Linux до установки запускается только read-only preflight. Он проверяет
-синтаксис units с безопасными заглушками runtime-путей; после install повторный
-verify проверяет уже реальные executable:
+На Linux до установки запускается только строгий read-only preflight. Он
+проверяет синтаксис units с безопасными заглушками runtime-путей, не запускает
+QA-службы и отказывает при любых признаках полной/частичной установки:
 
 ```bash
 sudo python3.12 scripts/sse_qa_ctl.py preflight --bundle-root "$PWD"

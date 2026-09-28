@@ -31,20 +31,13 @@ from users.models import Employee, EmployeeAccess
     ALLOWED_HOSTS=["sse-qa.driverform.ru"],
     SSE_PILOT_ENABLED=True,
     SSE_ALLOWED_ROLE_CODES=("driver", "excavator_operator"),
+    SSE_QA_DRIVER_PIN="135791",
+    SSE_QA_EXCAVATOR_PIN="246802",
 )
 class SseQaSeedBehaviorTests(TestCase):
     pins = {"driver": "135791", "excavator_operator": "246802"}
 
     def setUp(self):
-        self.environment = mock.patch.dict(
-            "os.environ",
-            {
-                "SSE_QA_DRIVER_PIN": self.pins["driver"],
-                "SSE_QA_EXCAVATOR_PIN": self.pins["excavator_operator"],
-            },
-        )
-        self.environment.start()
-        self.addCleanup(self.environment.stop)
         self.database_guard = mock.patch.object(Command, "_validate_database_target")
         self.marker_create = mock.patch.object(Command, "_ensure_marker")
         self.marker_verify = mock.patch.object(Command, "_verify_marker")

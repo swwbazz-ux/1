@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import os
@@ -47,6 +48,17 @@ def valid_secrets() -> dict[str, object]:
         "driver_pin": "135791",
         "excavator_pin": "246802",
     }
+
+
+def sealed_credentials() -> dict[str, bytes]:
+    return {
+        name: f"SYSTEMD-CREDENTIAL-TEST:{name}".encode("ascii")
+        for name in ctl.ENCRYPTED_CREDENTIAL_KEYS
+    }
+
+
+def qa_metadata() -> dict[str, object]:
+    return dict(receiver.SSE_QA_METADATA)
 
 
 class PackageContractTests(unittest.TestCase):
@@ -201,7 +213,9 @@ class PackageContractTests(unittest.TestCase):
     def test_local_render_has_no_placeholders_and_no_production_paths(self):
         with tempfile.TemporaryDirectory() as raw:
             test_root = Path(raw)
-            ctl.install_local_layout(ROOT, test_root, valid_secrets())
+            ctl.install_local_layout(
+                ROOT, test_root, valid_secrets(), sealed_credentials=sealed_credentials(),
+            )
             rendered = test_root / "etc/sse-qa/app.env"
             self.assertTrue(rendered.is_file())
             self.assertNotIn("@@", rendered.read_text(encoding="utf-8"))
@@ -225,11 +239,13 @@ class PackageContractTests(unittest.TestCase):
 
     def test_receiver_contract_rejects_extra_payload_or_metadata(self):
         package = b"PK-placeholder"
-        manifest = {"mode": "verify_sse_qa", "metadata": {"qa_schema": 1}}
+        manifest = {"mode": "verify_sse_qa", "metadata": qa_metadata()}
         receiver.validate_mode_contract(manifest, {receiver.SSE_QA_PACKAGE_PAYLOAD: package})
         with self.assertRaises(receiver.ReleaseError):
+            bad_metadata = qa_metadata()
+            bad_metadata["command"] = "id"
             receiver.validate_mode_contract(
-                {"mode": "verify_sse_qa", "metadata": {"qa_schema": 1, "command": "id"}},
+                {"mode": "verify_sse_qa", "metadata": bad_metadata},
                 {receiver.SSE_QA_PACKAGE_PAYLOAD: package},
             )
 
@@ -245,10 +261,13 @@ class PackageContractTests(unittest.TestCase):
                 "--files", str(ROOT / "REQUIRED_FILES.txt"),
                 "--output", str(output), "--commit", "a" * 40,
                 "--mode", "verify_sse_qa", "--sse-qa-package", str(package),
+                "--sse-qa-candidate-commit", receiver.SSE_QA_CANDIDATE_COMMIT,
+                "--sse-qa-controller-sha256", receiver.SSE_QA_CONTROLLER_SHA256,
+                "--sse-qa-runtime-sha256", receiver.SSE_QA_RUNTIME_SHA256,
             ]
             subprocess.run(command, check=True, capture_output=True, text=True)
             manifest, payload = receiver.load_release(output)
-            self.assertEqual(manifest["metadata"], {"qa_schema": 1})
+            self.assertEqual(manifest["metadata"], qa_metadata())
             self.assertEqual(set(payload), {receiver.SSE_QA_PACKAGE_PAYLOAD})
 
             secrets = temp / "secrets.json"
@@ -317,6 +336,11 @@ class PackageContractTests(unittest.TestCase):
 
     def test_runtime_archive_is_backend_only_and_rejects_traversal(self):
         ctl.validate_runtime_archive(ROOT / "generated/runtime.tar.gz")
+        with tarfile.open(ROOT / "generated/runtime.tar.gz", "r:gz") as archive:
+            names = [member.name for member in archive.getmembers()]
+        self.assertFalse(
+            any("__pycache__" in name or name.endswith((".pyc", ".pyo")) for name in names)
+        )
         with tempfile.TemporaryDirectory() as raw:
             bad = Path(raw) / "bad.tar.gz"
             payload = Path(raw) / "payload"
@@ -366,7 +390,10 @@ class PackageContractTests(unittest.TestCase):
             ctl.rooted(root, ctl.STATE_ROOT).mkdir(parents=True)
             state = ctl.new_ownership()
             ctl.save_ownership(state, root)
-            ctl.install_local_layout(ROOT, root, valid_secrets(), ownership=state)
+            ctl.install_local_layout(
+                ROOT, root, valid_secrets(), ownership=state,
+                sealed_credentials=sealed_credentials(),
+            )
             source = ROOT / "config/systemd/srv-sse-x2dqa.mount"
             ctl._copy_owned(source, logical, state, root)
             state["complete"] = True
@@ -466,7 +493,10 @@ class PackageContractTests(unittest.TestCase):
             ctl.rooted(root, ctl.STATE_ROOT).mkdir(parents=True)
             state = ctl.new_ownership()
             ctl.save_ownership(state, root)
-            ctl.install_local_layout(ROOT, root, valid_secrets(), ownership=state)
+            ctl.install_local_layout(
+                ROOT, root, valid_secrets(), ownership=state,
+                sealed_credentials=sealed_credentials(),
+            )
             state["complete"] = True
             state["phase"] = "complete_disabled"
             ctl.save_ownership(state, root)
@@ -477,13 +507,16 @@ class PackageContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ctl.QaError, "owned file changed"):
                 ctl.verify_installation(root)
 
-    def test_redis_acl_permissions_and_canonical_equipment_types(self):
+    def test_redis_acl_is_memfd_only_and_canonical_equipment_types(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            with mock.patch.object(ctl.os, "chmod", wraps=os.chmod) as chmod:
-                ctl.install_local_layout(ROOT, root, valid_secrets())
-            acl = ctl.rooted(root, Path("/etc/sse-qa/redis.acl"))
-            self.assertIn(mock.call(acl, 0o640), chmod.mock_calls)
+            ctl.install_local_layout(
+                ROOT, root, valid_secrets(), sealed_credentials=sealed_credentials(),
+            )
+            self.assertFalse(ctl.rooted(root, Path("/etc/sse-qa/redis.acl")).exists())
+            redis_unit = (ROOT / "config/systemd/redis-sse-qa.service").read_text(encoding="utf-8")
+            self.assertIn("LoadCredentialEncrypted=redis_password:", redis_unit)
+            self.assertIn("sse-qa-redis-launcher", redis_unit)
         seed = (ROOT / "app-overlay/users/management/commands/seed_sse_qa.py").read_text(encoding="utf-8")
         self.assertIn('get_or_create(name="Самосвал")', seed)
         self.assertIn('get_or_create(name="Экскаватор")', seed)
@@ -536,9 +569,10 @@ class PackageContractTests(unittest.TestCase):
                     ctl.fault_injection("after_image_before_marker")
 
     def test_control_package_needs_no_runtime_or_package_index(self):
+        controller = b"print('controller')\n"
         payload_buffer = BytesIO()
         with zipfile.ZipFile(payload_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("scripts/sse_qa_ctl.py", "print('controller')\n")
+            archive.writestr("scripts/sse_qa_ctl.py", controller)
 
         class FakeProcess:
             returncode = 0
@@ -549,7 +583,9 @@ class PackageContractTests(unittest.TestCase):
             def communicate(self, timeout=None):
                 return "SSE_QA_DISABLE_OK data_preserved=true complete=false\n", None
 
-        with mock.patch.object(receiver.subprocess, "Popen", FakeProcess):
+        with mock.patch.object(
+            receiver, "SSE_QA_CONTROLLER_SHA256", hashlib.sha256(controller).hexdigest()
+        ), mock.patch.object(receiver.subprocess, "Popen", FakeProcess):
             result = receiver.run_sse_qa(
                 "disable_sse_qa",
                 {receiver.SSE_QA_PACKAGE_PAYLOAD: payload_buffer.getvalue()},
@@ -561,9 +597,10 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn("pip download", control_branch.split("fi\n            args+=", 1)[0].split("else", 1)[1])
 
     def test_installed_smoke_process_is_child_of_shared_slice(self):
+        controller = b"print('controller')\n"
         payload_buffer = BytesIO()
         with zipfile.ZipFile(payload_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("scripts/sse_qa_ctl.py", "print('controller')\n")
+            archive.writestr("scripts/sse_qa_ctl.py", controller)
         commands: list[list[str]] = []
 
         class FakeProcess:
@@ -580,6 +617,8 @@ class PackageContractTests(unittest.TestCase):
             receiver, "_receiver_unified_cgroup", return_value="/system.slice/receiver.service"
         ), mock.patch.object(
             receiver, "_sse_qa_slice_cgroup", return_value=receiver.SSE_QA_SLICE_CGROUP
+        ), mock.patch.object(
+            receiver, "SSE_QA_CONTROLLER_SHA256", hashlib.sha256(controller).hexdigest()
         ), mock.patch.object(receiver.subprocess, "Popen", FakeProcess):
             result = receiver.run_sse_qa(
                 "smoke_sse_qa",
@@ -598,13 +637,16 @@ class PackageContractTests(unittest.TestCase):
         self.assertFalse(receiver._cgroup_is_at_or_below("/system.slice/receiver.service", parent))
         self.assertFalse(receiver._cgroup_is_at_or_below("/sse.slice/sse-qa.slice-other/x", parent))
 
+        controller = b"print('controller')\n"
         payload_buffer = BytesIO()
         with zipfile.ZipFile(payload_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("scripts/sse_qa_ctl.py", "print('controller')\n")
+            archive.writestr("scripts/sse_qa_ctl.py", controller)
         with mock.patch.object(
             receiver, "_receiver_unified_cgroup", return_value=f"{parent}/receiver.service"
         ), mock.patch.object(
             receiver, "_sse_qa_slice_cgroup", return_value=parent
+        ), mock.patch.object(
+            receiver, "SSE_QA_CONTROLLER_SHA256", hashlib.sha256(controller).hexdigest()
         ), mock.patch.object(receiver.subprocess, "Popen") as popen:
             with self.assertRaisesRegex(receiver.ReleaseError, "receiver must remain outside"):
                 receiver.run_sse_qa(
@@ -696,9 +738,10 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn("print(parsed.password", redis_metrics)
 
     def test_enable_process_is_child_of_shared_slice(self):
+        controller = b"print('controller')\n"
         payload_buffer = BytesIO()
         with zipfile.ZipFile(payload_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("scripts/sse_qa_ctl.py", "print('controller')\n")
+            archive.writestr("scripts/sse_qa_ctl.py", controller)
         commands: list[list[str]] = []
 
         class FakeProcess:
@@ -715,6 +758,8 @@ class PackageContractTests(unittest.TestCase):
             receiver, "_receiver_unified_cgroup", return_value="/system.slice/receiver.service"
         ), mock.patch.object(
             receiver, "_sse_qa_slice_cgroup", return_value=receiver.SSE_QA_SLICE_CGROUP
+        ), mock.patch.object(
+            receiver, "SSE_QA_CONTROLLER_SHA256", hashlib.sha256(controller).hexdigest()
         ), mock.patch.object(receiver.subprocess, "Popen", FakeProcess):
             result = receiver.run_sse_qa(
                 "enable_sse_qa",
@@ -726,12 +771,11 @@ class PackageContractTests(unittest.TestCase):
         self.assertIn("--slice=sse-qa.slice", commands[0])
         self.assertNotIn("receiver.service", " ".join(commands[0]))
 
-    def test_install_enable_verify_and_smoke_use_shared_parent_slice(self):
+    def test_install_enable_and_smoke_use_shared_parent_slice_but_preflight_does_not(self):
         receiver_source = (CONTROL / "deployment/server/accounting_github_deploy_receiver.py").read_text(encoding="utf-8")
         for required in (
             'scoped_unit = "sse-qa-install.service"',
             'scoped_unit = "sse-qa-enable.service"',
-            'scoped_unit = "sse-qa-verify.service"',
             'scoped_unit = "sse-qa-smoke.service"',
             'f"--slice={SSE_QA_SLICE_UNIT}"', '"--property=CPUQuota=100%"',
             '"--property=MemoryMax=2G"', '"--property=MemorySwapMax=0"',
@@ -739,6 +783,8 @@ class PackageContractTests(unittest.TestCase):
             'os.killpg(process.pid, signal.SIGTERM)',
         ):
             self.assertIn(required, receiver_source)
+        self.assertNotIn('scoped_unit = "sse-qa-verify.service"', receiver_source)
+        self.assertIn('"verify_sse_qa": "preflight"', receiver_source)
         for service in ("sse-qa-wsgi.service", "sse-qa-asgi.service", "sse-qa-reconcile.service"):
             text = (ROOT / "config/systemd" / service).read_text(encoding="utf-8")
             self.assertIn("StandardOutput=append:/srv/sse-qa/log/", text)
@@ -755,6 +801,23 @@ class PackageContractTests(unittest.TestCase):
                 b"--- a/test\n+++ b/test\n-safe\n+PRIVATE " b"KEY----- leaked\n"
             )
             self.assertIsNotNone(package_checker.SECRET_PATTERN.search(package_checker.secret_scan_payload(patch)))
+
+    def test_secret_scan_distinguishes_source_literals_from_secret_values(self):
+        safe_literals = (
+            b'key = "POSTGRES_PASSWORD="\n'
+            b'other = "REDIS_PASSWORD="\n'
+            b'fixture = "sessionid="\n'
+            b'header = "Authorization: Bearer"\n'
+        )
+        self.assertIsNone(package_checker.SECRET_PATTERN.search(safe_literals))
+        for leaked_value in (
+            b"POSTGRES_" b"PASSWORD=synthetic-value",
+            b"REDIS_" b"PASSWORD=!synthetic-value",
+            b"session" b"id=abc123",
+            b"Authorization: " b"Bearer token.value",
+        ):
+            with self.subTest(leaked_value=leaked_value):
+                self.assertIsNotNone(package_checker.SECRET_PATTERN.search(leaked_value))
 
 
 if __name__ == "__main__":

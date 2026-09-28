@@ -1,5 +1,38 @@
 # Закрытие замечаний независимого install-review
 
+## CodeQL: хранение секретов полного установщика — 28.09.2026
+
+- `py/clear-text-storage-sensitive-data`: plaintext secrets больше не
+  публикуются в persistent config; используются systemd encrypted credentials,
+  Redis memfd и временный nginx verifier в tmpfs.
+- `py/weak-sensitive-data-hashing`: ownership SHA-256 считается только по уже
+  опубликованному ciphertext/обычным файлам. Пароли PostgreSQL обрабатываются
+  штатным SCRAM, пароль Redis — ACL-механизмом Redis.
+- Запись ciphertext и ownership journal атомарна; mode/owner задаются до первого
+  байта; symlink/foreign/corrupt/missing-key paths fail closed.
+- Адресные проверки находятся в `tests/test_installer_secret_storage.py`.
+  CodeQL и новый полный Linux lifecycle должны быть выполнены после публикации
+  только по отдельному разрешению; локальная работа их не подменяет.
+
+### R2 по независимому ревью — 29.09.2026
+
+- Receiver создаёт дочерний процесс с настоящим `stdin=PIPE`, когда controller
+  ожидает secret JSON; поведенческий тест использует реальный дочерний Python и
+  проверяет точное число принятых байтов.
+- Временный nginx verifier перенесён из постоянного `files` в отдельный
+  `runtime_files`: disable удаляет запись после проверки собственного файла,
+  повторный disable идемпотентен, enable восстанавливает файл после очистки
+  `/run`, а изменённый/чужой файл остаётся блокирующим.
+- Builder сам создаёт release archive с `0600` до первого байта и публикует его
+  атомарно без замены; workflow задаёт `umask 077` в том же build-шаге и через
+  `always()` удаляет архив после передачи/ошибки. Архив содержит краткоживущий
+  plaintext JSON и не называется зашифрованным.
+- `secure_atomic_write(..., replace_existing=False)` использует hard-link
+  no-replace вместо `exists()` + `os.replace`; race сохраняет чужой destination
+  и удаляет собственный temporary.
+- Linux fixture теперь создаёт родительский `<temporary>/run` и проверяет
+  enable → disable → enable, повторный disable и потерю tmpfs `/run`.
+
 ## Disposable workflow R2 — 28.09.2026
 
 По независимой проверке нового disposable workflow исправлены шесть адресных

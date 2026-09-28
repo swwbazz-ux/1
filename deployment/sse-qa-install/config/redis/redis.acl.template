@@ -1,3 +1,0 @@
-user default off
-user sseqa on >@@REDIS_PASSWORD@@ ~accounting-mvp:sse:qa:* &accounting-mvp:sse:qa:* +ping +client +subscribe +unsubscribe +psubscribe +punsubscribe +publish
-

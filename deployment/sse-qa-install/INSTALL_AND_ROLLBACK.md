@@ -1,5 +1,15 @@
 # Установка, первый запуск и откат
 
+## Обязательный gate хранения секретов
+
+Перед отдельно разрешённой установкой receiver должен подтвердить fixed
+`/usr/bin/systemd-creds` и существующий root-only
+`/var/lib/systemd/credential.secret`. Установщик шифрует все QA credentials до
+первой мутации и прекращает работу, если key отсутствует, ciphertext не
+создаётся или не может быть проверен. Создание/замена host key на существующем
+сервере не входит в install и требует отдельного решения. Порядок хранения,
+runtime-доступа и recovery описан в `SECRET_STORAGE.md`.
+
 ## 1. Почему нужен отдельный receiver mode
 
 Существующие `deploy`/`apply_data` работают с production release и не должны
@@ -7,7 +17,7 @@
 
 | Режим | Confirmation | Назначение |
 |---|---|---|
-| `verify_sse_qa` | `VERIFY_SSE_QA` | до установки — read-only preflight; после установки — контролируемая live-проверка QA |
+| `verify_sse_qa` | `VERIFY_SSE_QA` | только строгий начальный read-only preflight; при найденной полной или частичной установке — отказ без запуска служб |
 | `install_sse_qa` | `INSTALL_SSE_QA` | создание отдельного отключённого QA-контура |
 | `enable_sse_qa` | `ENABLE_SSE_QA` | первый запуск после всех gate, максимум 1–2 клиента |
 | `smoke_sse_qa` | `SMOKE_SSE_QA` | два штатных входа, экраны, synthetic trip, catch-up и реальная SSE-доставка |
@@ -20,6 +30,21 @@ builder вкладывает полный пакет и зафиксирован
 единственным allowlisted controller и не используют PyPI/runtime rebuild. Для `install_sse_qa`
 зашифрованный GitHub Environment secret `SSE_QA_SECRETS_JSON_B64`. Receiver
 проверяет exact target names, SHA-256, package manifest и commit SHA.
+
+При `install_sse_qa` decoded JSON передаётся builder и receiver только через
+stdin. Временный transport tar.gz содержит plaintext JSON, поэтому builder
+создаёт его `0600` до первого байта, не перезаписывает существующий/symlink
+destination, а workflow удаляет архив шагом `always()` после передачи или
+ошибки. Постоянное хранение на сервере при этом остаётся только зашифрованным
+через systemd credentials.
+
+Control checkout и источник QA разделены явно. Workflow остаётся на exact SHA
+control-ветки, а application/runtime извлекает только из зашитого в коде
+candidate `fb81480a9709e3a26ccbeb74aaefbaa08a3d722c`. Исправленный controller
+входит в проверяемый control patch отдельным файлом и допускается receiver
+только при exact SHA-256. Пользовательского candidate input нет. Manifest и
+логи раздельно фиксируют control SHA, candidate SHA, controller/runtime и
+собранный package hash.
 
 ## 2. Последовательность через защищённый GitHub Actions
 
@@ -34,26 +59,27 @@ builder вкладывает полный пакет и зафиксирован
 3. Выполнить `verify_receiver` → `update_receiver` для exact SHA, как в
    действующем протоколе. Это только обучает receiver новым фиксированным
    режимам.
-4. Добавить в защищённый GitHub Environment один secret
-   `SSE_QA_SECRETS_JSON_B64`, созданный из `secrets/secrets.example.json` после
-   замены всех placeholder. Secret не входит в Git и логи.
-5. Запустить `verify_sse_qa / VERIFY_SSE_QA`. PASS требует свободных портов
-   55432/6381, отсутствия конфликтующих путей, cgroup v2 cpu/memory/io/pids,
-   loop/ext4, PostgreSQL 16, Redis 7, nginx и минимум 8 GiB свободного диска.
-6. Отдельным разрешением запустить `install_sse_qa / INSTALL_SSE_QA`.
+4. Запустить ровно один `verify_sse_qa / VERIFY_SSE_QA` и остановиться с
+   отчётом. Эта операция не входит в `sse-qa.slice`, не вызывает `systemd-run`,
+   не стартует и не останавливает QA PostgreSQL/Redis и отказывает при marker,
+   ownership journal, любом managed path, user/group/cluster conflict или
+   неизвестном результате `id/getent/pg_lsclusters`.
+5. Только по фактическому preflight-отчёту запросить новое разрешение. Тогда
+   добавить в защищённый GitHub Environment secret `SSE_QA_SECRETS_JSON_B64`,
+   созданный из `secrets/secrets.example.json` после замены placeholder.
+6. Отдельным новым разрешением запустить `install_sse_qa / INSTALL_SSE_QA`.
    Установка оставляет ingress выключенным и не перезапускает production.
    Весь controller вместе с venv/pip, cluster init, migrations, seed и
    collectstatic выполняется в transient `sse-qa-install.service`, который
    вместе с QA PostgreSQL/Redis находится под единым parent `sse-qa.slice`
    (1 CPU, 2 GiB RAM, swap 0, 256 tasks). Первый запуск использует проверяемый
    runtime slice и после успеха передаёт lifecycle marker-owned persistent unit.
-7. Повторить `verify_sse_qa`. Это уже не полностью read-only операция:
-   проверяются owner marker, units, loop mount, лимиты, `max_connections`, role
-   limits, live cgroup membership, Redis ACL, synthetic fixture и
-   `SSE_PILOT_ENABLED=false`; сам installed verify выполняется внутри того же
-   parent slice; выключенные
-   QA PostgreSQL/Redis временно запускаются и обязательно снова останавливаются
-   с проверкой фактического состояния.
+7. Не повторять `verify_sse_qa` после установки: этот mode намеренно остаётся
+   только начальным preflight и откажет при marker/journal. Фактическая
+   post-install проверка выполняется внутри самого `install_sse_qa`: mount,
+   применённые cgroup limits/membership, PostgreSQL/Redis, миграции, synthetic
+   fixture, kill switch и итог `enabled=false clients=0`. Это controller result,
+   а не отдельный независимый zero-residue scanner.
 8. Отдельно согласовать DNS-запись `sse-qa.driverform.ru`, TLS certificate,
    allowlist CIDR и окно первого запуска. Покупка домена не требуется.
 9. Запустить `enable_sse_qa / ENABLE_SSE_QA`. Весь фиксированный enable-controller,
@@ -97,6 +123,13 @@ Receiver сначала повторяет disable, затем проверяе�
 останавливает соответствующую опасную операцию и сохраняет журнал для
 диагностики. Partial install можно повторно disable/remove. Production пути не
 вычисляются из переменных и не удаляются.
+
+`remove_sse_qa` подтверждает собственные ownership guards и итоговые controller
+checks. Отдельный независимый `linux_zero_residue_scan.sh` доказан только в
+disposable harness и receiver автоматически не запускает его на рабочем
+сервере. Для серверного этапа фактическое доказательство — точный controller
+summary плюс отдельный последующий read-only inventory разрешённого канала.
+Fault/cancel disposable cycle на рабочем сервере запускать нельзя.
 
 ### Откат receiver
 

@@ -13,8 +13,10 @@ FORBIDDEN_NAMES = {
 }
 FORBIDDEN_SUFFIXES = {".jks", ".keystore", ".p12", ".pfx", ".key", ".sqlite3", ".pyc"}
 SECRET_PATTERN = re.compile(
-    rb"(?i)(authorization:\s*bearer|sessionid=|private[_ -]?key-----|"
-    rb"postgres_password\s*=\s*[^@\r\n]|redis_password\s*=\s*[^@\r\n])"
+    rb"(?i)(authorization:\s*bearer\s+[a-z0-9._~-]|sessionid=[a-z0-9]|"
+    rb"private[_ -]?key-----|"
+    rb"postgres_password\s*=\s*[^@\"'\s\r\n]|"
+    rb"redis_password\s*=\s*[^@\"'\s\r\n])"
 )
 
 

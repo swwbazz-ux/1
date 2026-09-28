@@ -117,6 +117,7 @@ jobs:
           ROLLBACK_ID: ${{ inputs.rollback_id }}
         run: |
           set -euo pipefail
+          umask 077
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
           if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]; then
             test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
@@ -285,8 +286,12 @@ jobs:
           ROLLBACK_ID: ${{ inputs.rollback_id }}
           FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
           SSE_QA_SECRETS_JSON_B64: ${{ secrets.SSE_QA_SECRETS_JSON_B64 }}
+          SSE_QA_CANDIDATE_SHA: fb81480a9709e3a26ccbeb74aaefbaa08a3d722c
+          SSE_QA_CONTROLLER_SHA256: 60453f11c6657a4fbe2e8a7c70549bed51fbc4c45e063ef99440a6857098c119
+          SSE_QA_RUNTIME_SHA256: 8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e
         run: |
           set -euo pipefail
+          umask 077
           python .github/deploy/test_release_protocol.py
           args=(
             --root .
@@ -311,7 +316,23 @@ jobs:
           elif [[ "$MODE" == "diagnose" ]]; then
             args+=(--event-file "$GITHUB_EVENT_PATH")
           elif [[ "$MODE" == *sse_qa ]]; then
-            qa_source="deployment/sse-qa-install"
+            qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
+            mkdir -p "$qa_candidate_root"
+            git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"
+            candidate_resolved="$(git rev-parse 'FETCH_HEAD^{commit}')"
+            test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"
+            git archive --format=tar "$candidate_resolved" deployment/sse-qa-install | \
+              tar -xf - -C "$qa_candidate_root"
+            qa_source="$qa_candidate_root/deployment/sse-qa-install"
+            test -d "$qa_source"
+            controller_source="deployment/server/sse_qa_ctl.py"
+            controller_actual="$(sha256sum "$controller_source" | cut -d' ' -f1)"
+            runtime_actual="$(sha256sum "$qa_source/generated/runtime.tar.gz" | cut -d' ' -f1)"
+            test "$controller_actual" = "$SSE_QA_CONTROLLER_SHA256"
+            test "$runtime_actual" = "$SSE_QA_RUNTIME_SHA256"
+            cp "$controller_source" "$qa_source/scripts/sse_qa_ctl.py"
+            printf 'SSE_QA_SOURCE control_sha=%s candidate_sha=%s controller_sha256=%s runtime_sha256=%s\n' \
+              "${{ github.sha }}" "$candidate_resolved" "$controller_actual" "$runtime_actual"
             qa_build="$RUNNER_TEMP/sse-qa-payload"
             if [[ "$MODE" == "install_sse_qa" || "$MODE" == "verify_sse_qa" ]]; then
               cp -a "$qa_source" "$qa_build"
@@ -335,18 +356,25 @@ jobs:
               cp "$qa_source/scripts/sse_qa_ctl.py" "$qa_build/scripts/sse_qa_ctl.py"
               (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" scripts/sse_qa_ctl.py)
             fi
-            args+=(--sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip")
+            args+=(
+              --sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip"
+              --sse-qa-candidate-commit "$candidate_resolved"
+              --sse-qa-controller-sha256 "$controller_actual"
+              --sse-qa-runtime-sha256 "$runtime_actual"
+            )
             if [[ "$MODE" == "install_sse_qa" ]]; then
               test -n "$SSE_QA_SECRETS_JSON_B64"
-              printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode > "$RUNNER_TEMP/sse-qa-secrets.json"
-              chmod 0600 "$RUNNER_TEMP/sse-qa-secrets.json"
-              trap 'rm -f "$RUNNER_TEMP/sse-qa-secrets.json"' EXIT
-              args+=(--sse-qa-secrets "$RUNNER_TEMP/sse-qa-secrets.json")
+              args+=(--sse-qa-secrets-stdin)
             fi
           elif [[ "$MODE" == "rollback" ]]; then
             args+=(--rollback-id "$ROLLBACK_ID")
           fi
-          python .github/deploy/build_release.py "${args[@]}"
+          if [[ "$MODE" == "install_sse_qa" ]]; then
+            printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode | \
+              python .github/deploy/build_release.py "${args[@]}"
+          else
+            python .github/deploy/build_release.py "${args[@]}"
+          fi
 
       - name: Configure pinned SSH transport
         env:
@@ -508,3 +536,9 @@ jobs:
           if hashlib.sha256(apk).hexdigest() != published["sha256"]:
               raise SystemExit("published APK SHA-256 mismatch")
           PY
+
+      - name: Remove transient release archive
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          rm -f -- "$RUNNER_TEMP/accounting-release.tar.gz"

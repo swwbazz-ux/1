@@ -57,6 +57,15 @@ SSE_QA_SLICE_UNIT = "sse-qa.slice"
 SSE_QA_SLICE_CGROUP = "/sse.slice/sse-qa.slice"
 SSE_QA_RUNTIME_SLICE_PATH = Path("/run/systemd/system/sse-qa.slice")
 SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
+SSE_QA_CANDIDATE_COMMIT = "fb81480a9709e3a26ccbeb74aaefbaa08a3d722c"
+SSE_QA_CONTROLLER_SHA256 = "60453f11c6657a4fbe2e8a7c70549bed51fbc4c45e063ef99440a6857098c119"
+SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
+SSE_QA_METADATA = {
+    "qa_schema": 2,
+    "candidate_commit": SSE_QA_CANDIDATE_COMMIT,
+    "controller_sha256": SSE_QA_CONTROLLER_SHA256,
+    "runtime_sha256": SSE_QA_RUNTIME_SHA256,
+}
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
 TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
@@ -1810,7 +1819,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
         expected = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
             expected.add(SSE_QA_SECRETS_PAYLOAD)
-        if set(payload) != expected or metadata != {"qa_schema": 1}:
+        if set(payload) != expected or metadata != SSE_QA_METADATA:
             raise ReleaseError("invalid SSE QA package contract")
         if len(payload[SSE_QA_PACKAGE_PAYLOAD]) > SSE_QA_MAX_PACKAGE_BYTES:
             raise ReleaseError("SSE QA package is too large")
@@ -2412,7 +2421,7 @@ def _terminate_sse_qa_process(
 def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
     operation = {
-        "verify_sse_qa": "verify",
+        "verify_sse_qa": "preflight",
         "install_sse_qa": "install",
         "enable_sse_qa": "enable",
         "smoke_sse_qa": "smoke",
@@ -2455,6 +2464,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
         control_only = mode in {"enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa"}
         if not controller.is_file():
             raise ReleaseError("SSE QA controller is missing")
+        if digest(controller.read_bytes()) != SSE_QA_CONTROLLER_SHA256:
+            raise ReleaseError("SSE QA controller does not match accepted candidate")
         if control_only:
             extracted_files = {
                 path.relative_to(root / "bundle").as_posix()
@@ -2463,6 +2474,9 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             if extracted_files != {"scripts/sse_qa_ctl.py"}:
                 raise ReleaseError("SSE QA control package contains unexpected files")
         else:
+            runtime = root / "bundle" / "generated" / "runtime.tar.gz"
+            if not runtime.is_file() or digest(runtime.read_bytes()) != SSE_QA_RUNTIME_SHA256:
+                raise ReleaseError("SSE QA runtime does not match accepted candidate")
             if not checker.is_file():
                 raise ReleaseError("SSE QA package checker is missing")
             checked = subprocess.run(
@@ -2476,11 +2490,13 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             "/usr/bin/python3", str(controller), operation,
             "--bundle-root", str(root / "bundle"),
         ]
+        secret_input: str | None = None
         if mode == "install_sse_qa":
-            secrets = root / "secrets.json"
-            secrets.write_bytes(payload[SSE_QA_SECRETS_PAYLOAD])
-            os.chmod(secrets, 0o600)
-            command.extend(["--secrets-file", str(secrets)])
+            try:
+                secret_input = payload[SSE_QA_SECRETS_PAYLOAD].decode("utf-8")
+            except UnicodeError as exc:
+                raise ReleaseError("SSE QA secrets payload is not UTF-8") from exc
+            command.append("--secrets-stdin")
         scoped_unit: str | None = None
         if mode == "install_sse_qa":
             scoped_unit = "sse-qa-install.service"
@@ -2488,8 +2504,6 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             scoped_unit = "sse-qa-enable.service"
         elif mode == "smoke_sse_qa":
             scoped_unit = "sse-qa-smoke.service"
-        elif mode == "verify_sse_qa" and Path("/var/lib/sse-qa/INSTALLATION_MARKER").is_file():
-            scoped_unit = "sse-qa-verify.service"
         runtime_slice_digest = (
             _stage_sse_qa_runtime_slice(root / "bundle")
             if mode == "install_sse_qa" else None
@@ -2516,7 +2530,7 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                     "--bundle-root", str(root / "bundle"),
                 ]
                 if mode == "install_sse_qa":
-                    command.extend(["--secrets-file", str(secrets)])
+                    command.append("--secrets-stdin")
         except BaseException:
             if runtime_slice_digest is not None:
                 _cleanup_sse_qa_runtime_slice(runtime_slice_digest, keep_installed=False)
@@ -2525,10 +2539,14 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
         try:
             process = subprocess.Popen(
                 command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=(subprocess.PIPE if secret_input is not None else subprocess.DEVNULL),
                 start_new_session=True,
             )
             try:
-                output, _ = process.communicate(timeout=900)
+                if secret_input is None:
+                    output, _ = process.communicate(timeout=900)
+                else:
+                    output, _ = process.communicate(input=secret_input, timeout=900)
             except subprocess.TimeoutExpired as exc:
                 output = _terminate_sse_qa_process(process, mode, scoped_unit)
                 raise ReleaseError("SSE QA operation timed out; termination confirmed") from exc
@@ -2570,7 +2588,13 @@ def main() -> int:
                 return 0
             if mode == "verify_sse_qa":
                 summary = run_sse_qa(mode, payload)
-                print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha} summary={summary}")
+                print(
+                    f"VERIFY_OK mode={mode} commit={manifest['commit']} "
+                    f"candidate={SSE_QA_CANDIDATE_COMMIT} "
+                    f"controller_sha256={SSE_QA_CONTROLLER_SHA256} "
+                    f"runtime_sha256={SSE_QA_RUNTIME_SHA256} "
+                    f"files={len(payload)} package_sha256={package_sha} summary={summary}"
+                )
                 return 0
             if mode in VERIFY_MODES:
                 print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha}")

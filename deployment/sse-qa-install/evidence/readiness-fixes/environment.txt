@@ -1,0 +1,7 @@
+﻿utc=2026-09-28T00:40:46.3350222Z
+candidate_commit=fb81480a9709e3a26ccbeb74aaefbaa08a3d722c
+control_base=f2248cb79c737e98b580e784abea394335a2700b
+os=Microsoft Windows NT 10.0.27924.0
+powershell=5.1.27924.1000
+python=Python 3.12.10
+git=git version 2.54.0.windows.1

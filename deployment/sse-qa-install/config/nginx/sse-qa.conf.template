@@ -19,7 +19,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/sse-qa.driverform.ru/privkey.pem;
 
     auth_basic "SSE QA";
-    auth_basic_user_file /etc/sse-qa/htpasswd;
+    auth_basic_user_file /run/sse-qa-nginx/htpasswd;
     satisfy all;
     allow @@ALLOW_CIDR@@;
     deny all;

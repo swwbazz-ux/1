@@ -931,7 +931,24 @@ class ReleaseProtocolTests(unittest.TestCase):
         for line in uses_lines:
             reference = line.split("@", 1)[1].split()[0]
             self.assertRegex(reference, r"^[0-9a-f]{40}$")
-
+    # SSE-QA source provenance is independent from the protected control commit.
+    def test_sse_qa_source_is_fixed_separately_from_control_commit(self):
+        workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn(
+            f"SSE_QA_CANDIDATE_SHA: {receiver.SSE_QA_CANDIDATE_COMMIT}", workflow
+        )
+        self.assertIn('git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"', workflow)
+        self.assertIn('test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"', workflow)
+        self.assertIn('controller_source="deployment/server/sse_qa_ctl.py"', workflow)
+        self.assertIn("SSE_QA_SOURCE control_sha=%s candidate_sha=%s", workflow)
+        inputs = workflow.split("permissions:", 1)[0]
+        self.assertNotIn("candidate_sha:", inputs)
+        self.assertNotIn("candidate_commit:", inputs)
+        controller = ROOT / "deployment" / "server" / "sse_qa_ctl.py"
+        controller_blob = controller.read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(hashlib.sha256(controller_blob).hexdigest(), receiver.SSE_QA_CONTROLLER_SHA256)
+    # Existing FCM validation remains a separate protocol contract.
     def test_fcm_mode_accepts_only_a_complete_matching_service_account(self):
         credentials = {
             "type": "service_account",

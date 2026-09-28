@@ -1,0 +1,1 @@
+﻿CODEQL_NOT_RUN reason=local_codeql_cli_unavailable alerts_not_suppressed gates_not_changed

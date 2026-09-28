@@ -24,6 +24,8 @@ QA_CGROUP_FS=/sys/fs/cgroup/sse.slice/sse-qa.slice
 INSTALL_UNIT=sse-qa-install.service
 EXIT_DIR=/run/sse-qa-cycle
 TLS_DIR=/etc/letsencrypt/live/sse-qa.driverform.ru
+SYSTEMD_CREDENTIAL_KEY=/var/lib/systemd/credential.secret
+SYSTEMD_CREDENTIAL_KEY_CREATED=0
 
 test "$(id -u)" = 0
 test -f /run/sse-qa-disposable-test
@@ -44,6 +46,24 @@ test ! -e "$TLS_DIR"
 mkdir -p "$EVIDENCE_ROOT"/{raw,cgroup,metadata,zero-residue}
 chmod 0700 "$EVIDENCE_ROOT"
 umask 077
+
+prepare_systemd_credential_key() {
+  if test ! -e "$SYSTEMD_CREDENTIAL_KEY"; then
+    systemd-creds setup >/dev/null
+    SYSTEMD_CREDENTIAL_KEY_CREATED=1
+  fi
+  test ! -L "$SYSTEMD_CREDENTIAL_KEY"
+  test -f "$SYSTEMD_CREDENTIAL_KEY"
+  test "$(stat -c '%u:%a' "$SYSTEMD_CREDENTIAL_KEY")" = 0:600
+  printf 'SYSTEMD_CREDENTIAL_KEY_OK source=host created=%s\n' \
+    "$SYSTEMD_CREDENTIAL_KEY_CREATED"
+}
+
+cleanup_systemd_credential_key() {
+  if test "$SYSTEMD_CREDENTIAL_KEY_CREATED" = 1; then
+    rm -f "$SYSTEMD_CREDENTIAL_KEY"
+  fi
+}
 
 # shellcheck source=linux_install_diagnostics.sh
 source "$DIAGNOSTIC_HELPER"
@@ -484,7 +504,7 @@ cleanup_partial() {
 
 FINALIZED=0
 on_exit() {
-  local status=$? diagnostic_status=0 cleanup_status=0 zero_status=0 final_status
+  local status=$? diagnostic_status=0 cleanup_status=0 zero_status=0 credential_status=0 final_status
   local per_attempt_cleanup_status=not_run cleanup_result=''
   trap - EXIT
   set +e
@@ -510,13 +530,16 @@ on_exit() {
   if test "$FINALIZED" -ne 1; then
     /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" emergency-exit || zero_status=$?
   fi
+  cleanup_systemd_credential_key || credential_status=$?
   final_status="$status"
-  if test "$final_status" -eq 0 && { test "$cleanup_status" -ne 0 || test "$zero_status" -ne 0; }; then
+  if test "$final_status" -eq 0 && {
+    test "$cleanup_status" -ne 0 || test "$zero_status" -ne 0 || test "$credential_status" -ne 0
+  }; then
     final_status=1
   fi
-  printf 'utc_end=%s\nprimary_exit=%s\ndiagnostic_exit=%s\nper_attempt_cleanup_exit=%s\nemergency_cleanup_exit=%s\ncleanup_exit=%s\nzero_residue_exit=%s\nexit=%s\n' \
+  printf 'utc_end=%s\nprimary_exit=%s\ndiagnostic_exit=%s\nper_attempt_cleanup_exit=%s\nemergency_cleanup_exit=%s\ncleanup_exit=%s\nzero_residue_exit=%s\ncredential_key_cleanup_exit=%s\nexit=%s\n' \
     "$(date -u +%FT%TZ)" "$status" "$diagnostic_status" "$per_attempt_cleanup_status" \
-    "$cleanup_status" "$cleanup_status" "$zero_status" "$final_status" \
+    "$cleanup_status" "$cleanup_status" "$zero_status" "$credential_status" "$final_status" \
     >>"$EVIDENCE_ROOT/metadata/run.txt"
   exit "$final_status"
 }
@@ -525,6 +548,7 @@ trap on_exit EXIT
 capture_environment
 run_logged production-network-guard assert_production_names_loopback
 run_logged initial-zero-residue /usr/bin/bash "$ZERO_SCAN" "$EVIDENCE_ROOT" initial
+run_logged systemd-credential-key prepare_systemd_credential_key
 run_logged preflight /usr/bin/python3.12 "$CTL" preflight --bundle-root "$PACKAGE_ROOT"
 
 # Normal install: capture the installer, PostgreSQL and Redis concurrently under
@@ -615,6 +639,7 @@ rm -f "$NETWORK_SMOKE_JSON"
 find "$EVIDENCE_ROOT/raw" "$EVIDENCE_ROOT/cgroup" -type f -print0 \
   | sort -z | xargs -0 sha256sum >"$EVIDENCE_ROOT/metadata/evidence.sha256"
 printf 'utc_end=%s\nexit=0\n' "$(date -u +%FT%TZ)" >>"$EVIDENCE_ROOT/metadata/run.txt"
+cleanup_systemd_credential_key
 FINALIZED=1
 trap - EXIT
 echo 'SSE_QA_DISPOSABLE_CYCLE_OK normal=1 faults=2 cancel=1 zero_residue=4 production_access=0 load_clients=0'

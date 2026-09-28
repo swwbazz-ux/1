@@ -87,6 +87,9 @@ managed_paths=(
   /var/lib/sse-qa
   /srv/sse-qa
   /etc/sse-qa
+  /etc/credstore.encrypted/sse-qa
+  /usr/local/libexec/sse-qa-redis-launcher
+  /run/sse-qa-nginx
   /etc/nginx/sites-enabled/sse-qa.conf
   /etc/logrotate.d/sse-qa
   /etc/systemd/system/sse-qa.slice

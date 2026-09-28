@@ -64,6 +64,8 @@ class ShutdownContractTests(unittest.TestCase):
         output = io.StringIO()
         with mock.patch.object(ctl, "_assert_operation_scope"), mock.patch.object(
             ctl, "load_ownership", return_value={"complete": True, "phase": "complete_enabled"}
+        ), mock.patch.object(
+            ctl, "application_environment", return_value={}
         ), mock.patch.object(ctl.Path, "read_text", return_value=""), mock.patch.object(
             ctl, "run", return_value=completed
         ), redirect_stdout(output):
@@ -119,6 +121,10 @@ class ShutdownContractTests(unittest.TestCase):
         ), mock.patch.object(
             ctl, "set_sse_enabled", side_effect=fake_switch
         ), mock.patch.object(
+            ctl, "materialize_nginx_auth", side_effect=lambda: events.append("auth_materialized")
+        ), mock.patch.object(
+            ctl, "remove_nginx_auth", side_effect=lambda: events.append("auth_removed")
+        ), mock.patch.object(
             ctl, "run", side_effect=fake_run
         ), mock.patch.object(
             ctl, "load_ownership", return_value=state
@@ -156,6 +162,8 @@ class ShutdownContractTests(unittest.TestCase):
         self.assertEqual(events.count("switch_true"), 1)
         self.assertEqual(events.count("site_linked"), 1)
         self.assertEqual(events.count("site_unlinked"), 1)
+        self.assertEqual(events.count("auth_materialized"), 1)
+        self.assertEqual(events.count("auth_removed"), 1)
         self.assertEqual(state["phase"], "complete_disabled")
         self.assertIn("phase:complete_disabled", events)
         self.assertEqual(signal_handler.call_count, 2)

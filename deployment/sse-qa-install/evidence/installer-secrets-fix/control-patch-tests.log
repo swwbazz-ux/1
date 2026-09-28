@@ -1,0 +1,48 @@
+﻿git : Preparing worktree (detached HEAD b222bfdb)
+At line:2 char:374
++ ... TEXITCODE}; git worktree add --detach $t b222bfdbc0f739ead7d04cfd6e84 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Preparing workt... HEAD b222bfdb):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Updating files:  69% (1176/1686)
+Updating files:  70% (1181/1686)
+Updating files:  71% (1198/1686)
+Updating files:  72% (1214/1686)
+Updating files:  73% (1231/1686)
+Updating files:  74% (1248/1686)
+Updating files:  75% (1265/1686)
+Updating files:  76% (1282/1686)
+Updating files:  77% (1299/1686)
+Updating files:  78% (1316/1686)
+Updating files:  79% (1332/1686)
+Updating files:  80% (1349/1686)
+Updating files:  81% (1366/1686)
+Updating files:  82% (1383/1686)
+Updating files:  83% (1400/1686)
+Updating files:  84% (1417/1686)
+Updating files:  85% (1434/1686)
+Updating files:  86% (1450/1686)
+Updating files:  87% (1467/1686)
+Updating files:  88% (1484/1686)
+Updating files:  89% (1501/1686)
+Updating files:  90% (1518/1686)
+Updating files:  91% (1535/1686)
+Updating files:  92% (1552/1686)
+Updating files:  93% (1568/1686)
+Updating files:  94% (1585/1686)
+Updating files:  95% (1602/1686)
+Updating files:  96% (1619/1686)
+Updating files:  97% (1636/1686)
+Updating files:  98% (1653/1686)
+Updating files:  99% (1670/1686)
+Updating files: 100% (1686/1686)
+Updating files: 100% (1686/1686), done.
+HEAD is now at b222bfdb feat(deploy): add bounded infrastructure capacity diagnostic
+CONTROL_PATCH_APPLY_CHECK_OK
+......................................
+----------------------------------------------------------------------
+Ran 38 tests in 0.759s
+
+OK
+

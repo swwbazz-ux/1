@@ -1,0 +1,5 @@
+﻿status=NOT_RUN
+reason=local CodeQL CLI is not installed
+alerts_suppressed=false
+queries_changed=false
+gate_changed=false

@@ -16,7 +16,8 @@
 
 ## Обязательный server-side preflight перед записью
 
-`verify_sse_qa` проверяет и останавливается при любой ошибке:
+`verify_sse_qa` является только начальным no-service preflight и останавливается
+при любой ошибке:
 
 1. x86_64 architecture and `systemctl`, `systemd-analyze`, `losetup`, `/dev/loop-control`, `mkfs.ext4`,
    `findmnt`, `fallocate`;
@@ -25,9 +26,11 @@
 4. `redis-server`, `redis-cli`, `nginx`, точный `/usr/bin/python3.12` и Linux
    wheelhouse с SHA-256 каждого wheel;
 5. bind 127.0.0.1:18080/18082/55432/6381;
-6. отсутствие cluster `16/sseqa` и любого объекта из единого полного списка:
+6. отсутствие user и group `sseqa`, cluster `16/sseqa`, marker/ownership journal
+   и любого объекта из единого полного списка:
    WSGI/ASGI/reconcile/target/mount/drop-in/logrotate/nginx/config/app/state;
-   при повторной проверке — валидный ownership journal и хеши;
+   неуспешный `id`, `getent` или `pg_lsclusters` считается ошибкой проверки, а
+   не отсутствием объекта;
 7. минимум 8 GiB free под `/var/lib` и 3 GiB `MemAvailable`;
 8. отсутствие symlink/junction/archive traversal, duplicates и undeclared
    package files;
@@ -42,13 +45,18 @@ Exec*-executables и runtime paths во временной копии unit, не
 code и продолжает проверять структуру, лимиты и связи. После install исходные
 units проверяются без подстановок, включая исполнимость Python/gunicorn/uvicorn.
 
-Повторный установленный verify не является полностью read-only: он различает
-выключенную и включённую фазу и проверяет backing
-file mount, фактические cgroup properties всех QA units, SQL max/role limits,
-Redis ACL от `sseqa`, synthetic fixture и точное значение kill switch. Для
-выключенной фазы PG/Redis кратко запускаются только на время проверки и снова
-останавливаются; частичный запуск также попадает под гарантированный cleanup,
-а неподтверждённая остановка завершает verify ошибкой.
+Начальный PASS подтверждает только доступность CLI, чтение controllers,
+`/dev/loop-control`, минимальные RAM/disk, отсутствие конфликтов и возможность
+bind четырёх loopback ports. Он не подтверждает созданный loop/mount,
+применённые cgroup limits/membership, runtime isolation, event-loop lag,
+сменный пик или nginx route: эти свойства возникают и проверяются только в
+install/enable/smoke либо отдельном наблюдении.
+
+Установленный/частичный QA начальный mode не проверяет: он отказывает до любого
+live-verify. Проверка backing file, применённых cgroup properties, SQL
+max/role limits, Redis ACL, fixture и kill switch остаётся частью отдельно
+разрешаемого install lifecycle. Автоматического перехода из preflight к нему
+нет.
 
 Пока `verify_sse_qa` не выполнен на сервере, доступность loop/cgroup и
 отсутствие новых конфликтов считаются **не установленными**, а не

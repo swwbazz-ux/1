@@ -17,7 +17,12 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     files = sorted(
         path for path in root.rglob("*")
-        if path.is_file() and path.relative_to(root).as_posix() not in EXCLUDED
+        if (
+            path.is_file()
+            and "__pycache__" not in path.relative_to(root).parts
+            and path.suffix not in {".pyc", ".pyo"}
+            and path.relative_to(root).as_posix() not in EXCLUDED
+        )
     )
     with (root / "PACKAGE_MANIFEST.csv").open("w", encoding="utf-8", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=("path", "size", "sha256"))

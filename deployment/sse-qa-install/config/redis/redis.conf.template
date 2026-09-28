@@ -13,6 +13,5 @@ maxmemory-policy noeviction
 maxclients 32
 timeout 0
 tcp-keepalive 30
-aclfile /etc/sse-qa/redis.acl
 loglevel notice
 logfile /srv/sse-qa/log/redis.log

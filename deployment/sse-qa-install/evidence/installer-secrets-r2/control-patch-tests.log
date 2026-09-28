@@ -1,0 +1,11 @@
+BASE=b222bfdbc0f739ead7d04cfd6e84f45e7f4ca419
+PATCH=C:\codex-tmp\sse-qa-diagnostics-local-20260928\deployment\sse-qa-install\github-actions\control-channel.patch
+GIT_APPLY_CHECK_EXIT=0
+GIT_APPLY_EXIT=0
+RELEASE_PROTOCOL_EXIT=0
+......................................
+----------------------------------------------------------------------
+Ran 38 tests in 0.514s
+
+OK
+GIT_DIFF_CHECK_EXIT=0

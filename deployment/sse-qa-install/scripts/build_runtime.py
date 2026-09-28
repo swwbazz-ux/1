@@ -58,8 +58,11 @@ def overlay_instrumentation(package: Path, target: Path) -> None:
     source_root = package / "app-overlay"
     backend = target.joinpath(*BACKEND.parts)
     for source in source_root.rglob("*"):
+        relative = source.relative_to(source_root)
+        if "__pycache__" in relative.parts or source.suffix in {".pyc", ".pyo"}:
+            continue
         if source.is_file():
-            destination = backend / source.relative_to(source_root)
+            destination = backend / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
