@@ -451,6 +451,57 @@ test("restart retries legacy inactive-equipment conflicts for a factual manual l
     }
 });
 
+test("restart resends a manual load refused as free_bucket_not_available and its chain", async () => {
+    const local = storage();
+    const loadPayload = {
+        manual_control: true, truck_id: 58, excavator_id: 7, dump_point_id: 3, rock_type_id: 2,
+        assignment_id: null, free_bucket_acceptance_id: null, free_bucket_acceptance_local_id: "fb-select-1",
+    };
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: event.event_id === "fb-load" ? "free_bucket_not_available" : "dependency_rejected",
+                message: event.event_id === "fb-load"
+                    ? "Свободный ковш уже отменён или закрыт."
+                    : "Предыдущее событие требует сверки или отклонено.",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "fb-load",
+        event_type: "driver.trip.loaded",
+        occurred_at: "2026-09-28T13:00:00.000Z",
+        local_trip_id: "fb-load",
+        payload: loadPayload,
+    });
+    await rejected.enqueue({
+        event_id: "fb-complete",
+        event_type: "driver.trip.manual_completed",
+        occurred_at: "2026-09-28T13:05:00.000Z",
+        local_trip_id: "fb-load",
+        depends_on: ["fb-load"],
+        payload: {manual_control: true, truck_id: 58, excavator_id: 7, dump_point_id: 3},
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await restarted.initialize();
+
+    assert.deepEqual(delivered.flat(), ["fb-load", "fb-complete"]);
+    assert.equal((await restarted.pending()).length, 0);
+});
+
 test("restart never retries a real domain conflict", async () => {
     const local = storage();
     const rejected = runtime({

@@ -728,6 +728,10 @@
             });
         }
 
+        // Локальный номер погрузки под текущее принятие — чтобы узнать завершение
+        // именно этого рейса (см. правило «на один рейс» в project()).
+        var bucketLoadLocalId = "";
+
         function project(events) {
             expireStateIfDue();
             var projected = normalizeState(state);
@@ -889,6 +893,36 @@
                     // на уже отклонённый выбор — правило 1, замкнутый круг с
                     // "review" больше не создаётся).
                     projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
+                }
+                /* Свободный ковш — на ОДИН рейс (владелец, 28.09.2026). Погрузка под
+                   это принятие переводит право в «использовано» (отменять больше
+                   нечего), а завершение этого рейса — разгрузка удержанием или
+                   завершение ручного рейса с круга — гасит режим сразу, на телефоне,
+                   не дожидаясь сервера: круг, барабан и кнопка ковша возвращаются к
+                   основному назначению. Рейс узнаётся по локальному номеру погрузки
+                   (ручной рейс) либо по факту: право уже «использовано» (сервер или
+                   местная погрузка), а у самосвала один открытый рейс — его разгрузка
+                   и есть разгрузка ковша. Отклонённые события не считаются. */
+                if (rejected || !projected.active) return;
+                if (event.event_type === "driver.trip.loaded") {
+                    var loadPayload = event.payload || {};
+                    var loadsThisBucket = (
+                        (positive(loadPayload.free_bucket_acceptance_id) && positive(loadPayload.free_bucket_acceptance_id) === projected.acceptance_id)
+                        || (text(loadPayload.free_bucket_acceptance_local_id) && text(loadPayload.free_bucket_acceptance_local_id) === projected.acceptance_local_id)
+                    );
+                    if (!loadsThisBucket) return;
+                    bucketLoadLocalId = text(event.local_trip_id);
+                    projected = normalizeState(Object.assign({}, projected, {status: "used", can_cancel: false, sync_mode: "local"}));
+                    return;
+                }
+                if (event.event_type === "driver.trip.manual_completed" || event.event_type === "driver.trip.unloaded") {
+                    var completesBucketTrip = (
+                        (bucketLoadLocalId && text(event.local_trip_id) === bucketLoadLocalId)
+                        || projected.status === "used"
+                    );
+                    if (!completesBucketTrip) return;
+                    bucketLoadLocalId = "";
+                    projected = normalizeState({active: false, status: "used", sync_mode: "local"});
                 }
             });
             state = projected;

@@ -1437,6 +1437,18 @@
         });
     }
 
+    /* Экскаватор для отмены/завершения — тот, у которого рейс ПОГРУЖЕН, а не базовый
+       контекст рабочего места. Базовый контекст при живом основном назначении всегда
+       основной экскаватор (readWorkspaceContext), и завершение рейса под свободным ковшом
+       уходило на сервер с подписью основного — сервер отвечал «рейс относится к другой
+       технике», рейс оставался открытым (стенд 28.09.2026). Порядок: погрузка из очереди
+       телефона → экскаватор активного рейса, отрисованный сервером → базовый контекст. */
+    function projectionExcavatorId(workspace, projection, context) {
+        return positive(projection && projection.payload && projection.payload.excavator_id)
+            || positive(workspace && workspace.dataset.driverManualExcavatorId)
+            || positive(context && context.excavator_id);
+    }
+
     function buildManualLoadCancelEvent(workspace, target, events) {
         if (!currentTripProjection || typeof root.createDriverManualLoadCancelledEvent !== "function") {
             throw new Error("offline_runtime_unavailable");
@@ -1451,7 +1463,7 @@
             localTripId: positive(projection.trip_id) ? "" : String(projection.local_trip_id || ""),
             loadEventId: String(projection.event_id || projection.local_trip_id || ""),
             truckId: positive(shell && shell.dataset.driverCurrentTruckId) || positive(context.truck_id),
-            excavatorId: positive(context.excavator_id) || positive(workspace.dataset.driverManualExcavatorId),
+            excavatorId: projectionExcavatorId(workspace, projection, context),
             dumpPointId: pointId,
             events: events,
             contextSnapshot: {
@@ -1490,7 +1502,7 @@
             localTripId: positive(projection.trip_id) ? "" : String(projection.local_trip_id || ""),
             loadEventId: String(projection.event_id || projection.local_trip_id || ""),
             truckId: positive(shell && shell.dataset.driverCurrentTruckId) || positive(context.truck_id),
-            excavatorId: positive(context.excavator_id) || positive(workspace.dataset.driverManualExcavatorId),
+            excavatorId: projectionExcavatorId(workspace, projection, context),
             dumpPointId: positive(target && target.dataset.eoDumpTarget)
                 || positive(projection.payload && projection.payload.dump_point_id),
             events: events,

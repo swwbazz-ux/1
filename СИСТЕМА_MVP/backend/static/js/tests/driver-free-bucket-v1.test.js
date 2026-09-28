@@ -847,6 +847,65 @@ test("a rejected local selection falls back to the server's live acceptance, not
     assert.equal(controller.state().active, true);
 });
 
+test("the one-load right is consumed by its load and switched off locally by that trip's completion", () => {
+    // Свободный ковш — на один рейс (владелец, 28.09.2026): погрузка под принятие
+    // переводит право в «использовано», завершение этого рейса гасит режим сразу,
+    // на телефоне; без завершения режим ещё активен.
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({active: false});
+    const selected = {
+        event_id: "select-one-load", event_type: "driver.free_bucket.selected", sequence: 1, state: "pending",
+        occurred_at: "2026-09-28T10:00:00Z", payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    };
+    const loaded = {
+        event_id: "manual-load-one", event_type: "driver.trip.loaded", sequence: 2, state: "pending",
+        local_trip_id: "manual-load-one", occurred_at: "2026-09-28T10:01:00Z",
+        payload: {truck_id: 17, excavator_id: 22, dump_point_id: 5, free_bucket_acceptance_local_id: "select-one-load"},
+    };
+    let projected = controller.project([selected, loaded]);
+    assert.equal(projected.active, true, "loaded but not yet unloaded: the mode stays on");
+    assert.equal(projected.status, "used");
+    assert.equal(projected.can_cancel, false);
+    const completed = {
+        event_id: "manual-complete-one", event_type: "driver.trip.manual_completed", sequence: 3, state: "pending",
+        local_trip_id: "manual-load-one", occurred_at: "2026-09-28T10:20:00Z", payload: {truck_id: 17},
+    };
+    projected = controller.project([selected, loaded, completed]);
+    assert.equal(projected.active, false, "completion of the bucket trip switches the mode off");
+    assert.equal(projected.status, "used");
+    assert.equal(controller.state().active, false);
+    // Отклонённое завершение режим не гасит.
+    const rejectedCompletion = Object.assign({}, completed, {event_id: "manual-complete-rejected", state: "conflict"});
+    assert.equal(controller.project([selected, loaded, rejectedCompletion]).active, true);
+});
+
+test("a right the server already marked used switches off on the driver's unload of that trip", () => {
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({
+        active: true, status: "used", can_cancel: false, acceptance_id: 9, selection: item(),
+        sync_mode: "server", version: 40, generated_at: "2026-09-28T10:05:00Z",
+    });
+    assert.equal(controller.project([]).active, true, "loaded by the excavator, not yet unloaded");
+    const projected = controller.project([{
+        event_id: "unload-9", event_type: "driver.trip.unloaded", sequence: 7, state: "pending",
+        trip_id: 451, occurred_at: "2026-09-28T10:25:00Z", payload: {trip_id: 451},
+    }]);
+    assert.equal(projected.active, false);
+    assert.equal(projected.status, "used");
+});
+
 test("missing or invalid server catalog keeps last-good snapshot", () => {
     const localStorage = storage();
     const controller = createDriverFreeBucketController({

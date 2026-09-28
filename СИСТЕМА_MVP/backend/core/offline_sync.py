@@ -1966,6 +1966,104 @@ def _driver_manual_primary_context(*, payload, context_snapshot):
     return authoritative, selected
 
 
+def _revive_cancelled_free_bucket_by_driver_load(acceptance, *, access, truck, occurred_at):
+    """Return a server-cancelled free-bucket right to life by the driver's load mark.
+
+    Бой 28.09.2026 (телефон владельца): водитель включил ковш, погрузился в ручном
+    режиме, отметка застряла в очереди, а сервер через 10 минут сам погасил
+    неподтверждённый запрос (expire_stale_free_bucket_requests). Когда отметка
+    дошла, ответ был «Свободный ковш уже отменён или закрыт» — погрузку отклонили,
+    за ней каскадом ещё пять отметок, три рейса не записаны. Нажатие водителя —
+    истина (правило владельца): погрузка была, значит право было. Снимаем отмену
+    и дальше идём обычным путём (приём отметкой водителя → USED). Не трогаем, только
+    если у самосвала уже живёт другое право — два открытых сразу база не допускает.
+    """
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    other_open = (
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .filter(
+            truck=truck,
+            status__in=(
+                FreeBucketAcceptanceStatus.REQUESTED,
+                FreeBucketAcceptanceStatus.ACCEPTED,
+                FreeBucketAcceptanceStatus.USED,
+            ),
+        )
+        .exclude(pk=acceptance.pk)
+        .first()
+    )
+    if other_open:
+        _log_discrepancy(
+            access=access,
+            code='free_bucket_cancelled_not_revived',
+            process='driver.trip.loaded',
+            description=(
+                f'отменённый ковш #{acceptance.id} не восстановлен: у самосвала открыт ковш #{other_open.id}'
+            ),
+        )
+        return acceptance
+    cancelled_at = acceptance.cancelled_at
+    acceptance.status = (
+        FreeBucketAcceptanceStatus.ACCEPTED
+        if acceptance.accepted_at
+        else FreeBucketAcceptanceStatus.REQUESTED
+    )
+    acceptance.cancelled_at = None
+    acceptance.save(update_fields=['status', 'cancelled_at'])
+    _log_discrepancy(
+        access=access,
+        code='free_bucket_cancelled_revived_by_driver_load',
+        process='driver.trip.loaded',
+        description=(
+            f'ковш #{acceptance.id} был отменён сервером '
+            f'{cancelled_at.isoformat() if cancelled_at else "?"}; '
+            f'погрузка водителя {occurred_at.isoformat()} записана по факту'
+        ),
+    )
+    return acceptance
+
+
+def _accept_free_bucket_by_driver_action(acceptance, *, access, excavator, accepted_at):
+    """Accept a still-REQUESTED free-bucket right by the driver's own manual load mark.
+
+    Машинист, если он сейчас на смене у экскаватора ковша (как считает пульт в
+    dispatcher_trip_commands), записывается принявшим — для отчётов это реальные
+    данные. Без открытой смены право принимается без машиниста: признак
+    accepted_by_driver_action допускает это по ограничениям модели. accepted_at —
+    ровно время погрузки, чтобы проверка «погрузка раньше приёма» не срабатывала.
+    """
+    from shifts.models import EmployeeShift
+    from trips.models import FreeBucketAcceptanceStatus
+
+    operator_shift = (
+        EmployeeShift.objects
+        .select_related('employee')
+        .filter(equipment=excavator, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    acceptance.operator = operator_shift.employee if operator_shift else None
+    acceptance.loading_shift = operator_shift
+    acceptance.accepted_by_driver_action = True
+    acceptance.status = FreeBucketAcceptanceStatus.ACCEPTED
+    acceptance.accepted_at = accepted_at
+    acceptance.save(update_fields=[
+        'operator', 'loading_shift', 'accepted_by_driver_action', 'status', 'accepted_at',
+    ])
+    _log_discrepancy(
+        access=access,
+        code='free_bucket_accepted_by_driver_action',
+        process='driver.trip.loaded',
+        description=(
+            f'запрос свободного ковша #{acceptance.id} принят отметкой водителя '
+            f'{accepted_at.isoformat()}; машинист на смене: '
+            f'{"есть" if operator_shift else "нет"}'
+        ),
+    )
+    return acceptance
+
+
 def _process_driver_loaded(access, normalized):
     """Create or attach one Driver manual-load event to the common Trip row."""
     from assignments.models import HaulAssignment, HaulAssignmentAction
@@ -2059,8 +2157,27 @@ def _process_driver_loaded(access, normalized):
                 'free_bucket_request_owner_changed',
                 'Запрос свободного ковша принадлежит другой смене водителя.',
             )
-        if not acceptance.accepted_at:
-            _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
+        if acceptance.status == FreeBucketAcceptanceStatus.CANCELLED:
+            acceptance = _revive_cancelled_free_bucket_by_driver_load(
+                acceptance, access=access, truck=truck, occurred_at=normalized['occurred_at'],
+            )
+        if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
+            # Ручной режим: машинист без приложения, подтверждать запрос некому —
+            # раньше здесь был retry «машинист ещё не подтвердил», и телефон водителя
+            # крутил его бесконечно (бой 28.09.2026: 260 попыток за ~38 минут, три
+            # рейса не записаны, вся очередь за первым событием). По правилу владельца
+            # в ручном режиме погрузку определяет водитель: его отметка сама принимает
+            # запрос временем погрузки. Машинист, если он на смене у этого экскаватора,
+            # записывается как принявший; без смены право живёт без машиниста
+            # (accepted_by_driver_action, см. ограничения FreeBucketAcceptance).
+            _accept_free_bucket_by_driver_action(
+                acceptance, access=access, excavator=excavator, accepted_at=normalized['occurred_at'],
+            )
+        if acceptance.status not in (
+            FreeBucketAcceptanceStatus.ACCEPTED,
+            FreeBucketAcceptanceStatus.USED,
+        ):
+            _conflict('free_bucket_not_available', 'Свободный ковш уже отменён или закрыт.')
         if normalized['occurred_at'] < acceptance.accepted_at:
             _conflict(
                 'free_bucket_load_before_accept',
@@ -2070,13 +2187,6 @@ def _process_driver_loaded(access, normalized):
             acceptance.requested_by = access.employee
             acceptance.requesting_shift = shift
             acceptance.save(update_fields=['requested_by', 'requesting_shift'])
-        if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
-            _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
-        if acceptance.status not in (
-            FreeBucketAcceptanceStatus.ACCEPTED,
-            FreeBucketAcceptanceStatus.USED,
-        ):
-            _conflict('free_bucket_not_available', 'Свободный ковш уже отменён или закрыт.')
         try:
             load_context = resolve_free_bucket_load_context(acceptance, payload)
         except ValidationError as error:
@@ -3579,11 +3689,29 @@ def _process_driver_manual_completed(access, normalized):
         truck_id=truck_id,
     )
     trip = _resolve_trip_reference(access, normalized)
-    if trip.truck_id != truck.id or trip.excavator_id != excavator.id:
+    if trip.truck_id != truck.id:
         _conflict(
             'driver_manual_trip_changed',
             'Текущий ручной рейс уже относится к другой технике.',
         )
+    if trip.excavator_id != excavator.id:
+        # Рейс назван однозначно (trip_id / local_trip_id) и принадлежит самосвалу
+        # этой смены — экскаватор в payload лишь подпись. Телефон подписывает
+        # завершение рейса под свободным ковшом основным экскаватором
+        # (driver-manual-excavator-workspace-v1.js берёт базовый контекст), и
+        # раньше это отвергалось как «другая техника»: рейс оставался открытым,
+        # а очередь телефона — в тупике (стенд 28.09.2026). Работник — истина:
+        # завершаем рейс по его собственному экскаватору, расхождение — в журнал.
+        _log_discrepancy(
+            access=access,
+            code='manual_complete_excavator_mismatch',
+            process='driver.trip.manual_completed',
+            description=(
+                f'рейс #{trip.id} экскаватора #{trip.excavator_id}, '
+                f'в отметке завершения экскаватор #{excavator.id}'
+            ),
+        )
+        excavator = trip.excavator
     if (
         trip.driver_id != access.employee_id
         or trip.driver_control_shift_id != shift.id
@@ -4311,10 +4439,60 @@ def process_one_offline_event(access, normalized):
                 device_clock_was_invalid = bool(
                     existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
                 )
+                dependency_chain_is_ready = False
+                if (
+                    normalized['role_code'] == 'driver'
+                    and existing.status == OfflineFieldEventStatus.CONFLICT
+                    and existing.error_code == 'dependency_rejected'
+                    and existing.depends_on
+                ):
+                    dependency_receipts = list(
+                        OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+                            event_id__in=existing.depends_on,
+                        )
+                    )
+                    dependency_chain_is_ready = bool(
+                        len(dependency_receipts) == len(set(existing.depends_on))
+                        and all(
+                            dependency.actor_id == access.employee_id
+                            and dependency.access_id == access.id
+                            and dependency.role_code == normalized['role_code']
+                            and dependency.device_id == normalized['device_id']
+                            and dependency.sequence < existing.sequence
+                            and dependency.status == OfflineFieldEventStatus.ACCEPTED
+                            for dependency in dependency_receipts
+                        )
+                    )
                 recoverable_clock_conflict = bool(
                     existing.status == OfflineFieldEventStatus.CONFLICT
-                    and existing.error_code == 'device_clock_ahead'
-                    and device_clock_was_invalid
+                    and (
+                        (
+                            normalized['role_code'] == 'driver'
+                            and (
+                                (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
+                                or dependency_chain_is_ready
+                                # Ручная погрузка под ковшом, который сервер сам погасил
+                                # до прихода отметки: теперь она записывается по факту
+                                # (_revive_cancelled_free_bucket_by_driver_load), а уже
+                                # отклонённая на телефоне — принимается при повторе.
+                                or (
+                                    existing.event_type == 'driver.trip.loaded'
+                                    and existing.error_code == 'free_bucket_not_available'
+                                )
+                            )
+                        )
+                        or (
+                            normalized['role_code'] == 'excavator_operator'
+                            and existing.error_code in {'device_clock_ahead', 'dependency_rejected'}
+                            and (
+                                device_clock_was_invalid
+                                or (
+                                    existing.error_code == 'dependency_rejected'
+                                    and _clock_skewed_dependency_exists(existing)
+                                )
+                            )
+                        )
+                    )
                 )
                 recoverable_worker_truth_conflict = bool(
                     existing.status == OfflineFieldEventStatus.CONFLICT
@@ -4331,7 +4509,14 @@ def process_one_offline_event(access, normalized):
                     # receipt time. The id, sequence, dependencies and raw
                     # device timestamp stay unchanged, so no duplicate action
                     # can be created and the dependent queue keeps its order.
-                    clock_adjusted = recoverable_clock_conflict
+                    clock_adjusted = bool(
+                        recoverable_clock_conflict
+                        and (
+                            device_clock_was_invalid
+                            if normalized['role_code'] == 'driver'
+                            else True
+                        )
+                    )
                     normalized['device_occurred_at'] = existing.occurred_at
                     normalized['received_at'] = existing.received_at
                     normalized['clock_adjusted'] = clock_adjusted

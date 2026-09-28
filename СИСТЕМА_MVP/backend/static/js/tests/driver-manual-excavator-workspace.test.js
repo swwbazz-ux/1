@@ -313,6 +313,31 @@ test("manual mode survives lower tabs and blocks ordinary mode during an active 
     assert.doesNotMatch(source, /localStorage|indexedDB|fetch\s*\(/);
 });
 
+test("cancel and completion are signed with the loaded trip's excavator, not the base context", () => {
+    // Базовый контекст при живом основном назначении — всегда основной экскаватор
+    // (readWorkspaceContext), и завершение рейса под свободным ковшом уходило с его
+    // подписью: сервер отвечал driver_manual_trip_changed, рейс оставался открытым
+    // (стенд 28.09.2026). Порядок: погрузка из очереди → экскаватор активного рейса
+    // от сервера → базовый контекст.
+    const source = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    assert.match(
+        source,
+        /function projectionExcavatorId\(workspace, projection, context\) \{\s*return positive\(projection && projection\.payload && projection\.payload\.excavator_id\)\s*\|\| positive\(workspace && workspace\.dataset\.driverManualExcavatorId\)\s*\|\| positive\(context && context\.excavator_id\);/,
+    );
+    assert.match(
+        source,
+        /createDriverManualLoadCancelledEvent\(\{[\s\S]*?excavatorId: projectionExcavatorId\(workspace, projection, context\)/,
+    );
+    assert.match(
+        source,
+        /createDriverManualCompletedEvent\(\{[\s\S]*?excavatorId: projectionExcavatorId\(workspace, projection, context\)/,
+    );
+    assert.doesNotMatch(
+        source,
+        /excavatorId: positive\(context\.excavator_id\) \|\| positive\(workspace\.dataset\.driverManualExcavatorId\)/,
+    );
+});
+
 test("only the active dump point exposes cancel and complete swipe cues", () => {
     const card = read("templates", "includes", "excavator_dashboard_dump_card.html");
     const css = read("static", "css", "driver-manual-excavator-workspace-v1.css");

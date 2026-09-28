@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v365'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v367'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4235,13 +4235,21 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         # и подменяла собой настоящее назначение — водитель видел старый
         # экскаватор, не мог ни выбрать другой, ни отменить этот.
         # Тот же общий признак «право активно», что у пульта и экскаваторщика
-        # (жива смена, не старше срока с момента включения), плюс погруженный
-        # рейс этой смены — его экран показывает до закрытия карточки.
+        # (жива смена, не старше срока с момента включения) — для запроса и
+        # принятия. Использованное право (USED) для экрана водителя живо только
+        # пока его рейс открыт: свободный ковш — на ОДИН рейс, после разгрузки
+        # режим сам выключается и остаётся основное назначение (владелец,
+        # 28.09.2026). Раньше USED считался активным до конца смены — режим
+        # оставался включённым после завершённого рейса. Пятиминутное окно
+        # карточки у экскаваторщика здесь не действует; статус USED остаётся
+        # в истории, ничего не отменяется задним числом.
         from trips.free_bucket import active_free_bucket_acceptance_filter
+        from trips.models import OPEN_TRIP_STATUSES
         active_acceptance = (
             FreeBucketAcceptance.objects
             .filter(
-                Q(status='used') | active_free_bucket_acceptance_filter(),
+                (active_free_bucket_acceptance_filter() & ~Q(status='used'))
+                | Q(status='used', used_trip__status__in=OPEN_TRIP_STATUSES),
                 truck=current_truck,
                 requesting_shift=open_shift,
             )

@@ -1316,6 +1316,46 @@ def calculate_progress_from_snapshot_facts(shift, facts=None):
     return result
 
 
+def calculate_plan_group_progress_from_facts(equipment, group, date, shift_type, facts=None):
+    """Calculate current-period progress when equipment has no shift snapshot."""
+    facts = normalize_trip_facts(facts)
+    result = {
+        'equipment': equipment,
+        'date': date,
+        'shift_type': shift_type,
+        'shift': None,
+        'plan': None,
+        'plan_group': group,
+        'plan_group_name': group.name if group else '',
+        'plan_status': PlanAssignmentStatus.NO_PLAN_GROUP,
+        'calculation_mode': group.calculation_mode if group else '',
+        'plan_value': None,
+        **facts,
+        'progress_percent': None,
+    }
+    if not group:
+        return result
+    if (
+        not group.is_active
+        or (group.active_from and date and group.active_from > date)
+        or not group.plan_value
+        or Decimal(group.plan_value) <= 0
+    ):
+        result['plan_status'] = PlanAssignmentStatus.NO_ACTIVE_PLAN
+        return result
+
+    result['plan_status'] = PlanAssignmentStatus.ASSIGNED
+    result['plan_value'] = group.plan_value
+    if group.calculation_mode == PlanCalculationMode.TRIPS:
+        progress_percent = percent(result['trip_count'], group.plan_value)
+    elif group.calculation_mode == PlanCalculationMode.TONNAGE:
+        progress_percent = percent(result['tonnage'], group.plan_value)
+    else:
+        progress_percent = percent(result['volume_m3'], group.plan_value)
+    result['progress_percent'] = progress_percent
+    return result
+
+
 def calculate_progress_from_snapshot(shift, trips):
     return calculate_progress_from_snapshot_facts(shift, aggregate_trip_facts(trips))
 
