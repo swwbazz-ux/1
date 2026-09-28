@@ -584,6 +584,123 @@ class RouteProjectionAdapterTests(TestCase):
         )
         self.assertIn('local_trip_binding_ambiguous', evidence.incomplete_reasons)
 
+    def test_conflict_from_foreign_local_original_is_not_collected(self):
+        trip_x = self.factory_trip()
+        trip_y = self.legacy_trip(truck=self.other_truck)
+        local_trip_id = 'p28-local-origin-foreign'
+        self.local_receipt(
+            event_id='p28-map-origin-own', sequence=1,
+            actor=self.driver, access=self.driver_access,
+            device='p28-origin-own-device', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.ACCEPTED,
+            trip=trip_x, event_type='driver.trip.loaded',
+        )
+        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
+            self.other_truck,
+            full_name='P28 I2 R2 foreign original driver',
+            access_code='928113',
+        )
+        foreign_original = self.local_receipt(
+            event_id='p28-origin-foreign-id', sequence=2,
+            actor=other_driver, access=other_access,
+            device='p28-origin-foreign-device', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.RETRY,
+        )
+        conflict = OfflineFieldEventConflict.objects.create(
+            attempted_event_id=foreign_original.event_id,
+            actor=other_driver,
+            access=other_access,
+            role_code='driver',
+            device_id='p28-origin-foreign-device',
+            fingerprint='p28-origin-foreign-repeat',
+            code='event_id_reused',
+            submitted_event={
+                'event_id': foreign_original.event_id,
+                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
+                'role_code': 'driver',
+                'trip_id': trip_y.pk,
+                'occurred_at': timezone.now().isoformat(),
+                'payload': {
+                    'trip_id': trip_y.pk,
+                    'dump_point_id': self.other_dump.pk,
+                },
+            },
+            existing_event=foreign_original,
+        )
+
+        evidence = read_trip_route_evidence(trip_x.pk)
+
+        conflict_pks = {
+            item['source_pk'] for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event_conflict'
+        }
+        self.assertNotIn(conflict.pk, conflict_pks)
+        self.assertNotEqual(evidence.projection.status, 'integrity_conflict')
+
+    def test_conflict_from_ambiguous_local_original_is_not_collected(self):
+        trip_x = self.factory_trip()
+        trip_y = self.legacy_trip(truck=self.other_truck)
+        truck_z = Equipment.objects.create(
+            equipment_type=self.truck_type,
+            model=self.truck_model,
+            garage_number='P28-R2-AMB-Z',
+        )
+        trip_z = self.legacy_trip(truck=truck_z)
+        local_trip_id = 'p28-local-origin-ambiguous'
+        common = {
+            'actor': self.driver,
+            'access': self.driver_access,
+            'device': 'p28-origin-ambiguous-device',
+            'local_trip_id': local_trip_id,
+            'status': OfflineFieldEventStatus.ACCEPTED,
+            'event_type': 'driver.trip.loaded',
+        }
+        self.local_receipt(
+            event_id='p28-map-origin-ambiguous-x', sequence=1,
+            trip=trip_x, **common,
+        )
+        self.local_receipt(
+            event_id='p28-map-origin-ambiguous-y', sequence=2,
+            trip=trip_y, **common,
+        )
+        ambiguous_original = self.local_receipt(
+            event_id='p28-origin-ambiguous-id', sequence=3,
+            actor=self.driver, access=self.driver_access,
+            device='p28-origin-ambiguous-device', local_trip_id=local_trip_id,
+            status=OfflineFieldEventStatus.RETRY,
+        )
+        conflict = OfflineFieldEventConflict.objects.create(
+            attempted_event_id=ambiguous_original.event_id,
+            actor=self.driver,
+            access=self.driver_access,
+            role_code='driver',
+            device_id='p28-origin-ambiguous-device',
+            fingerprint='p28-origin-ambiguous-repeat',
+            code='event_id_reused',
+            submitted_event={
+                'event_id': ambiguous_original.event_id,
+                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
+                'role_code': 'driver',
+                'trip_id': trip_z.pk,
+                'occurred_at': timezone.now().isoformat(),
+                'payload': {
+                    'trip_id': trip_z.pk,
+                    'dump_point_id': self.other_dump.pk,
+                },
+            },
+            existing_event=ambiguous_original,
+        )
+
+        evidence = read_trip_route_evidence(trip_x.pk)
+
+        conflict_pks = {
+            item['source_pk'] for item in evidence.sources
+            if item['source_kind'] == 'offline_field_event_conflict'
+        }
+        self.assertNotIn(conflict.pk, conflict_pks)
+        self.assertNotEqual(evidence.projection.status, 'integrity_conflict')
+        self.assertIn('local_trip_binding_ambiguous', evidence.incomplete_reasons)
+
     def test_conflicting_local_reference_keeps_authenticated_and_claimed_authors_separate(self):
         trip_x = self.factory_trip()
         trip_y = self.legacy_trip(truck=self.other_truck)

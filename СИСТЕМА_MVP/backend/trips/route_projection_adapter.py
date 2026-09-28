@@ -649,6 +649,16 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         .order_by('attempted_event_id', 'pk')
     )
     direct_conflict_pks = {item.pk for item in direct_conflicts}
+    original_receipt_conflicts = list(
+        OfflineFieldEventConflict.objects
+        .filter(existing_event_id__in=receipt_by_pk)
+        .select_related('existing_event', 'actor', 'access')
+        .distinct()
+        .order_by('attempted_event_id', 'pk')
+    ) if receipt_by_pk else []
+    original_receipt_conflict_pks = {
+        item.pk for item in original_receipt_conflicts
+    }
     locally_bound_conflicts = list(
         OfflineFieldEventConflict.objects
         .filter(_conflict_scope_query(resolved_scopes))
@@ -657,6 +667,7 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         .order_by('attempted_event_id', 'pk')
     ) if resolved_scopes else []
     conflict_by_pk = {item.pk: item for item in direct_conflicts}
+    conflict_by_pk.update({item.pk: item for item in original_receipt_conflicts})
     conflict_by_pk.update({item.pk: item for item in locally_bound_conflicts})
     conflicts = sorted(
         conflict_by_pk.values(), key=lambda item: (item.attempted_event_id, item.pk),
@@ -665,7 +676,15 @@ def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
         item.pk: (
             'direct_trip_reference'
             if item.pk in direct_conflict_pks
-            else 'resolved_local_trip_reference'
+            else (
+                'original_receipt_'
+                + receipt_associations[item.existing_event_id]
+                if (
+                    item.pk in original_receipt_conflict_pks
+                    and item.existing_event_id in receipt_associations
+                )
+                else 'resolved_local_trip_reference'
+            )
         )
         for item in conflicts
     }
