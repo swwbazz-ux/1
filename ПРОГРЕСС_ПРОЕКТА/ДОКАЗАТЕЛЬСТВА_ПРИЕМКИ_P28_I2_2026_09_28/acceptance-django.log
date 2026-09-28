@@ -1,0 +1,239 @@
+CANDIDATE_HEAD=e1cdef3c319889662985a65909726130a596a3c6 SOURCE_CLEAN=True
+ISOLATED_P28_I2 django=6.0.8 vendor=sqlite db=:memory:
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Found 20 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying users.0001_initial... OK
+  Applying references.0001_initial... OK
+  Applying users.0002_driverprimaryregistration... OK
+  Applying users.0003_employee_comment_employee_dismissed_at_and_more... OK
+  Applying users.0004_remove_driverprimaryregistration_shift_type_and_more... OK
+  Applying users.0005_employee_position... OK
+  Applying users.0006_remove_global_unique_access_code... OK
+  Applying users.0007_deduplicate_employee_accesses... OK
+  Applying users.0008_remove_employeeaccess_unique_employee_role_access... OK
+  Applying shifts.0001_initial... OK
+  Applying trips.0001_initial... OK
+  Applying trips.0002_trip_downtime_text_trip_loading_block_and_more... OK
+  Applying shifts.0002_employeeshift_end_engine_hours_and_more... OK
+  Applying assignments.0001_initial... OK
+  Applying trips.0003_dispatcheractionlog... OK
+  Applying trips.0004_dispatcheractionlog_reason... OK
+  Applying trips.0005_truck_loaded_action... OK
+  Applying references.0002_equipmentstate... OK
+  Applying trips.0006_trip_actual_dump_point_trip_assigned_dump_point... OK
+  Applying trips.0007_alter_trip_status... OK
+  Applying trips.0008_trip_cancelled_at... OK
+  Applying users.0009_employee_oup_fields_and_audit_target... OK
+  Applying users.0010_normalize_activated_employee_status... OK
+  Applying users.0011_adminactionlog_reversal... OK
+  Applying references.0003_remove_in_transit_and_rename_free... OK
+  Applying shifts.0003_shiftplan_equipmentshiftplan... OK
+  Applying shifts.0004_shiftplan_plan_scope... OK
+  Applying shifts.0005_employeeshift_plan_assigned_at_and_more... OK
+  Applying shifts.0006_reconcile_equipment_plan_groups... OK
+  Applying references.0004_update_free_color_semantics... OK
+  Applying shifts.0007_achievementprize_achievementunlock... OK
+  Applying shifts.0008_employeeshift_unique_open_shift_per_employee_and_more... OK
+  Applying references.0005_equipmentmodel_fuel_capacity_limit_l... OK
+  Applying references.0006_assign_excavator_fuel_limit_models... OK
+  Applying shifts.0009_shiftclientaction_shiftreadingcorrection... OK
+  Applying shifts.0010_alter_shiftreadingcorrection_employee_and_more... OK
+  Applying shifts.0011_employeeshift_workplace_code... OK
+  Applying references.0007_assign_truck_fuel_limits... OK
+  Applying users.0012_personnel_positions_and_temporary_transfers... OK
+  Applying users.0013_normalize_department_work_schedule... OK
+  Applying users.0014_allow_work_schedules_without_brigades... OK
+  Applying users.0015_seed_rotation_roles... OK
+  Applying users.0016_watchcomposition_employee_watch_composition... OK
+  Applying users.0017_employee_sex... OK
+  Applying shifts.0012_watchperiod_watch_composition... OK
+  Applying shifts.0013_unique_open_oup_period... OK
+  Applying shifts.0014_watch_period_brigade_phases... OK
+  Applying shifts.0015_brigade_phase_actor_accesses... OK
+  Applying assignments.0002_excavatorplacement... OK
+  Applying assignments.0003_excavatorplacement_loading_block_and_more... OK
+  Applying assignments.0004_haulassignment_action_haulassignment_effective_at... OK
+  Applying assignments.0005_equipmentassignment_ended_by_and_more... OK
+  Applying assignments.0006_crewplan_crewplanslot_and_more... OK
+  Applying assignments.0007_equipment_assignment_provenance... OK
+  Applying assignments.0008_crew_plan_secondary_employee... OK
+  Applying assignments.0009_excavatorplacement_transport_distance_km... OK
+  Applying assignments.0010_excavatordumppointsetting... OK
+  Applying assignments.0011_haul_assignment_open_state_constraints... OK
+  Applying assignments.0012_haul_assignment_handoff... OK
+  Applying assignments.0013_numbered_shift_labels... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying users.0018_employee_watch_profile_guard... OK
+  Applying users.0019_activeapplicationsession... OK
+  Applying users.0020_pushnotification_webpushsubscription... OK
+  Applying users.0021_client_error_report... OK
+  Applying users.0022_employee_protected_card... OK
+  Applying users.0023_activeapplicationsession_presence... OK
+  Applying users.0024_employee_contractor_access_from_and_more... OK
+  Applying references.0008_equipment_contractor_organization... OK
+  Applying trips.0009_unique_open_trip_per_truck... OK
+  Applying trips.0010_dispatcher_manual_trip_action... OK
+  Applying shifts.0016_numbered_shift_labels... OK
+  Applying shifts.0017_drivershiftreadingconfirmation... OK
+  Applying references.0009_link_legacy_rock_capacity_rules... OK
+  Applying references.0010_remove_obsolete_cargo_aliases... OK
+  Applying shifts.0018_excavatorshiftreadingconfirmation... OK
+  Applying trips.0011_manual_loading_participation... OK
+  Applying trips.0012_trip_offline_loading_times... OK
+  Applying shifts.0019_employeeshift_service_close_kind... OK
+  Applying downtimes.0001_initial... OK
+  Applying downtimes.0002_seed_mechanic_reasons... OK
+  Applying downtimes.0003_alter_downtimereason_options_and_more... OK
+  Applying downtimes.0004_update_downtime_reason_state_semantics... OK
+  Applying downtimes.0005_downtime_actor_subject... OK
+  Applying core.0001_initial... OK
+  Applying core.0002_operationalstateevent... OK
+  Applying core.0003_offline_field_event... OK
+  Applying portal.0001_initial... OK
+  Applying portal.0002_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0003_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0004_publication_portal_public_story_requires_consent_and_more... OK
+  Applying reports.0001_initial... OK
+  Applying reports.0002_reporttemplate_filters... OK
+  Applying reports.0003_reporttemplate_group_by... OK
+  Applying reports.0004_reporttemplate_column_labels... OK
+  Applying reports.0005_pilotfeedback... OK
+  Applying reports.0006_driver_shift_passport_snapshots... OK
+  Applying reports.0007_ratingperiod... OK
+  Applying reports.0008_ratingperiod_nominal_starts_on... OK
+  Applying reports.0009_driver_rating_period_materialized_snapshot... OK
+  Applying reports.0010_driverratingperiodmaterializedsnapshot_participant_group_snapshots... OK
+  Applying reports.0011_driver_rating_materialized_group_key... OK
+  Applying reports.0012_numbered_shift_labels... OK
+  Applying settlement.0001_initial... OK
+  Applying settlement.0002_settlementrevision_accommodationanchor_and_more... OK
+  Applying settlement.0003_employeebedoccupancy... OK
+  Applying settlement.0004_employeebedoccupancy_temporal_fields... OK
+  Applying settlement.0005_physical_room_sex_restriction... OK
+  Applying settlement.0006_remove_legacy_occupancy_constraints... OK
+  Applying settlement.0007_settlement_control_lease_and_event... OK
+  Applying settlement.0008_m4_calendar_slots_and_bindings... OK
+  Applying settlement.0009_m5_authoritative_cohorts... OK
+  Applying settlement.0010_settlement_residents... OK
+  Applying settlement.0011_resident_subject_transition... OK
+  Applying settlement.0012_m7_saved_previews... OK
+  Applying settlement.0013_resident_occupancy_subject... OK
+  Applying settlement.0014_m8_apply_provenance... OK
+  Applying settlement.0015_cohort_member_work_shift... OK
+  Applying settlement.0016_shift_scoped_apply_and_occupancy... OK
+  Applying settlement.0017_m9_preview_corrections... OK
+  Applying rotations.0001_initial... OK
+  Applying rotations.0002_arrival_roster_versions... OK
+  Applying rotations.0003_arrival_roster_manual_review... OK
+  Applying rotations.0004_arrival_roster_employee_pool... OK
+  Applying rotations.0005_arrival_roster_confirmation... OK
+  Applying rotations.0006_arrival_roster_excel_revision... OK
+  Applying rotations.0007_arrival_roster_routing... OK
+  Applying rotations.0008_employee_watch_profile_change... OK
+  Applying rotations.0009_numbered_shift_labels... OK
+  Applying sessions.0001_initial... OK
+  Applying settlement.0018_arrival_roster_cohort_provenance... OK
+  Applying settlement.0019_cohort_member_watch_profile_provenance... OK
+  Applying shifts.0020_shiftclientaction_request_signature... OK
+  Applying users.0025_employeeaccess_driver_quick_reasons... OK
+  Applying users.0026_native_push_device... OK
+  Applying trips.0013_free_bucket_acceptance... OK
+  Applying trips.0014_free_bucket_acceptance_active_constraint... OK
+  Applying trips.0015_free_bucket_driver_request... OK
+  Applying trips.0016_trip_driver_device_load_time... OK
+  Applying trips.0017_free_bucket_accepted_by_driver_action...test_adapter_import_has_no_database_queries_or_registration_side_effects (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_adapter_import_has_no_database_queries_or_registration_side_effects) ... ok
+test_cancelled_driver_unload_and_service_completion_have_distinct_terminal_bases (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_cancelled_driver_unload_and_service_completion_have_distinct_terminal_bases) ... ok
+test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload) ... ok
+test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event) ... ok
+test_incompatible_event_id_is_found_for_original_and_submitted_trips_without_touching_third (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_incompatible_event_id_is_found_for_original_and_submitted_trips_without_touching_third) ... ok
+test_no_change_retry_and_conflict_are_evidence_but_not_applied_route_inputs (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_no_change_retry_and_conflict_are_evidence_but_not_applied_route_inputs) ... ok
+test_real_offline_point_change_exposes_identity_actor_and_both_times_without_promoting_depends_on (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_real_offline_point_change_exposes_identity_actor_and_both_times_without_promoting_depends_on) ... ok
+test_real_report_correction_keeps_administrator_separate_from_driver (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_real_report_correction_keeps_administrator_separate_from_driver) ... ok
+test_repeated_reads_are_stable_and_execute_no_dml_or_operational_side_effects (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_repeated_reads_are_stable_and_execute_no_dml_or_operational_side_effects) ... ok
+test_shift_handover_and_foreign_excavator_contexts_remain_separate (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_shift_handover_and_foreign_excavator_contexts_remain_separate) ... ok
+test_uncontrolled_lifecycle_separates_technical_positive_and_possible_replacement (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_uncontrolled_lifecycle_separates_technical_positive_and_possible_replacement) ... ok
+test_dump_point_a_to_b_to_a_keeps_distinct_ordered_events (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_a_to_b_to_a_keeps_distinct_ordered_events) ... ok
+test_dump_point_current_choice_is_accepted_without_business_change (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_current_choice_is_accepted_without_business_change) ... ok
+test_dump_point_change_and_dependent_unload_complete_same_exact_trip (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_change_and_dependent_unload_complete_same_exact_trip) ... ok
+test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state (core.test_offline_sync.OfflineEventSyncTests.test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state) ... ok
+test_local_reference_retry_is_collected_after_binding_exists (probe_adapter.AdapterAcceptanceProbes.test_local_reference_retry_is_collected_after_binding_exists) ...  OK
+System check identified no issues (0 silenced).
+P28_I2_PROBE {"case": "local_reference_pending", "server": {"event_id": "probe-pending", "status": "retry", "retryable": true, "code": "trip_reference_pending", "message": "Связанный рейс ещё не подтверждён сервером.", "server_ids": {}, "server_received_at": "2026-09-28T13:32:04.832299+00:00", "version": null}, "existing_resolver_trip_id": 1, "collected_event_ids": ["probe-load-map"], "missing_expected_event": "probe-pending"}
+FAIL
+test_raw_id_conflict_survives_route_normalization (probe_adapter.AdapterAcceptanceProbes.test_raw_id_conflict_survives_route_normalization) ... P28_I2_PROBE {"case": "raw_identity_collision", "server": {"event_id": "probe-id", "status": "conflict", "retryable": false, "code": "event_id_reused", "message": "Идентификатор уже использован для другого события.", "server_ids": {}, "server_received_at": "2026-09-28T13:32:04.956328+00:00", "version": null}, "projection": "causality_incomplete", "diagnostics": ["legacy_history_incomplete"], "conflict_sources": 1, "expected": "integrity_conflict"}
+FAIL
+test_accepted_late_duplicate_is_not_the_original_loading_source (probe_load_origin.LateLoadOriginProbe.test_accepted_late_duplicate_is_not_the_original_loading_source) ... offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=3 role=6 — Опоздавшее событие погрузки самосвала Самосвал 21 на 2026-09-28 13:14:05.031828+00:00 попадает в окно уже известного рейса #1 — та же погрузка, повторно отмеченная. Новый рейс не создан, действующий рейс #2 не тронут.
+FAIL
+test_transferred_core_keeps_r1_collision_and_incomplete_history_guards (trips.test_route_projection_adapter.RouteProjectionCoreProvenanceTests.test_transferred_core_keeps_r1_collision_and_incomplete_history_guards) ... ok
+test_transferred_r1_core_has_the_accepted_git_blob (trips.test_route_projection_adapter.RouteProjectionCoreProvenanceTests.test_transferred_r1_core_has_the_accepted_git_blob) ... ok
+
+======================================================================
+FAIL: test_local_reference_retry_is_collected_after_binding_exists (probe_adapter.AdapterAcceptanceProbes.test_local_reference_retry_is_collected_after_binding_exists)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/p28-i2-review/probe_adapter.py", line 78, in test_local_reference_retry_is_collected_after_binding_exists
+    self.assertIn(early['event_id'], event_ids)
+AssertionError: 'probe-pending' not found in ['probe-load-map']
+
+======================================================================
+FAIL: test_raw_id_conflict_survives_route_normalization (probe_adapter.AdapterAcceptanceProbes.test_raw_id_conflict_survives_route_normalization)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/p28-i2-review/probe_adapter.py", line 44, in test_raw_id_conflict_survives_route_normalization
+    self.assertEqual(evidence.projection.status, 'integrity_conflict')
+AssertionError: 'causality_incomplete' != 'integrity_conflict'
+- causality_incomplete
++ integrity_conflict
+
+
+======================================================================
+FAIL: test_accepted_late_duplicate_is_not_the_original_loading_source (probe_load_origin.LateLoadOriginProbe.test_accepted_late_duplicate_is_not_the_original_loading_source)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/p28-i2-review/probe_load_origin.py", line 145, in test_accepted_late_duplicate_is_not_the_original_loading_source
+    self.assertEqual(observed, {
+AssertionError: {'synthetic': False, 'loading_actor_id': '3', 'loading_[36 chars]gin'} != {'synthetic': True, 'loading_actor_id': '1', 'loading_r[39 chars]hot'}
+- {'loading_actor_id': '3',
+?                       ^
+
++ {'loading_actor_id': '1',
+?                       ^
+
+-  'loading_reference': 'astra-late-load-not-origin',
++  'loading_reference': 'source:trip:1:loading_snapshot',
+-  'synthetic': False}
+?               ^^^^
+
++  'synthetic': True}
+?               ^^^
+
+
+----------------------------------------------------------------------
+Ran 20 tests in 1.955s
+
+FAILED (failures=3)
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+TRACE_LATE_LOAD_ORIGIN {"path": "real process_offline_batch -> _process_excavator_loaded -> _process_late_excavator_load same_load", "result": {"event_id": "astra-late-load-not-origin", "status": "accepted", "retryable": false, "code": "", "message": "", "server_ids": {"trip_id": 1, "shift_id": 3, "event_receipt_id": 1}, "server_received_at": "2026-09-28T13:32:05.054347+00:00", "version": 29}, "original_trip_id": 1, "original_actor_id": 1, "late_duplicate_actor_id": 3, "load_action_count_for_duplicate": 0, "observed": {"synthetic": false, "loading_actor_id": "3", "loading_reference": "astra-late-load-not-origin"}, "incomplete_reasons": ["dedicated_route_event_journal_absent", "replacement_link_missing", "ui_observation_not_recorded"]}

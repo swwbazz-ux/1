@@ -1,0 +1,56 @@
+{
+  "candidate": "e1cdef3c319889662985a65909726130a596a3c6",
+  "docs": "6ada74a87e9fa356f22b39f06c69c6e684760d34",
+  "manifest_checks": [
+    {
+      "path": "candidate:СИСТЕМА_MVP/backend/trips/route_projection_adapter.py",
+      "sha256": "e5ce3431598746613d22376d1b59401d54ba4d668c51945969b7c70f684af2f5",
+      "manifest_match": true,
+      "checkout_matches_published": true
+    },
+    {
+      "path": "candidate:СИСТЕМА_MVP/backend/trips/route_projection_core.py",
+      "sha256": "335cd1400f1783fa9837160c364c2bc3c66b49a86db89e7acd7ba463b92b1a90",
+      "manifest_match": true,
+      "checkout_matches_published": true
+    },
+    {
+      "path": "candidate:СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py",
+      "sha256": "c4b58c3315b6656cfbe24d069a387d4060f86fac5f081964a4affb3d936bf720",
+      "manifest_match": true,
+      "checkout_matches_published": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ДОКАЗАТЕЛЬСТВА_P28_I2_2026_09_28.md",
+      "sha256": "53224a7af6d19b6c9ab188895f273854b37f0e9cd89fdcde42c8d4474dbe0ef5",
+      "manifest_match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_2026_09_28/README.md",
+      "sha256": "7e9fa2dc4c0cb973b14df20162b2b8d17d28d33cea91803adbfee4ea3b0199ca",
+      "manifest_match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_2026_09_28/run.ps1",
+      "sha256": "7b50d6cbbbcf11ce8f7fe891750dc8a91d6f05b738524c2969c4c7a9a023d687",
+      "manifest_match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_2026_09_28/candidate-tests-utf8.log",
+      "sha256": "52a4870e5cb6abeb5b73ff9f7d2b5fc49bbe4f532bade2e1e33b60ea96b3f368",
+      "manifest_match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_2026_09_28/r1-replay-utf8.log",
+      "sha256": "d3cb243e16887339a71944d31602b6a01383cf36167dbe870fb52eea9a6de677",
+      "manifest_match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_2026_09_28/checks-utf8.log",
+      "sha256": "796b2b75691555fe3b5061f8d682b48437bb2ed9866226f52c349f113048f188",
+      "manifest_match": true
+    }
+  ],
+  "accepted_core_blob": "64b2519fb8bb0874012577fd2d779d7b9a619b74",
+  "all_pass": true
+}
