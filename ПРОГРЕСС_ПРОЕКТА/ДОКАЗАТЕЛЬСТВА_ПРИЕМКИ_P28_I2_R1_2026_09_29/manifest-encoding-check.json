@@ -1,0 +1,58 @@
+[
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ОТЧЕТ_P28_I2_R1_2026_09_29.md",
+    "expected": "f48b808b1f0cd2fa96798571a7c067adb8d7e75397a4ceddf7f633314c04922b",
+    "sha256": "f48b808b1f0cd2fa96798571a7c067adb8d7e75397a4ceddf7f633314c04922b",
+    "lf_matches": true,
+    "crlf_matches": false
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R1_2026_09_29/README.md",
+    "expected": "2e120d12098a6ab0cd5824f0c243c629b07f6ed9a804fe840485ab3cd931ea15",
+    "sha256": "2e120d12098a6ab0cd5824f0c243c629b07f6ed9a804fe840485ab3cd931ea15",
+    "lf_matches": true,
+    "crlf_matches": false
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R1_2026_09_29/run_isolated_r1.py",
+    "expected": "142f6c430aa214556454a61e250237a6d481ffe4289c1acd46cbf71ce693442e",
+    "sha256": "142f6c430aa214556454a61e250237a6d481ffe4289c1acd46cbf71ce693442e",
+    "lf_matches": true,
+    "crlf_matches": false
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/README.md",
+    "expected": "c1bc1df569db0b70cc1deee333294ffb9bdf5526184e2a56d1d9ceeb8bd91f5b",
+    "sha256": "c1bc1df569db0b70cc1deee333294ffb9bdf5526184e2a56d1d9ceeb8bd91f5b",
+    "lf_matches": true,
+    "crlf_matches": false
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/manifest-verification.json",
+    "expected": "0f972447b3b7977d4a88dc130a49cbd245d8ef44b39306ac657f39ec79b00a0b",
+    "sha256": "0f972447b3b7977d4a88dc130a49cbd245d8ef44b39306ac657f39ec79b00a0b",
+    "lf_matches": true,
+    "crlf_matches": false
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/isolated-replay.log",
+    "expected": "626e18745dd5464ffb8a6f153760ac7d8dfab2991aa9b4ab03d219d7d39d3321",
+    "sha256": "3e4dd3071ec3722b7a43953a4702829b8c0f42916e646e4defe3987fcdbb9d57",
+    "lf_matches": false,
+    "crlf_matches": true
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/clean-gate.log",
+    "expected": "2d4305ed4c93ecbd54a1ec6a123a72b909f7935240cb6ed2d9c375f632ae53cc",
+    "sha256": "9bb8953741c811e276f2013b81266d5a502c39a54a64dd1ba119b3abef33c30e",
+    "lf_matches": false,
+    "crlf_matches": true
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/dirty-gate.log",
+    "expected": "dd656f897b53be7c8b505d8a973495009b1878b1ee490970f2172f16fd127745",
+    "sha256": "aa6dceee9ea7f1ebab3653c773c1e336687e9bc7798e0d90de828208e3fd9eaf",
+    "lf_matches": false,
+    "crlf_matches": true
+  }
+]

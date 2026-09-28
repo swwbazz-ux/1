@@ -1,0 +1,83 @@
+{
+  "docs_sha": "c8d08c7f36b2a6b1eab10fdfd01535069bc98384",
+  "entries": [
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ОТЧЕТ_P28_I2_R1_2026_09_29.md",
+      "expected": "f48b808b1f0cd2fa96798571a7c067adb8d7e75397a4ceddf7f633314c04922b",
+      "actual_git_blob_sha256": "f48b808b1f0cd2fa96798571a7c067adb8d7e75397a4ceddf7f633314c04922b",
+      "match": true,
+      "git_blob": "0b7bd23c61e49ee784ed800788436c86cf483e1b",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R1_2026_09_29/README.md",
+      "expected": "2e120d12098a6ab0cd5824f0c243c629b07f6ed9a804fe840485ab3cd931ea15",
+      "actual_git_blob_sha256": "2e120d12098a6ab0cd5824f0c243c629b07f6ed9a804fe840485ab3cd931ea15",
+      "match": true,
+      "git_blob": "a6d7415bd90f2f2acc2df4a3577bcd8b46f67df4",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R1_2026_09_29/run_isolated_r1.py",
+      "expected": "142f6c430aa214556454a61e250237a6d481ffe4289c1acd46cbf71ce693442e",
+      "actual_git_blob_sha256": "142f6c430aa214556454a61e250237a6d481ffe4289c1acd46cbf71ce693442e",
+      "match": true,
+      "git_blob": "0175fa412aa4246e4f066c7f979c3e2676670dd0",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/README.md",
+      "expected": "c1bc1df569db0b70cc1deee333294ffb9bdf5526184e2a56d1d9ceeb8bd91f5b",
+      "actual_git_blob_sha256": "c1bc1df569db0b70cc1deee333294ffb9bdf5526184e2a56d1d9ceeb8bd91f5b",
+      "match": true,
+      "git_blob": "4c774ed4e407e4277c038f9e46ced30bebdc0721",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/manifest-verification.json",
+      "expected": "0f972447b3b7977d4a88dc130a49cbd245d8ef44b39306ac657f39ec79b00a0b",
+      "actual_git_blob_sha256": "0f972447b3b7977d4a88dc130a49cbd245d8ef44b39306ac657f39ec79b00a0b",
+      "match": true,
+      "git_blob": "f144edbe2fa6c227cbc8837a297805f2b511257e",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/isolated-replay.log",
+      "expected": "626e18745dd5464ffb8a6f153760ac7d8dfab2991aa9b4ab03d219d7d39d3321",
+      "actual_git_blob_sha256": "3e4dd3071ec3722b7a43953a4702829b8c0f42916e646e4defe3987fcdbb9d57",
+      "match": false,
+      "git_blob": "a72a8ad6503fa76d95bb3ba383dc244d90815aa3",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/clean-gate.log",
+      "expected": "2d4305ed4c93ecbd54a1ec6a123a72b909f7935240cb6ed2d9c375f632ae53cc",
+      "actual_git_blob_sha256": "9bb8953741c811e276f2013b81266d5a502c39a54a64dd1ba119b3abef33c30e",
+      "match": false,
+      "git_blob": "c1cd089d420f925d60937aa6f70f6eb56a03a38c",
+      "crlf_count": 0
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R1_2026_09_29/dirty-gate.log",
+      "expected": "dd656f897b53be7c8b505d8a973495009b1878b1ee490970f2172f16fd127745",
+      "actual_git_blob_sha256": "aa6dceee9ea7f1ebab3653c773c1e336687e9bc7798e0d90de828208e3fd9eaf",
+      "match": false,
+      "git_blob": "a46a059abb48012c7618c4112df06ff5b2065cfb",
+      "crlf_count": 0
+    }
+  ],
+  "published_probe_bytes": [
+    {
+      "name": "probe_adapter.py",
+      "git_blob_sha256": "05573f69d16913516c0273ee461890e6f65aa9e8cfa97f89d37b2e7e0a1f9b5f",
+      "crlf_equivalent_sha256": "b3d2fc99bab29f0adf2c2a453e575380ffb4e2b91714b366bbd75d1bd7bb8389",
+      "crlf_count": 0
+    },
+    {
+      "name": "probe_load_origin.py",
+      "git_blob_sha256": "6302543320ada0674c2d7702572c4fd9cd929b1d31453908c0996440fe999a4a",
+      "crlf_equivalent_sha256": "28639a0049b10170d922fd9ef80cf511d0ada7a106e6828b2716978e0fc8eec6",
+      "crlf_count": 0
+    }
+  ]
+}
