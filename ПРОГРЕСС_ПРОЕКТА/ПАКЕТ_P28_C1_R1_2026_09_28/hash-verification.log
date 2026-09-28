@@ -1,0 +1,39 @@
+P28-C1-R1 package bytes audit
+Commit: 8344afbf13f9cc10e07fee2b76a7c8537bd37c91
+Method: GitHub connector contents UTF-8; content Git SHA-1 independently matches remote blob SHA.
+No Django run; no original artifact modified.
+
+p28_c1_r1_django.py
+  Git blob: 14f099f7954b1f7a97e585f6c0ee7365ded92122 MATCH
+  Published LF SHA-256: ca5641ac5880a4e7647ac1aa215284f0561c1a46420ea13f2277f92f08bacdea
+  Original manifest: 9d40398a3623dc64f5e7588b1f2efa4bed28b07fe71ce1088ce348ee085ad3af
+  CRLF reconstruction SHA-256: 9d40398a3623dc64f5e7588b1f2efa4bed28b07fe71ce1088ce348ee085ad3af MATCH
+  Published bytes match original manifest: NO
+raw-run-utf8.log
+  Git blob: f4af0b3e7b28d13d541cf7f2467ecb8c6e469159 MATCH
+  Published LF SHA-256: 22fff9c12ddf0431bd90400300687566c092439bb317dbed957888c0773f1665
+  Original manifest: 635ad5addd87f282c21536af10e72ed73b9699792b7caa5bc4ebe3a615cf4e53
+  CRLF reconstruction SHA-256: 635ad5addd87f282c21536af10e72ed73b9699792b7caa5bc4ebe3a615cf4e53 MATCH
+  Published bytes match original manifest: NO
+README.md
+  Git blob: 55289242134f505b8ac6959c0278b862f57c7dbe MATCH
+  Published LF SHA-256: af626de76c9b3286a9b12133b982486243d64eb8a1068d535efa4c2a6e4fd796
+  Original manifest: c5a83b851f86a7ba0b0f207f251673ff9eb452eff9c690f0cee487016dc98fe7
+  CRLF reconstruction SHA-256: c5a83b851f86a7ba0b0f207f251673ff9eb452eff9c690f0cee487016dc98fe7 MATCH
+  Published bytes match original manifest: NO
+run.ps1
+  Git blob: 986cf8fe44360631de3a71026c8d64980384e48c MATCH
+  Published LF SHA-256: 0257fde757db353a8cd69e0e88a52712246368b2088ce8e2bb1419002c99c0e2
+  Original manifest: d59c2d7718da724cf1133e2f528fe9971a6c1477832f2b4a4b3a6eb24a286be8
+  CRLF reconstruction SHA-256: d59c2d7718da724cf1133e2f528fe9971a6c1477832f2b4a4b3a6eb24a286be8 MATCH
+  Published bytes match original manifest: NO
+run_p28_c1_r1.py
+  Git blob: 47066a038784680bd501ff15431e004ca2230c46 MATCH
+  Published LF SHA-256: 5ff81574ca5622e263bd90998843433caed4cb5718edbc08fe5a639ad325f764
+  Original manifest: f4f45305dd046dc2ffee9c046e0f97c4f9ac2137c4797231ead267b6f7e54020
+  CRLF reconstruction SHA-256: f4f45305dd046dc2ffee9c046e0f97c4f9ac2137c4797231ead267b6f7e54020 MATCH
+  Published bytes match original manifest: NO
+
+Original manifest SHA-256: 8312eeb06c7efba0ff07668e648482eb1c8ee0d60d85efb14b514273d2ad0df9
+raw-run-utf8.log: original published LF bytes unchanged; strict UTF-8 valid; test exit code 0 observed.
+All 5 published LF SHA-256 differ from supplied CRLF manifest. All 5 reconstructed CRLF SHA-256 match supplied manifest.
