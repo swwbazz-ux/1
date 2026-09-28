@@ -1,0 +1,53 @@
+{
+  "task": "P28-I2-R1",
+  "candidate_branch": "codex/p28-i2-r1-route-evidence-adapter-20260929",
+  "candidate_head": "735f676ec2755bdd43f5c7c567d7ab253744037c",
+  "release_base": "5074ca6f047b4954a42676dc452cbc5749dde6ae",
+  "initial_release_observed": "28b293e07859cfea11a383b17791656fdb0322c2",
+  "fix_commit_before_release_refresh": "1aac019f9f923959f261201bf0d0a2b33db716e9",
+  "transferred_i2_commit": "156a539c00e0931fd7985f6e2b50fbc113d38d76",
+  "original_i2_candidate": "e1cdef3c319889662985a65909726130a596a3c6",
+  "source_clean": true,
+  "database": {
+    "vendor": "sqlite",
+    "name": ":memory:",
+    "test_name": ":memory:",
+    "persistent_db_touched": false,
+    "postgresql": "NOT_RUN"
+  },
+  "environment": {
+    "python": "3.12.10",
+    "django": "6.0.6",
+    "platform": "Windows"
+  },
+  "git_blobs": {
+    "route_projection_core.py": "64b2519fb8bb0874012577fd2d779d7b9a619b74",
+    "route_projection_adapter.py": "eaddb8230fecd4fa845ea0f8485f10a31dc42736",
+    "test_route_projection_adapter.py": "dd26b1290ad8e151c11b19d42897c9362ebeae1a"
+  },
+  "unchanged_acceptance_probe_sha256": {
+    "probe_adapter.py": "b3d2fc99bab29f0adf2c2a453e575380ffb4e2b91714b366bbd75d1bd7bb8389",
+    "probe_load_origin.py": "28639a0049b10170d922fd9ef80cf511d0ada7a106e6828b2716978e0fc8eec6"
+  },
+  "results": {
+    "adapter_tests": "19/19 PASS; original 13 preserved plus 6 R1 regressions",
+    "unchanged_acceptance_probes": "3/3 PASS",
+    "existing_handler_tests": "4/4 PASS",
+    "unchanged_r1_core_tests": "30/30 PASS",
+    "django_check": "PASS",
+    "migration_drift": "No changes detected",
+    "clean_gate": "PASS, exit 0",
+    "dirty_gate": "REFUSED as expected, exit 1",
+    "runner_exit": 0
+  },
+  "not_run": [
+    "PostgreSQL",
+    "concurrent writer",
+    "DOM",
+    "field phone",
+    "native app",
+    "production",
+    "merge into release",
+    "deploy"
+  ]
+}

@@ -1,0 +1,10 @@
+﻿python.exe : P28_I2_R1_REFUSED: dirty candidate (staged, unstaged, or untracked):
+At line:2 char:278
++ ... -gate.log'; & $py $runner --candidate-root 'C:\codex-tmp\p28-i2-r1-ro ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (P28_I2_R1_REFUS... or untracked)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+?? .p28-i2-r1-dirty-probe
+DIRTY_GATE_EXIT=1
+
