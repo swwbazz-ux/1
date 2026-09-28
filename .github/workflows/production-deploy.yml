@@ -21,6 +21,7 @@ on:
           - update_receiver
           - verify_fcm
           - configure_fcm
+          - verify_sse_qa
           - diagnose
           - rollback
       expected_commit:
@@ -112,7 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm ]]; then
+          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]; then
             test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
           fi
           case "$MODE" in
@@ -128,6 +129,7 @@ jobs:
             update_receiver) expected=UPDATE_RECEIVER ;;
             verify_fcm) expected=VERIFY_FCM ;;
             configure_fcm) expected=CONFIGURE_FCM ;;
+            verify_sse_qa) expected=VERIFY_SSE_QA ;;
             diagnose) expected=DIAGNOSE ;;
             rollback) expected=ROLLBACK ;;
             *) exit 2 ;;
@@ -150,16 +152,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install project dependencies
-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
         run: python -m pip install -r "СИСТЕМА_MVP/backend/requirements.txt"
 
       - name: Prepare runtime directories for checks
-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
         working-directory: СИСТЕМА_MVP/backend
         run: mkdir -p media/employee_photos
 
       - name: Run Django release checks
-        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
+        if: ${{ !contains(inputs.mode, 'apk') && !contains(inputs.mode, 'receiver') && !contains(inputs.mode, 'fcm') && !contains(inputs.mode, 'sse_qa') && inputs.mode != 'rollback' && inputs.mode != 'diagnose' }}
         working-directory: СИСТЕМА_MVP/backend
         env:
           DJANGO_SECRET_KEY: github-production-release-check
@@ -272,6 +274,8 @@ jobs:
           DATA_OPERATION: ${{ inputs.data_operation }}
           ROLLBACK_ID: ${{ inputs.rollback_id }}
           FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
+          SSE_QA_CANDIDATE_SHA: fb81480a9709e3a26ccbeb74aaefbaa08a3d722c
+          SSE_QA_CONTROLLER_SHA256: 37241cf19b7309ce4ecda8a484b0bd02ba26e93829e0c3fd87d4e93485e13ecc
         run: |
           set -euo pipefail
           python .github/deploy/test_release_protocol.py
@@ -297,6 +301,43 @@ jobs:
             args+=(--operation "$DATA_OPERATION")
           elif [[ "$MODE" == "diagnose" ]]; then
             args+=(--event-file "$GITHUB_EVENT_PATH")
+          elif [[ "$MODE" == "verify_sse_qa" ]]; then
+            qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
+            mkdir -p "$qa_candidate_root"
+            git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"
+            candidate_resolved="$(git rev-parse 'FETCH_HEAD^{commit}')"
+            test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"
+            git archive --format=tar "$candidate_resolved" deployment/sse-qa-install/config/systemd | \
+              tar -xf - -C "$qa_candidate_root"
+            qa_assets="$qa_candidate_root/deployment/sse-qa-install/config/systemd"
+            test -d "$qa_assets"
+            controller_source="deployment/server/sse_qa_preflight.py"
+            controller_actual="$(sha256sum "$controller_source" | cut -d' ' -f1)"
+            test "$controller_actual" = "$SSE_QA_CONTROLLER_SHA256"
+            qa_build="$RUNNER_TEMP/sse-qa-payload"
+            mkdir -p "$qa_build/scripts" "$qa_build/config/systemd"
+            cp "$controller_source" "$qa_build/scripts/sse_qa_preflight.py"
+            cp -a "$qa_assets/." "$qa_build/config/systemd/"
+            expected_files="$RUNNER_TEMP/sse-qa-preflight-files.txt"
+            printf '%s\n' \
+              config/systemd/postgresql@16-sseqa.service.d/qa-limits.conf \
+              config/systemd/redis-sse-qa.service \
+              config/systemd/srv-sse-x2dqa.mount \
+              config/systemd/sse-qa-asgi.service \
+              config/systemd/sse-qa-reconcile.service \
+              config/systemd/sse-qa-wsgi.service \
+              config/systemd/sse-qa.slice \
+              config/systemd/sse-qa.target \
+              scripts/sse_qa_preflight.py > "$expected_files"
+            (cd "$qa_build" && find . -type f -printf '%P\n' | LC_ALL=C sort | diff -u "$expected_files" -)
+            (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-preflight.zip" $(cat "$expected_files"))
+            printf 'SSE_QA_SOURCE control_sha=%s candidate_sha=%s controller_sha256=%s capability=preflight_only\n' \
+              "${{ github.sha }}" "$candidate_resolved" "$controller_actual"
+            args+=(
+              --sse-qa-package "$RUNNER_TEMP/sse-qa-preflight.zip"
+              --sse-qa-candidate-commit "$candidate_resolved"
+              --sse-qa-controller-sha256 "$controller_actual"
+            )
           elif [[ "$MODE" == "rollback" ]]; then
             args+=(--rollback-id "$ROLLBACK_ID")
           fi
