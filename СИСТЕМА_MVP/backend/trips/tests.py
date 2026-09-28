@@ -14,6 +14,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.contrib.staticfiles import finders
 from django.db import IntegrityError, transaction
+from django.template.loader import render_to_string
 from django.test import Client, TestCase, override_settings
 from django.urls import resolve, reverse
 from django.utils import timezone
@@ -1151,6 +1152,137 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['plan_fact_value'], '1')
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
+
+    def test_assigned_truck_without_open_shift_inherits_active_complex_plan(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
+        self.shift.save(update_fields=['opened_at'])
+        self.create_plan_group(
+            equipment=self.assigned_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='20.00',
+            name='Самосвалы БелАЗ тест комплекса',
+        )
+        self.create_plan_group(
+            equipment=self.excavator,
+            mode=PlanCalculationMode.VOLUME,
+            value='5000.00',
+            name='Экскаваторы тест активного комплекса',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        excavator_shift = self.open_equipment_shift(
+            self.excavator,
+            employee_name='Машинист экскаватора',
+        )
+        self.create_completed_trip(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            loading_shift=excavator_shift,
+            volume='2652.00',
+        )
+
+        dashboard = self.build_dashboard()
+        assigned_tile = next(
+            tile
+            for card in dashboard['complex_cards']
+            for tile in card['active_truck_tiles']
+            if tile['name'] == '13'
+        )
+        detail_card = dashboard['equipment_cards'][str(self.assigned_truck.id)]
+
+        self.assertFalse(assigned_tile['has_current_shift'])
+        self.assertEqual(assigned_tile['plan_status'], PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(
+            assigned_tile['plan_group_name'],
+            'Экскаваторы тест активного комплекса',
+        )
+        self.assertEqual(assigned_tile['plan_calculation_mode'], PlanCalculationMode.VOLUME)
+        self.assertEqual(assigned_tile['plan_value'], '5 000')
+        self.assertEqual(assigned_tile['plan_fact_value'], '2 652')
+        self.assertEqual(assigned_tile['percent'], 53)
+        self.assertEqual(assigned_tile['plan_visual']['loop_progress'], 53)
+        self.assertTrue(assigned_tile['plan_inactive_fill'])
+        self.assertEqual(detail_card['percent'], 53)
+        self.assertEqual(detail_card['plan']['fact_plan_label'], '2 652 / 5 000 м³')
+        board_html = render_to_string(
+            'trips/includes/dispatcher_board.html',
+            {
+                'dispatcher_dashboard': dashboard,
+                'mining_master_mobile_enabled': False,
+            },
+        )
+        tile_tag = re.search(
+            r'<article class="dispatcher-truck-tile complex-truck-tile[^>]*'
+            r'data-equipment-name="13"[^>]*>',
+            board_html,
+        )
+        self.assertIsNotNone(tile_tag)
+        self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
+        self.assertIn('--tile-progress: 53%;', tile_tag.group(0))
+        self.assertIn('data-plan-percent="53"', tile_tag.group(0))
+
+    def test_assigned_truck_with_open_shift_keeps_its_own_snapshot_plan(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
+        self.shift.save(update_fields=['opened_at'])
+        self.create_plan_group(
+            equipment=self.assigned_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='4.00',
+            name='Самосвалы тест личного snapshot',
+        )
+        self.create_plan_group(
+            equipment=self.excavator,
+            mode=PlanCalculationMode.VOLUME,
+            value='5000.00',
+            name='Экскаваторы тест приоритета snapshot',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        truck_shift = self.open_equipment_shift(
+            self.assigned_truck,
+            employee_name='Водитель самосвала',
+        )
+        excavator_shift = self.open_equipment_shift(
+            self.excavator,
+            employee_name='Машинист экскаватора',
+        )
+        self.create_completed_trip(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            unloading_shift=truck_shift,
+            loading_shift=excavator_shift,
+            volume='2652.00',
+        )
+
+        dashboard = self.build_dashboard()
+        assigned_tile = next(
+            tile
+            for card in dashboard['complex_cards']
+            for tile in card['active_truck_tiles']
+            if tile['name'] == '13'
+        )
+
+        self.assertTrue(assigned_tile['has_current_shift'])
+        self.assertEqual(assigned_tile['plan_group_name'], 'Самосвалы тест личного snapshot')
+        self.assertEqual(assigned_tile['plan_calculation_mode'], PlanCalculationMode.TRIPS)
+        self.assertEqual(assigned_tile['plan_value'], '4')
+        self.assertEqual(assigned_tile['plan_fact_value'], '1')
+        self.assertEqual(assigned_tile['percent'], 25)
+        self.assertFalse(assigned_tile['plan_inactive_fill'])
 
     def test_inactive_truck_plan_uses_seven_to_seven_period_without_dispatcher_shift(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT

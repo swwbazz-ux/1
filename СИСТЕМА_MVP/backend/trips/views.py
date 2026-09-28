@@ -2042,6 +2042,31 @@ def build_dispatcher_dashboard_context(
             ),
         )
     )
+
+    def assigned_complex_progress_for_truck(truck_id):
+        """Use the working complex plan when an assigned truck has no shift."""
+        assignment = assignment_by_truck.get(truck_id)
+        if (
+            not assignment
+            or assignment.status != AssignmentStatus.ACCEPTED
+            or assignment.action == HaulAssignmentAction.RELEASE
+            or not assignment.excavator_id
+        ):
+            return None
+        excavator_shift = open_shift_by_equipment_id.get(assignment.excavator_id)
+        if not excavator_shift or not excavator_shift.plan_status:
+            return None
+        progress = calculate_progress_from_snapshot_facts(
+            excavator_shift,
+            snapshot_trip_facts['loading'].get(excavator_shift.id),
+        )
+        if (
+            progress.get('plan_status') != PlanAssignmentStatus.ASSIGNED
+            or progress.get('progress_percent') is None
+        ):
+            return None
+        return progress
+
     plan_by_equipment_id = {}
     def dispatcher_plan_for_equipment(equipment):
         equipment_id = getattr(equipment, 'id', None)
@@ -2065,6 +2090,17 @@ def build_dispatcher_dashboard_context(
                     shift,
                     snapshot_trip_facts['loading'].get(shift.id),
                 )
+            elif (
+                not shift
+                and not is_mining_master_reporting_period
+                and equipment_id in truck_equipment_ids
+                and (complex_progress := assigned_complex_progress_for_truck(equipment_id))
+            ):
+                # Без смены водителя рейсы не могут попасть в личный
+                # snapshot самосвала. Назначенная машина показывает
+                # авторитетный прогресс работающего комплекса, а UI окрашивает
+                # его серым как неактивную технику.
+                progress = complex_progress
             elif (
                 not shift
                 and not is_mining_master_reporting_period
