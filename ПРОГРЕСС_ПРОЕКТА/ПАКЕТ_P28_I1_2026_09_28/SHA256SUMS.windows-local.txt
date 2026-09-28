@@ -1,0 +1,9 @@
+# SHA-256 точных локальных байтов Windows перед commit.
+# В этом worktree все перечисленные файлы уже имели LF, поэтому значения совпадают с manifest опубликованных LF-байтов.
+85ea836f8f991b5c5e204129c3801eb56e6920cfaf2bde0ac4d9a8d64ffee054  route_core.py
+cbfa9d23809da24649544ae812336dc9dc71701f2e3ccae3bf6b67296e33442d  test_route_core.py
+638c00a340d51995e8eba3f4cfd5b435d123e2fa092ffa832a400a83b5e377be  run_tests.py
+f832dec4f37024087eec5f13c9f7b11b4d761a0297772ec45bd5eba3da583be7  run.ps1
+db900a1a54392273962c2af680c626be78294f65cccd362e081e057158481f53  README.md
+14946559a78ecc24e190e53745393b941507b957a0ef0905a90e79d466447ca4  CONVERGENCE.md
+854c7c434f9df0dccd9cf6e731bbf6470a630f42cb77b84439cefd614268e839  raw-run-utf8.log
