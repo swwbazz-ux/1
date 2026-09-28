@@ -1,0 +1,22 @@
+{
+  "probe": "confirmed-parent-conflict-child",
+  "method": "real published JS runtime; mocked transport; no backend execution",
+  "release_sha": "5721c045d665f5811fc8d343d7374575f386af66",
+  "checkout_sha": "bdecc7eb9c528e40a4891201e1bae4682dc309e1",
+  "runtime_path": "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+  "runtime_git_blob": "0f7a0deef70c96e1e3169229f435615c25bf0620",
+  "node": "v24.19.0",
+  "parentStoredIdentity": true,
+  "parentServerMapping": {
+    "downtime_event_id": 123
+  },
+  "sentAfterRestart": [],
+  "remaining": [
+    {
+      "id": "c",
+      "state": "conflict",
+      "code": "dependency_rejected"
+    }
+  ],
+  "result": "CONFIRMED_REMAINING_GAP: child is not resent; assertions verify current behavior, not desired acceptance"
+}
