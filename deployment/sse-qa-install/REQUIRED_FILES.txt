@@ -58,6 +58,7 @@ tests/test_disposable_workflow_contract.py
 tests/test_disposable_workflow_r2_contract.py
 tests/test_readiness_fixes.py
 tests/test_install_diagnostics.py
+tests/test_redis_metrics.py
 github-actions/control-channel.patch
 github-actions/sse-qa-disposable-linux.yml
 github-actions/source-overlay/.github/deploy/build_release.py

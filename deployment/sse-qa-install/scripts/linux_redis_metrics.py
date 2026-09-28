@@ -5,8 +5,14 @@ from __future__ import annotations
 
 import json
 import socket
-import urllib.parse
 from pathlib import Path
+
+from sse_qa_ctl import decrypt_systemd_credential
+
+
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = 6381
+REDIS_USERNAME = "sseqa"
 
 
 def command(sock: socket.socket, *parts: str) -> bytes:
@@ -39,16 +45,7 @@ def command(sock: socket.socket, *parts: str) -> bytes:
 
 
 def main() -> int:
-    values: dict[str, str] = {}
-    for line in Path("/etc/sse-qa/app.env").read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values[key] = value
-    parsed = urllib.parse.urlsplit(values["SSE_REDIS_URL"])
-    if parsed.scheme != "redis" or parsed.hostname != "127.0.0.1" or parsed.port != 6381:
-        raise RuntimeError("unexpected Redis QA endpoint")
-    if not parsed.username or not parsed.password:
-        raise RuntimeError("Redis QA credentials missing")
+    password = decrypt_systemd_credential("redis_password")
     config: dict[str, int] = {}
     for line in Path("/etc/sse-qa/redis.conf").read_text(encoding="utf-8").splitlines():
         fields = line.split()
@@ -58,10 +55,17 @@ def main() -> int:
             config[fields[0]] = 64 * 1024 * 1024
     if config != {"port": 6381, "maxclients": 32, "maxmemory": 64 * 1024 * 1024}:
         raise RuntimeError("Redis QA limits mismatch")
-    with socket.create_connection(("127.0.0.1", 6381), timeout=5) as sock:
-        command(sock, "AUTH", parsed.username, parsed.password)
+    with socket.create_connection((REDIS_HOST, REDIS_PORT), timeout=5) as sock:
+        if command(sock, "AUTH", REDIS_USERNAME, password) != b"OK":
+            raise RuntimeError("Redis authentication response invalid")
         clients = command(sock, "CLIENT", "LIST")
-    client_count = sum(1 for line in clients.splitlines() if line.strip())
+    client_lines = [line for line in clients.splitlines() if line.strip()]
+    if not client_lines or any(
+        not any(field.startswith(b"id=") for field in line.split())
+        for line in client_lines
+    ):
+        raise RuntimeError("Redis client list response invalid")
+    client_count = len(client_lines)
     print(json.dumps({**config, "connected_clients": client_count}, sort_keys=True))
     return 0
 

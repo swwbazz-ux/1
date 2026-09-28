@@ -735,10 +735,17 @@ class PackageContractTests(unittest.TestCase):
         self.assertNotIn("print(password", source)
         self.assertNotIn("print(pin", source)
         redis_metrics = (ROOT / "scripts/linux_redis_metrics.py").read_text(encoding="utf-8")
-        self.assertIn('command(sock, "AUTH", parsed.username, parsed.password)', redis_metrics)
+        self.assertIn('decrypt_systemd_credential("redis_password")', redis_metrics)
+        self.assertIn('REDIS_HOST = "127.0.0.1"', redis_metrics)
+        self.assertIn("REDIS_PORT = 6381", redis_metrics)
+        self.assertIn('REDIS_USERNAME = "sseqa"', redis_metrics)
+        self.assertIn('command(sock, "AUTH", REDIS_USERNAME, password)', redis_metrics)
         self.assertIn('command(sock, "CLIENT", "LIST")', redis_metrics)
         self.assertIn('"connected_clients"', redis_metrics)
-        self.assertNotIn("print(parsed.password", redis_metrics)
+        self.assertNotIn("SSE_REDIS_URL", redis_metrics)
+        self.assertNotIn("/etc/sse-qa/app.env", redis_metrics)
+        self.assertNotIn("urllib.parse", redis_metrics)
+        self.assertNotIn("print(password", redis_metrics)
 
     def test_enable_process_is_child_of_shared_slice(self):
         controller = b"print('controller')\n"
