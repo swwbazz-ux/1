@@ -67,6 +67,6 @@ test("only the compact dump point action owns the production modal trigger", () 
     assert.match(template, /data-driver-current-point-name/);
     assert.match(template, /Подтверждено сервером/);
     assert.match(template, /Действие сохранено/);
-    assert.match(template, /Не подтверждено/);
+    assert.doesNotMatch(template, /Не подтверждено/);
     assert.doesNotMatch(template, /Нужна сверка/);
 });

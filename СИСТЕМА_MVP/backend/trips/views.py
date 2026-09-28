@@ -48,8 +48,8 @@ from core.production_time import (
 )
 from downtimes.driver_workflow import (
     DRIVER_DOWNTIME_FLOW_WAITING_LOADING,
+    close_downtimes_resumed_by_load,
     close_truck_unloading_wait_downtimes,
-    close_truck_waiting_loading_downtimes,
     driver_downtime_flow,
 )
 from downtimes.models import DowntimeEvent, DowntimeReason
@@ -86,7 +86,6 @@ from .manual_loading import (
     manual_dump_card_is_visible,
     manual_dump_card_visibility_filter,
     manual_loading_enabled,
-    may_replace_open_trip,
     reconcile_expired_manual_trips,
     trip_driver_control_filter,
     truck_driver_participation,
@@ -97,6 +96,7 @@ from .free_bucket import (
     free_bucket_dump_card_expires_at,
     free_bucket_dump_card_is_visible,
     free_bucket_dump_card_visibility_filter,
+    free_bucket_reservation_expires_at,
     reconcile_expired_free_bucket_acceptances,
 )
 from users.active_role import role_session_state
@@ -195,7 +195,9 @@ from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
+    classify_late_load_slot,
     create_loaded_waiting_unload_trip,
+    load_context_matches_trip,
     lock_trip_participant_equipment,
 )
 
@@ -624,7 +626,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v262";
+const CACHE_NAME = "excavator-mobile-shell-v263";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -638,26 +640,26 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v263",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -3553,20 +3555,13 @@ def excavator_truck_load_block(
         )
     participation = participation or truck_driver_participation([truck.pk])[truck.pk]
     manual_control = bool(manual_control and manual_loading_enabled() and participation['passive'])
-    replace_trip = may_replace_open_trip(active_trip, participation) and (
-        manual_control or not participation['passive']
-    )
-    if active_trip and not replace_trip:
-        return excavator_truck_load_block_payload('active_trip')
-    if active_downtime is None:
-        active_downtime = (
-            DowntimeEvent.objects
-            .filter(equipment=truck, ended_at__isnull=True)
-            .order_by('-started_at', '-id')
-            .first()
-        )
-    if active_downtime and not truck_waiting_loading_downtime(active_downtime):
-        return excavator_truck_load_block_payload('active_downtime')
+    # The excavator operator is the factual source of a load. An open server
+    # trip is superseded by a newer load; it never vetoes the field gesture.
+    replace_trip = bool(active_trip)
+    if replace_trip:
+        return None
+    # A factual load closes downtime intervals at its tap time. Downtime stays
+    # visible on the card, but it is not a veto on the worker's load action.
     if post_unload_cooldown is None:
         post_unload_cooldown = truck_post_unload_cooldown(truck)
     if post_unload_cooldown and not manual_control and not replace_trip:
@@ -3743,10 +3738,25 @@ def excavator_assigned_truck_counts(excavator):
         not getattr(assignment.truck, 'is_active', True)
         for assignment in assignments
     )
+    active_trip_truck_ids = set(
+        Trip.objects.filter(
+            truck_id__in=[assignment.truck_id for assignment in assignments],
+            status__in=OPEN_TRIP_STATUSES,
+        ).values_list('truck_id', flat=True)
+    )
     loadable = sum(
         1
         for assignment in assignments
-        if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
+        # A newer factual load is allowed to supersede an open trip, but an
+        # already dispatched truck is not an ordinarily available truck for
+        # the automatic "waiting for trucks" calculation.
+        if assignment.truck_id not in active_trip_truck_ids
+        and not excavator_truck_load_block(
+            assignment,
+            current_excavator=excavator,
+            manual_control=True,
+            active_trip=False,
+        )
     )
     return len(assignments), loadable, has_inactive_assigned_truck
 
@@ -4146,6 +4156,31 @@ def excavator_json_payload(request):
     return request.POST
 
 
+def uncontrolled_trip_successor(trip, *, for_update=False):
+    """Return the actual later trip that superseded an UNCONTROLLED trip.
+
+    ``operationally_closed_at`` alone is not proof of a later load: the
+    visibility timeout also sets it.  A real successor is identified by the
+    durable relation first and then by the next non-cancelled load.
+    """
+    queryset = Trip.objects
+    if for_update:
+        queryset = queryset.select_for_update(of=('self',))
+    successor = None
+    if trip.superseded_by_id:
+        successor = queryset.filter(pk=trip.superseded_by_id).first()
+        if successor and successor.status != TripStatus.CANCELLED:
+            return successor
+    loaded_at = trip.loaded_at or trip.created_at
+    return (
+        queryset
+        .filter(truck_id=trip.truck_id, loaded_at__gt=loaded_at)
+        .exclude(status=TripStatus.CANCELLED)
+        .order_by('loaded_at', 'id')
+        .first()
+    )
+
+
 def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, late_confirmation=False):
     if trip.status not in (*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED):
         return False
@@ -4161,7 +4196,11 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
     # мог перейти сменщику гружёным (см. is_carryover). Перезаписываем только
     # если водителя загрузки почему-то не было зафиксировано вовсе.
     if trip.driver_id is None:
-        trip.driver = driver
+        trip.driver = (
+            trip.driver_control_shift.employee
+            if trip.driver_control_shift_id
+            else driver
+        )
     trip.unload_received_at = timezone.now()
     trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
     trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
@@ -4193,11 +4232,10 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
     ])
     from trips.free_bucket import close_free_bucket_acceptance_for_trip
     close_free_bucket_acceptance_for_trip(trip, closed_at=trip.completed_at or trip.unload_received_at)
-    if not late_confirmation:
-        close_truck_unloading_wait_downtimes(
-            trip.truck,
-            ended_at=trip.completed_at,
-        )
+    close_truck_unloading_wait_downtimes(
+        trip.truck,
+        ended_at=trip.completed_at or trip.unload_received_at,
+    )
     reconcile_excavator_waiting_for_trucks(trip.excavator)
     return True
 
@@ -4294,6 +4332,13 @@ def excavator_truck_loaded_view(request):
     if not access:
         return JsonResponse({'ok': False, 'error': 'Нет доступа к экрану Экскаваторщика.'}, status=403)
     payload = excavator_json_payload(request)
+    raw_occurred_at = str(payload.get('occurred_at') or '').strip()
+    try:
+        load_occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else timezone.now()
+    except ValueError:
+        load_occurred_at = None
+    if load_occurred_at is None or timezone.is_naive(load_occurred_at):
+        return JsonResponse({'ok': False, 'error': 'Некорректное время погрузки.'}, status=400)
     client_action_id = str(payload.get('client_action_id') or '').strip()
     if not client_action_id or len(client_action_id) > 128:
         return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
@@ -4362,13 +4407,15 @@ def excavator_truck_loaded_view(request):
                 },
                 status=409,
             )
-        from trips.free_bucket import active_free_bucket_acceptance_for_truck
-        if active_free_bucket_acceptance_for_truck(locked_truck, for_update=True):
-            return JsonResponse({
-                'ok': False,
-                'error': 'Самосвал принят под свободный ковш; погрузка возможна только через этот временный приём.',
-                'code': 'free_bucket_acceptance_required',
-            }, status=409)
+        from trips.free_bucket import (
+            active_free_bucket_acceptance_for_truck,
+            finish_free_bucket_hint_for_factual_load,
+        )
+        free_bucket_hint = active_free_bucket_acceptance_for_truck(
+            locked_truck,
+            for_update=True,
+            now=load_occurred_at,
+        )
         open_shift.equipment = current_excavator
         assignment, handoff = resolve_excavator_load_authority(
             truck_id=locked_truck.id,
@@ -4391,9 +4438,14 @@ def excavator_truck_loaded_view(request):
         )
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
         manual_control = payload.get('manual_control') is True
-        if open_trip and may_replace_open_trip(open_trip, participation):
-            if str(payload.get('expected_open_trip_id') or '') != str(open_trip.pk):
-                return JsonResponse({'ok': False, 'error': 'Рейс изменился. Обновите экран.', 'code': 'trip_changed'}, status=409)
+        expected_open_trip_id = str(payload.get('expected_open_trip_id') or '').strip()
+        if open_trip and expected_open_trip_id and expected_open_trip_id != str(open_trip.pk):
+            logger.warning(
+                'excavator load %s supersedes current trip %s despite stale expected trip %s',
+                client_action_id,
+                open_trip.pk,
+                expected_open_trip_id,
+            )
         load_block = excavator_truck_load_block(
             assignment,
             current_excavator=current_excavator,
@@ -4409,10 +4461,13 @@ def excavator_truck_loaded_view(request):
                 'load_block_reason_label': load_block['label'],
             }, status=409)
 
-        if manual_control and (not current_excavator.is_active or DowntimeEvent.objects.filter(
-            equipment=current_excavator, ended_at__isnull=True, reason__is_critical=True,
-        ).exists()):
-            return JsonResponse({'ok': False, 'error': 'Экскаватор недоступен для работы.'}, status=409)
+        if manual_control and not current_excavator.is_active:
+            logger.warning(
+                'excavator load %s accepted from inactive excavator %s at %s',
+                client_action_id,
+                current_excavator.pk,
+                load_occurred_at,
+            )
 
         dump_point = get_object_or_404(DumpPoint.objects.filter(is_active=True), id=dump_point_id)
         rock_type = get_object_or_404(RockType.objects.filter(is_active=True), id=rock_type_id)
@@ -4429,6 +4484,66 @@ def excavator_truck_loaded_view(request):
                 .values_list('transport_distance_km', flat=True)
                 .first()
             )
+        historical_closed_at = None
+        supersede_trip = open_trip
+        if open_trip:
+            open_loaded_at = open_trip.loaded_at or open_trip.created_at
+            forward_same_context = bool(
+                load_occurred_at >= open_loaded_at
+                and load_context_matches_trip(
+                    open_trip,
+                    excavator_id=current_excavator.id,
+                    dump_point_id=dump_point.id,
+                    rock_type_id=rock_type.id,
+                    loading_horizon=loading_horizon,
+                    loading_block=loading_block,
+                )
+            )
+            if load_occurred_at < open_loaded_at or forward_same_context:
+                slot, reference_trip = classify_late_load_slot(
+                    truck_id=locked_truck.id,
+                    occurred_at=load_occurred_at,
+                    open_trip=open_trip,
+                    excavator_id=current_excavator.id,
+                    dump_point_id=dump_point.id,
+                    rock_type_id=rock_type.id,
+                    loading_horizon=loading_horizon,
+                    loading_block=loading_block,
+                )
+            else:
+                slot, reference_trip = 'gap', open_trip
+            if slot == 'same_load':
+                logger.warning(
+                    'excavator load %s at %s is a duplicate of trip %s; current trip %s is unchanged',
+                    client_action_id,
+                    load_occurred_at,
+                    reference_trip.id,
+                    open_trip.id,
+                )
+                TripClientAction.objects.create(
+                    action_type='truck_loaded',
+                    client_action_id=client_action_id,
+                    trip=reference_trip,
+                    actor=access.employee,
+                )
+                response_payload = trip_loaded_payload(
+                    reference_trip,
+                    client_action_id=client_action_id,
+                )
+                response_payload.update({
+                    'no_effect': True,
+                    'duplicate_load': True,
+                    'version': get_operational_state_version(),
+                    'downtime_status': excavator_downtime_status_payload(
+                        current_excavator,
+                        open_shift,
+                    ),
+                })
+                return JsonResponse(response_payload)
+            if load_occurred_at < (open_trip.loaded_at or open_trip.created_at):
+                historical_closed_at = reference_trip.loaded_at or reference_trip.created_at
+                supersede_trip = None
+
         try:
             trip = create_loaded_waiting_unload_trip(
                 assignment=assignment,
@@ -4447,7 +4562,9 @@ def excavator_truck_loaded_view(request):
                 downtime_text=payload.get('downtime_text'),
                 note=payload.get('note'),
                 participation=participation,
-                supersede_trip=open_trip,
+                supersede_trip=supersede_trip,
+                historical_closed_at=historical_closed_at,
+                occurred_at=load_occurred_at,
             )
         except ValidationError as error:
             return JsonResponse(
@@ -4458,31 +4575,41 @@ def excavator_truck_loaded_view(request):
                 },
                 status=409,
             )
-        save_excavator_work_context(
-            current_excavator=current_excavator,
-            actor=access.employee,
-            rock_type=rock_type,
-            dump_points=[dump_point],
-            loading_horizon=loading_horizon,
-            loading_block=loading_block,
-            transport_distance_km=trip.transport_distance_km,
-        )
+        if free_bucket_hint:
+            finish_free_bucket_hint_for_factual_load(
+                free_bucket_hint,
+                loaded_at=load_occurred_at,
+            )
+        if historical_closed_at is None:
+            save_excavator_work_context(
+                current_excavator=current_excavator,
+                actor=access.employee,
+                rock_type=rock_type,
+                dump_points=[dump_point],
+                loading_horizon=loading_horizon,
+                loading_block=loading_block,
+                transport_distance_km=trip.transport_distance_km,
+            )
         TripClientAction.objects.create(
             action_type='truck_loaded',
             client_action_id=client_action_id,
             trip=trip,
             actor=access.employee,
         )
-        if open_trip:
+        if supersede_trip:
             TripClientAction.objects.create(action_type='truck_load_supersede', client_action_id=client_action_id,
-                                            trip=open_trip, actor=access.employee)
-        close_truck_waiting_loading_downtimes(assignment.truck)
-        close_excavator_open_downtimes(current_excavator)
-        reconcile_excavator_waiting_for_trucks(
-            current_excavator,
-            access.employee,
-            start_when_empty=True,
+                                            trip=supersede_trip, actor=access.employee)
+        close_downtimes_resumed_by_load(
+            truck=assignment.truck,
+            excavator=current_excavator,
+            loaded_at=trip.loaded_at,
         )
+        if historical_closed_at is None:
+            reconcile_excavator_waiting_for_trucks(
+                current_excavator,
+                access.employee,
+                start_when_empty=True,
+            )
         state = bump_operational_state(
             'Trip:truck_loaded',
             event_type='trip_changed',
@@ -4507,13 +4634,16 @@ def excavator_truck_loaded_view(request):
                 'assigned_dump_point_id': trip.assigned_dump_point_id,
                 'actual_dump_point_id': trip.actual_dump_point_id,
                 'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
-                'status': TripStatus.LOADED_WAITING_UNLOAD,
+                'status': trip.status,
             },
         )
 
-    notify_driver_truck_loaded(trip)
+    if trip.status == TripStatus.LOADED_WAITING_UNLOAD:
+        notify_driver_truck_loaded(trip)
     response_payload = trip_loaded_payload(trip, client_action_id=client_action_id)
     response_payload['version'] = state.version
+    if historical_closed_at is not None:
+        response_payload['historical'] = True
     response_payload['downtime_status'] = excavator_downtime_status_payload(current_excavator, open_shift)
     return JsonResponse(response_payload)
 
@@ -4527,6 +4657,27 @@ def excavator_truck_loaded_cancel_view(request):
     client_action_id = str(payload.get('client_action_id') or '').strip()
     if not client_action_id:
         return JsonResponse({'ok': False, 'error': 'Не передан client_action_id.'}, status=400)
+    received_at = timezone.now()
+    raw_occurred_at = str(payload.get('occurred_at') or '').strip()
+    try:
+        cancel_occurred_at = parse_datetime(raw_occurred_at) if raw_occurred_at else received_at
+    except ValueError:
+        cancel_occurred_at = None
+    if cancel_occurred_at is None or timezone.is_naive(cancel_occurred_at):
+        logger.warning(
+            'excavator load cancel %s has invalid device time %r; using receipt time',
+            client_action_id,
+            raw_occurred_at,
+        )
+        cancel_occurred_at = received_at
+    if cancel_occurred_at > received_at + timedelta(minutes=5):
+        logger.warning(
+            'excavator load cancel %s has future device time %s; using receipt time %s',
+            client_action_id,
+            cancel_occurred_at,
+            received_at,
+        )
+        cancel_occurred_at = received_at
 
     with transaction.atomic():
         lock_idempotency_key('truck_loaded_cancel', client_action_id)
@@ -4599,12 +4750,27 @@ def excavator_truck_loaded_cancel_view(request):
         if dump_point_id and dump_point_id != current_dump_point_id:
             return JsonResponse({'ok': False, 'error': 'Точка разгрузки в действии не совпадает с рейсом.'}, status=409)
 
+        loaded_at = trip.loaded_at or trip.created_at
+        if cancel_occurred_at < loaded_at:
+            logger.warning(
+                'excavator load cancel %s predates trip %s load; clamping to %s',
+                client_action_id,
+                trip.id,
+                loaded_at,
+            )
+            cancel_occurred_at = loaded_at
         trip.status = TripStatus.CANCELLED
-        trip.cancelled_at = timezone.now()
+        trip.cancelled_at = cancel_occurred_at
         trip.save(update_fields=['status', 'cancelled_at'])
-        from trips.free_bucket import close_free_bucket_acceptance_for_trip
-        close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
         previous = Trip.objects.select_for_update().filter(superseded_by=trip, status=TripStatus.UNCONTROLLED).first()
+        from trips.free_bucket import restore_free_bucket_acceptance_after_trip_cancel
+        acceptance, acceptance_restored, acceptance_expires_at = (
+            restore_free_bucket_acceptance_after_trip_cancel(
+                trip,
+                cancelled_at=trip.cancelled_at,
+                as_of=received_at,
+            )
+        )
         if previous:
             previous.status = TripStatus.LOADED_WAITING_UNLOAD
             previous.operationally_closed_at = None
@@ -4633,7 +4799,7 @@ def excavator_truck_loaded_cancel_view(request):
             },
         )
         state_ui = equipment_state_ui(get_equipment_state_ui_map(), 'assigned')
-        return JsonResponse({
+        response_payload = {
             'ok': True,
             'trip_id': trip.id,
             'truck_id': trip.truck_id,
@@ -4643,7 +4809,17 @@ def excavator_truck_loaded_cancel_view(request):
             'status_label': state_ui['label'],
             'status_key': state_ui['color_group'],
             'version': state.version,
-        })
+            'free_bucket_restored': bool(acceptance_restored),
+        }
+        if acceptance:
+            response_payload.update({
+                'free_bucket_acceptance_id': acceptance.id,
+                'free_bucket_client_acceptance_id': acceptance.client_acceptance_id,
+                'free_bucket_expires_at': (
+                    acceptance_expires_at.isoformat() if acceptance_expires_at else ''
+                ),
+            })
+        return JsonResponse(response_payload)
 
 
 @require_POST
@@ -5110,6 +5286,8 @@ def excavator_work_view(request):
         else:
             trip = None
             deduplicated = False
+            duplicate_load = False
+            historical_load = False
             try:
                 with transaction.atomic():
                     lock_idempotency_key('truck_loaded', legacy_trip_client_action_id)
@@ -5185,23 +5363,107 @@ def excavator_work_view(request):
                         if block_reason:
                             raise ValidationError(block_reason)
                         form.cleaned_data['assignment'] = locked_assignment
-                        trip = form.create_trip(
-                            excavator_operator=access.employee,
-                            loading_shift=locked_shift,
+                        raw_occurred_at = str(request.POST.get('occurred_at') or '').strip()
+                        try:
+                            legacy_loaded_at = (
+                                parse_datetime(raw_occurred_at)
+                                if raw_occurred_at
+                                else timezone.now()
+                            )
+                        except ValueError:
+                            legacy_loaded_at = None
+                        if legacy_loaded_at is None or timezone.is_naive(legacy_loaded_at):
+                            raise ValidationError('Некорректное время погрузки.')
+                        from trips.free_bucket import (
+                            active_free_bucket_acceptance_for_truck,
+                            finish_free_bucket_hint_for_factual_load,
                         )
+                        free_bucket_hint = active_free_bucket_acceptance_for_truck(
+                            locked_truck,
+                            for_update=True,
+                            now=legacy_loaded_at,
+                        )
+                        historical_closed_at = None
+                        supersede_trip = open_trip
+                        if open_trip:
+                            open_loaded_at = open_trip.loaded_at or open_trip.created_at
+                            forward_same_context = bool(
+                                legacy_loaded_at >= open_loaded_at
+                                and load_context_matches_trip(
+                                    open_trip,
+                                    excavator_id=locked_excavator.id,
+                                    dump_point_id=form.cleaned_data['dump_point'].id,
+                                    rock_type_id=form.cleaned_data['rock_type'].id,
+                                    loading_horizon=form.cleaned_data.get('loading_horizon'),
+                                    loading_block=form.cleaned_data.get('loading_block'),
+                                )
+                            )
+                            if legacy_loaded_at < open_loaded_at or forward_same_context:
+                                slot, reference_trip = classify_late_load_slot(
+                                    truck_id=locked_truck.id,
+                                    occurred_at=legacy_loaded_at,
+                                    open_trip=open_trip,
+                                    excavator_id=locked_excavator.id,
+                                    dump_point_id=form.cleaned_data['dump_point'].id,
+                                    rock_type_id=form.cleaned_data['rock_type'].id,
+                                    loading_horizon=form.cleaned_data.get('loading_horizon'),
+                                    loading_block=form.cleaned_data.get('loading_block'),
+                                )
+                            else:
+                                slot, reference_trip = 'gap', open_trip
+                            if slot == 'same_load':
+                                trip = reference_trip
+                                duplicate_load = True
+                                supersede_trip = None
+                                logger.warning(
+                                    'legacy excavator load %s at %s is a duplicate of trip %s; current trip %s is unchanged',
+                                    legacy_trip_client_action_id,
+                                    legacy_loaded_at,
+                                    reference_trip.id,
+                                    open_trip.id,
+                                )
+                            elif legacy_loaded_at < (open_trip.loaded_at or open_trip.created_at):
+                                historical_closed_at = reference_trip.loaded_at or reference_trip.created_at
+                                supersede_trip = None
+                                historical_load = True
+                        if trip is None:
+                            trip = form.create_trip(
+                                excavator_operator=access.employee,
+                                loading_shift=locked_shift,
+                                occurred_at=legacy_loaded_at,
+                                supersede_trip=supersede_trip,
+                                historical_closed_at=historical_closed_at,
+                            )
+                        if not duplicate_load and free_bucket_hint:
+                            finish_free_bucket_hint_for_factual_load(
+                                free_bucket_hint,
+                                loaded_at=legacy_loaded_at,
+                            )
                         TripClientAction.objects.create(
                             action_type='truck_loaded',
                             client_action_id=legacy_trip_client_action_id,
                             trip=trip,
                             actor=access.employee,
                         )
-                        close_truck_waiting_loading_downtimes(locked_assignment.truck)
-                        close_excavator_open_downtimes(locked_excavator)
-                        reconcile_excavator_waiting_for_trucks(
-                            locked_excavator,
-                            access.employee,
-                            start_when_empty=True,
-                        )
+                        if supersede_trip:
+                            TripClientAction.objects.create(
+                                action_type='truck_load_supersede',
+                                client_action_id=legacy_trip_client_action_id,
+                                trip=supersede_trip,
+                                actor=access.employee,
+                            )
+                        if not duplicate_load:
+                            close_downtimes_resumed_by_load(
+                                truck=locked_assignment.truck,
+                                excavator=locked_excavator,
+                                loaded_at=trip.loaded_at,
+                            )
+                        if not duplicate_load and not historical_load:
+                            reconcile_excavator_waiting_for_trucks(
+                                locked_excavator,
+                                access.employee,
+                                start_when_empty=True,
+                            )
                         bump_operational_state(
                             'Trip:truck_loaded',
                             event_type='trip_changed',
@@ -5226,7 +5488,7 @@ def excavator_work_view(request):
                                 'assigned_dump_point_id': trip.assigned_dump_point_id or trip.dump_point_id,
                                 'actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
                                 'dump_point_name': str(trip.assigned_dump_point or trip.dump_point),
-                                'status': TripStatus.LOADED_WAITING_UNLOAD,
+                                'status': trip.status,
                             },
                         )
             except ValidationError as error:
@@ -5239,6 +5501,11 @@ def excavator_work_view(request):
                     )
                     if deduplicated:
                         response_payload['deduplicated'] = True
+                    if duplicate_load:
+                        response_payload['no_effect'] = True
+                        response_payload['duplicate_load'] = True
+                    if historical_load:
+                        response_payload['historical'] = True
                     response_payload['downtime_status'] = excavator_downtime_status_payload(
                         trip.excavator,
                         trip.loading_shift,
@@ -5712,11 +5979,6 @@ def excavator_work_view(request):
         target_label = str(active_trip.dump_point) if active_trip else ''
         state_ui = equipment_state_ui(equipment_state_map, equipment_state_code)
         load_block = assignment_load_block(assignment, active_trip)
-        if foreign_free_bucket:
-            load_block = {
-                'code': 'free_bucket_reserved_elsewhere',
-                'label': 'Самосвал временно обслуживается другим экскаватором.',
-            }
         block_reason = load_block['label'] if load_block else ''
         load_block_reason_code = load_block['code'] if load_block else ''
         participation = driver_participation[assignment.truck_id]
@@ -5729,7 +5991,9 @@ def excavator_work_view(request):
         active_truck_downtime = truck_downtime_by_equipment_id.get(assignment.truck_id)
         is_waiting_for_loading = truck_waiting_loading_downtime(active_truck_downtime)
         state_allows_load = bool(
-            is_waiting_for_loading
+            active_truck_downtime
+            or active_trip
+            or is_waiting_for_loading
             or unowned_previous
             or (state_ui['allows_drag'] and not state_ui['blocks_operation'])
         )
@@ -5876,8 +6140,14 @@ def excavator_work_view(request):
             'is_active': bool(truck.is_active),
             'can_accept_free_bucket': bool(
                 truck.is_active
-                and not active_trip
-                and (not acceptance or requested_for_current_excavator)
+                and (
+                    not acceptance
+                    or requested_for_current_excavator
+                    or acceptance.status == FreeBucketAcceptanceStatus.USED
+                )
+            ),
+            'free_bucket_expires_at': (
+                free_bucket_acceptance_expires_at(acceptance) if acceptance else None
             ),
             'primary_assignment_label': free_bucket_primary_by_truck_id.get(truck.id, ''),
             'availability_label': availability_label,
@@ -5890,6 +6160,7 @@ def excavator_work_view(request):
                 excavator=current_excavator,
                 status=FreeBucketAcceptanceStatus.ACCEPTED,
             )
+            .filter(active_free_bucket_acceptance_filter(now=timezone.now()))
             .select_related('truck', 'primary_assignment__excavator')
             .order_by('occurred_at', 'id')
         ):
@@ -5903,6 +6174,7 @@ def excavator_work_view(request):
                     if acceptance.primary_assignment_id else ''
                 ),
                 'occurred_at': acceptance.occurred_at,
+                'expires_at': free_bucket_acceptance_expires_at(acceptance),
             })
 
     work_settings = excavator_work_settings_from_session(request, current_excavator, form)
@@ -6152,31 +6424,42 @@ def excavator_work_view(request):
         if row['effective_dump_point_id']:
             completed_by_dump_id[row['effective_dump_point_id']] = row['total']
 
+    def pending_truck_payload(index, trip):
+        acceptance = getattr(trip, 'free_bucket_acceptance', None)
+        return {
+            'truck_id': trip.truck_id,
+            'trip_id': trip.id,
+            'number': equipment_number(trip.truck),
+            'status_key': 'green',
+            'is_last_sent': index == 0,
+            'auto_hide_at': (
+                free_bucket_dump_card_expires_at(trip)
+                or manual_dump_card_expires_at(trip)
+            ),
+            'auto_hide_kind': (
+                'free_bucket'
+                if free_bucket_dump_card_expires_at(trip) is not None
+                else 'manual' if manual_dump_card_expires_at(trip) is not None
+                else ''
+            ),
+            'free_bucket_acceptance_id': acceptance.id if acceptance else None,
+            'free_bucket_client_acceptance_id': (
+                acceptance.client_acceptance_id if acceptance else ''
+            ),
+            'free_bucket_reservation_expires_at': (
+                free_bucket_reservation_expires_at(acceptance) if acceptance else None
+            ),
+            'transition_id': dump_transition_by_trip_id.get(trip.id, {}).get('id', ''),
+            'transition_hide_at': dump_transition_by_trip_id.get(trip.id, {}).get('deadline'),
+        }
+
     for card in dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
         card['is_last_sent'] = point_id == last_sent_dump_point_id
         pending_trips = active_trips_by_dump_id.get(point_id, [])
         card['pending_trucks'] = [
-            {
-                'truck_id': trip.truck_id,
-                'trip_id': trip.id,
-                'number': equipment_number(trip.truck),
-                'status_key': 'green',
-                'is_last_sent': index == 0,
-                'auto_hide_at': (
-                    free_bucket_dump_card_expires_at(trip)
-                    or manual_dump_card_expires_at(trip)
-                ),
-                'auto_hide_kind': (
-                    'free_bucket'
-                    if free_bucket_dump_card_expires_at(trip) is not None
-                    else 'manual' if manual_dump_card_expires_at(trip) is not None
-                    else ''
-                ),
-                'transition_id': dump_transition_by_trip_id.get(trip.id, {}).get('id', ''),
-                'transition_hide_at': dump_transition_by_trip_id.get(trip.id, {}).get('deadline'),
-            }
+            pending_truck_payload(index, trip)
             for index, trip in enumerate(pending_trips)
         ]
 
@@ -6886,9 +7169,18 @@ def driver_complete_trip_view(request, trip_id):
         messages.error(request, message)
         return redirect('driver_shift')
 
-    def accepted(trip):
+    def accepted(trip=None, *, no_effect=False, reported_trip_id=None):
         if wants_json:
-            return JsonResponse({'ok': True, 'trip_id': trip.pk, 'client_action_id': client_action_id})
+            payload = {
+                'ok': True,
+                'client_action_id': client_action_id,
+                'no_effect': bool(no_effect),
+            }
+            if trip is not None:
+                payload['trip_id'] = trip.pk
+            elif reported_trip_id is not None:
+                payload['trip_id'] = reported_trip_id
+            return JsonResponse(payload)
         return redirect('driver_shift')
 
     access_id = request.session.get('employee_access_id')
@@ -6906,26 +7198,28 @@ def driver_complete_trip_view(request, trip_id):
     with transaction.atomic():
         lock_idempotency_key('trip_unloaded', client_action_id)
         existing_action = TripClientAction.objects.filter(
-            action_type='trip_unloaded',
+            action_type__in=('trip_unloaded', 'trip_unloaded_no_effect'),
             client_action_id=client_action_id,
         ).first()
         if existing_action:
             if existing_action.actor_id != access.employee_id or existing_action.trip_id != trip_id:
-                return reject('Идентификатор подтверждения принадлежит другому действию.')
-            return accepted(existing_action.trip)
+                logger.warning(
+                    'driver unload action id %s was reused for another actor or trip',
+                    client_action_id,
+                )
+                return accepted(no_effect=True, reported_trip_id=trip_id)
+            return accepted(
+                existing_action.trip,
+                no_effect=existing_action.action_type == 'trip_unloaded_no_effect',
+            )
         Employee.objects.select_for_update().get(pk=access.employee_id)
         if not role_session_state(request, access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect('driver_shift')
-        reference = Trip.objects.filter(pk=trip_id).first()
-        if reference and reference.driver_participation_recorded:
-            shift_query = Q(pk=reference.driver_control_shift_id, employee=access.employee)
-        else:
-            shift_query = Q(employee=access.employee, closed_at__isnull=True)
         unloading_shift = (
             EmployeeShift.objects
             .select_for_update(of=('self',))
-            .filter(shift_query)
+            .filter(employee=access.employee, closed_at__isnull=True)
             .filter(
                 Q(workplace_code='driver')
                 | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
@@ -6939,28 +7233,67 @@ def driver_complete_trip_view(request, trip_id):
             return redirect('driver_shift')
         # Тот же порядок, что у отправки: состояние производства, техника, рейс.
         lock_production_state()
+        reference = Trip.objects.filter(pk=trip_id).first()
         if reference and reference.truck_id == unloading_shift.equipment_id:
             lock_trip_participant_equipment(
                 excavator_id=reference.excavator_id, truck_id=reference.truck_id,
             )
         trip = (
             Trip.objects
-            .select_for_update()
+            # trip_driver_control_filter joins nullable driver_control_shift;
+            # PostgreSQL may lock only the Trip side of that LEFT JOIN.
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=(*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED))
             .first()
         )
         if trip:
             raw_time = str(request.POST.get('occurred_at') or '').strip()
+            received_at = timezone.now()
             try:
-                occurred_at = parse_datetime(raw_time) if raw_time else None
+                occurred_at = parse_datetime(raw_time) if raw_time else received_at
             except ValueError:
                 occurred_at = None
+            if occurred_at is None or timezone.is_naive(occurred_at):
+                logger.warning(
+                    'driver unload %s has invalid device time %r; using receipt time',
+                    client_action_id,
+                    raw_time,
+                )
+                occurred_at = received_at
+            if occurred_at > received_at + timedelta(minutes=5):
+                logger.warning(
+                    'driver unload %s has future device time %s; using receipt time %s',
+                    client_action_id,
+                    occurred_at,
+                    received_at,
+                )
+                occurred_at = received_at
+            loaded_at = trip.loaded_at or trip.created_at
+            if occurred_at < loaded_at:
+                logger.warning(
+                    'driver unload %s predates trip %s load; clamping to %s',
+                    client_action_id,
+                    trip.id,
+                    loaded_at,
+                )
+                occurred_at = loaded_at
             late_confirmation = trip.status == TripStatus.UNCONTROLLED
-            latest = trip.operationally_closed_at if late_confirmation else timezone.now() + timedelta(minutes=2)
-            if raw_time and (occurred_at is None or timezone.is_naive(occurred_at)
-                             or occurred_at < trip.created_at or occurred_at > latest):
-                return reject('Время подтверждения не соответствует рейсу. Требуется сверка.')
+            next_trip = uncontrolled_trip_successor(trip, for_update=True) if late_confirmation else None
+            if next_trip and occurred_at > next_trip.loaded_at:
+                logger.warning(
+                    'driver unload %s for trip %s occurred after successor trip %s; accepted as no_effect',
+                    client_action_id,
+                    trip.id,
+                    next_trip.id,
+                )
+                TripClientAction.objects.create(
+                    action_type='trip_unloaded_no_effect',
+                    client_action_id=client_action_id,
+                    trip=trip,
+                    actor=access.employee,
+                )
+                return accepted(trip, no_effect=True)
             finalize_trip_unloaded(trip, driver=access.employee, unloading_shift=unloading_shift,
                                    occurred_at=occurred_at, late_confirmation=late_confirmation)
             TripClientAction.objects.create(
@@ -7055,7 +7388,9 @@ def driver_change_unload_point_view(request, trip_id):
             dump_point_id = 0
         trip = (
             Trip.objects
-            .select_for_update()
+            # Keep the same PostgreSQL-safe lock scope as trip completion:
+            # driver_control_shift is nullable and therefore not lockable.
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=OPEN_TRIP_STATUSES)
             .first()

@@ -17,7 +17,7 @@ test("shared drag keeps the Excavator seven-pixel pickup threshold", () => {
 test("Driver reports durable manual-trip states without a false server confirmation", () => {
     assert.equal(driverRuntime.resultText("saving"), "Сохраняем на телефоне…");
     assert.equal(driverRuntime.resultText("confirmed", 451), "Подтверждено · рейс №451");
-    assert.match(driverRuntime.resultText("review"), /Отметьте погрузку заново\.$/);
+    assert.equal(driverRuntime.resultText("review"), "");
     assert.equal(driverRuntime.resultText("storage-error"), "Не сохранено · повторите отправку");
 });
 
@@ -236,8 +236,8 @@ test("manual controls use compact action timer and source rows with one shared g
     const sourceStart = workspace.indexOf('data-driver-manual-source-row');
     assert(actionStart > -1 && timerStart > actionStart && sourceStart > timerStart);
     const actionMarkup = workspace.slice(actionStart, sourceStart);
-    // Две кнопки переключения режима плюс кнопка «Понятно» у отклонённой отметки (скрыта по умолчанию, в строке таймера).
-    assert.equal((actionMarkup.match(/<button\b/g) || []).length, 3);
+    // Только две рабочие кнопки; технические terminal-состояния не требуют подтверждения водителя.
+    assert.equal((actionMarkup.match(/<button\b/g) || []).length, 2);
     assert.match(actionMarkup, /data-driver-manual-close/);
     assert.match(actionMarkup, /data-driver-manual-point-open/);
     assert.match(actionMarkup, />ОБЫЧНЫЙ РЕЖИМ</);
@@ -883,7 +883,7 @@ test("manual context and confirmed timer survive fragment refresh", () => {
     assert.match(driverShiftSource, /DriverManualExcavatorWorkspace\.restoreProjection\(/);
 });
 
-test("отклонённая отметка ручного рейса разблокирует экран сама, без касаний", () => {
+test("terminal manual load is reconciled without a field prompt", () => {
     // Боевой случай: машинист пересохранил забой без изменений (только
     // placement_updated_at сдвинулся), сервер отклонил driver.trip.loaded
     // конфликтом manual_work_context_changed. До этой правки currentTripProjection
@@ -918,7 +918,7 @@ test("отклонённая отметка ручного рейса разбл
     const shell = {dataset: {}};
     const source = makeNode();
     const result = makeNode();
-    const ack = makeNode();
+    const ack = makeNode({hidden: true});
     const closeHint = makeNode();
     const closeButton = makeNode();
     closeButton.__children.em = closeHint;
@@ -967,26 +967,34 @@ test("отклонённая отметка ручного рейса разбл
 
     driverRuntime.renderProjection(workspace, [rejectedEvent], null);
 
-    // Сразу после отказа, БЕЗ единого касания: источник и «Обычный режим»
-    // уже разблокированы — держать их нечем, currentTripProjection пуст.
-    // «Изменить точку» остаётся недоступна — так и должно быть, активного
-    // рейса нет, это не регрессия. Сообщение об отказе показано.
+    // Terminal transport state is not a field-worker workflow. The screen
+    // accepts the authoritative empty projection without another tap.
     assert.equal(source.disabled, false, "источник не заблокирован ни на миг");
     assert.equal(closeButton.disabled, false, "«Обычный режим» не заблокирован ни на миг");
-    assert.equal(ack.hidden, false, "кнопка «Понятно» показана");
-    assert.match(result.textContent, /Отметьте погрузку заново\./);
-
-    driverRuntime.dismissRejectedTripProjection(workspace);
-
-    // «Понятно» только прячет сообщение — блокировки, которую снимать,
-    // не было вовсе.
-    assert.equal(source.disabled, false, "источник остаётся разблокирован");
-    assert.equal(closeButton.disabled, false, "«Обычный режим» остаётся разблокирован");
-    assert.equal(ack.hidden, true, "кнопка «Понятно» спрятана после нажатия");
-    assert.equal(result.hidden, true, "сообщение об отказе убрано");
+    assert.equal(ack.hidden, true, "нет кнопки подтверждения технического состояния");
+    assert.equal(result.hidden, true, "техническое состояние не показано водителю");
+    assert.equal(result.textContent, "");
 });
 
-test("отклонённая смена точки разгрузки не проходит молча", () => {
+test("manual free-bucket cancellation preserves the original acceptance and ttl snapshot", () => {
+    const source = fs.readFileSync(path.join(__dirname, "../driver-manual-excavator-workspace-v1.js"), "utf8");
+    assert.match(source, /free_bucket_expires_local_at_ms:\s*Number\(freeBucketState\.expires_local_at_ms/);
+    assert.match(source, /authority_type:\s*context\.authority_type/);
+    assert.match(source, /free_bucket_acceptance_id:\s*positive\(context\.free_bucket_acceptance_id\)/);
+    assert.match(source, /free_bucket_expires_at:\s*String\(context\.free_bucket_expires_at/);
+    assert.match(source, /dump_points:\s*clone\(context\.dump_points/);
+});
+
+test("terminal transport records have no field acknowledgement or retry prompt", () => {
+    const runtime = read("static", "js", "driver-manual-excavator-workspace-v1.js");
+    const workspace = read("templates", "includes", "driver_manual_excavator_workspace.html");
+    const dashboard = read("templates", "includes", "excavator_dashboard_workspace.html");
+    assert.doesNotMatch(runtime, /Отметьте погрузку заново|Выберите точку снова|dismissRejectedTripProjection/);
+    assert.doesNotMatch(workspace, /data-driver-manual-point-notice/);
+    assert.doesNotMatch(dashboard, /data-driver-manual-dismiss-rejected/);
+});
+
+test("terminal dump-point event silently keeps the authoritative point", () => {
     // Найдено при разборе боевого инцидента: сервер отклоняет
     // driver.trip.dump_point_changed по своим причинам (точка деактивирована,
     // рейс уже не редактируется, точку уже меняли позже) — забой здесь не
@@ -1022,7 +1030,7 @@ test("отклонённая смена точки разгрузки не пр�
     const source = makeNode();
     const result = makeNode();
     const ack = makeNode();
-    const pointNotice = makeNode();
+    const pointNotice = makeNode({hidden: true});
     const closeHint = makeNode();
     const closeButton = makeNode();
     closeButton.__children.em = closeHint;
@@ -1096,10 +1104,9 @@ test("отклонённая смена точки разгрузки не пр�
     assert.equal(source.disabled, lockedByTripAlone, "отклонённая смена точки не добавляет блокировку сверх той, что уже даёт активный рейс");
     // Прежняя точка осталась в проекции — выбор не применился.
     assert.equal(projected.payload.dump_point_id, 5, "точка осталась прежней: 9 не применилось");
-    // И это видно на экране.
-    assert.equal(pointNotice.hidden, false, "уведомление о несостоявшейся смене показано");
-    assert.match(pointNotice.textContent, /Точка разгрузки больше недоступна\./);
-    assert.match(pointNotice.textContent, /Выберите точку снова\./);
+    // The internal terminal record never becomes a field prompt.
+    assert.equal(pointNotice.hidden, true);
+    assert.equal(pointNotice.textContent, "");
 
     // Успешный рендер заводит интервал таймера рейса (setInterval) — иначе
     // он тикает вечно и держит процесс живым уже после конца теста.

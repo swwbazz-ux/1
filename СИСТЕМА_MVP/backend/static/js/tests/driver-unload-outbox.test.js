@@ -29,6 +29,21 @@ test('different trip acknowledgement never deletes a pending confirmation', asyn
     assert.deepEqual(box.pending(), [event()]);
 });
 
+test('server no-effect acknowledgement clears the durable action without review', async () => {
+    const local = storage();
+    const reviews = [];
+    const box = createOutbox({
+        storage: local,
+        accessId: 1,
+        onConflict: item => reviews.push(item),
+        send: async e => ({...ack(e), no_effect: true}),
+    });
+    box.queue(event());
+    await box.flush();
+    assert.deepEqual(box.pending(), []);
+    assert.deepEqual(reviews, []);
+});
+
 test('new trip and another driver retain independent pending events', async () => {
     const local = storage();
     const one = createOutbox({storage: local, accessId: 1, send: async e => ack(e)});

@@ -466,7 +466,7 @@ class ChaosDriverShiftHandoffRegressionTests(TestCase):
         self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
         self.assertEqual(trip.loading_shift, operator_shift)
         self.assertIsNone(trip.unloading_shift_id)
-        self.assertIsNone(trip.driver_id)
+        self.assertEqual(trip.driver, self.driver)
 
         with patch('shifts.services.timezone.now', return_value=original_closed_at):
             closed_shift, close_created = close_driver_shift(
@@ -520,7 +520,7 @@ class ChaosDriverShiftHandoffRegressionTests(TestCase):
         self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(trip.loading_shift, operator_shift)
         self.assertEqual(trip.unloading_shift, replacement_shift)
-        self.assertEqual(trip.driver, self.replacement)
+        self.assertEqual(trip.driver, self.driver)
         self.assertEqual(trip.volume_m3, Decimal('38.00'))
         self.assertEqual(trip.tonnage, Decimal('76.00'))
         self.assertTrue(trip.is_carryover)

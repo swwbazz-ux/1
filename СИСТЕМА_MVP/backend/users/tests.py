@@ -4283,7 +4283,7 @@ class AccessLoginTests(TestCase):
         )
         # Разгрузка и в ожидании разгрузки — удержанием со шкалой, не одним касанием.
         self.assertContains(response, 'data-driver-unload-one-tap="false"')
-        self.assertContains(response, 'Удерживайте 1 секунду.')
+        self.assertContains(response, 'Удерживайте полсекунды.')
         self.assertContains(response, '>ОЖИДАНИЕ ККД</em>')
 
     def test_driver_waiting_loading_is_rejected_after_trip_is_loaded(self):

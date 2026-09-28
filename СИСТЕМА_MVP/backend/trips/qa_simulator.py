@@ -18,7 +18,7 @@ from assignments.services import apply_pending_haul_assignment, schedule_haul_as
 from core.models import bump_operational_state
 from core.production_time import production_work_date
 from core.qa_environment import require_excavator_qa_environment
-from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
+from downtimes.driver_workflow import close_downtimes_resumed_by_load
 from downtimes.models import DowntimeReason
 from references.models import (
     DumpPoint,
@@ -661,7 +661,6 @@ def _load_human_driver_truck(
 ) -> tuple[Trip | None, str]:
     """Let the QA bot excavator load, but never unload, the human truck."""
     from trips.views import (
-        close_excavator_open_downtimes,
         excavator_truck_load_block,
         notify_driver_truck_loaded,
         reconcile_excavator_waiting_for_trucks,
@@ -753,8 +752,11 @@ def _load_human_driver_truck(
             loading_block=placement.loading_block,
             note='Погрузка создана изолированным RuStore QA-симулятором.',
         )
-        close_truck_waiting_loading_downtimes(scenario.human_driver_truck)
-        close_excavator_open_downtimes(scenario.driver_bot_excavator)
+        close_downtimes_resumed_by_load(
+            truck=scenario.human_driver_truck,
+            excavator=scenario.driver_bot_excavator,
+            loaded_at=trip.loaded_at,
+        )
         reconcile_excavator_waiting_for_trucks(
             scenario.driver_bot_excavator,
             scenario.driver_bot_operator,

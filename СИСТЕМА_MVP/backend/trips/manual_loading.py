@@ -75,17 +75,15 @@ def manual_dump_card_visibility_filter(*, now):
 def reconcile_expired_manual_trips(*, now=None):
     """Remove expired passive loads from operational control without inventing unloading.
 
-    Ловит два разных «осиротевших» случая, найденных на бою 20.09.2026 —
-    один и тот же рейс может выпасть из виду водителя двумя путями:
+    Ловит два вида действительно «осиротевших» рейсов:
     1) пассивный ручной рейс — driver_control_shift вообще не назначен
        (водитель не был активен на связи в момент погрузки);
-    2) рейс БЫЛ правильно привязан к смене водителя, но та смена с тех пор
-       ЗАКРЫЛАСЬ, а рейс так и остался «на разгрузку» — закрытие смены само
-       по себе рейсы не трогает, а новая смена водителя никогда не совпадёт
-       со старым driver_control_shift (см. trip_driver_control_filter).
-       На бою такая запись провисела больше четырёх часов, потому что первая
-       версия этой функции проверяла только пустой control_shift.
+    2) старая legacy-запись указывает на закрытую driver_control_shift,
+       но не имеет признака is_carryover.
     Оба случая гасятся одинаково — в UNCONTROLLED, без выдумывания разгрузки.
+
+    Управляемый рейс с is_carryover=True не истекает: он остаётся
+    тем же рейсом и переходит сменщику до фактической разгрузки.
     """
     from core.models import bump_operational_state, lock_production_state
     from .models import Trip, TripStatus
@@ -103,6 +101,7 @@ def reconcile_expired_manual_trips(*, now=None):
     expired_by_closed_shift = Q(
         driver_control_shift__closed_at__isnull=False,
         driver_control_shift__closed_at__lte=cutoff,
+        is_carryover=False,
     )
 
     with transaction.atomic():
@@ -312,8 +311,39 @@ def truck_driver_participation(truck_ids):
 
 
 def trip_driver_control_filter(shift):
-    # Старые рейсы сохраняют прежний контракт; новые привязаны к смене при отправке.
-    return Q(driver_participation_recorded=False) | Q(driver_control_shift=shift)
+    """Trips the current driver shift may operate.
+
+    A loaded managed trip survives a shift change. The successor controls it
+    on the same truck, while loading attribution remains on the original
+    control shift and driver.
+    """
+    return (
+        Q(driver_participation_recorded=False)
+        | Q(driver_control_shift=shift)
+        | Q(
+            driver_participation_recorded=True,
+            is_carryover=True,
+            truck_id=shift.equipment_id,
+            driver_control_shift__closed_at__isnull=False,
+            driver_control_shift__closed_at__lte=shift.opened_at,
+        )
+    )
+
+
+def driver_shift_controls_trip(trip, shift):
+    """Python equivalent of ``trip_driver_control_filter`` for locked rows."""
+    if not trip.driver_participation_recorded:
+        return True
+    if trip.driver_control_shift_id == shift.id:
+        return True
+    original_shift = trip.driver_control_shift
+    return bool(
+        trip.is_carryover
+        and trip.truck_id == shift.equipment_id
+        and original_shift
+        and original_shift.closed_at
+        and original_shift.closed_at <= shift.opened_at
+    )
 
 
 def may_replace_open_trip(trip, participation):

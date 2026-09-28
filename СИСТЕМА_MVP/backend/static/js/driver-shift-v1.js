@@ -1070,12 +1070,10 @@ window.bindDriverMobileShell = function () {
         window.dispatchEvent(new CustomEvent("operational-outbox-state", {detail: {
             role: "driver", pendingCount: pending, reviewCount: review
         }}));
-        var mode = state.review ? "review" : state.sending ? "sending" : state.pending ? "pending" : "confirmed";
+        var mode = state.sending ? "sending" : state.pending ? "pending" : "confirmed";
         current.dataset.driverSyncState = mode;
         if (label) {
-            label.textContent = mode === "review"
-                ? "Не подтверждено"
-                : mode === "sending"
+            label.textContent = mode === "sending"
                     ? "Отправка"
                     : mode === "pending"
                         ? "Действие сохранено"
@@ -1092,10 +1090,8 @@ window.bindDriverMobileShell = function () {
         var status = current && current.querySelector("[data-driver-point-sync-state]");
         if (!status) return;
         status.classList.toggle("is-local", mode === "local");
-        status.classList.toggle("is-review", mode === "review");
-        status.textContent = mode === "review"
-            ? "Не подтверждено"
-            : mode === "local"
+        status.classList.toggle("is-review", false);
+        status.textContent = mode === "local" || mode === "review"
                 ? "Действие сохранено"
                 : "Подтверждено сервером";
     }
@@ -1240,14 +1236,15 @@ window.bindDriverMobileShell = function () {
 
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
-        var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
+        var ordered = (events || []).filter(function (event) {
+            return ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) === -1;
+        }).sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         var activeTripId = String(current.dataset.driverActiveTripId || "");
         var manualTrip = String(current.dataset.driverActiveTripOrigin || "") === "driver_manual";
         var unload = manualTrip ? null : ordered.find(function (event) {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
-            var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
             current.dataset.driverHasOpenTrip = "false";
             current.dataset.driverHasLoadedTrip = "false";
             current.dataset.driverActiveTripId = "";
@@ -1281,15 +1278,13 @@ window.bindDriverMobileShell = function () {
                         || ""
                     )
                     : "";
-                var unloadDialText = unloadNeedsReview
-                    ? "НЕ ПОДТВЕРЖДЕНО"
-                    : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
+                var unloadDialText = nextExcavatorLabel || "НА ЗАГРУЗКУ";
                 dialLabel.textContent = unloadDialText;
                 dialLabel.dataset.driverDialRaw = unloadDialText;
                 delete dialLabel.dataset.driverDialFitKey;
                 if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
             }
-            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
+            if (note) note.textContent = "НА ЗАГРУЗКУ";
             var pointCard = current.querySelector("[data-driver-point-open]");
             if (pointCard) {
                 pointCard.disabled = true;
@@ -1308,8 +1303,7 @@ window.bindDriverMobileShell = function () {
             var pointForm = current.querySelector('.driver-unload-tile-form [name="dump_point"][value="' + pointId + '"]');
             var pointButton = pointForm && pointForm.closest("form") && pointForm.closest("form").querySelector(".driver-unload-tile");
             var pointName = pointButton && pointButton.dataset.driverPointName || "";
-            var pointMode = ["conflict", "auth_required", "invalid"].includes(latestPoint.state) ? "review" : "local";
-            applyDriverPointSelection(current, pointId, pointName, pointMode);
+            applyDriverPointSelection(current, pointId, pointName, "local");
         }
         var latestDowntime = typeof window.selectDriverDowntimeProjection === "function"
             ? window.selectDriverDowntimeProjection(ordered)
@@ -1388,6 +1382,13 @@ window.bindDriverMobileShell = function () {
                     window.DriverManualExcavatorWorkspace.restoreProjection(window.driverOfflineOutbox).catch(function () {});
                 }
                 var result = args[1] || {};
+                if (
+                    event.event_type === "driver.trip.loaded.cancelled"
+                    && window.DriverFreeBucket
+                    && typeof window.DriverFreeBucket.confirmManualCancellation === "function"
+                ) {
+                    window.DriverFreeBucket.confirmManualCancellation(event, result);
+                }
                 var isDowntime = event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended";
                 if (isDowntime) {
                     var serverIds = result.server_ids || {};
@@ -1411,15 +1412,12 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onReview: function (event, result) {
-                showDriverToast(result.message || "Действие не подтверждено сервером. Обновите экран; если состояние неверное — сообщите диспетчеру.");
-                if (
-                    event
-                    && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")
-                    && window.AppRealtime
-                    && typeof window.AppRealtime.requestReconcile === "function"
-                ) {
+                if (window.console && typeof window.console.warn === "function") {
+                    window.console.warn("driver offline event stored for internal review", event, result);
+                }
+                if (window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
                     window.AppRealtime.requestReconcile(
-                        "driver_downtime_review",
+                        "driver_internal_reconcile",
                         Number(result.server_version || result.version || 0)
                     );
                 }
@@ -1543,6 +1541,28 @@ window.bindDriverMobileShell = function () {
             });
         });
     }
+    function restoreDriverConfirmedManualCancellation(outbox) {
+        var context = driverOfflineContext();
+        if (
+            !outbox
+            || typeof outbox.getManualTripProjectionReceipt !== "function"
+            || !window.DriverFreeBucket
+            || typeof window.DriverFreeBucket.confirmManualCancellation !== "function"
+        ) {
+            return Promise.resolve(false);
+        }
+        return outbox.getManualTripProjectionReceipt(context.shiftId, context.equipmentId).then(function (receipt) {
+            if (
+                !receipt
+                || receipt.event_type !== "driver.trip.loaded.cancelled"
+                || receipt.free_bucket_restored !== true
+            ) {
+                return false;
+            }
+            window.DriverFreeBucket.confirmManualCancellation(receipt, receipt);
+            return true;
+        });
+    }
     restoreDriverConfirmedDowntime(driverOfflineOutbox).catch(function () {});
     if (
         window.DriverManualExcavatorWorkspace
@@ -1553,6 +1573,7 @@ window.bindDriverMobileShell = function () {
     if (window.DriverFreeBucket && typeof window.DriverFreeBucket.bind === "function") {
         window.DriverFreeBucket.bind({shell: shell, outbox: driverOfflineOutbox});
     }
+    restoreDriverConfirmedManualCancellation(driverOfflineOutbox).catch(function () {});
 
     function formatDriverDowntimeDuration(seconds) {
         seconds = Math.max(0, Math.floor(Number(seconds) || 0));

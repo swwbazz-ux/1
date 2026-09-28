@@ -392,7 +392,7 @@
             if (button.disabled) button.disabled = false;
             if (button.hasAttribute("aria-disabled")) button.removeAttribute("aria-disabled");
             setUnloadWait(button, wrap.classList.contains("is-waiting-unload"));
-            var aria = "Завершить ручной рейс на " + name + ". Удерживайте 1 секунду.";
+            var aria = "Завершить ручной рейс на " + name + ". Удерживайте полсекунды.";
             if (button.getAttribute("aria-label") !== aria) button.setAttribute("aria-label", aria);
             if (button.classList.contains("is-empty")) button.classList.remove("is-empty");
             if (!button.classList.contains("is-loaded") && !button.classList.contains("is-holding")) button.classList.add("is-loaded");

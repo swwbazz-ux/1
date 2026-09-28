@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.utils import timezone
 
 from .defaults import normalize_reason_name
@@ -23,6 +24,8 @@ EXCAVATOR_WORKFLOW_REASON_NAMES = (
     'Ожидание самосвалов',
     'Перегон экскаватора',
 )
+
+DOWNTIME_CLOSURE_WORK_RESUMED_BY_LOAD = 'work_resumed_by_load'
 
 
 def _reason_name_key(value):
@@ -178,17 +181,28 @@ def driver_downtime_opens_work(reason):
 
 
 def close_open_truck_downtimes_for_reasons(truck, reason_names, *, ended_at=None):
-    """Close matching truck waits within the caller's database transaction."""
+    """Close matching waits at their factual boundary.
+
+    When ``ended_at`` is historical, also shorten an interval that was closed
+    later but still overlapped that boundary. Intervals starting after the
+    worker's action are never touched.
+    """
     if not truck:
         return 0
     reason_keys = frozenset(_reason_name_key(name) for name in reason_names)
-    events = list(
+    events_queryset = (
         DowntimeEvent.objects
         .select_for_update(of=('self',))
         .select_related('reason')
-        .filter(equipment=truck, ended_at__isnull=True)
-        .order_by('id')
+        .filter(equipment=truck)
     )
+    if ended_at is None:
+        events_queryset = events_queryset.filter(ended_at__isnull=True)
+    else:
+        events_queryset = events_queryset.filter(
+            started_at__lte=ended_at,
+        ).filter(Q(ended_at__isnull=True) | Q(ended_at__gt=ended_at))
+    events = list(events_queryset.order_by('id'))
     matching_events = [
         event
         for event in events
@@ -217,3 +231,37 @@ def close_truck_unloading_wait_downtimes(truck, *, ended_at=None):
         TRUCK_UNLOADING_WAIT_REASON_NAMES,
         ended_at=ended_at,
     )
+
+
+def close_downtimes_resumed_by_load(*, truck, excavator, loaded_at):
+    """Close only downtime intervals that overlap the factual load time.
+
+    The load itself proves that both participating machines resumed work at
+    ``loaded_at``.  Earlier closed intervals and later-started intervals are
+    historical facts and must not be rewritten.
+    """
+    equipment_ids = {
+        equipment_id
+        for equipment_id in (
+            getattr(truck, 'pk', truck),
+            getattr(excavator, 'pk', excavator),
+        )
+        if equipment_id
+    }
+    if not equipment_ids:
+        return 0
+    events = list(
+        DowntimeEvent.objects
+        .select_for_update(of=('self',))
+        .filter(
+            equipment_id__in=equipment_ids,
+            started_at__lte=loaded_at,
+        )
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=loaded_at))
+        .order_by('id')
+    )
+    for event in events:
+        event.ended_at = loaded_at
+        event.closure_reason = DOWNTIME_CLOSURE_WORK_RESUMED_BY_LOAD
+        event.save(update_fields=['ended_at', 'closure_reason'])
+    return len(events)

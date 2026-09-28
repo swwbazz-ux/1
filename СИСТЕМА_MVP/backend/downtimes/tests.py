@@ -156,6 +156,73 @@ class DriverDowntimeWorkflowTests(TestCase):
         self.assertEqual(waiting_loading_event.ended_at, loading_ended_at)
         self.assertIsNone(ordinary_event.ended_at)
 
+    def test_load_closes_only_downtimes_overlapping_tap_time_with_reason(self):
+        from .driver_workflow import close_downtimes_resumed_by_load
+
+        excavator_type = EquipmentType.objects.create(
+            name='Экскаватор теста возобновления работы',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type,
+            garage_number='LOAD-RESUMED-EXCAVATOR',
+        )
+        truck_reason = DowntimeReason.objects.create(
+            name='Самосвал в ремонте Stage A helper',
+            equipment_type=self.truck.equipment_type,
+            is_critical=True,
+        )
+        excavator_reason = DowntimeReason.objects.create(
+            name='Экскаватор в ремонте Stage A helper',
+            equipment_type=excavator_type,
+            is_critical=True,
+        )
+        loaded_at = timezone.now() - timedelta(minutes=5)
+        spanning_truck = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            reason=truck_reason,
+            started_at=loaded_at - timedelta(minutes=10),
+        )
+        spanning_excavator = DowntimeEvent.objects.create(
+            equipment=excavator,
+            reason=excavator_reason,
+            started_at=loaded_at,
+        )
+        closed_after_load = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            reason=truck_reason,
+            started_at=loaded_at - timedelta(minutes=3),
+            ended_at=loaded_at + timedelta(minutes=2),
+        )
+        closed_before_load = DowntimeEvent.objects.create(
+            equipment=self.truck,
+            reason=truck_reason,
+            started_at=loaded_at - timedelta(minutes=8),
+            ended_at=loaded_at - timedelta(minutes=1),
+        )
+        future = DowntimeEvent.objects.create(
+            equipment=excavator,
+            reason=excavator_reason,
+            started_at=loaded_at + timedelta(seconds=1),
+        )
+
+        closed_count = close_downtimes_resumed_by_load(
+            truck=self.truck,
+            excavator=excavator,
+            loaded_at=loaded_at,
+        )
+
+        self.assertEqual(closed_count, 3)
+        for event in (spanning_truck, spanning_excavator, closed_after_load):
+            event.refresh_from_db()
+            self.assertEqual(event.ended_at, loaded_at)
+            self.assertEqual(event.closure_reason, 'work_resumed_by_load')
+        closed_before_load.refresh_from_db()
+        future.refresh_from_db()
+        self.assertEqual(closed_before_load.ended_at, loaded_at - timedelta(minutes=1))
+        self.assertEqual(closed_before_load.closure_reason, '')
+        self.assertIsNone(future.ended_at)
+        self.assertEqual(future.closure_reason, '')
+
 
 class MechanicDowntimeCloseRegressionTests(TestCase):
     def setUp(self):

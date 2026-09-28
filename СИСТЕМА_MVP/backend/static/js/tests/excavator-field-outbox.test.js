@@ -431,7 +431,7 @@ test('conflict and authorization outcomes remain for review and are not retried'
     assert.equal(pending[0].last_error, 'assignment changed');
 });
 
-test('a pending event depending on a terminal conflict becomes attention instead of hanging', async () => {
+test('a terminal parent never cascades into independent dependent events', async () => {
     let calls = 0;
     const attention = [];
     const box = createOutbox({
@@ -442,9 +442,12 @@ test('a pending event depending on a terminal conflict becomes attention instead
             calls += 1;
             return {
                 ok: true,
-                results: events.map(event => event.event_id === 'first'
-                    ? {event_id: event.event_id, status: 'conflict', message: 'assignment changed'}
-                    : {event_id: event.event_id, status: 'retry', message: 'dependency pending'}),
+                results: events.map(event => {
+                    if (event.event_id === 'first') {
+                        return {event_id: event.event_id, status: 'conflict', message: 'assignment changed'};
+                    }
+                    return accepted(event);
+                }),
             };
         },
     });
@@ -462,15 +465,8 @@ test('a pending event depending on a terminal conflict becomes attention instead
     assert.equal(calls, 1);
     assert.deepEqual(pending.map(event => [event.event_id, event.sync_state]), [
         ['first', 'conflict'],
-        ['second', 'conflict'],
-        ['third', 'conflict'],
     ]);
-    assert.equal(pending[1].last_error_code, 'dependency_rejected');
-    assert.equal(pending[2].last_error_code, 'dependency_rejected');
-    assert.deepEqual(attention.slice(-2), [
-        ['second', 'dependency_rejected'],
-        ['third', 'dependency_rejected'],
-    ]);
+    assert.deepEqual(attention, [['first', undefined]]);
 });
 
 test('restart retries a legacy device clock conflict and its dependency chain', async () => {
@@ -517,6 +513,94 @@ test('restart retries a legacy device clock conflict and its dependency chain', 
     ]);
     await afterUpdate.flush();
     assert.deepEqual(replayed, ['clock-first', 'clock-second']);
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
+test('restart retries every legacy dependency cascade code independently', async () => {
+    const dependencyCodes = [
+        'dependency_rejected',
+        'dependency_owner_mismatch',
+        'dependency_order_invalid',
+    ];
+    const local = storage();
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => ({
+            ok: true,
+            results: events.map((event, index) => ({
+                event_id: event.event_id,
+                status: 'conflict',
+                code: dependencyCodes[index],
+                message: 'legacy dependency cascade',
+            })),
+        }),
+    });
+    for (let index = 0; index < dependencyCodes.length; index += 1) {
+        await beforeUpdate.queue(loadEvent(`legacy-dependency-${index + 1}`, index + 1));
+    }
+    await beforeUpdate.flush();
+    assert.deepEqual(
+        (await beforeUpdate.pending()).map(event => event.sync_state),
+        ['conflict', 'conflict', 'conflict'],
+    );
+
+    let replayed = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => {
+            replayed = events.map(event => event.event_id);
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await afterUpdate.ready();
+    assert.deepEqual(
+        restored.map(event => event.sync_state),
+        ['pending', 'pending', 'pending'],
+    );
+    await afterUpdate.flush();
+    assert.deepEqual(replayed, [
+        'legacy-dependency-1',
+        'legacy-dependency-2',
+        'legacy-dependency-3',
+    ]);
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
+test('restart retries a legacy open_trip_changed factual load', async () => {
+    const local = storage();
+    const event = loadEvent('legacy-open-trip-changed', 1);
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => ({
+            ok: true,
+            results: events.map(item => ({
+                event_id: item.event_id,
+                status: 'conflict',
+                code: 'open_trip_changed',
+                message: 'legacy open trip conflict',
+            })),
+        }),
+    });
+    await beforeUpdate.queue(event);
+    await beforeUpdate.flush();
+    assert.equal((await beforeUpdate.pending())[0].sync_state, 'conflict');
+
+    const replayed = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => {
+            replayed.push(...events.map(item => item.event_id));
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    assert.equal((await afterUpdate.ready())[0].sync_state, 'pending');
+    await afterUpdate.flush();
+
+    assert.deepEqual(replayed, [event.event_id]);
     assert.deepEqual(await afterUpdate.pending(), []);
 });
 

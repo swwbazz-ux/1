@@ -3,6 +3,9 @@
 const test = require("node:test");
 const {driverScreenSource} = require("./driver-screen-source");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 
 const {
     createDriverFreeBucketController,
@@ -13,8 +16,21 @@ const {
     resolveInstalledState,
     tileStatusLabel,
 } = require("../driver-free-bucket-v1.js");
-const fs = require("node:fs");
-const path = require("node:path");
+
+const driverShiftRuntime = fs.readFileSync(path.resolve(__dirname, "../driver-shift-v1.js"), "utf8");
+
+function functionSource(source, name) {
+    const start = source.indexOf("function " + name + "(");
+    assert.notEqual(start, -1, name + " must exist");
+    const bodyStart = source.indexOf("{", start);
+    let depth = 0;
+    for (let index = bodyStart; index < source.length; index += 1) {
+        if (source[index] === "{") depth += 1;
+        if (source[index] === "}") depth -= 1;
+        if (depth === 0) return source.slice(start, index + 1);
+    }
+    throw new Error("function_not_closed");
+}
 
 function item(overrides) {
     return Object.assign({
@@ -66,6 +82,39 @@ function storage() {
         setItem(key, value) { values.set(key, value); },
         removeItem(key) { values.delete(key); },
     };
+}
+
+function eventTarget(initial) {
+    const listeners = new Map();
+    return Object.assign({
+        addEventListener(type, callback) {
+            if (!listeners.has(type)) listeners.set(type, new Set());
+            listeners.get(type).add(callback);
+        },
+        removeEventListener(type, callback) {
+            if (listeners.has(type)) listeners.get(type).delete(callback);
+        },
+        emit(type, event) {
+            for (const callback of listeners.get(type) || []) callback(event || {type});
+        },
+    }, initial || {});
+}
+
+function selectedEvent(occurredAt, overrides) {
+    return Object.assign({
+        event_id: "driver-free-bucket-local-1",
+        event_type: "driver.free_bucket.selected",
+        occurred_at: new Date(occurredAt).toISOString(),
+        sequence: 1,
+        state: "pending",
+        payload: {
+            truck_id: 17,
+            excavator_id: 22,
+            catalog_version: 12,
+            catalog_generated_at: "2026-09-27T00:00:00Z",
+        },
+        context_snapshot: displaySnapshot(item()),
+    }, overrides || {});
 }
 
 test("catalog remains complete while per-item availability reports missing settings", () => {
@@ -184,6 +233,7 @@ test("selection becomes optimistic only after durable enqueue resolves", async (
                 };
             },
         },
+        now: Date.parse("2026-09-14T03:01:00Z"),
         outbox: {enqueue(event) { return durable.then(() => event); }},
     });
     controller.installCatalog(serverCatalog());
@@ -194,6 +244,406 @@ test("selection becomes optimistic only after durable enqueue resolves", async (
     assert.equal(controller.state().active, true);
     assert.equal(controller.state().catalog_version, 12);
     assert.equal(controller.state().catalog_generated_at, "2026-09-14T03:00:00Z");
+});
+
+test("local offline request expires exactly ten minutes after the tap", async () => {
+    const tappedAt = Date.parse("2026-09-27T20:00:00Z");
+    let now = tappedAt;
+    let scheduled = null;
+    const localStorage = storage();
+    const event = selectedEvent(tappedAt);
+    const windowObject = {
+        localStorage,
+        navigator: {onLine: false},
+        createDriverFreeBucketSelectedEvent() { return event; },
+        setTimeout(callback, delay) {
+            scheduled = {callback, delay};
+            return {unref() {}};
+        },
+        clearTimeout() {},
+    };
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: localStorage,
+        window: windowObject,
+        outbox: {enqueue(value) { return Promise.resolve(value); }},
+        now: () => now,
+    });
+    controller.installCatalog(serverCatalog());
+
+    await controller.select(controller.catalog().excavators[0]);
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().expiry_basis, "local");
+
+    now = tappedAt + 10 * 60 * 1000 - 1;
+    assert.equal(controller.state().active, true);
+    assert.equal(scheduled.delay, 1);
+    now += 1;
+    scheduled.callback();
+    assert.equal(controller.state().active, false);
+});
+
+test("expired local request does not return after restart or repeated outbox projection", async () => {
+    const tappedAt = Date.parse("2026-09-27T01:00:00Z");
+    let now = tappedAt;
+    const localStorage = storage();
+    const event = selectedEvent(tappedAt);
+    const first = createDriverFreeBucketController({
+        shell: shell(),
+        storage: localStorage,
+        window: {
+            localStorage,
+            navigator: {onLine: false},
+            createDriverFreeBucketSelectedEvent() { return event; },
+        },
+        outbox: {enqueue(value) { return Promise.resolve(value); }},
+        now: () => now,
+    });
+    first.installCatalog(serverCatalog());
+    await first.select(first.catalog().excavators[0]);
+    assert.equal(first.state().active, true);
+    first.destroy();
+
+    now = tappedAt + 10 * 60 * 1000 + 1;
+    const restarted = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage, navigator: {onLine: false}},
+        now: () => now,
+    });
+    restarted.installCatalog(serverCatalog());
+    restarted.installState({
+        active: false,
+        version: 11,
+        generated_at: new Date(tappedAt - 1000).toISOString(),
+    });
+    assert.equal(restarted.state().active, false);
+    restarted.installState({
+        active: true,
+        acceptance_id: 702,
+        acceptance_local_id: event.event_id,
+        status: "accepted",
+        selection: item(),
+        version: 12,
+        generated_at: new Date(now).toISOString(),
+    });
+    assert.equal(restarted.state().active, true);
+    assert.equal(restarted.project([event]).active, false);
+    assert.equal(restarted.project([event]).active, false);
+});
+
+test("authoritative expiry uses server time instead of a skewed device clock", () => {
+    const serverNow = Date.parse("2026-09-27T02:00:00Z");
+    let deviceNow = serverNow + 20 * 60 * 1000;
+    const localStorage = storage();
+    const serverState = {
+        active: true,
+        acceptance_id: 701,
+        acceptance_local_id: "server-request-701",
+        status: "requested",
+        can_cancel: true,
+        selection: item(),
+        sync_mode: "confirmed",
+        version: 20,
+        generated_at: new Date(serverNow).toISOString(),
+        expires_at: new Date(serverNow + 5 * 60 * 1000).toISOString(),
+    };
+    const controller = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage, navigator: {onLine: true}},
+        now: () => deviceNow,
+    });
+    controller.installState(serverState);
+    const localDeadline = controller.state().expires_local_at_ms;
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().expiry_basis, "server");
+    assert.equal(localDeadline, deviceNow + 5 * 60 * 1000);
+
+    deviceNow += 60 * 1000;
+    controller.destroy();
+    const restarted = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage, navigator: {onLine: false}},
+        now: () => deviceNow,
+    });
+    restarted.installState(serverState);
+    assert.equal(restarted.state().expires_local_at_ms, localDeadline);
+    deviceNow = localDeadline - 1;
+    assert.equal(restarted.state().active, true);
+    deviceNow = localDeadline;
+    assert.equal(restarted.state().active, false);
+});
+
+test("ten-minute request ttl never closes an already used free-bucket trip", () => {
+    const serverNow = Date.parse("2026-09-27T02:00:00Z");
+    const localStorage = storage();
+    const controller = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage},
+        now: serverNow + 30 * 60 * 1000,
+    });
+    controller.installState({
+        active: true,
+        acceptance_id: 703,
+        status: "used",
+        selection: item(),
+        generated_at: new Date(serverNow).toISOString(),
+        expires_at: new Date(serverNow + 10 * 60 * 1000).toISOString(),
+    });
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().status, "used");
+    assert.equal(controller.state().expires_local_at_ms, 0);
+});
+
+test("manual free-bucket load cancellation restores the same acceptance only until its original deadline", () => {
+    const tappedAt = Date.parse("2026-09-27T02:00:00Z");
+    let now = tappedAt + 2 * 60 * 1000;
+    const localStorage = storage();
+    const controller = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage},
+        now: () => now,
+    });
+    controller.installState({
+        active: true,
+        acceptance_id: 703,
+        acceptance_local_id: "free-cycle-703",
+        status: "used",
+        selection: item(),
+        generated_at: new Date(tappedAt).toISOString(),
+    });
+    const cancelled = {
+        event_id: "driver-manual-cancel-free-703",
+        event_type: "driver.trip.loaded.cancelled",
+        occurred_at: new Date(now).toISOString(),
+        sequence: 4,
+        state: "pending",
+        context_snapshot: Object.assign(displaySnapshot(item()), {
+            authority_type: "free_bucket",
+            free_bucket_acceptance_id: 703,
+            free_bucket_acceptance_local_id: "free-cycle-703",
+            free_bucket_expires_at: new Date(tappedAt + 10 * 60 * 1000).toISOString(),
+            free_bucket_expires_local_at_ms: tappedAt + 10 * 60 * 1000,
+        }),
+    };
+
+    let restored = controller.project([cancelled]);
+    assert.equal(restored.active, true);
+    assert.equal(restored.status, "accepted");
+    assert.equal(restored.acceptance_id, 703);
+    assert.equal(restored.acceptance_local_id, "free-cycle-703");
+    assert.equal(restored.expires_local_at_ms, tappedAt + 10 * 60 * 1000);
+
+    controller.installState({
+        active: true,
+        acceptance_id: 704,
+        acceptance_local_id: "newer-cycle-704",
+        status: "accepted",
+        selection: item({id: 23, label: "EX-23"}),
+        generated_at: new Date(tappedAt + 3 * 60 * 1000).toISOString(),
+    });
+    assert.equal(controller.project([cancelled]).acceptance_id, 704);
+
+    controller.installState({
+        active: true,
+        acceptance_id: 703,
+        acceptance_local_id: "free-cycle-703",
+        status: "used",
+        selection: item(),
+        generated_at: new Date(tappedAt).toISOString(),
+    });
+    now = tappedAt + 10 * 60 * 1000;
+    restored = controller.project([cancelled]);
+    assert.equal(restored.active, false);
+    assert.equal(restored.status, "closed");
+});
+
+test("server cancellation result confirms or rolls back only the matching optimistic restore", () => {
+    const tappedAt = Date.parse("2026-09-27T02:00:00Z");
+    const localStorage = storage();
+    const controller = createDriverFreeBucketController({
+        shell: shell(), storage: localStorage,
+        window: {localStorage},
+        now: tappedAt + 60 * 1000,
+    });
+    const event = {
+        event_type: "driver.trip.loaded.cancelled",
+        occurred_at: new Date(tappedAt + 60 * 1000).toISOString(),
+        context_snapshot: Object.assign(displaySnapshot(item()), {
+            authority_type: "free_bucket",
+            free_bucket_acceptance_id: 703,
+            free_bucket_acceptance_local_id: "free-cycle-703",
+            free_bucket_expires_local_at_ms: tappedAt + 10 * 60 * 1000,
+        }),
+    };
+    controller.installState({
+        active: true, acceptance_id: 703, acceptance_local_id: "free-cycle-703",
+        status: "used", selection: item(), generated_at: new Date(tappedAt).toISOString(),
+    });
+    let confirmed = controller.confirmManualCancellation(event, {
+        free_bucket_restored: true,
+        server_ids: {free_bucket_acceptance_id: 703},
+        free_bucket_client_acceptance_id: "free-cycle-703",
+    });
+    assert.equal(confirmed.status, "accepted");
+    assert.equal(confirmed.sync_mode, "confirmed");
+
+    controller.installState({
+        active: true, acceptance_id: 703, acceptance_local_id: "free-cycle-703",
+        status: "used", selection: item(), generated_at: new Date(tappedAt).toISOString(),
+    });
+    confirmed = controller.confirmManualCancellation(event, {free_bucket_restored: false});
+    assert.equal(confirmed.active, false);
+
+    controller.installState({
+        active: true, acceptance_id: 704, acceptance_local_id: "newer-cycle-704",
+        status: "accepted", selection: item({id: 23}), generated_at: new Date(tappedAt).toISOString(),
+    });
+    confirmed = controller.confirmManualCancellation(event, {free_bucket_restored: false});
+    assert.equal(confirmed.acceptance_id, 704);
+
+    confirmed = controller.confirmManualCancellation(event, {
+        free_bucket_restored: true,
+        server_ids: {free_bucket_acceptance_id: 703},
+        free_bucket_client_acceptance_id: "free-cycle-703",
+    });
+    assert.equal(confirmed.acceptance_id, 704);
+    assert.equal(confirmed.acceptance_local_id, "newer-cycle-704");
+});
+
+test("confirmed manual free-bucket restore survives restart without renewing the original ttl", async () => {
+    const tappedAt = Date.parse("2026-09-27T02:00:00Z");
+    const deadline = tappedAt + 10 * 60 * 1000;
+    let now = tappedAt + 5 * 60 * 1000;
+    let activeController = null;
+    const sandbox = {
+        driverOfflineContext() {
+            return {shiftId: 11, equipmentId: 17};
+        },
+        window: {
+            DriverFreeBucket: {
+                confirmManualCancellation(event, result) {
+                    return activeController.confirmManualCancellation(event, result);
+                },
+            },
+        },
+    };
+    const restoreConfirmedCancellation = vm.runInNewContext(
+        "(" + functionSource(driverShiftRuntime, "restoreDriverConfirmedManualCancellation") + ")",
+        sandbox
+    );
+    const receipt = {
+        event_id: "driver-manual-cancel-free-703",
+        event_type: "driver.trip.loaded.cancelled",
+        occurred_at: new Date(tappedAt + 4 * 60 * 1000).toISOString(),
+        shift_id: 11,
+        equipment_id: 17,
+        payload: {truck_id: 17, excavator_id: 22},
+        context_snapshot: Object.assign(displaySnapshot(item()), {
+            authority_type: "free_bucket",
+        }),
+        server_ids: {free_bucket_acceptance_id: 703},
+        free_bucket_restored: true,
+        free_bucket_client_acceptance_id: "free-cycle-703",
+        free_bucket_expires_at: new Date(deadline).toISOString(),
+        free_bucket_expires_local_at_ms: deadline,
+    };
+    const fragments = [
+        ["empty", {}],
+        ["matching used", {
+            active: true,
+            acceptance_id: 703,
+            status: "used",
+            selection: item(),
+            generated_at: new Date(tappedAt).toISOString(),
+        }],
+        ["identity-free used", {
+            active: true,
+            status: "used",
+            selection: item(),
+            generated_at: new Date(tappedAt).toISOString(),
+        }],
+    ];
+
+    for (const [label, fragment] of fragments) {
+        const localStorage = storage();
+        activeController = createDriverFreeBucketController({
+            shell: shell(),
+            storage: localStorage,
+            window: {localStorage},
+            now: () => now,
+        });
+        activeController.installState(fragment);
+        const requested = [];
+        const restored = await restoreConfirmedCancellation({
+            getManualTripProjectionReceipt(shiftId, equipmentId) {
+                requested.push([shiftId, equipmentId]);
+                return Promise.resolve(receipt);
+            },
+        });
+
+        assert.equal(restored, true, label);
+        assert.deepEqual(requested, [[11, 17]], label);
+        assert.equal(activeController.state().active, true, label);
+        assert.equal(activeController.state().status, "accepted", label);
+        assert.equal(activeController.state().sync_mode, "confirmed", label);
+        assert.equal(activeController.state().acceptance_id, 703, label);
+        assert.equal(activeController.state().acceptance_local_id, "free-cycle-703", label);
+        assert.equal(activeController.state().expires_local_at_ms, deadline, label);
+
+        now = deadline - 1;
+        assert.equal(activeController.state().active, true, label + " before boundary");
+        now = deadline;
+        assert.equal(activeController.state().active, false, label + " at boundary");
+        activeController.destroy();
+        now = tappedAt + 5 * 60 * 1000;
+    }
+});
+
+test("visibility pageshow and resume expire a suspended offline request without waiting for its timer", () => {
+    const lifecycleCases = [
+        ["document", "visibilitychange"],
+        ["window", "pageshow"],
+        ["document", "resume"],
+        ["window", "resume"],
+    ];
+    lifecycleCases.forEach(([targetName, eventName], index) => {
+        const tappedAt = Date.parse("2026-09-27T03:00:00Z") + index * 60 * 60 * 1000;
+        let now = tappedAt;
+        const rendered = [];
+        const localStorage = storage();
+        const documentObject = eventTarget({hidden: false});
+        const windowObject = eventTarget({
+            localStorage,
+            navigator: {onLine: false},
+            setTimeout() { return {unref() {}}; },
+            clearTimeout() {},
+            CustomEvent: function CustomEvent(type, options) {
+                this.type = type;
+                this.detail = options.detail;
+            },
+            dispatchEvent(event) { rendered.push(event.detail.state); },
+        });
+        const controller = createDriverFreeBucketController({
+            shell: shell(),
+            storage: localStorage,
+            window: windowObject,
+            document: documentObject,
+            now: () => now,
+        });
+        controller.installState({
+            active: true,
+            acceptance_local_id: "sleep-request-" + index,
+            status: "requested",
+            selection: item(),
+            sync_mode: "local",
+            generated_at: new Date(tappedAt).toISOString(),
+        });
+        rendered.length = 0;
+        now = tappedAt + 10 * 60 * 1000;
+        (targetName === "document" ? documentObject : windowObject).emit(eventName);
+        assert.equal(rendered.at(-1).active, false, eventName);
+        controller.destroy();
+    });
 });
 
 test("active selection A blocks selection B before enqueue and preserves A", async () => {
@@ -248,6 +698,45 @@ test("a server-rejected selected event never leaves the free bucket stuck active
     assert.equal(controller.state().active, false);
 });
 
+test("cancel drops a rejected local selection without queueing a meaningless server cancel", async () => {
+    let enqueueCalls = 0;
+    const localStorage = storage();
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: localStorage,
+        window: {localStorage},
+        outbox: {
+            pending() {
+                return Promise.resolve([{
+                    event_type: "driver.free_bucket.selected",
+                    event_id: "rejected-selection-to-cancel",
+                    state: "conflict",
+                }]);
+            },
+            enqueue() {
+                enqueueCalls += 1;
+                return Promise.resolve({event_id: "unexpected-cancel"});
+            },
+        },
+        now: Date.parse("2026-09-26T10:03:00Z"),
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({
+        active: true,
+        acceptance_local_id: "rejected-selection-to-cancel",
+        status: "requested",
+        can_cancel: true,
+        selection: item(),
+        sync_mode: "local",
+        generated_at: "2026-09-26T10:01:00Z",
+    });
+
+    assert.equal(await controller.cancel(), null);
+    assert.equal(enqueueCalls, 0);
+    assert.equal(controller.state().active, false);
+    assert.notEqual(controller.state().sync_mode, "review");
+});
+
 test("a rejected cancel (dependency_rejected on an already-rejected selection) still deactivates locally", () => {
     // Замкнутый круг 26.09.2026: cancel() ставил dependsOn на отклонённый
     // selected → сервер отвечал dependency_rejected (state "conflict") →
@@ -259,6 +748,7 @@ test("a rejected cancel (dependency_rejected on an already-rejected selection) s
         storage: storage(),
         window: {localStorage: storage()},
         outbox: {enqueue() { return Promise.resolve({}); }},
+        now: Date.parse("2026-09-26T10:03:00Z"),
     });
     controller.installCatalog(serverCatalog());
     controller.project([{
@@ -404,6 +894,13 @@ test("unavailable tile keeps its status after an unselected state render", () =>
     assert.equal(tileStatusLabel(unavailable, false), "Недоступно");
     assert.equal(tileStatusLabel(unavailable, true), "Выбран");
     assert.equal(tileStatusLabel(unavailable, false), "Недоступно");
+});
+
+test("technical review state is never shown as a field-worker problem", () => {
+    const source = fs.readFileSync(path.join(__dirname, "../driver-free-bucket-v1.js"), "utf8");
+    assert.doesNotMatch(source, /НУЖНА СВЕРКА/);
+    assert.doesNotMatch(source, /Не подтверждено/);
+    assert.doesNotMatch(source, /classList\.toggle\("is-review"/);
 });
 
 test("browser lifecycle drops the controller for disabled and detached shells", () => {

@@ -4,6 +4,7 @@
     var CATALOG_SCHEMA = "driver-free-bucket-catalog-v1";
     var STATE_SCHEMA = "driver-free-bucket-state-v1";
     var CATALOG_STALE_AFTER_MS = 60 * 60 * 1000;
+    var FREE_BUCKET_REQUEST_TTL_MS = 10 * 60 * 1000;
     var pendingFragment = null;
     var currentController = null;
 
@@ -18,6 +19,16 @@
 
     function clone(value) {
         return JSON.parse(JSON.stringify(value));
+    }
+
+    function timestampMs(value) {
+        var parsed = Date.parse(text(value));
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    function finiteNumber(value) {
+        value = Number(value);
+        return Number.isFinite(value) ? value : 0;
     }
 
     function readJsonScript(document, id) {
@@ -122,7 +133,10 @@
             selection: selection,
             sync_mode: text(value.sync_mode) || "confirmed",
             catalog_version: Number(value.catalog_version || value.version || 0),
-            catalog_generated_at: text(value.catalog_generated_at)
+            catalog_generated_at: text(value.catalog_generated_at),
+            expires_at: text(value.expires_at || value.free_bucket_expires_at),
+            expiry_basis: text(value.expiry_basis),
+            expires_local_at_ms: finiteNumber(value.expires_local_at_ms)
         };
     }
 
@@ -197,6 +211,181 @@
         var returnFocus = null;
         var catalog = null;
         var state = normalizeState(options.state || {});
+        var expiryTimer = null;
+        var expiryLifecycleBound = false;
+
+        function nowMs() {
+            var value = typeof options.now === "function" ? options.now() : options.now;
+            value = Number(value);
+            return Number.isFinite(value) ? value : Date.now();
+        }
+
+        function stateUsesRequestTtl(candidate) {
+            candidate = candidate || {};
+            return Boolean(
+                candidate.active
+                && candidate.selection
+                && ["used", "cancelled", "closed"].indexOf(text(candidate.status)) < 0
+            );
+        }
+
+        function sameAcceptance(left, right) {
+            left = left || {};
+            right = right || {};
+            if (left.acceptance_id && right.acceptance_id) {
+                return Number(left.acceptance_id) === Number(right.acceptance_id);
+            }
+            if (text(left.acceptance_local_id) && text(right.acceptance_local_id)) {
+                return text(left.acceptance_local_id) === text(right.acceptance_local_id);
+            }
+            return false;
+        }
+
+        function localFallbackDeadline(candidate) {
+            if (!stateUsesRequestTtl(candidate)) return 0;
+            var occurredAt = timestampMs(candidate.generated_at);
+            if (!occurredAt) return 0;
+            return occurredAt + FREE_BUCKET_REQUEST_TTL_MS;
+        }
+
+        function prepareInstalledExpiry(candidate, fresh, saved, rawServerState) {
+            candidate = normalizeState(candidate);
+            fresh = normalizeState(fresh);
+            saved = normalizeState(saved);
+            rawServerState = rawServerState || {};
+            if (!stateUsesRequestTtl(candidate)) {
+                candidate.expires_at = "";
+                candidate.expiry_basis = "";
+                candidate.expires_local_at_ms = 0;
+                return candidate;
+            }
+
+            var explicitExpiresAt = timestampMs(
+                rawServerState.expires_at
+                || rawServerState.free_bucket_expires_at
+                || fresh.expires_at
+            );
+            if (explicitExpiresAt && sameAcceptance(candidate, fresh)) {
+                var explicitText = text(
+                    rawServerState.expires_at
+                    || rawServerState.free_bucket_expires_at
+                    || fresh.expires_at
+                );
+                if (
+                    sameAcceptance(candidate, saved)
+                    && saved.expires_local_at_ms
+                    && saved.expires_at === explicitText
+                    && !stateIsNewer(fresh, saved)
+                ) {
+                    candidate.expires_at = saved.expires_at;
+                    candidate.expiry_basis = saved.expiry_basis;
+                    candidate.expires_local_at_ms = saved.expires_local_at_ms;
+                    return candidate;
+                }
+                var serverNow = timestampMs(rawServerState.server_now || fresh.generated_at);
+                var capturedAt = nowMs();
+                candidate.expires_at = explicitText;
+                candidate.expiry_basis = "server";
+                candidate.expires_local_at_ms = serverNow
+                    ? capturedAt + (explicitExpiresAt - serverNow)
+                    : explicitExpiresAt;
+                return candidate;
+            }
+
+            if (sameAcceptance(candidate, saved) && saved.expires_local_at_ms) {
+                candidate.expires_at = saved.expires_at;
+                candidate.expiry_basis = saved.expiry_basis;
+                candidate.expires_local_at_ms = saved.expires_local_at_ms;
+                return candidate;
+            }
+
+            if (["local", "review"].indexOf(candidate.sync_mode) >= 0) {
+                candidate.expiry_basis = "local";
+                candidate.expires_local_at_ms = localFallbackDeadline(candidate);
+            }
+            return candidate;
+        }
+
+        function expiryDeadline(candidate) {
+            if (!stateUsesRequestTtl(candidate)) return 0;
+            return finiteNumber(candidate.expires_local_at_ms)
+                || (["local", "review"].indexOf(candidate.expiry_basis || candidate.sync_mode) >= 0
+                    ? localFallbackDeadline(candidate)
+                    : 0);
+        }
+
+        function clearExpiryTimer() {
+            if (expiryTimer && typeof windowObject.clearTimeout === "function") {
+                windowObject.clearTimeout(expiryTimer);
+            }
+            expiryTimer = null;
+        }
+
+        function expireStateIfDue() {
+            var deadline = expiryDeadline(state);
+            if (!deadline || nowMs() < deadline) return false;
+            state = normalizeState({active: false, status: "", sync_mode: "confirmed"});
+            storageRemove(stateKey);
+            return true;
+        }
+
+        function scheduleExpiryTimer() {
+            clearExpiryTimer();
+            var deadline = expiryDeadline(state);
+            if (!deadline || typeof windowObject.setTimeout !== "function") return;
+            var delay = deadline - nowMs();
+            if (delay <= 0) {
+                if (expireStateIfDue()) renderState();
+                return;
+            }
+            expiryTimer = windowObject.setTimeout(function () {
+                expiryTimer = null;
+                renderState();
+            }, delay);
+            if (expiryTimer && typeof expiryTimer.unref === "function") expiryTimer.unref();
+        }
+
+        function reconcileExpiry() {
+            var expired = expireStateIfDue();
+            if (expired) renderState(); else scheduleExpiryTimer();
+            return expired;
+        }
+
+        function onExpiryLifecycleResume() {
+            if (document && document.hidden === true) return;
+            reconcileExpiry();
+        }
+
+        function onExpiryVisibilityChange() {
+            if (!document || document.hidden !== true) onExpiryLifecycleResume();
+        }
+
+        function bindExpiryLifecycle() {
+            if (expiryLifecycleBound) return;
+            expiryLifecycleBound = true;
+            if (document && typeof document.addEventListener === "function") {
+                document.addEventListener("visibilitychange", onExpiryVisibilityChange);
+                document.addEventListener("resume", onExpiryLifecycleResume);
+            }
+            if (windowObject && typeof windowObject.addEventListener === "function") {
+                windowObject.addEventListener("pageshow", onExpiryLifecycleResume);
+                windowObject.addEventListener("resume", onExpiryLifecycleResume);
+            }
+        }
+
+        function destroy() {
+            clearExpiryTimer();
+            if (!expiryLifecycleBound) return;
+            expiryLifecycleBound = false;
+            if (document && typeof document.removeEventListener === "function") {
+                document.removeEventListener("visibilitychange", onExpiryVisibilityChange);
+                document.removeEventListener("resume", onExpiryLifecycleResume);
+            }
+            if (windowObject && typeof windowObject.removeEventListener === "function") {
+                windowObject.removeEventListener("pageshow", onExpiryLifecycleResume);
+                windowObject.removeEventListener("resume", onExpiryLifecycleResume);
+            }
+        }
 
         function storageRead(key) {
             if (!storage) return null;
@@ -244,7 +433,13 @@
             var fresh = normalizeState(serverState);
             lastServerState = fresh;
             var saved = normalizeState(storageRead(stateKey));
-            state = resolveInstalledState(fresh, saved);
+            state = prepareInstalledExpiry(
+                resolveInstalledState(fresh, saved),
+                fresh,
+                saved,
+                serverState
+            );
+            expireStateIfDue();
             if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
             renderState();
             return state;
@@ -280,7 +475,7 @@
             button.innerHTML = '<strong class="driver-free-bucket-tile-number"></strong>'
                 + '<span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status></span>';
             button.querySelector(".driver-free-bucket-tile-number").textContent = item.label;
-            button.querySelector("[data-driver-free-bucket-tile-status]").textContent = tileStatusLabel(item, false, state);
+            button.querySelector("[data-driver-free-bucket-tile-status]").textContent = tileStatusLabel(item, false);
             if (item.is_primary || !item.available) {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");
@@ -370,12 +565,17 @@
         }
 
         function renderState() {
-            if (!shell) return;
+            expireStateIfDue();
+            if (!shell) {
+                scheduleExpiryTimer();
+                return;
+            }
             var active = state.active && state.selection;
             shell.dataset.driverFreeBucketActive = active ? "true" : "false";
             if (trigger) {
                 trigger.classList.toggle("is-current", !!active);
                 trigger.classList.toggle("is-local", !!active && state.sync_mode === "local");
+                trigger.classList.remove("is-review");
                 trigger.setAttribute("aria-haspopup", "dialog");
                 trigger.setAttribute("aria-controls", "driver-free-bucket-dialog");
             }
@@ -400,6 +600,7 @@
             }
             var sync = shell.querySelector("[data-driver-free-bucket-sync-state]");
             if (sync) {
+                sync.classList.remove("is-review");
                 sync.textContent = state.sync_mode === "local"
                     ? "Действие сохранено"
                     : state.status === "accepted"
@@ -414,6 +615,7 @@
                     detail: {state: clone(state), catalog: clone(catalog)}
                 }));
             }
+            scheduleExpiryTimer();
         }
 
         function focusWithoutScroll(target) {
@@ -465,6 +667,7 @@
             if (!outbox || !item || item.is_primary || !item.available || state.active || state.status === "used") return Promise.reject(new Error("free_bucket_unavailable"));
             setMessage("Сохраняю выбор на телефоне…", false);
             return outbox.enqueue(selectedSpec(item)).then(function (event) {
+                var occurredAt = text(event.occurred_at) || new Date(nowMs()).toISOString();
                 state = normalizeState({
                     active: true,
                     acceptance_local_id: event.event_id,
@@ -473,11 +676,14 @@
                     selection: item,
                     sync_mode: "local",
                     version: catalog.version,
-                    generated_at: text(event.occurred_at) || new Date().toISOString(),
+                    generated_at: occurredAt,
                     catalog_version: catalog.version,
-                    catalog_generated_at: catalog.generated_at
+                    catalog_generated_at: catalog.generated_at,
+                    expiry_basis: "local",
+                    expires_local_at_ms: timestampMs(occurredAt) + FREE_BUCKET_REQUEST_TTL_MS
                 });
-                storageWrite(stateKey, state);
+                expireStateIfDue();
+                if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
                 renderState();
                 setOpen(false);
                 return event;
@@ -499,7 +705,7 @@
                 if (requestRejected && !state.acceptance_id) {
                     // Сервер так и не принял выбор — отменять на сервере
                     // нечего. Ставить dependsOn на отклонённое событие давало
-                    // dependency_rejected и снова "НУЖНА СВЕРКА" по кругу
+                    // dependency_rejected и снова полевое предупреждение по кругу
                     // (26.09.2026, боевой afb373a5); теперь гасим локально
                     // без сетевого запроса.
                     return null;
@@ -523,6 +729,7 @@
         }
 
         function project(events) {
+            expireStateIfDue();
             var projected = normalizeState(state);
             if (projected.sync_mode === "review") {
                 // Хранилище/предыдущая установка ещё держит зависшее «на
@@ -537,7 +744,7 @@
                     if (rejected) {
                         // Сервер не принял ЭТОТ выбор — местного ковша нет. Раньше
                         // это всё равно оставляло active:true с sync_mode "review"
-                        // ("НУЖНА СВЕРКА") — самосвал застревал навсегда, ни выбрать
+                        // (полевое предупреждение) — самосвал застревал навсегда, ни выбрать
                         // заново, ни отменить было нельзя (26.09.2026, боевой afb373a5).
                         // Но отказ «уже выбран другой экскаватор»
                         // (free_bucket_target_changed) значит, что у сервера ЕСТЬ живой
@@ -551,7 +758,8 @@
                     }
                     var item = itemFromEvent(event, catalog);
                     if (!item) return;
-                    projected = normalizeState({
+                    var occurredAt = text(event.occurred_at);
+                    var candidate = normalizeState({
                         active: true,
                         acceptance_local_id: event.event_id,
                         status: "requested",
@@ -559,9 +767,106 @@
                         selection: item,
                         sync_mode: "local",
                         version: Number(event.payload && event.payload.catalog_version || 0),
-                        generated_at: text(event.occurred_at),
+                        generated_at: occurredAt,
                         catalog_version: Number(event.payload && event.payload.catalog_version || 0),
-                        catalog_generated_at: text(event.payload && event.payload.catalog_generated_at)
+                        catalog_generated_at: text(event.payload && event.payload.catalog_generated_at),
+                        expiry_basis: "local",
+                        expires_local_at_ms: timestampMs(occurredAt) + FREE_BUCKET_REQUEST_TTL_MS
+                    });
+                    if (expiryDeadline(candidate) && nowMs() >= expiryDeadline(candidate)) {
+                        if (
+                            projected.status !== "used"
+                            && text(projected.acceptance_local_id) === text(event.event_id)
+                        ) {
+                            projected = normalizeState({active: false, status: "", sync_mode: "confirmed"});
+                        }
+                        return;
+                    }
+                    projected = candidate;
+                }
+                if (event.event_type === "driver.trip.loaded.cancelled") {
+                    var restoreSnapshot = event.context_snapshot || {};
+                    var restoreServerIds = event.server_ids || {};
+                    var confirmedRestore = event.free_bucket_restored === true;
+                    var restoreId = positive(
+                        (confirmedRestore && restoreServerIds.free_bucket_acceptance_id)
+                        || restoreSnapshot.free_bucket_acceptance_id
+                    );
+                    var restoreLocalId = text(
+                        (confirmedRestore && event.free_bucket_client_acceptance_id)
+                        || restoreSnapshot.free_bucket_acceptance_local_id
+                    );
+                    var isFreeBucketCancel = text(restoreSnapshot.authority_type) === "free_bucket"
+                        && Boolean(restoreId || restoreLocalId);
+                    var currentHasIdentity = Boolean(
+                        projected.acceptance_id || projected.acceptance_local_id
+                    );
+                    var matchesCurrent = !projected.active || (
+                        (restoreId && projected.acceptance_id === restoreId)
+                        || (restoreLocalId && projected.acceptance_local_id === restoreLocalId)
+                        || (
+                            confirmedRestore
+                            && projected.status === "used"
+                            && !currentHasIdentity
+                        )
+                    );
+                    if (!isFreeBucketCancel || !matchesCurrent) return;
+
+                    var restoreDeadline = finiteNumber(
+                        restoreSnapshot.free_bucket_expires_local_at_ms
+                        || (confirmedRestore && event.free_bucket_expires_local_at_ms)
+                    );
+                    if (!restoreDeadline && projected.expires_local_at_ms) {
+                        restoreDeadline = finiteNumber(projected.expires_local_at_ms);
+                    }
+                    if (!restoreDeadline) {
+                        restoreDeadline = timestampMs(
+                            restoreSnapshot.free_bucket_expires_at
+                            || (confirmedRestore && event.free_bucket_expires_at)
+                        );
+                    }
+                    if (!restoreDeadline) return;
+                    if (nowMs() >= restoreDeadline) {
+                        projected = normalizeState({
+                            active: false,
+                            status: "closed",
+                            sync_mode: confirmedRestore ? "confirmed" : "local"
+                        });
+                        return;
+                    }
+
+                    var restoreSelection = projected.selection || normalizeItem({
+                        id: restoreSnapshot.excavator_id || (event.payload && event.payload.excavator_id),
+                        label: restoreSnapshot.excavator_label,
+                        complex_label: restoreSnapshot.complex_label,
+                        loading_horizon: restoreSnapshot.loading_horizon,
+                        loading_block: restoreSnapshot.loading_block,
+                        rock_type_id: restoreSnapshot.rock_type_id,
+                        rock_type: restoreSnapshot.rock_type_name,
+                        dump_points: restoreSnapshot.dump_points,
+                        available: true,
+                        missing_fields: []
+                    });
+                    if (!restoreSelection) return;
+                    projected = normalizeState({
+                        active: true,
+                        acceptance_id: restoreId || projected.acceptance_id,
+                        acceptance_local_id: restoreLocalId || projected.acceptance_local_id,
+                        status: "accepted",
+                        can_cancel: true,
+                        selection: restoreSelection,
+                        sync_mode: confirmedRestore ? "confirmed" : "local",
+                        generated_at: text(projected.generated_at || event.occurred_at),
+                        version: Number(event.version || projected.version || 0),
+                        catalog_version: projected.catalog_version,
+                        catalog_generated_at: projected.catalog_generated_at,
+                        expires_at: text(
+                            restoreSnapshot.free_bucket_expires_at
+                            || (confirmedRestore && event.free_bucket_expires_at)
+                            || projected.expires_at
+                        ),
+                        expiry_basis: "restored",
+                        expires_local_at_ms: restoreDeadline
                     });
                 }
                 if (event.event_type === "driver.free_bucket.cancelled") {
@@ -587,6 +892,56 @@
                 }
             });
             state = projected;
+            expireStateIfDue();
+            if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
+            renderState();
+            return clone(state);
+        }
+
+        function confirmManualCancellation(event, result) {
+            if (!event || event.event_type !== "driver.trip.loaded.cancelled") return clone(state);
+            result = result || {};
+            var snapshot = event.context_snapshot || {};
+            var serverIds = result.server_ids || event.server_ids || {};
+            var snapshotId = positive(
+                serverIds.free_bucket_acceptance_id || snapshot.free_bucket_acceptance_id
+            );
+            var snapshotLocalId = text(
+                result.free_bucket_client_acceptance_id
+                || event.free_bucket_client_acceptance_id
+                || snapshot.free_bucket_acceptance_local_id
+            );
+            var matchesCurrent = state.active && (
+                (snapshotId && state.acceptance_id === snapshotId)
+                || (snapshotLocalId && state.acceptance_local_id === snapshotLocalId)
+            );
+            if (result.free_bucket_restored === false) {
+                if (matchesCurrent) state = normalizeState({active: false, status: "closed", sync_mode: "confirmed"});
+            } else if (result.free_bucket_restored === true) {
+                var confirmedEvent = Object.assign({}, event, {
+                    free_bucket_restored: true,
+                    server_ids: clone(serverIds),
+                    free_bucket_client_acceptance_id: snapshotLocalId,
+                    free_bucket_expires_at: text(
+                        result.free_bucket_expires_at || event.free_bucket_expires_at
+                    ),
+                    free_bucket_expires_local_at_ms: finiteNumber(
+                        result.free_bucket_expires_local_at_ms
+                        || event.free_bucket_expires_local_at_ms
+                        || snapshot.free_bucket_expires_local_at_ms
+                    )
+                });
+                project([confirmedEvent]);
+                var restoredMatchesCurrent = state.active && (
+                    (snapshotId && state.acceptance_id === snapshotId)
+                    || (snapshotLocalId && state.acceptance_local_id === snapshotLocalId)
+                );
+                if (restoredMatchesCurrent) {
+                    state.acceptance_id = snapshotId || state.acceptance_id;
+                    state.acceptance_local_id = snapshotLocalId || state.acceptance_local_id;
+                    state.sync_mode = "confirmed";
+                }
+            }
             if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
             renderState();
             return clone(state);
@@ -618,14 +973,22 @@
             return true;
         }
 
+        bindExpiryLifecycle();
+
         return {
             bind: bind,
             installCatalog: installCatalog,
             installState: installState,
             project: project,
+            confirmManualCancellation: confirmManualCancellation,
             select: select,
             cancel: cancel,
-            state: function () { return clone(state); },
+            reconcileExpiry: reconcileExpiry,
+            destroy: destroy,
+            state: function () {
+                reconcileExpiry();
+                return clone(state);
+            },
             catalog: function () { return clone(catalog); },
             ownsShell: function (candidate) { return shell === candidate; }
         };
@@ -644,17 +1007,23 @@
         return candidate === documentObject.querySelector("[data-driver-shell]");
     }
 
+    function dropCurrentController() {
+        if (currentController && typeof currentController.destroy === "function") currentController.destroy();
+        currentController = null;
+    }
+
     function bindBrowser(options) {
         options = options || {};
         var document = root.document;
         var shell = options.shell || document.querySelector("[data-driver-shell]");
         if (!usableBrowserShell(document, shell)) {
-            currentController = null;
+            dropCurrentController();
             if (!shell || shell === document.querySelector("[data-driver-shell]")) pendingFragment = null;
             return null;
         }
         var fragment = pendingFragment;
         pendingFragment = null;
+        dropCurrentController();
         currentController = createDriverFreeBucketController({
             window: root,
             document: document,
@@ -675,7 +1044,7 @@
             var activeShell = root.document.querySelector("[data-driver-shell]");
             var requestedShell = shell || activeShell;
             if (!usableBrowserShell(root.document, requestedShell)) {
-                currentController = null;
+                dropCurrentController();
                 if (!requestedShell || requestedShell === activeShell) pendingFragment = null;
                 return null;
             }
@@ -689,6 +1058,11 @@
         },
         currentCatalog: function () {
             return currentController ? currentController.catalog() : null;
+        },
+        confirmManualCancellation: function (event, result) {
+            return currentController
+                ? currentController.confirmManualCancellation(event, result)
+                : null;
         }
     };
 
