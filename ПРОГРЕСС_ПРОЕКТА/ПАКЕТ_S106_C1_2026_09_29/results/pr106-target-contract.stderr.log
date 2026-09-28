@@ -1,0 +1,9 @@
+Creating test database for alias 'default'...
+offline_sync: accepted despite discrepancy (Отмена погрузки/cancel_before_load) employee=1 role=6 — Отмена рейса #1 на 2026-09-28 17:35:43.094373+00:00 раньше времени погрузки (2026-09-28 17:36:13.094373+00:00). Принято по времени нажатия.
+..offline_sync: dependency owner mismatch for event s106-self-contained-child dependency s106-foreign-parent; processing child by its own domain references
+...
+----------------------------------------------------------------------
+Ran 5 tests in 0.361s
+
+OK
+Destroying test database for alias 'default'...

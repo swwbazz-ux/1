@@ -1,0 +1,7 @@
+overlay=PASS
+release_backend=C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\release\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py
+pr106_backend=C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py
+release_driver=C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\release\СИСТЕМА_MVP\backend\static\js\tests\driver-offline-outbox-v2.test.js
+pr106_driver=C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\static\js\tests\driver-offline-outbox-v2.test.js
+copied_backend_methods=backdate_truck_shift,driver_manual_load_under_bucket,driver_manual_complete_under_bucket,_expired_bucket_load_pair,test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact,test_already_rejected_cancelled_bucket_load_is_accepted_on_resend
+copied_js_test=restart resends a manual load refused as free_bucket_not_available and its chain

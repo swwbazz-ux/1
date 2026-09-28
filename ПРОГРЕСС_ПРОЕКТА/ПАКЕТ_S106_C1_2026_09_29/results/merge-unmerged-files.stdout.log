@@ -1,0 +1,3 @@
+СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js

@@ -1,0 +1,12 @@
+Creating test database for alias 'default'...
+offline_sync: accepted despite discrepancy (Отмена погрузки/cancel_before_load) employee=1 role=6 — Отмена рейса #1 на 2026-09-28 17:35:01.344584+00:00 раньше времени погрузки (2026-09-28 17:35:31.344584+00:00). Принято по времени нажатия.
+..offline_sync: dependency legacy-parent-dependency_rejected-stage-a for event legacy-dependency_rejected-stage-a is not stored; processing child independently
+offline_sync: dependency legacy-parent-dependency_owner_mismatch-stage-a for event legacy-dependency_owner_mismatch-stage-a is not stored; processing child independently
+offline_sync: dependency legacy-parent-dependency_order_invalid-stage-a for event legacy-dependency_order_invalid-stage-a is not stored; processing child independently
+.driver unload event legacy-unload-before-load-stage-a predates trip 1 load; clamping 2026-09-28 17:31:31.569387+00:00 to 2026-09-28 17:32:31.569387+00:00
+.
+----------------------------------------------------------------------
+Ran 4 tests in 0.321s
+
+OK
+Destroying test database for alias 'default'...

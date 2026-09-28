@@ -1,0 +1,32 @@
+✖ restart resends a manual load refused as free_bucket_not_available and its chain (9.524ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 117.129
+
+✖ failing tests:
+
+test at static\js\tests\driver-offline-outbox-v2.test.js:454:1
+✖ restart resends a manual load refused as free_bucket_not_available and its chain (9.524ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  -   'fb-load',
+      'fb-complete'
+    ]
+
+      at TestContext.<anonymous> (C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\static\js\tests\driver-offline-outbox-v2.test.js:501:12)
+      at async Test.run (node:internal/test_runner/test:1313:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'fb-complete' ],
+    expected: [ 'fb-load', 'fb-complete' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

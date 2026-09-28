@@ -1,0 +1,31 @@
+Creating test database for alias 'default'...
+EE
+======================================================================
+ERROR: test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact (core.test_free_bucket_sync.FreeBucketServerIntegrationTests.test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact)
+Погрузка под ковшом, который сервер погасил до прихода отметки, — записана.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py", line 3231, in test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact
+    acceptance, loaded, completed, loaded_at = self._expired_bucket_load_pair('fact')
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py", line 3201, in _expired_bucket_load_pair
+    from trips.free_bucket import expire_stale_free_bucket_requests
+ImportError: cannot import name 'expire_stale_free_bucket_requests' from 'trips.free_bucket' (C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\trips\free_bucket.py)
+
+======================================================================
+ERROR: test_already_rejected_cancelled_bucket_load_is_accepted_on_resend (core.test_free_bucket_sync.FreeBucketServerIntegrationTests.test_already_rejected_cancelled_bucket_load_is_accepted_on_resend)
+Отметка, отклонённая старым сервером, и её каскад проходят при повторной отправке.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py", line 3255, in test_already_rejected_cancelled_bucket_load_is_accepted_on_resend
+    acceptance, loaded, completed, loaded_at = self._expired_bucket_load_pair('resend')
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\core\test_free_bucket_sync.py", line 3201, in _expired_bucket_load_pair
+    from trips.free_bucket import expire_stale_free_bucket_requests
+ImportError: cannot import name 'expire_stale_free_bucket_requests' from 'trips.free_bucket' (C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\pr106-overlay\СИСТЕМА_MVP\backend\trips\free_bucket.py)
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.120s
+
+FAILED (errors=2)
+Destroying test database for alias 'default'...

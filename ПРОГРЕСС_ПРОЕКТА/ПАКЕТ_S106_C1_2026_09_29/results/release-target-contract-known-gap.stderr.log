@@ -1,0 +1,37 @@
+Creating test database for alias 'default'...
+FFF..
+======================================================================
+FAIL: test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad (core.test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\release\СИСТЕМА_MVP\backend\core\test_s106_c1_probe.py", line 60, in test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad
+    self.assertEqual(trip.cancelled_at, child_time)
+AssertionError: datetime.datetime(2026, 9, 28, 17, 35, 52, 536495, tzinfo=datetime.timezone.utc) != datetime.datetime(2026, 9, 28, 17, 35, 22, 536495, tzinfo=datetime.timezone.utc)
+
+======================================================================
+FAIL: test_target_child_replays_after_parent_was_already_accepted (core.test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_replays_after_parent_was_already_accepted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\release\СИСТЕМА_MVP\backend\core\test_s106_c1_probe.py", line 81, in test_target_child_replays_after_parent_was_already_accepted
+    self.assertEqual(result['status'], 'accepted', result)
+AssertionError: 'conflict' != 'accepted'
+- conflict
++ accepted
+ : {'event_id': 's106-child-after-confirmed-parent', 'status': 'conflict', 'retryable': False, 'code': 'dependency_rejected', 'message': 'legacy dependency conflict after accepted parent', 'server_ids': {}, 'server_received_at': '2026-09-28T17:36:52.658371+00:00', 'version': None}
+
+======================================================================
+FAIL: test_target_foreign_parent_neither_vetoes_nor_supplies_child_references (core.test_s106_c1_probe.S106C1ReplayContractProbe.test_target_foreign_parent_neither_vetoes_nor_supplies_child_references)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\swwba\AppData\Local\Temp\s106-c1-c249262448d44f1e8ea3b1068a3e8298\release\СИСТЕМА_MVP\backend\core\test_s106_c1_probe.py", line 133, in test_target_foreign_parent_neither_vetoes_nor_supplies_child_references
+    self.assertEqual(result['status'], 'accepted', result)
+AssertionError: 'conflict' != 'accepted'
+- conflict
++ accepted
+ : {'event_id': 's106-self-contained-child', 'status': 'conflict', 'retryable': False, 'code': 'dependency_owner_mismatch', 'message': 'legacy foreign dependency', 'server_ids': {}, 'server_received_at': '2026-09-28T17:35:52.701029+00:00', 'version': None}
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.370s
+
+FAILED (failures=3)
+Destroying test database for alias 'default'...

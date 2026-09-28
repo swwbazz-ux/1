@@ -1,0 +1,12 @@
+✔ restart recovers only clock conflict and its dependency chain with immutable identity (6.6451ms)
+✔ restart independently retries every legacy dependency cascade code (3.1606ms)
+✔ restart retries a legacy device clock conflict and its dependency chain (5.1139ms)
+✔ restart retries every legacy dependency cascade code independently (1.203ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 92.1155

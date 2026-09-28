@@ -1,0 +1,11 @@
+Creating test database for alias 'default'...
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-09-28T17:06:48.682598+00:00; погрузка водителя 2026-09-28T16:57:48.682598+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-09-28T16:57:48.682598+00:00; машинист на смене: нет
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-09-28T17:06:48.762484+00:00; погрузка водителя 2026-09-28T16:57:48.762484+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-09-28T16:57:48.762484+00:00; машинист на смене: нет
+..
+----------------------------------------------------------------------
+Ran 3 tests in 0.297s
+
+OK
+Destroying test database for alias 'default'...

@@ -1,0 +1,11 @@
+✔ restart recovers only clock conflict and its dependency chain with immutable identity (8.8041ms)
+✔ restart resends a manual load refused as free_bucket_not_available and its chain (1.3939ms)
+✔ restart retries a legacy device clock conflict and its dependency chain (6.898ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116.6413

@@ -1,0 +1,15 @@
+Auto-merging ПРОГРЕСС_ПРОЕКТА/04_БЛИЖАЙШИЕ_ЗАДАЧИ.md
+Auto-merging СИСТЕМА_MVP/backend/core/offline_sync.py
+CONFLICT (content): Merge conflict in СИСТЕМА_MVP/backend/core/offline_sync.py
+Auto-merging СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
+Auto-merging СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+CONFLICT (content): Merge conflict in СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+Auto-merging СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js
+CONFLICT (content): Merge conflict in СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js
+Auto-merging СИСТЕМА_MVP/backend/static/js/tests/driver-offline-template-contract.test.js
+Auto-merging СИСТЕМА_MVP/backend/trips/tests.py
+Auto-merging СИСТЕМА_MVP/backend/trips/views.py
+Auto-merging СИСТЕМА_MVP/backend/users/role_apps.py
+Auto-merging СИСТЕМА_MVP/backend/users/tests.py
+Auto-merging СИСТЕМА_MVP/backend/users/views.py
+Automatic merge failed; fix conflicts and then commit the result.
