@@ -534,6 +534,131 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertIsNone(other_shift_state['selection'])
         self.assertFalse(other_shift_state['can_cancel'])
 
+    def test_used_right_leaves_the_driver_screen_once_its_trip_is_unloaded(self):
+        """Свободный ковш — на один рейс: после разгрузки режим сам выключается.
+
+        Владелец, 28.09.2026: водитель включил ковш → погрузился у выбранного →
+        разгрузился → остаётся основное назначение. Раньше USED-принятие текущей
+        смены считалось активным для экрана водителя до конца смены, и режим
+        оставался включённым после завершённого рейса. Статус USED остаётся в
+        истории — ничего не отменяется задним числом.
+        """
+        from users.views import driver_free_bucket_payload
+
+        def driver_state():
+            _, state, active = driver_free_bucket_payload(
+                current_truck=self.truck,
+                current_assignment=self.assignment,
+                version=1,
+                open_shift=self.truck_shift,
+            )
+            return state, active
+
+        selected = self.select_event(event_id='driver-free-select-one-load')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(event_id='free-accept-one-load', **identity)
+        accepted_result = self.sync(
+            [accepted], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='free-bucket-one-load-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        loaded = self.load_event(accepted, event_id='free-load-one-load', sequence=2, **identity)
+        loaded_result = self.sync(
+            [loaded], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='free-bucket-one-load-device',
+        ).json()['results'][0]
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        trip = Trip.objects.get(pk=loaded_result['server_ids']['trip_id'])
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+
+        # Погружен, ещё не разгружен — режим на экране водителя активен.
+        loaded_state, loaded_active = driver_state()
+        self.assertTrue(loaded_state['active'])
+        self.assertEqual(loaded_state['status'], 'used')
+        self.assertEqual(loaded_active, acceptance)
+
+        occurred_at = trip.loaded_at + timedelta(minutes=3)
+        unload = {
+            'event_id': 'driver-unload-one-load',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'actor_id': self.driver.id,
+            'access_id': self.driver_access.id,
+            'role_code': 'driver',
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': 2,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'context_snapshot': {
+                'actor_id': self.driver.id,
+                'access_id': self.driver_access.id,
+                'role_code': 'driver',
+            },
+            'payload': {'trip_id': trip.id},
+        }
+        unload_result = self.sync_driver([unload]).json()['results'][0]
+        self.assertEqual(unload_result['status'], 'accepted', unload_result)
+        trip.refresh_from_db()
+        self.assertNotIn(trip.status, (TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD))
+        acceptance.refresh_from_db()
+        # Использованное право при разгрузке закрывается (CLOSED — «использовано и
+        # завершено»), ничего не отменяется задним числом: рейс и погрузка остаются.
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertEqual(acceptance.used_trip_id, trip.id)
+        self.assertIsNone(acceptance.cancelled_at)
+
+        # Разгружен — режим выключен, осталось основное назначение.
+        unloaded_state, unloaded_active = driver_state()
+        self.assertFalse(unloaded_state['active'])
+        self.assertIsNone(unloaded_active)
+        self.assertIsNone(unloaded_state['selection'])
+        self.assertFalse(unloaded_state['can_cancel'])
+
+    def test_used_right_whose_trip_left_open_statuses_without_closing_is_off_for_the_driver(self):
+        """Рейс ковша ушёл из открытых, а право осталось USED — экран водителя всё равно гасит режим.
+
+        Разгрузка и отмены закрывают право (CLOSED), но не все пути: истечение
+        пассивного ручного рейса (trips/manual_loading.py, UNCONTROLLED) право не
+        трогает. Раньше USED считалось активным для экрана водителя безусловно —
+        кнопка ковша горела до конца смены. Правило владельца: ковш на один рейс —
+        право активно, только пока его рейс открыт.
+        """
+        from users.views import driver_free_bucket_payload
+
+        selected = self.select_event(event_id='driver-free-select-uncontrolled')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(event_id='free-accept-uncontrolled', **identity)
+        loaded = self.load_event(accepted, event_id='free-load-uncontrolled', sequence=2, **identity)
+        results = self.sync(
+            [accepted, loaded], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='free-bucket-uncontrolled-device',
+        ).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+
+        Trip.objects.filter(pk=acceptance.used_trip_id).update(
+            status=TripStatus.UNCONTROLLED, operationally_closed_at=timezone.now(),
+        )
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+
+        _, state, active = driver_free_bucket_payload(
+            current_truck=self.truck,
+            current_assignment=self.assignment,
+            version=1,
+            open_shift=self.truck_shift,
+        )
+        self.assertFalse(state['active'])
+        self.assertIsNone(active)
+        self.assertIsNone(state['selection'])
+        self.assertFalse(state['can_cancel'])
+
     def test_orphaned_request_stops_holding_the_truck_for_dispatcher_and_excavator(self):
         """Осиротевшая заявка не держит самосвал «под свободным ковшом» нигде.
 
