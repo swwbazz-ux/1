@@ -26,6 +26,14 @@ class FreeBucketAcceptanceStatus(models.TextChoices):
     CLOSED = 'closed', 'Завершён'
 
 
+# Принятое/использованное/закрытое право обязано знать, кто его принял: машинист
+# (operator) либо отметка водителя без машиниста (accepted_by_driver_action).
+_FREE_BUCKET_ACCEPTED_BY_SOMEONE = (
+    models.Q(operator__isnull=False)
+    | models.Q(accepted_by_driver_action=True, requested_by__isnull=False, accepted_at__isnull=False)
+)
+
+
 class FreeBucketAcceptance(models.Model):
     """One temporary, single-load acceptance without changing primary haul assignment."""
 
@@ -66,6 +74,12 @@ class FreeBucketAcceptance(models.Model):
     occurred_at = models.DateTimeField('Принят на устройстве')
     received_at = models.DateTimeField('Принят сервером', default=timezone.now)
     accepted_at = models.DateTimeField('Согласован с машинистом', null=True, blank=True)
+    # Ручной режим: у экскаватора никого с приложением, подтверждать запрос некому.
+    # Погрузку определяет водитель (правило владельца 3), и его отметка сама
+    # принимает запрос временем погрузки. Только с этим признаком принятие живёт
+    # без машиниста и его смены (см. ограничения ниже); если машинист на смене
+    # был, он записывается, признак всё равно стоит — кнопку нажимал не он.
+    accepted_by_driver_action = models.BooleanField('Принят отметкой водителя', default=False)
     cancelled_at = models.DateTimeField('Отменён', null=True, blank=True)
     used_at = models.DateTimeField('Погружен', null=True, blank=True)
     closed_at = models.DateTimeField('Закрыт', null=True, blank=True)
@@ -100,6 +114,14 @@ class FreeBucketAcceptance(models.Model):
                 condition=(
                     models.Q(operator__isnull=True, loading_shift__isnull=True, accepted_at__isnull=True)
                     | models.Q(operator__isnull=False, loading_shift__isnull=False, accepted_at__isnull=False)
+                    # Принято отметкой водителя без машиниста на смене: время есть, машиниста нет.
+                    | models.Q(
+                        accepted_by_driver_action=True,
+                        requested_by__isnull=False,
+                        operator__isnull=True,
+                        loading_shift__isnull=True,
+                        accepted_at__isnull=False,
+                    )
                 ),
                 name='free_bucket_accept_fields_consistent',
             ),
@@ -109,18 +131,21 @@ class FreeBucketAcceptance(models.Model):
                         status=FreeBucketAcceptanceStatus.REQUESTED,
                         requested_by__isnull=False,
                         operator__isnull=True,
+                        accepted_by_driver_action=False,
                         cancelled_at__isnull=True,
                         used_at__isnull=True,
                         used_trip__isnull=True,
                         closed_at__isnull=True,
                     )
-                    | models.Q(
-                        status=FreeBucketAcceptanceStatus.ACCEPTED,
-                        operator__isnull=False,
-                        cancelled_at__isnull=True,
-                        used_at__isnull=True,
-                        used_trip__isnull=True,
-                        closed_at__isnull=True,
+                    | (
+                        models.Q(
+                            status=FreeBucketAcceptanceStatus.ACCEPTED,
+                            cancelled_at__isnull=True,
+                            used_at__isnull=True,
+                            used_trip__isnull=True,
+                            closed_at__isnull=True,
+                        )
+                        & _FREE_BUCKET_ACCEPTED_BY_SOMEONE
                     )
                     | models.Q(
                         status=FreeBucketAcceptanceStatus.CANCELLED,
@@ -138,21 +163,25 @@ class FreeBucketAcceptance(models.Model):
                         used_trip__isnull=True,
                         closed_at__isnull=True,
                     )
-                    | models.Q(
-                        status=FreeBucketAcceptanceStatus.USED,
-                        operator__isnull=False,
-                        cancelled_at__isnull=True,
-                        used_at__isnull=False,
-                        used_trip__isnull=False,
-                        closed_at__isnull=True,
+                    | (
+                        models.Q(
+                            status=FreeBucketAcceptanceStatus.USED,
+                            cancelled_at__isnull=True,
+                            used_at__isnull=False,
+                            used_trip__isnull=False,
+                            closed_at__isnull=True,
+                        )
+                        & _FREE_BUCKET_ACCEPTED_BY_SOMEONE
                     )
-                    | models.Q(
-                        status=FreeBucketAcceptanceStatus.CLOSED,
-                        operator__isnull=False,
-                        cancelled_at__isnull=True,
-                        used_at__isnull=False,
-                        used_trip__isnull=False,
-                        closed_at__isnull=False,
+                    | (
+                        models.Q(
+                            status=FreeBucketAcceptanceStatus.CLOSED,
+                            cancelled_at__isnull=True,
+                            used_at__isnull=False,
+                            used_trip__isnull=False,
+                            closed_at__isnull=False,
+                        )
+                        & _FREE_BUCKET_ACCEPTED_BY_SOMEONE
                     )
                 ),
                 name='free_bucket_status_fields_consistent',

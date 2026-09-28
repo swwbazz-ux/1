@@ -76,6 +76,16 @@
         return errorCode(event) === "device_clock_ahead"
             || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error && event.last_error.message || ""));
     }
+    /* Погрузка под свободным ковшом, который сервер сам погасил, пока отметка
+       висела в очереди: раньше сервер отвечал free_bucket_not_available
+       окончательно, теперь записывает её по факту (PR #128). Отклонённую старым
+       сервером отметку и её цепочку отправляем заново при старте — иначе три
+       рейса владельца так и остались бы «на сверке» (бой 29.09.2026). */
+    function recoverableServerRefusedConflict(event) {
+        return !!event && event.state === "conflict"
+            && event.event_type === "driver.trip.loaded"
+            && errorCode(event) === "free_bucket_not_available";
+    }
     function recoverableDependencyConflict(event) {
         return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
     }
@@ -1070,7 +1080,9 @@
             });
             var recoverable = Object.create(null);
             events.forEach(function (event) {
-                if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                if (recoverableDeviceClockConflict(event) || recoverableServerRefusedConflict(event)) {
+                    recoverable[event.event_id] = true;
+                }
             });
             var changed = true;
             while (changed) {
