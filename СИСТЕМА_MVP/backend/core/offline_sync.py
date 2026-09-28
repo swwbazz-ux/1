@@ -2418,11 +2418,29 @@ def _process_driver_manual_completed(access, normalized):
         truck_id=truck_id,
     )
     trip = _resolve_trip_reference(access, normalized)
-    if trip.truck_id != truck.id or trip.excavator_id != excavator.id:
+    if trip.truck_id != truck.id:
         _conflict(
             'driver_manual_trip_changed',
             'Текущий ручной рейс уже относится к другой технике.',
         )
+    if trip.excavator_id != excavator.id:
+        # Рейс назван однозначно (trip_id / local_trip_id) и принадлежит самосвалу
+        # этой смены — экскаватор в payload лишь подпись. Телефон подписывает
+        # завершение рейса под свободным ковшом основным экскаватором
+        # (driver-manual-excavator-workspace-v1.js берёт базовый контекст), и
+        # раньше это отвергалось как «другая техника»: рейс оставался открытым,
+        # а очередь телефона — в тупике (стенд 28.09.2026). Работник — истина:
+        # завершаем рейс по его собственному экскаватору, расхождение — в журнал.
+        _log_discrepancy(
+            access=access,
+            code='manual_complete_excavator_mismatch',
+            process='driver.trip.manual_completed',
+            description=(
+                f'рейс #{trip.id} экскаватора #{trip.excavator_id}, '
+                f'в отметке завершения экскаватор #{excavator.id}'
+            ),
+        )
+        excavator = trip.excavator
     if (
         trip.driver_id != access.employee_id
         or trip.driver_control_shift_id != shift.id
