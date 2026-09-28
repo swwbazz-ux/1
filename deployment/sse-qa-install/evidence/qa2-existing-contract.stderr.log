@@ -1,0 +1,6 @@
+test_redis_acl_permissions_and_canonical_equipment_types (tests.test_package_contract.PackageContractTests.test_redis_acl_permissions_and_canonical_equipment_types) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.030s
+
+OK

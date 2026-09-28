@@ -1,0 +1,8 @@
+test_fixture_constants_follow_application_phone_and_measurement_rules (test_seed_business_smoke.SeedBusinessSmokeContractTests.test_fixture_constants_follow_application_phone_and_measurement_rules) ... ok
+test_runtime_contains_the_exact_seed_and_behavior_test_sources (test_seed_business_smoke.SeedBusinessSmokeContractTests.test_runtime_contains_the_exact_seed_and_behavior_test_sources) ... ok
+test_serialized_event_matcher_requires_new_trip_identity_and_version (test_seed_business_smoke.SeedBusinessSmokeContractTests.test_serialized_event_matcher_requires_new_trip_identity_and_version) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.522s
+
+OK

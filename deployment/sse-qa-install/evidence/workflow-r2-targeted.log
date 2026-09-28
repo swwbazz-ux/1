@@ -1,0 +1,12 @@
+﻿test_evidence_manifest_excludes_itself_and_rechecks (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_evidence_manifest_excludes_itself_and_rechecks) ... ok
+test_journal_collector_isolated_normal_faults_and_cancel (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_journal_collector_isolated_normal_faults_and_cancel) ... ok
+test_masks_and_sanitization_gate_precede_any_evidence_emit (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_masks_and_sanitization_gate_precede_any_evidence_emit) ... ok
+test_nginx_is_explicitly_started_and_evidenced_before_cycle (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_nginx_is_explicitly_started_and_evidenced_before_cycle) ... ok
+test_package_tests_use_fresh_venv_and_offline_wheelhouse (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_package_tests_use_fresh_venv_and_offline_wheelhouse) ... ok
+test_secret_sentinel_fails_without_echoing_value (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_secret_sentinel_fails_without_echoing_value) ... ok
+test_workflow_wheelhouse_manifest_is_installer_compatible (test_disposable_workflow_r2_contract.DisposableWorkflowR2ContractTests.test_workflow_wheelhouse_manifest_is_installer_compatible) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.999s
+
+OK

@@ -1,0 +1,38 @@
+﻿git : warning: in the working copy of 'deployment/sse-qa-install/INSTALL_AND_ROLLBACK.md', LF will be replaced by CRLF 
+the next time Git touches it
+At line:2 char:921
++ ...  $ev 'py-compile.exit.txt') -Value $pc; git diff --check 2>&1 | Out-F ...
++                                             ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: in the... Git touches it:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: in the working copy of 'deployment/sse-qa-install/PREFLIGHT_AND_CONFLICTS.md', LF will be replaced by CRLF 
+the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/README.md', LF will be replaced by CRLF the next time Git 
+touches it
+warning: in the working copy of 'deployment/sse-qa-install/REQUIRED_FILES.txt', LF will be replaced by CRLF the next 
+time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/RESOURCE_LIMITS.md', LF will be replaced by CRLF the next 
+time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/github-actions/control-channel.patch', LF will be replaced 
+by CRLF the next time Git touches it
+warning: in the working copy of 
+'deployment/sse-qa-install/github-actions/source-overlay/.github/deploy/build_release.py', LF will be replaced by CRLF 
+the next time Git touches it
+warning: in the working copy of 
+'deployment/sse-qa-install/github-actions/source-overlay/.github/deploy/test_release_protocol.py', LF will be replaced 
+by CRLF the next time Git touches it
+warning: in the working copy of 
+'deployment/sse-qa-install/github-actions/source-overlay/.github/workflows/production-deploy.yml', LF will be replaced 
+by CRLF the next time Git touches it
+warning: in the working copy of 
+'deployment/sse-qa-install/github-actions/source-overlay/deployment/server/accounting_github_deploy_receiver.py', LF 
+will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/scripts/sse_qa_ctl.py', LF will be replaced by CRLF the 
+next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/tests/test_package_contract.py', LF will be replaced by 
+CRLF the next time Git touches it
+warning: in the working copy of 'ПРОГРЕСС_ПРОЕКТА/01_ТЕКУЩЕЕ_СОСТОЯНИЕ.md', LF will be replaced by CRLF the next time 
+Git touches it
+warning: in the working copy of 'ПРОГРЕСС_ПРОЕКТА/04_БЛИЖАЙШИЕ_ЗАДАЧИ.md', LF will be replaced by CRLF the next time 
+Git touches it

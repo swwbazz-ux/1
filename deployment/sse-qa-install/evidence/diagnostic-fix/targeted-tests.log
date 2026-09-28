@@ -1,0 +1,13 @@
+test_child_exit_has_fixed_step_and_redacts_registered_secret (test_install_diagnostics.ControllerCommandDiagnosticTests.test_child_exit_has_fixed_step_and_redacts_registered_secret) ... ok
+test_child_timeout_is_bounded_and_does_not_emit_command_or_environment (test_install_diagnostics.ControllerCommandDiagnosticTests.test_child_timeout_is_bounded_and_does_not_emit_command_or_environment) ... ok
+test_cycle_orders_diagnostic_capture_before_cleanup_and_reset (test_install_diagnostics.InstallDiagnosticBashTests.test_cycle_orders_diagnostic_capture_before_cleanup_and_reset) ... ok
+test_early_exit_preserves_exact_exit_journal_and_capture_before_cleanup (test_install_diagnostics.InstallDiagnosticBashTests.test_early_exit_preserves_exact_exit_journal_and_capture_before_cleanup) ... ok
+test_journal_export_failure_is_recorded_without_replacing_primary_failure (test_install_diagnostics.InstallDiagnosticBashTests.test_journal_export_failure_is_recorded_without_replacing_primary_failure) ... ok
+test_live_timeout_is_captured_before_stop_and_after_stop (test_install_diagnostics.InstallDiagnosticBashTests.test_live_timeout_is_captured_before_stop_and_after_stop) ... ok
+test_missing_exit_marker_and_async_initial_state_keep_terminal_status (test_install_diagnostics.InstallDiagnosticBashTests.test_missing_exit_marker_and_async_initial_state_keep_terminal_status) ... ok
+test_missing_invocation_is_explicit_and_does_not_block_cleanup_record (test_install_diagnostics.InstallDiagnosticBashTests.test_missing_invocation_is_explicit_and_does_not_block_cleanup_record) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 4.723s
+
+OK

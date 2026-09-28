@@ -1,0 +1,4 @@
+PY_COMPILE_OK
+BASH_CYCLE_SYNTAX_OK
+BASH_ZERO_RESIDUE_SYNTAX_OK
+GIT_DIFF_CHECK_OK generated_control_patch_checked_by_git_apply

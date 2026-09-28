@@ -1,0 +1,8 @@
+﻿date_utc=2026-09-28T11:20:07Z
+os=Microsoft Windows NT 10.0.27924.0
+powershell=5.1.27924.1000
+python=Python 3.12.10
+test_python=Python 3.12.10
+git=git version 2.54.0.windows.1
+head=fb81480a9709e3a26ccbeb74aaefbaa08a3d722c
+branch=codex/sse-qa-cleanup-candidate-20260928

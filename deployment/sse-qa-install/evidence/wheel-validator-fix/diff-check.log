@@ -1,0 +1,4 @@
+﻿warning: in the working copy of 'deployment/sse-qa-install/REQUIRED_FILES.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/scripts/sse_qa_ctl.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/sse-qa-install/tests/test_disposable_workflow_r2_contract.py', LF will be replaced by CRLF the next time Git touches it
+GIT_DIFF_CHECK_EXIT=0

@@ -1,0 +1,4 @@
+warning: in the working copy of '.github/deploy/build_release.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.github/deploy/test_release_protocol.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.github/workflows/production-deploy.yml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'deployment/server/accounting_github_deploy_receiver.py', LF will be replaced by CRLF the next time Git touches it
