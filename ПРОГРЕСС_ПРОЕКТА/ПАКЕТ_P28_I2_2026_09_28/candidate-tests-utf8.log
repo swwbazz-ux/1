@@ -1,0 +1,32 @@
+P28-I2 adapter candidate test log
+Date: 2026-09-28
+Candidate: e1cdef3c319889662985a65909726130a596a3c6
+Base: 9869b29348cae038a88abbde1d8f75bd8ab99dd4
+Database: isolated Django SQLite test database
+
+COMMAND:
+C:\codex-tmp\venv-security-dependency-updates-20260922\Scripts\python.exe manage.py test trips.test_route_projection_adapter --verbosity 1
+
+Found 13 test(s).
+System check identified no issues (0 silenced).
+Creating test database for alias 'default'...
+.............
+----------------------------------------------------------------------
+Ran 13 tests in 0.781s
+
+OK
+Destroying test database for alias 'default'...
+EXIT=0
+COMMAND:
+C:\codex-tmp\venv-security-dependency-updates-20260922\Scripts\python.exe manage.py test core.test_offline_sync.OfflineEventSyncTests.test_dump_point_a_to_b_to_a_keeps_distinct_ordered_events core.test_offline_sync.OfflineEventSyncTests.test_dump_point_current_choice_is_accepted_without_business_change core.test_offline_sync.OfflineEventSyncTests.test_dump_point_change_and_dependent_unload_complete_same_exact_trip core.test_offline_sync.OfflineEventSyncTests.test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state --verbosity 1
+
+Found 4 test(s).
+System check identified no issues (0 silenced).
+Creating test database for alias 'default'...
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.351s
+
+OK
+Destroying test database for alias 'default'...
+EXIT=0

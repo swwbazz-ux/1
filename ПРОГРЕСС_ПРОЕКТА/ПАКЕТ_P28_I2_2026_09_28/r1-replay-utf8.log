@@ -1,0 +1,18 @@
+P28-I2 transferred core replay
+Date: 2026-09-28
+Source docs commit: bb5398ae8eed4a9725135360bb33ca310df89b8d
+Candidate core git blob: 64b2519fb8bb0874012577fd2d779d7b9a619b74
+
+COMMAND:
+C:\Users\swwba\AppData\Local\Programs\Python\Python312\python.exe -c "import sys, unittest; suite=unittest.defaultTestLoader.discover('.', pattern='test_*.py'); result=unittest.TextTestRunner(stream=sys.stdout, verbosity=1, buffer=True).run(suite); raise SystemExit(0 if result.wasSuccessful() else 1)"
+
+..............................
+----------------------------------------------------------------------
+Ran 30 tests in 0.005s
+
+OK
+EXIT=0
+
+Buffering suppresses stdout of successful individual tests only. Test discovery,
+assertions and exit status are unchanged. Original detailed traces remain in the
+immutable published P28-I1-R1 package.

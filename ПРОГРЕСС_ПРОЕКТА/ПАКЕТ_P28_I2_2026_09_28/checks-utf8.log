@@ -1,0 +1,54 @@
+P28-I2 static and Django checks
+Date: 2026-09-28
+
+Initial release named by task:
+d208b84db920aa98ec80612645dac3996c61f76c
+
+Fresh release before candidate commit:
+9869b29348cae038a88abbde1d8f75bd8ab99dd4
+
+Parallel release change preserved:
+9869b293 Свободный ковш: ручная погрузка под непринятым запросом принимается отметкой водителя (#124)
+
+Candidate:
+branch=codex/p28-i2-route-evidence-adapter-20260928
+head=e1cdef3c319889662985a65909726130a596a3c6
+base=9869b29348cae038a88abbde1d8f75bd8ab99dd4
+
+Source blobs on fresh base:
+trips/models.py=700686b701efc5d58601a8ab24843a59b809de16
+core/models.py=7668b2876f1c2fc0405f71657a3ee249a0e75b86
+core/offline_sync.py=3a2c2f153f5c83925e3b3d0b9800f9e39a73220a
+route_projection_core.py=64b2519fb8bb0874012577fd2d779d7b9a619b74
+
+Candidate diff:
+A  СИСТЕМА_MVP/backend/trips/route_projection_adapter.py
+A  СИСТЕМА_MVP/backend/trips/route_projection_core.py
+A  СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py
+3 files changed, 1631 insertions(+)
+
+COMMAND:
+python.exe manage.py check
+System check identified no issues (0 silenced).
+EXIT=0
+
+COMMAND:
+python.exe manage.py makemigrations --check --dry-run
+No changes detected
+EXIT=0
+
+COMMAND:
+python.exe -m py_compile trips/route_projection_core.py trips/route_projection_adapter.py trips/test_route_projection_adapter.py
+EXIT=0
+
+STATIC READ-ONLY SIGNATURE CHECK:
+No .save(), .update(), bulk operation, .create(), timezone.now(), reconcile or
+bump_operational_state call is present in route_projection_adapter.py.
+Import-side-effect and SQL DML absence are additionally asserted by the Django
+test suite.
+
+NOT_RUN:
+- PostgreSQL and concurrent writer consistency;
+- production or persistent QA data;
+- endpoint, template, service worker, browser DOM, sound and installed phone;
+- PR #106/#120 integration, merge and deploy.
