@@ -10,8 +10,8 @@ class FreeBucketAcceptanceAdmin(admin.ModelAdmin):
     search_fields = ('truck__garage_number', 'excavator__garage_number', 'operator__full_name', 'client_acceptance_id')
     readonly_fields = (
         'client_acceptance_id', 'truck', 'excavator', 'operator', 'loading_shift',
-        'primary_assignment', 'status', 'occurred_at', 'received_at', 'cancelled_at',
-        'used_at', 'closed_at', 'used_trip',
+        'accepted_by_driver_action', 'primary_assignment', 'status', 'occurred_at',
+        'received_at', 'accepted_at', 'cancelled_at', 'used_at', 'closed_at', 'used_trip',
     )
 
     def has_add_permission(self, request):
