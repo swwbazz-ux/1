@@ -1,0 +1,9 @@
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_manual_completion_excavator_mismatch (__main__.Probe.test_manual_completion_excavator_mismatch) ... offline_sync: accepted despite discrepancy (driver.trip.manual_completed/manual_complete_excavator_mismatch) employee=2 role=7 — рейс #1 экскаватора #3, в отметке завершения экскаватор #4
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.178s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...

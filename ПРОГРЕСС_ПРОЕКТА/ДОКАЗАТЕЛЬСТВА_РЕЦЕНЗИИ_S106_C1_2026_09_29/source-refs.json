@@ -1,0 +1,35 @@
+{
+  "docs": "a59c33ec197b42975655270df1b67131c917347e",
+  "release": "35d11e1fe479ec80fddd3d8120e535cb0014e60e",
+  "pr106": {
+    "sha": "17cbb3e913dfdc98aaa9585ba4090d0f4cf17ee0",
+    "merged": false
+  },
+  "pr125": {
+    "head": "8c471e5f1a7dd5173c8683eba3440389124b7f0f",
+    "merge": "35d11e1fe479ec80fddd3d8120e535cb0014e60e",
+    "merged_at": "2026-09-28T21:13:51Z"
+  },
+  "pr126": {
+    "merge": "28b293e07859cfea11a383b17791656fdb0322c2",
+    "merged": true
+  },
+  "unchanged_from_8c215ae2": [
+    {
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "blob": "a3dff96867e2323635aedc2b1fb82bf0c3b051d2"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py",
+      "blob": "a1dffa82546214a94c8c00ef66b6b63eb05d33ca"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/reports/views.py",
+      "blob": "56d13ad6401c4e8ca8e95b26da402fcbcab654de"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+      "blob": "0f7a0deef70c96e1e3169229f435615c25bf0620"
+    }
+  ]
+}
