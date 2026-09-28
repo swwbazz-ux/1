@@ -94,24 +94,34 @@ body.driver-mobile-screen .driver-free-bucket-top {
     border-bottom: 1px solid rgba(var(--fb-rgb), .22);
 }
 
+/* «Закрыть» — на одной оси с заголовком: и кружок, и строка заголовка ровно
+   44px высотой от верхнего отступа шапки, отступ от правого края равен левому
+   отступу заголовка (18px). Крестик — по центру кружка: сетка, без отступов
+   кнопки (владелец, 28.09.2026: «стоит криво»). */
 body.driver-mobile-screen .driver-free-bucket-close {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 18px;
+    right: 18px;
     width: 44px;
     height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
     border: 1px solid rgba(151, 181, 190, .28);
     border-radius: 50%;
     background: rgba(255, 255, 255, .05);
     color: #cad8dc;
-    font-size: 26px;
+    font-size: 28px;
+    font-weight: 300;
     line-height: 1;
 }
 
 body.driver-mobile-screen .driver-free-bucket-head {
-    display: grid;
+    display: flex;
+    align-items: center;
+    min-height: 44px;
     gap: 6px;
-    margin: 0 42px 0 0;
+    margin: 0 62px 0 0;
     padding: 0;
     text-transform: none;
 }
@@ -142,7 +152,8 @@ body.driver-mobile-screen .driver-free-bucket-current {
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 4px 12px;
-    margin: 10px 0 0;
+    /* Просвет от кружка «закрыть» (18–62px шапки) до этого блока — не меньше 8px. */
+    margin: 12px 0 0;
     padding: 10px 13px;
     border: 1px solid rgba(var(--fb-rgb), .45);
     border-radius: 12px;
@@ -271,32 +282,42 @@ body.driver-mobile-screen .driver-free-bucket-tile:not(:disabled):active::after 
     opacity: 1;
 }
 
+/* Выбранная «горит»: насыщенная окантовка, светлый лиловый фон, заметное свечение
+   вокруг плитки и светлый номер — видно с первого взгляда (владелец, 28.09.2026:
+   «ярче, чем сейчас»). Всё статично, только цвета и тени без анимации. */
 body.driver-mobile-screen .driver-free-bucket-tile.is-current {
     --fb-frame: rgb(var(--fb-rgb));
-    --fb-icon: rgb(var(--fb-rgb));
-    color: rgb(var(--fb-rgb));
+    --fb-icon: #f3edff;
+    color: #f7f2ff;
     background:
         linear-gradient(90deg,
-            rgba(0, 0, 0, .5) 0%,
-            rgba(0, 0, 0, .22) 12%,
+            rgba(0, 0, 0, .35) 0%,
+            rgba(0, 0, 0, .12) 12%,
             rgba(0, 0, 0, 0) 32%,
-            rgba(255, 255, 255, .05) 50%,
+            rgba(255, 255, 255, .08) 50%,
             rgba(0, 0, 0, 0) 68%,
-            rgba(0, 0, 0, .22) 88%,
-            rgba(0, 0, 0, .5) 100%),
-        linear-gradient(180deg, rgba(var(--fb-rgb), .34), rgba(var(--fb-rgb), .08) 62%),
+            rgba(0, 0, 0, .12) 88%,
+            rgba(0, 0, 0, .35) 100%),
+        linear-gradient(180deg, rgba(var(--fb-rgb), .62), rgba(var(--fb-rgb), .28) 62%, rgba(var(--fb-rgb), .2)),
         linear-gradient(180deg, #1b2d34, #0c181e 72%);
     box-shadow:
         inset 0 2px 0 var(--fb-frame),
         inset 0 -2px 0 var(--fb-frame),
         inset 2px 0 0 var(--fb-frame),
         inset -2px 0 0 var(--fb-frame),
-        inset 0 6px 12px rgba(255, 255, 255, .06),
-        inset 0 -10px 16px rgba(0, 0, 0, .4),
-        inset 0 0 22px rgba(var(--fb-rgb), .18),
+        inset 0 6px 12px rgba(255, 255, 255, .1),
+        inset 0 -10px 16px rgba(0, 0, 0, .3),
+        inset 0 0 26px rgba(var(--fb-rgb), .35),
         0 5px 12px rgba(0, 0, 0, .55),
-        0 0 0 1px rgba(var(--fb-rgb), .4),
-        0 0 18px rgba(var(--fb-rgb), .5);
+        0 0 0 2px rgba(var(--fb-rgb), .75),
+        0 0 14px rgba(var(--fb-rgb), .85),
+        0 0 30px rgba(var(--fb-rgb), .55);
+}
+
+body.driver-mobile-screen .driver-free-bucket-tile.is-current .driver-free-bucket-tile-number {
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, .6),
+        0 0 10px rgba(var(--fb-rgb), .8);
 }
 
 body.driver-mobile-screen .driver-free-bucket-tile:disabled {

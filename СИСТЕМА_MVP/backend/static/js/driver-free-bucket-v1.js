@@ -622,6 +622,8 @@
 
     function tileStatusLabel(item, selected) {
         if (selected) return "Выбран";
+        // Экскаватор основного закрепления: плитка выключена и подписана (владелец, 28.09.2026).
+        if (item && item.is_primary) return "Основной";
         return item && item.available === false ? "Недоступно" : "";
     }
 

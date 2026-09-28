@@ -49,6 +49,24 @@ test("the selected tile is scrolled into view when the window opens", () => {
     assert.match(open, /is-current[\s\S]*?scrollIntoView\(\{block: "center"/);
 });
 
+test("the primary-assignment tile is disabled and labelled ОСНОВНОЙ, the selected one glows", () => {
+    // Подпись — и в шаблоне, и в JS-сборке плитки; выбор важнее подписи «основной».
+    assert.match(TEMPLATE, /\{% elif excavator\.is_primary %\}Основной\{% elif not excavator\.available %\}Недоступно/);
+    const label = JS.match(/function tileStatusLabel\(item, selected\) \{[\s\S]*?\n {4}\}\n/)[0];
+    assert.match(label, /if \(selected\) return "Выбран";[\s\S]*?is_primary\) return "Основной";[\s\S]*?"Недоступно"/);
+    // Плитка основного выключена (как недоступная) — шаблон ставит disabled по is_primary.
+    assert.match(TEMPLATE, /\{% if excavator\.is_primary or not excavator\.available %\} disabled aria-disabled="true"/);
+    // Выбранная: окантовка полным цветом и свечение снаружи плитки.
+    const current = CSS.match(/\.driver-free-bucket-tile\.is-current \{([^}]*)\}/)[1];
+    assert.match(current, /--fb-frame: rgb\(var\(--fb-rgb\)\)/);
+    assert.match(current, /0 0 30px rgba\(var\(--fb-rgb\), \.55\)/);
+    // «Закрыть» на одной оси с заголовком: одинаковый верхний отступ и высота 44px.
+    const close = CSS.match(/\.driver-free-bucket-close \{([^}]*)\}/)[1];
+    const head = CSS.match(/\.driver-free-bucket-head \{([^}]*)\}/)[1];
+    assert.match(close, /top: 18px;[\s\S]*right: 18px;[\s\S]*height: 44px;[\s\S]*place-items: center;[\s\S]*padding: 0;/);
+    assert.match(head, /align-items: center;[\s\S]*min-height: 44px;/);
+});
+
 test("a long contractor number is fitted by width, never broken across lines", () => {
     assert.match(TEMPLATE, /style="--fb-len: \{\{ excavator\.label\|length \}\}"/);
     assert.match(JS, /button\.style\.setProperty\("--fb-len"/);
