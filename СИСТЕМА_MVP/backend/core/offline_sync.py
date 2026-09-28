@@ -1233,6 +1233,64 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
     return authoritative, selected
 
 
+def _revive_cancelled_free_bucket_by_driver_load(acceptance, *, access, truck, occurred_at):
+    """Return a server-cancelled free-bucket right to life by the driver's load mark.
+
+    Бой 28.09.2026 (телефон владельца): водитель включил ковш, погрузился в ручном
+    режиме, отметка застряла в очереди, а сервер через 10 минут сам погасил
+    неподтверждённый запрос (expire_stale_free_bucket_requests). Когда отметка
+    дошла, ответ был «Свободный ковш уже отменён или закрыт» — погрузку отклонили,
+    за ней каскадом ещё пять отметок, три рейса не записаны. Нажатие водителя —
+    истина (правило владельца): погрузка была, значит право было. Снимаем отмену
+    и дальше идём обычным путём (приём отметкой водителя → USED). Не трогаем, только
+    если у самосвала уже живёт другое право — два открытых сразу база не допускает.
+    """
+    from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    other_open = (
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .filter(
+            truck=truck,
+            status__in=(
+                FreeBucketAcceptanceStatus.REQUESTED,
+                FreeBucketAcceptanceStatus.ACCEPTED,
+                FreeBucketAcceptanceStatus.USED,
+            ),
+        )
+        .exclude(pk=acceptance.pk)
+        .first()
+    )
+    if other_open:
+        _log_discrepancy(
+            access=access,
+            code='free_bucket_cancelled_not_revived',
+            process='driver.trip.loaded',
+            description=(
+                f'отменённый ковш #{acceptance.id} не восстановлен: у самосвала открыт ковш #{other_open.id}'
+            ),
+        )
+        return acceptance
+    cancelled_at = acceptance.cancelled_at
+    acceptance.status = (
+        FreeBucketAcceptanceStatus.ACCEPTED
+        if acceptance.accepted_at
+        else FreeBucketAcceptanceStatus.REQUESTED
+    )
+    acceptance.cancelled_at = None
+    acceptance.save(update_fields=['status', 'cancelled_at'])
+    _log_discrepancy(
+        access=access,
+        code='free_bucket_cancelled_revived_by_driver_load',
+        process='driver.trip.loaded',
+        description=(
+            f'ковш #{acceptance.id} был отменён сервером '
+            f'{cancelled_at.isoformat() if cancelled_at else "?"}; '
+            f'погрузка водителя {occurred_at.isoformat()} записана по факту'
+        ),
+    )
+    return acceptance
+
+
 def _accept_free_bucket_by_driver_action(acceptance, *, access, excavator, accepted_at):
     """Accept a still-REQUESTED free-bucket right by the driver's own manual load mark.
 
@@ -1363,6 +1421,10 @@ def _process_driver_loaded(access, normalized):
             _conflict(
                 'free_bucket_request_owner_changed',
                 'Запрос свободного ковша принадлежит другой смене водителя.',
+            )
+        if acceptance.status == FreeBucketAcceptanceStatus.CANCELLED:
+            acceptance = _revive_cancelled_free_bucket_by_driver_load(
+                acceptance, access=access, truck=truck, occurred_at=normalized['occurred_at'],
             )
         if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
             # Ручной режим: машинист без приложения, подтверждать запрос некому —
@@ -3081,6 +3143,14 @@ def process_one_offline_event(access, normalized):
                             and (
                                 (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
                                 or dependency_chain_is_ready
+                                # Ручная погрузка под ковшом, который сервер сам погасил
+                                # до прихода отметки: теперь она записывается по факту
+                                # (_revive_cancelled_free_bucket_by_driver_load), а уже
+                                # отклонённая на телефоне — принимается при повторе.
+                                or (
+                                    existing.event_type == 'driver.trip.loaded'
+                                    and existing.error_code == 'free_bucket_not_available'
+                                )
                             )
                         )
                         or (

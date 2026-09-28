@@ -792,6 +792,86 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual([item['status'] for item in next_results], ['accepted', 'accepted'], next_results)
         self.assertEqual(Trip.objects.filter(status=TripStatus.COMPLETED).count(), 2)
 
+    def _expired_bucket_load_pair(self, suffix):
+        """Ковш включён 40 мин назад, погрузка через минуту, сервер погасил запрос по TTL."""
+        from trips.free_bucket import expire_stale_free_bucket_requests
+
+        self.backdate_truck_shift(minutes=60)
+        select = self.select_event(
+            event_id=f'driver-free-select-expired-{suffix}',
+            occurred_at=timezone.now() - timedelta(minutes=40),
+        )
+        self.assertEqual(self.sync_driver([select]).json()['results'][0]['status'], 'accepted')
+        expire_stale_free_bucket_requests(self.truck)
+        acceptance = FreeBucketAcceptance.objects.get()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
+        loaded_at = timezone.datetime.fromisoformat(select['occurred_at']) + timedelta(minutes=1)
+        loaded = self.driver_manual_load_under_bucket(
+            select, event_id=f'driver-manual-load-expired-{suffix}', sequence=2, occurred_at=loaded_at,
+        )
+        completed = self.driver_manual_complete_under_bucket(
+            loaded, event_id=f'driver-manual-complete-expired-{suffix}', sequence=3,
+            occurred_at=loaded_at + timedelta(minutes=2),
+        )
+        return acceptance, loaded, completed, loaded_at
+
+    def test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact(self):
+        """Погрузка под ковшом, который сервер погасил до прихода отметки, — записана.
+
+        Бой 28.09.2026 (телефон владельца, после выкладки 0017): отметка висела в
+        очереди, запрос истёк через 10 минут, и сервер ответил
+        «free_bucket_not_available» — погрузку отклонил, следом каскадом
+        dependency_rejected ещё пять отметок. Нажатие водителя — истина: отмена
+        снимается, право принимается отметкой водителя, рейс создаётся и завершается.
+        """
+        acceptance, loaded, completed, loaded_at = self._expired_bucket_load_pair('fact')
+        results = self.sync_driver([loaded, completed]).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        self.assertIsNone(acceptance.cancelled_at)
+        self.assertTrue(acceptance.accepted_by_driver_action)
+        self.assertEqual(acceptance.accepted_at, loaded_at)
+        trip = Trip.objects.get(pk=results[0]['server_ids']['trip_id'])
+        self.assertEqual(acceptance.used_trip_id, trip.id)
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(trip.loaded_at, loaded_at)
+
+    def test_already_rejected_cancelled_bucket_load_is_accepted_on_resend(self):
+        """Отметка, отклонённая старым сервером, и её каскад проходят при повторной отправке.
+
+        Телефон владельца продолжает слать отклонённые записи (try914); после
+        выкладки правки корневая погрузка обрабатывается заново, а зависимые
+        dependency_rejected восстанавливаются, как только корень принят.
+        """
+        from unittest import mock
+
+        acceptance, loaded, completed, loaded_at = self._expired_bucket_load_pair('resend')
+        # Старое поведение сервера: отмену не снимали.
+        with mock.patch(
+            'core.offline_sync._revive_cancelled_free_bucket_by_driver_load',
+            side_effect=lambda acceptance, **kwargs: acceptance,
+        ):
+            rejected = self.sync_driver([loaded, completed]).json()['results']
+        self.assertEqual(
+            [(item['status'], item.get('code')) for item in rejected],
+            [('conflict', 'free_bucket_not_available'), ('conflict', 'dependency_rejected')],
+            rejected,
+        )
+        self.assertFalse(Trip.objects.exists())
+
+        results = self.sync_driver([loaded, completed]).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        acceptance.refresh_from_db()
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.loaded_at, loaded_at)
+        receipts = OfflineFieldEvent.objects.filter(event_id__in=[loaded['event_id'], completed['event_id']])
+        self.assertEqual({item.status for item in receipts}, {'accepted'})
+
     def test_bucket_trip_completion_signed_with_the_primary_excavator_is_accepted(self):
         """Завершение рейса под ковшом с подписью основного экскаватора — принято.
 
