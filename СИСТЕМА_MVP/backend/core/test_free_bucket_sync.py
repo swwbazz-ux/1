@@ -792,6 +792,38 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual([item['status'] for item in next_results], ['accepted', 'accepted'], next_results)
         self.assertEqual(Trip.objects.filter(status=TripStatus.COMPLETED).count(), 2)
 
+    def test_bucket_trip_completion_signed_with_the_primary_excavator_is_accepted(self):
+        """Завершение рейса под ковшом с подписью основного экскаватора — принято.
+
+        Телефон подписывает завершение ручного рейса базовым контекстом рабочего
+        места — при живом основном назначении это основной экскаватор, а не тот,
+        у которого рейс погружен (driver-manual-excavator-workspace-v1.js). Рейс
+        назван однозначно (trip_id / local_trip_id) и принадлежит самосвалу смены;
+        раньше сервер отвечал conflict driver_manual_trip_changed — рейс оставался
+        открытым, очередь телефона вставала (стенд 28.09.2026).
+        """
+        self.backdate_truck_shift()
+        select = self.select_event(
+            event_id='driver-free-select-primary-signed',
+            occurred_at=timezone.now() - timedelta(minutes=9),
+        )
+        self.assertEqual(self.sync_driver([select]).json()['results'][0]['status'], 'accepted')
+        loaded_at = timezone.datetime.fromisoformat(select['occurred_at']) + timedelta(minutes=1)
+        loaded = self.driver_manual_load_under_bucket(
+            select, event_id='driver-manual-load-primary-signed', sequence=2, occurred_at=loaded_at,
+        )
+        completed = self.driver_manual_complete_under_bucket(
+            loaded, event_id='driver-manual-complete-primary-signed', sequence=3,
+            occurred_at=loaded_at + timedelta(minutes=2),
+        )
+        completed['payload']['excavator_id'] = self.excavator.id
+        results = self.sync_driver([loaded, completed]).json()['results']
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        trip = Trip.objects.get(pk=results[0]['server_ids']['trip_id'])
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.CLOSED)
+
     def test_orphaned_request_stops_holding_the_truck_for_dispatcher_and_excavator(self):
         """Осиротевшая заявка не держит самосвал «под свободным ковшом» нигде.
 
