@@ -22,11 +22,6 @@ on:
           - verify_fcm
           - configure_fcm
           - verify_sse_qa
-          - install_sse_qa
-          - enable_sse_qa
-          - smoke_sse_qa
-          - disable_sse_qa
-          - remove_sse_qa
           - diagnose
           - rollback
       expected_commit:
@@ -135,11 +130,6 @@ jobs:
             verify_fcm) expected=VERIFY_FCM ;;
             configure_fcm) expected=CONFIGURE_FCM ;;
             verify_sse_qa) expected=VERIFY_SSE_QA ;;
-            install_sse_qa) expected=INSTALL_SSE_QA ;;
-            enable_sse_qa) expected=ENABLE_SSE_QA ;;
-            smoke_sse_qa) expected=SMOKE_SSE_QA ;;
-            disable_sse_qa) expected=DISABLE_SSE_QA ;;
-            remove_sse_qa) expected=REMOVE_SSE_QA ;;
             diagnose) expected=DIAGNOSE ;;
             rollback) expected=ROLLBACK ;;
             *) exit 2 ;;
@@ -284,10 +274,8 @@ jobs:
           DATA_OPERATION: ${{ inputs.data_operation }}
           ROLLBACK_ID: ${{ inputs.rollback_id }}
           FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
-          SSE_QA_SECRETS_JSON_B64: ${{ secrets.SSE_QA_SECRETS_JSON_B64 }}
           SSE_QA_CANDIDATE_SHA: fb81480a9709e3a26ccbeb74aaefbaa08a3d722c
-          SSE_QA_CONTROLLER_SHA256: bb95e7ca01dedd8c68b842b27040ea35c82b42922e4fd2b4c492d2b2f32c3963
-          SSE_QA_RUNTIME_SHA256: 286e1b15af70271eac98dac7d806423af48e38665b858e6a0bbfcaf403d7433d
+          SSE_QA_CONTROLLER_SHA256: 37241cf19b7309ce4ecda8a484b0bd02ba26e93829e0c3fd87d4e93485e13ecc
         run: |
           set -euo pipefail
           python .github/deploy/test_release_protocol.py
@@ -313,60 +301,43 @@ jobs:
             args+=(--operation "$DATA_OPERATION")
           elif [[ "$MODE" == "diagnose" ]]; then
             args+=(--event-file "$GITHUB_EVENT_PATH")
-          elif [[ "$MODE" == *sse_qa ]]; then
+          elif [[ "$MODE" == "verify_sse_qa" ]]; then
             qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
             mkdir -p "$qa_candidate_root"
             git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"
             candidate_resolved="$(git rev-parse 'FETCH_HEAD^{commit}')"
             test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"
-            git archive --format=tar "$candidate_resolved" deployment/sse-qa-install | \
+            git archive --format=tar "$candidate_resolved" deployment/sse-qa-install/config/systemd | \
               tar -xf - -C "$qa_candidate_root"
-            qa_source="$qa_candidate_root/deployment/sse-qa-install"
-            test -d "$qa_source"
-            controller_source="deployment/server/sse_qa_ctl.py"
+            qa_assets="$qa_candidate_root/deployment/sse-qa-install/config/systemd"
+            test -d "$qa_assets"
+            controller_source="deployment/server/sse_qa_preflight.py"
             controller_actual="$(sha256sum "$controller_source" | cut -d' ' -f1)"
-            runtime_actual="$(sha256sum "$qa_source/generated/runtime.tar.gz" | cut -d' ' -f1)"
             test "$controller_actual" = "$SSE_QA_CONTROLLER_SHA256"
-            test "$runtime_actual" = "$SSE_QA_RUNTIME_SHA256"
-            cp "$controller_source" "$qa_source/scripts/sse_qa_ctl.py"
-            printf 'SSE_QA_SOURCE control_sha=%s candidate_sha=%s controller_sha256=%s runtime_sha256=%s\n' \
-              "${{ github.sha }}" "$candidate_resolved" "$controller_actual" "$runtime_actual"
             qa_build="$RUNNER_TEMP/sse-qa-payload"
-            if [[ "$MODE" == "install_sse_qa" || "$MODE" == "verify_sse_qa" ]]; then
-              cp -a "$qa_source" "$qa_build"
-              rm -rf "$qa_build/generated/wheelhouse" "$qa_build/generated/wheelhouse.sha256" \
-                "$qa_build/PACKAGE_MANIFEST.csv" "$qa_build/evidence/package-self-check.log"
-              mkdir -p "$qa_build/evidence"
-              (cd "$qa_build/generated" && sha256sum -c runtime.sha256)
-              if [[ "$MODE" == "install_sse_qa" ]]; then
-                mkdir -p "$qa_build/generated/wheelhouse"
-                tar -xOf "$qa_build/generated/runtime.tar.gz" backend/requirements.txt > "$RUNNER_TEMP/sse-qa-requirements.txt"
-                python -m pip download --only-binary=:all: \
-                  --dest "$qa_build/generated/wheelhouse" \
-                  -r "$RUNNER_TEMP/sse-qa-requirements.txt" "uvicorn==0.37.0"
-                (cd "$qa_build/generated/wheelhouse" && sha256sum *.whl > ../wheelhouse.sha256)
-              fi
-              python "$qa_build/scripts/finalize_package.py" "$qa_build"
-              python "$qa_build/scripts/package_self_check.py" "$qa_build" | tee "$qa_build/evidence/package-self-check.log"
-              (cd "$qa_build" && zip -q -r -X "$RUNNER_TEMP/sse-qa-install.zip" .)
-            else
-              mkdir -p "$qa_build/scripts"
-              cp "$qa_source/scripts/sse_qa_ctl.py" "$qa_build/scripts/sse_qa_ctl.py"
-              (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" scripts/sse_qa_ctl.py)
-            fi
+            mkdir -p "$qa_build/scripts" "$qa_build/config/systemd"
+            cp "$controller_source" "$qa_build/scripts/sse_qa_preflight.py"
+            cp -a "$qa_assets/." "$qa_build/config/systemd/"
+            expected_files="$RUNNER_TEMP/sse-qa-preflight-files.txt"
+            printf '%s\n' \
+              config/systemd/postgresql@16-sseqa.service.d/qa-limits.conf \
+              config/systemd/redis-sse-qa.service \
+              config/systemd/srv-sse-x2dqa.mount \
+              config/systemd/sse-qa-asgi.service \
+              config/systemd/sse-qa-reconcile.service \
+              config/systemd/sse-qa-wsgi.service \
+              config/systemd/sse-qa.slice \
+              config/systemd/sse-qa.target \
+              scripts/sse_qa_preflight.py > "$expected_files"
+            (cd "$qa_build" && find . -type f -printf '%P\n' | LC_ALL=C sort | diff -u "$expected_files" -)
+            (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-preflight.zip" $(cat "$expected_files"))
+            printf 'SSE_QA_SOURCE control_sha=%s candidate_sha=%s controller_sha256=%s capability=preflight_only\n' \
+              "${{ github.sha }}" "$candidate_resolved" "$controller_actual"
             args+=(
-              --sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip"
+              --sse-qa-package "$RUNNER_TEMP/sse-qa-preflight.zip"
               --sse-qa-candidate-commit "$candidate_resolved"
               --sse-qa-controller-sha256 "$controller_actual"
-              --sse-qa-runtime-sha256 "$runtime_actual"
             )
-            if [[ "$MODE" == "install_sse_qa" ]]; then
-              test -n "$SSE_QA_SECRETS_JSON_B64"
-              printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode > "$RUNNER_TEMP/sse-qa-secrets.json"
-              chmod 0600 "$RUNNER_TEMP/sse-qa-secrets.json"
-              trap 'rm -f "$RUNNER_TEMP/sse-qa-secrets.json"' EXIT
-              args+=(--sse-qa-secrets "$RUNNER_TEMP/sse-qa-secrets.json")
-            fi
           elif [[ "$MODE" == "rollback" ]]; then
             args+=(--rollback-id "$ROLLBACK_ID")
           fi

@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +37,10 @@ release_audit = load_module(
 receiver = load_module(
     "accounting_github_deploy_receiver",
     ROOT / "deployment" / "server" / "accounting_github_deploy_receiver.py",
+)
+preflight = load_module(
+    "sse_qa_preflight",
+    ROOT / "deployment" / "server" / "sse_qa_preflight.py",
 )
 
 
@@ -940,14 +945,88 @@ class ReleaseProtocolTests(unittest.TestCase):
         )
         self.assertIn('git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"', workflow)
         self.assertIn('test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"', workflow)
-        self.assertIn('controller_source="deployment/server/sse_qa_ctl.py"', workflow)
+        self.assertIn('controller_source="deployment/server/sse_qa_preflight.py"', workflow)
         self.assertIn("SSE_QA_SOURCE control_sha=%s candidate_sha=%s", workflow)
         inputs = workflow.split("permissions:", 1)[0]
         self.assertNotIn("candidate_sha:", inputs)
         self.assertNotIn("candidate_commit:", inputs)
-        controller = ROOT / "deployment" / "server" / "sse_qa_ctl.py"
+        controller = ROOT / "deployment" / "server" / "sse_qa_preflight.py"
         controller_blob = controller.read_bytes().replace(b"\r\n", b"\n")
         self.assertEqual(hashlib.sha256(controller_blob).hexdigest(), receiver.SSE_QA_CONTROLLER_SHA256)
+
+    def test_sse_qa_exposes_only_preflight_and_has_no_secret_channel(self):
+        workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
+        forbidden = {
+            "install_sse_qa", "enable_sse_qa", "smoke_sse_qa",
+            "disable_sse_qa", "remove_sse_qa",
+        }
+        self.assertEqual(receiver.SSE_QA_MODES, {"verify_sse_qa"})
+        self.assertIn("verify_sse_qa", builder.MODES)
+        for value in forbidden:
+            self.assertNotIn(value, builder.MODES)
+            self.assertNotIn(value, workflow)
+        self.assertNotIn("SSE_QA_SECRETS", workflow)
+        self.assertNotIn("--sse-qa-secrets", workflow)
+        self.assertNotIn("secrets-file", (ROOT / "deployment/server/sse_qa_preflight.py").read_text(encoding="utf-8"))
+
+    def test_preflight_controller_clean_and_conflicting_local_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.object(preflight, "check_ports"):
+                checks = preflight.preflight(root, root / "unused", real_host=False)
+            self.assertIn("local_test_root", checks)
+            conflict = preflight.rooted(root, "/etc/sse-qa")
+            conflict.mkdir(parents=True)
+            with mock.patch.object(preflight, "check_ports"):
+                with self.assertRaisesRegex(preflight.PreflightError, "conflicting QA paths"):
+                    preflight.preflight(root, root / "unused", real_host=False)
+
+    def test_preflight_inventory_queries_fail_closed(self):
+        answers = [
+            subprocess.CompletedProcess(["id"], 2, "", "query failed"),
+        ]
+        with mock.patch.object(preflight, "run", side_effect=answers):
+            with self.assertRaisesRegex(preflight.PreflightError, "user state query failed"):
+                preflight.check_identity_conflicts()
+
+    def test_sse_qa_release_round_trip_has_exact_preflight_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package_zip = root / "preflight.zip"
+            controller = (ROOT / "deployment/server/sse_qa_preflight.py").read_bytes()
+            with zipfile.ZipFile(package_zip, "w") as archive:
+                for name in sorted(receiver.SSE_QA_PACKAGE_FILES):
+                    archive.writestr(name, controller if name.endswith("sse_qa_preflight.py") else b"[Unit]\nDescription=test\n")
+            files_path = root / "files.txt"
+            files_path.write_text("", encoding="utf-8")
+            release = root / "release.tar.gz"
+            argv = [
+                "build_release.py", "--root", str(root), "--files", str(files_path),
+                "--output", str(release), "--commit", "a" * 40,
+                "--mode", "verify_sse_qa", "--sse-qa-package", str(package_zip),
+                "--sse-qa-candidate-commit", receiver.SSE_QA_CANDIDATE_COMMIT,
+                "--sse-qa-controller-sha256", receiver.SSE_QA_CONTROLLER_SHA256,
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                builder.main()
+            manifest, payload = receiver.load_release(release)
+            self.assertEqual(manifest["metadata"], receiver.SSE_QA_METADATA)
+            receiver.validate_mode_contract(manifest, payload)
+            completed = subprocess.CompletedProcess(
+                ["python3"], 0, "SSE_QA_PREFLIGHT_OK clean\n", "",
+            )
+            with mock.patch.object(receiver.subprocess, "run", return_value=completed):
+                self.assertEqual(
+                    receiver.run_sse_qa("verify_sse_qa", payload),
+                    "SSE_QA_PREFLIGHT_OK clean",
+                )
+            tampered = bytearray(payload[receiver.SSE_QA_PACKAGE_PAYLOAD])
+            tampered[-1] ^= 1
+            with self.assertRaises((receiver.ReleaseError, zipfile.BadZipFile)):
+                receiver.run_sse_qa(
+                    "verify_sse_qa",
+                    {receiver.SSE_QA_PACKAGE_PAYLOAD: bytes(tampered)},
+                )
     # Existing FCM validation remains a separate protocol contract.
     def test_fcm_mode_accepts_only_a_complete_matching_service_account(self):
         credentials = {
