@@ -197,16 +197,30 @@ def _process_driver_free_bucket_selected(access, normalized):
             'free_bucket_primary_target',
             'Основной экскаватор не требует отдельного запроса свободного ковша.',
         )
+    # Действующее принятие — ТЕМ ЖЕ фильтром, что видит экран водителя
+    # (active_free_bucket_acceptance_filter, с TTL 10 минут для запроса): раньше
+    # здесь смотрели только на статус, и просроченный запрос, уже невидимый
+    # водителю, всё равно отвечал «уже выбран другой экскаватор» — сервер держал
+    # работника (стенд 28.09.2026). Просроченный запрос гасится как истёкший
+    # (CANCELLED моментом истечения, как при закрытии смены), новый выбор
+    # принимается. ACCEPTED и USED — как прежде, без срока: принятое
+    # машинистом право и созданный рейс живут по своим правилам.
+    from trips.free_bucket import (
+        active_free_bucket_acceptance_filter,
+        expire_stale_free_bucket_requests,
+    )
+    expire_stale_free_bucket_requests(truck, now=normalized['received_at'])
     existing = (
-        FreeBucketAcceptance.objects.select_for_update()
+        FreeBucketAcceptance.objects.select_for_update(of=('self',))
+        .filter(truck=truck)
         .filter(
-            truck=truck,
-            status__in=(
-                FreeBucketAcceptanceStatus.REQUESTED,
+            active_free_bucket_acceptance_filter(now=normalized['received_at'])
+            | Q(status__in=(
                 FreeBucketAcceptanceStatus.ACCEPTED,
                 FreeBucketAcceptanceStatus.USED,
-            ),
+            ))
         )
+        .order_by('-occurred_at', '-id')
         .first()
     )
     if existing:
