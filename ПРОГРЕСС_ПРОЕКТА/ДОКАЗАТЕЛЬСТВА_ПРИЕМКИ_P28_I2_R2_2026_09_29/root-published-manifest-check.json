@@ -1,0 +1,208 @@
+{
+  "commit": "fb9cde8e8a8de881a26883c76d2d3bf5550adaca",
+  "manifest_commit": "c55b5affd46223089261f8da90727abec46c62e8",
+  "manifest_path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/published-manifest.json",
+  "manifest_blob": "8a6c1970bbeb29acba09d821ffcd6226b9dbc870",
+  "checked": 22,
+  "ok": true,
+  "results": [
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/README.md",
+      "blob": "1a4c0ccd08539e6f7ea0e71c5a7a317ac84693c5",
+      "sha256": "8da71bc0564245b51f6e06694c9279615a197a24ceb86daebf669151422e2a0e",
+      "size": 1566,
+      "crlf_count": 0,
+      "lf_count": 27,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/candidate-diff.stderr.log",
+      "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "crlf_count": 0,
+      "lf_count": 0,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/candidate-manifest.json",
+      "blob": "4b32dd7de12b09086293917635d1d0f1a722f50b",
+      "sha256": "ee6aa31010b635e7f00dbdeb204fce8d05d784a08d56225ea2bac9a2a3aac3b9",
+      "size": 1316,
+      "crlf_count": 0,
+      "lf_count": 37,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/candidate-manifest.stderr.log",
+      "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "crlf_count": 0,
+      "lf_count": 0,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/candidate.diff",
+      "blob": "5faf22f2217e9d537cc61d7768dc68c1cbb411ae",
+      "sha256": "e74aea3f449c07ca32f6418d94a2e6fddffb126ac2c15d6868a99f329b42dab9",
+      "size": 107622,
+      "crlf_count": 0,
+      "lf_count": 2472,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/clean-gate-exit.json",
+      "blob": "3ecdd2d5f8e03de62f813748ae168ae948d4c138",
+      "sha256": "39b3ea27a99c3a2f6409559ec3cd4535b2c963836db10673094ba467932785b9",
+      "size": 68,
+      "crlf_count": 0,
+      "lf_count": 5,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/clean-gate.stderr.log",
+      "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "crlf_count": 0,
+      "lf_count": 0,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/clean-gate.stdout.log",
+      "blob": "2a265592f5ef6f444c152a744bee1e9a1d495d1d",
+      "sha256": "d807ccf39605296700e0ee3b98a9188084b021d3fe7ba17ae84272c8b55fcd5a",
+      "size": 489,
+      "crlf_count": 0,
+      "lf_count": 8,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/dirty-gate-exit.json",
+      "blob": "cc958a2561c14b29ac91f266b3927f74a3e87e32",
+      "sha256": "678b49d0e55b899a4d40cd251cf1f3da6dc2be98e594d3a960fecff47ed9b824",
+      "size": 197,
+      "crlf_count": 0,
+      "lf_count": 8,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/dirty-gate.stderr.log",
+      "blob": "31f2582f4272ab4ec302f696e11326d9da020970",
+      "sha256": "36c9ddea7a838762710e14922f12c134a5dd36145208907edd63e9f77364b89e",
+      "size": 98,
+      "crlf_count": 0,
+      "lf_count": 2,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/dirty-gate.stdout.log",
+      "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "crlf_count": 0,
+      "lf_count": 0,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/replay-exit.json",
+      "blob": "c3257fd9c0184ebfd4e41d3f9b5e8cd500bf1d4e",
+      "sha256": "101b693c615a2dbb157c91593f195a0180307602f1ee180bf120b9ea81c7b62f",
+      "size": 162,
+      "crlf_count": 0,
+      "lf_count": 6,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/replay.stderr.log",
+      "blob": "5c35c460e885ca448ca0d7d1d1cf827738afc6e1",
+      "sha256": "c69d0bd63fbf3da0c950bf06eb039a6b9ae2c74113f51f90c00533bcd7b54e3f",
+      "size": 7894,
+      "crlf_count": 62,
+      "lf_count": 62,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/replay.stdout.log",
+      "blob": "db60c135e1adfa6bfe27b285e6383be1725013a3",
+      "sha256": "76ec396437ed2b0227a563ed284ea44407661fcc346fa0945e530e3a481de685",
+      "size": 24818,
+      "crlf_count": 0,
+      "lf_count": 244,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/unchanged-probe-exit.json",
+      "blob": "679be4baeea4e936fc730620a33c304f1e3b78cb",
+      "sha256": "9f4036559f9036e57a2f398b0bffdf4c6beda6e09251cd4864dd262e1338747f",
+      "size": 229,
+      "crlf_count": 0,
+      "lf_count": 7,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/unchanged-probe.stderr.log",
+      "blob": "1401f575684c1e61fcaead44135b6dbad78e09b9",
+      "sha256": "a8bd6bd33e0c82c00209ad4b3f1ad0f6a16e36543a3c54b7ad83a3870ada3f4e",
+      "size": 475,
+      "crlf_count": 8,
+      "lf_count": 8,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_P28_I2_R2_2026_09_29/unchanged-probe.stdout.log",
+      "blob": "e480d59d76e02301100a3fe22e2c954802b9a009",
+      "sha256": "586c97b7394f82b6094808ead10b8f3bfcad0dc8c004a33b525ff19cc76bf3a5",
+      "size": 11170,
+      "crlf_count": 0,
+      "lf_count": 168,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R2_2026_09_29/README.md",
+      "blob": "5a83b8ec190be6bba0e7749ac2fe0d49fc9cb340",
+      "sha256": "cf82a49d5d5b3c175f5d2a2d840723353afdcf982c6b46b563f9ce14751a6dcd",
+      "size": 3136,
+      "crlf_count": 0,
+      "lf_count": 52,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R2_2026_09_29/build_git_manifest.py",
+      "blob": "143052955e8b23e35b5a8b8841f9f62ffec878cd",
+      "sha256": "8574642547abb2dee6e38e88b1d72a745ee6c023bf26679246165c809d1912f9",
+      "size": 2164,
+      "crlf_count": 0,
+      "lf_count": 68,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R2_2026_09_29/run_isolated_r2.py",
+      "blob": "62675a9c0a2007e1e4b2cab54e2e2c02f1923bb2",
+      "sha256": "01c23c35030c12f946be5e64a71574289e7c5b73c483906abf940d4773d81549",
+      "size": 13403,
+      "crlf_count": 0,
+      "lf_count": 356,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_P28_I2_R2_2026_09_29/verify_published_manifest.py",
+      "blob": "dfcacfdf16e473c12d63c3617513626cb60cace5",
+      "sha256": "3b11803fca54e31f59673a28dca4110b7774d3733c359cc0225a8753bfd7a71a",
+      "size": 2244,
+      "crlf_count": 0,
+      "lf_count": 70,
+      "matches": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ОТЧЕТ_P28_I2_R2_2026_09_29.md",
+      "blob": "697ccd1c87edb069dd8ff459d3644d340e890694",
+      "sha256": "033fe70168bd066b55c05e9644ff635e36956b2521e653df788d709d276e984e",
+      "size": 7266,
+      "crlf_count": 0,
+      "lf_count": 122,
+      "matches": true
+    }
+  ]
+}

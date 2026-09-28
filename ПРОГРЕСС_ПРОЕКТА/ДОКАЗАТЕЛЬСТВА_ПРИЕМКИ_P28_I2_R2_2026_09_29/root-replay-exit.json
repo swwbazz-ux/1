@@ -1,0 +1,20 @@
+{
+  "candidate": "bdecc7eb9c528e40a4891201e1bae4682dc309e1",
+  "release_base": "5721c045d665f5811fc8d343d7374575f386af66",
+  "runner_exit": 0,
+  "django_groups": [
+    21,
+    3,
+    1,
+    4
+  ],
+  "core_tests": 30,
+  "all_passed": true,
+  "python": "3.12.14",
+  "django": "6.0.8",
+  "database": "SQLite :memory:",
+  "postgresql": "NOT_RUN",
+  "ui_phone_native": "NOT_RUN",
+  "initial_quotepath_preflight_exit": 1,
+  "published_manifest_exit": 0
+}
