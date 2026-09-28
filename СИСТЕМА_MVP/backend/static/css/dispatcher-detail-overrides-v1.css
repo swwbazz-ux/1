@@ -1060,6 +1060,14 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-tru
     --dispatcher-plan-color: rgba(251, 146, 60, .24);
 }
 
+/* Самосвал без открытой смены продолжает выполнять план по своим рейсам,
+   но нейтральный серый цвет не выдаёт его за активную сменную машину. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile.is-inactive-plan-fill[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
+    --dispatcher-plan-color: rgba(139, 159, 170, .32);
+    --dispatcher-plan-glow: rgba(139, 159, 170, .14);
+    --dispatcher-plan-complete-color: rgba(139, 159, 170, .24);
+}
+
 /* Текст поверх заливки: своя тень вместо расчёта на контраст фона. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) strong,
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-excavator-garage-tile[data-plan-progress-phase]:not([data-plan-progress-phase=""]) strong {

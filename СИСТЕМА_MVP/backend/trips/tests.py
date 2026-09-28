@@ -396,7 +396,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v162')
+        self.assertContains(response, 'dispatcher-desktop-shell-v163')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -407,36 +407,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v162',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v163',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v162',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v163',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
@@ -1101,6 +1101,56 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(tile['plan']['percent'], 33)
         self.assertEqual(tile['plan']['fact_plan_label'], '1 / 3 рейса')
         self.assertEqual(tile['plan']['value'], truck_shift.plan_value)
+        self.assertFalse(tile['plan_inactive_fill'])
+
+    def test_assigned_truck_without_open_shift_uses_current_group_plan_with_neutral_fill(self):
+        self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
+        self.shift.save(update_fields=['opened_at'])
+        self.create_plan_group(
+            equipment=self.assigned_truck,
+            mode=PlanCalculationMode.TRIPS,
+            value='4.00',
+            name='Самосвалы без открытой смены',
+        )
+        ExcavatorPlacement.objects.create(
+            excavator=self.excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+        )
+        HaulAssignment.objects.create(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        excavator_shift = self.open_equipment_shift(
+            self.excavator,
+            employee_name='Машинист экскаватора',
+        )
+        completed_trip = self.create_completed_trip(
+            truck=self.assigned_truck,
+            excavator=self.excavator,
+            loading_shift=excavator_shift,
+        )
+        Trip.objects.filter(pk=completed_trip.pk).update(
+            created_at=self.shift.opened_at + timedelta(minutes=5),
+            completed_at=self.shift.opened_at + timedelta(minutes=10),
+        )
+
+        dashboard = self.build_dashboard()
+        assigned_tile = next(
+            tile
+            for card in dashboard['complex_cards']
+            for tile in card['active_truck_tiles']
+            if tile['name'] == '13'
+        )
+
+        self.assertFalse(assigned_tile['has_current_shift'])
+        self.assertEqual(assigned_tile['plan_status'], PlanAssignmentStatus.ASSIGNED)
+        self.assertEqual(assigned_tile['plan_group_name'], 'Самосвалы без открытой смены')
+        self.assertEqual(assigned_tile['plan_calculation_mode'], PlanCalculationMode.TRIPS)
+        self.assertEqual(assigned_tile['plan_value'], '4')
+        self.assertEqual(assigned_tile['plan_fact_value'], '1')
+        self.assertEqual(assigned_tile['percent'], 25)
+        self.assertTrue(assigned_tile['plan_inactive_fill'])
 
     def test_dispatcher_dashboard_returns_excavator_snapshot_plan_progress(self):
         self.create_plan_group(
