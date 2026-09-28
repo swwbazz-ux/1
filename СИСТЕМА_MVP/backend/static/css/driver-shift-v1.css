@@ -503,13 +503,6 @@ body.driver-mobile-screen .driver-work-screen.is-active {
     overflow: hidden;
 }
 
-body.driver-mobile-screen .driver-free-bucket-chip {
-    position: absolute;
-    top: 4px;
-    right: 8px;
-    z-index: 2;
-}
-
 body.driver-mobile-screen .driver-work-context-card {
     grid-area: context;
     position: relative;
@@ -770,7 +763,7 @@ body.driver-mobile-screen .driver-work-dial-svg {
    поворачиваются трансформацией, и композитор рисует это сам. На бою кольца
    набирались conic-gradient'ом с маской и drop-shadow, который скрипт перекрашивал
    каждый кадр: на телефоне водителя это 19 кадров в секунду и кадры по 280 мс.
-   Длительности анимаций (500 + 500 мс) равны holdMs: 1000 в скрипте удержания. */
+   Длительности анимаций (250 + 250 мс) равны holdMs: 500 в скрипте удержания. */
 body.driver-mobile-screen .driver-work-hold-ring {
     position: absolute;
     /* Внешний край секций — внешний край больших делений (кольцо делений: inset 3%,
@@ -831,17 +824,156 @@ body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-
     opacity: 1;
 }
 
+/* Обе половины вместе — ровно holdMs: 500 разгрузки (driver-shift-v1.js). Раньше
+   половины шли по 500 мс (кольцо на 1 с), а действие срабатывало через 500 мс —
+   в миг срабатывания кольцо было заполнено наполовину (владелец, 28.09.2026). */
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-right .driver-work-hold-fill {
-    animation: driver-hold-right 500ms steps(6, end) forwards;
+    animation: driver-hold-right 250ms steps(6, end) forwards;
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-holding .driver-work-hold-half.is-left .driver-work-hold-fill {
-    animation: driver-hold-left 500ms steps(6, end) 500ms forwards;
+    animation: driver-hold-left 250ms steps(6, end) 250ms forwards;
 }
 
 /* Удержание завершено — все двенадцать секций горят до ответа. */
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-right .driver-work-hold-fill { transform: rotate(0deg); }
 body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-hold-half.is-left .driver-work-hold-fill { transform: rotate(180deg); }
+
+/* Слой «засчитано» (driver-shift-v1.js, showDriverDialConfirmed). Лежит на body
+   поверх СЕРДЦЕВИНЫ круга (внутреннего кружка с подписью) и получает её
+   прямоугольник при показе: ни сама сердцевина, ни кольцо удержания, ни что-либо
+   снаружи не меняются ни на пиксель — кольцо после срабатывания само возвращается
+   в исходный вид (владелец, 28.09.2026: всё подтверждение строго внутри
+   сердцевины). Сверка после разгрузки может заменить оболочку целиком — слой на
+   body это переживает. Внутри: непрозрачная основа того же вида, что настоящая
+   сердцевина (под ней уже готово следующее состояние), мягкий зелёный ореол от
+   центра со вспышкой, тонкая зелёная кромка по краю, галочка, которая
+   прорисовывается, и «РАЗГРУЖЕНО» шрифтом приложения. Цвет успеха задан явно, а
+   не через --driver-green: тот в ручном режиме и при свободном ковше перекрашен
+   в цвет режима. Анимируются только opacity слоёв и stroke-dashoffset маленького
+   SVG галочки; ни фильтров, ни теней на живом круге. Размеры — в cqw от ширины
+   сердцевины (container-type: size на слое). */
+body.driver-mobile-screen .driver-work-confirm {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    z-index: 150;
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 3cqw;
+    border-radius: 50%;
+    overflow: hidden;
+    container-type: size;
+    color: #8cff2e;
+    background:
+        radial-gradient(circle at 50% 24%, rgba(188, 215, 211, .2), transparent 38%),
+        radial-gradient(circle at 50% 46%, rgb(63, 88, 90), rgb(27, 49, 53) 62%, rgb(8, 20, 24));
+    /* Тонкая кромка по краю сердцевины — внутрь, наружу ничего не выходит. */
+    box-shadow: inset 0 0 0 1.5px rgba(140, 255, 46, .55);
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    will-change: opacity;
+    transition: opacity 400ms ease, visibility 0s linear 400ms;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 120ms ease;
+}
+
+/* Затухание: по концу показа или по касанию; под слоем уже следующее состояние. */
+body.driver-mobile-screen .driver-work-confirm.is-showing.is-leaving {
+    opacity: 0;
+    transition: opacity 450ms ease;
+}
+
+/* Ореол со вспышкой — радиальный градиент от центра, только внутри сердцевины. */
+body.driver-mobile-screen .driver-work-confirm-halo {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(140, 255, 46, .42), rgba(140, 255, 46, .14) 48%, rgba(140, 255, 46, .04) 78%, transparent 100%);
+    opacity: 0;
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo {
+    animation: driver-confirm-flash 700ms ease-out forwards;
+}
+
+body.driver-mobile-screen .driver-work-confirm-check {
+    position: relative;
+    width: 32cqw;
+    height: 32cqw;
+    overflow: visible;
+}
+
+body.driver-mobile-screen .driver-work-confirm-check path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-check path {
+    animation: driver-confirm-draw 300ms cubic-bezier(.2, .7, .2, 1) 90ms forwards;
+}
+
+body.driver-mobile-screen .driver-work-confirm-text {
+    position: relative;
+    max-width: 92%;
+    color: currentColor;
+    font-weight: 900;
+    font-size: 8.2cqw;
+    line-height: 1;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-shadow:
+        0 1px 0 rgba(0, 0, 0, .7),
+        0 0 12px rgba(140, 255, 46, .35);
+    opacity: 0;
+    will-change: opacity;
+}
+
+body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-text {
+    animation: driver-confirm-fade-in 220ms ease-out 260ms forwards;
+}
+
+@keyframes driver-confirm-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes driver-confirm-flash {
+    0% { opacity: 0; }
+    30% { opacity: 1; }
+    100% { opacity: .55; }
+}
+
+@keyframes driver-confirm-draw {
+    to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-halo,
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-text {
+        animation: none;
+        opacity: 1;
+    }
+    body.driver-mobile-screen .driver-work-confirm.is-showing .driver-work-confirm-check path {
+        animation: none;
+        stroke-dashoffset: 0;
+    }
+}
 
 @keyframes driver-hold-right {
     from { transform: rotate(-180deg); }

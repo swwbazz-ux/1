@@ -72,8 +72,10 @@ body.driver-mobile-screen .mobile-dial-action--dump-point {
 }
 
 body.driver-mobile-screen .mobile-dial-action--free-bucket {
-    --mobile-dial-accent: #ac9cc7;
-    --mobile-dial-accent-rgb: 172, 156, 199;
+    /* Токен цвета свободного ковша — общий для кнопки и всего, что относится к
+       режиму (driver-point-drum-v1.css, driver-free-bucket-v1.css). */
+    --mobile-dial-accent: rgb(var(--driver-free-bucket-accent-rgb, 172, 156, 199));
+    --mobile-dial-accent-rgb: var(--driver-free-bucket-accent-rgb, 172, 156, 199);
     --mobile-dial-flip-x: -1;
     --mobile-dial-flip-y: -1;
     right: 0;

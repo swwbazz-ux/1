@@ -236,8 +236,13 @@
             return catalog;
         }
 
+        /* Последнее состояние, пришедшее С СЕРВЕРА (не местная проекция): к нему
+           возвращается проекция, когда сервер отклонил местный выбор. */
+        var lastServerState = normalizeState(options.state || {});
+
         function installState(serverState) {
             var fresh = normalizeState(serverState);
+            lastServerState = fresh;
             var saved = normalizeState(storageRead(stateKey));
             state = resolveInstalledState(fresh, saved);
             if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
@@ -269,6 +274,9 @@
             button.dataset.rockType = item.rock_type;
             button.dataset.dumpPoint = item.dump_point;
             button.dataset.isPrimary = item.is_primary ? "true" : "false";
+            // Длина номера — для подгонки кегля по ширине плитки (CSS), длинные подрядные
+            // номера вроде «ЭКС-ПОДР-12» не должны переноситься по буквам.
+            button.style.setProperty("--fb-len", String(String(item.label || "").length || 5));
             button.innerHTML = '<strong class="driver-free-bucket-tile-number"></strong>'
                 + '<span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status></span>';
             button.querySelector(".driver-free-bucket-tile-number").textContent = item.label;
@@ -424,8 +432,16 @@
             if (open) {
                 returnFocus = document.activeElement;
                 windowObject.requestAnimationFrame(function () {
-                    var focus = sheet.querySelector(".driver-free-bucket-tile.is-current, [data-driver-free-bucket-option], [data-driver-free-bucket-close]");
+                    /* Сначала выбранная плитка: querySelector со списком селекторов вернул бы
+                       первую по порядку в разметке (обычно ЭКС-1), а не выбранную. */
+                    var focus = sheet.querySelector(".driver-free-bucket-tile.is-current")
+                        || sheet.querySelector("[data-driver-free-bucket-option], [data-driver-free-bucket-close]");
                     focusWithoutScroll(focus);
+                    /* Экскаваторов может быть много и сетка прокручивается внутри окна:
+                       выбранная плитка при открытии должна быть на виду (владелец, 28.09.2026). */
+                    if (focus && focus.classList.contains("is-current") && typeof focus.scrollIntoView === "function") {
+                        try { focus.scrollIntoView({block: "center", inline: "nearest"}); } catch (error) { focus.scrollIntoView(); }
+                    }
                 });
             } else if (returnFocus && typeof returnFocus.focus === "function") {
                 focusWithoutScroll(returnFocus);
@@ -519,12 +535,18 @@
                 var rejected = ["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0;
                 if (event.event_type === "driver.free_bucket.selected" && positive(event.payload && event.payload.truck_id) === positive(truckId)) {
                     if (rejected) {
-                        // Сервер не принял выбор — ковша нет и никогда не было.
-                        // Раньше это всё равно оставляло active:true с
-                        // sync_mode "review" ("НУЖНА СВЕРКА") — самосвал
-                        // застревал навсегда, ни выбрать заново, ни отменить
-                        // было нельзя (26.09.2026, боевой afb373a5).
-                        projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
+                        // Сервер не принял ЭТОТ выбор — местного ковша нет. Раньше
+                        // это всё равно оставляло active:true с sync_mode "review"
+                        // ("НУЖНА СВЕРКА") — самосвал застревал навсегда, ни выбрать
+                        // заново, ни отменить было нельзя (26.09.2026, боевой afb373a5).
+                        // Но отказ «уже выбран другой экскаватор»
+                        // (free_bucket_target_changed) значит, что у сервера ЕСТЬ живой
+                        // ковш — его состояние и есть истина. Гасить в «ковша нет»
+                        // прятало принятие #4 (ЭКГ-15) на стенде 28.09.2026: плитка не
+                        // светилась, а отменить было нельзя (cancel() требует active).
+                        projected = lastServerState.active
+                            ? normalizeState(lastServerState)
+                            : normalizeState({active: false, status: "cancelled", sync_mode: "local"});
                         return;
                     }
                     var item = itemFromEvent(event, catalog);
@@ -611,6 +633,8 @@
 
     function tileStatusLabel(item, selected) {
         if (selected) return "Выбран";
+        // Экскаватор основного закрепления: плитка выключена и подписана (владелец, 28.09.2026).
+        if (item && item.is_primary) return "Основной";
         return item && item.available === false ? "Недоступно" : "";
     }
 

@@ -11,6 +11,25 @@ function syncDriverTabMarkup(shell, tab) {
     });
 }
 
+/* Полная подмена оболочки: свежая разметка с сервера приходит без клиентских
+   значений, которые живая оболочка получила подгонкой кадром позже загрузки —
+   переменных окна (--driver-viewport-h/w в style) и плотности
+   (data-driver-density / data-driver-viewport-density). Без них первый кадр
+   новой оболочки раскладывается иначе (на Xiaomi круг 353px вместо 373, экран
+   на 10px правее), а через кадр-два подгонка возвращает всё на место — вся
+   сборка вместе с контуром «вздрагивала» при каждой погрузке, разгрузке, отмене
+   (владелец, 28.09.2026; замер: входы контура 707→738→746 за одну подмену).
+   Переносим значения ДО вставки: первая раскладка совпадает с итоговой, контур
+   и сборка не двигаются. Подгонка после привязки посчитает то же самое. */
+window.driverAdoptClientLayout = function (liveShell, freshShell) {
+    if (!liveShell || !freshShell) return;
+    var liveStyle = liveShell.getAttribute("style");
+    if (liveStyle && !freshShell.getAttribute("style")) freshShell.setAttribute("style", liveStyle);
+    ["driverDensity", "driverViewportDensity"].forEach(function (key) {
+        if (liveShell.dataset[key] && !freshShell.dataset[key]) freshShell.dataset[key] = liveShell.dataset[key];
+    });
+};
+
 window.applyOperationalStateRefresh = function (context) {
     // Все события дельты — наши же подтверждённые простои (их номера записал
     // onConfirmed). Пустая или усечённая дельта доказательством не считается.
@@ -193,6 +212,10 @@ window.applyOperationalStateRefresh = function (context) {
                 && window.driverFragmentSnapshot(oldShell).full === freshSnapshot.full;
         }
         var appliedShell = morphed ? oldShell : freshShell;
+        window.__driverShellSwapLog = (window.__driverShellSwapLog || []).concat([{
+            at: Date.now(), morphed: morphed, divergence: morphed ? "" : String(window.__driverMorphDivergence || "")
+        }]).slice(-20);
+        if (!morphed && typeof window.driverAdoptClientLayout === "function") window.driverAdoptClientLayout(oldShell, freshShell);
         if (!morphed) oldShell.replaceWith(freshShell);
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
@@ -294,6 +317,7 @@ window.submitDriverFormInPlace = function (form, options) {
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!freshShell || !oldShell) throw new Error("driver shell missing");
         var actionVoice = driverAppliedActionVoice(actionKind, freshShell);
+        if (typeof window.driverAdoptClientLayout === "function") window.driverAdoptClientLayout(oldShell, freshShell);
         oldShell.replaceWith(freshShell);
         if (result.url && window.history && window.history.replaceState) {
             var responseUrl = new URL(result.url, window.location.href);

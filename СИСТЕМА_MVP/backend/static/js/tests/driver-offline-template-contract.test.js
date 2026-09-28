@@ -29,7 +29,7 @@ function functionSource(source, name) {
 test("current Driver shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v364'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v365'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-haptics-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-native-push-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
@@ -46,7 +46,7 @@ test("current Driver shell precaches the durable runtime and exact authenticated
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v364'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v365'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -237,7 +237,8 @@ test("экран обновляется послойно, а результат 
     );
     // Любое расхождение структуры — отказ: иначе вставленный узел остался бы без обработчика.
     const morphSource = template.slice(template.indexOf("window.driverMorphShell = function"));
-    assert.match(morphSource.slice(0, morphSource.indexOf("/* DRIVER_FRAGMENT_SNAPSHOT_END */")), /return !an && !bn;/);
+    // Лишний или недостающий дочерний узел — тоже отказ, с записью первого расхождения.
+    assert.match(morphSource.slice(0, morphSource.indexOf("/* DRIVER_FRAGMENT_SNAPSHOT_END */")), /if \(an \|\| bn\) return diverged\(an \|\| a, bn \|\| b\);\s*return true;/);
     // Области, которые рисует клиент, послойное обновление не трогает и снимок не сравнивает.
     assert.match(template, /window\.DRIVER_CLIENT_OWNED = "\[data-driver-downtime-drum\]/);
     assert.match(template, /all\(window\.DRIVER_CLIENT_OWNED\)\.forEach/);

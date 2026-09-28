@@ -121,7 +121,14 @@
         if (!c) return false;
         var selected = all("[data-driver-point-card]:not([data-driver-point-clone])", c);
         var signature = signatureOf(c);
-        if (geo.built === c && geo.signature === signature && cards().length === geo.n && geo.n) return true;
+        if (geo.built === c && geo.signature === signature && cards().length === geo.n && geo.n) {
+            // Тот же набор точек — геометрию не трогаем. Подгонку здесь НЕ дёргаем:
+            // build()/refresh() вызываются на любую относящуюся мутацию, часто —
+            // и пересчёт на каждый такой случай грузил телефон и «прыгал» размером
+            // текста (владелец, 28.09.2026). Случай «барабан был скрыт» ловит
+            // отдельный узкий сигнал — ResizeObserver на самом барабане ниже.
+            return true;
+        }
         all("[data-driver-point-card][data-driver-point-clone]", c).forEach(function (clone) { clone.parentNode.removeChild(clone); });
         if (!selected.length) { geo.n = 0; geo.built = c; geo.signature = signature; return false; }
         // Кольцо всегда полное: точки повторяются по кругу целое число раз.
@@ -155,7 +162,16 @@
         });
         if (!keepTheta) geo.theta = 0;
         lastFront = -1;
+        fitLabels(c);
         return true;
+    }
+
+    // Кегль подписи — driver-drum-label-fit-v1.js, тот же модуль, что у барабана
+    // простоев. Карточка новой сборки может ещё не иметь ширины (скрытая вкладка,
+    // первая отрисовка) — модуль сам не сдаётся при нулевой ширине.
+    function fitLabels(c) {
+        root.__driverDrumFitCalls = (root.__driverDrumFitCalls || 0) + 1;
+        if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
     function frontIndex(theta) {
@@ -227,6 +243,7 @@
             // Пока грань доезжает, контур не сверяется (driver-downtime-drum-v1.js).
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
+            // Подгонку после фиксации не вызываем (см. driver-downtime-drum-v1.js).
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLink(); }, 370);
         }
         var liveCardW = cards()[0] ? cards()[0].offsetWidth : 0;
@@ -425,7 +442,8 @@
     }
 
     // Удержание круга с ручным рейсом (вызывает driver-shift-v1.js вместо разгрузки).
-    function completeFromDial() {
+    // onSaved — слой «засчитано» поверх круга, как у обычной разгрузки: только после записи на телефоне.
+    function completeFromDial(onSaved) {
         var api = engine();
         if (!api || typeof api.completeActiveManualLoad !== "function") {
             toast("Ручной режим недоступен: обновите экран");
@@ -437,7 +455,8 @@
             refresh();
         }
         api.completeActiveManualLoad().then(function (saved) {
-            if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); }
+            if (!saved) { toast("Рейс ещё сохраняется, повторите"); undoPending(); return; }
+            if (typeof onSaved === "function") onSaved();
         }).catch(function () {
             toast("Не удалось сохранить завершение рейса на телефоне");
             undoPending();
@@ -480,6 +499,9 @@
         g.style.top = (r.top - box.top) + "px";
         g.style.width = r.width + "px";
         g.style.height = r.height + "px";
+        // См. тот же комментарий в driver-downtime-drum-v1.js (makeGhost).
+        g.style.setProperty("--drum-card-w", r.width + "px");
+        g.style.setProperty("--drum-card-h", r.height + "px");
         g.style.transform = "translateY(0px)";
         screen.appendChild(g);
         var w = dial();
@@ -641,6 +663,10 @@
         var fresh = !!(c && geo.built !== c);
         if (fresh) healStaleStyles();
         if (build()) render(false);
+        // Без назначения build() выше не запускается вовсе (нет граней для сборки) —
+        // текст пустой грани («Экскаватору не назначены точки разгрузки») подгоняем
+        // отдельно, тем же вызовом, что и настоящие точки.
+        else if (fresh) fitLabels(c);
         syncModeControls();
         syncAssigned();
         syncDial();
@@ -699,7 +725,12 @@
         doc.documentElement.classList.toggle(MANUAL_CLASS, manualTrip || readStoredMode());
         refresh();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-trip-origin", "data-driver-manual-active-point-id"] });
-        root.addEventListener("resize", function () { geo.built = null; refresh(); });
+        // Смена размера окна/ориентации — с задержкой (см. driver-downtime-drum-v1.js).
+        var resizeTimer = 0;
+        root.addEventListener("resize", function () {
+            root.clearTimeout(resizeTimer);
+            resizeTimer = root.setTimeout(function () { geo.built = null; refresh(); }, 150);
+        });
         // Движок ручного рейса сообщает о каждой погрузке, отмене и завершении.
         root.addEventListener("driver-manual-trip-changed", function (event) {
             if (event.detail && event.detail.pointId && !isManual()) setManual(true);
@@ -709,11 +740,16 @@
             var w = dial();
             if (w) new root.ResizeObserver(function () { syncLink(); }).observe(w);
         }
+        // Кегль подписей считает CSS сам (driver-drum-label-fit-v1.js) — повторные
+        // подгонки при появлении барабана, ресайзе и загрузке шрифтов не нужны.
         root.setTimeout(refresh, 300);
     }
 
     root.DriverPointDrum = Object.freeze({
-        refresh: refresh, isManual: isManual, setManual: setManual, completeFromDial: completeFromDial
+        refresh: refresh, isManual: isManual, setManual: setManual, completeFromDial: completeFromDial,
+        // Барабан простоев не пересчитывает общий контур, пока крутят ЭТОТ барабан
+        // (driver-downtime-drum-v1.js, syncLinkVars).
+        isDragging: function () { return !!drag; }
     });
 
     if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", init);

@@ -1377,15 +1377,9 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
-                // Ручной рейс, завершённый на круге, озвучивается так же, как обычная разгрузка.
-                if (
-                    (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
-                    && !window.driverOfflineConfirmationCueScheduled
-                ) {
-                    window.driverOfflineConfirmationCueScheduled = true;
-                    playDriverVoice("action_ok", "voice_trip_finished");
-                    window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
-                }
+                /* Разгрузку и завершение ручного рейса голос подтверждает сразу, по
+                   записи на телефоне (showDriverDialConfirmed). Ответ сервера приходит
+                   позже, иногда пачкой — второй голос тогда звучал бы невпопад. */
                 if (
                     event.event_type === "driver.trip.loaded"
                     && window.DriverManualExcavatorWorkspace
@@ -2229,7 +2223,7 @@ window.bindDriverMobileShell = function () {
                когда движок ручного рейса сообщит о завершении. */
             if (holdButton.dataset.driverManualDial === "true") {
                 if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
-                var started = window.DriverPointDrum.completeFromDial();
+                var started = window.DriverPointDrum.completeFromDial(showDriverDialConfirmed);
                 /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
                    иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
                 if (started) {
@@ -2291,10 +2285,12 @@ window.bindDriverMobileShell = function () {
                 });
             }).then(function (savedEvent) {
                 unloadRecovery.recover({type: "queued"});
+                /* Разгрузка записана на телефоне — это и есть факт (телефон решает
+                   сам). Круг сначала показывает «засчитано», и только потом
+                   проекция переводит его в следующее состояние: проекция ниже
+                   выждет конец показа (см. showDriverDialConfirmed). */
+                showDriverDialConfirmed();
                 applyDriverOfflineProjection(shell, driverOfflineEvents);
-                /* The state projection owns the visible result: after a durable
-                   local save the dial immediately becomes the quiet inactive
-                   instrument.  No completion animation may imply server sync. */
                 showDriverToast("Разгрузка сохранена на телефоне.");
                 /* Delivery is best-effort. A flush error must never turn a successful
                    durable enqueue into a false "save failed" message or restore the trip. */
@@ -2341,17 +2337,113 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(24);
             }, totalMs / HOLD_SEGMENTS);
         }
+        /* «Засчитано»: как только разгрузка (или завершение ручного рейса) записана
+           на телефоне, поверх круга ~5 с лежит отдельный слой — полное зелёное
+           кольцо со вспышкой, галочка, которая прорисовывается, «РАЗГРУЖЕНО» и
+           мягкий ореол; звучит голос. Под слоем экран живёт как обычно: проекция,
+           очередь, опрос и подмена фрагмента ничего не ждут, и к концу показа
+           следующее состояние («ЭКС-1 / НА ЗАГРУЗКУ») уже готово — слой просто
+           гаснет. Касание по экрану закрывает показ досрочно. Раньше проекция
+           перестраивала круг в тот же миг, и водитель, у которого во время
+           удержания экран закрыт рукой, не понимал, засчитался ли рейс
+           (владелец, 28.09.2026).
+           Слой лежит на body, а не внутри круга: сверка после разгрузки приходит
+           через 1–2 с и заменяет или послойно перестраивает оболочку целиком —
+           слой внутри неё исчез бы посреди показа. Геометрию берём с самой
+           кнопки круга при показе; сама кнопка и сердцевина не меняются ни на
+           пиксель. Голос звучит здесь, по факту записи на телефоне, а не по
+           ответу сервера: ответ мог прийти через секунды или минуты, когда
+           водитель уже уехал. */
+        var DRIVER_DIAL_CONFIRM_MS = 5000;
+        var DRIVER_DIAL_CONFIRM_FADE_MS = 450;
+        var driverDialConfirmTimer = null;
+        var driverDialConfirmFadeTimer = null;
+        function driverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            if (layer) return layer;
+            layer = document.createElement("div");
+            layer.className = "driver-work-confirm";
+            layer.setAttribute("data-driver-work-confirm", "");
+            layer.setAttribute("aria-hidden", "true");
+            /* Только сердцевина: ни кольца удержания, ни свечения снаружи неё
+               (владелец, 28.09.2026) — кольцо после срабатывания само возвращается
+               в исходный вид. */
+            layer.innerHTML = ''
+                + '<span class="driver-work-confirm-halo"></span>'
+                + '<svg class="driver-work-confirm-check" viewBox="0 0 100 100" aria-hidden="true">'
+                +   '<path d="M26 53 L44 70 L75 34" pathLength="100"></path>'
+                + '</svg>'
+                + '<b class="driver-work-confirm-text">РАЗГРУЖЕНО</b>';
+            document.body.appendChild(layer);
+            return layer;
+        }
+        function placeDriverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            var button = document.querySelector("[data-driver-hold-button]");
+            var core = button && button.querySelector(".driver-work-dial-core");
+            if (!layer || !core || !layer.classList.contains("is-showing")) return;
+            var rect = core.getBoundingClientRect();
+            if (!(rect.width > 0)) return;
+            layer.style.left = rect.left.toFixed(1) + "px";
+            layer.style.top = rect.top.toFixed(1) + "px";
+            layer.style.width = rect.width.toFixed(1) + "px";
+            layer.style.height = rect.height.toFixed(1) + "px";
+        }
+        function hideDriverDialConfirmed(fade) {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            window.clearTimeout(driverDialConfirmTimer);
+            window.clearTimeout(driverDialConfirmFadeTimer);
+            driverDialConfirmTimer = null;
+            driverDialConfirmFadeTimer = null;
+            document.removeEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.removeEventListener("resize", placeDriverDialConfirmLayer);
+            if (!layer || !layer.classList.contains("is-showing")) return;
+            if (!fade) {
+                layer.classList.remove("is-showing", "is-leaving");
+                return;
+            }
+            layer.classList.add("is-leaving");
+            driverDialConfirmFadeTimer = window.setTimeout(function () {
+                driverDialConfirmFadeTimer = null;
+                layer.classList.remove("is-showing", "is-leaving");
+            }, DRIVER_DIAL_CONFIRM_FADE_MS);
+        }
+        // Слой не ловит касаний (pointer-events: none): касание доходит до экрана как обычно.
+        function dismissDriverDialConfirmed() { hideDriverDialConfirmed(true); }
+        function showDriverDialConfirmed() {
+            var layer = driverDialConfirmLayer();
+            hideDriverDialConfirmed(false);
+            // Повторный показ подряд: сброс классов и принудительная раскладка перезапускают анимации.
+            void layer.offsetWidth;
+            layer.classList.add("is-showing");
+            placeDriverDialConfirmLayer();
+            window.driverDialConfirmShownAt = Date.now();
+            playDriverVoice("action_ok", "voice_trip_finished");
+            document.addEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.addEventListener("resize", placeDriverDialConfirmLayer);
+            driverDialConfirmTimer = window.setTimeout(function () {
+                driverDialConfirmTimer = null;
+                hideDriverDialConfirmed(true);
+            }, DRIVER_DIAL_CONFIRM_MS - DRIVER_DIAL_CONFIRM_FADE_MS);
+        }
+        window.showDriverDialConfirmed = showDriverDialConfirmed;
+        /* Удержание завершено: сброс удержания после этого (восстановление
+           формы, отмена) не должен глушить длинный отклик завершения. */
+        var unloadHoldCompleted = false;
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
-               чтобы случайное касание не отправило рейс, и не утомляет за смену. */
+               чтобы случайное касание не отправило рейс, и не утомляет за смену.
+               Кольцо в CSS (driver-shift-v1.css, driver-hold-right/left) набирается
+               ровно за это же время: две половины по 250 мс. */
             holdMs: 500,
             onStart: function () {
+                unloadHoldCompleted = false;
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
-                driverVibrate(0);
+                if (!unloadHoldCompleted) driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
@@ -2366,6 +2458,7 @@ window.bindDriverMobileShell = function () {
             },
             onComplete: function () {
                 stopHoldSegmentFeedback();
+                unloadHoldCompleted = true;
                 driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();

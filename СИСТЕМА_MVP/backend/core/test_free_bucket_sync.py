@@ -356,6 +356,57 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.REQUESTED)
         self.assertEqual(Trip.objects.count(), 0)
 
+    def stale_driver_request(self, *, age):
+        """A REQUESTED right created directly, ``age`` ago, for the primary excavator."""
+        from trips.free_bucket import FREE_BUCKET_REQUEST_TTL
+
+        driver_shift = EmployeeShift.objects.get(employee=self.driver, closed_at__isnull=True)
+        occurred_at = timezone.now() - age
+        return FreeBucketAcceptance.objects.create(
+            client_acceptance_id='driver-free-select-stale',
+            truck=self.truck,
+            excavator=self.excavator,
+            requested_by=self.driver,
+            requesting_shift=driver_shift,
+            primary_assignment=self.assignment,
+            status=FreeBucketAcceptanceStatus.REQUESTED,
+            occurred_at=occurred_at,
+            received_at=occurred_at,
+            work_context_snapshot={},
+        ), FREE_BUCKET_REQUEST_TTL
+
+    def test_expired_driver_request_is_closed_and_a_new_pick_is_accepted(self):
+        # Стенд 28.09.2026: просроченный запрос (#4) уже невидим водителю (TTL 10 минут),
+        # но приём нового выбора смотрел только на статус и отвечал «уже выбран другой
+        # экскаватор» — окно пустое, выбрать нельзя. Правило: сервер не держит работника.
+        from trips.free_bucket import FREE_BUCKET_REQUEST_TTL
+
+        stale, ttl = self.stale_driver_request(age=FREE_BUCKET_REQUEST_TTL + timedelta(minutes=1))
+        selected = self.select_event(event_id='driver-free-select-after-expiry', excavator=self.other_excavator)
+        result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        stale.refresh_from_db()
+        # Как при закрытии смены: CANCELLED моментом истечения (CLOSED по ограничению
+        # модели принадлежит только использованному праву с рейсом).
+        self.assertEqual(stale.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(stale.cancelled_at, stale.occurred_at + ttl)
+        self.assertIsNone(stale.closed_at)
+        fresh = FreeBucketAcceptance.objects.get(id=result['server_ids']['free_bucket_acceptance_id'])
+        self.assertNotEqual(fresh.id, stale.id)
+        self.assertEqual(fresh.excavator_id, self.other_excavator.id)
+        self.assertEqual(fresh.status, FreeBucketAcceptanceStatus.REQUESTED)
+
+    def test_fresh_driver_request_still_blocks_a_different_pick(self):
+        # Правило ковша не меняется: живой запрос на другой экскаватор — отказ.
+        fresh, _ = self.stale_driver_request(age=timedelta(minutes=1))
+        selected = self.select_event(event_id='driver-free-select-while-fresh', excavator=self.other_excavator)
+        result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(result['status'], 'conflict', result)
+        self.assertEqual(result['code'], 'free_bucket_target_changed')
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.status, FreeBucketAcceptanceStatus.REQUESTED)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+
     def test_driver_can_cancel_own_accepted_request_before_load(self):
         selected = self.select_event()
         self.sync_driver([selected])

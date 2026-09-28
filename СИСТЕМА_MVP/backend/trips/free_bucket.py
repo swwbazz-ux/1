@@ -141,6 +141,55 @@ def reconcile_expired_free_bucket_acceptances(*, now=None):
     return len(expired)
 
 
+def expire_stale_free_bucket_requests(truck, *, now=None):
+    """Close the truck's REQUESTED rights that outlived ``FREE_BUCKET_REQUEST_TTL``.
+
+    Для экрана водителя такой запрос давно «не активен» (см.
+    ``active_free_bucket_acceptance_filter``), но приём нового выбора в
+    ``core.offline_sync`` смотрел только на статус и отвечал «уже выбран другой
+    экскаватор»: окно ничего не показывало, а выбрать другой было нельзя —
+    сервер держал работника (стенд 28.09.2026, принятие #4). Неиспользованное
+    право гасится так же, как при закрытии смены
+    (``cancel_free_bucket_acceptances_for_shift``): статус CANCELLED,
+    ``cancelled_at`` — момент истечения (CLOSED по ограничению модели принадлежит
+    только использованному праву с рейсом). ACCEPTED и USED не трогаем:
+    принятое машинистом право и уже созданный рейс живут по своим правилам.
+    Вызывать под блокировкой самосвала.
+    """
+    from core.models import bump_operational_state
+    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    now = now or timezone.now()
+    expired = list(
+        FreeBucketAcceptance.objects
+        .select_for_update(of=('self',))
+        .filter(
+            truck=truck,
+            status=FreeBucketAcceptanceStatus.REQUESTED,
+            occurred_at__lte=now - FREE_BUCKET_REQUEST_TTL,
+        )
+        .order_by('id')
+    )
+    if not expired:
+        return []
+    for acceptance in expired:
+        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+        acceptance.cancelled_at = acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
+    FreeBucketAcceptance.objects.bulk_update(expired, ['status', 'cancelled_at'])
+    bump_operational_state(
+        'FreeBucketAcceptance:expired',
+        event_type='trip_changed',
+        object_type='FreeBucketAcceptance',
+        payload={
+            'action': 'free_bucket_expired',
+            'acceptance_ids': [item.id for item in expired],
+            'truck_ids': [truck.id],
+            'excavator_ids': sorted({item.excavator_id for item in expired}),
+        },
+    )
+    return expired
+
+
 def canonical_free_bucket_work_context_snapshot(excavator):
     """Freeze the target excavator's persisted work context for one load.
 
