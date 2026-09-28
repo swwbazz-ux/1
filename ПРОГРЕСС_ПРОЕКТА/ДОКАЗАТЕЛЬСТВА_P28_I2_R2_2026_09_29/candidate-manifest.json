@@ -1,0 +1,37 @@
+{
+  "commit": "bdecc7eb9c528e40a4891201e1bae4682dc309e1",
+  "base": "5721c045d665f5811fc8d343d7374575f386af66",
+  "parents": [
+    "edee207d216804d3914bb408814c592f20031df4",
+    "5721c045d665f5811fc8d343d7374575f386af66"
+  ],
+  "remote_ref": "refs/heads/codex/p28-i2-r2-route-evidence-adapter-20260929",
+  "remote_oid": "bdecc7eb9c528e40a4891201e1bae4682dc309e1",
+  "remote_matches_commit": true,
+  "files": [
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/route_projection_adapter.py",
+      "blob": "1ba6169c19a5b6615a49e249d7b764cee1e4b324",
+      "sha256": "783ac7ffbb64cdc69128b760598ef6681400e1da4ddcfcd6c8f7c3f10ca85b1a",
+      "size": 39319,
+      "crlf_count": 0,
+      "lf_count": 961
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/route_projection_core.py",
+      "blob": "64b2519fb8bb0874012577fd2d779d7b9a619b74",
+      "sha256": "335cd1400f1783fa9837160c364c2bc3c66b49a86db89e7acd7ba463b92b1a90",
+      "size": 17487,
+      "crlf_count": 0,
+      "lf_count": 416
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py",
+      "blob": "0655436df3333e86a3ae2002b6e0121a15a70614",
+      "sha256": "1ae33147a08ed29d143dace4f2abccd989729d8091bef12a900e4aeb702086a0",
+      "size": 47509,
+      "crlf_count": 0,
+      "lf_count": 1077
+    }
+  ]
+}

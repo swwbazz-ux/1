@@ -1,0 +1,62 @@
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_adapter_import_has_no_database_queries_or_registration_side_effects (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_adapter_import_has_no_database_queries_or_registration_side_effects) ... ok
+test_cancelled_driver_unload_and_service_completion_have_distinct_terminal_bases (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_cancelled_driver_unload_and_service_completion_have_distinct_terminal_bases) ... ok
+test_conflict_from_ambiguous_local_original_is_not_collected (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_conflict_from_ambiguous_local_original_is_not_collected) ... ok
+test_conflict_from_foreign_local_original_is_not_collected (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_conflict_from_foreign_local_original_is_not_collected) ... ok
+test_conflicting_local_reference_keeps_authenticated_and_claimed_authors_separate (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_conflicting_local_reference_keeps_authenticated_and_claimed_authors_separate) ... ok
+test_cross_event_type_reuse_is_an_explicit_integrity_conflict_with_full_envelopes (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_cross_event_type_reuse_is_an_explicit_integrity_conflict_with_full_envelopes) ... ok
+test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload) ... ok
+test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event) ... ok
+test_incompatible_event_id_is_found_for_original_and_submitted_trips_without_touching_third (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_incompatible_event_id_is_found_for_original_and_submitted_trips_without_touching_third) ... ok
+test_local_trip_reference_is_scoped_by_authenticated_actor_and_device (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_local_trip_reference_is_scoped_by_authenticated_actor_and_device) ... ok
+test_local_trip_reference_mapping_to_multiple_trips_stays_ambiguous (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_local_trip_reference_mapping_to_multiple_trips_stays_ambiguous) ... ok
+test_no_change_retry_and_conflict_are_evidence_but_not_applied_route_inputs (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_no_change_retry_and_conflict_are_evidence_but_not_applied_route_inputs) ... ok
+test_normalization_is_stable_when_source_lists_are_reversed (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_normalization_is_stable_when_source_lists_are_reversed) ... ok
+test_original_loading_origin_requires_matching_receipt_action_time_and_actor (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_original_loading_origin_requires_matching_receipt_action_time_and_actor) ... ok
+test_real_offline_point_change_exposes_identity_actor_and_both_times_without_promoting_depends_on (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_real_offline_point_change_exposes_identity_actor_and_both_times_without_promoting_depends_on) ... ok
+test_real_report_correction_keeps_administrator_separate_from_driver (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_real_report_correction_keeps_administrator_separate_from_driver) ... ok
+test_repeated_reads_are_stable_and_execute_no_dml_or_operational_side_effects (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_repeated_reads_are_stable_and_execute_no_dml_or_operational_side_effects) ... ok
+test_shift_handover_and_foreign_excavator_contexts_remain_separate (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_shift_handover_and_foreign_excavator_contexts_remain_separate) ... ok
+test_uncontrolled_lifecycle_separates_technical_positive_and_possible_replacement (trips.test_route_projection_adapter.RouteProjectionAdapterTests.test_uncontrolled_lifecycle_separates_technical_positive_and_possible_replacement) ... ok
+test_transferred_core_keeps_r1_collision_and_incomplete_history_guards (trips.test_route_projection_adapter.RouteProjectionCoreProvenanceTests.test_transferred_core_keeps_r1_collision_and_incomplete_history_guards) ... ok
+test_transferred_r1_core_has_the_accepted_git_blob (trips.test_route_projection_adapter.RouteProjectionCoreProvenanceTests.test_transferred_r1_core_has_the_accepted_git_blob) ... ok
+
+----------------------------------------------------------------------
+Ran 21 tests in 1.375s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_local_reference_retry_is_collected_after_binding_exists (probe_adapter.AdapterAcceptanceProbes.test_local_reference_retry_is_collected_after_binding_exists) ... ok
+test_raw_id_conflict_survives_route_normalization (probe_adapter.AdapterAcceptanceProbes.test_raw_id_conflict_survives_route_normalization) ... ok
+test_accepted_late_duplicate_is_not_the_original_loading_source (probe_load_origin.LateLoadOriginProbe.test_accepted_late_duplicate_is_not_the_original_loading_source) ... offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=3 role=6 — Опоздавшее событие погрузки самосвала Самосвал 21 на 2026-09-28 15:33:44.613262+00:00 попадает в окно уже известного рейса #1 — та же погрузка, повторно отмеченная. Новый рейс не создан, действующий рейс #2 не тронут.
+ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.226s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_locally_bound_original_collision_reaches_both_trips (probe_local_conflict.LocalOriginalCollisionProbe.test_locally_bound_original_collision_reaches_both_trips) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.117s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_dump_point_a_to_b_to_a_keeps_distinct_ordered_events (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_a_to_b_to_a_keeps_distinct_ordered_events) ... ok
+test_dump_point_current_choice_is_accepted_without_business_change (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_current_choice_is_accepted_without_business_change) ... ok
+test_dump_point_change_and_dependent_unload_complete_same_exact_trip (core.test_offline_sync.OfflineEventSyncTests.test_dump_point_change_and_dependent_unload_complete_same_exact_trip) ... ok
+test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state (core.test_offline_sync.OfflineEventSyncTests.test_late_equal_timestamp_dump_point_change_cannot_roll_back_newer_state) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.285s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+----------------------------------------------------------------------
+Ran 30 tests in 0.009s
+
+OK

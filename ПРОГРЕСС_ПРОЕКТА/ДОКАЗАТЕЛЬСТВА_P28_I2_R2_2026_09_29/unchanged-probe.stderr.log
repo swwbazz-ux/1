@@ -1,0 +1,8 @@
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_locally_bound_original_collision_reaches_both_trips (probe_local_conflict.LocalOriginalCollisionProbe.test_locally_bound_original_collision_reaches_both_trips) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.146s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...

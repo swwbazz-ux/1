@@ -1,0 +1,8 @@
+{
+  "exit_code": 1,
+  "temporary_marker": ".p28-i2-r2-dirty-gate.tmp",
+  "expected_refusal": true,
+  "marker_removed_after_check": true,
+  "candidate_clean_after_check": true,
+  "result": "PASS"
+}

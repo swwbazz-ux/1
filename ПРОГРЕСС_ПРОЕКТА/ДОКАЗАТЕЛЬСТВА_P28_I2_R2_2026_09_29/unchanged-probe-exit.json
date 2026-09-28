@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "probe_source_commit": "834539b201b68eb3ac165fefd26c6118eb53e899",
+  "probe_blob": "57001ac995e22b1a7907312331e8f74ac6ed24e1",
+  "candidate": "bdecc7eb9c528e40a4891201e1bae4682dc309e1",
+  "result": "PASS"
+}

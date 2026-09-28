@@ -1,0 +1,244 @@
+CANDIDATE_HEAD=bdecc7eb9c528e40a4891201e1bae4682dc309e1
+RELEASE_BASE=5721c045d665f5811fc8d343d7374575f386af66
+SOURCE_DOCS_COMMIT=834539b201b68eb3ac165fefd26c6118eb53e899
+SOURCE_CLEAN=True
+R1_CORE_BLOB=64b2519fb8bb0874012577fd2d779d7b9a619b74
+CANDIDATE_PATHS=СИСТЕМА_MVP/backend/trips/route_projection_adapter.py,СИСТЕМА_MVP/backend/trips/route_projection_core.py,СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py
+PREFLIGHT_OK=True
+PUBLISHED_PROBE=probe_adapter.py BLOB=9b02c502c0667194d1b412c2985ee21f18326a0b SHA256=05573f69d16913516c0273ee461890e6f65aa9e8cfa97f89d37b2e7e0a1f9b5f CRLF=0 LF=78
+PUBLISHED_PROBE=probe_load_origin.py BLOB=f1ff9609397ebb066b29c016f9535c8bf2ef2ae8 SHA256=6302543320ada0674c2d7702572c4fd9cd929b1d31453908c0996440fe999a4a CRLF=0 LF=149
+PUBLISHED_PROBE=probe_local_conflict.py BLOB=57001ac995e22b1a7907312331e8f74ac6ed24e1 SHA256=caabf74cf3633bda47aa171d4b41497f29facd277523a73cc5190cef0d22fa81 CRLF=0 LF=164
+PUBLISHED_CORE_TEST=route_core.py BLOB=64b2519fb8bb0874012577fd2d779d7b9a619b74 SHA256=335cd1400f1783fa9837160c364c2bc3c66b49a86db89e7acd7ba463b92b1a90
+PUBLISHED_CORE_TEST=test_original_i1.py BLOB=e0406aaad8a899d317a39f293ad27d3e1bd1216b SHA256=66d17d8684351c90b05d5c9f20a9be23daf5bbf5aedf302e4a30216bb35c97cb
+PUBLISHED_CORE_TEST=test_route_core_r1.py BLOB=d1f32930252459dfc5b4bd1a83ad725088310ae8 SHA256=e119df81f9bbea154398291752c31f71692e5e598575fff6b35c75d64599ef6c
+PUBLISHED_ORIGINAL_CORE_TEST=test_route_core.py BLOB=d47e8561879c0baad025bb5286779b3bd64d4c74 SHA256=cbfa9d23809da24649544ae812336dc9dc71701f2e3ccae3bf6b67296e33442d
+PYTHON=C:\Users\swwba\Desktop\Проект учетная система\ПОЕКТ\СИСТЕМА_MVP\.venv\Scripts\python.exe
+DJANGO=6.0.6
+DB_VENDOR=sqlite
+DB_NAME=:memory:
+DB_TEST_NAME=:memory:
+EXTERNAL_DB_ALLOWED=False
+INHERITED_DB_ENV_REMOVED=
+=== P28-I2-R2 adapter suite (R1 19 plus two scope guards) ===
+Found 21 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying users.0001_initial... OK
+  Applying references.0001_initial... OK
+  Applying users.0002_driverprimaryregistration... OK
+  Applying users.0003_employee_comment_employee_dismissed_at_and_more... OK
+  Applying users.0004_remove_driverprimaryregistration_shift_type_and_more... OK
+  Applying users.0005_employee_position... OK
+  Applying users.0006_remove_global_unique_access_code... OK
+  Applying users.0007_deduplicate_employee_accesses... OK
+  Applying users.0008_remove_employeeaccess_unique_employee_role_access... OK
+  Applying shifts.0001_initial... OK
+  Applying trips.0001_initial... OK
+  Applying trips.0002_trip_downtime_text_trip_loading_block_and_more... OK
+  Applying shifts.0002_employeeshift_end_engine_hours_and_more... OK
+  Applying assignments.0001_initial... OK
+  Applying trips.0003_dispatcheractionlog... OK
+  Applying trips.0004_dispatcheractionlog_reason... OK
+  Applying trips.0005_truck_loaded_action... OK
+  Applying references.0002_equipmentstate... OK
+  Applying trips.0006_trip_actual_dump_point_trip_assigned_dump_point... OK
+  Applying trips.0007_alter_trip_status... OK
+  Applying trips.0008_trip_cancelled_at... OK
+  Applying users.0009_employee_oup_fields_and_audit_target... OK
+  Applying users.0010_normalize_activated_employee_status... OK
+  Applying users.0011_adminactionlog_reversal... OK
+  Applying references.0003_remove_in_transit_and_rename_free... OK
+  Applying shifts.0003_shiftplan_equipmentshiftplan... OK
+  Applying shifts.0004_shiftplan_plan_scope... OK
+  Applying shifts.0005_employeeshift_plan_assigned_at_and_more... OK
+  Applying shifts.0006_reconcile_equipment_plan_groups... OK
+  Applying references.0004_update_free_color_semantics... OK
+  Applying shifts.0007_achievementprize_achievementunlock... OK
+  Applying shifts.0008_employeeshift_unique_open_shift_per_employee_and_more... OK
+  Applying references.0005_equipmentmodel_fuel_capacity_limit_l... OK
+  Applying references.0006_assign_excavator_fuel_limit_models... OK
+  Applying shifts.0009_shiftclientaction_shiftreadingcorrection... OK
+  Applying shifts.0010_alter_shiftreadingcorrection_employee_and_more... OK
+  Applying shifts.0011_employeeshift_workplace_code... OK
+  Applying references.0007_assign_truck_fuel_limits... OK
+  Applying users.0012_personnel_positions_and_temporary_transfers... OK
+  Applying users.0013_normalize_department_work_schedule... OK
+  Applying users.0014_allow_work_schedules_without_brigades... OK
+  Applying users.0015_seed_rotation_roles... OK
+  Applying users.0016_watchcomposition_employee_watch_composition... OK
+  Applying users.0017_employee_sex... OK
+  Applying shifts.0012_watchperiod_watch_composition... OK
+  Applying shifts.0013_unique_open_oup_period... OK
+  Applying shifts.0014_watch_period_brigade_phases... OK
+  Applying shifts.0015_brigade_phase_actor_accesses... OK
+  Applying assignments.0002_excavatorplacement... OK
+  Applying assignments.0003_excavatorplacement_loading_block_and_more... OK
+  Applying assignments.0004_haulassignment_action_haulassignment_effective_at... OK
+  Applying assignments.0005_equipmentassignment_ended_by_and_more... OK
+  Applying assignments.0006_crewplan_crewplanslot_and_more... OK
+  Applying assignments.0007_equipment_assignment_provenance... OK
+  Applying assignments.0008_crew_plan_secondary_employee... OK
+  Applying assignments.0009_excavatorplacement_transport_distance_km... OK
+  Applying assignments.0010_excavatordumppointsetting... OK
+  Applying assignments.0011_haul_assignment_open_state_constraints... OK
+  Applying assignments.0012_haul_assignment_handoff... OK
+  Applying assignments.0013_numbered_shift_labels... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying users.0018_employee_watch_profile_guard... OK
+  Applying users.0019_activeapplicationsession... OK
+  Applying users.0020_pushnotification_webpushsubscription... OK
+  Applying users.0021_client_error_report... OK
+  Applying users.0022_employee_protected_card... OK
+  Applying users.0023_activeapplicationsession_presence... OK
+  Applying users.0024_employee_contractor_access_from_and_more... OK
+  Applying references.0008_equipment_contractor_organization... OK
+  Applying trips.0009_unique_open_trip_per_truck... OK
+  Applying trips.0010_dispatcher_manual_trip_action... OK
+  Applying shifts.0016_numbered_shift_labels... OK
+  Applying shifts.0017_drivershiftreadingconfirmation... OK
+  Applying references.0009_link_legacy_rock_capacity_rules... OK
+  Applying references.0010_remove_obsolete_cargo_aliases... OK
+  Applying shifts.0018_excavatorshiftreadingconfirmation... OK
+  Applying trips.0011_manual_loading_participation... OK
+  Applying trips.0012_trip_offline_loading_times... OK
+  Applying shifts.0019_employeeshift_service_close_kind... OK
+  Applying downtimes.0001_initial... OK
+  Applying downtimes.0002_seed_mechanic_reasons... OK
+  Applying downtimes.0003_alter_downtimereason_options_and_more... OK
+  Applying downtimes.0004_update_downtime_reason_state_semantics... OK
+  Applying downtimes.0005_downtime_actor_subject... OK
+  Applying core.0001_initial... OK
+  Applying core.0002_operationalstateevent... OK
+  Applying core.0003_offline_field_event... OK
+  Applying portal.0001_initial... OK
+  Applying portal.0002_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0003_alter_leadershipmessage_photo_and_more... OK
+  Applying portal.0004_publication_portal_public_story_requires_consent_and_more... OK
+  Applying reports.0001_initial... OK
+  Applying reports.0002_reporttemplate_filters... OK
+  Applying reports.0003_reporttemplate_group_by... OK
+  Applying reports.0004_reporttemplate_column_labels... OK
+  Applying reports.0005_pilotfeedback... OK
+  Applying reports.0006_driver_shift_passport_snapshots... OK
+  Applying reports.0007_ratingperiod... OK
+  Applying reports.0008_ratingperiod_nominal_starts_on... OK
+  Applying reports.0009_driver_rating_period_materialized_snapshot... OK
+  Applying reports.0010_driverratingperiodmaterializedsnapshot_participant_group_snapshots... OK
+  Applying reports.0011_driver_rating_materialized_group_key... OK
+  Applying reports.0012_numbered_shift_labels... OK
+  Applying settlement.0001_initial... OK
+  Applying settlement.0002_settlementrevision_accommodationanchor_and_more... OK
+  Applying settlement.0003_employeebedoccupancy... OK
+  Applying settlement.0004_employeebedoccupancy_temporal_fields... OK
+  Applying settlement.0005_physical_room_sex_restriction... OK
+  Applying settlement.0006_remove_legacy_occupancy_constraints... OK
+  Applying settlement.0007_settlement_control_lease_and_event... OK
+  Applying settlement.0008_m4_calendar_slots_and_bindings... OK
+  Applying settlement.0009_m5_authoritative_cohorts... OK
+  Applying settlement.0010_settlement_residents... OK
+  Applying settlement.0011_resident_subject_transition... OK
+  Applying settlement.0012_m7_saved_previews... OK
+  Applying settlement.0013_resident_occupancy_subject... OK
+  Applying settlement.0014_m8_apply_provenance... OK
+  Applying settlement.0015_cohort_member_work_shift... OK
+  Applying settlement.0016_shift_scoped_apply_and_occupancy... OK
+  Applying settlement.0017_m9_preview_corrections... OK
+  Applying rotations.0001_initial... OK
+  Applying rotations.0002_arrival_roster_versions... OK
+  Applying rotations.0003_arrival_roster_manual_review... OK
+  Applying rotations.0004_arrival_roster_employee_pool... OK
+  Applying rotations.0005_arrival_roster_confirmation... OK
+  Applying rotations.0006_arrival_roster_excel_revision... OK
+  Applying rotations.0007_arrival_roster_routing... OK
+  Applying rotations.0008_employee_watch_profile_change... OK
+  Applying rotations.0009_numbered_shift_labels... OK
+  Applying sessions.0001_initial... OK
+  Applying settlement.0018_arrival_roster_cohort_provenance... OK
+  Applying settlement.0019_cohort_member_watch_profile_provenance... OK
+  Applying shifts.0020_shiftclientaction_request_signature... OK
+  Applying users.0025_employeeaccess_driver_quick_reasons... OK
+  Applying users.0026_native_push_device... OK
+  Applying trips.0013_free_bucket_acceptance... OK
+  Applying trips.0014_free_bucket_acceptance_active_constraint... OK
+  Applying trips.0015_free_bucket_driver_request... OK
+  Applying trips.0016_trip_driver_device_load_time... OK
+  Applying trips.0017_free_bucket_accepted_by_driver_action... OK
+System check identified no issues (0 silenced).
+GROUP_FAILURES=0
+=== Three unchanged original Astra acceptance probes ===
+Found 3 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  No migrations to apply.
+System check identified no issues (0 silenced).
+P28_I2_PROBE {"case": "local_reference_pending", "server": {"event_id": "probe-pending", "status": "retry", "retryable": true, "code": "trip_reference_pending", "message": "Связанный рейс ещё не подтверждён сервером.", "server_ids": {}, "server_received_at": "2026-09-28T15:51:44.472515+00:00", "version": null}, "existing_resolver_trip_id": 1, "collected_event_ids": ["probe-load-map", "probe-pending"], "missing_expected_event": "probe-pending"}
+P28_I2_PROBE {"case": "raw_identity_collision", "server": {"event_id": "probe-id", "status": "conflict", "retryable": false, "code": "event_id_reused", "message": "Идентификатор уже использован для другого события.", "server_ids": {}, "server_received_at": "2026-09-28T15:51:44.561957+00:00", "version": null}, "projection": "integrity_conflict", "diagnostics": ["id_collision:probe-id", "legacy_history_incomplete"], "conflict_sources": 1, "expected": "integrity_conflict"}
+TRACE_LATE_LOAD_ORIGIN {"path": "real process_offline_batch -> _process_excavator_loaded -> _process_late_excavator_load same_load", "result": {"event_id": "astra-late-load-not-origin", "status": "accepted", "retryable": false, "code": "", "message": "", "server_ids": {"trip_id": 1, "shift_id": 3, "event_receipt_id": 1}, "server_received_at": "2026-09-28T15:51:44.625243+00:00", "version": 29}, "original_trip_id": 1, "original_actor_id": 1, "late_duplicate_actor_id": 3, "load_action_count_for_duplicate": 0, "observed": {"synthetic": true, "loading_actor_id": "1", "loading_reference": "source:trip:1:loading_snapshot"}, "incomplete_reasons": ["dedicated_route_event_journal_absent", "loading_origin_not_proven", "replacement_link_missing", "ui_observation_not_recorded"]}
+GROUP_FAILURES=0
+=== Unchanged combined C1/C2 Astra probe ===
+Found 1 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  No migrations to apply.
+System check identified no issues (0 silenced).
+P28_I2_R1_PROBE {"case": "local_only_original_collision_to_numeric_other_trip", "original_http_result": {"event_id": "probe-r1-local-original-id", "status": "retry", "retryable": true, "code": "trip_reference_pending", "message": "Связанный рейс ещё не подтверждён сервером.", "server_ids": {}, "server_received_at": "2026-09-28T15:51:45.076690+00:00", "version": null}, "repeat_http_result": {"event_id": "probe-r1-local-original-id", "status": "conflict", "retryable": false, "code": "event_id_reused", "message": "Идентификатор уже использован для другого события.", "server_ids": {}, "server_received_at": "2026-09-28T15:51:45.091478+00:00", "version": null}, "trip_ids": {"X": 1, "Y": 2, "Z": 3}, "resolver_local_trip_id": 1, "original_receipt_trip_id": null, "original_collected_for_X": true, "X_binding": [{"actor_id": 2, "device_id": "probe-r1-local-original-device", "local_trip_id": "probe-r1-local-original-X", "mapping_event_ids": ["probe-r1-local-original-load-map"], "mapped_trip_ids": [1], "resolution": "resolved_to_this_trip"}], "projection_X": "integrity_conflict", "projection_Y": "integrity_conflict", "projection_Z": "causality_incomplete", "conflict_id": 1, "conflict_source_count_X": 1, "conflict_source_count_Y": 1, "Z_unchanged": true, "reader_DML_count": 0, "expected": "X and Y integrity_conflict with both raw envelopes; Z unchanged"}
+GROUP_FAILURES=0
+=== Four existing route handler tests ===
+Found 4 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, assignments, auth, contenttypes, core, downtimes, portal, references, reports, rotations, sessions, settlement, shifts, trips, users
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  No migrations to apply.
+System check identified no issues (0 silenced).
+GROUP_FAILURES=0
+=== Django system check ===
+System check identified no issues (0 silenced).
+=== Migration drift check ===
+No changes detected
+=== Transferred R1 core tests ===
+P28_I1_TRACE {"causal_maxima": ["D2", "O1"], "diagnostics": [], "history": [{"action_at": "", "actor_id": "driver-D1", "actor_role": "driver", "event_id": "D1", "event_type": "route_direction_changed", "fingerprint": "5fe5325e35374ae6232d26610feb85fe86163347b5e6d2c208ab9fc3e6c3f778", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "", "target_point_id": "P2", "trip_id": "X"}, {"action_at": "", "actor_id": "driver-D2", "actor_role": "driver", "event_id": "D2", "event_type": "route_direction_changed", "fingerprint": "de2f80619e6afb1f77a3e4837449279b819d1a0df7249cc08e6f1699879526b0", "loading_event_id": "load-X", "observed_ancestor_ids": ["O2"], "received_at": "", "target_point_id": "P5", "trip_id": "X"}, {"action_at": "", "actor_id": "excavator_operator-O1", "actor_role": "excavator_operator", "event_id": "O1", "event_type": "route_direction_changed", "fingerprint": "5c6fbc7d10a9d5c737a120531dd95214c5260e9844d6626074bb64d5396c05e1", "loading_event_id": "load-X", "observed_ancestor_ids": ["D1"], "received_at": "", "target_point_id": "P3", "trip_id": "X"}, {"action_at": "", "actor_id": "excavator_operator-O2", "actor_role": "excavator_operator", "event_id": "O2", "event_type": "route_direction_changed", "fingerprint": "e4ac4f7334dbf5572ff578f1dd7ad443c214eebad76ece79d417189244847f56", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "", "target_point_id": "P4", "trip_id": "X"}], "label": "permutations_24_converged", "lifecycle_evidence_ids": [], "lifecycle_state": "ongoing", "loading_actor_id": "loader-A", "loading_event_id": "load-X", "missing_ancestor_ids": [], "notification_key": "route:X:D2:de2f80619e6afb1f", "operational_allowed": true, "operational_reason": "trip_ongoing", "original_point_id": "P1", "selected_event_id": "D2", "selected_point_id": "P5", "selection_reason": "independent_driver_over_operator_p28_v3a", "status": "resolved", "successor_proven_without_fk": false, "successor_trip_id": null, "trip_id": "X"}
+P28_I1_TRACE {"causal_maxima": ["O"], "diagnostics": [], "history": [{"action_at": "", "actor_id": "driver-D", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "f2c355bf8c024fcb231917162357317a858f9c9d4b9eced85c33b6a54aa45833", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "", "target_point_id": "P2", "trip_id": "X"}, {"action_at": "", "actor_id": "excavator_operator-O", "actor_role": "excavator_operator", "event_id": "O", "event_type": "route_direction_changed", "fingerprint": "c9e1480f8476e6348b968e37061ac625c5aadfee881098df3d77edff427ae37c", "loading_event_id": "load-X", "observed_ancestor_ids": ["D"], "received_at": "", "target_point_id": "P3", "trip_id": "X"}], "label": "causal_operator_after_missing_parent", "lifecycle_evidence_ids": [], "lifecycle_state": "ongoing", "loading_actor_id": "loader-A", "loading_event_id": "load-X", "missing_ancestor_ids": [], "notification_key": "route:X:O:c9e1480f8476e634", "operational_allowed": true, "operational_reason": "trip_ongoing", "original_point_id": "P1", "selected_event_id": "O", "selected_point_id": "P3", "selection_reason": "single_causal_maximum", "status": "resolved", "successor_proven_without_fk": false, "successor_trip_id": null, "trip_id": "X"}
+P28_I1_TRACE {"causal_maxima": ["D", "O"], "diagnostics": [], "history": [{"action_at": "", "actor_id": "driver-D", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "f2c355bf8c024fcb231917162357317a858f9c9d4b9eced85c33b6a54aa45833", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "", "target_point_id": "P2", "trip_id": "X"}, {"action_at": "", "actor_id": "excavator_operator-O", "actor_role": "excavator_operator", "event_id": "O", "event_type": "route_direction_changed", "fingerprint": "8b851858d38a48c9a850969a27308d0020c825aad1aca63b48e81cae5df9426f", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "", "target_point_id": "P3", "trip_id": "X"}], "label": "independent_driver_operator", "lifecycle_evidence_ids": [], "lifecycle_state": "ongoing", "loading_actor_id": "loader-A", "loading_event_id": "load-X", "missing_ancestor_ids": [], "notification_key": "route:X:D:f2c355bf8c024fcb", "operational_allowed": true, "operational_reason": "trip_ongoing", "original_point_id": "P1", "selected_event_id": "D", "selected_point_id": "P2", "selection_reason": "independent_driver_over_operator_p28_v3a", "status": "resolved", "successor_proven_without_fk": false, "successor_trip_id": null, "trip_id": "X"}
+P28_I1_R1_TRACE {"label": "C3_business_equal_audit_distinct", "value": {"audit_equal": false, "audits": [{"duplicate_count": 1, "receipt_observations": [{"disposition": "stored_original", "event_id": "D", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "observation_index": 1, "reported_received_at": "10:01"}, {"disposition": "duplicate_same_content", "event_id": "D", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "observation_index": 2, "reported_received_at": "10:03"}]}, {"duplicate_count": 1, "receipt_observations": [{"disposition": "stored_original", "event_id": "D", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "observation_index": 1, "reported_received_at": "10:03"}, {"disposition": "duplicate_same_content", "event_id": "D", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "observation_index": 2, "reported_received_at": "10:01"}]}], "business_equal": true}}
+P28_I1_R1_TRACE {"label": "C1_full_conflicting_envelope", "value": {"event_id": "D", "incoming": {"action_at": "10:05", "actor_id": "driver-B", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "cc664f9c6b9247f97faf5f4d77ce2f56f753c30f8a06fade6c3ec7a4d1500c3e", "loading_event_id": "load-X", "observed_ancestor_ids": ["O7"], "received_at": "r2", "target_point_id": "P9", "trip_id": "X"}, "original": {"action_at": "10:00", "actor_id": "driver-A", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "loading_event_id": "load-X", "observed_ancestor_ids": [], "received_at": "r1", "target_point_id": "P2", "trip_id": "X"}}}
+P28_I1_R1_TRACE {"label": "C2_recalculate_without_new_action", "value": {"complete": {"causal_maxima": ["D"], "diagnostics": [], "history": [{"action_at": "10:00", "actor_id": "driver-A", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "loading_event_id": "load-X", "observed_ancestor_ids": [], "target_point_id": "P2", "trip_id": "X"}], "lifecycle_evidence_ids": [], "lifecycle_state": "ongoing", "loading_actor_id": "loader", "loading_event_id": "load-X", "missing_ancestor_ids": [], "notification_key": "route:X:D:2659f81c9affabc1", "operational_allowed": true, "operational_reason": "trip_ongoing", "original_point_id": "P1", "selected_event_id": "D", "selected_point_id": "P2", "selection_reason": "single_causal_maximum", "status": "resolved", "successor_proven_without_fk": false, "successor_trip_id": null, "trip_id": "X"}, "incomplete": {"causal_maxima": [], "diagnostics": ["legacy_history_incomplete"], "history": [{"action_at": "10:00", "actor_id": "driver-A", "actor_role": "driver", "event_id": "D", "event_type": "route_direction_changed", "fingerprint": "2659f81c9affabc161407fe36e4ad688c96effbc47fc8df04bf24299634d35d4", "loading_event_id": "load-X", "observed_ancestor_ids": [], "target_point_id": "P2", "trip_id": "X"}], "lifecycle_evidence_ids": [], "lifecycle_state": "ongoing", "loading_actor_id": "loader", "loading_event_id": "load-X", "missing_ancestor_ids": [], "notification_key": null, "operational_allowed": true, "operational_reason": "trip_ongoing", "original_point_id": "P1", "selected_event_id": null, "selected_point_id": null, "selection_reason": "legacy_history_incomplete", "status": "causality_incomplete", "successor_proven_without_fk": false, "successor_trip_id": null, "trip_id": "X"}}}
+CORE_R1_EXIT=0
+PERSISTENT_DB_BEFORE=(False, None, None)
+PERSISTENT_DB_AFTER=(False, None, None)
+PERSISTENT_DB_TOUCHED=False
+P28_I2_R2_REPLAY_OK

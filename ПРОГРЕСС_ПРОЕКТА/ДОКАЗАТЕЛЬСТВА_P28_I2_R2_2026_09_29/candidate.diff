@@ -1,0 +1,2472 @@
+diff --git a/СИСТЕМА_MVP/backend/trips/route_projection_adapter.py b/СИСТЕМА_MVP/backend/trips/route_projection_adapter.py
+new file mode 100644
+index 00000000..1ba6169c
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/trips/route_projection_adapter.py
+@@ -0,0 +1,961 @@
++"""Read-only P28-I2 adapter from current Django records to the P28 route core.
++
++The adapter is deliberately not registered in a view, signal, task, middleware,
++or ``AppConfig``.  It reports provenance and gaps in legacy history; it does not
++authenticate a caller or grant permission to perform a new route action.
++
++The function below performs several ordinary SELECT statements.  Under the
++database's default READ COMMITTED isolation those statements are not claimed to
++be one historical snapshot when concurrent writes happen.
++"""
++
++from __future__ import annotations
++
++from dataclasses import asdict, dataclass, replace
++from typing import Any, Mapping
++
++from django.db.models import Q
++
++from core.models import OfflineFieldEvent, OfflineFieldEventConflict, OfflineFieldEventStatus
++
++from .models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
++from .route_projection_core import LifecycleEvidence, Projection, RouteLedger, TripRouteContext, route_event
++
++
++ROUTE_EVENT_TYPE = 'driver.trip.dump_point_changed'
++LOAD_EVENT_TYPES = frozenset({
++    'driver.trip.loaded',
++    'excavator.trip.loaded',
++    'excavator.free_bucket.loaded',
++})
++IDENTITY_CONFLICT_CODES = frozenset({'event_id_reused', 'sequence_reused'})
++EFFECT_ACTION_TYPES = {
++    'driver.trip.dump_point_changed': frozenset({'change_actual_unload_point'}),
++    'driver.trip.unloaded': frozenset({'trip_unloaded'}),
++    'driver.trip.loaded': frozenset({'driver_manual_loaded'}),
++    'excavator.trip.loaded': frozenset({'truck_loaded'}),
++    'excavator.free_bucket.loaded': frozenset({'free_bucket_loaded'}),
++}
++
++
++@dataclass(frozen=True)
++class TripRouteEvidence:
++    trip_id: int
++    trip_snapshot: dict[str, Any]
++    sources: tuple[dict[str, Any], ...]
++    normalized_route_inputs: tuple[dict[str, Any], ...]
++    incomplete_reasons: tuple[str, ...]
++    history_complete: bool
++    loading_reference: dict[str, Any]
++    author_context: dict[str, Any]
++    lifecycle_detail: dict[str, Any]
++    local_reference_bindings: tuple[dict[str, Any], ...]
++    integrity_conflicts: tuple[dict[str, Any], ...]
++    projection: Projection
++    read_consistency: str = 'multiple_selects_database_default_isolation_no_snapshot_claim'
++
++    def to_dict(self) -> dict[str, Any]:
++        return {
++            **asdict(self),
++            'projection': self.projection.to_dict(),
++        }
++
++
++def _iso(value: Any) -> str | None:
++    return value.isoformat() if value is not None else None
++
++
++def _positive_int(value: Any) -> int | None:
++    if value in (None, '', False):
++        return None
++    try:
++        parsed = int(value)
++    except (TypeError, ValueError):
++        return None
++    return parsed if parsed > 0 else None
++
++
++def _mapping_trip_ids(value: Mapping[str, Any] | None) -> tuple[int, ...]:
++    value = value if isinstance(value, Mapping) else {}
++    payload = value.get('payload') if isinstance(value.get('payload'), Mapping) else {}
++    context = value.get('context_snapshot') if isinstance(value.get('context_snapshot'), Mapping) else {}
++    result = value.get('result_payload') if isinstance(value.get('result_payload'), Mapping) else {}
++    server_ids = result.get('server_ids') if isinstance(result.get('server_ids'), Mapping) else {}
++    ids = {
++        item
++        for item in (
++            _positive_int(value.get('trip_id')),
++            _positive_int(payload.get('trip_id')),
++            _positive_int(context.get('trip_id')),
++            _positive_int(server_ids.get('trip_id')),
++        )
++        if item is not None
++    }
++    return tuple(sorted(ids))
++
++
++def _receipt_trip_ids(receipt: OfflineFieldEvent) -> tuple[int, ...]:
++    ids = set(_mapping_trip_ids({
++        'payload': receipt.payload,
++        'context_snapshot': receipt.context_snapshot,
++        'result_payload': receipt.result_payload,
++    }))
++    if receipt.trip_id:
++        ids.add(receipt.trip_id)
++    return tuple(sorted(ids))
++
++
++def _receipt_disposition(receipt: OfflineFieldEvent, *, effect_proven: bool = False) -> str:
++    result = receipt.result_payload if isinstance(receipt.result_payload, Mapping) else {}
++    if receipt.status != OfflineFieldEventStatus.ACCEPTED:
++        return receipt.status
++    if result.get('no_effect'):
++        return 'accepted_no_effect'
++    if result.get('no_change'):
++        return 'accepted_no_change'
++    return 'accepted_effect_recorded' if effect_proven else 'accepted_effect_unproven'
++
++
++def _effect_proven(receipt: OfflineFieldEvent, action_pairs: set[tuple[str, str]]) -> bool:
++    return any(
++        (action_type, receipt.event_id) in action_pairs
++        for action_type in EFFECT_ACTION_TYPES.get(receipt.event_type, ())
++    )
++
++
++def _receipt_effective_occurred_at(receipt: OfflineFieldEvent) -> str | None:
++    result = receipt.result_payload if isinstance(receipt.result_payload, Mapping) else {}
++    effective = result.get('effective_occurred_at')
++    if effective not in (None, ''):
++        return str(effective)
++    return _iso(receipt.occurred_at)
++
++
++def _receipt_source(
++    receipt: OfflineFieldEvent,
++    *,
++    action_pairs: set[tuple[str, str]],
++    association: str = 'direct_trip_reference',
++) -> dict[str, Any]:
++    effect_proven = _effect_proven(receipt, action_pairs)
++    return {
++        'source_kind': 'offline_field_event',
++        'source_pk': receipt.pk,
++        'event_id': receipt.event_id,
++        'event_type': receipt.event_type,
++        'trip_ids': _receipt_trip_ids(receipt),
++        'linked_trip_id': receipt.trip_id,
++        'actor_id': receipt.actor_id,
++        'access_id': receipt.access_id,
++        'role_code': receipt.role_code,
++        'shift_id': receipt.shift_id,
++        'equipment_id': receipt.equipment_id,
++        'device_id': receipt.device_id,
++        'sequence': receipt.sequence,
++        'depends_on': tuple(receipt.depends_on or ()),
++        'local_trip_id': receipt.local_trip_id,
++        'occurred_at': _iso(receipt.occurred_at),
++        'effective_occurred_at': _receipt_effective_occurred_at(receipt),
++        'received_at': _iso(receipt.received_at),
++        'payload': receipt.payload or {},
++        'context_snapshot': receipt.context_snapshot or {},
++        'fingerprint': receipt.fingerprint,
++        'status': receipt.status,
++        'retryable': receipt.retryable,
++        'error_code': receipt.error_code,
++        'error_message': receipt.error_message,
++        'result_payload': receipt.result_payload or {},
++        'effect_disposition': _receipt_disposition(receipt, effect_proven=effect_proven),
++        'applied_effect_proven_by_client_action': effect_proven,
++        'evidence_association': association,
++    }
++
++
++def _submitted_local_trip_id(submitted: Mapping[str, Any] | None) -> str:
++    submitted = submitted if isinstance(submitted, Mapping) else {}
++    payload = submitted.get('payload') if isinstance(submitted.get('payload'), Mapping) else {}
++    return str(submitted.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128]
++
++
++def _conflict_source(
++    conflict: OfflineFieldEventConflict,
++    *,
++    action_pairs: set[tuple[str, str]],
++    association: str = 'direct_trip_reference',
++) -> dict[str, Any]:
++    submitted = conflict.submitted_event if isinstance(conflict.submitted_event, Mapping) else {}
++    submitted_trip_ids = _mapping_trip_ids(submitted)
++    existing_source = (
++        _receipt_source(
++            conflict.existing_event,
++            action_pairs=action_pairs,
++            association='conflict_original_event',
++        )
++        if conflict.existing_event_id else None
++    )
++    return {
++        'source_kind': 'offline_field_event_conflict',
++        'source_pk': conflict.pk,
++        'attempted_event_id': conflict.attempted_event_id,
++        'code': conflict.code,
++        'existing_event_pk': conflict.existing_event_id,
++        'existing_event_id': conflict.existing_event.event_id if conflict.existing_event_id else None,
++        'existing_trip_id': conflict.existing_event.trip_id if conflict.existing_event_id else None,
++        'submitted_trip_ids': submitted_trip_ids,
++        'submitted_local_trip_id': _submitted_local_trip_id(submitted),
++        'actor_id': conflict.actor_id,
++        'access_id': conflict.access_id,
++        'role_code': conflict.role_code,
++        'device_id': conflict.device_id,
++        'fingerprint': conflict.fingerprint,
++        'submitted_claimed_actor_id': submitted.get('claimed_actor_id'),
++        'submitted_claimed_access_id': submitted.get('claimed_access_id'),
++        'submitted_claimed_role_code': submitted.get('claimed_role_code'),
++        'submitted_event': dict(submitted),
++        'existing_event': existing_source,
++        'evidence_association': association,
++        'received_at': _iso(conflict.received_at),
++    }
++
++
++def _action_source(action: TripClientAction, *, receipt_ids: set[str]) -> dict[str, Any]:
++    return {
++        'source_kind': 'trip_client_action',
++        'source_pk': action.pk,
++        'action_type': action.action_type,
++        'client_action_id': action.client_action_id,
++        'trip_id': action.trip_id,
++        'actor_id': action.actor_id,
++        'created_at': _iso(action.created_at),
++        'matching_offline_receipt': action.client_action_id in receipt_ids,
++        'payload_available': False,
++    }
++
++
++def _dispatcher_source(item: DispatcherActionLog) -> dict[str, Any]:
++    return {
++        'source_kind': 'dispatcher_action_log',
++        'source_pk': item.pk,
++        'action_type': item.action_type,
++        'trip_id': item.trip_id,
++        'actor_id': item.actor_id,
++        'shift_id': item.shift_id,
++        'target_summary': item.target_summary,
++        'reason': item.reason,
++        'created_at': _iso(item.created_at),
++        'before_after_available': False,
++    }
++
++
++def _trip_snapshot(trip: Trip) -> dict[str, Any]:
++    return {
++        'source_kind': 'trip_snapshot',
++        'source_pk': trip.pk,
++        'trip_id': trip.pk,
++        'status': trip.status,
++        'excavator_id': trip.excavator_id,
++        'truck_id': trip.truck_id,
++        'excavator_operator_id': trip.excavator_operator_id,
++        'driver_id': trip.driver_id,
++        'loading_shift_id': trip.loading_shift_id,
++        'unloading_shift_id': trip.unloading_shift_id,
++        'driver_control_shift_id': trip.driver_control_shift_id,
++        'dump_point_id': trip.dump_point_id,
++        'assigned_dump_point_id': trip.assigned_dump_point_id,
++        'actual_dump_point_id': trip.actual_dump_point_id,
++        'created_at': _iso(trip.created_at),
++        'loaded_at': _iso(trip.loaded_at),
++        'load_received_at': _iso(trip.load_received_at),
++        'load_time_source': trip.load_time_source,
++        'completed_at': _iso(trip.completed_at),
++        'unload_received_at': _iso(trip.unload_received_at),
++        'unload_time_source': trip.unload_time_source,
++        'cancelled_at': _iso(trip.cancelled_at),
++        'operationally_closed_at': _iso(trip.operationally_closed_at),
++        'closure_recorded_by_id': trip.closure_recorded_by_id,
++        'superseded_by_id': trip.superseded_by_id,
++        'is_carryover': trip.is_carryover,
++        'legacy_values_are_current_snapshot_not_value_history': True,
++    }
++
++
++def _target_point_id(value: Mapping[str, Any]) -> int | None:
++    payload = value.get('payload') if isinstance(value.get('payload'), Mapping) else {}
++    result = value.get('result_payload') if isinstance(value.get('result_payload'), Mapping) else {}
++    server_ids = result.get('server_ids') if isinstance(result.get('server_ids'), Mapping) else {}
++    return _positive_int(payload.get('dump_point_id')) or _positive_int(server_ids.get('dump_point_id'))
++
++
++def _receipt_local_scope(receipt: OfflineFieldEvent) -> tuple[int, str, str] | None:
++    local_trip_id = str(receipt.local_trip_id or '').strip()
++    if not local_trip_id:
++        return None
++    return receipt.actor_id, receipt.device_id, local_trip_id
++
++
++def _receipt_scope_query(scopes: set[tuple[int, str, str]]) -> Q:
++    query = Q(pk__in=[])
++    for actor_id, device_id, local_trip_id in sorted(scopes):
++        query |= Q(actor_id=actor_id, device_id=device_id, local_trip_id=local_trip_id)
++    return query
++
++
++def _conflict_scope_query(scopes: set[tuple[int, str, str]]) -> Q:
++    query = Q(pk__in=[])
++    for actor_id, device_id, local_trip_id in sorted(scopes):
++        query |= (
++            Q(
++                actor_id=actor_id,
++                device_id=device_id,
++                submitted_event__local_trip_id=local_trip_id,
++            )
++            | Q(
++                actor_id=actor_id,
++                device_id=device_id,
++                submitted_event__payload__local_trip_id=local_trip_id,
++            )
++        )
++    return query
++
++
++def _proven_loading_origins(
++    trip: Trip,
++    *,
++    receipts: list[OfflineFieldEvent],
++    actions: list[TripClientAction],
++) -> list[tuple[OfflineFieldEvent, TripClientAction]]:
++    actions_by_pair = {
++        (item.action_type, item.client_action_id): item
++        for item in actions
++    }
++    proven: list[tuple[OfflineFieldEvent, TripClientAction]] = []
++    for receipt in receipts:
++        if (
++            receipt.trip_id != trip.pk
++            or receipt.event_type not in LOAD_EVENT_TYPES
++            or receipt.status != OfflineFieldEventStatus.ACCEPTED
++            or (receipt.result_payload or {}).get('no_effect')
++            or (receipt.result_payload or {}).get('no_change')
++            or trip.loaded_at is None
++            or _receipt_effective_occurred_at(receipt) != _iso(trip.loaded_at)
++        ):
++            continue
++        expected_actions = EFFECT_ACTION_TYPES.get(receipt.event_type, ())
++        matching = [
++            actions_by_pair[(action_type, receipt.event_id)]
++            for action_type in expected_actions
++            if (action_type, receipt.event_id) in actions_by_pair
++        ]
++        if len(matching) != 1 or matching[0].trip_id != trip.pk:
++            continue
++        action = matching[0]
++        if action.actor_id not in (None, receipt.actor_id):
++            continue
++        if receipt.event_type.startswith('excavator.'):
++            if trip.excavator_operator_id != receipt.actor_id:
++                continue
++        elif receipt.event_type == 'driver.trip.loaded' and trip.driver_id != receipt.actor_id:
++            continue
++        proven.append((receipt, action))
++    return sorted(proven, key=lambda item: (item[0].event_id, item[0].pk))
++
++
++def _normalize_route_evidence(
++    *,
++    receipts: list[OfflineFieldEvent],
++    conflicts: list[OfflineFieldEventConflict],
++    actions: list[TripClientAction],
++    loading_event_id: str,
++) -> tuple[RouteLedger, list[dict[str, Any]], set[int]]:
++    action_pairs = {(item.action_type, item.client_action_id) for item in actions}
++    ledger = RouteLedger()
++    normalized_inputs: list[dict[str, Any]] = []
++    appended_receipts: set[int] = set()
++    applied_receipt_pks: set[int] = set()
++    for receipt in sorted(receipts, key=lambda item: (item.event_id, item.pk)):
++        route = _route_from_receipt(receipt, loading_event_id=loading_event_id)
++        effect_proven = _effect_proven(receipt, action_pairs)
++        applied = bool(
++            route is not None
++            and receipt.trip_id is not None
++            and receipt.status == OfflineFieldEventStatus.ACCEPTED
++            and _receipt_disposition(receipt, effect_proven=effect_proven) == 'accepted_effect_recorded'
++        )
++        if applied:
++            ledger.append(route)
++            appended_receipts.add(receipt.pk)
++            applied_receipt_pks.add(receipt.pk)
++            normalized_inputs.append({
++                'event': route.to_record(),
++                'source_kind': 'offline_field_event',
++                'source_pk': receipt.pk,
++                'applied_effect_proven_by_client_action': True,
++                'depends_on_preserved_as_queue_metadata': tuple(receipt.depends_on or ()),
++                'observed_ancestors_proven': False,
++                'raw_fingerprint': receipt.fingerprint,
++            })
++
++    for conflict in sorted(conflicts, key=lambda item: (item.attempted_event_id, item.pk)):
++        original_receipt = conflict.existing_event
++        original = (
++            _route_from_receipt(original_receipt, loading_event_id=loading_event_id)
++            if original_receipt is not None else None
++        )
++        incoming = _route_from_submitted(conflict, loading_event_id=loading_event_id)
++        if original is None or incoming is None:
++            continue
++        if original_receipt.pk not in appended_receipts:
++            ledger.append(original)
++            appended_receipts.add(original_receipt.pk)
++        ledger.append(incoming)
++        normalized_inputs.append({
++            'event': incoming.to_record(),
++            'source_kind': 'offline_field_event_conflict',
++            'source_pk': conflict.pk,
++            'applied_effect_proven_by_client_action': False,
++            'collision_with_event_id': original.event_id,
++            'observed_ancestors_proven': False,
++            'raw_fingerprint': conflict.fingerprint,
++        })
++
++    normalized_inputs.sort(key=lambda item: (
++        str(item['event']['event_id']), item['source_kind'], int(item['source_pk']),
++    ))
++    return ledger, normalized_inputs, applied_receipt_pks
++
++
++def _route_from_receipt(receipt: OfflineFieldEvent, *, loading_event_id: str):
++    if receipt.event_type != ROUTE_EVENT_TYPE:
++        return None
++    target_point_id = _target_point_id({
++        'payload': receipt.payload,
++        'result_payload': receipt.result_payload,
++    })
++    trip_ids = _receipt_trip_ids(receipt)
++    if target_point_id is None or len(trip_ids) != 1:
++        return None
++    return route_event(
++        event_id=receipt.event_id,
++        trip_id=str(trip_ids[0]),
++        event_type=receipt.event_type,
++        actor_id=str(receipt.actor_id),
++        actor_role=receipt.role_code,
++        target_point_id=str(target_point_id),
++        # Current depends_on records queue order, not a proven UI observation.
++        observed_ancestor_ids=(),
++        action_at=_iso(receipt.occurred_at) or '',
++        received_at=_iso(receipt.received_at) or '',
++        loading_event_id=loading_event_id,
++    )
++
++
++def _route_from_submitted(conflict: OfflineFieldEventConflict, *, loading_event_id: str):
++    submitted = conflict.submitted_event if isinstance(conflict.submitted_event, Mapping) else {}
++    event_type = str(submitted.get('event_type') or '')
++    target_point_id = _target_point_id(submitted)
++    trip_ids = _mapping_trip_ids(submitted)
++    if event_type != ROUTE_EVENT_TYPE or target_point_id is None or len(trip_ids) != 1:
++        return None
++    actor_id = _positive_int(submitted.get('claimed_actor_id')) or conflict.actor_id
++    action_at = submitted.get('occurred_at') or ''
++    return route_event(
++        event_id=conflict.attempted_event_id,
++        trip_id=str(trip_ids[0]),
++        event_type=event_type,
++        actor_id=str(actor_id),
++        actor_role=str(submitted.get('role_code') or conflict.role_code),
++        target_point_id=str(target_point_id),
++        observed_ancestor_ids=(),
++        action_at=str(action_at),
++        received_at=_iso(conflict.received_at) or '',
++        loading_event_id=loading_event_id,
++    )
++
++
++def _lifecycle(
++    trip: Trip,
++    *,
++    receipts: list[OfflineFieldEvent],
++    actions: list[TripClientAction],
++    logs: list[DispatcherActionLog],
++    possible_successor_ids: tuple[int, ...],
++) -> tuple[LifecycleEvidence, dict[str, Any]]:
++    unload_receipts = [
++        item for item in receipts
++        if item.trip_id == trip.pk
++        and item.event_type == 'driver.trip.unloaded'
++        and item.status == OfflineFieldEventStatus.ACCEPTED
++        and not (item.result_payload or {}).get('no_effect')
++    ]
++    unload_actions = [item for item in actions if item.action_type == 'trip_unloaded']
++    service_logs = [item for item in logs if item.action_type == DispatcherActionType.COMPLETE_TRIP]
++    evidence_ids = tuple(sorted({
++        *(f'offline:{item.event_id}' for item in unload_receipts),
++        *(f'client_action:{item.client_action_id}' for item in unload_actions),
++        *(f'dispatcher_log:{item.pk}' for item in service_logs),
++    }))
++    detail: dict[str, Any] = {
++        'trip_status': trip.status,
++        'driver_unload_receipt_ids': tuple(item.event_id for item in unload_receipts),
++        'driver_unload_action_ids': tuple(item.client_action_id for item in unload_actions),
++        'service_completion_log_ids': tuple(item.pk for item in service_logs),
++        'possible_successor_trip_ids': possible_successor_ids,
++        'physical_unload_not_inferred_from_status_alone': True,
++    }
++    if trip.status == TripStatus.CANCELLED:
++        detail['basis'] = 'trip_cancelled_state'
++        return LifecycleEvidence(state='cancelled', evidence_ids=(f'trip:{trip.pk}:cancelled',)), detail
++    if trip.status == TripStatus.COMPLETED:
++        if unload_receipts or unload_actions:
++            detail['basis'] = 'driver_unload_confirmation_recorded'
++            return LifecycleEvidence(state='unloaded', evidence_ids=evidence_ids), detail
++        if service_logs:
++            detail['basis'] = 'service_completion_without_driver_unload_confirmation'
++            return LifecycleEvidence(state='completed_service', evidence_ids=evidence_ids), detail
++        detail['basis'] = 'completed_without_recorded_origin'
++        return LifecycleEvidence(
++            state='completed_origin_unknown', evidence_ids=(f'trip:{trip.pk}:completed',),
++        ), detail
++    if trip.status == TripStatus.UNCONTROLLED:
++        if trip.superseded_by_id:
++            detail['basis'] = 'positive_superseded_by_foreign_key'
++            return LifecycleEvidence(
++                state='superseded',
++                evidence_ids=(f'trip:{trip.pk}:superseded_by',),
++                successor_trip_id=str(trip.superseded_by_id),
++            ), detail
++        if possible_successor_ids:
++            detail['basis'] = 'possible_later_trip_without_causal_link'
++            return LifecycleEvidence(
++                state='replacement_unknown',
++                evidence_ids=(f'trip:{trip.pk}:operational_close',),
++            ), detail
++        detail['basis'] = 'technical_uncontrolled_without_successor_evidence'
++        return LifecycleEvidence(
++            state='technical_uncontrolled',
++            evidence_ids=(f'trip:{trip.pk}:operational_close',),
++        ), detail
++    detail['basis'] = 'trip_ongoing'
++    return LifecycleEvidence(state='ongoing'), detail
++
++
++def read_trip_route_evidence(trip_id: int) -> TripRouteEvidence:
++    """Collect current route evidence for one trip without writing anything."""
++    trip = (
++        Trip.objects
++        .select_related(
++            'loading_shift__employee', 'unloading_shift__employee',
++            'driver_control_shift__employee', 'superseded_by',
++        )
++        .get(pk=trip_id)
++    )
++    trip_id_text = str(trip.pk)
++    receipt_filter = (
++        Q(trip_id=trip.pk)
++        | Q(payload__trip_id=trip.pk)
++        | Q(payload__trip_id=trip_id_text)
++        | Q(result_payload__server_ids__trip_id=trip.pk)
++        | Q(result_payload__server_ids__trip_id=trip_id_text)
++        | Q(context_snapshot__trip_id=trip.pk)
++        | Q(context_snapshot__trip_id=trip_id_text)
++    )
++    direct_receipts = list(
++        OfflineFieldEvent.objects
++        .filter(receipt_filter)
++        .select_related('actor', 'access', 'shift', 'equipment', 'trip')
++        .distinct()
++        .order_by('event_id', 'pk')
++    )
++    direct_receipt_pks = {item.pk for item in direct_receipts}
++    linked_scopes = {
++        scope
++        for item in direct_receipts
++        if (
++            item.trip_id == trip.pk
++            and item.event_type in LOAD_EVENT_TYPES
++            and item.status == OfflineFieldEventStatus.ACCEPTED
++            and (scope := _receipt_local_scope(item)) is not None
++        )
++    }
++    scope_mappings = list(
++        OfflineFieldEvent.objects
++        .filter(
++            _receipt_scope_query(linked_scopes),
++            event_type__in=LOAD_EVENT_TYPES,
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip__isnull=False,
++        )
++        .select_related('actor', 'access', 'shift', 'equipment', 'trip')
++        .order_by('actor_id', 'device_id', 'local_trip_id', 'sequence', 'pk')
++    ) if linked_scopes else []
++    mappings_by_scope: dict[tuple[int, str, str], list[OfflineFieldEvent]] = {
++        scope: [] for scope in linked_scopes
++    }
++    for mapping in scope_mappings:
++        scope = _receipt_local_scope(mapping)
++        if scope in mappings_by_scope:
++            mappings_by_scope[scope].append(mapping)
++    local_reference_bindings: list[dict[str, Any]] = []
++    resolved_scopes: set[tuple[int, str, str]] = set()
++    for scope in sorted(linked_scopes):
++        mappings = mappings_by_scope.get(scope, [])
++        mapped_trip_ids = tuple(sorted({item.trip_id for item in mappings if item.trip_id}))
++        resolution = (
++            'resolved_to_this_trip'
++            if mapped_trip_ids == (trip.pk,)
++            else 'ambiguous_multiple_trips'
++        )
++        if resolution == 'resolved_to_this_trip':
++            resolved_scopes.add(scope)
++        local_reference_bindings.append({
++            'actor_id': scope[0],
++            'device_id': scope[1],
++            'local_trip_id': scope[2],
++            'mapping_event_ids': tuple(item.event_id for item in mappings),
++            'mapped_trip_ids': mapped_trip_ids,
++            'resolution': resolution,
++        })
++    locally_bound_receipts = list(
++        OfflineFieldEvent.objects
++        .filter(_receipt_scope_query(resolved_scopes))
++        .select_related('actor', 'access', 'shift', 'equipment', 'trip')
++        .order_by('event_id', 'pk')
++    ) if resolved_scopes else []
++    receipt_by_pk = {item.pk: item for item in direct_receipts}
++    receipt_by_pk.update({item.pk: item for item in locally_bound_receipts})
++    receipts = sorted(receipt_by_pk.values(), key=lambda item: (item.event_id, item.pk))
++    receipt_associations = {
++        item.pk: (
++            'direct_trip_reference'
++            if item.pk in direct_receipt_pks
++            else 'resolved_local_trip_reference'
++        )
++        for item in receipts
++    }
++    conflict_filter = (
++        Q(existing_event__trip_id=trip.pk)
++        | Q(submitted_event__trip_id=trip.pk)
++        | Q(submitted_event__trip_id=trip_id_text)
++        | Q(submitted_event__payload__trip_id=trip.pk)
++        | Q(submitted_event__payload__trip_id=trip_id_text)
++        | Q(submitted_event__context_snapshot__trip_id=trip.pk)
++        | Q(submitted_event__context_snapshot__trip_id=trip_id_text)
++    )
++    direct_conflicts = list(
++        OfflineFieldEventConflict.objects
++        .filter(conflict_filter)
++        .select_related('existing_event', 'actor', 'access')
++        .distinct()
++        .order_by('attempted_event_id', 'pk')
++    )
++    direct_conflict_pks = {item.pk for item in direct_conflicts}
++    original_receipt_conflicts = list(
++        OfflineFieldEventConflict.objects
++        .filter(existing_event_id__in=receipt_by_pk)
++        .select_related('existing_event', 'actor', 'access')
++        .distinct()
++        .order_by('attempted_event_id', 'pk')
++    ) if receipt_by_pk else []
++    original_receipt_conflict_pks = {
++        item.pk for item in original_receipt_conflicts
++    }
++    locally_bound_conflicts = list(
++        OfflineFieldEventConflict.objects
++        .filter(_conflict_scope_query(resolved_scopes))
++        .select_related('existing_event', 'actor', 'access')
++        .distinct()
++        .order_by('attempted_event_id', 'pk')
++    ) if resolved_scopes else []
++    conflict_by_pk = {item.pk: item for item in direct_conflicts}
++    conflict_by_pk.update({item.pk: item for item in original_receipt_conflicts})
++    conflict_by_pk.update({item.pk: item for item in locally_bound_conflicts})
++    conflicts = sorted(
++        conflict_by_pk.values(), key=lambda item: (item.attempted_event_id, item.pk),
++    )
++    conflict_associations = {
++        item.pk: (
++            'direct_trip_reference'
++            if item.pk in direct_conflict_pks
++            else (
++                'original_receipt_'
++                + receipt_associations[item.existing_event_id]
++                if (
++                    item.pk in original_receipt_conflict_pks
++                    and item.existing_event_id in receipt_associations
++                )
++                else 'resolved_local_trip_reference'
++            )
++        )
++        for item in conflicts
++    }
++    actions = list(
++        TripClientAction.objects
++        .filter(trip_id=trip.pk)
++        .select_related('actor')
++        .order_by('action_type', 'client_action_id', 'pk')
++    )
++    logs = list(
++        DispatcherActionLog.objects
++        .filter(trip_id=trip.pk)
++        .select_related('actor', 'shift')
++        .order_by('action_type', 'created_at', 'pk')
++    )
++
++    possible_successor_ids: tuple[int, ...] = ()
++    if trip.status == TripStatus.UNCONTROLLED and not trip.superseded_by_id:
++        loaded_after = trip.loaded_at or trip.created_at
++        possible_successor_ids = tuple(
++            Trip.objects
++            .filter(truck_id=trip.truck_id, loaded_at__gt=loaded_after)
++            .exclude(pk=trip.pk)
++            .order_by('loaded_at', 'pk')
++            .values_list('pk', flat=True)
++        )
++
++    accepted_load_receipts = [
++        item for item in receipts
++        if item.trip_id == trip.pk
++        and item.event_type in LOAD_EVENT_TYPES
++        and item.status == OfflineFieldEventStatus.ACCEPTED
++        and not (item.result_payload or {}).get('no_effect')
++        and not (item.result_payload or {}).get('no_change')
++    ]
++    proven_loading_origins = _proven_loading_origins(
++        trip,
++        receipts=receipts,
++        actions=actions,
++    )
++    if len(proven_loading_origins) == 1:
++        loading_receipt, loading_action = proven_loading_origins[0]
++        loading_event_id = loading_receipt.event_id
++        loading_actor_id = str(loading_receipt.actor_id)
++        loading_reference = {
++            'value': loading_event_id,
++            'source_kind': 'offline_field_event',
++            'source_pk': loading_receipt.pk,
++            'synthetic': False,
++            'proof_source_kind': 'trip_client_action',
++            'proof_source_pk': loading_action.pk,
++            'proof_action_type': loading_action.action_type,
++            'raw_occurred_at': _iso(loading_receipt.occurred_at),
++            'effective_occurred_at': _receipt_effective_occurred_at(loading_receipt),
++        }
++    else:
++        loading_receipt = None
++        loading_event_id = f'source:trip:{trip.pk}:loading_snapshot'
++        loading_actor_id = str(trip.excavator_operator_id or trip.driver_id or '')
++        loading_reference = {
++            'value': loading_event_id,
++            'source_kind': 'trip_snapshot',
++            'source_pk': trip.pk,
++            'synthetic': True,
++            'accepted_load_receipt_ids': tuple(
++                item.event_id for item in accepted_load_receipts
++            ),
++            'proven_origin_event_ids': tuple(
++                item.event_id for item, _action in proven_loading_origins
++            ),
++        }
++
++    action_pairs = {(item.action_type, item.client_action_id) for item in actions}
++    receipt_ids = {item.event_id for item in receipts}
++    sources: list[dict[str, Any]] = [_trip_snapshot(trip)]
++    sources.extend(
++        _receipt_source(
++            item,
++            action_pairs=action_pairs,
++            association=receipt_associations[item.pk],
++        )
++        for item in receipts
++    )
++    sources.extend(
++        _conflict_source(
++            item,
++            action_pairs=action_pairs,
++            association=conflict_associations[item.pk],
++        )
++        for item in conflicts
++    )
++    sources.extend(_action_source(item, receipt_ids=receipt_ids) for item in actions)
++    sources.extend(_dispatcher_source(item) for item in logs)
++
++    integrity_conflicts = [
++        {
++            'source_kind': 'offline_field_event_conflict',
++            'source_pk': item.pk,
++            'code': item.code,
++            'event_id': item.attempted_event_id,
++            'existing_event_id': (
++                item.existing_event.event_id if item.existing_event_id else None
++            ),
++            'existing_event_type': (
++                item.existing_event.event_type if item.existing_event_id else None
++            ),
++            'existing_trip_id': (
++                item.existing_event.trip_id if item.existing_event_id else None
++            ),
++            'existing_fingerprint': (
++                item.existing_event.fingerprint if item.existing_event_id else None
++            ),
++            'submitted_event_type': str((item.submitted_event or {}).get('event_type') or ''),
++            'submitted_trip_ids': _mapping_trip_ids(item.submitted_event),
++            'submitted_local_trip_id': _submitted_local_trip_id(item.submitted_event),
++            'submitted_fingerprint': item.fingerprint,
++            'evidence_association': conflict_associations[item.pk],
++        }
++        for item in conflicts
++        if item.code in IDENTITY_CONFLICT_CODES
++    ]
++    ledger, normalized_inputs, applied_receipt_pks = _normalize_route_evidence(
++        receipts=receipts,
++        conflicts=conflicts,
++        actions=actions,
++        loading_event_id=loading_event_id,
++    )
++
++    route_receipts_with_effect = {
++        item.event_id for item in receipts
++        if item.pk in applied_receipt_pks and item.trip_id == trip.pk
++    }
++    direct_route_actions = [
++        item for item in actions
++        if item.action_type == 'change_actual_unload_point'
++        and item.client_action_id not in route_receipts_with_effect
++    ]
++    correction_logs = [
++        item for item in logs if item.action_type == 'report_source_correction'
++    ]
++
++    if trip.actual_dump_point_id is None:
++        legacy_actual_origin = 'unset'
++    elif route_receipts_with_effect:
++        legacy_actual_origin = 'offline_driver_change_with_receipt_and_client_action'
++    elif direct_route_actions:
++        legacy_actual_origin = 'legacy_direct_action_without_value_payload'
++    elif correction_logs:
++        legacy_actual_origin = 'administrative_correction_log_without_before_after'
++    else:
++        legacy_actual_origin = 'trip_snapshot_origin_unknown'
++
++    incomplete_reasons = {
++        'dedicated_route_event_journal_absent',
++        'ui_observation_not_recorded',
++    }
++    if not accepted_load_receipts:
++        incomplete_reasons.add('loading_event_not_recorded')
++    elif not proven_loading_origins:
++        incomplete_reasons.add('loading_origin_not_proven')
++    elif len(proven_loading_origins) > 1:
++        incomplete_reasons.add('loading_event_ambiguous')
++    if any(
++        item['resolution'] == 'ambiguous_multiple_trips'
++        for item in local_reference_bindings
++    ):
++        incomplete_reasons.add('local_trip_binding_ambiguous')
++    if legacy_actual_origin in {
++        'legacy_direct_action_without_value_payload',
++        'trip_snapshot_origin_unknown',
++    }:
++        incomplete_reasons.add('actual_point_origin_incomplete')
++    if direct_route_actions:
++        incomplete_reasons.add('legacy_route_action_payload_missing')
++    if correction_logs:
++        incomplete_reasons.add('administrative_correction_before_after_missing')
++    if trip.status == TripStatus.UNCONTROLLED and not trip.superseded_by_id and possible_successor_ids:
++        incomplete_reasons.add('replacement_link_missing')
++
++    lifecycle, lifecycle_detail = _lifecycle(
++        trip,
++        receipts=receipts,
++        actions=actions,
++        logs=logs,
++        possible_successor_ids=possible_successor_ids,
++    )
++    if lifecycle_detail['basis'] in {
++        'service_completion_without_driver_unload_confirmation',
++        'completed_without_recorded_origin',
++    }:
++        incomplete_reasons.add('completed_without_driver_unload_confirmation')
++
++    original_point_id = trip.assigned_dump_point_id or trip.dump_point_id
++    context = TripRouteContext(
++        trip_id=trip_id_text,
++        loading_event_id=loading_event_id,
++        loading_actor_id=loading_actor_id,
++        loading_excavator_id=str(trip.excavator_id),
++        original_point_id=str(original_point_id) if original_point_id else None,
++        # The current schema has no complete append-only route journal and no
++        # proof of what the phone displayed when legacy commands were created.
++        history_complete=False,
++        legacy_actual_point_id=(
++            str(trip.actual_dump_point_id) if trip.actual_dump_point_id else None
++        ),
++        legacy_actual_origin=legacy_actual_origin,
++    )
++    projection = ledger.project(context, lifecycle)
++    if integrity_conflicts:
++        collision_ids = {
++            item['event_id'] for item in integrity_conflicts if item['event_id']
++        }
++        projection = replace(
++            projection,
++            status='integrity_conflict',
++            selected_point_id=None,
++            selected_event_id=None,
++            selection_reason='event_integrity_not_proven',
++            causal_maxima=(),
++            diagnostics=tuple(sorted({
++                *projection.diagnostics,
++                *(f'id_collision:{event_id}' for event_id in collision_ids),
++            })),
++            notification_key=None,
++        )
++    author_context = {
++        'loading_actor_id': loading_actor_id or None,
++        'loading_actor_source': loading_reference,
++        'trip_excavator_operator_id': trip.excavator_operator_id,
++        'trip_driver_id': trip.driver_id,
++        'loading_shift_id': trip.loading_shift_id,
++        'loading_shift_employee_id': (
++            trip.loading_shift.employee_id if trip.loading_shift_id else None
++        ),
++        'driver_control_shift_id': trip.driver_control_shift_id,
++        'driver_control_employee_id': (
++            trip.driver_control_shift.employee_id if trip.driver_control_shift_id else None
++        ),
++        'unloading_shift_id': trip.unloading_shift_id,
++        'unloading_shift_employee_id': (
++            trip.unloading_shift.employee_id if trip.unloading_shift_id else None
++        ),
++        'route_action_actor_ids': tuple(sorted({
++            item.actor_id for item in receipts if item.event_type == ROUTE_EVENT_TYPE
++        })),
++        'administrative_correction_actor_ids': tuple(sorted({
++            item.actor_id for item in correction_logs
++        })),
++        'current_access_not_used_as_historical_authority': True,
++    }
++    sources.sort(key=lambda item: (
++        item['source_kind'], str(item.get('event_id') or item.get('client_action_id') or ''),
++        int(item.get('source_pk') or 0),
++    ))
++    normalized_inputs.sort(key=lambda item: (
++        str(item['event']['event_id']), item['source_kind'], int(item['source_pk']),
++    ))
++    return TripRouteEvidence(
++        trip_id=trip.pk,
++        trip_snapshot=_trip_snapshot(trip),
++        sources=tuple(sources),
++        normalized_route_inputs=tuple(normalized_inputs),
++        incomplete_reasons=tuple(sorted(incomplete_reasons)),
++        history_complete=False,
++        loading_reference=loading_reference,
++        author_context=author_context,
++        lifecycle_detail=lifecycle_detail,
++        local_reference_bindings=tuple(local_reference_bindings),
++        integrity_conflicts=tuple(sorted(
++            integrity_conflicts,
++            key=lambda item: (str(item['event_id']), int(item['source_pk'])),
++        )),
++        projection=projection,
++    )
+diff --git a/СИСТЕМА_MVP/backend/trips/route_projection_core.py b/СИСТЕМА_MVP/backend/trips/route_projection_core.py
+new file mode 100644
+index 00000000..64b2519f
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/trips/route_projection_core.py
+@@ -0,0 +1,416 @@
++"""Pure P28-I1-R1 route projection core.
++
++No Django, database, network, UI or audio integration lives here.  A future
++adapter must authenticate actors and prove that observed ancestors were really
++shown by the creating application.
++"""
++
++from __future__ import annotations
++
++from dataclasses import asdict, dataclass, field
++from hashlib import sha256
++import json
++from typing import Iterable, Mapping
++
++
++ROUTE_ROLES = frozenset({'driver', 'excavator_operator'})
++TERMINAL_LIFECYCLES = frozenset({'cancelled', 'unloaded', 'superseded'})
++
++
++def _canonical_json(value: object) -> str:
++    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
++
++
++@dataclass(frozen=True)
++class RouteEvent:
++    event_id: str
++    trip_id: str
++    event_type: str
++    actor_id: str
++    actor_role: str
++    target_point_id: str
++    observed_ancestor_ids: tuple[str, ...] = ()
++    action_at: str = ''
++    received_at: str = ''
++    loading_event_id: str = ''
++    fingerprint: str = ''
++
++    def content(self) -> dict[str, object]:
++        """Immutable business content. Receipt observation is not identity."""
++        return {
++            'event_id': self.event_id,
++            'trip_id': self.trip_id,
++            'event_type': self.event_type,
++            'actor_id': self.actor_id,
++            'actor_role': self.actor_role,
++            'target_point_id': self.target_point_id,
++            'observed_ancestor_ids': list(self.observed_ancestor_ids),
++            'action_at': self.action_at,
++            'loading_event_id': self.loading_event_id,
++        }
++
++    def business_record(self) -> dict[str, object]:
++        """Stable event history used by the business projection."""
++        return {**self.content(), 'fingerprint': self.fingerprint}
++
++    def calculated_fingerprint(self) -> str:
++        return sha256(_canonical_json(self.content()).encode('utf-8')).hexdigest()
++
++    def with_calculated_fingerprint(self) -> 'RouteEvent':
++        data = asdict(self)
++        data['fingerprint'] = self.calculated_fingerprint()
++        return RouteEvent(**data)
++
++    def to_record(self) -> dict[str, object]:
++        """Full immutable envelope, including the reported receipt field."""
++        return {**self.business_record(), 'received_at': self.received_at}
++
++    @classmethod
++    def from_record(cls, record: Mapping[str, object]) -> 'RouteEvent':
++        data = dict(record)
++        data['observed_ancestor_ids'] = tuple(data.get('observed_ancestor_ids') or ())
++        return cls(**data)
++
++
++def route_event(**values: object) -> RouteEvent:
++    values.setdefault('event_type', 'route_direction_changed')
++    values.setdefault('observed_ancestor_ids', ())
++    values.setdefault('action_at', '')
++    values.setdefault('received_at', '')
++    values.setdefault('loading_event_id', '')
++    values.setdefault('fingerprint', '')
++    return RouteEvent(**values).with_calculated_fingerprint()
++
++
++@dataclass(frozen=True)
++class TripRouteContext:
++    trip_id: str
++    loading_event_id: str
++    loading_actor_id: str
++    loading_excavator_id: str
++    original_point_id: str | None
++    history_complete: bool = True
++    legacy_actual_point_id: str | None = None
++    legacy_actual_origin: str = 'unknown'
++
++
++@dataclass(frozen=True)
++class LifecycleEvidence:
++    state: str = 'ongoing'
++    evidence_ids: tuple[str, ...] = ()
++    successor_trip_id: str | None = None
++    successor_proven_without_fk: bool = False
++
++    def operational_decision(self) -> tuple[bool, str]:
++        if self.state in TERMINAL_LIFECYCLES:
++            return False, f'lifecycle_{self.state}'
++        if self.state == 'replacement_unknown':
++            return False, 'replacement_history_incomplete'
++        if self.state == 'technical_uncontrolled':
++            return True, 'technical_uncontrolled_is_not_unload'
++        if self.state == 'ongoing':
++            return True, 'trip_ongoing'
++        return False, 'lifecycle_unknown'
++
++
++@dataclass(frozen=True)
++class CollisionEvidence:
++    """Full original and conflicting envelopes; neither is silently discarded."""
++    event_id: str
++    original: RouteEvent
++    incoming: RouteEvent
++
++    def to_record(self) -> dict[str, object]:
++        return {
++            'event_id': self.event_id,
++            'original': self.original.to_record(),
++            'incoming': self.incoming.to_record(),
++        }
++
++    @classmethod
++    def from_record(cls, record: Mapping[str, object]) -> 'CollisionEvidence':
++        return cls(
++            event_id=str(record['event_id']),
++            original=RouteEvent.from_record(record['original']),
++            incoming=RouteEvent.from_record(record['incoming']),
++        )
++
++    def affects(self, trip_id: str) -> bool:
++        return trip_id in {self.original.trip_id, self.incoming.trip_id}
++
++
++@dataclass(frozen=True)
++class ReceiptObservation:
++    """Arrival audit. Ordering is factual delivery history, not a route tiebreaker."""
++    observation_index: int
++    event_id: str
++    fingerprint: str
++    reported_received_at: str
++    disposition: str
++
++
++@dataclass(frozen=True)
++class Projection:
++    trip_id: str
++    status: str
++    selected_point_id: str | None
++    selected_event_id: str | None
++    selection_reason: str
++    causal_maxima: tuple[str, ...]
++    missing_ancestor_ids: tuple[str, ...]
++    diagnostics: tuple[str, ...]
++    history: tuple[dict[str, object], ...]
++    loading_event_id: str
++    loading_actor_id: str
++    original_point_id: str | None
++    lifecycle_state: str
++    lifecycle_evidence_ids: tuple[str, ...]
++    successor_trip_id: str | None
++    successor_proven_without_fk: bool
++    operational_allowed: bool
++    operational_reason: str
++    notification_key: str | None
++
++    def business_dict(self) -> dict[str, object]:
++        """Convergent decision surface; arrival audit is intentionally separate."""
++        data = asdict(self)
++        data['history'] = [
++            {key: value for key, value in item.items() if key != 'received_at'}
++            for item in data['history']
++        ]
++        return data
++
++    def to_dict(self) -> dict[str, object]:
++        """Full historical view; unlike business_dict, receipt order may differ."""
++        return asdict(self)
++
++
++@dataclass
++class RouteLedger:
++    """Append-only event identity ledger with a separate arrival audit."""
++
++    _events: dict[str, RouteEvent] = field(default_factory=dict)
++    _collisions: list[CollisionEvidence] = field(default_factory=list)
++    _receipt_observations: list[ReceiptObservation] = field(default_factory=list)
++    duplicate_count: int = 0
++
++    def _observe(self, event: RouteEvent, disposition: str) -> None:
++        self._receipt_observations.append(ReceiptObservation(
++            observation_index=len(self._receipt_observations) + 1,
++            event_id=event.event_id,
++            fingerprint=event.fingerprint,
++            reported_received_at=event.received_at,
++            disposition=disposition,
++        ))
++
++    def append(self, event: RouteEvent) -> str:
++        existing = self._events.get(event.event_id)
++        if existing is None:
++            self._events[event.event_id] = event
++            self._observe(event, 'stored_original')
++            return 'stored'
++        if existing.content() == event.content() and existing.fingerprint == event.fingerprint:
++            self.duplicate_count += 1
++            self._observe(event, 'duplicate_same_content')
++            return 'duplicate'
++
++        repeated_conflict = next((item for item in self._collisions
++                                  if item.event_id == event.event_id
++                                  and item.incoming.content() == event.content()
++                                  and item.incoming.fingerprint == event.fingerprint), None)
++        if repeated_conflict is not None:
++            self.duplicate_count += 1
++            self._observe(event, 'duplicate_conflicting_envelope')
++            return 'id_conflict_duplicate'
++
++        self._collisions.append(CollisionEvidence(event.event_id, existing, event))
++        self._observe(event, 'stored_conflicting_envelope')
++        return 'id_conflict'
++
++    def extend(self, events: Iterable[RouteEvent]) -> list[str]:
++        return [self.append(event) for event in events]
++
++    def audit_snapshot(self) -> dict[str, object]:
++        """Non-convergent receipt audit, explicitly excluded from route choice."""
++        return {
++            'receipt_observations': [asdict(item) for item in self._receipt_observations],
++            'duplicate_count': self.duplicate_count,
++        }
++
++    def snapshot(self) -> dict[str, object]:
++        return {
++            'events': [self._events[key].to_record() for key in sorted(self._events)],
++            'collisions': [item.to_record() for item in self._collisions],
++            **self.audit_snapshot(),
++        }
++
++    @classmethod
++    def from_snapshot(cls, snapshot: Mapping[str, object]) -> 'RouteLedger':
++        ledger = cls()
++        for record in snapshot.get('events', []):
++            event = RouteEvent.from_record(record)
++            ledger._events[event.event_id] = event
++        ledger._collisions = [CollisionEvidence.from_record(item)
++                              for item in snapshot.get('collisions', [])]
++        ledger._receipt_observations = [ReceiptObservation(**item)
++                                        for item in snapshot.get('receipt_observations', [])]
++        ledger.duplicate_count = int(snapshot.get('duplicate_count', 0))
++        return ledger
++
++    def project(self, context: TripRouteContext,
++                lifecycle: LifecycleEvidence | None = None) -> Projection:
++        lifecycle = lifecycle or LifecycleEvidence()
++        events = {key: value for key, value in self._events.items()
++                  if value.trip_id == context.trip_id}
++        history = tuple(event.to_record()
++                        for event in sorted(events.values(), key=lambda item: item.event_id))
++        operational_allowed, operational_reason = lifecycle.operational_decision()
++        diagnostics: set[str] = set()
++
++        collision_ids = {item.event_id for item in self._collisions
++                         if item.affects(context.trip_id)}
++        invalid_fingerprints = {event.event_id for event in events.values()
++                                if event.fingerprint != event.calculated_fingerprint()}
++        invalid_roles = {event.event_id for event in events.values()
++                         if event.actor_role not in ROUTE_ROLES}
++        diagnostics.update(f'id_collision:{item}' for item in sorted(collision_ids))
++        diagnostics.update(f'fingerprint_mismatch:{item}' for item in sorted(invalid_fingerprints))
++        diagnostics.update(f'unsupported_role:{item}' for item in sorted(invalid_roles))
++        if diagnostics:
++            return self._projection(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                status='integrity_conflict', reason='event_integrity_not_proven',
++                diagnostics=diagnostics,
++            )
++
++        parents: dict[str, set[str]] = {event_id: set() for event_id in events}
++        missing: set[str] = set()
++        for event in events.values():
++            for ancestor_id in event.observed_ancestor_ids:
++                ancestor = self._events.get(ancestor_id)
++                if ancestor is None:
++                    missing.add(ancestor_id)
++                elif ancestor.trip_id != context.trip_id:
++                    diagnostics.add(f'cross_trip_ancestor_ignored:{event.event_id}:{ancestor_id}')
++                else:
++                    parents[event.event_id].add(ancestor_id)
++        if missing:
++            return self._projection(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                status='causality_incomplete', reason='missing_ancestor',
++                missing=missing, diagnostics=diagnostics,
++            )
++        if self._has_cycle(parents):
++            diagnostics.add('causality_cycle')
++            return self._projection(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                status='causality_cycle', reason='causality_cycle', diagnostics=diagnostics,
++            )
++        if not context.history_complete:
++            diagnostics.add('legacy_history_incomplete')
++            return self._projection(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                status='causality_incomplete', reason='legacy_history_incomplete',
++                diagnostics=diagnostics,
++            )
++
++        ancestors_of_any = {ancestor for values in parents.values() for ancestor in values}
++        maxima = tuple(sorted(set(events) - ancestors_of_any))
++        if not maxima:
++            return self._projection(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                status='no_route_event', reason='original_loading_point',
++                diagnostics=diagnostics, point=context.original_point_id,
++            )
++        if len(maxima) == 1:
++            return self._resolved(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                events[maxima[0]], maxima, 'single_causal_maximum', diagnostics,
++            )
++
++        maximum_events = [events[event_id] for event_id in maxima]
++        drivers = [event for event in maximum_events if event.actor_role == 'driver']
++        operators = [event for event in maximum_events
++                     if event.actor_role == 'excavator_operator']
++        if len(maximum_events) == 2 and len(drivers) == 1 and len(operators) == 1:
++            return self._resolved(
++                context, history, lifecycle, operational_allowed, operational_reason,
++                drivers[0], maxima, 'independent_driver_over_operator_p28_v3a', diagnostics,
++            )
++        diagnostics.add('independent_maxima_without_approved_policy:' + ','.join(maxima))
++        return self._projection(
++            context, history, lifecycle, operational_allowed, operational_reason,
++            status='policy_unresolved', reason='independent_combination_not_approved',
++            maxima=maxima, diagnostics=diagnostics,
++        )
++
++    @staticmethod
++    def _has_cycle(parents: Mapping[str, set[str]]) -> bool:
++        visiting: set[str] = set()
++        visited: set[str] = set()
++
++        def visit(node: str) -> bool:
++            if node in visiting:
++                return True
++            if node in visited:
++                return False
++            visiting.add(node)
++            for parent in parents[node]:
++                if visit(parent):
++                    return True
++            visiting.remove(node)
++            visited.add(node)
++            return False
++
++        return any(visit(node) for node in parents)
++
++    def _resolved(self, context: TripRouteContext,
++                  history: tuple[dict[str, object], ...], lifecycle: LifecycleEvidence,
++                  operational_allowed: bool, operational_reason: str,
++                  selected: RouteEvent, maxima: tuple[str, ...], reason: str,
++                  diagnostics: set[str]) -> Projection:
++        notification_key = None
++        if operational_allowed:
++            notification_key = f'route:{context.trip_id}:{selected.event_id}:{selected.fingerprint[:16]}'
++        return Projection(
++            trip_id=context.trip_id, status='resolved',
++            selected_point_id=selected.target_point_id,
++            selected_event_id=selected.event_id, selection_reason=reason,
++            causal_maxima=maxima, missing_ancestor_ids=(),
++            diagnostics=tuple(sorted(diagnostics)), history=history,
++            loading_event_id=context.loading_event_id,
++            loading_actor_id=context.loading_actor_id,
++            original_point_id=context.original_point_id,
++            lifecycle_state=lifecycle.state,
++            lifecycle_evidence_ids=lifecycle.evidence_ids,
++            successor_trip_id=lifecycle.successor_trip_id,
++            successor_proven_without_fk=lifecycle.successor_proven_without_fk,
++            operational_allowed=operational_allowed,
++            operational_reason=operational_reason,
++            notification_key=notification_key,
++        )
++
++    @staticmethod
++    def _projection(context: TripRouteContext,
++                    history: tuple[dict[str, object], ...], lifecycle: LifecycleEvidence,
++                    operational_allowed: bool, operational_reason: str, *, status: str,
++                    reason: str, point: str | None = None,
++                    maxima: tuple[str, ...] = (), missing: set[str] | None = None,
++                    diagnostics: set[str] | None = None) -> Projection:
++        return Projection(
++            trip_id=context.trip_id, status=status, selected_point_id=point,
++            selected_event_id=None, selection_reason=reason,
++            causal_maxima=maxima,
++            missing_ancestor_ids=tuple(sorted(missing or ())),
++            diagnostics=tuple(sorted(diagnostics or ())), history=history,
++            loading_event_id=context.loading_event_id,
++            loading_actor_id=context.loading_actor_id,
++            original_point_id=context.original_point_id,
++            lifecycle_state=lifecycle.state,
++            lifecycle_evidence_ids=lifecycle.evidence_ids,
++            successor_trip_id=lifecycle.successor_trip_id,
++            successor_proven_without_fk=lifecycle.successor_proven_without_fk,
++            operational_allowed=operational_allowed,
++            operational_reason=operational_reason,
++            notification_key=None,
++        )
+diff --git a/СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py b/СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py
+new file mode 100644
+index 00000000..0655436d
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/trips/test_route_projection_adapter.py
+@@ -0,0 +1,1077 @@
++import hashlib
++import importlib
++import json
++from datetime import timedelta
++from pathlib import Path
++
++from django.db import connection
++from django.test import Client, SimpleTestCase, TestCase, override_settings
++from django.test.utils import CaptureQueriesContext
++from django.urls import reverse
++from django.utils import timezone
++
++from assignments.models import AssignmentStatus, HaulAssignment
++from core.models import (
++    OfflineFieldEvent,
++    OfflineFieldEventConflict,
++    OfflineFieldEventStatus,
++    OperationalStateEvent,
++    OperationalStateVersion,
++)
++from references.models import DumpPoint, Equipment
++from shifts.models import EmployeeShift
++from trips import route_projection_adapter, tests as trip_fixtures
++from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripClientAction, TripStatus
++from trips.route_projection_adapter import read_trip_route_evidence
++from trips.route_projection_core import RouteLedger, TripRouteContext, route_event
++from trips.trip_creation import create_loaded_waiting_unload_trip
++from users.models import Employee, EmployeeAccess, Role
++
++
++class RouteProjectionCoreProvenanceTests(SimpleTestCase):
++    def test_transferred_r1_core_has_the_accepted_git_blob(self):
++        path = Path(__file__).with_name('route_projection_core.py')
++        # Git stores the accepted source with LF.  A Windows checkout may
++        # materialize the same committed blob with CRLF; compare logical source
++        # bytes so the provenance guard does not depend on core.autocrlf.
++        content = path.read_bytes().replace(b'\r\n', b'\n')
++        git_blob = hashlib.sha1(
++            f'blob {len(content)}\0'.encode('ascii') + content,
++        ).hexdigest()
++        self.assertEqual(git_blob, '64b2519fb8bb0874012577fd2d779d7b9a619b74')
++
++    def test_transferred_core_keeps_r1_collision_and_incomplete_history_guards(self):
++        original = route_event(
++            event_id='same-id', trip_id='Y', actor_id='1', actor_role='driver',
++            target_point_id='2', loading_event_id='load-Y',
++        )
++        incoming = route_event(
++            event_id='same-id', trip_id='X', actor_id='1', actor_role='driver',
++            target_point_id='3', loading_event_id='load-X',
++        )
++        ledger = RouteLedger()
++        self.assertEqual(ledger.append(original), 'stored')
++        self.assertEqual(ledger.append(incoming), 'id_conflict')
++        projection = ledger.project(TripRouteContext(
++            trip_id='X', loading_event_id='load-X', loading_actor_id='2',
++            loading_excavator_id='7', original_point_id='1', history_complete=False,
++        ))
++        self.assertEqual(projection.status, 'integrity_conflict')
++        self.assertIsNone(projection.notification_key)
++
++
++@override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
++class RouteProjectionAdapterTests(TestCase):
++    create_registered_driver_shift = (
++        trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
++    )
++
++    def setUp(self):
++        trip_fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
++        self.shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
++        self.assignment = HaulAssignment.objects.get(
++            truck=self.truck,
++            excavator=self.excavator,
++            status=AssignmentStatus.ACCEPTED,
++        )
++        self.other_dump = DumpPoint.objects.create(name='Склад P28-I2')
++
++    def factory_trip(self, *, truck=None, excavator=None, assignment=None, loaded_at=None):
++        truck = truck or self.truck
++        excavator = excavator or self.excavator
++        assignment = self.assignment if assignment is None and truck == self.truck else assignment
++        return create_loaded_waiting_unload_trip(
++            assignment=assignment,
++            truck=None if assignment else truck,
++            excavator=None if assignment else excavator,
++            free_bucket_acceptance=None,
++            excavator_operator=self.operator,
++            loading_shift=self.shift,
++            rock_type=self.rock,
++            dump_point=self.dump_point,
++            occurred_at=loaded_at or timezone.now() - timedelta(minutes=2),
++            driver=self.driver,
++            participation={'shift': self.truck_shift, 'control_shift': self.truck_shift},
++        )
++
++    def legacy_trip(self, *, truck=None, status=TripStatus.LOADED_WAITING_UNLOAD,
++                    loaded_at=None, dump_point=None, actual_dump_point=None,
++                    excavator=None):
++        return Trip.objects.create(
++            excavator=excavator or self.excavator,
++            truck=truck or self.truck,
++            excavator_operator=self.operator,
++            driver=self.driver,
++            loading_shift=self.shift,
++            driver_control_shift=self.truck_shift if (truck or self.truck) == self.truck else None,
++            rock_type=self.rock,
++            dump_point=dump_point or self.dump_point,
++            assigned_dump_point=dump_point or self.dump_point,
++            actual_dump_point=actual_dump_point,
++            status=status,
++            loaded_at=loaded_at or timezone.now() - timedelta(minutes=2),
++        )
++
++    def driver_client(self):
++        client = Client()
++        session = client.session
++        session['employee_access_id'] = self.driver_access.pk
++        session.save()
++        return client
++
++    def driver_event(self, trip, *, event_id, sequence, point=None, event_type='driver.trip.dump_point_changed',
++                     occurred_at=None, depends_on=()):
++        payload = {'trip_id': trip.pk}
++        if event_type == 'driver.trip.dump_point_changed':
++            payload.update({
++                'dump_point_id': (point or self.other_dump).pk,
++                'expected_actual_dump_point_id': trip.actual_dump_point_id or trip.dump_point_id,
++            })
++        return {
++            'event_id': event_id,
++            'event_type': event_type,
++            'format_version': 1,
++            'actor_id': self.driver.pk,
++            'access_id': self.driver_access.pk,
++            'role_code': 'driver',
++            'occurred_at': (occurred_at or timezone.now()).isoformat(),
++            'sequence': sequence,
++            'depends_on': list(depends_on),
++            'shift_id': self.truck_shift.pk,
++            'equipment_id': self.truck.pk,
++            'trip_id': trip.pk,
++            'context_snapshot': {
++                'actor_id': self.driver.pk,
++                'access_id': self.driver_access.pk,
++                'role_code': 'driver',
++            },
++            'payload': payload,
++        }
++
++    def sync_driver(self, events, *, device_id='p28-i2-driver'):
++        return self.driver_client().post(
++            reverse('offline_events_sync'),
++            data=json.dumps({
++                'protocol_version': 1,
++                'actor_id': self.driver.pk,
++                'access_id': self.driver_access.pk,
++                'role_code': 'driver',
++                'device_id': device_id,
++                'events': events,
++            }),
++            content_type='application/json',
++        )
++
++    def manual_receipt(self, trip, *, event_id, sequence, status, code='', result=None,
++                       point=None, device='p28-i2-manual'):
++        return OfflineFieldEvent.objects.create(
++            event_id=event_id,
++            event_type='driver.trip.dump_point_changed',
++            format_version=1,
++            actor=self.driver,
++            access=self.driver_access,
++            role_code='driver',
++            device_id=device,
++            sequence=sequence,
++            depends_on=['legacy-queue-parent'],
++            occurred_at=timezone.now(),
++            received_at=timezone.now(),
++            shift=self.truck_shift,
++            equipment=self.truck,
++            trip=trip,
++            payload={'trip_id': trip.pk, 'dump_point_id': (point or self.other_dump).pk},
++            fingerprint=f'fingerprint-{event_id}',
++            status=status,
++            retryable=status == OfflineFieldEventStatus.RETRY,
++            error_code=code,
++            error_message=code,
++            result_payload=result or {'server_ids': {'trip_id': trip.pk}},
++        )
++
++    def local_receipt(self, *, event_id, sequence, actor, access, device, local_trip_id,
++                      status, trip=None, event_type='driver.trip.dump_point_changed'):
++        return OfflineFieldEvent.objects.create(
++            event_id=event_id,
++            event_type=event_type,
++            format_version=1,
++            actor=actor,
++            access=access,
++            role_code='driver',
++            device_id=device,
++            sequence=sequence,
++            depends_on=[],
++            occurred_at=timezone.now(),
++            received_at=timezone.now(),
++            shift=self.truck_shift if actor == self.driver else None,
++            equipment=self.truck,
++            trip=trip,
++            local_trip_id=local_trip_id,
++            payload={'dump_point_id': self.other_dump.pk},
++            fingerprint=f'fingerprint-{event_id}',
++            status=status,
++            retryable=status == OfflineFieldEventStatus.RETRY,
++            error_code='trip_reference_pending' if status == OfflineFieldEventStatus.RETRY else '',
++            error_message='',
++            result_payload=(
++                {'server_ids': {'trip_id': trip.pk}} if trip else {}
++            ),
++        )
++
++    def operator_load_event(self, *, event_id, sequence, occurred_at=None):
++        occurred_at = occurred_at or timezone.now()
++        return {
++            'event_id': event_id,
++            'event_type': 'excavator.trip.loaded',
++            'format_version': 1,
++            'actor_id': self.operator.pk,
++            'access_id': self.access.pk,
++            'role_code': 'excavator_operator',
++            'occurred_at': occurred_at.isoformat(),
++            'sequence': sequence,
++            'depends_on': [],
++            'shift_id': self.shift.pk,
++            'equipment_id': self.excavator.pk,
++            'local_trip_id': f'local-{event_id}',
++            'context_snapshot': {
++                'actor_id': self.operator.pk,
++                'access_id': self.access.pk,
++                'role_code': 'excavator_operator',
++            },
++            'payload': {
++                'truck_id': self.truck.pk,
++                'assignment_id': self.assignment.pk,
++                'dump_point_id': self.dump_point.pk,
++                'rock_type_id': self.rock.pk,
++                'manual_control': True,
++                'loading_horizon': '125',
++                'loading_block': '4',
++            },
++        }
++
++    def sync_operator(self, events, *, device_id='p28-i2-operator'):
++        return self.client.post(
++            reverse('offline_events_sync'),
++            data=json.dumps({
++                'protocol_version': 1,
++                'actor_id': self.operator.pk,
++                'access_id': self.access.pk,
++                'role_code': 'excavator_operator',
++                'device_id': device_id,
++                'events': events,
++            }),
++            content_type='application/json',
++        )
++
++    def assert_select_only(self, captured):
++        mutating = [
++            query['sql'] for query in captured.captured_queries
++            if query['sql'].lstrip().upper().startswith(
++                ('INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'ALTER', 'CREATE', 'DROP')
++            )
++        ]
++        self.assertEqual(mutating, [])
++
++    def test_factory_load_preserves_p1_and_author_without_inventing_driver_route_event(self):
++        trip = self.factory_trip()
++
++        evidence = read_trip_route_evidence(trip.pk)
++
++        self.assertEqual(evidence.trip_snapshot['assigned_dump_point_id'], self.dump_point.pk)
++        self.assertEqual(evidence.author_context['trip_excavator_operator_id'], self.operator.pk)
++        self.assertEqual(evidence.loading_reference['source_kind'], 'trip_snapshot')
++        self.assertTrue(evidence.loading_reference['synthetic'])
++        self.assertEqual(evidence.normalized_route_inputs, ())
++        self.assertFalse(evidence.history_complete)
++        self.assertIn('loading_event_not_recorded', evidence.incomplete_reasons)
++        self.assertEqual(evidence.projection.status, 'causality_incomplete')
++        self.assertIsNone(evidence.projection.notification_key)
++
++    def test_real_offline_point_change_exposes_identity_actor_and_both_times_without_promoting_depends_on(self):
++        trip = self.factory_trip()
++        first_event = self.driver_event(
++            trip,
++            event_id='p28-change-real',
++            sequence=1,
++            point=self.other_dump,
++        )
++        response = self.sync_driver([first_event])
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.json()['results'][0]['status'], 'accepted')
++        trip.refresh_from_db()
++        second_event = self.driver_event(
++            trip,
++            event_id='p28-change-dependent',
++            sequence=2,
++            point=self.dump_point,
++            occurred_at=timezone.now() + timedelta(seconds=1),
++            depends_on=(first_event['event_id'],),
++        )
++        second_response = self.sync_driver([second_event])
++        self.assertEqual(second_response.status_code, 200)
++        self.assertEqual(second_response.json()['results'][0]['status'], 'accepted')
++
++        evidence = read_trip_route_evidence(trip.pk)
++        route_input = next(
++            item for item in evidence.normalized_route_inputs
++            if item['event']['event_id'] == second_event['event_id']
++        )
++        source = next(
++            item for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event'
++            and item['event_id'] == second_event['event_id']
++        )
++        self.assertEqual(route_input['event']['event_id'], second_event['event_id'])
++        self.assertEqual(route_input['event']['target_point_id'], str(self.dump_point.pk))
++        self.assertEqual(route_input['event']['actor_id'], str(self.driver.pk))
++        self.assertEqual(route_input['event']['observed_ancestor_ids'], [])
++        self.assertFalse(route_input['observed_ancestors_proven'])
++        self.assertEqual(
++            route_input['depends_on_preserved_as_queue_metadata'],
++            (first_event['event_id'],),
++        )
++        self.assertEqual(source['depends_on'], (first_event['event_id'],))
++        self.assertEqual(source['occurred_at'], second_event['occurred_at'])
++        self.assertIsNotNone(source['received_at'])
++        self.assertEqual(source['effect_disposition'], 'accepted_effect_recorded')
++        self.assertEqual(evidence.projection.status, 'causality_incomplete')
++
++    def test_no_change_retry_and_conflict_are_evidence_but_not_applied_route_inputs(self):
++        trip = self.factory_trip()
++        no_change = self.driver_event(
++            trip,
++            event_id='p28-no-change',
++            sequence=1,
++            point=self.dump_point,
++        )
++        response = self.sync_driver([no_change], device_id='p28-no-change-device')
++        self.assertEqual(response.json()['results'][0]['status'], 'accepted')
++        self.assertTrue(response.json()['results'][0]['no_change'])
++        self.manual_receipt(
++            trip,
++            event_id='p28-retry',
++            sequence=2,
++            status=OfflineFieldEventStatus.RETRY,
++            code='trip_reference_pending',
++            device='p28-retry-device',
++        )
++        self.manual_receipt(
++            trip,
++            event_id='p28-conflict',
++            sequence=3,
++            status=OfflineFieldEventStatus.CONFLICT,
++            code='stale_dump_point_change',
++            device='p28-conflict-device',
++        )
++
++        evidence = read_trip_route_evidence(trip.pk)
++        dispositions = {
++            item['event_id']: item['effect_disposition']
++            for item in evidence.sources if item['source_kind'] == 'offline_field_event'
++        }
++        self.assertEqual(dispositions['p28-no-change'], 'accepted_no_change')
++        self.assertEqual(dispositions['p28-retry'], 'retry')
++        self.assertEqual(dispositions['p28-conflict'], 'conflict')
++        self.assertEqual(evidence.normalized_route_inputs, ())
++
++    def test_incompatible_event_id_is_found_for_original_and_submitted_trips_without_touching_third(self):
++        trip_y = self.factory_trip()
++        trip_x = self.legacy_trip(truck=self.other_truck, status=TripStatus.UNCONTROLLED)
++        third_truck = Equipment.objects.create(
++            equipment_type=self.truck_type,
++            model=self.truck_model,
++            garage_number='P28-Z',
++        )
++        trip_z = self.legacy_trip(truck=third_truck, status=TripStatus.UNCONTROLLED)
++        original = self.driver_event(
++            trip_y,
++            event_id='p28-shared-id',
++            sequence=1,
++            point=self.other_dump,
++        )
++        first = self.sync_driver([original], device_id='p28-collision-device').json()['results'][0]
++        self.assertEqual(first['status'], 'accepted')
++        incoming = self.driver_event(
++            trip_x,
++            event_id='p28-shared-id',
++            sequence=2,
++            point=self.dump_point,
++        )
++        second = self.sync_driver([incoming], device_id='p28-collision-device').json()['results'][0]
++        self.assertEqual(second['status'], 'conflict')
++        self.assertEqual(second['code'], 'event_id_reused')
++        repeated = self.sync_driver([incoming], device_id='p28-collision-device').json()['results'][0]
++        self.assertEqual(repeated['status'], 'conflict')
++        self.assertEqual(repeated['code'], 'event_id_reused')
++
++        x_evidence = read_trip_route_evidence(trip_x.pk)
++        y_evidence = read_trip_route_evidence(trip_y.pk)
++        z_before = _trip_values(trip_z.pk)
++        z_evidence = read_trip_route_evidence(trip_z.pk)
++        z_after = _trip_values(trip_z.pk)
++
++        self.assertEqual(x_evidence.projection.status, 'integrity_conflict')
++        self.assertEqual(y_evidence.projection.status, 'integrity_conflict')
++        self.assertEqual(
++            tuple(item for item in x_evidence.projection.diagnostics if item == 'id_collision:p28-shared-id'),
++            ('id_collision:p28-shared-id',),
++        )
++        self.assertTrue(any(
++            item['source_kind'] == 'offline_field_event_conflict'
++            and trip_x.pk in item['submitted_trip_ids']
++            for item in x_evidence.sources
++        ))
++        self.assertTrue(any(
++            item['source_kind'] == 'offline_field_event_conflict'
++            and item['existing_trip_id'] == trip_y.pk
++            for item in y_evidence.sources
++        ))
++        self.assertFalse(any(
++            item['source_kind'] == 'offline_field_event_conflict'
++            for item in z_evidence.sources
++        ))
++        self.assertEqual(z_before, z_after)
++
++    def test_cross_event_type_reuse_is_an_explicit_integrity_conflict_with_full_envelopes(self):
++        trip = self.factory_trip()
++        event_id = 'p28-cross-event-type-id'
++        route_command = self.driver_event(
++            trip,
++            event_id=event_id,
++            sequence=1,
++            point=self.other_dump,
++        )
++        accepted = self.sync_driver(
++            [route_command], device_id='p28-cross-event-type-device',
++        ).json()['results'][0]
++        self.assertEqual(accepted['status'], 'accepted')
++        trip.refresh_from_db()
++        unload_command = self.driver_event(
++            trip,
++            event_id=event_id,
++            sequence=2,
++            event_type='driver.trip.unloaded',
++            occurred_at=trip.loaded_at + timedelta(minutes=1),
++        )
++        rejected = self.sync_driver(
++            [unload_command], device_id='p28-cross-event-type-device',
++        ).json()['results'][0]
++        self.assertEqual(rejected['status'], 'conflict')
++        self.assertEqual(rejected['code'], 'event_id_reused')
++
++        with CaptureQueriesContext(connection) as captured:
++            evidence = read_trip_route_evidence(trip.pk)
++        self.assert_select_only(captured)
++
++        self.assertEqual(evidence.projection.status, 'integrity_conflict')
++        self.assertIn(f'id_collision:{event_id}', evidence.projection.diagnostics)
++        conflict = next(
++            item for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event_conflict'
++            and item['attempted_event_id'] == event_id
++        )
++        self.assertEqual(
++            conflict['existing_event']['event_type'],
++            route_projection_adapter.ROUTE_EVENT_TYPE,
++        )
++        self.assertEqual(conflict['submitted_event']['event_type'], 'driver.trip.unloaded')
++        self.assertEqual(conflict['existing_event']['payload'], route_command['payload'])
++        self.assertEqual(conflict['submitted_event']['payload'], unload_command['payload'])
++        integrity = next(
++            item for item in evidence.integrity_conflicts
++            if item['event_id'] == event_id
++        )
++        self.assertEqual(
++            integrity['existing_event_type'], route_projection_adapter.ROUTE_EVENT_TYPE,
++        )
++        self.assertEqual(integrity['submitted_event_type'], 'driver.trip.unloaded')
++        self.assertNotEqual(
++            integrity['existing_fingerprint'], integrity['submitted_fingerprint'],
++        )
++        self.assertFalse(any(
++            item['source_kind'] == 'offline_field_event_conflict'
++            for item in evidence.normalized_route_inputs
++        ))
++
++    def test_local_trip_reference_is_scoped_by_authenticated_actor_and_device(self):
++        trip_x = self.factory_trip()
++        trip_y = self.legacy_trip(truck=self.other_truck)
++        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
++            self.other_truck,
++            full_name='P28 I2 R1 other driver',
++            access_code='928111',
++        )
++        local_trip_id = 'p28-local-same-text'
++        self.local_receipt(
++            event_id='p28-map-x', sequence=1,
++            actor=self.driver, access=self.driver_access,
++            device='p28-device-a', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip=trip_x, event_type='driver.trip.loaded',
++        )
++        own_pending = self.local_receipt(
++            event_id='p28-pending-x', sequence=2,
++            actor=self.driver, access=self.driver_access,
++            device='p28-device-a', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.RETRY,
++        )
++        self.local_receipt(
++            event_id='p28-map-y', sequence=1,
++            actor=other_driver, access=other_access,
++            device='p28-device-b', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip=trip_y, event_type='driver.trip.loaded',
++        )
++        foreign_pending = self.local_receipt(
++            event_id='p28-pending-y', sequence=2,
++            actor=other_driver, access=other_access,
++            device='p28-device-b', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.RETRY,
++        )
++
++        with CaptureQueriesContext(connection) as captured:
++            evidence = read_trip_route_evidence(trip_x.pk)
++        self.assert_select_only(captured)
++        source_pks = {
++            item['source_pk'] for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event'
++        }
++        self.assertIn(own_pending.pk, source_pks)
++        self.assertNotIn(foreign_pending.pk, source_pks)
++        self.assertEqual(evidence.local_reference_bindings, ({
++            'actor_id': self.driver.pk,
++            'device_id': 'p28-device-a',
++            'local_trip_id': local_trip_id,
++            'mapping_event_ids': ('p28-map-x',),
++            'mapped_trip_ids': (trip_x.pk,),
++            'resolution': 'resolved_to_this_trip',
++        },))
++
++    def test_local_trip_reference_mapping_to_multiple_trips_stays_ambiguous(self):
++        trip_x = self.factory_trip()
++        trip_y = self.legacy_trip(truck=self.other_truck)
++        local_trip_id = 'p28-local-ambiguous'
++        common = {
++            'actor': self.driver,
++            'access': self.driver_access,
++            'device': 'p28-ambiguous-device',
++            'local_trip_id': local_trip_id,
++            'status': OfflineFieldEventStatus.ACCEPTED,
++            'event_type': 'driver.trip.loaded',
++        }
++        self.local_receipt(event_id='p28-map-ambiguous-x', sequence=1, trip=trip_x, **common)
++        self.local_receipt(event_id='p28-map-ambiguous-y', sequence=2, trip=trip_y, **common)
++        pending = self.local_receipt(
++            event_id='p28-pending-ambiguous', sequence=3,
++            actor=self.driver, access=self.driver_access,
++            device='p28-ambiguous-device', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.RETRY,
++        )
++
++        evidence = read_trip_route_evidence(trip_x.pk)
++
++        source_pks = {
++            item['source_pk'] for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event'
++        }
++        self.assertNotIn(pending.pk, source_pks)
++        self.assertEqual(
++            evidence.local_reference_bindings[0]['resolution'],
++            'ambiguous_multiple_trips',
++        )
++        self.assertEqual(
++            evidence.local_reference_bindings[0]['mapped_trip_ids'],
++            tuple(sorted((trip_x.pk, trip_y.pk))),
++        )
++        self.assertIn('local_trip_binding_ambiguous', evidence.incomplete_reasons)
++
++    def test_conflict_from_foreign_local_original_is_not_collected(self):
++        trip_x = self.factory_trip()
++        trip_y = self.legacy_trip(truck=self.other_truck)
++        local_trip_id = 'p28-local-origin-foreign'
++        self.local_receipt(
++            event_id='p28-map-origin-own', sequence=1,
++            actor=self.driver, access=self.driver_access,
++            device='p28-origin-own-device', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip=trip_x, event_type='driver.trip.loaded',
++        )
++        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
++            self.other_truck,
++            full_name='P28 I2 R2 foreign original driver',
++            access_code='928113',
++        )
++        foreign_original = self.local_receipt(
++            event_id='p28-origin-foreign-id', sequence=2,
++            actor=other_driver, access=other_access,
++            device='p28-origin-foreign-device', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.RETRY,
++        )
++        conflict = OfflineFieldEventConflict.objects.create(
++            attempted_event_id=foreign_original.event_id,
++            actor=other_driver,
++            access=other_access,
++            role_code='driver',
++            device_id='p28-origin-foreign-device',
++            fingerprint='p28-origin-foreign-repeat',
++            code='event_id_reused',
++            submitted_event={
++                'event_id': foreign_original.event_id,
++                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
++                'role_code': 'driver',
++                'trip_id': trip_y.pk,
++                'occurred_at': timezone.now().isoformat(),
++                'payload': {
++                    'trip_id': trip_y.pk,
++                    'dump_point_id': self.other_dump.pk,
++                },
++            },
++            existing_event=foreign_original,
++        )
++
++        evidence = read_trip_route_evidence(trip_x.pk)
++
++        conflict_pks = {
++            item['source_pk'] for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event_conflict'
++        }
++        self.assertNotIn(conflict.pk, conflict_pks)
++        self.assertNotEqual(evidence.projection.status, 'integrity_conflict')
++
++    def test_conflict_from_ambiguous_local_original_is_not_collected(self):
++        trip_x = self.factory_trip()
++        trip_y = self.legacy_trip(truck=self.other_truck)
++        truck_z = Equipment.objects.create(
++            equipment_type=self.truck_type,
++            model=self.truck_model,
++            garage_number='P28-R2-AMB-Z',
++        )
++        trip_z = self.legacy_trip(truck=truck_z)
++        local_trip_id = 'p28-local-origin-ambiguous'
++        common = {
++            'actor': self.driver,
++            'access': self.driver_access,
++            'device': 'p28-origin-ambiguous-device',
++            'local_trip_id': local_trip_id,
++            'status': OfflineFieldEventStatus.ACCEPTED,
++            'event_type': 'driver.trip.loaded',
++        }
++        self.local_receipt(
++            event_id='p28-map-origin-ambiguous-x', sequence=1,
++            trip=trip_x, **common,
++        )
++        self.local_receipt(
++            event_id='p28-map-origin-ambiguous-y', sequence=2,
++            trip=trip_y, **common,
++        )
++        ambiguous_original = self.local_receipt(
++            event_id='p28-origin-ambiguous-id', sequence=3,
++            actor=self.driver, access=self.driver_access,
++            device='p28-origin-ambiguous-device', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.RETRY,
++        )
++        conflict = OfflineFieldEventConflict.objects.create(
++            attempted_event_id=ambiguous_original.event_id,
++            actor=self.driver,
++            access=self.driver_access,
++            role_code='driver',
++            device_id='p28-origin-ambiguous-device',
++            fingerprint='p28-origin-ambiguous-repeat',
++            code='event_id_reused',
++            submitted_event={
++                'event_id': ambiguous_original.event_id,
++                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
++                'role_code': 'driver',
++                'trip_id': trip_z.pk,
++                'occurred_at': timezone.now().isoformat(),
++                'payload': {
++                    'trip_id': trip_z.pk,
++                    'dump_point_id': self.other_dump.pk,
++                },
++            },
++            existing_event=ambiguous_original,
++        )
++
++        evidence = read_trip_route_evidence(trip_x.pk)
++
++        conflict_pks = {
++            item['source_pk'] for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event_conflict'
++        }
++        self.assertNotIn(conflict.pk, conflict_pks)
++        self.assertNotEqual(evidence.projection.status, 'integrity_conflict')
++        self.assertIn('local_trip_binding_ambiguous', evidence.incomplete_reasons)
++
++    def test_conflicting_local_reference_keeps_authenticated_and_claimed_authors_separate(self):
++        trip_x = self.factory_trip()
++        trip_y = self.legacy_trip(truck=self.other_truck)
++        local_trip_id = 'p28-local-conflict'
++        self.local_receipt(
++            event_id='p28-map-conflict-x', sequence=1,
++            actor=self.driver, access=self.driver_access,
++            device='p28-conflict-local-device', local_trip_id=local_trip_id,
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip=trip_x, event_type='driver.trip.loaded',
++        )
++        other_driver, other_access, _other_shift = self.create_registered_driver_shift(
++            self.other_truck,
++            full_name='P28 I2 R1 claimed driver',
++            access_code='928112',
++        )
++        existing = self.local_receipt(
++            event_id='p28-local-conflict-id', sequence=1,
++            actor=other_driver, access=other_access,
++            device='p28-other-device', local_trip_id='other-local',
++            status=OfflineFieldEventStatus.ACCEPTED,
++            trip=trip_y, event_type='driver.trip.unloaded',
++        )
++        conflict = OfflineFieldEventConflict.objects.create(
++            attempted_event_id=existing.event_id,
++            actor=self.driver,
++            access=self.driver_access,
++            role_code='driver',
++            device_id='p28-conflict-local-device',
++            fingerprint='p28-submitted-conflict-fingerprint',
++            code='event_id_reused',
++            submitted_event={
++                'event_id': existing.event_id,
++                'event_type': route_projection_adapter.ROUTE_EVENT_TYPE,
++                'role_code': 'driver',
++                'claimed_actor_id': other_driver.pk,
++                'claimed_access_id': other_access.pk,
++                'local_trip_id': local_trip_id,
++                'occurred_at': timezone.now().isoformat(),
++                'payload': {'dump_point_id': self.other_dump.pk},
++            },
++            existing_event=existing,
++        )
++
++        evidence = read_trip_route_evidence(trip_x.pk)
++
++        source = next(
++            item for item in evidence.sources
++            if item['source_kind'] == 'offline_field_event_conflict'
++            and item['source_pk'] == conflict.pk
++        )
++        self.assertEqual(source['evidence_association'], 'resolved_local_trip_reference')
++        self.assertEqual(source['actor_id'], self.driver.pk)
++        self.assertEqual(source['submitted_claimed_actor_id'], other_driver.pk)
++        self.assertEqual(source['submitted_local_trip_id'], local_trip_id)
++        self.assertEqual(source['existing_event']['actor_id'], other_driver.pk)
++        self.assertEqual(evidence.projection.status, 'integrity_conflict')
++
++    def test_original_loading_origin_requires_matching_receipt_action_time_and_actor(self):
++        event = self.operator_load_event(
++            event_id='p28-proven-loading-origin',
++            sequence=1,
++            occurred_at=timezone.now() - timedelta(seconds=1),
++        )
++        result = self.sync_operator([event]).json()['results'][0]
++        self.assertEqual(result['status'], 'accepted')
++        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
++        action = TripClientAction.objects.get(
++            trip=trip,
++            client_action_id=event['event_id'],
++            action_type='truck_loaded',
++        )
++
++        with CaptureQueriesContext(connection) as captured:
++            evidence = read_trip_route_evidence(trip.pk)
++        self.assert_select_only(captured)
++
++        self.assertFalse(
++            evidence.loading_reference['synthetic'],
++            evidence.to_dict(),
++        )
++        self.assertEqual(evidence.loading_reference['value'], event['event_id'])
++        self.assertEqual(evidence.loading_reference['proof_source_pk'], action.pk)
++        self.assertEqual(evidence.loading_reference['proof_action_type'], 'truck_loaded')
++        self.assertEqual(evidence.author_context['loading_actor_id'], str(self.operator.pk))
++        source = next(
++            item for item in evidence.sources
++            if item.get('event_id') == event['event_id']
++        )
++        self.assertEqual(source['effect_disposition'], 'accepted_effect_recorded')
++        self.assertTrue(source['applied_effect_proven_by_client_action'])
++
++    def test_normalization_is_stable_when_source_lists_are_reversed(self):
++        trip = self.factory_trip()
++        first = self.driver_event(
++            trip, event_id='p28-order-a', sequence=1, point=self.other_dump,
++        )
++        self.assertEqual(self.sync_driver([first]).json()['results'][0]['status'], 'accepted')
++        trip.refresh_from_db()
++        second = self.driver_event(
++            trip, event_id='p28-order-b', sequence=2, point=self.dump_point,
++        )
++        self.assertEqual(self.sync_driver([second]).json()['results'][0]['status'], 'accepted')
++        receipts = list(OfflineFieldEvent.objects.filter(trip=trip))
++        actions = list(TripClientAction.objects.filter(trip=trip))
++
++        forward = route_projection_adapter._normalize_route_evidence(
++            receipts=receipts,
++            conflicts=[],
++            actions=actions,
++            loading_event_id=f'source:trip:{trip.pk}:loading_snapshot',
++        )
++        reverse = route_projection_adapter._normalize_route_evidence(
++            receipts=list(reversed(receipts)),
++            conflicts=[],
++            actions=list(reversed(actions)),
++            loading_event_id=f'source:trip:{trip.pk}:loading_snapshot',
++        )
++
++        self.assertEqual(forward[0].snapshot(), reverse[0].snapshot())
++        self.assertEqual(forward[1], reverse[1])
++        self.assertEqual(forward[2], reverse[2])
++
++    def test_direct_legacy_action_keeps_actual_value_but_reports_missing_payload(self):
++        trip = self.legacy_trip(actual_dump_point=self.other_dump)
++        TripClientAction.objects.create(
++            action_type='change_actual_unload_point',
++            client_action_id='legacy-direct-point',
++            trip=trip,
++            actor=self.driver,
++        )
++
++        evidence = read_trip_route_evidence(trip.pk)
++
++        self.assertEqual(evidence.trip_snapshot['actual_dump_point_id'], self.other_dump.pk)
++        self.assertEqual(evidence.normalized_route_inputs, ())
++        self.assertIn('legacy_route_action_payload_missing', evidence.incomplete_reasons)
++        self.assertEqual(
++            evidence.projection.to_dict()['history'],
++            (),
++        )
++
++    def test_real_report_correction_keeps_administrator_separate_from_driver(self):
++        trip = self.legacy_trip(status=TripStatus.COMPLETED)
++        Trip.objects.filter(pk=trip.pk).update(
++            completed_at=timezone.now(),
++            volume_m3='49.40',
++            tonnage='127.45',
++        )
++        dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер P28')
++        dispatcher = Employee.objects.create(
++            full_name='Диспетчер коррекции P28', status=Employee.Status.ACTIVE, is_active=True,
++        )
++        dispatcher_access = EmployeeAccess.objects.create(
++            employee=dispatcher,
++            role=dispatcher_role,
++            access_code='928001',
++            is_active=True,
++            status=EmployeeAccess.Status.ACTIVATED,
++        )
++        EmployeeShift.objects.create(
++            employee=dispatcher,
++            shift_type='day',
++            opened_at=timezone.now() - timedelta(hours=1),
++            opened_by=dispatcher,
++        )
++        client = Client()
++        session = client.session
++        session['employee_access_id'] = dispatcher_access.pk
++        session.save()
++        url = reverse('dispatcher_shift_trucks')
++        response = client.post(
++            f'{url}?date={timezone.localdate().isoformat()}&shift_type=day',
++            {
++                'trip_id': trip.pk,
++                'correction_reason': 'Адресная проверка P28-I2',
++                'volume_m3': '49.40',
++                'transport_distance_km': '1.25',
++                'loading_horizon': '125',
++                'loading_block': '4',
++                'downtime_text': '',
++                'note': 'P28-I2',
++                'rock_type_id': self.rock.pk,
++                'actual_dump_point_id': self.other_dump.pk,
++            },
++        )
++        self.assertEqual(response.status_code, 302)
++        self.assertTrue(DispatcherActionLog.objects.filter(
++            trip=trip,
++            actor=dispatcher,
++            action_type='report_source_correction',
++        ).exists())
++
++        evidence = read_trip_route_evidence(trip.pk)
++
++        self.assertEqual(evidence.author_context['trip_driver_id'], self.driver.pk)
++        self.assertEqual(evidence.author_context['administrative_correction_actor_ids'], (dispatcher.pk,))
++        self.assertNotEqual(dispatcher.pk, self.driver.pk)
++        self.assertEqual(evidence.normalized_route_inputs, ())
++        self.assertIn('administrative_correction_before_after_missing', evidence.incomplete_reasons)
++
++    def test_uncontrolled_lifecycle_separates_technical_positive_and_possible_replacement(self):
++        technical_truck = Equipment.objects.create(
++            equipment_type=self.truck_type,
++            model=self.truck_model,
++            garage_number='P28-T',
++        )
++        technical = self.legacy_trip(truck=technical_truck, status=TripStatus.UNCONTROLLED)
++        positive = self.legacy_trip(status=TripStatus.UNCONTROLLED)
++        successor = self.legacy_trip(
++            status=TripStatus.LOADED_WAITING_UNLOAD,
++            loaded_at=positive.loaded_at + timedelta(minutes=6),
++        )
++        Trip.objects.filter(pk=positive.pk).update(
++            superseded_by=successor,
++            operationally_closed_at=successor.loaded_at,
++        )
++        possible_truck = Equipment.objects.create(
++            equipment_type=self.truck_type,
++            model=self.truck_model,
++            garage_number='P28-U',
++        )
++        possible = self.legacy_trip(
++            truck=possible_truck,
++            status=TripStatus.UNCONTROLLED,
++            loaded_at=timezone.now() - timedelta(minutes=20),
++        )
++        possible_later = self.legacy_trip(
++            truck=possible_truck,
++            status=TripStatus.LOADED_WAITING_UNLOAD,
++            loaded_at=timezone.now() - timedelta(minutes=5),
++        )
++
++        technical_evidence = read_trip_route_evidence(technical.pk)
++        positive_evidence = read_trip_route_evidence(positive.pk)
++        possible_evidence = read_trip_route_evidence(possible.pk)
++
++        self.assertEqual(technical_evidence.projection.lifecycle_state, 'technical_uncontrolled')
++        self.assertEqual(positive_evidence.projection.lifecycle_state, 'superseded')
++        self.assertEqual(positive_evidence.projection.successor_trip_id, str(successor.pk))
++        self.assertEqual(possible_evidence.projection.lifecycle_state, 'replacement_unknown')
++        self.assertIsNone(possible_evidence.projection.successor_trip_id)
++        self.assertIn(possible_later.pk, possible_evidence.lifecycle_detail['possible_successor_trip_ids'])
++        self.assertIn('replacement_link_missing', possible_evidence.incomplete_reasons)
++
++    def test_cancelled_driver_unload_and_service_completion_have_distinct_terminal_bases(self):
++        cancelled = self.legacy_trip(status=TripStatus.CANCELLED)
++        unloaded = self.factory_trip()
++        unload_event = self.driver_event(
++            unloaded,
++            event_id='p28-unload-confirmed',
++            sequence=1,
++            event_type='driver.trip.unloaded',
++            occurred_at=unloaded.loaded_at + timedelta(minutes=1),
++        )
++        unload_result = self.sync_driver(
++            [unload_event], device_id='p28-unload-device',
++        ).json()['results'][0]
++        self.assertEqual(unload_result['status'], 'accepted')
++        service_truck = Equipment.objects.create(
++            equipment_type=self.truck_type,
++            model=self.truck_model,
++            garage_number='P28-S',
++        )
++        service = self.legacy_trip(truck=service_truck, status=TripStatus.COMPLETED)
++        DispatcherActionLog.objects.create(
++            actor=self.operator,
++            action_type=DispatcherActionType.COMPLETE_TRIP,
++            trip=service,
++            shift=self.shift,
++            target_summary='Служебное завершение P28-I2',
++            reason='Тест источника',
++        )
++
++        cancelled_evidence = read_trip_route_evidence(cancelled.pk)
++        unloaded_evidence = read_trip_route_evidence(unloaded.pk)
++        service_evidence = read_trip_route_evidence(service.pk)
++
++        self.assertEqual(cancelled_evidence.lifecycle_detail['basis'], 'trip_cancelled_state')
++        self.assertEqual(unloaded_evidence.lifecycle_detail['basis'], 'driver_unload_confirmation_recorded')
++        self.assertEqual(unloaded_evidence.projection.lifecycle_state, 'unloaded')
++        self.assertEqual(service_evidence.lifecycle_detail['basis'], 'service_completion_without_driver_unload_confirmation')
++        self.assertEqual(service_evidence.projection.lifecycle_state, 'completed_service')
++        for evidence in (cancelled_evidence, unloaded_evidence, service_evidence):
++            self.assertFalse(evidence.projection.operational_allowed)
++            self.assertIsNone(evidence.projection.notification_key)
++
++    def test_shift_handover_and_foreign_excavator_contexts_remain_separate(self):
++        trip = self.legacy_trip(excavator=self.other_excavator)
++        self.truck_shift.closed_at = timezone.now() - timedelta(minutes=5)
++        self.truck_shift.save(update_fields=['closed_at'])
++        replacement, _, replacement_shift = self.create_registered_driver_shift(
++            self.truck,
++            full_name='Сменщик P28-I2',
++            access_code='928002',
++        )
++        Trip.objects.filter(pk=trip.pk).update(
++            status=TripStatus.COMPLETED,
++            unloading_shift=replacement_shift,
++            completed_at=timezone.now(),
++        )
++
++        evidence = read_trip_route_evidence(trip.pk)
++
++        self.assertEqual(evidence.trip_snapshot['excavator_id'], self.other_excavator.pk)
++        self.assertEqual(evidence.author_context['trip_excavator_operator_id'], self.operator.pk)
++        self.assertEqual(evidence.author_context['trip_driver_id'], self.driver.pk)
++        self.assertEqual(evidence.author_context['driver_control_employee_id'], self.driver.pk)
++        self.assertEqual(evidence.author_context['unloading_shift_employee_id'], replacement.pk)
++        self.assertIn('completed_without_driver_unload_confirmation', evidence.incomplete_reasons)
++
++    def test_repeated_reads_are_stable_and_execute_no_dml_or_operational_side_effects(self):
++        trip = self.factory_trip()
++        before = {
++            'trip': _trip_values(trip.pk),
++            'receipts': OfflineFieldEvent.objects.count(),
++            'conflicts': OfflineFieldEventConflict.objects.count(),
++            'actions': TripClientAction.objects.count(),
++            'logs': DispatcherActionLog.objects.count(),
++            'versions': OperationalStateVersion.objects.count(),
++            'events': OperationalStateEvent.objects.count(),
++        }
++        with CaptureQueriesContext(connection) as queries:
++            first = read_trip_route_evidence(trip.pk).to_dict()
++            second = read_trip_route_evidence(trip.pk).to_dict()
++        after = {
++            'trip': _trip_values(trip.pk),
++            'receipts': OfflineFieldEvent.objects.count(),
++            'conflicts': OfflineFieldEventConflict.objects.count(),
++            'actions': TripClientAction.objects.count(),
++            'logs': DispatcherActionLog.objects.count(),
++            'versions': OperationalStateVersion.objects.count(),
++            'events': OperationalStateEvent.objects.count(),
++        }
++        mutating = [
++            query['sql'] for query in queries.captured_queries
++            if query['sql'].lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE', 'REPLACE'))
++        ]
++        self.assertEqual(first, second)
++        self.assertEqual(before, after)
++        self.assertEqual(mutating, [])
++        self.assertEqual(
++            first['read_consistency'],
++            'multiple_selects_database_default_isolation_no_snapshot_claim',
++        )
++
++    def test_adapter_import_has_no_database_queries_or_registration_side_effects(self):
++        before = (
++            Trip.objects.count(),
++            OfflineFieldEvent.objects.count(),
++            OperationalStateVersion.objects.count(),
++        )
++        with CaptureQueriesContext(connection) as queries:
++            importlib.reload(route_projection_adapter)
++        after = (
++            Trip.objects.count(),
++            OfflineFieldEvent.objects.count(),
++            OperationalStateVersion.objects.count(),
++        )
++        self.assertEqual(queries.captured_queries, [])
++        self.assertEqual(before, after)
++
++
++def _trip_values(trip_id):
++    return Trip.objects.filter(pk=trip_id).values(
++        'status',
++        'dump_point_id',
++        'assigned_dump_point_id',
++        'actual_dump_point_id',
++        'completed_at',
++        'cancelled_at',
++        'operationally_closed_at',
++        'superseded_by_id',
++    ).get()
