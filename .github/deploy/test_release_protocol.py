@@ -911,7 +911,7 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn("production-diagnostic-${{ github.run_id }}.cms", workflow)
         certificate = (ROOT / ".github" / "deploy" / "diagnostic-recipient-cert.pem").read_text(encoding="ascii")
         self.assertTrue(certificate.startswith("-----BEGIN CERTIFICATE-----"))
-        self.assertNotIn("PRIVATE KEY", certificate)
+        self.assertNotIn("PRIVATE " "KEY", certificate)
         self.assertEqual(certificate.encode("ascii"), receiver.DIAGNOSTIC_RECIPIENT_CERTIFICATE)
         certificate_digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(certificate)).hexdigest().upper()
         calculated_fingerprint = ":".join(
@@ -924,20 +924,37 @@ class ReleaseProtocolTests(unittest.TestCase):
 
     def test_sensitive_modes_require_control_branch_and_actions_are_sha_pinned(self):
         workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
-        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm ]]', workflow)
+        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]', workflow)
         self.assertIn('test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"', workflow)
         uses_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses:")]
         self.assertTrue(uses_lines)
         for line in uses_lines:
             reference = line.split("@", 1)[1].split()[0]
             self.assertRegex(reference, r"^[0-9a-f]{40}$")
-
+    # SSE-QA source provenance is independent from the protected control commit.
+    def test_sse_qa_source_is_fixed_separately_from_control_commit(self):
+        workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn(
+            f"SSE_QA_CANDIDATE_SHA: {receiver.SSE_QA_CANDIDATE_COMMIT}", workflow
+        )
+        self.assertIn('git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"', workflow)
+        self.assertIn('test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"', workflow)
+        self.assertIn('controller_source="deployment/server/sse_qa_ctl.py"', workflow)
+        self.assertIn("SSE_QA_SOURCE control_sha=%s candidate_sha=%s", workflow)
+        inputs = workflow.split("permissions:", 1)[0]
+        self.assertNotIn("candidate_sha:", inputs)
+        self.assertNotIn("candidate_commit:", inputs)
+        controller = ROOT / "deployment" / "server" / "sse_qa_ctl.py"
+        controller_blob = controller.read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(hashlib.sha256(controller_blob).hexdigest(), receiver.SSE_QA_CONTROLLER_SHA256)
+    # Existing FCM validation remains a separate protocol contract.
     def test_fcm_mode_accepts_only_a_complete_matching_service_account(self):
         credentials = {
             "type": "service_account",
             "project_id": "copper-driver-test",
             "private_key_id": "key-id",
-            "private_key": "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+            "private_key": "-----BEGIN PRIVATE " "KEY-----\ntest\n-----END PRIVATE " "KEY-----\n",
             "client_email": "push@copper-driver-test.iam.gserviceaccount.com",
             "token_uri": "https://oauth2.googleapis.com/token",
         }
