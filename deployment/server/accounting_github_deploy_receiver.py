@@ -17,6 +17,7 @@ import tempfile
 import time
 from typing import Any
 from urllib.parse import urlparse
+import zipfile
 
 try:
     import fcntl
@@ -39,12 +40,36 @@ DATA_MODES = {"verify_data", "apply_data"}
 RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
-ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | {"rollback"}
+SSE_QA_MODES = {"verify_sse_qa"}
+ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
 VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
 RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
 FCM_PAYLOAD = "deploy/secrets/firebase-service-account.json"
 FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
+SSE_QA_PACKAGE_PAYLOAD = "deploy/sse-qa/package.zip"
+SSE_QA_MAX_PACKAGE_BYTES = 256 * 1024
+SSE_QA_MAX_MEMBERS = 9
+SSE_QA_MAX_UNCOMPRESSED_BYTES = 512 * 1024
+SSE_QA_CANDIDATE_COMMIT = "fb81480a9709e3a26ccbeb74aaefbaa08a3d722c"
+SSE_QA_CONTROLLER_SHA256 = "37241cf19b7309ce4ecda8a484b0bd02ba26e93829e0c3fd87d4e93485e13ecc"
+SSE_QA_PACKAGE_FILES = {
+    "config/systemd/postgresql@16-sseqa.service.d/qa-limits.conf",
+    "config/systemd/redis-sse-qa.service",
+    "config/systemd/srv-sse-x2dqa.mount",
+    "config/systemd/sse-qa-asgi.service",
+    "config/systemd/sse-qa-reconcile.service",
+    "config/systemd/sse-qa-wsgi.service",
+    "config/systemd/sse-qa.slice",
+    "config/systemd/sse-qa.target",
+    "scripts/sse_qa_preflight.py",
+}
+SSE_QA_METADATA = {
+    "qa_schema": 3,
+    "capability": "preflight_only",
+    "candidate_commit": SSE_QA_CANDIDATE_COMMIT,
+    "controller_sha256": SSE_QA_CONTROLLER_SHA256,
+}
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
 TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
@@ -1664,6 +1689,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         if path.as_posix() != FCM_PAYLOAD:
             raise ReleaseError(f"FCM configuration target is not allowed: {value}")
         return path
+    if mode in SSE_QA_MODES:
+        if path.as_posix() != SSE_QA_PACKAGE_PAYLOAD:
+            raise ReleaseError(f"SSE QA target is not allowed: {value}")
+        return path
     if mode in APK_MODES:
         if path.parts[:2] != ("media", "apk") or len(path.parts) != 3:
             raise ReleaseError(f"APK release target is not allowed: {value}")
@@ -1787,6 +1816,12 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             raise ReleaseError("receiver source is not valid Python") from exc
     elif mode in FCM_MODES:
         validate_fcm_payload(manifest, payload)
+    elif mode in SSE_QA_MODES:
+        expected = {SSE_QA_PACKAGE_PAYLOAD}
+        if set(payload) != expected or metadata != SSE_QA_METADATA:
+            raise ReleaseError("invalid SSE QA package contract")
+        if len(payload[SSE_QA_PACKAGE_PAYLOAD]) > SSE_QA_MAX_PACKAGE_BYTES:
+            raise ReleaseError("SSE QA package is too large")
     elif mode in DIAGNOSTIC_MODES:
         if payload:
             raise ReleaseError("diagnostic package cannot contain payload files")
@@ -2231,6 +2266,71 @@ def rollback(manifest: dict[str, Any]) -> Path:
     return backup
 
 
+def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
+    """Run the sole read-only preflight capability from an exact package."""
+    if mode != "verify_sse_qa":
+        raise ReleaseError("unsupported SSE QA capability")
+    with tempfile.TemporaryDirectory(prefix="accounting-sse-qa-") as raw:
+        root = Path(raw)
+        package_path = root / "package.zip"
+        package_path.write_bytes(payload[SSE_QA_PACKAGE_PAYLOAD])
+        with zipfile.ZipFile(package_path) as archive:
+            members = archive.infolist()
+            if not members or len(members) > SSE_QA_MAX_MEMBERS:
+                raise ReleaseError("invalid SSE QA archive member count")
+            names: set[str] = set()
+            folded_names: set[str] = set()
+            total_uncompressed = 0
+            for member in members:
+                path = PurePosixPath(member.filename.replace("\\", "/"))
+                if path.is_absolute() or ".." in path.parts or not path.parts:
+                    raise ReleaseError("unsafe SSE QA archive path")
+                if member.filename in names:
+                    raise ReleaseError("duplicate SSE QA archive path")
+                names.add(member.filename)
+                folded = member.filename.casefold()
+                if folded in folded_names:
+                    raise ReleaseError("case-colliding SSE QA archive path")
+                folded_names.add(folded)
+                unix_mode = (member.external_attr >> 16) & 0o170000
+                if unix_mode not in {0, 0o100000, 0o040000}:
+                    raise ReleaseError("SSE QA archive links/devices are forbidden")
+                if member.file_size > 128 * 1024:
+                    raise ReleaseError("SSE QA archive member is too large")
+                total_uncompressed += member.file_size
+                if total_uncompressed > SSE_QA_MAX_UNCOMPRESSED_BYTES:
+                    raise ReleaseError("SSE QA archive expands beyond its limit")
+            archive.extractall(root / "bundle")
+        extracted_files = {
+            path.relative_to(root / "bundle").as_posix()
+            for path in (root / "bundle").rglob("*") if path.is_file()
+        }
+        if extracted_files != SSE_QA_PACKAGE_FILES:
+            raise ReleaseError("SSE QA preflight package contains unexpected files")
+        controller = root / "bundle" / "scripts" / "sse_qa_preflight.py"
+        if not controller.is_file():
+            raise ReleaseError("SSE QA preflight controller is missing")
+        if digest(controller.read_bytes()) != SSE_QA_CONTROLLER_SHA256:
+            raise ReleaseError("SSE QA controller does not match accepted candidate")
+        command = [
+            "/usr/bin/python3", str(controller),
+            "--bundle-root", str(root / "bundle"),
+        ]
+        try:
+            completed = subprocess.run(
+                command, check=False, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseError("SSE QA preflight controller unavailable") from exc
+        if completed.returncode != 0:
+            raise ReleaseError("SSE QA preflight failed: " + completed.stdout[-2000:])
+        lines = completed.stdout.strip().splitlines()
+        if len(lines) != 1 or not lines[0].startswith("SSE_QA_PREFLIGHT_OK "):
+            raise ReleaseError("SSE QA preflight returned no fixed summary")
+        return lines[0]
+
+
 def main() -> int:
     if fcntl is None or grp is None or pwd is None:
         raise SystemExit("the production receiver requires POSIX file locking")
@@ -2249,6 +2349,16 @@ def main() -> int:
                 report = run_diagnostic(manifest)
                 envelope = encrypt_diagnostic_report(report)
                 print(json.dumps(envelope, sort_keys=True, separators=(",", ":")))
+                return 0
+            if mode == "verify_sse_qa":
+                summary = run_sse_qa(mode, payload)
+                print(
+                    f"VERIFY_OK mode={mode} commit={manifest['commit']} "
+                    f"candidate={SSE_QA_CANDIDATE_COMMIT} "
+                    f"controller_sha256={SSE_QA_CONTROLLER_SHA256} "
+                    f"capability=preflight_only "
+                    f"files={len(payload)} package_sha256={package_sha} summary={summary}"
+                )
                 return 0
             if mode in VERIFY_MODES:
                 print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha}")

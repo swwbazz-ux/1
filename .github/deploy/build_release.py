@@ -25,6 +25,7 @@ MODES = {
     "update_receiver",
     "verify_fcm",
     "configure_fcm",
+    "verify_sse_qa",
     "diagnose",
     "rollback",
 }
@@ -53,6 +54,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fcm-service-account", type=Path)
     parser.add_argument("--rollback-id")
     parser.add_argument("--event-file", type=Path)
+    parser.add_argument("--sse-qa-package", type=Path)
+    parser.add_argument("--sse-qa-candidate-commit")
+    parser.add_argument("--sse-qa-controller-sha256")
     return parser.parse_args()
 
 
@@ -230,6 +234,20 @@ def main() -> None:
                 source,
             )
         ]
+    elif args.mode == "verify_sse_qa":
+        if not args.sse_qa_package or not args.sse_qa_package.is_file():
+            raise SystemExit("SSE QA mode requires --sse-qa-package")
+        paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]
+        provenance = {
+            "candidate_commit": args.sse_qa_candidate_commit,
+            "controller_sha256": args.sse_qa_controller_sha256,
+        }
+        if not re.fullmatch(r"[0-9a-f]{40}", provenance["candidate_commit"] or ""):
+            raise SystemExit("SSE QA candidate commit must be a full lowercase SHA")
+        for field in ("controller_sha256",):
+            if not re.fullmatch(r"[0-9a-f]{64}", provenance[field] or ""):
+                raise SystemExit(f"SSE QA {field} must be a lowercase SHA-256")
+        metadata.update({"qa_schema": 3, "capability": "preflight_only", **provenance})
     else:
         paths = load_paths(
             root,

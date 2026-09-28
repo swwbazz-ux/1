@@ -1131,12 +1131,30 @@ window.bindDriverMobileShell = function () {
 
     /* После подмены разметки с сервера местная проекция неотправленных действий
        обязана лечь поверх заново — иначе снятая с сервера разметка вернула бы
-       на круг рейс, разгрузку которого телефон ещё не доставил. */
-    window.addEventListener("operational-state-refresh-applied", function () {
+       на круг рейс, разгрузку которого телефон ещё не доставил.
+
+       Полная подмена оболочки заново запускает весь bindDriverMobileShell, а
+       значит и эту строку — без удаления прежнего обработчика они копятся на
+       window НАВСЕГДА, по одному на каждую полную подмену. Старый обработчик
+       держит замыкание с downtimeCard от СВОЕГО, уже отсоединённого узла —
+       он навсегда пуст (простой начался уже ПОСЛЕ того как этот узел устарел).
+       syncDriverDowntimeTimerFromCard в этом устаревшем замыкании видела
+       пустую карточку, ждала 700 мс (подтверждение "пустой карточки", #113)
+       и гасила НАСТОЯЩИЙ, ещё идущий простой через общий window.driverDowntimeClock
+       — при этом видимая (живая) карточка оставалась нетронутой, потому что
+       запись шла в отсоединённый узел-призрак. Отсюда и "встал на N секунд,
+       потом сам ожил" на бою (27.09.2026, v362): портил не видимый DOM, а
+       общее состояние, и через один нормальный цикл живой обработчик сам
+       чинил его назад. Держим ровно один обработчик — от последней подмены. */
+    if (window.driverDowntimeRefreshHandler) {
+        window.removeEventListener("operational-state-refresh-applied", window.driverDowntimeRefreshHandler);
+    }
+    window.driverDowntimeRefreshHandler = function () {
         var current = document.querySelector("[data-driver-shell]");
         if (current && driverOfflineEvents.length) applyDriverOfflineProjection(current, driverOfflineEvents);
         syncDriverDowntimeTimerFromCard();
-    });
+    };
+    window.addEventListener("operational-state-refresh-applied", window.driverDowntimeRefreshHandler);
 
     /* Фоновое обновление раз в ~20 с меняет атрибуты карточки состояния простоя
        через послойную подмену (syncAttributes), но сам JS-таймер (замыкание
@@ -1353,15 +1371,9 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
-                // Ручной рейс, завершённый на круге, озвучивается так же, как обычная разгрузка.
-                if (
-                    (event.event_type === "driver.trip.unloaded" || event.event_type === "driver.trip.manual_completed")
-                    && !window.driverOfflineConfirmationCueScheduled
-                ) {
-                    window.driverOfflineConfirmationCueScheduled = true;
-                    playDriverVoice("action_ok", "voice_trip_finished");
-                    window.setTimeout(function () { window.driverOfflineConfirmationCueScheduled = false; }, 750);
-                }
+                /* Разгрузку и завершение ручного рейса голос подтверждает сразу, по
+                   записи на телефоне (showDriverDialConfirmed). Ответ сервера приходит
+                   позже, иногда пачкой — второй голос тогда звучал бы невпопад. */
                 if (
                     event.event_type === "driver.trip.loaded"
                     && window.DriverManualExcavatorWorkspace
@@ -1778,12 +1790,27 @@ window.bindDriverMobileShell = function () {
         };
         window.driverDowntimeClock = clock;
         syncDriverReasonTotals(payload, activeReasonId);
+        /* tick() НЕ держит ссылки на downtimeDuration/downtimeReasonButtons из
+           замыкания этого вызова: при полной подмене <main data-driver-shell>
+           (оболочка отстала от структуры для послойного обновления — см.
+           driverMorphShell) bindDriverMobileShell перепривязывается на НОВОМ
+           узле, а «тот же простой» (sameInstance выше) намеренно не
+           перезапускает интервал — он продолжает жить на window. Раньше это
+           означало, что тикающий интервал писал в уже отсоединённые от
+           документа узлы СТАРОГО замыкания: видимый текст замирал и менялся
+           только со следующей полной подменой, принёсшей свежее серверное
+           значение (боевой 27.09.2026, v361: "2:56" → через 20 с сразу
+           "3:18"). Каждый тик ищет живые узлы заново — тогда подмена оболочки
+           между тиками не имеет значения. */
         function tick() {
+            var liveShell = document.querySelector("[data-driver-shell]");
+            var liveDuration = liveShell && liveShell.querySelector("[data-driver-active-duration]");
+            var liveReasonButtons = liveShell ? liveShell.querySelectorAll("[data-driver-downtime-reason-button]") : [];
             var liveSeconds = Math.max(0, Math.floor((Date.now() - clock.startedAtMs) / 1000));
-            if (downtimeDuration) {
-                downtimeDuration.textContent = formatDriverDowntimeDuration(clock.priorShiftSeconds + liveSeconds);
+            if (liveDuration) {
+                liveDuration.textContent = formatDriverDowntimeDuration(clock.priorShiftSeconds + liveSeconds);
             }
-            downtimeReasonButtons.forEach(function (button) {
+            Array.prototype.forEach.call(liveReasonButtons, function (button) {
                 var reasonId = String(button.dataset.driverDowntimeReasonId || "");
                 if (reasonId === activeReasonId) {
                     renderDriverReasonDuration(button, clock.priorReasonSeconds + liveSeconds, true);
@@ -2217,7 +2244,7 @@ window.bindDriverMobileShell = function () {
                когда движок ручного рейса сообщит о завершении. */
             if (holdButton.dataset.driverManualDial === "true") {
                 if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
-                var started = window.DriverPointDrum.completeFromDial();
+                var started = window.DriverPointDrum.completeFromDial(showDriverDialConfirmed);
                 /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
                    иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
                 if (started) {
@@ -2279,10 +2306,12 @@ window.bindDriverMobileShell = function () {
                 });
             }).then(function (savedEvent) {
                 unloadRecovery.recover({type: "queued"});
+                /* Разгрузка записана на телефоне — это и есть факт (телефон решает
+                   сам). Круг сначала показывает «засчитано», и только потом
+                   проекция переводит его в следующее состояние: проекция ниже
+                   выждет конец показа (см. showDriverDialConfirmed). */
+                showDriverDialConfirmed();
                 applyDriverOfflineProjection(shell, driverOfflineEvents);
-                /* The state projection owns the visible result: after a durable
-                   local save the dial immediately becomes the quiet inactive
-                   instrument.  No completion animation may imply server sync. */
                 showDriverToast("Разгрузка сохранена на телефоне.");
                 /* Delivery is best-effort. A flush error must never turn a successful
                    durable enqueue into a false "save failed" message or restore the trip. */
@@ -2329,17 +2358,113 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(24);
             }, totalMs / HOLD_SEGMENTS);
         }
+        /* «Засчитано»: как только разгрузка (или завершение ручного рейса) записана
+           на телефоне, поверх круга ~5 с лежит отдельный слой — полное зелёное
+           кольцо со вспышкой, галочка, которая прорисовывается, «РАЗГРУЖЕНО» и
+           мягкий ореол; звучит голос. Под слоем экран живёт как обычно: проекция,
+           очередь, опрос и подмена фрагмента ничего не ждут, и к концу показа
+           следующее состояние («ЭКС-1 / НА ЗАГРУЗКУ») уже готово — слой просто
+           гаснет. Касание по экрану закрывает показ досрочно. Раньше проекция
+           перестраивала круг в тот же миг, и водитель, у которого во время
+           удержания экран закрыт рукой, не понимал, засчитался ли рейс
+           (владелец, 28.09.2026).
+           Слой лежит на body, а не внутри круга: сверка после разгрузки приходит
+           через 1–2 с и заменяет или послойно перестраивает оболочку целиком —
+           слой внутри неё исчез бы посреди показа. Геометрию берём с самой
+           кнопки круга при показе; сама кнопка и сердцевина не меняются ни на
+           пиксель. Голос звучит здесь, по факту записи на телефоне, а не по
+           ответу сервера: ответ мог прийти через секунды или минуты, когда
+           водитель уже уехал. */
+        var DRIVER_DIAL_CONFIRM_MS = 5000;
+        var DRIVER_DIAL_CONFIRM_FADE_MS = 450;
+        var driverDialConfirmTimer = null;
+        var driverDialConfirmFadeTimer = null;
+        function driverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            if (layer) return layer;
+            layer = document.createElement("div");
+            layer.className = "driver-work-confirm";
+            layer.setAttribute("data-driver-work-confirm", "");
+            layer.setAttribute("aria-hidden", "true");
+            /* Только сердцевина: ни кольца удержания, ни свечения снаружи неё
+               (владелец, 28.09.2026) — кольцо после срабатывания само возвращается
+               в исходный вид. */
+            layer.innerHTML = ''
+                + '<span class="driver-work-confirm-halo"></span>'
+                + '<svg class="driver-work-confirm-check" viewBox="0 0 100 100" aria-hidden="true">'
+                +   '<path d="M26 53 L44 70 L75 34" pathLength="100"></path>'
+                + '</svg>'
+                + '<b class="driver-work-confirm-text">РАЗГРУЖЕНО</b>';
+            document.body.appendChild(layer);
+            return layer;
+        }
+        function placeDriverDialConfirmLayer() {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            var button = document.querySelector("[data-driver-hold-button]");
+            var core = button && button.querySelector(".driver-work-dial-core");
+            if (!layer || !core || !layer.classList.contains("is-showing")) return;
+            var rect = core.getBoundingClientRect();
+            if (!(rect.width > 0)) return;
+            layer.style.left = rect.left.toFixed(1) + "px";
+            layer.style.top = rect.top.toFixed(1) + "px";
+            layer.style.width = rect.width.toFixed(1) + "px";
+            layer.style.height = rect.height.toFixed(1) + "px";
+        }
+        function hideDriverDialConfirmed(fade) {
+            var layer = document.querySelector("[data-driver-work-confirm]");
+            window.clearTimeout(driverDialConfirmTimer);
+            window.clearTimeout(driverDialConfirmFadeTimer);
+            driverDialConfirmTimer = null;
+            driverDialConfirmFadeTimer = null;
+            document.removeEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.removeEventListener("resize", placeDriverDialConfirmLayer);
+            if (!layer || !layer.classList.contains("is-showing")) return;
+            if (!fade) {
+                layer.classList.remove("is-showing", "is-leaving");
+                return;
+            }
+            layer.classList.add("is-leaving");
+            driverDialConfirmFadeTimer = window.setTimeout(function () {
+                driverDialConfirmFadeTimer = null;
+                layer.classList.remove("is-showing", "is-leaving");
+            }, DRIVER_DIAL_CONFIRM_FADE_MS);
+        }
+        // Слой не ловит касаний (pointer-events: none): касание доходит до экрана как обычно.
+        function dismissDriverDialConfirmed() { hideDriverDialConfirmed(true); }
+        function showDriverDialConfirmed() {
+            var layer = driverDialConfirmLayer();
+            hideDriverDialConfirmed(false);
+            // Повторный показ подряд: сброс классов и принудительная раскладка перезапускают анимации.
+            void layer.offsetWidth;
+            layer.classList.add("is-showing");
+            placeDriverDialConfirmLayer();
+            window.driverDialConfirmShownAt = Date.now();
+            playDriverVoice("action_ok", "voice_trip_finished");
+            document.addEventListener("pointerdown", dismissDriverDialConfirmed, true);
+            window.addEventListener("resize", placeDriverDialConfirmLayer);
+            driverDialConfirmTimer = window.setTimeout(function () {
+                driverDialConfirmTimer = null;
+                hideDriverDialConfirmed(true);
+            }, DRIVER_DIAL_CONFIRM_MS - DRIVER_DIAL_CONFIRM_FADE_MS);
+        }
+        window.showDriverDialConfirmed = showDriverDialConfirmed;
+        /* Удержание завершено: сброс удержания после этого (восстановление
+           формы, отмена) не должен глушить длинный отклик завершения. */
+        var unloadHoldCompleted = false;
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
-               чтобы случайное касание не отправило рейс, и не утомляет за смену. */
+               чтобы случайное касание не отправило рейс, и не утомляет за смену.
+               Кольцо в CSS (driver-shift-v1.css, driver-hold-right/left) набирается
+               ровно за это же время: две половины по 250 мс. */
             holdMs: 500,
             onStart: function () {
+                unloadHoldCompleted = false;
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
-                driverVibrate(0);
+                if (!unloadHoldCompleted) driverVibrate(0);
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
@@ -2354,6 +2479,7 @@ window.bindDriverMobileShell = function () {
             },
             onComplete: function () {
                 stopHoldSegmentFeedback();
+                unloadHoldCompleted = true;
                 driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();

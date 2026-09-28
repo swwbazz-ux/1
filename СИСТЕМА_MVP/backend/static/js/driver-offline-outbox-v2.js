@@ -620,6 +620,88 @@
            отклонённых стартов простоя трёхдневной давности, из-за которых подпись
            связи навсегда показывала «Не подтверждено». Старше суток — убираем. */
         var reviewRetentionMs = Number(options.reviewRetentionMs) > 0 ? Number(options.reviewRetentionMs) : 24 * 60 * 60 * 1000;
+        /* События, которые прямо сейчас в отправке: их нельзя убирать из очереди —
+           ответ сервера записал бы их обратно (update), а принятая погрузка без
+           своей отмены оставила бы на сервере открытый рейс. */
+        var inFlightIds = new Set();
+        /* Сервер точно не создал рейс по этой погрузке: её ни разу не отправляли
+           (и создала её эта же страница — иначе она может быть в отправке у другой
+           вкладки), либо на последнюю отправку сервер сам ответил «повторить».
+           Сетевой сбой или потерянный ответ — не доказательство: запрос мог дойти. */
+        function manualLoadNeverAccepted(load) {
+            if (!Number(load.attempt_count || 0)) return load.created_session === PAGE_SESSION;
+            var code = String(load.last_error && load.last_error.code || "");
+            return !!code && code !== "network" && code !== "missing_ack";
+        }
+        /* Неподтверждённая ручная погрузка и за ней её же неподтверждённая отмена —
+           намерение водителя «погрузки нет». Отправлять такую пару незачем, а
+           застрявшая навсегда (погрузка под свободный ковш, приём которого отменили:
+           сервер вечно отвечает retry free_bucket_acceptance_pending, отмена ждёт её
+           как зависимость) держала синий индикатор и подменяла собой рейс сервера:
+           как только новая погрузка подтверждалась и уходила из очереди, «последней»
+           становилась зомби-погрузка, её отмена «выигрывала», и круг пустел, хотя
+           сервер держал рейс открытым (стенд 28.09.2026, телефон: 336 повторов).
+           Обе записи снимаются локально, без отправки, с отметкой в журнале. */
+        async function annihilateManualLoadCancelPairs(repo, items) {
+            var removed = new Set();
+            for (var cancel of items) {
+                if (cancel.event_type !== "driver.trip.loaded.cancelled" || cancel.state !== "pending") continue;
+                var localId = String(cancel.local_trip_id || "");
+                var cancelDeps = Array.isArray(cancel.depends_on) ? cancel.depends_on.map(String) : [];
+                var load = items.find(function (item) {
+                    return item.event_type === "driver.trip.loaded"
+                        && item.state === "pending"
+                        && !removed.has(item.event_id)
+                        && String(item.device_id || "") === String(cancel.device_id || "")
+                        && (
+                            (localId && String(item.local_trip_id || "") === localId)
+                            || cancelDeps.indexOf(String(item.event_id)) >= 0
+                        );
+                });
+                if (!load || inFlightIds.has(load.event_id) || inFlightIds.has(cancel.event_id)) continue;
+                if (!manualLoadNeverAccepted(load)) continue;
+                if (await repo.getMeta("event-identity:" + load.event_id)) continue;
+                var pairIds = [String(load.event_id), String(cancel.event_id)];
+                var loadLocalId = String(load.local_trip_id || "");
+                var otherDependent = items.some(function (item) {
+                    if (pairIds.indexOf(String(item.event_id)) >= 0 || TERMINAL_STATES.has(item.state)) return false;
+                    var deps = Array.isArray(item.depends_on) ? item.depends_on.map(String) : [];
+                    return deps.indexOf(pairIds[0]) >= 0
+                        || deps.indexOf(pairIds[1]) >= 0
+                        || (loadLocalId && String(item.local_trip_id || "") === loadLocalId);
+                });
+                if (otherDependent) continue;
+                try {
+                    await repo.remove(cancel.event_id);
+                    await repo.remove(load.event_id);
+                } catch (error) {
+                    continue;
+                }
+                removed.add(pairIds[0]);
+                removed.add(pairIds[1]);
+                var record = {
+                    load_event_id: pairIds[0],
+                    cancel_event_id: pairIds[1],
+                    local_trip_id: loadLocalId,
+                    load_attempts: Number(load.attempt_count || 0),
+                    load_last_error: load.last_error && load.last_error.code || "",
+                    removed_at: nowIso()
+                };
+                try { await repo.setMeta("annihilated-manual-load:" + pairIds[0], record); } catch (error) {}
+                /* Два listAll() при старте страницы идут одновременно и оба видят пару:
+                   повторное удаление безвредно, а запись в журнале — одна. */
+                var already = (root.driverOfflineAnnihilatedPairs || []).some(function (item) {
+                    return item && item.load_event_id === record.load_event_id;
+                });
+                if (!already) {
+                    root.driverOfflineAnnihilatedPairs = (root.driverOfflineAnnihilatedPairs || []).concat([record]).slice(-20);
+                    if (root.console && typeof root.console.warn === "function") {
+                        root.console.warn("driver_offline_outbox: unsent manual load and its cancel removed locally", record);
+                    }
+                }
+            }
+            return removed;
+        }
         async function listAll() {
             var repo = await repoPromise;
             var items = await repo.list();
@@ -633,6 +715,10 @@
                     continue;
                 }
                 kept.push(item);
+            }
+            var annihilated = await annihilateManualLoadCancelPairs(repo, kept);
+            if (annihilated.size) {
+                kept = kept.filter(function (item) { return !annihilated.has(String(item.event_id)); });
             }
             return kept.sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         }
@@ -904,7 +990,13 @@
                     if (drainRequested) continue;
                     return publish();
                 }
-                await publish();
+                due.forEach(function (event) { inFlightIds.add(String(event.event_id)); });
+                try {
+                    await publish();
+                } catch (error) {
+                    inFlightIds.clear();
+                    throw error;
+                }
                 var callbackBatch = {confirmed: [], review: []};
                 var response;
                 try {
@@ -933,14 +1025,22 @@
                         })
                     });
                 } catch (error) {
-                    for (var event of due) {
-                        var attempt = Number(event.attempt_count || 0) + 1;
-                        await update(event, {state: "pending", attempt_count: attempt, next_retry_at: Date.now() + backoff(attempt), last_error: {code: "network", message: "Сервер временно недоступен."}});
+                    try {
+                        for (var event of due) {
+                            var attempt = Number(event.attempt_count || 0) + 1;
+                            await update(event, {state: "pending", attempt_count: attempt, next_retry_at: Date.now() + backoff(attempt), last_error: {code: "network", message: "Сервер временно недоступен."}});
+                        }
+                    } finally {
+                        inFlightIds.clear();
                     }
                     await publish();
                     continue;
                 }
-                callbackBatch = await applyResults(due, response || {});
+                try {
+                    callbackBatch = await applyResults(due, response || {});
+                } finally {
+                    inFlightIds.clear();
+                }
                 await publish();
                 for (var confirmed of callbackBatch.confirmed) {
                     if (typeof callbacks.onConfirmed === "function") {

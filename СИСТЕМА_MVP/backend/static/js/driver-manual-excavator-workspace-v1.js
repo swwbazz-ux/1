@@ -614,6 +614,20 @@
         );
     }
 
+    /* Отмена относится к открытому ручному рейсу сервера, только если совпадает с
+       ним по номеру рейса или по локальному номеру той погрузки, из которой сервер
+       этот рейс создал (serverContext.local_trip_id). Совпадение с какой-то
+       локальной погрузкой из очереди — не доказательство: застрявшая пара
+       «погрузка + отмена» совпадала сама с собой и гасила чужой рейс сервера. */
+    function manualCancelTargetsServerTrip(cancelEvent, serverTripId, serverContext) {
+        if (!cancelEvent || !serverTripId) return false;
+        var cancelTripId = positive(cancelEvent.trip_id)
+            || positive(cancelEvent.server_ids && cancelEvent.server_ids.trip_id);
+        if (cancelTripId) return cancelTripId === positive(serverTripId);
+        var serverLocalId = String(serverContext && serverContext.local_trip_id || "");
+        return !!(serverLocalId && String(cancelEvent.local_trip_id || "") === serverLocalId);
+    }
+
     function manualCancelWins(cancelEvent, confirmedCancel, projection, serverTripId) {
         if (!cancelEvent) return false;
         var matchesCurrent = manualCancelMatches(cancelEvent, projection, serverTripId)
@@ -800,6 +814,15 @@
             setManualExitAvailability(workspace);
             setResult(workspace, "complete-pending", null, true);
             return {state: "completing"};
+        }
+        /* Открытый ручной рейс сервера главнее отмены, которая к нему не относится
+           (28.09.2026): в расчёт идёт только отмена именно этого рейса, остальные
+           не гасят круг — дальше рейс сервера показывается как есть. */
+        if (serverOrigin === "driver_manual" && serverTripId) {
+            var serverCancelContext = readWorkspaceTripContext();
+            activeCancel = [queuedCancel, confirmedCancel].filter(Boolean).find(function (cancel) {
+                return manualCancelTargetsServerTrip(cancel, serverTripId, serverCancelContext);
+            }) || null;
         }
         if (manualCancelWins(activeCancel, confirmedCancel, projected, serverTripId)) {
             var cancelledPointId = positive(

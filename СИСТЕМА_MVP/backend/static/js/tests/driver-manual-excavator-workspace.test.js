@@ -834,7 +834,7 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     assert.doesNotMatch(drum, /driverUnloadOneTap = /);
     assert.match(shift, /holdForm\.dataset\.driverUnloadOneTap = "false";/);
     // Удержание круга с ручным рейсом не шлёт обычную разгрузку.
-    assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(\);[\s\S]*?return false;/);
+    assert.match(shift, /if \(holdButton\.dataset\.driverManualDial === "true"\) \{[\s\S]*?completeFromDial\(showDriverDialConfirmed\);[\s\S]*?return false;/);
 });
 
 test("dump point corner button reroutes a manual trip to a point outside the drum", () => {

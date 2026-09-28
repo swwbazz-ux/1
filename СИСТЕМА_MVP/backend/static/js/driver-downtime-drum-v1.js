@@ -107,6 +107,7 @@
         geo.built = c;
         lastFront = -1;
         render(false);
+        fitLabels(c);
         return true;
     }
 
@@ -115,7 +116,16 @@
         if (!c) return false;
         // Копии от прошлой сборки убираем и собираем кольцо заново из выбранных причин.
         var selected = all("[data-driver-drum-card]:not([data-driver-drum-clone]):not([hidden])", c);
-        if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) return true;
+        if (geo.built === c && geo.reasons === selected.length && geo.n === cards().length && cards().length) {
+            // Тот же состав — геометрию не трогаем. Пересчёт кегля НЕ вызываем здесь:
+            // build() дёргается на любую относящуюся к барабану мутацию (в т.ч. часто
+            // на телефоне), и вызов подгонки на каждый такой случай грузил телефон и
+            // «прыгал» размером текста без всякой причины (владелец, 28.09.2026:
+            // «тормозит, текст прыгает»). Случай «простой стартовал, пока барабан
+            // был скрыт» ловит отдельный, куда более узкий сигнал — ResizeObserver
+            // на самом барабане (0 → реальный размер, см. init() ниже).
+            return true;
+        }
         var signature = drumSignature(c);
         if (geo.n && geo.signature === signature && !all("[data-driver-drum-card][data-driver-drum-clone]", c).length) {
             // Новая копия экрана с тем же составом: клонируем грани заново, но без замеров.
@@ -166,7 +176,16 @@
             card.dataset.driverDrumIndex = String(index);
             card.style.setProperty("--card-angle", (index * step).toFixed(3) + "deg");
         });
+        fitLabels(c);
         return true;
+    }
+
+    // Кегль подписи — driver-drum-label-fit-v1.js. Карточка новой сборки может ещё не
+    // иметь ширины (первая отрисовка, скрытая вкладка) — модуль сам не сдаётся при
+    // нулевой ширине, здесь достаточно просто вызвать его после каждой пересборки.
+    function fitLabels(c) {
+        root.__driverDrumFitCalls = (root.__driverDrumFitCalls || 0) + 1;
+        if (root.DriverDrumLabelFit) root.DriverDrumLabelFit.fitAll(c || cylinder(), "[data-driver-drum-label]");
     }
 
     function frontIndex(theta) {
@@ -225,6 +244,9 @@
             // Пока идёт анимация фиксации, грань ещё движется — контур дорисуем по её окончании.
             c.__snapUntil = Date.now() + 360;
             root.clearTimeout(c.__snapTimer);
+            // Подгонку кегля после фиксации НЕ вызываем: кегль не зависит от того,
+            // какая грань встала в центр (driver-drum-label-fit-v1.js), — вращение
+            // не повод его пересчитывать (владелец, 28.09.2026).
             c.__snapTimer = root.setTimeout(function () { c.__snapUntil = 0; syncLinkVars(); }, 370);
         }
         /* Радиус задан шириной грани, а ширина — единицами контейнера, поэтому
@@ -314,6 +336,36 @@
         } finally { rebuilding = false; }
     }
 
+    // Цвет мигания контура и центра круга — по статусу активной причины (та же
+    // палитра, что и цвет карточки, .driver-drum-card.status-*): жёлтый как
+    // раньше, а для красной причины (поломка, авария) — красный, чтобы мигание
+    // само по себе отличало «жду» от «сломался» (владелец, 28.09.2026). Пишем
+    // переменную на <html> — тот же приём, что и у --link-path (setLinkPath):
+    // цвет известен заранее, кадр мигания меняет только прозрачность готового
+    // слоя (найдено 19.09.2026, перекраска в момент анимации стоит секунды).
+    var DOWNTIME_ACCENT_BY_STATUS = { orange: "#fb923c", red: "#ff5a47" };
+    var lastDowntimeAccent = "";
+    function syncDowntimeAccent(active) {
+        // Класс на <html> — не завязан на конкретный цвет (жёлтый вообще не пишет
+        // переменную, см. ниже), но нужен как отдельный флаг «простой идёт» для
+        // правил вроде центральной карточки точки разгрузки в верхнем барабане
+        // (владелец, 28.09.2026: та же окантовка и цвет, что у контура/центра круга).
+        if (doc.documentElement.classList.contains("is-driver-downtime-active") !== active) {
+            doc.documentElement.classList.toggle("is-driver-downtime-active", active);
+        }
+        var accent = "";
+        if (active) {
+            var card = stateCard();
+            var match = card && card.className.match(/status-(\w+)/);
+            var status = match ? match[1] : "yellow";
+            accent = DOWNTIME_ACCENT_BY_STATUS[status] || ""; // жёлтый — пусто, берём CSS-умолчание
+        }
+        if (accent === lastDowntimeAccent) return;
+        lastDowntimeAccent = accent;
+        if (accent) doc.documentElement.style.setProperty("--driver-downtime-accent", accent);
+        else doc.documentElement.style.removeProperty("--driver-downtime-accent");
+    }
+
     function syncActive() {
         var id = activeReasonId();
         var d = drum(), w = dial();
@@ -344,6 +396,7 @@
         if (w && w.classList.contains("is-downtime-active") !== (id !== "")) {
             w.classList.toggle("is-downtime-active", id !== "");
         }
+        syncDowntimeAccent(id !== "");
         // Подводим активную причину вперёд только если она не спереди: иначе каждое
         // обновление таймера запускало бы анимацию фиксации и блокировало контур.
         if (activeIndex >= 0 && !drag && frontIndex(geo.theta) !== activeIndex) rotateTo(activeIndex, true);
@@ -475,6 +528,11 @@
         g.style.top = (r.top - box.top) + "px";
         g.style.width = r.width + "px";
         g.style.height = r.height + "px";
+        // Копия живёт вне барабана, где --drum-card-w/-h не заданы, а подпись —
+        // контейнер размеров от них (driver-downtime-drum-v1.css): без этих двух
+        // строк её ширина схлопывалась бы в 0 и текст в летящей копии пропадал.
+        g.style.setProperty("--drum-card-w", r.width + "px");
+        g.style.setProperty("--drum-card-h", r.height + "px");
         g.style.transform = "translateY(0px)";
         screen.appendChild(g);
         var w = dial();
@@ -754,10 +812,101 @@
        стили экрана, а сверить строку ничего не стоит. Поэтому контур можно сверять
        после каждого обновления экрана и любого сдвига — и он не отстаёт от граней. */
     var lastLinkPath = "";
+    // Подпись геометрических входов последнего пересчёта контура (syncLinkVars):
+    // повторный вызов с теми же входами не строит путь заново.
+    var lastLinkInputs = "";
     function setLinkPath(path) {
         if (path === lastLinkPath) return;
         lastLinkPath = path;
         doc.documentElement.style.setProperty("--link-path", 'path("' + path + '")');
+    }
+
+    /* Стрелки-слоты «свайп к кругу» (.driver-drum-slot-arrow): обе 24×16 (вдвое
+       против прежних 8px) и с ОДИНАКОВЫМ расстоянием до своей грани; ориентир —
+       верхняя, она стоит посередине своего зазора до круга (владелец,
+       28.09.2026). Нижний зазор уже верхнего, поэтому нижний барабан целиком
+       (грань и его часть контура — контур строится от фактического положения
+       грани) сдвигается вниз ровно настолько, чтобы нижняя стрелка встала так
+       же, как верхняя, — но не дальше, чем позволяет низ экрана «Работа»: там
+       должна поместиться нижняя рамка контура с её свечением. Если места не
+       хватает — обе стрелки одинаково уменьшаются. Сдвиг считается от
+       НЕсдвинутого положения грани (текущий сдвиг вычитается), иначе каждый
+       пересчёт менял бы его заново. Считается вместе с контуром: те же замеры,
+       тот же момент (вне жеста, только когда геометрия сдвинулась). */
+    var ARROW_H = 16, ARROW_MIN_H = 8, ARROW_MIN_CLEAR = 1;
+    // Нижняя рамка контура: отступ от грани (pad в syncLinkVars) + половина
+    // толщины яркой линии + половина толщины свечения (driver-downtime-drum-v1.css).
+    var OUTLINE_BELOW_CARD = 5 + 1.25 + 4.5;
+    var lastArrowVars = "";
+    var bottomShift = 0;
+    // Сдвиг всей сборки (оба барабана и круг с угловыми кнопками) по вертикали —
+    // чтобы она стояла ровно посередине экрана «Работа» (а он — посередине между
+    // шапкой и таб-баром). Сетка экрана заканчивается пустой строкой «assign»,
+    // которая всё равно добавляет один промежуток сетки под нижним барабаном, —
+    // на маленьких экранах из-за этого сборка сидела на несколько пикселей выше
+    // середины (владелец, 28.09.2026). Меньше полпикселя не двигаем: на телефоне
+    // владельца сборка и так по центру, там ничего не должно сдвинуться.
+    var assemblyShift = 0;
+    var ASSEMBLY_MIN_SHIFT = 0.5;
+    function syncSlotArrows(dr, cr, tr, box) {
+        // Все замеры — в НЕсдвинутых координатах: вычитаем текущие сдвиги, иначе
+        // каждый пересчёт менял бы их заново.
+        var a = assemblyShift;
+        var dialTop0 = dr.top - a, dialBottom0 = dr.bottom - a;
+        var cardTop0 = cr.top - bottomShift - a, cardBottom0 = cr.bottom - bottomShift - a;
+        var topCardTop0 = tr && tr.height ? tr.top - a : null;
+        var topCardBottom0 = tr && tr.height ? tr.bottom - a : null;
+        var gapBottom0 = cardTop0 - dialBottom0;
+        var gapTop = topCardBottom0 !== null ? dialTop0 - topCardBottom0 : gapBottom0;
+        var h = Math.max(ARROW_MIN_H, Math.min(ARROW_H, gapTop - 2 * ARROW_MIN_CLEAR));
+        var lift = (gapTop - h) / 2;
+        var need = Math.max(0, 2 * lift + h - gapBottom0);
+        // Место под сдвиг нижнего барабана — всё свободное место экрана «Работа»
+        // сверху и снизу сборки: после сдвига сборка всё равно центруется ниже.
+        var spareTop = box && topCardTop0 !== null ? Math.max(0, (topCardTop0 - OUTLINE_BELOW_CARD) - box.top) : 0;
+        var spareBottom = box ? Math.max(0, box.bottom - (cardBottom0 + OUTLINE_BELOW_CARD)) : 0;
+        var room = spareTop + spareBottom;
+        var shift = Math.min(need, room);
+        var center = (spareBottom - shift - spareTop) / 2;
+        var newAssembly = Math.abs(center) >= ASSEMBLY_MIN_SHIFT ? Math.round(center * 10) / 10 : 0;
+        var gapBottom = gapBottom0 + shift;
+        if (2 * lift + h > gapBottom) {
+            // Не хватило места даже со сдвигом: уменьшаем обе стрелки одинаково,
+            // сохраняя их одинаковое расстояние до граней.
+            h = Math.max(ARROW_MIN_H, Math.min(h, gapBottom - 2 * ARROW_MIN_CLEAR));
+            lift = Math.max(ARROW_MIN_CLEAR, Math.min((gapTop - h) / 2, (gapBottom - h) / 2));
+        }
+        var vars = [h, lift, shift, newAssembly].map(function (v) { return v.toFixed(1); }).join(",");
+        if (vars === lastArrowVars) return;
+        lastArrowVars = vars;
+        bottomShift = Math.round(shift * 10) / 10;
+        assemblyShift = newAssembly;
+        root.__driverDrumArrowReport = { h: h, lift: lift, shift: shift, need: need, room: room, assembly: newAssembly };
+        var s = doc.documentElement.style;
+        s.setProperty("--driver-work-assembly-shift", assemblyShift.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-h-bottom", h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-bottom", lift.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-h-top", h.toFixed(1) + "px");
+        s.setProperty("--drum-arrow-lift-top", lift.toFixed(1) + "px");
+        s.setProperty("--drum-bottom-shift", bottomShift.toFixed(1) + "px");
+    }
+
+    /* Слот центральной позиции барабана: прямоугольник грани, стоящей ровно в
+       центре сцены, — от сцены (она неподвижна) и размера грани без 3D-преобразования.
+       Возвращает DOMRect-подобный объект в координатах экрана; null, если барабана
+       или граней нет. Сцена уже несёт сдвиги (translate барабана и сборки), так что
+       слот, как и раньше грань, меряется в сдвинутых координатах. */
+    function slotRect(drumEl, cardSelector) {
+        if (!drumEl) return null;
+        var stage = drumEl.querySelector(".driver-downtime-drum-stage");
+        var card = drumEl.querySelector(cardSelector);
+        if (!stage || !card) return null;
+        var sr = stage.getBoundingClientRect();
+        var cw = card.offsetWidth, ch = card.offsetHeight;
+        if (!sr.width || !cw || !ch) return null;
+        var left = sr.left + sr.width / 2 - cw / 2;
+        var top = sr.top + sr.height / 2 - ch / 2;
+        return {left: left, top: top, right: left + cw, bottom: top + ch, width: cw, height: ch};
     }
 
     var linkFrame = 0;
@@ -767,22 +916,55 @@
     }
 
     function syncLinkVars() {
+        // Контур — стационарный элемент, как большая круглая кнопка, и во время
+        // вращения ЛЮБОГО из барабанов не пересчитывается вовсе: центральная грань в
+        // этот момент ещё едет, is-center уже мог перескочить на соседнюю (по
+        // угловой близости, а не по фактическому положению), и контур, посчитанный
+        // от такой грани, «прыгал» вместе с прокруткой (владелец, 28.09.2026:
+        // «перестраивается при каждой прокрутке»). После отпускания и фиксации
+        // контур дорисует таймер фиксации (render → __snapTimer).
+        if (drag) return;
+        if (root.DriverPointDrum && typeof root.DriverPointDrum.isDragging === "function" && root.DriverPointDrum.isDragging()) return;
         // Грань ещё доезжает на место (анимация фиксации) — контур дорисуют по окончании.
         var own = cylinder();
         if (own && own.__snapUntil > Date.now()) return;
         var topTrack = q("[data-driver-point-drum-track]");
         if (topTrack && topTrack.__snapUntil > Date.now()) return;
         var w = dial();
-        var card = centerCard();
         var link = q("[data-driver-drum-link]");
-        if (!w || !card || !link) return;
+        if (!w || !link) return;
         var screen = link.parentElement;
         while (screen && !screen.classList.contains("driver-work-screen")) screen = screen.parentElement;
         if (!screen) return;
         var dr = w.getBoundingClientRect();
-        var cr = card.getBoundingClientRect();
         var box = screen.getBoundingClientRect();
-        if (!dr.width || !cr.width) return;
+        /* Контур строится от НЕПОДВИЖНЫХ слотов, а не от текущей центральной грани:
+           слот — центр сцены барабана и размер грани без 3D-преобразования
+           (offsetWidth/Height; все грани одинаковы). Грань в центре при прокрутке,
+           смене состояния, подмене оболочки или старте простоя — другая, её
+           прямоугольник чуть иной (перспектива, ещё не доехала, ещё не построена),
+           и контур пересчитывался и «вздрагивал» (владелец, 28.09.2026: при
+           прокрутке, погрузке, разгрузке, отмене, простое). Слот от всего этого не
+           зависит; на телефоне он совпадает с гранью в центре с точностью 0,3px. */
+        var cr = slotRect(q("[data-driver-downtime-drum]"), "[data-driver-drum-card]");
+        if (!dr.width || !cr) return;
+        // Ничего из входов не сдвинулось — и считать нечего. scheduleLink() дёргается
+        // наблюдателем на любую правку экрана (тик таймера, подмена фрагмента —
+        // на телефоне это десятки раз в минуту), и раньше каждый раз строился и
+        // сравнивался весь путь. Подпись входов — с точностью до 0,5px, чтобы
+        // субпиксельный шум округления не считался движением.
+        var tr0 = slotRect(q("[data-driver-point-drum]"), ".driver-drum-card");
+        function k(v) { return Math.round(v * 2); }
+        var inputs = [k(dr.left), k(dr.top), k(dr.width), k(dr.height), k(cr.left), k(cr.bottom), k(cr.width), k(box.left), k(box.top),
+            tr0 ? k(tr0.top) : -1, tr0 ? k(tr0.width) : -1].join(",");
+        if (inputs === lastLinkInputs) return;
+        lastLinkInputs = inputs;
+        root.__driverDrumLinkCalls = (root.__driverDrumLinkCalls || 0) + 1;
+        // Журнал настоящих пересчётов со стеком — по нему видно, кто позвал.
+        root.__driverDrumLinkLog = (root.__driverDrumLinkLog || []).concat([{
+            at: Date.now(), inputs: inputs, stack: String(new Error().stack || "").split("\n").slice(1, 6).join(" | ")
+        }]).slice(-30);
+        syncSlotArrows(dr, cr, tr0, box);
         var pad = 5, rr = 10;
         var half = cr.width / 2 + pad;
         // Кольцо — в зазоре между кольцом циферблата (48.5% стороны) и угловыми кнопками (51%).
@@ -799,8 +981,8 @@
         // Без назначения барабан точек показывает пустую серую грань вместо настоящей
         // карточки (driver_point_drum.html) — у неё нет data-driver-point-card, только
         // класс, но контур-горлышко должен стоять на месте и в этом состоянии.
-        var top = q("[data-driver-point-drum] [data-driver-point-card].is-center, [data-driver-point-drum] .driver-drum-card-empty.is-drum-empty-center");
-        var tr = top ? top.getBoundingClientRect() : null;
+        // Тот же неподвижный слот верхнего барабана, что и в подписи входов.
+        var tr = tr0;
         var halfT = tr && tr.width ? tr.width / 2 + pad : 0;
         if (halfT && halfT < r) {
             var xLt = cx - halfT, xRt = cx + halfT;
@@ -863,7 +1045,13 @@
         reconcileQuick();
         syncActive();
         observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id"] });
-        root.addEventListener("resize", function () { geo.built = null; build(); render(false); });
+        // Смена размера окна/ориентации — с задержкой: серия resize-событий при
+        // повороте экрана иначе даёт серию полных пересборок подряд.
+        var resizeTimer = 0;
+        root.addEventListener("resize", function () {
+            root.clearTimeout(resizeTimer);
+            resizeTimer = root.setTimeout(function () { geo.built = null; build(); render(false); }, 150);
+        });
         if (root.ResizeObserver) {
             var w = dial();
             var ro = new root.ResizeObserver(function () { scheduleLink(); });
@@ -871,6 +1059,10 @@
             // Круг зажат по высоте: при смене ширины экрана он не меняет размер, а сдвигается.
             ro.observe(doc.body);
         }
+        // Кегль подписей больше не требует повторных подгонок (скрытая вкладка,
+        // ресайз, шрифты): его считает CSS от размеров контейнера при каждой
+        // раскладке сам (driver-drum-label-fit-v1.js). JS только строит разметку
+        // строк при сборке барабана — здесь больше нечего перезапускать.
         root.addEventListener("operational-state-refresh-applied", scheduleLink);
         root.setTimeout(function () { render(false); }, 300);
     }

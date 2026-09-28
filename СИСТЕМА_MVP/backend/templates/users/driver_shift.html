@@ -10,6 +10,7 @@
 {% block extra_head %}
 <script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
+<script src="{% static 'js/driver-drum-label-fit-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-point-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-free-bucket-v1.js' %}?v={{ driver_shell_version }}" defer></script>
@@ -170,16 +171,24 @@
     {% if driver_free_bucket_can_open %}
         <section class="driver-free-bucket-sheet" id="driver-free-bucket-dialog" data-driver-free-bucket-sheet role="dialog" aria-modal="true" aria-labelledby="driver-free-bucket-title" hidden>
             <div class="driver-free-bucket-dialog">
-                <button class="driver-free-bucket-close" type="button" data-driver-free-bucket-close aria-label="Закрыть выбор свободного ковша">×</button>
-                <header class="driver-free-bucket-head">
-                    <h2 id="driver-free-bucket-title">Под свободный ковш</h2>
-                    <p>Выберите экскаватор на одну погрузку</p>
-                    <p class="driver-free-bucket-primary">Основное закрепление: <strong data-driver-free-bucket-primary-label>{{ driver_free_bucket_primary_label }}</strong></p>
-                </header>
-                <div class="driver-free-bucket-current" data-driver-free-bucket-current {% if not driver_free_bucket_state.active %}hidden{% endif %}>
-                    <span>Сейчас</span>
-                    <strong data-driver-free-bucket-current-label>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</strong>
-                    <small data-driver-free-bucket-sync-state>{% if driver_free_bucket_state.status == 'requested' %}Ожидание приёма машинистом{% elif driver_free_bucket_state.status == 'accepted' %}Принят машинистом{% elif driver_free_bucket_state.status == 'used' %}Погружен{% endif %}</small>
+                {% comment %} Закреплённая шапка окна: закрыть, заголовок-признак режима и строка
+                   состояния выбора не уезжают при прокрутке сетки (экскаваторов может быть
+                   до десяти, сетка прокручивается внутри окна). Пояснения («Выберите
+                   экскаватор на одну погрузку», «Основное закрепление: …») убраны — в смене их
+                   никто не читает (владелец, 28.09.2026). Основное закрепление и так видно:
+                   его плитка недоступна, номер стоит на круге. {% endcomment %}
+                <div class="driver-free-bucket-top">
+                    {% comment %} Крест — SVG из двух линий, а не символ «×»: у символа
+                       базовая линия шрифта сдвигала его от центра кружка (владелец, 28.09.2026). {% endcomment %}
+                    <button class="driver-free-bucket-close" type="button" data-driver-free-bucket-close aria-label="Закрыть выбор свободного ковша"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6 18 18M18 6 6 18"/></svg></button>
+                    <header class="driver-free-bucket-head">
+                        <h2 id="driver-free-bucket-title">Под свободный ковш</h2>
+                    </header>
+                    <div class="driver-free-bucket-current" data-driver-free-bucket-current {% if not driver_free_bucket_state.active %}hidden{% endif %}>
+                        <span>Сейчас</span>
+                        <strong data-driver-free-bucket-current-label>{% if driver_free_bucket_state.selection %}Свободный ковш · {{ driver_free_bucket_state.selection.label }}{% endif %}</strong>
+                        <small data-driver-free-bucket-sync-state>{% if driver_free_bucket_state.status == 'requested' %}Ожидание приёма машинистом{% elif driver_free_bucket_state.status == 'accepted' %}Принят машинистом{% elif driver_free_bucket_state.status == 'used' %}Погружен{% endif %}</small>
+                    </div>
                 </div>
                 <div class="driver-free-bucket-grid" data-driver-free-bucket-grid>
                     {% for excavator in driver_free_bucket_catalog.excavators %}
@@ -188,9 +197,9 @@
                            разглядеть сам номер). Статус («Выбран»/«Недоступно») остаётся — это не
                            справка, а состояние самой плитки. Данные горизонта и т.п. остаются в
                            data-атрибутах: их бросок в рейс при выборе экскаватора не отображение. {% endcomment %}
-                        <button class="driver-free-bucket-tile{% if driver_free_bucket_state.selection.id == excavator.id %} is-current{% endif %}" type="button" data-driver-free-bucket-option data-excavator-id="{{ excavator.id }}" data-excavator-label="{{ excavator.label }}" data-complex-label="{{ excavator.complex_label }}" data-loading-horizon="{{ excavator.loading_horizon }}" data-loading-block="{{ excavator.loading_block }}" data-rock-type="{{ excavator.rock_type }}" data-dump-point="{{ excavator.dump_point }}" data-is-primary="{% if excavator.is_primary %}true{% else %}false{% endif %}"{% if excavator.is_primary or not excavator.available %} disabled aria-disabled="true"{% endif %}{% if driver_free_bucket_state.selection.id == excavator.id %} aria-current="true"{% endif %}>
+                        <button class="driver-free-bucket-tile{% if driver_free_bucket_state.selection.id == excavator.id %} is-current{% endif %}" type="button" data-driver-free-bucket-option data-excavator-id="{{ excavator.id }}" data-excavator-label="{{ excavator.label }}" data-complex-label="{{ excavator.complex_label }}" data-loading-horizon="{{ excavator.loading_horizon }}" data-loading-block="{{ excavator.loading_block }}" data-rock-type="{{ excavator.rock_type }}" data-dump-point="{{ excavator.dump_point }}" data-is-primary="{% if excavator.is_primary %}true{% else %}false{% endif %}" style="--fb-len: {{ excavator.label|length }}"{% if excavator.is_primary or not excavator.available %} disabled aria-disabled="true"{% endif %}{% if driver_free_bucket_state.selection.id == excavator.id %} aria-current="true"{% endif %}>
                             <strong class="driver-free-bucket-tile-number">{{ excavator.label }}</strong>
-                            <span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status>{% if driver_free_bucket_state.selection.id == excavator.id %}Выбран{% elif not excavator.available %}Недоступно{% endif %}</span>
+                            <span class="driver-free-bucket-tile-status" data-driver-free-bucket-tile-status>{% if driver_free_bucket_state.selection.id == excavator.id %}Выбран{% elif excavator.is_primary %}Основной{% elif not excavator.available %}Недоступно{% endif %}</span>
                         </button>
                     {% empty %}
                         <p class="driver-free-bucket-empty" data-driver-free-bucket-empty>Нет активных экскаваторов в локальном справочнике.</p>

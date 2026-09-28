@@ -13,18 +13,18 @@
            самой стенки нет — так телефону легче, а изгиб граней и ободья читаются по карточкам. {% endcomment %}
         <div class="driver-downtime-drum-track" data-driver-drum-track>
             {% for reason in downtime_reasons %}
-                <button class="driver-drum-card{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" data-driver-drum-quick="{% if reason.driver_in_drum %}1{% else %}0{% endif %}"{% if not reason.driver_in_drum %} hidden{% endif %} aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
+                <button class="driver-drum-card status-{{ reason.effective_color_group }}{% if reason.driver_unavailable_message %} is-unavailable{% endif %}" type="button" data-driver-drum-card data-driver-drum-reason-id="{{ reason.id }}" data-driver-drum-quick="{% if reason.driver_in_drum %}1{% else %}0{% endif %}"{% if not reason.driver_in_drum %} hidden{% endif %} aria-label="Простой: {{ reason.button_label }}. Проведите вверх на круг, чтобы начать">
                     {% comment %} Грань — один слой: выпуклость цилиндра нарисована градиентом (блик по центру,
                        тень к боковым кромкам), а не набором объёмных полосок. На слабых телефонах это
                        решает: 12 слоёв вместо 108, и ни одного пересчёта при вращении. {% endcomment %}
                     <span class="driver-drum-card-face" aria-hidden="true"></span>
                     {% comment %} Стрелка на верхней кромке передней грани: вверх — начать простой, вниз — завершить. {% endcomment %}
                     <span class="driver-drum-card-arrow" aria-hidden="true"></span>
-                    {% comment %} Кегль подписи — по длине текста (короткая без класса, средняя/длинная
-                       классом): driver-downtime-drum-v1.css, .driver-drum-card-label. {% endcomment %}
+                    {% comment %} Кегль подписи подгоняет driver-drum-label-fit-v1.js: максимально крупно,
+                       перенос только по словам, «Ожидание X» — второстепенное слово мелко сверху. {% endcomment %}
                     <span class="driver-drum-card-body">
-                        <span class="driver-drum-card-label{% if reason.button_label|length > 14 %} is-drum-label-long{% elif reason.button_label|length > 6 %} is-drum-label-medium{% endif %}">{{ reason.button_label }}</span>
-                        <span class="driver-drum-card-total{% if reason.button_label|length > 14 %} is-drum-label-long{% elif reason.button_label|length > 6 %} is-drum-label-medium{% endif %}" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
+                        <span class="driver-drum-card-label" data-driver-drum-label>{{ reason.button_label }}</span>
+                        <span class="driver-drum-card-total" data-driver-drum-total{% if not reason.driver_is_used %} hidden{% endif %}>{{ reason.driver_total_label }}</span>
                     </span>
                 </button>
             {% empty %}
@@ -32,6 +32,11 @@
             {% endfor %}
         </div>
     </div>
+    {% comment %} Стрелка «свайп к кругу» — в неподвижном слоте над центральной гранью, в зазоре
+       между гранью и кругом, вне обрезки сцены (там ей не хватало высоты). Размер и отступ ставит
+       driver-downtime-drum-v1.js от фактического зазора (syncLinkVars), цвет — CSS по статусу
+       центральной грани. {% endcomment %}
+    <span class="driver-drum-slot-arrow" aria-hidden="true"></span>
 </div>
 {% comment %} Контур «кольцо → линии → рамка грани» — ОДНА непрерывная кривая. Сама кривая лежит в
    CSS-переменной на <html> (её ставит скрипт один раз при смене размеров), а путь берёт её через
