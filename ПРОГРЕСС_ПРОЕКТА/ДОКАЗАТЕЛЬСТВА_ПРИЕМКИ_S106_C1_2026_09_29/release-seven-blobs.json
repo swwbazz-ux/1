@@ -1,0 +1,44 @@
+[
+  {
+    "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "old": "a3dff96867e2323635aedc2b1fb82bf0c3b051d2",
+    "new": "a3dff96867e2323635aedc2b1fb82bf0c3b051d2",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py",
+    "old": "0709bbf4903e2f25680acec438d6b16f6efd3765",
+    "new": "0709bbf4903e2f25680acec438d6b16f6efd3765",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/core/test_offline_sync.py",
+    "old": "dded0ccfe3a6476aa7de1743ef8bddd9f2c00e2a",
+    "new": "dded0ccfe3a6476aa7de1743ef8bddd9f2c00e2a",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+    "old": "0f7a0deef70c96e1e3169229f435615c25bf0620",
+    "new": "0f7a0deef70c96e1e3169229f435615c25bf0620",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js",
+    "old": "9dbe739b304606e2e0172c006ab777ff3e5a7169",
+    "new": "9dbe739b304606e2e0172c006ab777ff3e5a7169",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js",
+    "old": "e7a1080f783150548ad7124ec2074276d5609e5b",
+    "new": "e7a1080f783150548ad7124ec2074276d5609e5b",
+    "equal": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js",
+    "old": "684b8626a1acbe3f33639943b5086ce047f252cd",
+    "new": "684b8626a1acbe3f33639943b5086ce047f252cd",
+    "equal": true
+  }
+]

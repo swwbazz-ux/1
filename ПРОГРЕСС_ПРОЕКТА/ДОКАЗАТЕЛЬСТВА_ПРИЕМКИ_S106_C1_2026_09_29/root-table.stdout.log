@@ -1,0 +1,8 @@
+{
+  "result": "PASS",
+  "schema": "s106-c1-contract-examples-v1",
+  "cases": 9,
+  "expanded_pr106_role_aware_pairs": 32,
+  "release_sha": "8c215ae2a45196e3e74e566c54f2ab5cb321be02",
+  "pr106_sha": "17cbb3e913dfdc98aaa9585ba4090d0f4cf17ee0"
+}

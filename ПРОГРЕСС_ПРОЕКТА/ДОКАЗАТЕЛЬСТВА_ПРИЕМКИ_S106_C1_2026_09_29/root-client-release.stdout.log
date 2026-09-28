@@ -1,0 +1,142 @@
+{
+  "result": "PASS_CURRENT_BEHAVIOR",
+  "label": "release",
+  "sha": "8c215ae2a45196e3e74e566c54f2ab5cb321be02",
+  "node": "v24.19.0",
+  "runtime_blobs": {
+    "driver": "0f7a0deef70c96e1e3169229f435615c25bf0620",
+    "excavator": "9dbe739b304606e2e0172c006ab777ff3e5a7169"
+  },
+  "working_sha256": {
+    "driver": "cd1e5055a656bcb08c853f8d6ee6952f4fab5810fc15f29e8cf2aa5de8272951",
+    "excavator": "a8b087d295f6bf30acbee0a718d83044d44a92ccaeb28b161c2872c5402ccf0e"
+  },
+  "observed": {
+    "driverConfirmedParent": [],
+    "driverForeignParent": [],
+    "driverBucketChain": [
+      "fb-load",
+      "fb-complete"
+    ],
+    "excavatorConfirmedParent": [],
+    "excavatorForeignParent": []
+  },
+  "scenarios": [
+    {
+      "name": "driver-confirmed-parent",
+      "before": [
+        {
+          "id": "c",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [],
+      "remaining": [
+        {
+          "id": "c",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ]
+    },
+    {
+      "name": "driver-foreign-parent",
+      "before": [
+        {
+          "id": "foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ],
+      "sent": [],
+      "remaining": [
+        {
+          "id": "foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ]
+    },
+    {
+      "name": "driver-free-bucket-chain",
+      "before": [
+        {
+          "id": "fb-load",
+          "state": "conflict",
+          "code": "free_bucket_not_available"
+        },
+        {
+          "id": "fb-complete",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [
+        "fb-load",
+        "fb-complete"
+      ],
+      "remaining": []
+    },
+    {
+      "name": "excavator-confirmed-parent",
+      "before": [
+        {
+          "id": "ec",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [],
+      "remaining": [
+        {
+          "id": "ec",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ]
+    },
+    {
+      "name": "excavator-foreign-parent",
+      "before": [
+        {
+          "id": "exc-foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "exc-foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ],
+      "sent": [],
+      "remaining": [
+        {
+          "id": "exc-foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "exc-foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ]
+    }
+  ],
+  "target_gaps": [
+    "confirmed parent is absent from queue so child is not retried",
+    "foreign/rejected parent keeps child terminal"
+  ]
+}

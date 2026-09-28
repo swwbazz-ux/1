@@ -1,0 +1,463 @@
+{
+  "source_commit": "34bcf0449a8a80e747b715183396e1f6907acb74",
+  "total": 76,
+  "matched": 75,
+  "entries": [
+    {
+      "path": "build_manifest.py",
+      "expected": "b5c9a16c7f016f7b43c3a4aa09f5eb18da8b17e7253432a1f24e8e3312327b8d",
+      "actual": "b5c9a16c7f016f7b43c3a4aa09f5eb18da8b17e7253432a1f24e8e3312327b8d",
+      "match": true
+    },
+    {
+      "path": "contract_cases.json",
+      "expected": "6569fe4ac1e1f17c5cecd7d8a3cffe4534b2d33ec0777f5a85a45be899e75a6d",
+      "actual": "6569fe4ac1e1f17c5cecd7d8a3cffe4534b2d33ec0777f5a85a45be899e75a6d",
+      "match": true
+    },
+    {
+      "path": "prepare_pr106_test_overlay.py",
+      "expected": "e245da33ceaefab27c6ff1de80d2cc6b922341e8774d45de1c2fd5de6c2a2d14",
+      "actual": "e245da33ceaefab27c6ff1de80d2cc6b922341e8774d45de1c2fd5de6c2a2d14",
+      "match": true
+    },
+    {
+      "path": "probe_client_recovery.cjs",
+      "expected": "3276c18cf4d407f8b66259bc2ddf48021a544093c477361ba329aa773eba7830",
+      "actual": "3276c18cf4d407f8b66259bc2ddf48021a544093c477361ba329aa773eba7830",
+      "match": true
+    },
+    {
+      "path": "README.md",
+      "expected": "0682ce474e6cf80dfb0d5509e0e67149bc89aa9afc2950b5edace99bffbd632e",
+      "actual": "0682ce474e6cf80dfb0d5509e0e67149bc89aa9afc2950b5edace99bffbd632e",
+      "match": true
+    },
+    {
+      "path": "results/client-pr106.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/client-pr106.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/client-pr106.stdout.log",
+      "expected": "c90f89d4c1464022aaf2408dc0210e3ccd6eb78c966092fc1cc5a40170fe3580",
+      "actual": "c90f89d4c1464022aaf2408dc0210e3ccd6eb78c966092fc1cc5a40170fe3580",
+      "match": true
+    },
+    {
+      "path": "results/client-release.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/client-release.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/client-release.stdout.log",
+      "expected": "aff14fd5862f3577795b970a3009dae49ef75634fad91507cfba893d0c84de60",
+      "actual": "aff14fd5862f3577795b970a3009dae49ef75634fad91507cfba893d0c84de60",
+      "match": true
+    },
+    {
+      "path": "results/contract-cases.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/contract-cases.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/contract-cases.stdout.log",
+      "expected": "5591c7a89f4efd93cc236925feb1e3ff4ff71cc951a738b2851067862de16179",
+      "actual": "5591c7a89f4efd93cc236925feb1e3ff4ff71cc951a738b2851067862de16179",
+      "match": true
+    },
+    {
+      "path": "results/git-add-merge-worktree.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-add-merge-worktree.stderr.log",
+      "expected": "656c00814318dfef05bc2bfb63e7a39864f48319c462f791a8e74d0721a14180",
+      "actual": "656c00814318dfef05bc2bfb63e7a39864f48319c462f791a8e74d0721a14180",
+      "match": true
+    },
+    {
+      "path": "results/git-add-merge-worktree.stdout.log",
+      "expected": "5e0ae9fdce2ee4f5aa0c1886b17e47565292638e1db24abcc869fe5dc9b0e00c",
+      "actual": "5e0ae9fdce2ee4f5aa0c1886b17e47565292638e1db24abcc869fe5dc9b0e00c",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-overlay-worktree.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-overlay-worktree.stderr.log",
+      "expected": "498e6b11fdf5b4e7e592496230419c3199df0c7d8810baef206f79ad49289333",
+      "actual": "498e6b11fdf5b4e7e592496230419c3199df0c7d8810baef206f79ad49289333",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-overlay-worktree.stdout.log",
+      "expected": "38e393f541a25f81b86427aee321c6b26d30456856fd5e6c53b12a209f4cc9dc",
+      "actual": "38e393f541a25f81b86427aee321c6b26d30456856fd5e6c53b12a209f4cc9dc",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-worktree.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-worktree.stderr.log",
+      "expected": "498e6b11fdf5b4e7e592496230419c3199df0c7d8810baef206f79ad49289333",
+      "actual": "498e6b11fdf5b4e7e592496230419c3199df0c7d8810baef206f79ad49289333",
+      "match": true
+    },
+    {
+      "path": "results/git-add-pr106-worktree.stdout.log",
+      "expected": "38e393f541a25f81b86427aee321c6b26d30456856fd5e6c53b12a209f4cc9dc",
+      "actual": "38e393f541a25f81b86427aee321c6b26d30456856fd5e6c53b12a209f4cc9dc",
+      "match": true
+    },
+    {
+      "path": "results/git-add-release-worktree.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-add-release-worktree.stderr.log",
+      "expected": "656c00814318dfef05bc2bfb63e7a39864f48319c462f791a8e74d0721a14180",
+      "actual": "656c00814318dfef05bc2bfb63e7a39864f48319c462f791a8e74d0721a14180",
+      "match": true
+    },
+    {
+      "path": "results/git-add-release-worktree.stdout.log",
+      "expected": "5e0ae9fdce2ee4f5aa0c1886b17e47565292638e1db24abcc869fe5dc9b0e00c",
+      "actual": "5e0ae9fdce2ee4f5aa0c1886b17e47565292638e1db24abcc869fe5dc9b0e00c",
+      "match": true
+    },
+    {
+      "path": "results/git-pr106-object.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-pr106-object.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/git-pr106-object.stdout.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/git-release-object.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/git-release-object.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/git-release-object.stdout.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/merge-probe.exit-code.txt",
+      "expected": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "actual": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "match": true
+    },
+    {
+      "path": "results/merge-probe.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/merge-probe.stdout.log",
+      "expected": "26a3c06e836412ac75b3f55bd6f84df23ec2b98d47e50829722381d9028e2946",
+      "actual": "26a3c06e836412ac75b3f55bd6f84df23ec2b98d47e50829722381d9028e2946",
+      "match": true
+    },
+    {
+      "path": "results/merge-status.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/merge-status.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/merge-status.stdout.log",
+      "expected": "3b534f6313cae5b94e26ef22861adb16520208373b615d8be9b015de0f4ab01d",
+      "actual": "3b534f6313cae5b94e26ef22861adb16520208373b615d8be9b015de0f4ab01d",
+      "match": true
+    },
+    {
+      "path": "results/merge-unmerged-files.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/merge-unmerged-files.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/merge-unmerged-files.stdout.log",
+      "expected": "3fdaea5cad1c89d640b5df53fddd4d240080485befb832b20a51bd71911ed7e5",
+      "actual": "3fdaea5cad1c89d640b5df53fddd4d240080485befb832b20a51bd71911ed7e5",
+      "match": true
+    },
+    {
+      "path": "results/pr106-existing-replay-regressions.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/pr106-existing-replay-regressions.stderr.log",
+      "expected": "9b7ef6f218c6d3574cc9b5e83aba9c157aa8925f1878f0525cfd169b9db283d4",
+      "actual": "9b7ef6f218c6d3574cc9b5e83aba9c157aa8925f1878f0525cfd169b9db283d4",
+      "match": true
+    },
+    {
+      "path": "results/pr106-existing-replay-regressions.stdout.log",
+      "expected": "3855f66d40c40481e6add25282d69f9444c68f76c0fb2a9eb75fe8c677526ceb",
+      "actual": "3855f66d40c40481e6add25282d69f9444c68f76c0fb2a9eb75fe8c677526ceb",
+      "match": true
+    },
+    {
+      "path": "results/pr106-node-regressions.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/pr106-node-regressions.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/pr106-node-regressions.stdout.log",
+      "expected": "00597e4b77a8786a51765e830ec705de5ef1e9974db3d5300783b1cf0b8317e7",
+      "actual": "00597e4b77a8786a51765e830ec705de5ef1e9974db3d5300783b1cf0b8317e7",
+      "match": true
+    },
+    {
+      "path": "results/pr106-target-contract.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/pr106-target-contract.stderr.log",
+      "expected": "838370f5c05a604e99bf3f6406a635dc9814bed36774860a7727a922450216be",
+      "actual": "838370f5c05a604e99bf3f6406a635dc9814bed36774860a7727a922450216be",
+      "match": true
+    },
+    {
+      "path": "results/pr106-target-contract.stdout.log",
+      "expected": "97bb28d3ce0bcfb58d9512b22a23591522c2c34ec0d5d007cf95c488c329f142",
+      "actual": "97bb28d3ce0bcfb58d9512b22a23591522c2c34ec0d5d007cf95c488c329f142",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-django-tests-known-incompatible.exit-code.txt",
+      "expected": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "actual": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-django-tests-known-incompatible.stderr.log",
+      "expected": "ec4b4b5cbc3cf98625b5d6ca8e80d2cea1dd1cd38615ff518d870d6b1cc8dcaf",
+      "actual": "ec4b4b5cbc3cf98625b5d6ca8e80d2cea1dd1cd38615ff518d870d6b1cc8dcaf",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-django-tests-known-incompatible.stdout.log",
+      "expected": "f9cb3d49df00639515275ab75d43599911979cba6536cb748236d167762ea683",
+      "actual": "f9cb3d49df00639515275ab75d43599911979cba6536cb748236d167762ea683",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-js-test-known-gap.exit-code.txt",
+      "expected": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "actual": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-js-test-known-gap.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/pr106-unchanged-release-js-test-known-gap.stdout.log",
+      "expected": "bac6dd51184e852dea0b3ee3be76422a251ed4b5e2b4f0a8efc5730380df6be0",
+      "actual": "bac6dd51184e852dea0b3ee3be76422a251ed4b5e2b4f0a8efc5730380df6be0",
+      "match": true
+    },
+    {
+      "path": "results/prepare-pr106-release-test-overlay.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/prepare-pr106-release-test-overlay.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/prepare-pr106-release-test-overlay.stdout.log",
+      "expected": "0768bb5b0a24867751ef85c4ac64197721e30a59647a52173098b1a291706a7b",
+      "actual": "0768bb5b0a24867751ef85c4ac64197721e30a59647a52173098b1a291706a7b",
+      "match": true
+    },
+    {
+      "path": "results/release-negative-domain-parent.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/release-negative-domain-parent.stderr.log",
+      "expected": "f4458579e359573690b4fc91a935b4da3a4aae45702b1eb6d5f92be35ce88105",
+      "actual": "f4458579e359573690b4fc91a935b4da3a4aae45702b1eb6d5f92be35ce88105",
+      "match": true
+    },
+    {
+      "path": "results/release-negative-domain-parent.stdout.log",
+      "expected": "11681d6688f45769771586268917f378bd642e8d6bf219f5b44040b49d2bed06",
+      "actual": "11681d6688f45769771586268917f378bd642e8d6bf219f5b44040b49d2bed06",
+      "match": true
+    },
+    {
+      "path": "results/release-node-regressions.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/release-node-regressions.stderr.log",
+      "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "match": true
+    },
+    {
+      "path": "results/release-node-regressions.stdout.log",
+      "expected": "e32d93abb5e97d9cb5f5893ea38bcfdb5d945a07786f46e8d7f165bd543e68b1",
+      "actual": "e32d93abb5e97d9cb5f5893ea38bcfdb5d945a07786f46e8d7f165bd543e68b1",
+      "match": true
+    },
+    {
+      "path": "results/release-target-contract-known-gap.exit-code.txt",
+      "expected": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "actual": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "match": true
+    },
+    {
+      "path": "results/release-target-contract-known-gap.stderr.log",
+      "expected": "28b5a525321f6d2c4fb2ad4cbf3447e7dd2c81ba462128c7ca0889a6824820cf",
+      "actual": "28b5a525321f6d2c4fb2ad4cbf3447e7dd2c81ba462128c7ca0889a6824820cf",
+      "match": true
+    },
+    {
+      "path": "results/release-target-contract-known-gap.stdout.log",
+      "expected": "97bb28d3ce0bcfb58d9512b22a23591522c2c34ec0d5d007cf95c488c329f142",
+      "actual": "97bb28d3ce0bcfb58d9512b22a23591522c2c34ec0d5d007cf95c488c329f142",
+      "match": true
+    },
+    {
+      "path": "results/release-three-coordinator-regressions.exit-code.txt",
+      "expected": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "actual": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "match": true
+    },
+    {
+      "path": "results/release-three-coordinator-regressions.stderr.log",
+      "expected": "7894c58e0d67be01836a6a7301e2b908dfdae615164b2b865b9fbb89c3c52b43",
+      "actual": "7894c58e0d67be01836a6a7301e2b908dfdae615164b2b865b9fbb89c3c52b43",
+      "match": true
+    },
+    {
+      "path": "results/release-three-coordinator-regressions.stdout.log",
+      "expected": "e8a722535a6bc5ee28032723b68811a5589a3c21053b20de0dca2d581f22d42d",
+      "actual": "e8a722535a6bc5ee28032723b68811a5589a3c21053b20de0dca2d581f22d42d",
+      "match": true
+    },
+    {
+      "path": "results/run-summary.json",
+      "expected": "8876d0e2ad9235681c1301688e8cde9338847a11774fb4e8f34c89f1feba2295",
+      "actual": "e1a6142319206e66e4b94c6555adea1da5da0af191adc49eb69ae365bad7b4a0",
+      "match": false
+    },
+    {
+      "path": "run_s106_c1.ps1",
+      "expected": "d1064299965002697cf8cb5e7db5952e5499b9ce13fb695d9f9f9fb93e6b17d8",
+      "actual": "d1064299965002697cf8cb5e7db5952e5499b9ce13fb695d9f9f9fb93e6b17d8",
+      "match": true
+    },
+    {
+      "path": "test_s106_c1_probe.py",
+      "expected": "86950214020b798012b7949ac0eaf0776fcb66b774f0aef0a47ab5fa5efe5cdf",
+      "actual": "86950214020b798012b7949ac0eaf0776fcb66b774f0aef0a47ab5fa5efe5cdf",
+      "match": true
+    },
+    {
+      "path": "verify_contract_cases.py",
+      "expected": "f3a055e66279e09667dcaedd425fa1debd8bb8f20e1c6b01f0bb6a2f78ddef94",
+      "actual": "f3a055e66279e09667dcaedd425fa1debd8bb8f20e1c6b01f0bb6a2f78ddef94",
+      "match": true
+    },
+    {
+      "path": "ПРОЕКТ_ПАТЧА_S106_C1.md",
+      "expected": "59b4ee9a4c33dbcfb4f66547539ed03cdd7b1868125895bac9782b399df13074",
+      "actual": "59b4ee9a4c33dbcfb4f66547539ed03cdd7b1868125895bac9782b399df13074",
+      "match": true
+    }
+  ]
+}

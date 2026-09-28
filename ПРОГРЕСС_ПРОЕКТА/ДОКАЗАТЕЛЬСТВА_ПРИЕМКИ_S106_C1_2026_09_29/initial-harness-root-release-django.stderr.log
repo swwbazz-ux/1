@@ -1,0 +1,70 @@
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact (core.test_free_bucket_sync.FreeBucketServerIntegrationTests.test_manual_load_under_bucket_cancelled_by_server_ttl_is_recorded_by_fact)
+Погрузка под ковшом, который сервер погасил до прихода отметки, — записана. ... offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-09-28T20:18:08.953542+00:00; погрузка водителя 2026-09-28T20:09:08.953542+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-09-28T20:09:08.953542+00:00; машинист на смене: нет
+ok
+test_already_rejected_cancelled_bucket_load_is_accepted_on_resend (core.test_free_bucket_sync.FreeBucketServerIntegrationTests.test_already_rejected_cancelled_bucket_load_is_accepted_on_resend)
+Отметка, отклонённая старым сервером, и её каскад проходят при повторной отправке. ... offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-09-28T20:18:09.080463+00:00; погрузка водителя 2026-09-28T20:09:09.080463+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-09-28T20:09:09.080463+00:00; машинист на смене: нет
+ok
+test_dependency_chain_recovers_when_only_the_parent_clock_was_ahead (core.test_offline_sync.OfflineEventSyncTests.test_dependency_chain_recovers_when_only_the_parent_clock_was_ahead)
+The phone may resync its clock between two queued offline actions. ... ok
+test_real_conflict_chain_is_not_reopened_by_clock_recovery (core.test_offline_sync.OfflineEventSyncTests.test_real_conflict_chain_is_not_reopened_by_clock_recovery)
+Настоящий доменный конфликт родителя остаётся терминальным. ... ok
+test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad) ... FAIL
+test_target_child_replays_after_parent_was_already_accepted (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_replays_after_parent_was_already_accepted) ... FAIL
+test_target_foreign_parent_neither_vetoes_nor_supplies_child_references (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_foreign_parent_neither_vetoes_nor_supplies_child_references) ... FAIL
+test_same_event_id_from_another_device_cannot_bypass_identity (test_s106_c1_probe.S106C1ReplayContractProbe.test_same_event_id_from_another_device_cannot_bypass_identity) ... ok
+test_same_code_on_unrelated_event_type_is_not_replayed (test_s106_c1_probe.S106C1ReplayContractProbe.test_same_code_on_unrelated_event_type_is_not_replayed) ... ok
+
+======================================================================
+FAIL: test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/s106-review/package/test_s106_c1_probe.py", line 60, in test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad
+    self.assertEqual(trip.cancelled_at, child_time)
+AssertionError: datetime.datetime(2026, 9, 28, 20, 46, 9, 387123, tzinfo=datetime.timezone.utc) != datetime.datetime(2026, 9, 28, 20, 45, 39, 387123, tzinfo=datetime.timezone.utc)
+
+======================================================================
+FAIL: test_target_child_replays_after_parent_was_already_accepted (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_replays_after_parent_was_already_accepted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/s106-review/package/test_s106_c1_probe.py", line 81, in test_target_child_replays_after_parent_was_already_accepted
+    self.assertEqual(result['status'], 'accepted', result)
+AssertionError: 'conflict' != 'accepted'
+- conflict
++ accepted
+ : {'event_id': 's106-child-after-confirmed-parent', 'status': 'conflict', 'retryable': False, 'code': 'dependency_rejected', 'message': 'legacy dependency conflict after accepted parent', 'server_ids': {}, 'server_received_at': '2026-09-28T20:47:09.570579+00:00', 'version': None}
+
+======================================================================
+FAIL: test_target_foreign_parent_neither_vetoes_nor_supplies_child_references (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_foreign_parent_neither_vetoes_nor_supplies_child_references)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/s106-review/package/test_s106_c1_probe.py", line 133, in test_target_foreign_parent_neither_vetoes_nor_supplies_child_references
+    self.assertEqual(result['status'], 'accepted', result)
+AssertionError: 'conflict' != 'accepted'
+- conflict
++ accepted
+ : {'event_id': 's106-self-contained-child', 'status': 'conflict', 'retryable': False, 'code': 'dependency_owner_mismatch', 'message': 'legacy foreign dependency', 'server_ids': {}, 'server_received_at': '2026-09-28T20:46:09.656283+00:00', 'version': None}
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.067s
+
+FAILED (failures=3)
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+Traceback (most recent call last):
+  File "/workspace/scratch/a66293d272e2/s106-review/run_addressed_django.py", line 69, in <module>
+    test_exit = runner.run_tests(existing + probes)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/a66293d272e2/p28-i2-venv/lib/python3.12/site-packages/django/test/runner.py", line 1149, in run_tests
+    return self.suite_result(suite, result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/a66293d272e2/s106-review/run_addressed_django.py", line 65, in suite_result
+    Path(output).write_text(json.dumps(details, ensure_ascii=False, indent=2) + '\n')
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/pathlib.py", line 1047, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'evidence/root-release-django.json'

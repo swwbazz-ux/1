@@ -1,0 +1,139 @@
+{
+  "result": "PASS_CURRENT_BEHAVIOR",
+  "label": "pr106",
+  "sha": "17cbb3e913dfdc98aaa9585ba4090d0f4cf17ee0",
+  "node": "v24.19.0",
+  "runtime_blobs": {
+    "driver": "b4ec7303651624af0670d90ccee9bc187538176b",
+    "excavator": "74f27be85b868cf23b07466630c09eb166949b4f"
+  },
+  "working_sha256": {
+    "driver": "180a1bd07f66f87b6b09dfffcf066166ff08daf8455170466741f69b8ca5bcfb",
+    "excavator": "a29dcc96aab81a616c3177c9e632c84cecfbb1c55c01584ab38902bb502f3509"
+  },
+  "observed": {
+    "driverConfirmedParent": [
+      "c"
+    ],
+    "driverForeignParent": [
+      "foreign-child"
+    ],
+    "driverBucketChain": [
+      "fb-complete"
+    ],
+    "excavatorConfirmedParent": [
+      "ec"
+    ],
+    "excavatorForeignParent": [
+      "exc-foreign-child"
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "driver-confirmed-parent",
+      "before": [
+        {
+          "id": "c",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [
+        "c"
+      ],
+      "remaining": []
+    },
+    {
+      "name": "driver-foreign-parent",
+      "before": [
+        {
+          "id": "foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ],
+      "sent": [
+        "foreign-child"
+      ],
+      "remaining": [
+        {
+          "id": "foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        }
+      ]
+    },
+    {
+      "name": "driver-free-bucket-chain",
+      "before": [
+        {
+          "id": "fb-load",
+          "state": "conflict",
+          "code": "free_bucket_not_available"
+        },
+        {
+          "id": "fb-complete",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [
+        "fb-complete"
+      ],
+      "remaining": [
+        {
+          "id": "fb-load",
+          "state": "conflict",
+          "code": "free_bucket_not_available"
+        }
+      ]
+    },
+    {
+      "name": "excavator-confirmed-parent",
+      "before": [
+        {
+          "id": "ec",
+          "state": "conflict",
+          "code": "dependency_rejected"
+        }
+      ],
+      "sent": [
+        "ec"
+      ],
+      "remaining": []
+    },
+    {
+      "name": "excavator-foreign-parent",
+      "before": [
+        {
+          "id": "exc-foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        },
+        {
+          "id": "exc-foreign-child",
+          "state": "conflict",
+          "code": "dependency_owner_mismatch"
+        }
+      ],
+      "sent": [
+        "exc-foreign-child"
+      ],
+      "remaining": [
+        {
+          "id": "exc-foreign-parent",
+          "state": "conflict",
+          "code": "equipment_context_changed"
+        }
+      ]
+    }
+  ],
+  "target_gaps": [
+    "free_bucket_not_available root is not retried while its child is sent alone"
+  ]
+}

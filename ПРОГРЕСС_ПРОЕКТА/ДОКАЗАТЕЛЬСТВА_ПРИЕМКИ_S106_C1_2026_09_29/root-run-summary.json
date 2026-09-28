@@ -1,0 +1,27 @@
+{
+  "root_release_wrapper_exit": 0,
+  "root_release_tests": {
+    "total": 9,
+    "pass": 6,
+    "expected_fail": 3,
+    "error": 0,
+    "skip": 0
+  },
+  "root_pr106_wrapper_exit": 0,
+  "root_pr106_tests": {
+    "total": 9,
+    "pass": 9,
+    "fail": 0,
+    "error": 0,
+    "skip": 0
+  },
+  "client_release_exit": 0,
+  "client_pr106_exit": 0,
+  "table_exit": 0,
+  "merge_tree_exit": 1,
+  "merge_conflict_files": [
+    "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+    "СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js"
+  ]
+}

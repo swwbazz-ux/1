@@ -1,0 +1,25 @@
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+test_dependency_chain_recovers_when_only_the_parent_clock_was_ahead (core.test_offline_sync.OfflineEventSyncTests.test_dependency_chain_recovers_when_only_the_parent_clock_was_ahead)
+The phone may resync its clock between two queued offline actions. ... offline_sync: accepted despite discrepancy (Отмена погрузки/cancel_before_load) employee=1 role=6 — Отмена рейса #1 на 2026-09-28 20:48:06.279879+00:00 раньше времени погрузки (2026-09-28 20:48:36.279879+00:00). Принято по времени нажатия.
+ok
+test_legacy_open_trip_changed_chain_replays_worker_truth (core.test_offline_sync.OfflineEventSyncTests.test_legacy_open_trip_changed_chain_replays_worker_truth)
+Старый terminal conflict не должен навсегда терять факт погрузки. ... ok
+test_legacy_dependency_receipts_reprocess_independently (core.test_offline_sync.OfflineEventSyncTests.test_legacy_dependency_receipts_reprocess_independently) ... offline_sync: dependency legacy-parent-dependency_rejected-stage-a for event legacy-dependency_rejected-stage-a is not stored; processing child independently
+offline_sync: dependency legacy-parent-dependency_owner_mismatch-stage-a for event legacy-dependency_owner_mismatch-stage-a is not stored; processing child independently
+offline_sync: dependency legacy-parent-dependency_order_invalid-stage-a for event legacy-dependency_order_invalid-stage-a is not stored; processing child independently
+ok
+test_legacy_unload_before_load_receipt_reprocesses_without_duplicate (core.test_offline_sync.OfflineEventSyncTests.test_legacy_unload_before_load_receipt_reprocesses_without_duplicate) ... driver unload event legacy-unload-before-load-stage-a predates trip 1 load; clamping 2026-09-28 20:44:36.763609+00:00 to 2026-09-28 20:45:36.763609+00:00
+ok
+test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_keeps_its_own_time_when_only_parent_clock_was_bad) ... offline_sync: accepted despite discrepancy (Отмена погрузки/cancel_before_load) employee=1 role=6 — Отмена рейса #1 на 2026-09-28 20:48:06.870621+00:00 раньше времени погрузки (2026-09-28 20:48:36.870621+00:00). Принято по времени нажатия.
+ok
+test_target_child_replays_after_parent_was_already_accepted (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_child_replays_after_parent_was_already_accepted) ... ok
+test_target_foreign_parent_neither_vetoes_nor_supplies_child_references (test_s106_c1_probe.S106C1ReplayContractProbe.test_target_foreign_parent_neither_vetoes_nor_supplies_child_references) ... offline_sync: dependency owner mismatch for event s106-self-contained-child dependency s106-foreign-parent; processing child by its own domain references
+ok
+test_same_event_id_from_another_device_cannot_bypass_identity (test_s106_c1_probe.S106C1ReplayContractProbe.test_same_event_id_from_another_device_cannot_bypass_identity) ... ok
+test_same_code_on_unrelated_event_type_is_not_replayed (test_s106_c1_probe.S106C1ReplayContractProbe.test_same_code_on_unrelated_event_type_is_not_replayed) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 1.391s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
