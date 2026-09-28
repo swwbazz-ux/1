@@ -59,12 +59,23 @@ test("the primary-assignment tile is disabled and labelled ОСНОВНОЙ, the
     // Выбранная: окантовка полным цветом и свечение снаружи плитки.
     const current = CSS.match(/\.driver-free-bucket-tile\.is-current \{([^}]*)\}/)[1];
     assert.match(current, /--fb-frame: rgb\(var\(--fb-rgb\)\)/);
-    assert.match(current, /0 0 30px rgba\(var\(--fb-rgb\), \.55\)/);
+    assert.match(current, /0 0 0 3px rgb\(var\(--fb-rgb\)\)/);
+    assert.match(current, /0 0 36px rgba\(var\(--fb-rgb\), \.7\)/);
+    assert.match(current, /color: #ffffff;/);
+    // Три состояния читаются сразу: основной — свой спокойный цвет (голубой ручного
+    // режима), недоступный — серый, выбранный — цвет ковша.
+    const primary = CSS.match(/\.driver-free-bucket-tile:disabled\[data-is-primary="true"\] \{([^}]*)\}/);
+    assert.ok(primary, "primary tile has its own rule");
+    assert.match(primary[1], /--driver-manual-accent-rgb/);
     // «Закрыть» на одной оси с заголовком: одинаковый верхний отступ и высота 44px.
     const close = CSS.match(/\.driver-free-bucket-close \{([^}]*)\}/)[1];
     const head = CSS.match(/\.driver-free-bucket-head \{([^}]*)\}/)[1];
     assert.match(close, /top: 18px;[\s\S]*right: 18px;[\s\S]*height: 44px;[\s\S]*place-items: center;[\s\S]*padding: 0;/);
     assert.match(head, /align-items: center;[\s\S]*min-height: 44px;/);
+    // Крест — SVG из двух линий, не текстовый «×» (тот стоял не по центру кружка).
+    assert.match(TEMPLATE, /data-driver-free-bucket-close aria-label="[^"]*"><svg viewBox="0 0 24 24"[^>]*><path d="M6 6 18 18M18 6 6 18"\/><\/svg><\/button>/);
+    assert.doesNotMatch(TEMPLATE, /data-driver-free-bucket-close aria-label="[^"]*">×</);
+    assert.match(CSS, /\.driver-free-bucket-close svg \{[^}]*display: block;[^}]*width: 20px;[^}]*height: 20px;/);
 });
 
 test("a long contractor number is fitted by width, never broken across lines", () => {

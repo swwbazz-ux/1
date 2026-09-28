@@ -320,6 +320,43 @@ test("a stuck review state from storage becomes inactive as soon as project() ru
     assert.equal(controller.state().active, false);
 });
 
+test("a rejected local selection falls back to the server's live acceptance, not to 'no bucket'", () => {
+    // Стенд 28.09.2026: у сервера принятие #4 (requested, ЭКГ-15), водитель тыкал
+    // другую плитку — сервер отвечал free_bucket_target_changed («уже выбран другой
+    // экскаватор»), а проекция гасила состояние в «ковша нет»: выбранная плитка не
+    // светилась, отменить принятие было нельзя (cancel() требует state.active).
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({
+        active: true,
+        status: "requested",
+        can_cancel: true,
+        acceptance_id: 4,
+        selection: item(),
+        sync_mode: "server",
+        version: 30,
+        generated_at: "2026-09-28T08:00:00Z",
+    });
+    const projected = controller.project([{
+        event_id: "select-other",
+        event_type: "driver.free_bucket.selected",
+        sequence: 21,
+        state: "conflict",
+        last_error: {code: "free_bucket_target_changed"},
+        occurred_at: "2026-09-28T08:16:00Z",
+        payload: {truck_id: 17, excavator_id: 63, catalog_version: 31},
+    }]);
+    assert.equal(projected.active, true, "server acceptance stays visible");
+    assert.equal(projected.acceptance_id, 4);
+    assert.equal(projected.selection.id, 22);
+    assert.equal(controller.state().active, true);
+});
+
 test("missing or invalid server catalog keeps last-good snapshot", () => {
     const localStorage = storage();
     const controller = createDriverFreeBucketController({

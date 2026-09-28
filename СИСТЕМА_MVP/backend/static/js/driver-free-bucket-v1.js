@@ -236,8 +236,13 @@
             return catalog;
         }
 
+        /* Последнее состояние, пришедшее С СЕРВЕРА (не местная проекция): к нему
+           возвращается проекция, когда сервер отклонил местный выбор. */
+        var lastServerState = normalizeState(options.state || {});
+
         function installState(serverState) {
             var fresh = normalizeState(serverState);
+            lastServerState = fresh;
             var saved = normalizeState(storageRead(stateKey));
             state = resolveInstalledState(fresh, saved);
             if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
@@ -530,12 +535,18 @@
                 var rejected = ["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0;
                 if (event.event_type === "driver.free_bucket.selected" && positive(event.payload && event.payload.truck_id) === positive(truckId)) {
                     if (rejected) {
-                        // Сервер не принял выбор — ковша нет и никогда не было.
-                        // Раньше это всё равно оставляло active:true с
-                        // sync_mode "review" ("НУЖНА СВЕРКА") — самосвал
-                        // застревал навсегда, ни выбрать заново, ни отменить
-                        // было нельзя (26.09.2026, боевой afb373a5).
-                        projected = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
+                        // Сервер не принял ЭТОТ выбор — местного ковша нет. Раньше
+                        // это всё равно оставляло active:true с sync_mode "review"
+                        // ("НУЖНА СВЕРКА") — самосвал застревал навсегда, ни выбрать
+                        // заново, ни отменить было нельзя (26.09.2026, боевой afb373a5).
+                        // Но отказ «уже выбран другой экскаватор»
+                        // (free_bucket_target_changed) значит, что у сервера ЕСТЬ живой
+                        // ковш — его состояние и есть истина. Гасить в «ковша нет»
+                        // прятало принятие #4 (ЭКГ-15) на стенде 28.09.2026: плитка не
+                        // светилась, а отменить было нельзя (cancel() требует active).
+                        projected = lastServerState.active
+                            ? normalizeState(lastServerState)
+                            : normalizeState({active: false, status: "cancelled", sync_mode: "local"});
                         return;
                     }
                     var item = itemFromEvent(event, catalog);
