@@ -1233,6 +1233,46 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
     return authoritative, selected
 
 
+def _accept_free_bucket_by_driver_action(acceptance, *, access, excavator, accepted_at):
+    """Accept a still-REQUESTED free-bucket right by the driver's own manual load mark.
+
+    Машинист, если он сейчас на смене у экскаватора ковша (как считает пульт в
+    dispatcher_trip_commands), записывается принявшим — для отчётов это реальные
+    данные. Без открытой смены право принимается без машиниста: признак
+    accepted_by_driver_action допускает это по ограничениям модели. accepted_at —
+    ровно время погрузки, чтобы проверка «погрузка раньше приёма» не срабатывала.
+    """
+    from shifts.models import EmployeeShift
+    from trips.models import FreeBucketAcceptanceStatus
+
+    operator_shift = (
+        EmployeeShift.objects
+        .select_related('employee')
+        .filter(equipment=excavator, closed_at__isnull=True)
+        .order_by('-opened_at')
+        .first()
+    )
+    acceptance.operator = operator_shift.employee if operator_shift else None
+    acceptance.loading_shift = operator_shift
+    acceptance.accepted_by_driver_action = True
+    acceptance.status = FreeBucketAcceptanceStatus.ACCEPTED
+    acceptance.accepted_at = accepted_at
+    acceptance.save(update_fields=[
+        'operator', 'loading_shift', 'accepted_by_driver_action', 'status', 'accepted_at',
+    ])
+    _log_discrepancy(
+        access=access,
+        code='free_bucket_accepted_by_driver_action',
+        process='driver.trip.loaded',
+        description=(
+            f'запрос свободного ковша #{acceptance.id} принят отметкой водителя '
+            f'{accepted_at.isoformat()}; машинист на смене: '
+            f'{"есть" if operator_shift else "нет"}'
+        ),
+    )
+    return acceptance
+
+
 def _process_driver_loaded(access, normalized):
     """Create or attach one Driver manual-load event to the common Trip row."""
     from assignments.models import HaulAssignment, HaulAssignmentAction
@@ -1324,8 +1364,23 @@ def _process_driver_loaded(access, normalized):
                 'free_bucket_request_owner_changed',
                 'Запрос свободного ковша принадлежит другой смене водителя.',
             )
-        if not acceptance.accepted_at:
-            _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
+        if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
+            # Ручной режим: машинист без приложения, подтверждать запрос некому —
+            # раньше здесь был retry «машинист ещё не подтвердил», и телефон водителя
+            # крутил его бесконечно (бой 28.09.2026: 260 попыток за ~38 минут, три
+            # рейса не записаны, вся очередь за первым событием). По правилу владельца
+            # в ручном режиме погрузку определяет водитель: его отметка сама принимает
+            # запрос временем погрузки. Машинист, если он на смене у этого экскаватора,
+            # записывается как принявший; без смены право живёт без машиниста
+            # (accepted_by_driver_action, см. ограничения FreeBucketAcceptance).
+            _accept_free_bucket_by_driver_action(
+                acceptance, access=access, excavator=excavator, accepted_at=normalized['occurred_at'],
+            )
+        if acceptance.status not in (
+            FreeBucketAcceptanceStatus.ACCEPTED,
+            FreeBucketAcceptanceStatus.USED,
+        ):
+            _conflict('free_bucket_not_available', 'Свободный ковш уже отменён или закрыт.')
         if normalized['occurred_at'] < acceptance.accepted_at:
             _conflict(
                 'free_bucket_load_before_accept',
@@ -1335,13 +1390,6 @@ def _process_driver_loaded(access, normalized):
             acceptance.requested_by = access.employee
             acceptance.requesting_shift = shift
             acceptance.save(update_fields=['requested_by', 'requesting_shift'])
-        if acceptance.status == FreeBucketAcceptanceStatus.REQUESTED:
-            _retry('free_bucket_acceptance_pending', 'Машинист ещё не подтвердил свободный ковш.')
-        if acceptance.status not in (
-            FreeBucketAcceptanceStatus.ACCEPTED,
-            FreeBucketAcceptanceStatus.USED,
-        ):
-            _conflict('free_bucket_not_available', 'Свободный ковш уже отменён или закрыт.')
         try:
             load_context = resolve_free_bucket_load_context(acceptance, payload)
         except ValidationError as error:
