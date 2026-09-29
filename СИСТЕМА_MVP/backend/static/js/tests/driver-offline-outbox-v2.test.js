@@ -336,6 +336,49 @@ test("restart resends a manual load refused as free_bucket_not_available and its
     assert.equal((await restarted.pending()).length, 0);
 });
 
+test("restart resends a free-bucket selection refused as free_bucket_request_stale and its cancel", async () => {
+    const local = storage();
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: event.event_id === "fb-select" ? "free_bucket_request_stale" : "dependency_rejected",
+                message: "Отклонено.",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "fb-select",
+        event_type: "driver.free_bucket.selected",
+        occurred_at: "2026-09-30T07:21:58.000Z",
+        payload: {truck_id: 58, excavator_id: 7},
+    });
+    await rejected.enqueue({
+        event_id: "fb-cancel",
+        event_type: "driver.free_bucket.cancelled",
+        occurred_at: "2026-09-30T07:21:59.000Z",
+        depends_on: ["fb-select"],
+        payload: {free_bucket_acceptance_id: null, free_bucket_acceptance_local_id: "fb-select"},
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await restarted.initialize();
+
+    assert.deepEqual(delivered.flat(), ["fb-select", "fb-cancel"]);
+    assert.equal((await restarted.pending()).length, 0);
+});
+
 test("restart never retries a real domain conflict", async () => {
     const local = storage();
     const rejected = runtime({
