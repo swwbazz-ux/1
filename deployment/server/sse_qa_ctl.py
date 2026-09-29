@@ -19,6 +19,7 @@ import re
 import signal
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import tarfile
@@ -537,6 +538,105 @@ def verify_systemd_credential_prerequisites(
     details = path.stat(follow_symlinks=False)
     if details.st_uid != 0 or details.st_mode & 0o077:
         raise QaError("systemd host credential key ownership or mode is unsafe")
+
+
+def inspect_systemd_host_credential_key(host_key: Path | None = None) -> str:
+    """Inspect only fixed-path metadata and never read or repair the host key."""
+    path = SYSTEMD_HOST_CREDENTIAL_KEY if host_key is None else host_key
+    try:
+        details = os.lstat(path)
+    except FileNotFoundError:
+        return "missing"
+    except OSError as exc:
+        raise QaError("systemd host credential key metadata check failed") from exc
+    if stat.S_ISLNK(details.st_mode):
+        return "symlink"
+    if not stat.S_ISREG(details.st_mode):
+        return "not_regular"
+    if details.st_uid != 0 or details.st_mode & 0o077:
+        return "unsafe_metadata"
+    return "ready"
+
+
+def _require_safe_systemd_host_key_state(state: str) -> None:
+    if state == "ready":
+        return
+    if state == "missing":
+        raise QaError("systemd host credential key is unavailable")
+    if state == "symlink":
+        raise QaError("systemd host credential key is a symlink")
+    if state == "not_regular":
+        raise QaError("systemd host credential key is not a regular file")
+    if state == "unsafe_metadata":
+        raise QaError("systemd host credential key ownership or mode is unsafe")
+    raise QaError("systemd host credential key state is invalid")
+
+
+def _state_after_host_key_setup_attempt(host_key: Path) -> str:
+    try:
+        return inspect_systemd_host_credential_key(host_key)
+    except QaError as exc:
+        raise QaError(
+            "systemd host key setup outcome is unknown; state=metadata_error; "
+            "host key was not removed"
+        ) from exc
+
+
+def prepare_systemd_host_credential_key(
+    *,
+    executable: Path | None = None,
+    host_key: Path | None = None,
+    command_runner=None,
+) -> str:
+    """Idempotently request fixed host-key setup without claiming authorship."""
+    executable = Path("/usr/bin/systemd-creds") if executable is None else executable
+    if executable.is_symlink() or not executable.is_file() or not os.access(executable, os.X_OK):
+        raise QaError("systemd-creds executable is unavailable or unsafe")
+    path = SYSTEMD_HOST_CREDENTIAL_KEY if host_key is None else host_key
+    initial_state = inspect_systemd_host_credential_key(path)
+    if initial_state == "ready":
+        return "state=existing action=noop"
+    if initial_state != "missing":
+        _require_safe_systemd_host_key_state(initial_state)
+
+    runner = subprocess.run if command_runner is None else command_runner
+    try:
+        completed = runner(
+            ["/usr/bin/systemd-creds", "setup"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+            cwd="/",
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+    except subprocess.TimeoutExpired as exc:
+        state = _state_after_host_key_setup_attempt(path)
+        raise QaError(
+            f"systemd host key setup timed out; state={state}; host key was not removed"
+        ) from exc
+    except OSError as exc:
+        state = _state_after_host_key_setup_attempt(path)
+        raise QaError(
+            f"systemd host key setup could not run; state={state}; host key was not removed"
+        ) from exc
+
+    final_state = _state_after_host_key_setup_attempt(path)
+    if completed.returncode != 0:
+        raise QaError(
+            f"systemd host key setup failed; state={final_state}; host key was not removed"
+        )
+    if final_state != "ready":
+        raise QaError(
+            f"systemd host key setup returned success; state={final_state}; "
+            "host key was not removed"
+        )
+    return (
+        "state=available_after_setup_attempt action=setup_attempted "
+        "attribution=unassigned"
+    )
 
 
 def seal_systemd_credential(name: str, value: str) -> bytes:
@@ -1959,7 +2059,13 @@ def real_smoke() -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("preflight", "wait-ports", "verify", "install", "enable", "smoke", "disable", "remove", "render-test"))
+    parser.add_argument(
+        "operation",
+        choices=(
+            "preflight", "prepare-host-key", "wait-ports", "verify", "install",
+            "enable", "smoke", "disable", "remove", "render-test",
+        ),
+    )
     parser.add_argument("--bundle-root", type=Path, default=Path(__file__).resolve().parents[1])
     secret_source = parser.add_mutually_exclusive_group()
     secret_source.add_argument("--secrets-file", type=Path)
@@ -1981,6 +2087,12 @@ def main(argv: list[str] | None = None) -> int:
             verify_linux_units(bundle, runtime_ready=False)
         checks = initial_preflight(root)
         print("SSE_QA_PREFLIGHT_OK " + ",".join(checks))
+        return 0
+    if args.operation == "prepare-host-key":
+        if root != REAL_ROOT:
+            raise QaError("host key preparation requires real mode")
+        result = prepare_systemd_host_credential_key()
+        print("SSE_QA_HOST_KEY_OK " + result)
         return 0
     if args.operation == "wait-ports":
         if root != REAL_ROOT:
