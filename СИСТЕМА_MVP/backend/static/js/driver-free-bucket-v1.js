@@ -189,7 +189,13 @@
         var shiftId = text(shell && shell.dataset.driverShiftId);
         var truckId = text(shell && shell.dataset.driverCurrentTruckId);
         var catalogKey = CATALOG_SCHEMA + ":" + accessId + ":" + authGeneration;
-        var stateKey = STATE_SCHEMA + ":" + accessId + ":" + shiftId + ":" + truckId;
+        /* Ключ — по смене, которая сейчас на экране: смена, открытая на
+           телефоне без связи, несёт местный ID, и после её открытия ключ тоже
+           её (а не смены, с которой страница была нарисована). */
+        function stateKey() {
+            var currentShift = text(shell && shell.dataset.driverShiftId) || shiftId;
+            return STATE_SCHEMA + ":" + accessId + ":" + currentShift + ":" + truckId;
+        }
         var trigger = shell && shell.querySelector('[data-mobile-dial-action="free-bucket"]');
         var sheet = shell && shell.querySelector("[data-driver-free-bucket-sheet]");
         var grid = shell && shell.querySelector("[data-driver-free-bucket-grid]");
@@ -243,9 +249,9 @@
         function installState(serverState) {
             var fresh = normalizeState(serverState);
             lastServerState = fresh;
-            var saved = normalizeState(storageRead(stateKey));
+            var saved = normalizeState(storageRead(stateKey()));
             state = resolveInstalledState(fresh, saved);
-            if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
+            if (state.active) storageWrite(stateKey(), state); else storageRemove(stateKey());
             renderState();
             return state;
         }
@@ -489,7 +495,7 @@
                     catalog_version: catalog.version,
                     catalog_generated_at: catalog.generated_at
                 });
-                storageWrite(stateKey, state);
+                storageWrite(stateKey(), state);
                 renderState();
                 setOpen(false);
                 return event;
@@ -517,14 +523,18 @@
                     return null;
                 }
                 if (typeof windowObject.createDriverFreeBucketCancelledEvent !== "function") throw new Error("offline_runtime_unavailable");
+                /* Имя параметра — как у построителя (localAcceptanceId). Раньше
+                   здесь было acceptanceLocalId: без серверного номера приёма (то
+                   есть всегда без сети) построитель отказывал, и отмена ковша
+                   не сохранялась — «Отмена не сохранена» (матрица C4, 30.09.2026). */
                 return outbox.enqueue(windowObject.createDriverFreeBucketCancelledEvent({
                     acceptanceId: state.acceptance_id,
-                    acceptanceLocalId: state.acceptance_local_id,
+                    localAcceptanceId: state.acceptance_local_id,
                     dependsOn: (request && !requestRejected) ? [request.event_id] : []
                 }));
             }).then(function (event) {
                 state = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
-                storageRemove(stateKey);
+                storageRemove(stateKey());
                 renderState();
                 setOpen(false);
                 return event;
@@ -642,7 +652,7 @@
                 }
             });
             state = projected;
-            if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
+            if (state.active) storageWrite(stateKey(), state); else storageRemove(stateKey());
             renderState();
             return clone(state);
         }

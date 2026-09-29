@@ -398,7 +398,7 @@
     function createDriverFreeBucketCancelledEvent(options) {
         options = options || {};
         var acceptanceId = number(options.acceptanceId);
-        var localAcceptanceId = String(options.localAcceptanceId || options.pendingSelectionId || "");
+        var localAcceptanceId = String(options.localAcceptanceId || options.acceptanceLocalId || options.pendingSelectionId || "");
         if (!acceptanceId && !localAcceptanceId) throw new Error("offline_free_bucket_acceptance_required");
         return {
             event_id: String(options.eventId || randomId("driver-free-bucket-cancel")),

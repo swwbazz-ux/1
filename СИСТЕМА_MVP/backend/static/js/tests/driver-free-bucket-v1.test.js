@@ -576,3 +576,58 @@ test("free-bucket tiles show only the excavator number and status, no place/rock
     assert.doesNotMatch(source, /driver-free-bucket-tile-missing/);
     assert.match(styles, /\.driver-free-bucket-tile-number\s*\{/);
 });
+
+/* Матрица без сети C4 (30.09.2026): «Отменить свободный ковш» без сети не
+   создавала события и не гасила режим — «Отмена не сохранена». Контроллер
+   передавал acceptanceLocalId, а построитель события очереди ждёт
+   localAcceptanceId; без серверного номера приёма он отказывал всегда.
+   Тесты выше подменяли построитель заглушкой — здесь настоящий. */
+test("cancel without a server acceptance id (offline) queues a real cancel event and switches the bucket off", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const queued = [];
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {
+            localStorage: storage(),
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+            createDriverFreeBucketCancelledEvent: outboxModule.createDriverFreeBucketCancelledEvent,
+        },
+        outbox: {
+            enqueue(event) { queued.push(event); return Promise.resolve(Object.assign({state: "pending"}, event)); },
+            pending() { return Promise.resolve(queued.map((event) => Object.assign({state: "pending"}, event))); },
+        },
+    });
+    controller.installCatalog(serverCatalog());
+    const selected = await controller.select(controller.catalog().excavators[0]);
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().acceptance_id, null);
+
+    const cancelled = await controller.cancel();
+
+    assert.ok(cancelled, "cancel must be queued");
+    assert.equal(cancelled.event_type, "driver.free_bucket.cancelled");
+    assert.equal(cancelled.payload.free_bucket_acceptance_local_id, selected.event_id);
+    assert.deepEqual(cancelled.depends_on, [selected.event_id]);
+    assert.equal(controller.state().active, false);
+});
+
+test("free-bucket state is saved under the shift now on screen, including a shift opened on the phone", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const saved = storage();
+    const liveShell = shell();
+    const controller = createDriverFreeBucketController({
+        shell: liveShell,
+        storage: saved,
+        window: {
+            localStorage: saved,
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        },
+        outbox: {enqueue(event) { return Promise.resolve(event); }},
+    });
+    controller.installCatalog(serverCatalog());
+    liveShell.dataset.driverShiftId = "driver-shift-open:local-1";
+    await controller.select(controller.catalog().excavators[0]);
+    assert.ok(saved.getItem("driver-free-bucket-state-v1:3:driver-shift-open:local-1:17"));
+    assert.equal(saved.getItem("driver-free-bucket-state-v1:3:11:17"), null);
+});
