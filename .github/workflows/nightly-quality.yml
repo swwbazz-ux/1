@@ -30,7 +30,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: full-nightly-quality
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' &&
+    format('full-nightly-quality-evidence-{0}', inputs.target_sha) ||
+    'full-nightly-quality' }}
   cancel-in-progress: false
 
 env:
