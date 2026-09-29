@@ -117,6 +117,55 @@ PostgreSQL connection counters отдельно возвращают общее 
 
 Этот снимок намеренно сообщает `historical_window_available=false` и `application_event_loop_probe_available=false`. Он не доказывает нормальную или пиковую capacity и не утверждает будущие CPU/RAM/DB лимиты.
 
+### Изолированный SSE-QA: следующий защищённый этап
+
+Принятый source/runtime остаётся неизменным:
+
+- source C2: `9d336723f3dc2fc574937a57602a27b54c54fd77`;
+- runtime SHA-256: `8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e`;
+- локально подготовленный controller SHA-256:
+  `d39d9c23e66e1be62052b66aab29b71d3fea90cc798dfd9c324ba450b447f971`.
+
+`verify_sse_qa` выполняет только строгий начальный read-only preflight. Помимо
+прежних проверок конфликтов он обязан подтвердить исполнимый
+`/usr/bin/systemd-creds` и metadata уже существующего обычного файла
+`/var/lib/systemd/credential.secret`: owner `root`, отсутствие group/other
+permissions, отсутствие symlink. Содержимое ключа не читается. Этот mode не
+запускает и не останавливает службы, не создаёт QA, ключ, secrets или файлы.
+Отсутствующий либо небезопасный host key завершает preflight явным отказом.
+
+После отдельного разрешения порядок только такой:
+
+1. Закрепить новый полный SHA control commit и дождаться обязательных CI и
+   CodeQL именно для него.
+2. Защищённо объединить control PR в каноническую ветку, не меняя pinned source
+   C2/runtime.
+3. Выполнить `verify_receiver / VERIFY_RECEIVER`, затем
+   `update_receiver / UPDATE_RECEIVER` для одного и того же точного control SHA.
+4. Выполнить ровно один `verify_sse_qa / VERIFY_SSE_QA` и остановиться с
+   отчётом. `install_sse_qa`, secrets, службы, nginx, DNS и TLS в это разрешение
+   не входят.
+
+Перед `update_receiver` нужно отдельно зафиксировать фактически подтверждённую
+предыдущую версию receiver из последней успешной защищённой цепочки, сохранить
+её точные байты и SHA-256 в отдельном revert commit. Один исторический SHA без
+доказательства последней установки не считается установленной версией. Сам
+`update_receiver` дополнительно создаёт server-side backup фактически
+заменяемого файла и возвращает его путь; этот путь нужно сохранить в отчёте.
+Откат выполняется не application rollback и не SSH: точные сохранённые байты
+предыдущего receiver проходят новый `verify_receiver`, затем
+`update_receiver` через тот же защищённый канал. Если идентичность предыдущих
+байтов не доказана, обновление нужно остановить.
+
+Последующая, отдельно разрешаемая установка оставляет
+`enabled=false clients=0`. Её gate: существующий безопасный systemd host key,
+зашифрованные QA secrets, source/runtime выше, общий `sse-qa.slice` с лимитами
+1 CPU / 2 GiB RAM, отдельный image до 6 GiB, отдельный PostgreSQL cluster с
+`max_connections=16`, максимум два SSE-клиента. При частичном отказе installer
+обязан выполнить собственный marker/ownership rollback; отсутствие подтверждения
+отката является FAIL и не разрешает enable. Покупка сервера или домена не
+требуется.
+
 Порядок будущей установки без прямого SSH: после отдельного разрешения принять проверенный commit в защищенную control-ветку, выполнить `verify_receiver` / `VERIFY_RECEIVER` для точного SHA, затем отдельным подтвержденным запуском `update_receiver` / `UPDATE_RECEIVER` установить только receiver. После этого `diagnose` / `DIAGNOSE` с операцией `infra_capacity_v1` и пустыми остальными diagnostic inputs вернет только зашифрованный CMS-артефакт. Workflow не перезапускает приложение при обновлении receiver.
 
 Откат receiver выполняется тем же защищенным каналом: подготовить проверенный revert commit, возвращающий предыдущие байты `deployment/server/accounting_github_deploy_receiver.py`, затем пройти `verify_receiver` и `update_receiver` для точного SHA revert. Встроенная резервная копия receiver автоматически используется только если новая версия не проходит `py_compile`; общий режим `rollback` предназначен для application release и не должен подменять откат receiver.
