@@ -3082,10 +3082,83 @@ window.bindDriverMobileShell = function () {
                 });
                 return runtime.applyPromise;
             };
+            /* Переход на новую версию оболочки (матрица без сети A5, 30.09.2026).
+               Раньше метка версии во фрагменте перезагружала страницу через 1,5 с —
+               раньше, чем ставился новый service worker: старый отдавал старую
+               страницу, и она оставалась под замком «service-worker-mismatch».
+               А разовая перезагрузка после смены воркера откладывалась, пока
+               страница скрыта или занята, и больше не повторялась — «Позже» и
+               сворачивание приложения оставляли его замороженным. Теперь экран
+               ждёт, пока base.html (он один ведёт обновление воркера) сообщит о
+               новом воркере (app-pwa-contract-state), и перезагружается, только
+               когда контроллер уже новый; скрытая страница — при возврате,
+               занятая вводом — чуть позже. */
+            runtime.followTarget = "";
+            runtime.followShellVersion = function (targetVersion) {
+                targetVersion = String(targetVersion || "");
+                if (!targetVersion || versionNumber(targetVersion) <= versionNumber(runtime.currentShellVersion)) {
+                    return false;
+                }
+                if (versionNumber(targetVersion) > versionNumber(runtime.followTarget)) {
+                    runtime.followTarget = targetVersion;
+                }
+                if (!runtime.followBound) {
+                    runtime.followBound = true;
+                    document.addEventListener("visibilitychange", function () {
+                        if (!document.hidden) runtime.checkFollow();
+                    });
+                }
+                runtime.checkFollow();
+                return true;
+            };
+            runtime.checkFollow = function () {
+                var target = runtime.followTarget;
+                if (!target) return;
+                runtime.requestWorkerVersion(navigator.serviceWorker.controller).then(function (controllerVersion) {
+                    if (versionNumber(controllerVersion) >= versionNumber(target)) {
+                        runtime.reloadIntoWorker(target);
+                        return;
+                    }
+                    var registration = runtime.registration;
+                    var waiting = registration && registration.waiting;
+                    if (!waiting) return;
+                    runtime.requestWorkerVersion(waiting).then(function (waitingVersion) {
+                        if (versionNumber(waitingVersion) >= versionNumber(target) && runtime.activationRequestedWorker !== waiting) {
+                            runtime.activationRequestedWorker = waiting;
+                            waiting.postMessage({type: "SKIP_WAITING"});
+                        }
+                    });
+                });
+            };
+            runtime.reloadIntoWorker = function (target) {
+                if (document.hidden || runtime.followReloading) return;
+                var current = document.querySelector("[data-driver-shell]");
+                if (current && typeof isDriverOperationalRefreshUnsafe === "function" && isDriverOperationalRefreshUnsafe(current)) {
+                    var reason = String(window.driverRefreshBusyReason || "");
+                    // Жёсткие причины — водитель вводит показания: ждём, не теряя ввод.
+                    if (/^focus:|^opening_form$|^close_form$/.test(reason)) {
+                        window.setTimeout(runtime.checkFollow, 5000);
+                        return;
+                    }
+                }
+                var key = "driver-shell-follow-reload:" + target;
+                var record = {count: 0, at: 0};
+                try { record = JSON.parse(window.sessionStorage.getItem(key) || "null") || record; } catch (error) {}
+                if (record.count >= 3 && Date.now() - Number(record.at || 0) < 10 * 60 * 1000) return;
+                try {
+                    window.sessionStorage.setItem(key, JSON.stringify({count: Number(record.count || 0) + 1, at: Date.now()}));
+                } catch (error) {}
+                runtime.followReloading = true;
+                window.location.reload();
+            };
             window.addEventListener("app-pwa-contract-state", function (event) {
                 var detail = event && event.detail ? event.detail : {};
                 if (releaseVerifiedPageFromStaleWorkerLock(detail)) {
                     return;
+                }
+                var workerVersion = detail.serviceWorker && detail.serviceWorker.shellVersion;
+                if (workerVersion && versionNumber(workerVersion) > versionNumber(runtime.currentShellVersion)) {
+                    runtime.followShellVersion(workerVersion);
                 }
                 var serverVersion = detail.server && detail.server.shellVersion;
                 if (
@@ -3093,6 +3166,7 @@ window.bindDriverMobileShell = function () {
                     && versionNumber(serverVersion) > versionNumber(runtime.currentShellVersion)
                 ) {
                     if (runtime.renderUpdate) runtime.renderUpdate(serverVersion);
+                    runtime.followShellVersion(serverVersion);
                 } else if (detail.ready && runtime.clearUpdate) {
                     runtime.clearUpdate();
                     runtime.scheduleControllerRecovery(runtime.currentShellVersion, 150);

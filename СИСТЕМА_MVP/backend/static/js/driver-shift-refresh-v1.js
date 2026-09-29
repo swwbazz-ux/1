@@ -75,7 +75,17 @@ window.applyOperationalStateRefresh = function (context) {
             );
             var freshShellVersion = String(freshShellMark.dataset.driverFragmentShell || "");
             freshShellMark.parentNode.removeChild(freshShellMark);
-            if (loadedShellVersion && freshShellVersion && loadedShellVersion !== freshShellVersion) {
+            var followRuntime = window.__driverPwaUpdateRuntime;
+            if (
+                loadedShellVersion && freshShellVersion && loadedShellVersion !== freshShellVersion
+                && followRuntime && typeof followRuntime.followShellVersion === "function"
+            ) {
+                /* Новая версия: просим service worker обновиться, страница
+                   перезагрузится, когда он уже новый (driver-shift-v1.js,
+                   followShellVersion). Мгновенная перезагрузка ниже — запасной
+                   путь для страницы без модуля обновления. */
+                followRuntime.followShellVersion(freshShellVersion);
+            } else if (loadedShellVersion && freshShellVersion && loadedShellVersion !== freshShellVersion) {
                 /* Пока сервер перезапускается после выкладки, страница по сети ещё
                    старая: перезагрузка на каждый фрагмент давала шторм перезагрузок
                    раз в секунду, а сама разметка (погрузка!) при этом выбрасывалась —
