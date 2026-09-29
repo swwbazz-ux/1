@@ -1,0 +1,70 @@
+# Релиз fc227986, стенд :8041, runserver (preview serverId 8e64b041), 30.09.2026, время сервера = локальное (UTC+10).
+# Сохранённый хвост лога. Опрос /realtime/state/ каждые 2 с убран (строки вида
+# "GET /realtime/state/?after=... 200 603"), остальное — без изменений.
+# Две строки offline_sync пришли в консоль в cp1251 и были нечитаемы; ниже они
+# восстановлены по формату _log_discrepancy (core/offline_sync.py), числа — из оригинала.
+
+# --- 03:14:50 сервер поднят, телефон (headless Chrome) отдаёт очередь ---
+[30/Sep/2026 03:14:49] "HEAD / HTTP/1.1" 200 0
+[30/Sep/2026 03:14:50] "GET / HTTP/1.1" 200 165289
+offline_sync: accepted despite discrepancy (Переключение причины простоя/downtime_switch_before_start) employee=3 role=8 — Работник переключает причину простоя на 2026-09-29 17:13:49.903000+00:00, раньше начала текущего простоя #28 (2026-09-29 17:14:50.768381+00:00). Принято по фактическому времени начала текущего простоя.
+offline_sync: accepted despite discrepancy (Переключение причины простоя/downtime_switch_before_start) employee=3 role=8 — Работник переключает причину простоя на 2026-09-29 17:13:52.254000+00:00, раньше начала текущего простоя #29 (2026-09-29 17:14:50.768381+00:00). Принято по фактическому времени начала текущего простоя.
+[30/Sep/2026 03:14:51] "POST /offline-events/sync/ HTTP/1.1" 200 2959
+[30/Sep/2026 03:14:51] "GET /realtime/state/?after=1615&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 4227
+[30/Sep/2026 03:14:51] "POST /client-error/ HTTP/1.1" 200 12
+#   ^ простой #28 = авто «Ожидание самосвалов», заведён сервером при воспроизведении погрузки
+#     временем сервера 17:14:50.768 UTC (= 03:14:50 местного). БВР (телефон 17:13:49.903) и Обед
+#     (17:13:52.254) «раньше» него → сдвинуты на 17:14:50.768; конец простоя (телефон 17:13:54.586)
+#     → conflict downtime_end_before_start; закрытие смены → conflict dependency_rejected.
+
+# --- 03:15:21 перезагрузка той же вкладки (Page.reload) — статика из памяти вкладки, не показательно ---
+[30/Sep/2026 03:15:10] "POST /session-heartbeat/ HTTP/1.1" 204 0
+[30/Sep/2026 03:15:21] "GET /excavator/work/ HTTP/1.1" 200 425783
+[30/Sep/2026 03:15:22] "GET /static/img/equipment/truck-blue.png HTTP/1.1" 200 48406
+[30/Sep/2026 03:15:22] "GET /excavator.webmanifest HTTP/1.1" 200 1541
+[30/Sep/2026 03:15:22] "POST /session-heartbeat/ HTTP/1.1" 204 0
+[30/Sep/2026 03:15:22] "GET /static/favicon.ico HTTP/1.1" 200 3879
+[30/Sep/2026 03:15:22] "GET /static/img/pwa/excavator-180.png HTTP/1.1" 200 5421
+[30/Sep/2026 03:15:22] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1626 HTTP/1.1" 200 72562
+[30/Sep/2026 03:15:22] "POST /client-error/ HTTP/1.1" 200 12
+[30/Sep/2026 03:15:23] "GET /api/achievements/current/ HTTP/1.1" 200 33
+[30/Sep/2026 03:15:24] "GET /excavator-sw.js HTTP/1.1" 200 19049
+[30/Sep/2026 03:15:42] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1626 HTTP/1.1" 200 72562
+
+# --- 03:15:50 ПУНКТ 6: перезапуск приложения в новой вкладке (/json/new) с сетью ---
+# Оболочка и ВСЯ версионированная статика скачаны заново полными 200 (не 304, не из кэша SW).
+[30/Sep/2026 03:15:50,545] - Broken pipe from ('127.0.0.1', 14539)
+[30/Sep/2026 03:15:50] "GET /excavator/work/ HTTP/1.1" 200 425783
+[30/Sep/2026 03:15:50] "GET /static/js/role-readonly.js?v=role-readonly-v6 HTTP/1.1" 200 20170
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 117524
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 97191
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 182518
+[30/Sep/2026 03:15:50] "GET /static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 12046
+[30/Sep/2026 03:15:50] "GET /static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 7892
+[30/Sep/2026 03:15:50] "GET /static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 29655
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 9941
+[30/Sep/2026 03:15:50] "GET /static/css/native-app-update-v1.css?v=1 HTTP/1.1" 200 2103
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-offline-v1.css?v=1 HTTP/1.1" 200 2337
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-manual-loading-v1.css?v=4 HTTP/1.1" 200 4973
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 25110
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 15961
+[30/Sep/2026 03:15:50] "GET /static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262 HTTP/1.1" 200 14996
+[30/Sep/2026 03:15:50] "GET /static/img/equipment/truck-blue.png HTTP/1.1" 200 48406
+[30/Sep/2026 03:15:50] "GET /static/img/equipment/excavator-yellow.png HTTP/1.1" 200 68719
+[30/Sep/2026 03:15:50] "GET /excavator.webmanifest HTTP/1.1" 200 1541
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 4268
+[30/Sep/2026 03:15:50] "GET /static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 12331
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 17503
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 1437
+[30/Sep/2026 03:15:50] "GET /static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 24223
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 5269
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 35534
+[30/Sep/2026 03:15:50] "GET /static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 14575
+[30/Sep/2026 03:15:50] "GET /static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262 HTTP/1.1" 200 45435
+[30/Sep/2026 03:15:50] "POST /session-heartbeat/ HTTP/1.1" 204 0
+[30/Sep/2026 03:15:50] "GET /static/img/pwa/excavator-180.png HTTP/1.1" 200 5421
+[30/Sep/2026 03:15:50] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1626 HTTP/1.1" 200 72562
+[30/Sep/2026 03:15:50] "POST /client-error/ HTTP/1.1" 200 12
+[30/Sep/2026 03:15:52] "GET /api/achievements/current/ HTTP/1.1" 200 33
+[30/Sep/2026 03:15:52] "GET /excavator-sw.js HTTP/1.1" 200 19049
+[30/Sep/2026 03:16:11] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1626 HTTP/1.1" 200 72562

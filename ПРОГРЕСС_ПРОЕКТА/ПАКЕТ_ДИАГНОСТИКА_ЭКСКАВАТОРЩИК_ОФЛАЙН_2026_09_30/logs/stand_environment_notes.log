@@ -1,0 +1,18 @@
+# Заметки о среде прогона (не дефекты приложения, но влияют на повторение)
+
+## Нехватка памяти на ПК во время прогона (preview serverId 57ecf93a, релиз :8041, 03:19)
+OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
+OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
+OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
+# Тогда же падал запуск процессов в git-bash: "fork: Resource temporarily unavailable".
+# Лечилось закрытием двух headless Chrome. На повторе держать открытым только нужный браузер.
+
+## Сирота runserver после перезапуска сессии
+# preview_stop сообщил «остановлен», но порты 8041/8042 продолжали отвечать 200 (PID 23080 / 19184 —
+# runserver, пережившие перезапуск сессии). Один прогон «без сети» из-за этого был на самом деле с сетью
+# и выброшен. Перед каждым офлайн-шагом проверять: netstat -ano | grep ":804[12] " и curl -m 3 (ожидается 000).
+
+## Зависание вкладки для CDP
+# Дважды вкладка перестала отвечать на CDP (timeout: Emulation.setTouchEmulationEnabled), хотя страница
+# продолжала опрашивать сервер. Лечится новой вкладкой через /json/new. Закрытие последней вкладки роняет
+# сеансовую куку — сначала открыть новую, потом закрыть старую, проверить Network.getCookies.

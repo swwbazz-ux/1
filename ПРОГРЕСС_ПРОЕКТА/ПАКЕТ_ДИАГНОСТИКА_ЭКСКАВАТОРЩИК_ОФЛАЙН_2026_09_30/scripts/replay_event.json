@@ -1,0 +1,1 @@
+{"event_id":"qa-replay-old-1790702357224","event_type":"excavator.downtime.started","format_version":1,"actor_id":3,"access_id":3,"role_code":"excavator_operator","device_id":"qa-replay-device-01","shift_id":3,"equipment_id":54,"occurred_at":"2026-09-29T17:19:17.225Z","sequence":900001,"depends_on":[],"payload":{"reason_id":17}}

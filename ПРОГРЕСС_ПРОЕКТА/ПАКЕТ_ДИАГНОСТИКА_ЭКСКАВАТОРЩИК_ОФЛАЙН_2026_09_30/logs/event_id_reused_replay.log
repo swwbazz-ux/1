@@ -1,0 +1,34 @@
+# Воспроизведение event_id_reused, 30.09.2026 (время сервера = локальное UTC+10).
+# Одно и то же сырое событие scripts/replay_event.json отправлено scripts/replay_event.js:
+#   1) коду релиза fc227986 (:8041) дважды — принято, затем deduplicated (контроль);
+#   2) коду c05a5925 (:8042) на КОПИИ той же базы — conflict event_id_reused.
+# Первые две 403 — ошибка стенда (тестовый CSRF-токен был 33 символа), исправлено, не относится к делу.
+
+## Релиз :8041 (preview serverId 1430e03b), хвост лога
+Forbidden (CSRF cookie has incorrect length.): /offline-events/sync/
+[30/Sep/2026 03:20:13] "POST /offline-events/sync/ HTTP/1.1" 403 2547
+Forbidden (CSRF cookie has incorrect length.): /offline-events/sync/
+[30/Sep/2026 03:20:13] "POST /offline-events/sync/ HTTP/1.1" 403 2547
+[30/Sep/2026 03:20:25] "POST /offline-events/sync/ HTTP/1.1" 200 396
+[30/Sep/2026 03:20:25] "POST /offline-events/sync/ HTTP/1.1" 200 400
+
+## Ответы (stdout replay_event.js)
+200 {"status":"accepted","code":"","message":"","server_ids":{"downtime_event_id":31,"shift_id":3,"event_receipt_id":60}}
+200 {"status":"deduplicated","code":"","message":"","server_ids":{"downtime_event_id":31,"shift_id":3,"event_receipt_id":60}}
+
+## c05a5925 :8042 (preview serverId 26086430) на копии базы релиза, хвост лога
+[30/Sep/2026 03:20:57] "POST /offline-events/sync/ HTTP/1.1" 200 619
+
+## Ответ (stdout replay_event.js)
+200 {"status":"conflict","code":"event_id_reused","message":"Идентификатор уже использован для другого события.","server_ids":{}}
+
+## База c05a5925 после повтора (manage.py shell)
+stored receipt 60 accepted 4011f691e947d827      <- отпечаток, записанный кодом релиза
+conflict attempt 1 event_id_reused 1b1f614bc70ae94a  <- отпечаток того же сырого события по коду c05a5925
+
+# Причина по коду c05a5925 (core/offline_sync.py, normalize_offline_event): в словарь normalized,
+# из которого считается sha256-отпечаток (canonical = {**normalized, ...}), добавлен ключ
+# 'local_shift_id' (для старых событий — пустая строка). Любое событие, принятое до обновления,
+# после обновления получает другой отпечаток, и точный повтор (потерян ответ, телефон шлёт снова)
+# отвечает event_id_reused вместо deduplicated.
+# После проверки база стенда :8042 возвращена из резервной копии (db.sqlite3.before-replay).
