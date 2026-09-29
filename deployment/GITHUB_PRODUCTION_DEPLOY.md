@@ -124,7 +124,7 @@ PostgreSQL connection counters отдельно возвращают общее 
 - source C2: `9d336723f3dc2fc574937a57602a27b54c54fd77`;
 - runtime SHA-256: `8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e`;
 - локально подготовленный controller SHA-256:
-  `d39d9c23e66e1be62052b66aab29b71d3fea90cc798dfd9c324ba450b447f971`.
+  `3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44`.
 
 `verify_sse_qa` выполняет только строгий начальный read-only preflight. Помимо
 прежних проверок конфликтов он обязан подтвердить исполнимый
@@ -134,7 +134,28 @@ permissions, отсутствие symlink. Содержимое ключа не 
 запускает и не останавливает службы, не создаёт QA, ключ, secrets или файлы.
 Отсутствующий либо небезопасный host key завершает preflight явным отказом.
 
-После отдельного разрешения порядок только такой:
+`prepare_sse_qa_host_key / PREPARE_SSE_QA_HOST_KEY` — отдельная фиксированная
+операция, не входящая в read-only preflight. Она не принимает путь, команду,
+секрет или иной пользовательский параметр. Операция проверяет только metadata
+фиксированного `/var/lib/systemd/credential.secret`, не читая содержимое:
+
+- существующий обычный root-only файл даёт успешный no-op;
+- только доказанное отсутствие допускает фиксированный вызов
+  `/usr/bin/systemd-creds setup`;
+- symlink, другой тип, небезопасные owner/mode и ошибка metadata-проверки дают
+  отказ без удаления, замены, `chmod`, `chown` или иного ремонта.
+
+После setup metadata проверяется повторно. Успешная сводка различает no-op и
+`available_after_setup_attempt`, но не утверждает, что ключ создал именно этот
+процесс: параллельная безопасная инициализация остаётся возможной. Timeout,
+ошибка команды или неоднозначное состояние завершают mode отказом с фактически
+наблюдаемым состоянием. Ключ не удаляется автоматически и не входит в ownership
+или remove/rollback SSE-QA.
+
+Эта операция пока только подготовлена локально. Фактический запуск требует
+нового явного разрешения.
+
+После отдельного разрешения следующего control-stage порядок только такой:
 
 1. Закрепить новый полный SHA control commit и дождаться обязательных CI и
    CodeQL именно для него.
@@ -142,8 +163,12 @@ permissions, отсутствие symlink. Содержимое ключа не 
    C2/runtime.
 3. Выполнить `verify_receiver / VERIFY_RECEIVER`, затем
    `update_receiver / UPDATE_RECEIVER` для одного и того же точного control SHA.
-4. Выполнить ровно один `verify_sse_qa / VERIFY_SSE_QA` и остановиться с
-   отчётом. `install_sse_qa`, secrets, службы, nginx, DNS и TLS в это разрешение
+4. Выполнить ровно один
+   `prepare_sse_qa_host_key / PREPARE_SSE_QA_HOST_KEY`. При любом отказе
+   остановиться: объект не удалять и не исправлять автоматически.
+5. Только после успеха выполнить ровно один
+   `verify_sse_qa / VERIFY_SSE_QA` и остановиться с отчётом.
+   `install_sse_qa`, secrets, запуск QA-служб, nginx, DNS и TLS в это разрешение
    не входят.
 
 Перед `update_receiver` нужно отдельно зафиксировать фактически подтверждённую
@@ -168,7 +193,16 @@ permissions, отсутствие symlink. Содержимое ключа не 
 
 Порядок будущей установки без прямого SSH: после отдельного разрешения принять проверенный commit в защищенную control-ветку, выполнить `verify_receiver` / `VERIFY_RECEIVER` для точного SHA, затем отдельным подтвержденным запуском `update_receiver` / `UPDATE_RECEIVER` установить только receiver. После этого `diagnose` / `DIAGNOSE` с операцией `infra_capacity_v1` и пустыми остальными diagnostic inputs вернет только зашифрованный CMS-артефакт. Workflow не перезапускает приложение при обновлении receiver.
 
-Откат receiver выполняется тем же защищенным каналом: подготовить проверенный revert commit, возвращающий предыдущие байты `deployment/server/accounting_github_deploy_receiver.py`, затем пройти `verify_receiver` и `update_receiver` для точного SHA revert. Встроенная резервная копия receiver автоматически используется только если новая версия не проходит `py_compile`; общий режим `rollback` предназначен для application release и не должен подменять откат receiver.
+Откат receiver выполняется тем же защищенным каналом: подготовить проверенный
+revert commit, возвращающий предыдущие байты
+`deployment/server/accounting_github_deploy_receiver.py`, затем пройти
+`verify_receiver` и `update_receiver` для точного опубликованного SHA revert.
+Локальный tar с правильным payload и metadata локального revert SHA является
+только доказательством контракта: будущий workflow обязан заново собрать пакет
+из фактически опубликованного revert SHA. Встроенная резервная копия receiver
+автоматически используется только если новая версия не проходит `py_compile`;
+общий режим `rollback` предназначен для application release и не должен
+подменять откат receiver.
 
 ### Откат
 

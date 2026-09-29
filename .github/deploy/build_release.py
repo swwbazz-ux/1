@@ -29,6 +29,7 @@ MODES = {
     "verify_fcm",
     "configure_fcm",
     "verify_sse_qa",
+    "prepare_sse_qa_host_key",
     "install_sse_qa",
     "enable_sse_qa",
     "smoke_sse_qa",
@@ -299,9 +300,15 @@ def main() -> None:
             )
         ]
     elif args.mode in {
-        "verify_sse_qa", "install_sse_qa", "enable_sse_qa", "smoke_sse_qa",
-        "disable_sse_qa", "remove_sse_qa",
+        "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
+        "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
     }:
+        if args.mode == "prepare_sse_qa_host_key" and any((
+            args.apk_dist, args.apk_profile, args.operation, args.receiver_source,
+            args.fcm_service_account, args.rollback_id, args.event_file,
+            args.sse_qa_secrets, args.sse_qa_secrets_stdin,
+        )):
+            raise SystemExit("prepare_sse_qa_host_key accepts no additional inputs")
         if not args.sse_qa_package or not args.sse_qa_package.is_file():
             raise SystemExit("SSE QA mode requires --sse-qa-package")
         paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]

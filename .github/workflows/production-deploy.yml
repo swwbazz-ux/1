@@ -22,6 +22,7 @@ on:
           - verify_fcm
           - configure_fcm
           - verify_sse_qa
+          - prepare_sse_qa_host_key
           - install_sse_qa
           - enable_sse_qa
           - smoke_sse_qa
@@ -119,7 +120,7 @@ jobs:
           set -euo pipefail
           umask 077
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]; then
+          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* ]]; then
             test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
           fi
           case "$MODE" in
@@ -136,6 +137,7 @@ jobs:
             verify_fcm) expected=VERIFY_FCM ;;
             configure_fcm) expected=CONFIGURE_FCM ;;
             verify_sse_qa) expected=VERIFY_SSE_QA ;;
+            prepare_sse_qa_host_key) expected=PREPARE_SSE_QA_HOST_KEY ;;
             install_sse_qa) expected=INSTALL_SSE_QA ;;
             enable_sse_qa) expected=ENABLE_SSE_QA ;;
             smoke_sse_qa) expected=SMOKE_SSE_QA ;;
@@ -154,6 +156,25 @@ jobs:
           fi
           if [[ "$MODE" == "rollback" ]]; then
             [[ "$ROLLBACK_ID" =~ ^github-[A-Za-z0-9._-]+$ ]]
+          fi
+          if [[ "$MODE" == "prepare_sse_qa_host_key" ]]; then
+            test "$APK_PROFILE" = "none"
+            test -z "$DATA_OPERATION"
+            test -z "$ROLLBACK_ID"
+            python - "$GITHUB_EVENT_PATH" <<'PY'
+          import json
+          import sys
+          inputs = json.load(open(sys.argv[1], encoding="utf-8")).get("inputs") or {}
+          expected = {
+              "diagnostic_operation": "none",
+              "diagnostic_equipment": "",
+              "diagnostic_from_utc": "",
+              "diagnostic_to_utc": "",
+              "diagnostic_max_rows": "500",
+          }
+          if any(str(inputs.get(name, "")) != value for name, value in expected.items()):
+              raise SystemExit("prepare_sse_qa_host_key rejects unrelated inputs")
+          PY
           fi
 
       - name: Set up Python
@@ -284,10 +305,10 @@ jobs:
           APK_PROFILE: ${{ inputs.apk_profile }}
           DATA_OPERATION: ${{ inputs.data_operation }}
           ROLLBACK_ID: ${{ inputs.rollback_id }}
-          FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.FCM_SERVICE_ACCOUNT_JSON }}
-          SSE_QA_SECRETS_JSON_B64: ${{ secrets.SSE_QA_SECRETS_JSON_B64 }}
+          FCM_SERVICE_ACCOUNT_JSON: ${{ contains(inputs.mode, 'fcm') && secrets.FCM_SERVICE_ACCOUNT_JSON || '' }}
+          SSE_QA_SECRETS_JSON_B64: ${{ inputs.mode == 'install_sse_qa' && secrets.SSE_QA_SECRETS_JSON_B64 || '' }}
           SSE_QA_CANDIDATE_SHA: 9d336723f3dc2fc574937a57602a27b54c54fd77
-          SSE_QA_CONTROLLER_SHA256: d39d9c23e66e1be62052b66aab29b71d3fea90cc798dfd9c324ba450b447f971
+          SSE_QA_CONTROLLER_SHA256: 3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44
           SSE_QA_RUNTIME_SHA256: 8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e
         run: |
           set -euo pipefail
@@ -315,7 +336,7 @@ jobs:
             args+=(--operation "$DATA_OPERATION")
           elif [[ "$MODE" == "diagnose" ]]; then
             args+=(--event-file "$GITHUB_EVENT_PATH")
-          elif [[ "$MODE" == *sse_qa ]]; then
+          elif [[ "$MODE" == *sse_qa* ]]; then
             qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
             mkdir -p "$qa_candidate_root"
             git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"
