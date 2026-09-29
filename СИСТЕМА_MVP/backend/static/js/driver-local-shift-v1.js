@@ -136,6 +136,41 @@
         }
     }
 
+    /* Удержание «Начать смену» ставит форме признак отправки (pending), ввод
+       показаний — признак набора (dirty). Раньше их снимала полная подмена
+       экрана ответом сервера; при местном открытии экран не подменяется, и
+       признаки оставались на скрытой форме навсегда: проверки «водитель вводит»
+       (isDriverOperationalRefreshUnsafe, driverIsTypingIntoForm) откладывали
+       каждое обновление с сервера — синий индикатор, пустая путёвка
+       (бой v371, Infinix, 30.09.2026). Смена открыта — форма открытия больше не
+       в работе. */
+    function clearOpeningBusy(form) {
+        form.dataset.driverShiftOpeningPending = "false";
+        form.dataset.driverShiftOpeningDirty = "false";
+        form.dataset.driverInPlacePending = "false";
+        delete form.dataset.driverShiftHoldComplete;
+        delete form.dataset.otherRoleShiftConfirmed;
+        var button = form.querySelector("[data-driver-shift-open-button]");
+        if (button) {
+            button.classList.remove("is-pending");
+            var label = button.querySelector("[data-mobile-shift-label]");
+            if (label) label.textContent = "Начать смену";
+        }
+    }
+
+    /* То же для формы закрытия, когда смена закрыта: отправка завершена. */
+    function clearClosingBusy(form) {
+        form.dataset.driverInPlacePending = "false";
+        delete form.dataset.driverShiftHoldComplete;
+        var button = form.querySelector("[data-driver-shift-close-button]");
+        if (button) {
+            button.disabled = false;
+            button.classList.remove("is-pending");
+            var label = button.querySelector("[data-mobile-shift-label]");
+            if (label) label.textContent = "Закрыть смену";
+        }
+    }
+
     function resetClosingForm(form, state) {
         form.dataset.driverInPlacePending = "false";
         form.classList.remove("is-sync-pending");
@@ -186,6 +221,8 @@
             if (open && decision.local) resetClosingForm(closeForm, state);
             else if (open && state && state.status === "open") resetClosingForm(closeForm, state);
         }
+        if (openForm && open) clearOpeningBusy(openForm);
+        if (closeForm && !open) clearClosingBusy(closeForm);
         if (openForm && !open && state && state.status === "closed") {
             resetOpeningForm(openForm, state.end_readings);
         }
