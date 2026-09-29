@@ -748,3 +748,175 @@ test('an event that waited in the queue or survived a reload is not marked live'
     assert.equal(received[0].event_id, 'stale-one');
     assert.equal('sent_live' in received[0], false);
 });
+
+test('OFF-C1-R1 C6: the exact rejected close is retried with confirmation and releases its children', async () => {
+    const local = storage();
+    const close = downtimeEvent('close-with-warning', 'excavator.shift.closed', 10);
+    close.payload = {fuel: '3500', fuel_percent: '50', engine_hours: '1199'};
+    const child = downtimeEvent('next-own-shift', 'excavator.shift.opened', 11);
+    child.depends_on = [close.event_id];
+    child.payload = {fuel: '3500', fuel_percent: '50', engine_hours: '1200'};
+    let confirmed = false;
+    const wireBatches = [];
+    const box = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c6',
+        send: async events => {
+            wireBatches.push(events);
+            if (!confirmed) {
+                return {ok: true, results: events.map(event => ({
+                    event_id: event.event_id,
+                    status: 'conflict',
+                    code: event.event_id === close.event_id ? 'confirmation_required' : 'dependency_rejected',
+                    confirmation_token: event.event_id === close.event_id ? 'signed-token' : undefined,
+                    warnings: event.event_id === close.event_id ? [{code: 'engine_hours_decreased'}] : undefined,
+                }))};
+            }
+            return {ok: true, results: events.map(event => ({event_id: event.event_id, status: 'accepted'}))};
+        },
+    });
+    await box.queue(close);
+    await box.queue(child);
+    await box.flush();
+    confirmed = true;
+    await box.retryWithConfirmation(close.event_id, 'signed-token');
+
+    const retried = wireBatches.flat().filter(event => event.event_id === close.event_id).at(-1);
+    assert.equal(retried.event_id, close.event_id);
+    assert.equal(retried.confirmation_token, 'signed-token');
+    assert.deepEqual(retried.payload, close.payload);
+    assert.deepEqual(await box.pending(), []);
+});
+
+test('OFF-C1-R1 C6: restart replays stored confirmation details to the reachable UI callback', async () => {
+    const local = storage();
+    const event = downtimeEvent('restart-close-warning', 'excavator.shift.closed', 1);
+    const first = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c6-restart',
+        send: async events => ({ok: true, results: events.map(item => ({
+            event_id: item.event_id,
+            status: 'conflict',
+            code: 'confirmation_required',
+            confirmation_token: 'restart-token',
+            warnings: [{code: 'fuel_above_capacity'}],
+        }))}),
+    });
+    await first.queue(event);
+    await first.flush();
+    let observed = null;
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c6-restart',
+        onAttention: (storedEvent, result) => { observed = {storedEvent, result}; },
+        send: async () => ({ok: true, results: []}),
+    });
+    await restarted.ready();
+
+    assert.equal(observed.storedEvent.event_id, event.event_id);
+    assert.equal(observed.result.confirmation_token, 'restart-token');
+    assert.equal(observed.result.warnings[0].code, 'fuel_above_capacity');
+});
+
+test('OFF-C1-R1 C10: restart recovers only the known negative-downtime chain with the same ids', async () => {
+    const local = storage();
+    const stop = downtimeEvent('historical-stop', 'excavator.downtime.ended', 20);
+    stop.depends_on = ['historical-start'];
+    stop.local_downtime_id = 'historical-start';
+    const close = downtimeEvent('historical-close', 'excavator.shift.closed', 21);
+    close.depends_on = [stop.event_id];
+    const unrelated = loadEvent('unrelated-terminal', 22);
+    let firstDelivery = true;
+    const sender = async events => {
+        if (firstDelivery) {
+            return {ok: true, results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'conflict',
+                code: event.event_id === stop.event_id
+                    ? 'downtime_end_before_start'
+                    : (event.event_id === close.event_id ? 'dependency_rejected' : 'equipment_context_changed'),
+            }))};
+        }
+        return {ok: true, results: events.map(event => ({event_id: event.event_id, status: 'accepted'}))};
+    };
+    const first = createOutbox({localStorage: local, queueKey: 'off-c1-c10', send: sender});
+    await first.queue(stop);
+    await first.queue(close);
+    await first.queue(unrelated);
+    await first.flush();
+
+    firstDelivery = false;
+    const replayedIds = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c10',
+        send: async events => {
+            replayedIds.push(...events.map(event => event.event_id));
+            return sender(events);
+        },
+    });
+    const restored = await restarted.ready();
+    assert.equal(restored.find(event => event.event_id === stop.event_id).sync_state, 'pending');
+    assert.equal(restored.find(event => event.event_id === close.event_id).sync_state, 'pending');
+    assert.equal(restored.find(event => event.event_id === unrelated.event_id).sync_state, 'conflict');
+    await restarted.flush();
+
+    assert.deepEqual(replayedIds, [stop.event_id, close.event_id]);
+    const remaining = await restarted.pending();
+    assert.deepEqual(remaining.map(event => event.event_id), [unrelated.event_id]);
+});
+
+test('OFF-C1-R1 C10: a close rejected only by the client is sent after the causal stop recovers', async () => {
+    const local = storage();
+    const stop = downtimeEvent('client-rejected-stop', 'excavator.downtime.ended', 30);
+    stop.depends_on = ['client-rejected-start'];
+    stop.local_downtime_id = 'client-rejected-start';
+    const close = downtimeEvent('client-rejected-close', 'excavator.shift.closed', 31);
+    close.depends_on = [stop.event_id];
+    const firstSent = [];
+    const first = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c10-client-rejected',
+        batchSize: 1,
+        send: async events => {
+            firstSent.push(...events.map(event => event.event_id));
+            return {
+                ok: true,
+                results: events.map(event => ({
+                    event_id: event.event_id,
+                    status: 'conflict',
+                    code: 'downtime_end_before_start',
+                })),
+            };
+        },
+    });
+    await first.queue(stop);
+    await first.queue(close);
+    await first.flush();
+
+    assert.deepEqual(firstSent, [stop.event_id]);
+    const rejected = await first.pending();
+    assert.equal(rejected.find(event => event.event_id === stop.event_id).last_error_code, 'downtime_end_before_start');
+    assert.equal(rejected.find(event => event.event_id === close.event_id).last_error_code, 'dependency_rejected');
+
+    const replayedIds = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey: 'off-c1-c10-client-rejected',
+        batchSize: 1,
+        send: async events => {
+            replayedIds.push(...events.map(event => event.event_id));
+            return {
+                ok: true,
+                results: events.map(event => ({event_id: event.event_id, status: 'accepted'})),
+            };
+        },
+    });
+    const restored = await restarted.ready();
+    assert.equal(restored.find(event => event.event_id === stop.event_id).sync_state, 'pending');
+    assert.equal(restored.find(event => event.event_id === close.event_id).sync_state, 'pending');
+    await restarted.flush();
+
+    assert.deepEqual(replayedIds, [stop.event_id, close.event_id]);
+    assert.deepEqual(await restarted.pending(), []);
+});

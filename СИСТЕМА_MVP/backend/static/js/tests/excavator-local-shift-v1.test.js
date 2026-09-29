@@ -404,3 +404,96 @@ test('OFF-08: a stale server shift cannot replace a newer unmapped local shift',
     assert.equal(current.server_shift_id, null);
     assert.equal((await ledger.snapshot()).shifts.length, 1);
 });
+
+test('OFF-C1-R1 C2: a stale cached hour is rebased and includes the next durable load', async () => {
+    const ledger = create();
+    const open = opening('rebased-shift', 1, '2026-09-29T00:00:00.000Z');
+    await ledger.recordAndQueue(open);
+    const cached = await ledger.hourlyReport(null, Date.parse('2026-09-29T00:05:00.000Z'));
+    await ledger.recordAndQueue(load(open, 'rebased-load', 2, '2026-09-29T00:06:00.000Z'));
+
+    const report = await ledger.hourlyReport(cached, Date.parse('2026-09-29T00:15:00.000Z'));
+
+    assert.equal(report.hours[0].period.start, '2026-09-29T00:00:00.000Z');
+    assert.equal(report.hours[0].totals.trip_count, 1);
+    assert.equal(report.hours[0].totals.volume_m3, 49.4);
+});
+
+test('OFF-C1-R1 C2: server source event evidence prevents a lost receipt from doubling a fact', async () => {
+    const ledger = create();
+    const open = opening('lost-receipt-shift', 1, '2026-09-29T00:00:00.000Z');
+    const fact = load(open, 'lost-receipt-load', 2, '2026-09-29T00:06:00.000Z');
+    await ledger.recordAndQueue(open);
+    await ledger.recordAndQueue(fact);
+    const server = await ledger.hourlyReport(null, Date.parse('2026-09-29T00:15:00.000Z'));
+    server.hours[0].rows = [{dump_point_id: 4, dump_point: 'Дробилка', belaz: 1, nhl: 0}];
+    server.hours[0].totals = {belaz: 1, nhl: 0, trip_count: 1, volume_m3: '49.40'};
+    server.hours[0].source_trip_count = 1;
+    server.hours[0].source_trip_ids = [901];
+    server.hours[0].source_event_ids = [fact.event_id];
+    server.hours[0].is_empty = false;
+
+    const hourly = await ledger.hourlyReport(server, Date.parse('2026-09-29T00:15:00.000Z'));
+    const summary = await ledger.shiftSummary({
+        trip_count: 1,
+        volume_m3: '49.40',
+        source_trip_ids: [901],
+        source_event_ids: [fact.event_id],
+    });
+
+    assert.equal(hourly.hours[0].totals.trip_count, 1);
+    assert.equal(summary.trip_count, 1);
+    assert.equal((await ledger.facts()).length, 1);
+});
+
+test('OFF-C1-R1 C4: a failed durable write rolls back memory and transport failure keeps ledger usable', async () => {
+    const failingAdapter = {
+        kind: 'failing',
+        read: async () => null,
+        write: async () => { throw new Error('quota exceeded'); },
+    };
+    const unsaved = create({adapter: failingAdapter});
+    await unsaved.ready();
+    await assert.rejects(unsaved.recordAndQueue(opening('unsaved-open')), /quota exceeded/);
+    assert.equal(unsaved.currentShift(), null);
+
+    const adapter = memoryAdapter();
+    const first = create({adapter, outbox: fakeOutbox({fail: true})});
+    await first.recordAndQueue(opening('transport-independent-open'));
+    const restarted = create({
+        adapter,
+        outbox: {
+            confirmed: async () => { throw new Error('transport receipt db unavailable'); },
+            queue: async () => { throw new Error('transport queue db unavailable'); },
+        },
+    });
+    await restarted.ready();
+    assert.equal(restarted.currentShift().local_shift_id, 'transport-independent-open');
+});
+
+test('OFF-C1-R1 C8: face context is durable, restart-safe and remains bound to its shift', async () => {
+    const adapter = memoryAdapter();
+    const first = create({adapter});
+    const open = opening('face-context-shift');
+    const context = {
+        event_id: 'face-context-event', event_type: 'excavator.work_context.changed', format_version: 1,
+        actor_id: 12, access_id: 7, role_code: 'excavator_operator', device_id: 'off-c1-device',
+        local_shift_id: open.local_shift_id, shift_id: 0, equipment_id: 7,
+        occurred_at: '2026-09-29T00:06:00.000Z', sequence: 2, depends_on: [open.event_id],
+        payload: {
+            local_shift_id: open.local_shift_id,
+            rock_type_id: 9,
+            dump_point_ids: [4, 5],
+            loading_horizon: '777',
+            loading_block: '8',
+        },
+    };
+    await first.recordAndQueue(open);
+    await first.recordAndQueue(context);
+
+    const restarted = create({adapter, outbox: fakeOutbox()});
+    await restarted.ready();
+    assert.deepEqual(await restarted.workContext(open.local_shift_id), context.payload);
+    assert.deepEqual((await restarted.events()).map((event) => event.event_id), [open.event_id, context.event_id]);
+    assert.equal(await restarted.nextSequence(), 3);
+});

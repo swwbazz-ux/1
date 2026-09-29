@@ -1,11 +1,12 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db.models import OuterRef, Subquery
 from django.utils import formats, timezone
 
 from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
 
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
 
 
 def _period_label(start, end):
@@ -37,6 +38,16 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
         )
         .exclude(status=TripStatus.CANCELLED)
         .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model')
+        .annotate(
+            load_source_event_id=Subquery(
+                TripClientAction.objects.filter(
+                    trip_id=OuterRef('pk'),
+                    action_type__in=('truck_loaded', 'free_bucket_loaded'),
+                )
+                .order_by('-created_at', '-id')
+                .values('client_action_id')[:1]
+            )
+        )
         .order_by('loaded_at', 'id')
     )
 
@@ -49,11 +60,14 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     volume_totals = [0, 0]
     unknown_volume_counts = [0, 0]
     source_trip_ids = [[], []]
+    source_event_ids = [[], []]
 
     for trip in trips:
         bucket = 0 if trip.loaded_at < current_start else 1
         source_counts[bucket] += 1
         source_trip_ids[bucket].append(trip.id)
+        if trip.load_source_event_id:
+            source_event_ids[bucket].append(trip.load_source_event_id)
         if trip.volume_m3 is None:
             unknown_volume_counts[bucket] += 1
         else:
@@ -119,6 +133,7 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
             },
             'source_trip_count': source_counts[bucket],
             'source_trip_ids': source_trip_ids[bucket],
+            'source_event_ids': source_event_ids[bucket],
             'unclassified_trip_count': unclassified_counts[bucket],
             'unknown_volume_trip_count': unknown_volume_counts[bucket],
             'is_empty': source_counts[bucket] == 0,

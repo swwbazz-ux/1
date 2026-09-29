@@ -10,7 +10,7 @@ from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
 from users.role_apps import ROLE_APPS_BY_CODE
 
 
@@ -189,11 +189,18 @@ class ExcavatorHourlyReportTests(TestCase):
             captured_at - timedelta(minutes=5),
             volume_m3='49.40',
         )
+        TripClientAction.objects.create(
+            action_type='truck_loaded',
+            client_action_id='hourly-source-event-1',
+            trip=covered,
+            actor=self.operator,
+        )
 
         report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
 
         current = report['hours'][0]
         self.assertEqual(current['source_trip_ids'], [covered.id])
+        self.assertEqual(current['source_event_ids'], ['hourly-source-event-1'])
         self.assertEqual(current['totals']['volume_m3'], '49.40')
         self.assertEqual(current['unknown_volume_trip_count'], 0)
 

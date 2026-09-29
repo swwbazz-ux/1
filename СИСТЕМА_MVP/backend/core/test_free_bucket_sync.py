@@ -301,6 +301,62 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
+    def test_local_excavator_shift_can_accept_and_load_free_bucket_once(self):
+        opened_at = timezone.now() - timedelta(minutes=5)
+        self.shift.closed_at = opened_at - timedelta(minutes=1)
+        self.shift.save(update_fields=['closed_at'])
+        self.assignment.excavator = self.other_excavator
+        self.assignment.save(update_fields=['excavator'])
+        opening = self.event(
+            'local-free-shift',
+            'excavator.shift.opened',
+            1,
+            occurred_at=opened_at,
+            shift=self.shift,
+            payload={
+                'local_shift_id': 'local-free-shift',
+                'excavator_id': self.excavator.id,
+                'fuel_percent': '50',
+                'fuel': '3500',
+                'engine_hours': '1200',
+            },
+        )
+        opening['shift_id'] = 0
+        opening['local_shift_id'] = opening['event_id']
+        acceptance_event = self.accept_event(
+            event_id='local-free-accept',
+            sequence=2,
+            occurred_at=opened_at + timedelta(minutes=1),
+        )
+        acceptance_event['shift_id'] = 0
+        acceptance_event['local_shift_id'] = opening['event_id']
+        acceptance_event['depends_on'] = [opening['event_id']]
+        acceptance_event['payload']['local_shift_id'] = opening['event_id']
+        loaded = self.load_event(
+            acceptance_event,
+            event_id='local-free-load',
+            sequence=3,
+            occurred_at=opened_at + timedelta(minutes=2),
+        )
+        loaded['shift_id'] = 0
+        loaded['local_shift_id'] = opening['event_id']
+        loaded['payload']['local_shift_id'] = opening['event_id']
+
+        results = self.sync([loaded, acceptance_event, opening]).json()['results']
+        repeated = self.sync([loaded]).json()['results'][0]
+
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(by_id[opening['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(by_id[acceptance_event['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(by_id[loaded['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(repeated['status'], 'deduplicated', repeated)
+        acceptance = FreeBucketAcceptance.objects.get(client_acceptance_id=acceptance_event['event_id'])
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.USED)
+        self.assertEqual(acceptance.loading_shift_id, by_id[opening['event_id']]['server_ids']['shift_id'])
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assignment.refresh_from_db()
+        self.assertEqual(self.assignment.excavator_id, self.other_excavator.id)
+
     def test_excavator_directory_allows_promoting_driver_request_for_same_excavator(self):
         other_client, identity = self.other_excavator_identity()
         selected = self.select_event(excavator=self.other_excavator)
@@ -432,19 +488,28 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(Trip.objects.count(), 0)
 
     def test_excavator_cancel_before_acceptance_time_is_terminal_conflict(self):
-        accepted = self.accept_event(event_id='free-accept-before-stale-cancel')
+        self.shift.opened_at = timezone.now() - timedelta(minutes=1)
+        self.shift.save(update_fields=['opened_at'])
+        accepted = self.accept_event(
+            event_id='free-accept-before-stale-cancel',
+            occurred_at=self.shift.opened_at + timedelta(seconds=30),
+        )
         accepted_result = self.sync([accepted]).json()['results'][0]
         self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
         acceptance = FreeBucketAcceptance.objects.get()
+        stale_at = self.shift.opened_at + (
+            (acceptance.accepted_at - self.shift.opened_at) / 2
+        )
+        self.assertGreater(stale_at, self.shift.opened_at)
+        self.assertLess(stale_at, acceptance.accepted_at)
         cancelled = self.event(
             'free-cancel-stale',
             'excavator.free_bucket.cancelled',
             2,
-            occurred_at=acceptance.accepted_at - timedelta(milliseconds=1),
+            occurred_at=stale_at,
             depends_on=[accepted['event_id']],
             payload={'free_bucket_acceptance_local_id': accepted['event_id']},
         )
-
         result = self.sync([cancelled]).json()['results'][0]
 
         self.assertEqual(result['status'], 'conflict', result)

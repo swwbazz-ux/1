@@ -26,6 +26,7 @@ class FakeResponse {
     }
     clone() { return new FakeResponse(this.body, {url: this.url, type: this.headers.type, ok: this.ok}); }
     text() { return Promise.resolve(this.body); }
+    arrayBuffer() { return Promise.resolve(Buffer.from(String(this.body))); }
 }
 
 class FakeRequest {
@@ -343,4 +344,107 @@ test('OFF-02: cached shell wins over HTTP 503 and a hung navigation fetch', asyn
     assert.equal(await (await navigate()).text(), shellHtml, '503 must not replace a prepared shell');
     fetchMode = 'hang';
     assert.equal(await (await navigate()).text(), shellHtml, 'a hung fetch must abort and reopen the cache');
+});
+
+test('OFF-C1-R1 C5: prepared shell returns before a background request that stalls after headers', async () => {
+    const shellHtml = '<main data-eo-shell data-eo-role-code="excavator_operator">prepared</main>';
+    const currentCache = fakeCache([[
+        '/excavator/work/',
+        new FakeResponse(shellHtml, {
+            url: 'https://excavator.test/excavator/work/',
+            type: 'text/html',
+        }),
+    ]]);
+    const listeners = {};
+    const timers = new Map();
+    let timerId = 0;
+    const fetcher = async (request, options = {}) => ({
+        ok: true,
+        url: 'https://excavator.test/excavator/work/',
+        headers: new FakeHeaders('text/html'),
+        clone() {
+            return {
+                arrayBuffer: () => new Promise((resolve, reject) => {
+                    if (options.signal) options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+                }),
+                text: () => new Promise(() => {}),
+            };
+        },
+    });
+    const context = {
+        URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
+        AbortController,
+        fetch: fetcher,
+        caches: {open: async () => currentCache, keys: async () => [currentShellVersion], delete: async () => true},
+        self: {
+            location: {origin: 'https://excavator.test'},
+            addEventListener: (name, fn) => { listeners[name] = fn; },
+            clients: {claim: async () => {}}, skipWaiting: async () => {},
+        },
+        setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id; },
+        clearTimeout: id => timers.delete(id),
+    };
+    vm.createContext(context);
+    vm.runInContext(workerSource, context);
+
+    let responseWork;
+    let backgroundWork;
+    listeners.fetch({
+        request: new FakeRequest('/excavator/work/'),
+        respondWith: promise => { responseWork = promise; },
+        waitUntil: promise => { backgroundWork = promise; },
+    });
+    const response = await responseWork;
+
+    assert.equal(await response.text(), shellHtml);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(timers.size, 1, 'only the background refresh may still be waiting');
+    for (const callback of [...timers.values()]) callback();
+    await backgroundWork;
+    assert.equal(await (await currentCache.match('/excavator/work/')).text(), shellHtml);
+});
+
+test('OFF-C1-R1 C5: a prepared versioned dependency is usable while its refresh hangs', async () => {
+    const assetPath = `/static/js/excavator-field-outbox-v1.js?v=${currentShellVersion}`;
+    const currentCache = fakeCache([[
+        assetPath,
+        new FakeResponse('prepared-asset', {
+            url: `https://excavator.test${assetPath}`,
+            type: 'text/javascript',
+        }),
+    ]]);
+    const listeners = {};
+    let networkCalls = 0;
+    const context = {
+        URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
+        fetch: () => {
+            networkCalls += 1;
+            return new Promise(() => {});
+        },
+        caches: {open: async () => currentCache, keys: async () => [currentShellVersion], delete: async () => true},
+        self: {
+            location: {origin: 'https://excavator.test'},
+            addEventListener: (name, fn) => { listeners[name] = fn; },
+            clients: {claim: async () => {}}, skipWaiting: async () => {},
+        },
+        setTimeout, clearTimeout,
+    };
+    vm.createContext(context);
+    vm.runInContext(workerSource, context);
+
+    let responseWork;
+    let backgroundWork;
+    listeners.fetch({
+        request: new FakeRequest(assetPath),
+        respondWith: promise => { responseWork = promise; },
+        waitUntil: promise => { backgroundWork = promise; },
+    });
+    const response = await Promise.race([
+        responseWork,
+        new Promise((resolve, reject) => setTimeout(() => reject(new Error('prepared asset waited for network')), 50)),
+    ]);
+
+    assert.equal(await response.text(), 'prepared-asset');
+    assert.equal(networkCalls, 1, 'refresh may start only in the background');
+    assert.equal(typeof backgroundWork.then, 'function');
 });

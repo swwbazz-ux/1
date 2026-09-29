@@ -1,6 +1,8 @@
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
 
 from django.db import close_old_connections, connection
 from django.test import Client, TestCase, TransactionTestCase, skipUnlessDBFeature
@@ -8,7 +10,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
-from core.models import OfflineFieldEvent
+from assignments.models import ExcavatorPlacement
+from core.models import OfflineFieldEvent, OfflineFieldEventStatus
+from core.offline_sync import normalize_offline_event
+from downtimes.models import DowntimeEvent, DowntimeReason
 from shifts.models import EmployeeShift, ShiftClientAction
 from trips import tests as trip_fixtures
 from trips.models import Trip
@@ -95,6 +100,99 @@ class AutonomousExcavatorShiftMixin:
         }
         event.update(changes)
         return event
+
+    def work_context(self, opening, event_id='local-context-1', sequence=2, occurred_at=None, **payload):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.work_context.changed',
+            'format_version': 1,
+            'actor_id': self.operator.id,
+            'access_id': self.access.id,
+            'role_code': 'excavator_operator',
+            'device_id': 'off-c1-device-001',
+            'local_shift_id': opening['local_shift_id'],
+            'shift_id': 0,
+            'equipment_id': self.excavator.id,
+            'occurred_at': (occurred_at or timezone.now() - timedelta(minutes=1)).isoformat(),
+            'sequence': sequence,
+            'depends_on': [opening['event_id']],
+            'payload': {
+                'local_shift_id': opening['local_shift_id'],
+                'rock_type_id': self.rock.id,
+                'dump_point_ids': [self.dump_point.id],
+                'loading_horizon': '777',
+                'loading_block': '8',
+                **payload,
+            },
+        }
+
+    def downtime_start(self, opening, reason, *, event_id, sequence, occurred_at, depends_on):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.downtime.started',
+            'format_version': 1,
+            'actor_id': self.operator.id,
+            'access_id': self.access.id,
+            'role_code': 'excavator_operator',
+            'device_id': 'off-c1-device-001',
+            'local_shift_id': opening['local_shift_id'],
+            'shift_id': 0,
+            'equipment_id': self.excavator.id,
+            'local_downtime_id': event_id,
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': list(depends_on),
+            'payload': {
+                'local_shift_id': opening['local_shift_id'],
+                'local_downtime_id': event_id,
+                'reason_id': reason.id,
+            },
+        }
+
+    def downtime_stop(self, opening, start, *, event_id, sequence, occurred_at):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.downtime.ended',
+            'format_version': 1,
+            'actor_id': self.operator.id,
+            'access_id': self.access.id,
+            'role_code': 'excavator_operator',
+            'device_id': 'off-c1-device-001',
+            'local_shift_id': opening['local_shift_id'],
+            'shift_id': 0,
+            'equipment_id': self.excavator.id,
+            'local_downtime_id': start['event_id'],
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': [start['event_id']],
+            'payload': {
+                'local_shift_id': opening['local_shift_id'],
+                'local_downtime_id': start['event_id'],
+            },
+        }
+
+    def close_event(self, opening, *, event_id, sequence, occurred_at, depends_on):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.shift.closed',
+            'format_version': 1,
+            'actor_id': self.operator.id,
+            'access_id': self.access.id,
+            'role_code': 'excavator_operator',
+            'device_id': 'off-c1-device-001',
+            'local_shift_id': opening['local_shift_id'],
+            'shift_id': 0,
+            'equipment_id': self.excavator.id,
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': list(depends_on),
+            'payload': {
+                'local_shift_id': opening['local_shift_id'],
+                'fuel_percent': '50',
+                'fuel': '3500',
+                'engine_hours': '1200',
+            },
+        }
 
     def sync(self, events, *, client=None):
         return (client or self.client).post(
@@ -280,6 +378,361 @@ class AutonomousExcavatorShiftTests(AutonomousExcavatorShiftMixin, TestCase):
             by_id[first['event_id']]['server_ids']['shift_id'],
             by_id[second['event_id']]['server_ids']['shift_id'],
         )
+
+    def test_offline_work_context_survives_repeat_and_drives_the_following_load(self):
+        opened_at = timezone.now() - timedelta(minutes=12)
+        opening = self.opening(occurred_at=opened_at)
+        context = self.work_context(
+            opening,
+            occurred_at=opened_at + timedelta(minutes=1),
+        )
+        load = self.load(
+            opening,
+            sequence=3,
+            occurred_at=opened_at + timedelta(minutes=2),
+        )
+        load['depends_on'] = [context['event_id']]
+        load['payload']['loading_horizon'] = '777'
+        load['payload']['loading_block'] = '8'
+
+        results = self.sync([load, context, opening]).json()['results']
+        repeated = self.sync([context]).json()['results'][0]
+
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(by_id[opening['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(by_id[context['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(by_id[load['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(repeated['status'], 'deduplicated', repeated)
+        placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
+        trip = OfflineFieldEvent.objects.get(event_id=load['event_id']).trip
+        self.assertEqual(placement.loading_horizon, '777')
+        self.assertEqual(placement.loading_block, '8')
+        self.assertEqual(trip.loading_horizon, '777')
+        self.assertEqual(trip.loading_block, '8')
+        self.assertEqual(
+            OfflineFieldEvent.objects.filter(event_id=context['event_id']).count(),
+            1,
+        )
+
+    def test_suspicious_offline_close_retries_same_event_with_confirmation_then_allows_next_cycle(self):
+        opened_at = timezone.now() - timedelta(minutes=15)
+        first = self.opening('confirm-shift-a', sequence=1, occurred_at=opened_at)
+        close = self.close_event(
+            first,
+            event_id='confirm-shift-a-close',
+            sequence=2,
+            occurred_at=opened_at + timedelta(minutes=5),
+            depends_on=[first['event_id']],
+        )
+        close['payload']['engine_hours'] = '1199'
+
+        self.assertEqual(self.sync([first]).json()['results'][0]['status'], 'accepted')
+        warning = self.sync([close]).json()['results'][0]
+        self.assertEqual(warning['status'], 'conflict', warning)
+        self.assertEqual(warning['code'], 'confirmation_required', warning)
+        self.assertTrue(warning['confirmation_token'])
+
+        confirmed = dict(close)
+        confirmed['confirmation_token'] = warning['confirmation_token']
+        confirmed_result = self.sync([confirmed]).json()['results'][0]
+        self.assertEqual(confirmed_result['status'], 'accepted', confirmed_result)
+        receipt = OfflineFieldEvent.objects.get(event_id=close['event_id'])
+        self.assertEqual(receipt.status, OfflineFieldEventStatus.ACCEPTED)
+        self.assertEqual(receipt.fingerprint, normalize_offline_event(
+            close,
+            role_code='excavator_operator',
+            device_id='off-c1-device-001',
+            received_at=receipt.received_at,
+        )['fingerprint'])
+
+        second = self.opening(
+            'confirm-shift-b', sequence=3,
+            occurred_at=opened_at + timedelta(minutes=6),
+        )
+        second['depends_on'] = [close['event_id']]
+        child = self.load(
+            second,
+            event_id='confirm-shift-b-load',
+            sequence=4,
+            occurred_at=opened_at + timedelta(minutes=7),
+        )
+        child['depends_on'] = [second['event_id']]
+        by_id = {
+            item['event_id']: item
+            for item in self.sync([child, second]).json()['results']
+        }
+        self.assertEqual(by_id[second['event_id']]['status'], 'accepted', by_id)
+        self.assertEqual(by_id[child['event_id']]['status'], 'accepted', by_id)
+
+    def test_authenticated_shell_can_be_exported_as_safe_service_worker_fixture(self):
+        """Render the real shell only from the isolated test DB.
+
+        The optional output is intentionally generated from synthetic fixtures,
+        never copied from an installed phone, production response or a private
+        browser profile.  The Node service-worker test consumes the exact bytes.
+        """
+        opening = self.opening('rendered-shell-shift', sequence=1)
+        result = self.sync([opening]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        rendered = bytes(response.content)
+        self.assertIn(b'data-eo-shell', rendered)
+        self.assertGreater(rendered.count(b'/static/'), 10)
+        output_path = str(os.getenv('EXCAVATOR_RENDERED_SHELL_PATH') or '').strip()
+        if output_path:
+            Path(output_path).write_bytes(rendered)
+
+    def test_late_offline_chain_keeps_auto_and_manual_downtime_boundaries(self):
+        from trips.views import EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS
+
+        opened_at = timezone.now() - timedelta(minutes=40)
+        opening = self.opening('timeline-shift', sequence=1, occurred_at=opened_at)
+        load = self.load(
+            opening,
+            event_id='timeline-load',
+            sequence=2,
+            occurred_at=opened_at + timedelta(minutes=2),
+        )
+        manual_reason = DowntimeReason.objects.create(
+            name='Ручной ремонт OFF-C1-R1',
+            equipment_type=self.excavator.equipment_type,
+            show_for_excavator_operator=True,
+        )
+        start = self.downtime_start(
+            opening,
+            manual_reason,
+            event_id='timeline-manual-start',
+            sequence=3,
+            occurred_at=opened_at + timedelta(minutes=5),
+            depends_on=[load['event_id']],
+        )
+        stop = self.downtime_stop(
+            opening,
+            start,
+            event_id='timeline-manual-stop',
+            sequence=4,
+            occurred_at=opened_at + timedelta(minutes=8),
+        )
+        close = self.close_event(
+            opening,
+            event_id='timeline-close',
+            sequence=5,
+            occurred_at=opened_at + timedelta(minutes=10),
+            depends_on=[stop['event_id']],
+        )
+
+        neighbor_reason = DowntimeReason.objects.create(
+            name='Соседний несвязанный простой OFF-C1-R1',
+            equipment_type=self.excavator.equipment_type,
+            show_for_excavator_operator=True,
+        )
+        neighbor = DowntimeEvent.objects.create(
+            equipment=self.excavator,
+            employee=self.operator,
+            reason=neighbor_reason,
+            started_at=opened_at + timedelta(minutes=50),
+            ended_at=opened_at + timedelta(minutes=54),
+        )
+
+        first_results = self.sync([load, opening]).json()['results']
+        self.assertTrue(all(item['status'] == 'accepted' for item in first_results), first_results)
+        auto_before_poll = DowntimeEvent.objects.get(
+            reason__name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+        )
+        self.assertEqual(auto_before_poll.started_at, opened_at + timedelta(minutes=2))
+
+        # A normal screen refresh between queue parts is allowed to reconcile
+        # production state, but it must not replace the action-time boundary
+        # with request time or create a second automatic interval.
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            DowntimeEvent.objects.filter(
+                reason__name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+            ).count(),
+            1,
+        )
+        auto_before_poll.refresh_from_db()
+        self.assertEqual(auto_before_poll.started_at, opened_at + timedelta(minutes=2))
+
+        results = self.sync([close, stop, start]).json()['results']
+        self.assertTrue(all(item['status'] == 'accepted' for item in results), results)
+        auto = DowntimeEvent.objects.get(reason__name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+        manual = DowntimeEvent.objects.get(reason=manual_reason)
+        self.assertEqual(auto.started_at, opened_at + timedelta(minutes=2))
+        self.assertEqual(auto.ended_at, opened_at + timedelta(minutes=5))
+        self.assertEqual(manual.started_at, opened_at + timedelta(minutes=5))
+        self.assertEqual(manual.ended_at, opened_at + timedelta(minutes=8))
+        self.assertEqual((auto.ended_at - auto.started_at), timedelta(minutes=3))
+        self.assertEqual((manual.ended_at - manual.started_at), timedelta(minutes=3))
+        self.assertEqual(
+            OfflineFieldEvent.objects.get(event_id=start['event_id']).downtime_event_id,
+            manual.id,
+        )
+        self.assertEqual(OfflineFieldEvent.objects.filter(event_id__in=[
+            opening['event_id'], load['event_id'], start['event_id'], stop['event_id'], close['event_id'],
+        ]).count(), 5)
+        neighbor.refresh_from_db()
+        self.assertEqual(neighbor.started_at, opened_at + timedelta(minutes=50))
+        self.assertEqual(neighbor.ended_at, opened_at + timedelta(minutes=54))
+
+    def test_manual_start_with_auto_reason_reuses_one_interval_and_repeat_is_idempotent(self):
+        from trips.views import EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS
+
+        opened_at = timezone.now() - timedelta(minutes=35)
+        opening = self.opening('same-reason-shift', sequence=1, occurred_at=opened_at)
+        load = self.load(
+            opening,
+            event_id='same-reason-load',
+            sequence=2,
+            occurred_at=opened_at + timedelta(minutes=2),
+        )
+        self.assertTrue(all(
+            item['status'] == 'accepted'
+            for item in self.sync([load, opening]).json()['results']
+        ))
+        reason = DowntimeReason.objects.get(name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+        start = self.downtime_start(
+            opening,
+            reason,
+            event_id='same-reason-start',
+            sequence=3,
+            occurred_at=opened_at + timedelta(minutes=5),
+            depends_on=[load['event_id']],
+        )
+        stop = self.downtime_stop(
+            opening,
+            start,
+            event_id='same-reason-stop',
+            sequence=4,
+            occurred_at=opened_at + timedelta(minutes=8),
+        )
+        close = self.close_event(
+            opening,
+            event_id='same-reason-close',
+            sequence=5,
+            occurred_at=opened_at + timedelta(minutes=10),
+            depends_on=[stop['event_id']],
+        )
+
+        first = self.sync([close, stop, start]).json()['results']
+        repeated = self.sync([start, stop, close]).json()['results']
+        self.assertTrue(all(item['status'] == 'accepted' for item in first), first)
+        self.assertTrue(all(item['status'] == 'deduplicated' for item in repeated), repeated)
+
+        intervals = list(DowntimeEvent.objects.filter(
+            equipment=self.excavator,
+            reason=reason,
+        ))
+        self.assertEqual(len(intervals), 1)
+        interval = intervals[0]
+        self.assertEqual(interval.started_at, opened_at + timedelta(minutes=2))
+        self.assertEqual(interval.ended_at, opened_at + timedelta(minutes=8))
+        self.assertEqual(interval.ended_at - interval.started_at, timedelta(minutes=6))
+        start_receipt = OfflineFieldEvent.objects.get(event_id=start['event_id'])
+        stop_receipt = OfflineFieldEvent.objects.get(event_id=stop['event_id'])
+        self.assertEqual(start_receipt.downtime_event_id, interval.id)
+        self.assertEqual(stop_receipt.downtime_event_id, interval.id)
+        self.assertEqual(OfflineFieldEvent.objects.filter(
+            event_id__in=[start['event_id'], stop['event_id'], close['event_id']],
+        ).count(), 3)
+
+    def test_legacy_negative_downtime_conflict_and_child_recover_with_same_ids(self):
+        from trips.views import EXCAVATOR_AUTO_DOWNTIME_COMMENT, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS
+
+        opened_at = timezone.now() - timedelta(minutes=45)
+        opening = self.opening('legacy-chain-shift', sequence=1, occurred_at=opened_at)
+        load = self.load(
+            opening,
+            event_id='legacy-chain-load',
+            sequence=2,
+            occurred_at=opened_at + timedelta(minutes=2),
+        )
+        manual_reason = DowntimeReason.objects.create(
+            name='Ручной ремонт legacy chain',
+            equipment_type=self.excavator.equipment_type,
+            show_for_excavator_operator=True,
+        )
+        start = self.downtime_start(
+            opening,
+            manual_reason,
+            event_id='legacy-chain-start',
+            sequence=3,
+            occurred_at=opened_at + timedelta(minutes=5),
+            depends_on=[load['event_id']],
+        )
+        self.assertTrue(all(
+            item['status'] == 'accepted'
+            for item in self.sync([opening, load, start]).json()['results']
+        ))
+        auto = DowntimeEvent.objects.get(reason__name=EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+        manual = DowntimeEvent.objects.get(reason=manual_reason)
+        legacy_boundary = timezone.now() - timedelta(minutes=5)
+        auto.started_at = legacy_boundary - timedelta(seconds=1)
+        auto.ended_at = legacy_boundary
+        auto.comment = EXCAVATOR_AUTO_DOWNTIME_COMMENT
+        auto.save(update_fields=['started_at', 'ended_at', 'comment'])
+        manual.started_at = legacy_boundary
+        manual.ended_at = None
+        manual.save(update_fields=['started_at', 'ended_at'])
+
+        stop = self.downtime_stop(
+            opening,
+            start,
+            event_id='legacy-chain-stop',
+            sequence=4,
+            occurred_at=opened_at + timedelta(minutes=8),
+        )
+        normalized = normalize_offline_event(
+            stop,
+            role_code='excavator_operator',
+            device_id='off-c1-device-001',
+        )
+        OfflineFieldEvent.objects.create(
+            event_id=stop['event_id'],
+            event_type=stop['event_type'],
+            actor=self.operator,
+            access=self.access,
+            role_code='excavator_operator',
+            device_id='off-c1-device-001',
+            sequence=stop['sequence'],
+            depends_on=stop['depends_on'],
+            occurred_at=normalized['device_occurred_at'],
+            shift=OfflineFieldEvent.objects.get(event_id=opening['event_id']).shift,
+            equipment=self.excavator,
+            local_downtime_id=start['event_id'],
+            payload=stop['payload'],
+            context_snapshot={},
+            fingerprint=normalized['fingerprint'],
+            status=OfflineFieldEventStatus.CONFLICT,
+            retryable=False,
+            error_code='downtime_end_before_start',
+            error_message='legacy negative interval',
+        )
+        close = self.close_event(
+            opening,
+            event_id='legacy-chain-close',
+            sequence=5,
+            occurred_at=opened_at + timedelta(minutes=10),
+            depends_on=[stop['event_id']],
+        )
+        rejected_child = self.sync([close]).json()['results'][0]
+        self.assertEqual(rejected_child['code'], 'dependency_rejected', rejected_child)
+
+        repaired_stop = self.sync([stop]).json()['results'][0]
+        repaired_close = self.sync([close]).json()['results'][0]
+
+        self.assertEqual(repaired_stop['status'], 'accepted', repaired_stop)
+        self.assertEqual(repaired_close['status'], 'accepted', repaired_close)
+        auto.refresh_from_db()
+        manual.refresh_from_db()
+        self.assertEqual(auto.started_at, opened_at + timedelta(minutes=2))
+        self.assertEqual(auto.ended_at, opened_at + timedelta(minutes=5))
+        self.assertEqual(manual.started_at, opened_at + timedelta(minutes=5))
+        self.assertEqual(manual.ended_at, opened_at + timedelta(minutes=8))
+        self.assertEqual(OfflineFieldEvent.objects.filter(event_id=stop['event_id']).count(), 1)
+        self.assertEqual(OfflineFieldEvent.objects.filter(event_id=close['event_id']).count(), 1)
 
 
 @skipUnlessDBFeature('has_select_for_update')

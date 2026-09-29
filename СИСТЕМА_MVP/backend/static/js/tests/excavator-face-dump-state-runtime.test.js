@@ -166,7 +166,7 @@ function dumpButton(id, name, {persisted = false, selected = false} = {}) {
 }
 
 
-function createRuntime({refreshResult = true} = {}) {
+function createRuntime({refreshResult = true, online = true} = {}) {
     const points = [
         dumpButton(1, "Буферный склад", {persisted: true, selected: true}),
         dumpButton(2, "ККД"),
@@ -208,6 +208,7 @@ function createRuntime({refreshResult = true} = {}) {
     const notices = [];
     const activatedTabs = [];
     const refreshCalls = [];
+    let flushCalls = 0;
     const sandbox = {
         context: {},
         shell,
@@ -218,6 +219,8 @@ function createRuntime({refreshResult = true} = {}) {
         applySettings,
         ids: ["1"],
         window: {},
+        navigator: {onLine: online},
+        fieldOutbox: {flush() { flushCalls += 1; return Promise.resolve(); }},
         showExcavatorNotice(message) {
             notices.push(message);
         },
@@ -262,6 +265,7 @@ function createRuntime({refreshResult = true} = {}) {
         notices,
         points,
         refreshCalls,
+        flushCalls: () => flushCalls,
         shell,
     };
 }
@@ -346,13 +350,14 @@ test("A successful save canonicalizes numeric server IDs into the persisted gree
     assert.equal(runtime.points[0].dataset.eoDumpPersisted, "false");
     assert.equal(runtime.dumpPointsInput.value, "2,3");
     assert.equal(runtime.dumpInput.value, "2");
-    assert.equal(runtime.refreshCalls.length, 1);
-    assert.equal(runtime.refreshCalls[0].pendingOwner, "face");
+    assert.equal(runtime.refreshCalls.length, 0, "durable save must not wait for a fragment refresh");
+    assert.deepEqual(runtime.activatedTabs, ["trucks"]);
+    assert.equal(runtime.flushCalls(), 1);
 });
 
 
-test("A failed post-save fragment refresh keeps Face visible and safely unlocks the confirmed draft", async () => {
-    const runtime = createRuntime({refreshResult: false});
+test("An offline durable save keeps the confirmed draft and unlocks without a fragment request", async () => {
+    const runtime = createRuntime({refreshResult: false, online: false});
     runtime.setPending(true);
     runtime.applySettings.classList.add("is-pending");
 
@@ -362,13 +367,13 @@ test("A failed post-save fragment refresh keeps Face visible and safely unlocks 
         active_downtime_reason: "",
     });
 
-    assert.equal(runtime.refreshCalls.length, 1);
-    assert.equal(runtime.refreshCalls[0].pendingOwner, "face");
-    assert.equal(runtime.shell.dataset.eoActiveTab, "face");
-    assert.deepEqual(runtime.activatedTabs, ["face"]);
+    assert.equal(runtime.refreshCalls.length, 0);
+    assert.equal(runtime.shell.dataset.eoActiveTab, "trucks");
+    assert.deepEqual(runtime.activatedTabs, ["trucks"]);
+    assert.equal(runtime.flushCalls(), 0);
     assert.equal(runtime.applySettings.classList.contains("is-pending"), false);
     assert.equal(runtime.points.every((button) => !button.disabled), true);
-    assert.match(runtime.notices.at(-1), /Настройки сохранены/);
+    assert.match(runtime.notices.at(-1), /Настройки забоя сохранены на телефоне/);
 });
 
 

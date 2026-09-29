@@ -48,6 +48,7 @@ def _log_discrepancy(*, access, code, process, description):
 
 SUPPORTED_EVENT_ROLES = {
     'excavator.shift.opened': 'excavator_operator',
+    'excavator.work_context.changed': 'excavator_operator',
     'excavator.free_bucket.accepted': 'excavator_operator',
     'excavator.free_bucket.cancelled': 'excavator_operator',
     'excavator.free_bucket.loaded': 'excavator_operator',
@@ -586,7 +587,10 @@ def _process_free_bucket_loaded(access, normalized):
         acceptance.save(update_fields=['status', 'used_at', 'used_trip'])
     TripClientAction.objects.create(action_type='free_bucket_loaded', client_action_id=normalized['event_id'], trip=trip, actor=access.employee)
     close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
-    reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
+    reconcile_excavator_waiting_for_trucks(
+        excavator, access.employee, start_when_empty=True,
+        occurred_at=normalized['occurred_at'], source_event_id=normalized['event_id'],
+    )
     state = bump_operational_state(
         'OfflineFieldEvent:free_bucket_loaded', event_type='trip_changed', object_type='Trip', object_id=trip.id,
         payload={'action': 'free_bucket_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
@@ -729,6 +733,12 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
                 payload['downtime_id'] = int(legacy_downtime_ref)
             else:
                 local_downtime_id = legacy_downtime_ref[:128]
+    local_shift_id = str(
+        raw_event.get('local_shift_id')
+        or payload.get('local_shift_id')
+        or context_snapshot.get('local_shift_id')
+        or ''
+    ).strip()[:128]
     normalized = {
         'event_id': event_id,
         'event_type': event_type,
@@ -743,12 +753,6 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'depends_on': depends_on,
         'occurred_at': occurred_at,
         'shift_id': raw_event.get('shift_id') or context_snapshot.get('shift_id'),
-        'local_shift_id': str(
-            raw_event.get('local_shift_id')
-            or payload.get('local_shift_id')
-            or context_snapshot.get('local_shift_id')
-            or ''
-        ).strip()[:128],
         'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
         'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
         'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
@@ -757,6 +761,12 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'context_snapshot': context_snapshot,
         'received_at': received_at,
     }
+    # OFF-C1 adds local_shift_id to the immutable envelope, but already-stored
+    # release receipts were fingerprinted before that optional key existed.
+    # Keep their exact canonical form when the wire event did not carry a local
+    # shift id; new envelopes still include and therefore protect the value.
+    if local_shift_id:
+        normalized['local_shift_id'] = local_shift_id
     canonical = {
         **normalized,
         'occurred_at': occurred_at.isoformat(),
@@ -765,6 +775,11 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     normalized['fingerprint'] = hashlib.sha256(
         json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')
     ).hexdigest()
+    # A close confirmation is a server-issued capability for the exact
+    # immutable readings already fingerprinted above. It may arrive after the
+    # original offline envelope was stored, so it is transport metadata rather
+    # than a mutation of payload identity.
+    normalized['confirmation_token'] = str(raw_event.get('confirmation_token') or '').strip()
     # Preserve the exact device value in the immutable receipt/fingerprint for
     # audit. Field actions must nevertheless remain possible when an Android
     # clock or time zone is far ahead: in that narrow, objectively detectable
@@ -1028,6 +1043,41 @@ def _process_excavator_shift_opened(access, normalized):
         'device_occurred_at': normalized['device_occurred_at'].isoformat(),
         'effective_occurred_at': normalized['occurred_at'].isoformat(),
         'time_source': 'server_receipt' if normalized.get('clock_adjusted') else 'device',
+    }, {'shift': shift, 'equipment': shift.equipment}
+
+
+def _process_excavator_work_context_changed(access, normalized):
+    from trips.views import (
+        ExcavatorWorkContextApplyError,
+        apply_excavator_work_context_change,
+    )
+
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
+    lock_production_state()
+    try:
+        result = apply_excavator_work_context_change(
+            access=access,
+            shift=shift,
+            payload=normalized['payload'],
+            occurred_at=normalized['occurred_at'],
+            source_event_id=normalized['event_id'],
+        )
+    except ExcavatorWorkContextApplyError as error:
+        if error.temporary:
+            _retry(error.code, str(error))
+        _conflict(error.code, str(error))
+    return {
+        'server_ids': {
+            'shift_id': shift.id,
+            'equipment_id': shift.equipment_id,
+            'rock_type_id': result['rock_type_id'],
+        },
+        'version': result['version'],
+        'dump_point_ids': result['dump_point_ids'],
+        'loading_horizon': result['loading_horizon'],
+        'loading_block': result['loading_block'],
+        'work_context_changed': result['work_context_changed'],
+        'face_position_changed': result['face_position_changed'],
     }, {'shift': shift, 'equipment': shift.equipment}
 
 
@@ -1996,7 +2046,10 @@ def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, exca
         action_type='free_bucket_loaded', client_action_id=normalized['event_id'], trip=trip, actor=access.employee,
     )
     close_truck_waiting_loading_downtimes(truck, ended_at=normalized['occurred_at'])
-    reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
+    reconcile_excavator_waiting_for_trucks(
+        excavator, access.employee, start_when_empty=True,
+        occurred_at=normalized['occurred_at'], source_event_id=normalized['event_id'],
+    )
     _log_discrepancy(
         access=access, code='assignment_context_changed', process='Погрузка экскаватором',
         description=(
@@ -2285,7 +2338,10 @@ def _process_excavator_loaded(access, normalized):
     for downtime in excavator_downtimes:
         downtime.ended_at = normalized['occurred_at']
         downtime.save(update_fields=['ended_at'])
-    reconcile_excavator_waiting_for_trucks(excavator, access.employee, start_when_empty=True)
+    reconcile_excavator_waiting_for_trucks(
+        excavator, access.employee, start_when_empty=True,
+        occurred_at=normalized['occurred_at'], source_event_id=normalized['event_id'],
+    )
     state = bump_operational_state(
         'OfflineFieldEvent:excavator_trip_loaded', event_type='trip_changed',
         object_type='Trip', object_id=trip.id,
@@ -2415,7 +2471,10 @@ def _process_excavator_loaded_cancelled(access, normalized):
         action_type='truck_loaded_cancel', client_action_id=normalized['event_id'],
         trip=trip, actor=access.employee,
     )
-    reconcile_excavator_waiting_for_trucks(trip.excavator)
+    reconcile_excavator_waiting_for_trucks(
+        trip.excavator, occurred_at=normalized['occurred_at'],
+        source_event_id=normalized['event_id'],
+    )
     state = bump_operational_state(
         'OfflineFieldEvent:excavator_trip_loaded_cancelled', event_type='trip_changed',
         object_type='Trip', object_id=trip.id,
@@ -2527,7 +2586,10 @@ def _process_driver_loaded_cancelled(access, normalized):
         trip=trip,
         actor=access.employee,
     )
-    reconcile_excavator_waiting_for_trucks(excavator)
+    reconcile_excavator_waiting_for_trucks(
+        excavator, occurred_at=normalized['occurred_at'],
+        source_event_id=normalized['event_id'],
+    )
     state = bump_operational_state(
         'OfflineFieldEvent:driver_manual_loaded_cancelled',
         event_type='trip_changed',
@@ -2852,6 +2914,7 @@ def _process_downtime(access, normalized, *, role_code, close):
             or normalized['payload'].get('downtime_id')
         )
         event = None
+        source = None
         if downtime_id:
             event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(pk=downtime_id).first()
         elif normalized['local_downtime_id']:
@@ -2871,7 +2934,63 @@ def _process_downtime(access, normalized, *, role_code, close):
         if event.equipment_id != equipment.id:
             _conflict('downtime_equipment_changed', 'Простой относится к другой технике.')
         if normalized['occurred_at'] < event.started_at:
-            _conflict('downtime_end_before_start', 'Время окончания простоя раньше его начала.')
+            source_started_at = source.occurred_at if source else None
+            if source_started_at and source_started_at <= normalized['occurred_at']:
+                from trips.views import EXCAVATOR_AUTO_DOWNTIME_COMMENT
+
+                causal_load = (
+                    OfflineFieldEvent.objects.select_for_update(of=('self',))
+                    .filter(
+                        event_id__in=source.depends_on,
+                        actor=access.employee,
+                        access=access,
+                        role_code='excavator_operator',
+                        device_id=normalized['device_id'],
+                        event_type__in={
+                            'excavator.trip.loaded',
+                            'excavator.free_bucket.loaded',
+                        },
+                        status=OfflineFieldEventStatus.ACCEPTED,
+                        occurred_at__lte=source_started_at,
+                    )
+                    .order_by('-occurred_at', '-sequence', '-id')
+                    .first()
+                )
+                event_is_auto = str(event.comment or '').startswith(EXCAVATOR_AUTO_DOWNTIME_COMMENT)
+                previous = None
+                if not event_is_auto:
+                    previous = (
+                        DowntimeEvent.objects.select_for_update(of=('self',))
+                        .filter(
+                            equipment=equipment,
+                            ended_at=event.started_at,
+                            comment__startswith=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
+                        )
+                        .exclude(pk=event.pk)
+                        .order_by('-started_at', '-id')
+                        .first()
+                    )
+                if previous and not causal_load:
+                    _conflict(
+                        'downtime_end_before_start',
+                        'Не удалось доказать границу производного автопростоя.',
+                    )
+                if previous and causal_load:
+                    previous.started_at = min(previous.started_at, causal_load.occurred_at)
+                    previous.ended_at = source_started_at
+                    previous.save(update_fields=['started_at', 'ended_at'])
+                event.started_at = (
+                    min(source_started_at, causal_load.occurred_at)
+                    if event_is_auto and causal_load
+                    else source_started_at
+                )
+                if event_is_auto and f'[manual:{source.event_id}]' not in str(event.comment or ''):
+                    event.comment = f'{event.comment} [manual:{source.event_id}]'[:255]
+                    event.save(update_fields=['started_at', 'comment'])
+                else:
+                    event.save(update_fields=['started_at'])
+            else:
+                _conflict('downtime_end_before_start', 'Время окончания простоя раньше его начала.')
         if event.employee_id not in (None, access.employee_id):
             _log_discrepancy(
                 access=access, code='downtime_owner_changed', process='Закрытие простоя',
@@ -2917,9 +3036,20 @@ def _process_downtime(access, normalized, *, role_code, close):
                     access=access, code=code, process='Начало простоя водителя',
                     description=f'{message} Простой принят по решению водителя.',
                 )
-        open_event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(
-            equipment=equipment, ended_at__isnull=True,
-        ).order_by('-started_at', '-id').first()
+        event_at = normalized['occurred_at']
+        open_event = (
+            DowntimeEvent.objects.select_for_update(of=('self',))
+            .filter(equipment=equipment, started_at__lte=event_at)
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=event_at))
+            .order_by('-started_at', '-id')
+            .first()
+        )
+        next_event = (
+            DowntimeEvent.objects.select_for_update(of=('self',))
+            .filter(equipment=equipment, started_at__gt=event_at)
+            .order_by('started_at', 'id')
+            .first()
+        )
         if open_event and open_event.employee_id != access.employee_id:
             _log_discrepancy(
                 access=access, code='downtime_owner_changed', process='Переключение причины простоя',
@@ -2927,17 +3057,6 @@ def _process_downtime(access, normalized, *, role_code, close):
                     f'Активный простой #{open_event.id} начат сотрудником {open_event.employee_id}, '
                     f'причину переключает сотрудник {access.employee_id}. Записаны оба: старый простой '
                     f'закрыт, новый открыт на переключившего.'
-                ),
-            )
-        effective_occurred_at = normalized['occurred_at']
-        if open_event and normalized['occurred_at'] < open_event.started_at:
-            effective_occurred_at = open_event.started_at
-            _log_discrepancy(
-                access=access, code='downtime_switch_before_start', process='Переключение причины простоя',
-                description=(
-                    f'Работник переключает причину простоя на {normalized["occurred_at"]}, раньше начала '
-                    f'текущего простоя #{open_event.id} ({open_event.started_at}). Принято по фактическому '
-                    f'времени начала текущего простоя.'
                 ),
             )
         if open_event and open_event.reason_id == reason.id:
@@ -2949,7 +3068,7 @@ def _process_downtime(access, normalized, *, role_code, close):
             if open_event:
                 # One timestamp closes the previous category and opens the next one,
                 # so the total downtime has neither a gap nor an overlap.
-                open_event.ended_at = effective_occurred_at
+                open_event.ended_at = event_at
                 open_event.save(update_fields=['ended_at'])
             event = DowntimeEvent.objects.create(
                 equipment=equipment,
@@ -2957,13 +3076,15 @@ def _process_downtime(access, normalized, *, role_code, close):
                 subject_employee=access.employee,
                 recorded_by=access.employee,
                 reason=reason,
-                started_at=effective_occurred_at,
+                started_at=event_at,
                 comment=str(normalized['payload'].get('comment') or '')[:255],
                 recorded_at=normalized['received_at'],
-                ended_at=(
-                    shift.closed_at
-                    if shift.closed_at and shift.closed_at >= normalized['occurred_at']
-                    else None
+                ended_at=min(
+                    [boundary for boundary in (
+                        next_event.started_at if next_event else None,
+                        shift.closed_at if shift.closed_at and shift.closed_at >= event_at else None,
+                    ) if boundary is not None],
+                    default=None,
                 ),
             )
             action = 'downtime_switched' if open_event else 'downtime_started'
@@ -3004,7 +3125,7 @@ def _process_shift_closed(access, normalized, *, role_code):
                     ),
                 },
                 client_action_id=normalized['event_id'],
-                confirmation_token=str(payload.get('confirmation_token') or ''),
+                confirmation_token=str(normalized.get('confirmation_token') or payload.get('confirmation_token') or ''),
                 occurred_at=normalized['occurred_at'],
                 actor_access_id=access.pk,
             )
@@ -3017,7 +3138,7 @@ def _process_shift_closed(access, normalized, *, role_code):
                                     else payload.get('end_engine_hours')),
                 client_action_id=normalized['event_id'],
                 submitted_fuel_percent=payload.get('fuel_percent'),
-                confirmation_token=str(payload.get('confirmation_token') or ''),
+                confirmation_token=str(normalized.get('confirmation_token') or payload.get('confirmation_token') or ''),
                 expected_shift_id=shift.id,
                 occurred_at=normalized['occurred_at'],
             )
@@ -3050,6 +3171,7 @@ def _process_shift_closed(access, normalized, *, role_code):
 
 PROCESSORS = {
     'excavator.shift.opened': _process_excavator_shift_opened,
+    'excavator.work_context.changed': _process_excavator_work_context_changed,
     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,
     'excavator.free_bucket.loaded': _process_free_bucket_loaded,
@@ -3215,9 +3337,9 @@ def process_one_offline_event(access, normalized):
                     existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
                 )
                 dependency_chain_is_ready = False
+                excavator_downtime_chain_is_ready = False
                 if (
-                    normalized['role_code'] == 'driver'
-                    and existing.status == OfflineFieldEventStatus.CONFLICT
+                    existing.status == OfflineFieldEventStatus.CONFLICT
                     and existing.error_code == 'dependency_rejected'
                     and existing.depends_on
                 ):
@@ -3235,6 +3357,14 @@ def process_one_offline_event(access, normalized):
                             and dependency.device_id == normalized['device_id']
                             and dependency.sequence < existing.sequence
                             and dependency.status == OfflineFieldEventStatus.ACCEPTED
+                            for dependency in dependency_receipts
+                        )
+                    )
+                    excavator_downtime_chain_is_ready = bool(
+                        dependency_chain_is_ready
+                        and normalized['role_code'] == 'excavator_operator'
+                        and any(
+                            dependency.event_type == 'excavator.downtime.ended'
                             for dependency in dependency_receipts
                         )
                     )
@@ -3262,12 +3392,27 @@ def process_one_offline_event(access, normalized):
                         )
                         or (
                             normalized['role_code'] == 'excavator_operator'
-                            and existing.error_code in {'device_clock_ahead', 'dependency_rejected'}
+                            and existing.error_code in {
+                                'device_clock_ahead', 'dependency_rejected',
+                                'confirmation_required', 'downtime_end_before_start',
+                            }
                             and (
                                 device_clock_was_invalid
                                 or (
+                                    existing.error_code == 'confirmation_required'
+                                    and existing.event_type == 'excavator.shift.closed'
+                                    and bool(normalized.get('confirmation_token'))
+                                )
+                                or (
+                                    existing.error_code == 'downtime_end_before_start'
+                                    and existing.event_type == 'excavator.downtime.ended'
+                                )
+                                or (
                                     existing.error_code == 'dependency_rejected'
-                                    and _clock_skewed_dependency_exists(existing)
+                                    and (
+                                        excavator_downtime_chain_is_ready
+                                        or _clock_skewed_dependency_exists(existing)
+                                    )
                                 )
                             )
                         )
@@ -3283,7 +3428,13 @@ def process_one_offline_event(access, normalized):
                     clock_adjusted = (
                         device_clock_was_invalid
                         if normalized['role_code'] == 'driver'
-                        else True
+                        else bool(
+                            device_clock_was_invalid
+                            or (
+                                existing.error_code == 'dependency_rejected'
+                                and _clock_skewed_dependency_exists(existing)
+                            )
+                        )
                     )
                     normalized['device_occurred_at'] = existing.occurred_at
                     normalized['received_at'] = existing.received_at

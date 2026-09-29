@@ -1887,8 +1887,12 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-settings-applied="false"')
         self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
         self.assertContains(response, 'currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot')
-        self.assertContains(response, 'data.work_context_changed && data.active_downtime_reason')
-        self.assertContains(response, '? "events"')
+        self.assertContains(
+            response,
+            'queueExcavatorFieldEvent("excavator.work_context.changed", payload,',
+        )
+        self.assertNotContains(response, 'fetch(settingsUrl')
+        self.assertContains(response, 'var nextTab = "trucks";')
         self.assertContains(response, 'Простои')
         self.assertContains(response, '>Работа</span>')
         self.assertContains(response, '>Простой</span>')
@@ -4303,7 +4307,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('excavatorShellStaticDependencies(html)', script)
         self.assertIn('async function hasCompleteExcavatorShell(cache, response)', script)
         self.assertIn('async function cacheExcavatorShellDependencies(cache, html)', script)
-        self.assertIn('if (missing.length) await cache.addAll(missing);', script)
+        self.assertNotIn('if (missing.length) await cache.addAll(missing);', script)
+        self.assertIn('const fetched = await Promise.all(missing.map', script)
+        self.assertIn('Unsafe or incomplete excavator dependency', script)
+        self.assertIn('async function cachedExcavatorShellDependenciesAvailable', script)
+        self.assertIn('await response.clone().arrayBuffer();', script)
         self.assertIn('if (!await cacheExcavatorShellDependencies(cache, shellHtml)) return false;', script)
         self.assertIn('requestUrl.search !== finalUrl.search', script)
         self.assertIn('finalUrl.pathname !== APP_SHELL_URL', script)

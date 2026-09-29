@@ -735,7 +735,7 @@ async function isExcavatorShellResponse(response) {
   const contentType = String(response.headers.get("Content-Type") || "").toLowerCase();
   if (!contentType.includes("text/html")) return false;
   try {
-    const html = await response.clone().text();
+    const html = await promiseWithExcavatorTimeout(response.clone().text());
     return html.includes("data-eo-shell") &&
       html.includes('data-eo-role-code="' + ROLE_CODE + '"');
   } catch (error) {
@@ -785,7 +785,28 @@ async function cacheExcavatorShellDependencies(cache, html) {
     const response = await cache.match(request);
     if (!await isSafeExcavatorCacheEntry(request, response)) missing.push(request);
   }
-  if (missing.length) await cache.addAll(missing);
+  if (missing.length) {
+    const fetched = await Promise.all(missing.map(async request => {
+      const response = await fetchWithExcavatorTimeout(request, {
+        cache: "reload",
+        credentials: "same-origin"
+      });
+      if (!await isSafeExcavatorCacheEntry(request, response)) {
+        throw new Error("Unsafe or incomplete excavator dependency: " + request.url);
+      }
+      return [request, response];
+    }));
+    await Promise.all(fetched.map(pair => cache.put(pair[0], pair[1].clone())));
+  }
+  const available = await Promise.all(dependencies.map(async path => {
+    const request = new Request(path, {credentials: "same-origin"});
+    return await isSafeExcavatorCacheEntry(request, await cache.match(request));
+  }));
+  return available.every(Boolean);
+}
+
+async function cachedExcavatorShellDependenciesAvailable(cache, html) {
+  const dependencies = excavatorShellStaticDependencies(html);
   const available = await Promise.all(dependencies.map(async path => {
     const request = new Request(path, {credentials: "same-origin"});
     return await isSafeExcavatorCacheEntry(request, await cache.match(request));
@@ -795,8 +816,8 @@ async function cacheExcavatorShellDependencies(cache, html) {
 
 async function hasCompleteExcavatorShell(cache, response) {
   if (!response || !await isExcavatorShellResponse(response)) return false;
-  const shellHtml = await response.clone().text();
-  return await cacheExcavatorShellDependencies(cache, shellHtml);
+  const shellHtml = await promiseWithExcavatorTimeout(response.clone().text());
+  return await cachedExcavatorShellDependenciesAvailable(cache, shellHtml);
 }
 
 async function isSafeExcavatorCacheEntry(request, response) {
@@ -852,15 +873,60 @@ async function migratePreviousExcavatorCache(cacheNames) {
 
 const NETWORK_FALLBACK_TIMEOUT_MS = 2500;
 
+async function promiseWithExcavatorTimeout(promise) {
+  let timeout = 0;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("excavator_network_timeout")), NETWORK_FALLBACK_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function fetchWithExcavatorTimeout(request, options) {
-  if (typeof AbortController !== "function") return fetch(request, options);
+  if (typeof AbortController !== "function") {
+    const response = await promiseWithExcavatorTimeout(fetch(request, options));
+    await promiseWithExcavatorTimeout(response.clone().arrayBuffer());
+    return response;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), NETWORK_FALLBACK_TIMEOUT_MS);
   try {
-    return await fetch(request, Object.assign({}, options || {}, { signal: controller.signal }));
+    const response = await fetch(request, Object.assign({}, options || {}, { signal: controller.signal }));
+    // A fetch promise resolves after headers. Consume a clone before clearing
+    // the abort timer so a server that stalls mid-body cannot block offline UI.
+    await response.clone().arrayBuffer();
+    return response;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function preparedExcavatorShell(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+  const candidates = [await cache.match(request)];
+  if (fallbackUrl) candidates.push(await cache.match(fallbackUrl));
+  for (const candidate of candidates) {
+    try {
+      if (candidate && await hasCompleteExcavatorShell(cache, candidate)) return candidate;
+    } catch (error) {}
+  }
+  return null;
+}
+
+async function refreshExcavatorShell(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+  const response = await fetchWithExcavatorTimeout(request, {cache: "no-store"});
+  if (!await isExcavatorShellResponse(response)) return false;
+  const html = await promiseWithExcavatorTimeout(response.clone().text());
+  if (!await cacheExcavatorShellDependencies(cache, html)) return false;
+  await cache.put(request, response.clone());
+  if (fallbackUrl) await cache.put(fallbackUrl, response.clone());
+  return true;
 }
 
 async function networkFirst(request, fallbackUrl, responseValidator) {
@@ -891,13 +957,27 @@ async function networkFirst(request, fallbackUrl, responseValidator) {
 
 async function networkOnly(request) {
   try {
-    return await fetch(request);
+    return await fetchWithExcavatorTimeout(request, {cache: "no-store"});
   } catch (error) {
     return new Response("Network unavailable: fresh excavator data was not received.", {
       status: 503,
       headers: { "Content-Type": "text/plain; charset=utf-8" }
     });
   }
+}
+
+function releaseAssetKey(url) {
+  return url.pathname + url.search;
+}
+
+function isPreparedExcavatorAsset(url) {
+  return CORE_ASSETS.indexOf(releaseAssetKey(url)) >= 0;
+}
+
+async function preparedExcavatorAsset(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const response = await cache.match(request);
+  return await isSafeExcavatorCacheEntry(request, response) ? response : null;
 }
 
 async function networkFirstStatic(request) {
@@ -932,7 +1012,15 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
-    event.respondWith(networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse));
+    const prepared = preparedExcavatorShell(request, APP_SHELL_URL);
+    event.respondWith(prepared.then(response => (
+      response || networkFirst(request, APP_SHELL_URL, isExcavatorShellResponse)
+    )));
+    if (typeof event.waitUntil === "function") {
+      event.waitUntil(prepared.then(response => (
+        response ? refreshExcavatorShell(request, APP_SHELL_URL).catch(() => false) : false
+      )));
+    }
     return;
   }
   if (url.pathname === MANIFEST_URL) {
@@ -940,6 +1028,16 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (url.pathname.startsWith("/static/")) {
+    if (isPreparedExcavatorAsset(url)) {
+      const prepared = preparedExcavatorAsset(request);
+      event.respondWith(prepared.then(response => response || networkFirstStatic(request)));
+      if (typeof event.waitUntil === "function") {
+        event.waitUntil(prepared.then(response => (
+          response ? networkFirstStatic(request).then(() => true).catch(() => false) : false
+        )));
+      }
+      return;
+    }
     event.respondWith(networkFirstStatic(request));
   }
 });
@@ -3771,7 +3869,10 @@ def excavator_auto_downtime_reason(excavator, reason_name):
     )
 
 
-def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False):
+def start_excavator_auto_downtime(
+    excavator, employee, reason_name, *, replace_active=False,
+    occurred_at=None, source_event_id='',
+):
     reason = excavator_auto_downtime_reason(excavator, reason_name)
     if not reason:
         return None
@@ -3780,35 +3881,53 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
-        active_events = list(
+        event_at = occurred_at or timezone.now()
+        covering_events = list(
             DowntimeEvent.objects
-            .select_for_update()
-            .filter(equipment=excavator, ended_at__isnull=True)
+            .select_for_update(of=('self',))
+            .filter(equipment=excavator, started_at__lte=event_at)
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=event_at))
             .select_related('reason')
             .order_by('-started_at', '-id')
         )
-        for event in active_events:
+        for event in covering_events:
             if event.reason_id == reason.id:
                 return event
-        if active_events and not replace_active:
+        if covering_events and not replace_active:
             return None
-        now = timezone.now()
-        for event in active_events:
-            event.ended_at = now
+        for event in covering_events:
+            event.ended_at = event_at
             event.save(update_fields=['ended_at'])
+        next_event = (
+            DowntimeEvent.objects
+            .select_for_update(of=('self',))
+            .filter(equipment=excavator, started_at__gt=event_at)
+            .select_related('reason')
+            .order_by('started_at', 'id')
+            .first()
+        )
+        if (
+            next_event
+            and next_event.reason_id == reason.id
+            and str(next_event.comment or '').startswith(EXCAVATOR_AUTO_DOWNTIME_COMMENT)
+        ):
+            next_event.started_at = event_at
+            next_event.save(update_fields=['started_at'])
+            return next_event
         return DowntimeEvent.objects.create(
             equipment=excavator,
             employee=employee,
             reason=reason,
-            started_at=now,
+            started_at=event_at,
+            ended_at=next_event.started_at if next_event else None,
             comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
         )
 
 
-def close_excavator_auto_downtime(excavator, reason_name):
+def close_excavator_auto_downtime(excavator, reason_name, *, occurred_at=None):
     if not excavator:
         return 0
-    now = timezone.now()
+    event_at = occurred_at or timezone.now()
     closed = 0
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
@@ -3818,12 +3937,13 @@ def close_excavator_auto_downtime(excavator, reason_name):
             .filter(
                 equipment=excavator,
                 reason__name=reason_name,
-                ended_at__isnull=True,
-                comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
+                started_at__lte=event_at,
+                comment__startswith=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
             )
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=event_at))
         )
         for event in events:
-            event.ended_at = now
+            event.ended_at = event_at
             event.save(update_fields=['ended_at'])
             closed += 1
     return closed
@@ -3882,32 +4002,46 @@ def excavator_assigned_truck_counts(excavator):
     return len(assignments), loadable, has_inactive_assigned_truck
 
 
-def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
+def reconcile_excavator_waiting_for_trucks(
+    excavator, employee=None, *, start_when_empty=False,
+    occurred_at=None, source_event_id='',
+):
     if not excavator:
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
         assigned_total, loadable, has_inactive_assigned_truck = excavator_assigned_truck_counts(excavator)
         if loadable:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(
+                excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
+            )
             return None
         # Ждать самосвалы можно только тогда, когда они назначены и все уже
         # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
         # ему нечего — это не простой по ожиданию, и открывать его нельзя.
         if assigned_total == 0:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(
+                excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
+            )
             return None
         # Автоматическое «Ожидание самосвалов» отражает только ситуацию,
         # когда весь назначенный парк включён, но уже находится в рейсах.
         # Выключенный самосвал не должен сам запускать этот простой.
         if has_inactive_assigned_truck:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(
+                excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
+            )
             return None
         if start_when_empty:
             return start_excavator_auto_downtime(
                 excavator,
                 employee,
                 EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
+                source_event_id=source_event_id,
             )
         return None
 
@@ -4100,6 +4234,128 @@ def save_excavator_work_context(
             setting.changed_by = actor
             setting.save()
     return placement
+
+
+class ExcavatorWorkContextApplyError(Exception):
+    def __init__(self, code, message, *, temporary=False):
+        super().__init__(message)
+        self.code = code
+        self.temporary = temporary
+
+
+def apply_excavator_work_context_change(
+    *, access, shift, payload, occurred_at, source_event_id,
+):
+    """Apply the operator's durable face snapshot without an HTTP session.
+
+    The same role/reference restrictions as the online form are retained.  The
+    immutable OfflineFieldEvent remains the action-time audit source; this
+    helper changes only the already existing ExcavatorPlacement projection.
+    """
+    current_excavator = (
+        Equipment.objects.select_for_update(of=('self',))
+        .select_related('equipment_type')
+        .get(pk=shift.equipment_id)
+    )
+    form = restrict_excavator_trip_form(
+        TripCreateForm(excavator_operator=access.employee),
+        current_excavator,
+        shift,
+    )
+    rock_queryset = form.fields['rock_type'].queryset
+    dump_point_queryset = form.fields['dump_point'].queryset
+    rock_type_id = payload.get('rock_type_id') or payload.get('rock_type')
+    rock_type = rock_queryset.filter(id=rock_type_id).first()
+    if not rock_type:
+        if RockType.objects.filter(id=rock_type_id, is_active=True).exists():
+            raise ExcavatorWorkContextApplyError(
+                'rock_reference_incomplete',
+                'Для выбранной породы не настроены плотность, коэффициент разрыхления '
+                'или кубатура назначенных самосвалов.',
+            )
+        raise ExcavatorWorkContextApplyError(
+            'rock_reference_changed',
+            'Порода больше недоступна в подготовленном справочнике.',
+        )
+
+    placement = (
+        ExcavatorPlacement.objects.select_for_update(of=('self',))
+        .select_related('work_rock_type', 'work_dump_point')
+        .filter(excavator=current_excavator)
+        .first()
+    )
+    destinations = parse_excavator_operator_destinations(
+        payload,
+        dump_point_queryset,
+        placement,
+    )
+    if not destinations:
+        raise ExcavatorWorkContextApplyError(
+            'dump_point_reference_changed',
+            'Ни одна выбранная точка разгрузки больше не доступна в подготовленном справочнике.',
+        )
+    dump_points = [row['dump_point'] for row in destinations]
+    loading_horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
+    loading_block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+    work_context_changed = excavator_work_context_changed(
+        placement,
+        None,
+        rock_type=rock_type,
+        dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
+    face_position_changed = excavator_face_position_changed(
+        placement,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+    )
+    save_excavator_work_context(
+        current_excavator=current_excavator,
+        actor=access.employee,
+        rock_type=rock_type,
+        dump_points=dump_points,
+        loading_horizon=loading_horizon,
+        loading_block=loading_block,
+        destination_settings=destinations,
+    )
+    active_downtime = None
+    if face_position_changed:
+        active_downtime = start_excavator_auto_downtime(
+            current_excavator,
+            access.employee,
+            EXCAVATOR_AUTO_DOWNTIME_TRANSFER,
+            replace_active=True,
+            occurred_at=occurred_at,
+            source_event_id=source_event_id,
+        )
+    state = bump_operational_state(
+        'OfflineFieldEvent:excavator_work_context',
+        event_type='equipment_changed',
+        object_type='Equipment',
+        object_id=current_excavator.id,
+        payload={
+            'action': 'excavator_work_settings',
+            'excavator_id': current_excavator.id,
+            'rock_type_id': rock_type.id,
+            'dump_point_ids': [point.id for point in dump_points],
+            'loading_horizon': loading_horizon,
+            'loading_block': loading_block,
+            'face_position_changed': face_position_changed,
+            'source_event_id': source_event_id,
+            'occurred_at': occurred_at.isoformat(),
+        },
+    )
+    return {
+        'rock_type_id': rock_type.id,
+        'dump_point_ids': [point.id for point in dump_points],
+        'loading_horizon': loading_horizon,
+        'loading_block': loading_block,
+        'work_context_changed': work_context_changed,
+        'face_position_changed': face_position_changed,
+        'active_downtime_reason': str(active_downtime.reason) if active_downtime else '',
+        'version': state.version,
+    }
 
 
 def normalize_excavator_numeric_setting(value, *, max_length=16):
@@ -4329,7 +4585,10 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
             trip.truck,
             ended_at=trip.completed_at,
         )
-    reconcile_excavator_waiting_for_trucks(trip.excavator)
+    reconcile_excavator_waiting_for_trucks(
+        trip.excavator,
+        occurred_at=trip.completed_at or trip.unload_received_at,
+    )
     return True
 
 
@@ -4613,6 +4872,8 @@ def excavator_truck_loaded_view(request):
             current_excavator,
             access.employee,
             start_when_empty=True,
+            occurred_at=trip.loaded_at,
+            source_event_id=client_action_id,
         )
         state = bump_operational_state(
             'Trip:truck_loaded',
@@ -4742,7 +5003,11 @@ def excavator_truck_loaded_cancel_view(request):
             previous.closure_recorded_by = None
             previous.superseded_by = None
             previous.save(update_fields=['status', 'operationally_closed_at', 'closure_recorded_by', 'superseded_by'])
-        reconcile_excavator_waiting_for_trucks(current_excavator)
+        reconcile_excavator_waiting_for_trucks(
+            current_excavator,
+            occurred_at=trip.cancelled_at,
+            source_event_id=client_action_id,
+        )
         TripClientAction.objects.create(
             action_type='truck_loaded_cancel',
             client_action_id=client_action_id,
@@ -5342,6 +5607,8 @@ def excavator_work_view(request):
                             locked_excavator,
                             access.employee,
                             start_when_empty=True,
+                            occurred_at=trip.loaded_at,
+                            source_event_id=legacy_trip_client_action_id,
                         )
                         bump_operational_state(
                             'Trip:truck_loaded',
@@ -6303,6 +6570,15 @@ def excavator_work_view(request):
         list(shift_trip_queryset.values_list('id', flat=True)),
         separators=(',', ':'),
     )
+    shift_source_event_ids_json = json.dumps(
+        list(
+            TripClientAction.objects.filter(
+                trip__in=shift_trip_queryset,
+                action_type__in=('truck_loaded', 'free_bucket_loaded'),
+            ).values_list('client_action_id', flat=True)
+        ),
+        separators=(',', ':'),
+    )
     shift_fact_label = 'Факт'
     shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
     shift_fact_meta = f'{completed_shift_count} маш.'
@@ -6429,6 +6705,7 @@ def excavator_work_view(request):
             'completed_shift_count': completed_shift_count,
             'completed_shift_volume': completed_shift_volume,
             'shift_source_trip_ids_json': shift_source_trip_ids_json,
+            'shift_source_event_ids_json': shift_source_event_ids_json,
             'shift_fuel_display': excavator_fuel_percent_from_liters(
                 open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None),
                 shift_fuel_limit,

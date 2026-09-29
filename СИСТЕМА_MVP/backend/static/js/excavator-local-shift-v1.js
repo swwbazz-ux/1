@@ -144,6 +144,7 @@
             schema_version: 1,
             identity: clone(identity),
             current_local_shift_id: "",
+            next_sequence: 1,
             shifts: []
         };
     }
@@ -241,6 +242,36 @@
         };
     }
 
+    function rebasedHourlyReport(serverPayload, shift, capturedAt) {
+        var target = emptyHourlyReport(shift, capturedAt);
+        if (!serverPayload || serverPayload.schema_version !== 2 || !Array.isArray(serverPayload.hours)) {
+            return target;
+        }
+        target.excavator = clone(serverPayload.excavator || target.excavator);
+        target.work_date = target.work_date || serverPayload.work_date;
+        target.data_quality = clone(serverPayload.data_quality || target.data_quality);
+        target.server_generated_at = serverPayload.generated_at || "";
+        target.server_coverage_until = serverPayload.generated_at || "";
+        target.hours = target.hours.map(function (wanted) {
+            var wantedStart = Date.parse(wanted.period.start || "");
+            var source = serverPayload.hours.find(function (hour) {
+                return Date.parse(hour && hour.period && hour.period.start || "") === wantedStart;
+            });
+            if (!source) return wanted;
+            var merged = clone(source);
+            merged.code = wanted.code;
+            merged.title = wanted.title;
+            merged.period = clone(wanted.period);
+            merged.rows = Array.isArray(merged.rows) ? merged.rows : [];
+            merged.source_trip_ids = Array.isArray(merged.source_trip_ids) ? merged.source_trip_ids : [];
+            merged.source_event_ids = Array.isArray(merged.source_event_ids) ? merged.source_event_ids : [];
+            return merged;
+        });
+        target.generated_at = new Date(capturedAt || Date.now()).toISOString();
+        target.freshness_label = serverPayload.freshness_label || target.freshness_label;
+        return target;
+    }
+
     function mergeFact(hour, fact, direction) {
         var fleet = fact.fleet_code === "belaz" || fact.fleet_code === "nhl" ? fact.fleet_code : "unknown";
         hour.source_trip_count = Math.max(0, Number(hour.source_trip_count || 0) + direction);
@@ -273,16 +304,17 @@
     }
 
     function mergeHourlyReport(serverPayload, shift, facts, capturedAt) {
-        var payload = serverPayload && serverPayload.schema_version === 2
-            ? clone(serverPayload)
-            : emptyHourlyReport(shift, capturedAt);
-        var covered = {};
+        var payload = rebasedHourlyReport(serverPayload, shift, capturedAt);
+        var coveredTrips = {};
+        var coveredEvents = {};
         (payload.hours || []).forEach(function (hour) {
             hour.rows = Array.isArray(hour.rows) ? hour.rows : [];
-            (hour.source_trip_ids || []).forEach(function (id) { covered[String(id)] = hour; });
+            (hour.source_trip_ids || []).forEach(function (id) { coveredTrips[String(id)] = hour; });
+            (hour.source_event_ids || []).forEach(function (id) { coveredEvents[String(id)] = hour; });
         });
         (facts || []).forEach(function (fact) {
-            var coveredHour = fact.server_trip_id ? covered[String(fact.server_trip_id)] : null;
+            var coveredHour = coveredEvents[String(fact.event_id || "")]
+                || (fact.server_trip_id ? coveredTrips[String(fact.server_trip_id)] : null);
             if (coveredHour) {
                 if (fact.cancelled) mergeFact(coveredHour, fact, -1);
                 return;
@@ -306,8 +338,10 @@
 
     function mergeShiftSummary(serverProjection, shift) {
         var projection = serverProjection || {};
-        var covered = {};
-        (projection.source_trip_ids || []).forEach(function (id) { covered[String(id)] = true; });
+        var coveredTrips = {};
+        var coveredEvents = {};
+        (projection.source_trip_ids || []).forEach(function (id) { coveredTrips[String(id)] = true; });
+        (projection.source_event_ids || []).forEach(function (id) { coveredEvents[String(id)] = true; });
         var result = {
             trip_count: Math.max(0, Number(projection.trip_count || 0)),
             volume_m3: Math.max(0, Number(projection.volume_m3 || 0)),
@@ -315,7 +349,10 @@
             local_shift_id: shift ? shift.local_shift_id : ""
         };
         (shift ? loadFacts(shift) : []).forEach(function (fact) {
-            var isCovered = fact.server_trip_id && covered[String(fact.server_trip_id)];
+            var isCovered = Boolean(
+                coveredEvents[String(fact.event_id || "")]
+                || (fact.server_trip_id && coveredTrips[String(fact.server_trip_id)])
+            );
             var direction = fact.cancelled ? -1 : 1;
             if (!isCovered && fact.cancelled) return;
             if (isCovered && !fact.cancelled) return;
@@ -428,7 +465,11 @@
             readyPromise = storagePromise.then(function (storage) { return storage.read(); }).then(function (stored) {
                 state = validIdentity(stored) ? stored : emptyState(identity);
                 state.shifts = Array.isArray(state.shifts) ? state.shifts : [];
-                return replayConfirmations();
+                return replayConfirmations().catch(function () {
+                    // Transport receipts are a secondary projection. A healthy
+                    // local ledger must remain usable while the outbox DB is down.
+                    return null;
+                });
             }).then(recoverDelivery).then(function () { return clone(state); });
             return readyPromise;
         }
@@ -473,6 +514,7 @@
         }
 
         function recordEvent(event) {
+            var stateBeforeWrite = clone(state);
             var localShiftId = eventLocalShiftId(event);
             var shift = findShift(state, localShiftId);
             if (event.event_type === "excavator.shift.opened") {
@@ -509,19 +551,23 @@
             }
             var entry = {event: clone(event), delivery_state: "awaiting_outbox", saved_at: new Date().toISOString()};
             shift.events.push(entry);
+            state.next_sequence = Math.max(Number(state.next_sequence || 1), Number(event.sequence || 0) + 1);
             if (event.event_type === "excavator.shift.closed") {
                 shift.status = "closed";
                 shift.closed_at = event.occurred_at;
                 shift.close_event_id = event.event_id;
             }
-            return persist().then(function () { return entry; });
+            return persist().then(function () { return entry; }).catch(function (error) {
+                // The in-memory projection is authoritative only after at least
+                // one durable adapter committed the complete next state.
+                state = stateBeforeWrite;
+                throw error;
+            });
         }
 
         function recordAndQueue(event) {
             return ready().then(function () { return recordEvent(event); }).then(function (entry) {
-                if (!outbox || typeof outbox.queue !== "function") {
-                    throw new Error("Очередь досылки недоступна.");
-                }
+                if (!outbox || typeof outbox.queue !== "function") return clone(event);
                 return outbox.queue(event).then(function (queued) {
                     entry.delivery_state = queued && queued.sync_state === "confirmed" ? "confirmed" : "queued";
                     if (queued && queued.server_result) applyConfirmation(event, queued.server_result);
@@ -545,10 +591,47 @@
             return ready().then(function () { return clone(state); });
         }
 
+        function nextSequence() {
+            return ready().then(function () {
+                var maximum = Number(state.next_sequence || 1) - 1;
+                (state.shifts || []).forEach(function (shift) {
+                    (shift.events || []).forEach(function (entry) {
+                        maximum = Math.max(maximum, Number(entry && entry.event && entry.event.sequence || 0));
+                    });
+                });
+                return maximum + 1;
+            });
+        }
+
+        function events() {
+            return ready().then(function () {
+                var result = [];
+                (state.shifts || []).forEach(function (shift) {
+                    (shift.events || []).forEach(function (entry) {
+                        if (entry && entry.event) result.push(clone(entry.event));
+                    });
+                });
+                return result;
+            });
+        }
+
         function facts(localShiftId) {
             return ready().then(function () {
                 var shift = findShift(state, localShiftId || state.current_local_shift_id);
                 return shift ? loadFacts(shift) : [];
+            });
+        }
+
+        function workContext(localShiftId) {
+            return ready().then(function () {
+                var shift = findShift(state, localShiftId || state.current_local_shift_id);
+                if (!shift) return null;
+                var entry = (shift.events || []).filter(function (item) {
+                    return item && item.event && item.event.event_type === "excavator.work_context.changed";
+                }).sort(function (left, right) {
+                    return Number(right.event.sequence || 0) - Number(left.event.sequence || 0);
+                })[0];
+                return entry ? clone(entry.event.payload || {}) : null;
             });
         }
 
@@ -590,7 +673,10 @@
             recordAndQueue: recordAndQueue,
             confirm: confirm,
             snapshot: snapshot,
+            nextSequence: nextSequence,
+            events: events,
             facts: facts,
+            workContext: workContext,
             getEvent: getEvent,
             hourlyReport: hourlyReport,
             shiftSummary: shiftSummary,

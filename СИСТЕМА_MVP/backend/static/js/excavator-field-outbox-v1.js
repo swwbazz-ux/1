@@ -49,6 +49,7 @@
         delete value.next_retry_at;
         delete value.last_error;
         delete value.last_error_code;
+        delete value.last_error_details;
         delete value.created_session;
         delete value.created_mono;
         return value;
@@ -92,6 +93,14 @@
         if (!event || event.sync_state !== "conflict") return false;
         return event.last_error_code === "dependency_rejected"
             || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
+    }
+
+    function recoverableAutonomousShiftConflict(event) {
+        if (!event || event.sync_state !== "conflict") return false;
+        return (
+            event.event_type === "excavator.downtime.ended"
+            && event.last_error_code === "downtime_end_before_start"
+        );
     }
 
     function createLocalStorageAdapter(storage, queueKey) {
@@ -551,6 +560,7 @@
                             sync_state: status,
                             last_error_code: String(result.code || ""),
                             last_error: String(result.message || result.error || status),
+                            last_error_details: clone(result),
                             next_retry_at: 0
                         }).then(function () {
                             if (typeof options.onAttention === "function") options.onAttention(clone(event), clone(result));
@@ -610,7 +620,9 @@
             return list().then(function (events) {
                 var recoverable = Object.create(null);
                 events.forEach(function (event) {
-                    if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                    if (recoverableDeviceClockConflict(event) || recoverableAutonomousShiftConflict(event)) {
+                        recoverable[event.event_id] = true;
+                    }
                 });
                 var changed = true;
                 while (changed) {
@@ -640,7 +652,22 @@
                     }
                     chain = chain.then(function () { return persist(event); });
                 });
-                return chain.then(function () { notify(events, {reason: "restored"}); scheduleRetry(events); return events.map(clone); });
+                return chain.then(function () {
+                    notify(events, {reason: "restored"});
+                    events.forEach(function (event) {
+                        if (
+                            event.sync_state === "conflict"
+                            && event.event_type === "excavator.shift.closed"
+                            && event.last_error_code === "confirmation_required"
+                            && event.last_error_details
+                            && typeof options.onAttention === "function"
+                        ) {
+                            options.onAttention(clone(event), clone(event.last_error_details));
+                        }
+                    });
+                    scheduleRetry(events);
+                    return events.map(clone);
+                });
             });
         }
 
@@ -668,6 +695,49 @@
             });
         }
 
+        function retryWithConfirmation(eventId, confirmationToken) {
+            eventId = String(eventId || "");
+            confirmationToken = String(confirmationToken || "");
+            if (!eventId || !confirmationToken) return Promise.reject(new Error("Подтверждение показаний недоступно."));
+            return list().then(function (events) {
+                var target = events.find(function (event) { return event.event_id === eventId; });
+                if (!target || target.event_type !== "excavator.shift.closed") {
+                    throw new Error("Закрытие смены для подтверждения не найдено.");
+                }
+                var recoverable = Object.create(null);
+                recoverable[eventId] = true;
+                var changed = true;
+                while (changed) {
+                    changed = false;
+                    events.forEach(function (event) {
+                        if (
+                            event.sync_state === "conflict"
+                            && event.last_error_code === "dependency_rejected"
+                            && !recoverable[event.event_id]
+                            && (event.depends_on || []).some(function (dependency) { return recoverable[dependency]; })
+                        ) {
+                            recoverable[event.event_id] = true;
+                            changed = true;
+                        }
+                    });
+                }
+                var chain = Promise.resolve();
+                events.forEach(function (event) {
+                    if (!recoverable[event.event_id]) return;
+                    var patch = {
+                        sync_state: "pending",
+                        next_retry_at: 0,
+                        last_error_code: "",
+                        last_error: "",
+                        last_error_details: null
+                    };
+                    if (event.event_id === eventId) patch.confirmation_token = confirmationToken;
+                    chain = chain.then(function () { return updateEvent(event.event_id, patch); });
+                });
+                return chain.then(flush);
+            });
+        }
+
         return {
             ready: restore,
             queue: queue,
@@ -682,6 +752,7 @@
             allocateSequence: allocateSequence,
             discardUnsent: discardUnsent,
             retryNow: retryNow,
+            retryWithConfirmation: retryWithConfirmation,
             storageKind: function () { return adapterPromise.then(function (adapter) { return adapter.kind; }); }
         };
     }

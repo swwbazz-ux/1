@@ -16,7 +16,7 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
 )
-from core.models import OfflineFieldEvent, OfflineFieldEventConflict
+from core.models import OfflineFieldEvent, OfflineFieldEventConflict, OfflineFieldEventStatus
 from core.offline_sync import normalize_offline_event
 from downtimes.models import DowntimeEvent, DowntimeReason
 from trips import tests as trip_fixtures
@@ -181,6 +181,189 @@ class OfflineEventSyncTests(TestCase):
         }
         event.update(changes)
         return event
+
+    def _legacy_downtime_event(self, *, role_code, event_id, sequence, reason, occurred_at, depends_on=()):
+        is_driver = role_code == 'driver'
+        return {
+            'event_id': event_id,
+            'event_type': f'{"driver" if is_driver else "excavator"}.downtime.started',
+            'format_version': 1,
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': list(depends_on),
+            'shift_id': self.truck_shift.id if is_driver else self.shift.id,
+            'equipment_id': self.truck.id if is_driver else self.excavator.id,
+            'payload': {'reason_id': reason.id},
+        }
+
+    def _store_release_receipt(self, raw_event, *, role_code, device_id, status, code=''):
+        is_driver = role_code == 'driver'
+        access = self.driver_access if is_driver else self.access
+        actor = self.driver if is_driver else self.operator
+        shift = self.truck_shift if is_driver else self.shift
+        equipment = self.truck if is_driver else self.excavator
+        received_at = timezone.now()
+        normalized = normalize_offline_event(
+            raw_event,
+            role_code=role_code,
+            device_id=device_id,
+            received_at=received_at,
+        )
+        self.assertNotIn('local_shift_id', normalized)
+        return OfflineFieldEvent.objects.create(
+            event_id=raw_event['event_id'],
+            event_type=raw_event['event_type'],
+            actor=actor,
+            access=access,
+            role_code=role_code,
+            device_id=device_id,
+            sequence=raw_event['sequence'],
+            depends_on=raw_event['depends_on'],
+            occurred_at=normalized['device_occurred_at'],
+            received_at=received_at,
+            shift=shift,
+            equipment=equipment,
+            payload=raw_event['payload'],
+            context_snapshot={},
+            fingerprint=normalized['fingerprint'],
+            status=status,
+            retryable=status == OfflineFieldEventStatus.RETRY,
+            error_code=code,
+            error_message=code,
+            result_payload={'server_ids': {'shift_id': shift.id, 'equipment_id': equipment.id}},
+        )
+
+    def test_release_fingerprint_lost_response_replays_for_both_field_roles(self):
+        cases = (
+            ('excavator_operator', self.excavator_type, False),
+            ('driver', self.truck_type, True),
+        )
+        for index, (role_code, equipment_type, is_driver) in enumerate(cases, start=1):
+            with self.subTest(role_code=role_code):
+                reason = DowntimeReason.objects.create(
+                    name=f'Legacy accepted {role_code}',
+                    equipment_type=equipment_type,
+                    show_for_excavator_operator=not is_driver,
+                    show_for_truck_driver=is_driver,
+                )
+                device_id = f'legacy-accepted-{index:02d}'
+                event = self._legacy_downtime_event(
+                    role_code=role_code,
+                    event_id=f'legacy-accepted-{index}',
+                    sequence=1,
+                    reason=reason,
+                    occurred_at=timezone.now() - timedelta(minutes=1),
+                )
+                original = self._store_release_receipt(
+                    event,
+                    role_code=role_code,
+                    device_id=device_id,
+                    status=OfflineFieldEventStatus.ACCEPTED,
+                )
+                response = self.sync(
+                    [event],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                self.assertIn(response['status'], {'accepted', 'deduplicated'}, response)
+                self.assertEqual(OfflineFieldEvent.objects.get(pk=original.pk).fingerprint, original.fingerprint)
+                changed = json.loads(json.dumps(event))
+                changed['local_shift_id'] = 'new-incompatible-local-shift'
+                conflict = self.sync(
+                    [changed],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                self.assertEqual(conflict['code'], 'event_id_reused', conflict)
+                changed_payload = json.loads(json.dumps(event))
+                changed_payload['payload']['comment'] = 'incompatible rewritten payload'
+                payload_conflict = self.sync(
+                    [changed_payload],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                self.assertEqual(payload_conflict['code'], 'event_id_reused', payload_conflict)
+
+    def test_release_fingerprint_retry_receipt_stays_retryable_for_both_field_roles(self):
+        cases = (
+            ('excavator_operator', self.excavator_type, False),
+            ('driver', self.truck_type, True),
+        )
+        for index, (role_code, equipment_type, is_driver) in enumerate(cases, start=1):
+            with self.subTest(role_code=role_code):
+                reason = DowntimeReason.objects.create(
+                    name=f'Legacy retry {role_code}',
+                    equipment_type=equipment_type,
+                    show_for_excavator_operator=not is_driver,
+                    show_for_truck_driver=is_driver,
+                )
+                event = self._legacy_downtime_event(
+                    role_code=role_code,
+                    event_id=f'legacy-retry-{index}',
+                    sequence=10,
+                    reason=reason,
+                    occurred_at=timezone.now() - timedelta(minutes=1),
+                    depends_on=(f'missing-parent-{index}',),
+                )
+                device_id = f'legacy-retry-device-{index}'
+                first = self.sync(
+                    [event],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                second = self.sync(
+                    [event],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                self.assertEqual(first['status'], 'retry', first)
+                self.assertEqual(first['code'], 'dependency_pending', first)
+                self.assertEqual(second['status'], 'retry', second)
+                self.assertNotEqual(second.get('code'), 'event_id_reused', second)
+
+    def test_release_fingerprint_recoverable_conflict_reprocesses_for_both_field_roles(self):
+        cases = (
+            ('excavator_operator', self.excavator_type, False),
+            ('driver', self.truck_type, True),
+        )
+        for index, (role_code, equipment_type, is_driver) in enumerate(cases, start=1):
+            with self.subTest(role_code=role_code):
+                reason = DowntimeReason.objects.create(
+                    name=f'Legacy recovery {role_code}',
+                    equipment_type=equipment_type,
+                    show_for_excavator_operator=not is_driver,
+                    show_for_truck_driver=is_driver,
+                )
+                event = self._legacy_downtime_event(
+                    role_code=role_code,
+                    event_id=f'legacy-recovery-{index}',
+                    sequence=20,
+                    reason=reason,
+                    occurred_at=timezone.now() + timedelta(minutes=10),
+                )
+                device_id = f'legacy-recovery-device-{index}'
+                self._store_release_receipt(
+                    event,
+                    role_code=role_code,
+                    device_id=device_id,
+                    status=OfflineFieldEventStatus.CONFLICT,
+                    code='device_clock_ahead',
+                )
+                result = self.sync(
+                    [event],
+                    client=self.driver_client() if is_driver else self.client,
+                    role_code=role_code,
+                    device_id=device_id,
+                ).json()['results'][0]
+                self.assertEqual(result['status'], 'accepted', result)
+                receipt = OfflineFieldEvent.objects.get(event_id=event['event_id'])
+                self.assertEqual(receipt.status, OfflineFieldEventStatus.ACCEPTED)
+                self.assertEqual(DowntimeEvent.objects.filter(reason=reason).count(), 1)
 
     def driver_manual_cancel_event(
         self,
@@ -1457,13 +1640,12 @@ class OfflineEventSyncTests(TestCase):
             show_for_excavator_operator=True,
         )
 
-    def test_lagging_clock_does_not_block_a_downtime_reason_switch(self):
-        """Сервер не отклоняет работника из-за отставших часов.
+    def test_lagging_clock_keeps_exact_time_without_corrupting_the_later_interval(self):
+        """Явно отставшие часы не скрываются произвольным server-now clamp.
 
-        Машинист с отведёнными назад часами всё равно переключает причину —
-        сервер принимает переключение и использует эффективное время (начало
-        текущего простоя), а не заявленное более раннее время устройства, так
-        что интервал не становится отрицательным.
+        Более ранний факт хранится отдельным историческим интервалом до уже
+        известного следующего интервала. Существующий более поздний факт не
+        переписывается, отрицательной длительности и отказа работнику нет.
         """
         self._open_shift_two_hours_ago()
         first = self._excavator_downtime_reason('Экскаватор: первая причина')
@@ -1474,17 +1656,19 @@ class OfflineEventSyncTests(TestCase):
         )]).json()['results'][0]
         self.assertEqual(started['status'], 'accepted', started)
 
+        earlier_device_time = timezone.now() - timedelta(minutes=30)
         switch = self.sync([self._excavator_downtime_event(
             event_id='eo-downtime-b', sequence=2, reason=second,
-            occurred_at=timezone.now() - timedelta(minutes=30),
+            occurred_at=earlier_device_time,
         )]).json()['results'][0]
 
         self.assertEqual(switch['status'], 'accepted', switch)
         first_event = DowntimeEvent.objects.get(reason=first)
         second_event = DowntimeEvent.objects.get(reason=second)
-        self.assertEqual(first_event.ended_at, first_started_at)
-        self.assertEqual(second_event.started_at, first_started_at)
-        self.assertIsNone(second_event.ended_at)
+        self.assertIsNone(first_event.ended_at)
+        self.assertEqual(second_event.started_at, earlier_device_time)
+        self.assertEqual(second_event.ended_at, first_started_at)
+        self.assertGreater(second_event.ended_at, second_event.started_at)
 
     def test_sent_live_unblocks_a_downtime_reason_switch(self):
         """Подмена времени идёт до проверок порядка, поэтому лечит блокировку.
