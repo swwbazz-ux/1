@@ -275,6 +275,10 @@
                 state = null;
             }
             apply(shell, decision, state);
+            /* Путёвка показывает смену, которая сейчас на экране (в т.ч. местную). */
+            if (root.DriverManifestLocal && typeof root.DriverManifestLocal.render === "function") {
+                try { root.DriverManifestLocal.render(shell); } catch (error) {}
+            }
             return decision;
         }
 

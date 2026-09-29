@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v373'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v374'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -340,6 +340,7 @@ const CORE_ASSETS = [
     "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-local-shift-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-manifest-local-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-haptics-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-native-push-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/mobile-dial-actions-v1.css?v={DRIVER_SHELL_VERSION}",
@@ -4158,6 +4159,100 @@ def driver_report_duration_label(seconds, *, total=False):
     return f'{rounded_minutes} мин.'
 
 
+def driver_manifest_payload(*, shift, trips, downtime_events, reasons):
+    """Путёвка смены для телефона: рейсы и простои с серверными и местными ID.
+
+    Телефон сводит их со своим журналом смены (driver-manifest-local-v1.js):
+    строка, которую он записал без связи, и та же строка от сервера — одна
+    строка (по ID рейса/простоя или по ID события телефона). Здесь только
+    неизменные значения: данные лежат внутри фрагмента экрана, и всё, что
+    меняется со временем само, заставляло бы подменять экран на каждом опросе.
+    """
+    def iso(value):
+        return value.isoformat() if value else None
+
+    if not shift:
+        return None
+    trip_ids = [trip.id for trip in trips]
+    trip_local_ids = {trip_id: set() for trip_id in trip_ids}
+    for trip_id, event_id, local_trip_id in (
+        OfflineFieldEvent.objects
+        .filter(trip_id__in=trip_ids, status='accepted', role_code='driver')
+        .values_list('trip_id', 'event_id', 'local_trip_id')
+    ):
+        trip_local_ids[trip_id].update(value for value in (event_id, local_trip_id) if value)
+    for trip_id, client_action_id in (
+        TripClientAction.objects
+        .filter(trip_id__in=trip_ids, action_type__in=['driver_manual_loaded', 'trip_unloaded'])
+        .values_list('trip_id', 'client_action_id')
+    ):
+        if client_action_id:
+            trip_local_ids[trip_id].add(client_action_id)
+    downtime_ids = [event.id for event in downtime_events]
+    downtime_local_ids = {downtime_id: set() for downtime_id in downtime_ids}
+    for downtime_id, event_id, local_downtime_id in (
+        OfflineFieldEvent.objects
+        .filter(downtime_event_id__in=downtime_ids, status='accepted', role_code='driver')
+        .values_list('downtime_event_id', 'event_id', 'local_downtime_id')
+    ):
+        downtime_local_ids[downtime_id].update(value for value in (event_id, local_downtime_id) if value)
+    local_shift_id = (
+        OfflineFieldEvent.objects
+        .filter(shift=shift, event_type='driver.shift.opened', status='accepted')
+        .values_list('event_id', flat=True)
+        .first()
+    )
+    excavators = {
+        str(item.id): str(item.garage_number or '')
+        for item in Equipment.objects.filter(equipment_type__name='Экскаватор').only('id', 'garage_number')
+    }
+    trip_rows = []
+    for trip in trips:
+        point = trip.actual_dump_point or trip.dump_point or trip.assigned_dump_point
+        trip_rows.append({
+            'id': trip.id,
+            'local_ids': sorted(trip_local_ids.get(trip.id) or []),
+            'status': trip.status,
+            'excavator_id': trip.excavator_id,
+            'excavator': trip.excavator.garage_number if trip.excavator_id else '—',
+            'dump_point_id': point.id if point else None,
+            'dump_point': str(point) if point else '—',
+            'loaded_at': iso(trip.loaded_at or trip.created_at),
+            'completed_at': iso(trip.completed_at),
+            'load_time_source': trip.load_time_source,
+            'unload_time_source': trip.unload_time_source,
+        })
+    downtime_rows = [
+        {
+            'id': event.id,
+            'local_ids': sorted(downtime_local_ids.get(event.id) or []),
+            'reason_id': event.reason_id,
+            'reason': event.reason.button_label,
+            'started_at': iso(event.started_at),
+            'ended_at': iso(event.ended_at),
+        }
+        for event in downtime_events
+    ]
+    offset = timezone.localtime(shift.opened_at).utcoffset()
+    return {
+        'shift': {
+            'id': shift.id,
+            'local_id': local_shift_id or '',
+            'opened_at': iso(shift.opened_at),
+            'closed_at': iso(shift.closed_at),
+            'truck_id': shift.equipment_id,
+            'shift_type': shift.shift_type,
+        },
+        'utc_offset_minutes': int(offset.total_seconds() // 60) if offset else 0,
+        'trips': trip_rows,
+        'downtimes': downtime_rows,
+        'labels': {
+            'excavators': excavators,
+            'reasons': {str(reason.id): reason.button_label for reason in reasons},
+        },
+    }
+
+
 def driver_shift_downtime_seconds_by_reason(equipment, shift, *, until=None):
     if not equipment or not shift or not shift.opened_at:
         return {}
@@ -4717,7 +4812,9 @@ def driver_shift_view(request):
                 | legacy_driver_trip_filter
             )
             .distinct()
-            .order_by('created_at')[:30]
+            # Вся смена: срез [:30] молча обрезал путёвку и счётчики точек на
+            # тридцать первом рейсе. Предел здесь — сама смена, не история.
+            .order_by('created_at')
         )
 
     for trip in shift_trips:
@@ -5385,6 +5482,12 @@ def driver_shift_view(request):
         DowntimeReason.for_workplace('truck_driver', downtime_equipment_type)
     )
     driver_quick_reason_ids = driver_quick_reason_ids_for(access, downtime_reasons)
+    driver_manifest_data = driver_manifest_payload(
+        shift=report_shift if report_truck else None,
+        trips=shift_trips,
+        downtime_events=driver_shift_downtime_events,
+        reasons=downtime_reasons,
+    )
     downtime_calculated_at = timezone.now()
     downtime_reason_totals = driver_shift_downtime_seconds_by_reason(
         open_shift.equipment if open_shift else current_truck,
@@ -5588,6 +5691,7 @@ def driver_shift_view(request):
             'driver_shift_report_trip_rows': driver_shift_report_trip_rows,
             'driver_shift_downtime_rows': driver_shift_downtime_rows,
             'driver_shift_timeline': driver_shift_timeline,
+            'driver_manifest_data': driver_manifest_data,
             'driver_shift_report_date': timezone.localtime(report_shift.opened_at).strftime('%d.%m.%Y') if report_shift else '—',
             'driver_shift_report_shift': report_shift.get_shift_type_display() if report_shift else 'Смена не открыта',
             'driver_shift_report_driver': driver_employee_short_name(access.employee),

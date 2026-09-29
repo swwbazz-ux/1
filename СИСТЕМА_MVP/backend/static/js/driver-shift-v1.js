@@ -1437,10 +1437,19 @@ window.bindDriverMobileShell = function () {
     function driverOfflineBindings() {
         return {
             context: driverOfflineContext,
-            onState: renderDriverOfflineState,
+            onState: function (state) {
+                renderDriverOfflineState(state);
+                /* Путёвка ведёт свой журнал смены из тех же событий очереди. */
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.observe === "function") {
+                    try { window.DriverManifestLocal.observe(state && state.events); } catch (error) {}
+                }
+            },
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.confirmed === "function") {
+                    try { window.DriverManifestLocal.confirmed(event, args[1] || {}); } catch (error) {}
+                }
                 if (typeof window.driverRequestShellCacheRefresh === "function") window.driverRequestShellCacheRefresh(4000);
                 if (window.DriverLocalShift && typeof window.DriverLocalShift.onConfirmed === "function") {
                     window.DriverLocalShift.onConfirmed(event, args[1] || {});
@@ -1479,6 +1488,9 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onReview: function (event, result) {
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.review === "function") {
+                    try { window.DriverManifestLocal.review(event, result || {}); } catch (error) {}
+                }
                 showDriverToast(result.message || "Действие не подтверждено сервером. Обновите экран; если состояние неверное — сообщите диспетчеру.");
                 if (
                     event
