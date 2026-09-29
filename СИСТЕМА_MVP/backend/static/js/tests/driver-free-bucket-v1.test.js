@@ -395,6 +395,53 @@ test("the one-load right is consumed by its load and switched off locally by tha
     assert.equal(controller.project([selected, loaded, rejectedCompletion]).active, true);
 });
 
+test("an old rejected selection in the review queue does not switch off the live bucket after its load is confirmed", () => {
+    // Боевой Infinix 29.09.2026 (v367): в очереди «на сверке» лежал старый
+    // отклонённый выбор. Пока новые выбор и погрузка ждали отправки, ковш светился;
+    // как только они подтверждались и уходили из очереди, старый отказ откатывал
+    // проекцию к серверному состоянию до выбора — ковш гас через полсекунды после
+    // погрузки, круг становился синим.
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    controller.installCatalog(serverCatalog());
+    controller.installState({active: false});
+    const oldRejected = {
+        event_id: "old-rejected-select", event_type: "driver.free_bucket.selected", sequence: 1, state: "conflict",
+        last_error: {code: "free_bucket_not_available"}, occurred_at: "2026-09-29T10:00:00Z",
+        payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    };
+    const selected = {
+        event_id: "select-live", event_type: "driver.free_bucket.selected", sequence: 5, state: "pending",
+        occurred_at: "2026-09-29T10:40:00Z", payload: {truck_id: 17, excavator_id: 22, catalog_version: 12},
+    };
+    const loaded = {
+        event_id: "load-live", event_type: "driver.trip.loaded", sequence: 6, state: "pending",
+        local_trip_id: "load-live", occurred_at: "2026-09-29T10:41:00Z",
+        payload: {truck_id: 17, excavator_id: 22, dump_point_id: 5, free_bucket_acceptance_local_id: "select-live"},
+    };
+    assert.equal(controller.project([oldRejected, selected, loaded]).active, true);
+    // Выбор и погрузка подтверждены и ушли из очереди — остался только старый отказ.
+    const projected = controller.project([oldRejected]);
+    assert.equal(projected.active, true, "the live bucket stays on until its trip is unloaded");
+    assert.equal(projected.status, "used");
+    assert.equal(projected.acceptance_local_id, "select-live");
+    // Свой же отклонённый выбор по-прежнему гасит местный ковш.
+    const fresh = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {localStorage: storage()},
+        outbox: {enqueue() { return Promise.resolve({}); }},
+    });
+    fresh.installCatalog(serverCatalog());
+    fresh.installState({active: false});
+    assert.equal(fresh.project([selected]).active, true);
+    assert.equal(fresh.project([Object.assign({}, selected, {state: "conflict"})]).active, false);
+});
+
 test("a right the server already marked used switches off on the driver's unload of that trip", () => {
     const controller = createDriverFreeBucketController({
         shell: shell(),
