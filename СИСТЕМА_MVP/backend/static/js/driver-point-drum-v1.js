@@ -420,10 +420,16 @@
         wrap.classList.remove("is-loaded");
         wrap.classList.add("is-empty");
         var manualWorkspace = q("[data-driver-manual-workspace]");
+        // Рейс под свободным ковшом завершён — ковш был на один рейс, едем к
+        // основному экскаватору, а не к тому, под кем грузились (29.09.2026).
+        var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
         var nextExcavatorLabel = manualWorkspace
             ? String(
-                manualWorkspace.dataset.driverManualExcavatorLabel
+                (bucketTrip
+                    ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                    : manualWorkspace.dataset.driverManualExcavatorLabel)
                 || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                || manualWorkspace.dataset.driverManualExcavatorLabel
                 || ""
             )
             : "";

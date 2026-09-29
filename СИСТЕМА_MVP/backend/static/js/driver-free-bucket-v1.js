@@ -365,6 +365,18 @@
             setNode("[data-driver-context-horizon]", "Горизонт " + (item.loading_horizon || "—"));
             setNode("[data-driver-context-block]", "Блок " + (item.loading_block || "—"));
             setNode("[data-driver-context-rock]", item.rock_type || "—");
+            // Погружен под ковшом — круг принадлежит рейсу (точка разгрузки и её
+            // подпись рисует сервер/барабан точек), номер экскаватора и «ОЖИДАНИЕ
+            // ПРИЁМА» поверх него были бы неправдой (29.09.2026).
+            if (state.status === "used" || shell.dataset.driverHasOpenTrip === "true") {
+                // Подпись этапа выбора («ОЖИДАНИЕ ПРИЁМА») сразу меняется на подпись
+                // рейса, не дожидаясь ответа сервера.
+                var tripNote = shell.querySelector(".driver-work-note");
+                if (tripNote && /ОЖИДАНИЕ ПРИЁМА|ПРИНЯТ МАШИНИСТОМ/.test(tripNote.textContent)) {
+                    tripNote.textContent = "ТОЧКА РАЗГРУЗКИ";
+                }
+                return;
+            }
             setDialLabel(item.label);
             setNode(".driver-work-note", state.status === "accepted" ? "ПРИНЯТ МАШИНИСТОМ" : "ОЖИДАНИЕ ПРИЁМА");
         }

@@ -1274,10 +1274,16 @@ window.bindDriverMobileShell = function () {
                    на нестабильной связи это давало задержку в минуты (реальный
                    полевой тест 26.09.2026). */
                 var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
+                // Разгрузка рейса под свободным ковшом — ковш был на один рейс,
+                // дальше основной экскаватор (29.09.2026).
+                var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
                 var nextExcavatorLabel = manualWorkspace
                     ? String(
-                        manualWorkspace.dataset.driverManualExcavatorLabel
+                        (bucketTrip
+                            ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                            : manualWorkspace.dataset.driverManualExcavatorLabel)
                         || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                        || manualWorkspace.dataset.driverManualExcavatorLabel
                         || ""
                     )
                     : "";

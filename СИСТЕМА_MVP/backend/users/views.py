@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v368'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v369'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4697,7 +4697,23 @@ def driver_shift_view(request):
         version=operational_state_version,
         open_shift=open_shift,
     )
-    driver_free_bucket_can_open = bool(open_shift and current_truck and not active_trip)
+    # Рейс, погруженный под свободный ковш, ещё открыт: режим ковша на экране
+    # водителя живёт до разгрузки (свободный ковш — на один рейс, владелец
+    # 28.09.2026). Раньше при любом открытом рейсе модуль ковша выключался
+    # целиком (флаг на оболочке, окно не рендерилось) — ковш гас через
+    # полсекунды после погрузки и круг становился синим, как в обычном
+    # ручном режиме (боевой Infinix, 29.09.2026). Выбрать другой экскаватор
+    # во время рейса по-прежнему нельзя: select() на телефоне не пускает при
+    # живом или использованном праве.
+    driver_free_bucket_trip_open = bool(
+        active_trip
+        and driver_free_bucket_acceptance
+        and driver_free_bucket_acceptance.status == 'used'
+        and driver_free_bucket_acceptance.used_trip_id == active_trip.id
+    )
+    driver_free_bucket_can_open = bool(
+        open_shift and current_truck and (not active_trip or driver_free_bucket_trip_open)
+    )
     driver_free_bucket_primary_label = driver_excavator_short_label(
         current_assignment.excavator if current_assignment else None
     )
