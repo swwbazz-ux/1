@@ -29,7 +29,7 @@ function functionSource(source, name) {
 test("current Driver shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v369'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v370'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-haptics-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-native-push-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
@@ -46,7 +46,7 @@ test("current Driver shell precaches the durable runtime and exact authenticated
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v369'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v370'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -248,7 +248,13 @@ test("круг устроен одинаково с рейсом и без не�
     // Пока состояния различались разметкой, разгрузка меняла структуру экрана и
     // послойное обновление было невозможно.
     assert.doesNotMatch(template, /<div class="driver-work-dial-button is-empty/);
-    assert.match(template, /data-driver-hold-button data-driver-pending-label="ОТПРАВКА"\{% if not active_trip %\} disabled/);
+    assert.match(template, /data-driver-hold-button\{% if not active_trip %\} disabled/);
+    // Промежуточной «ОТПРАВКИ» на круге нет (владелец, 30.09.2026).
+    assert.doesNotMatch(template, /data-driver-pending-label/);
+    const shiftJs = fs.readFileSync(path.resolve(__dirname, "../driver-shift-v1.js"), "utf8");
+    assert.doesNotMatch(shiftJs, /"ОТПРАВКА"/);
+    const shiftCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-shift-v1.css"), "utf8");
+    assert.doesNotMatch(shiftCss, /\.driver-work-dial-button\.is-pending\s*\{[^}]*--driver-cyan/);
 });
 
 test("timer-only unload hold never starts a requestAnimationFrame loop", () => {
