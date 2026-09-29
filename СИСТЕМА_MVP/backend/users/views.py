@@ -773,6 +773,28 @@ self.addEventListener("message", (event) => {{
         }}
         return;
     }}
+    if (event.data.type === "REFRESH_AUTHENTICATED_SHELL") {{
+        // Экран подтвердил действия на сервере или уходит в фон: кладём в кэш
+        // свежую страницу. Без этого перезапуск без сети показывал состояние
+        // с последней загрузки (не чаще SHELL_REVALIDATE_AFTER_MS): отменённый
+        // ковш, уже разгруженный рейс (матрица без сети A2/B4, 30.09.2026).
+        // Записи того же адреса с параметрами (?tab=…) убираем — они бы
+        // перекрыли свежую страницу при холодном старте.
+        const work = caches.open(CACHE_NAME).then(async (cache) => {{
+            const response = await fetchWithDriverTimeout(
+                new Request(APP_SHELL_URL, {{ cache: "no-store", credentials: "same-origin" }})
+            );
+            if (!(await cacheAuthenticatedDriverShell(cache, APP_SHELL_URL, response))) return false;
+            const keys = await cache.keys();
+            await Promise.all(keys.map((request) => {{
+                const url = new URL(request.url);
+                return url.pathname === APP_SHELL_URL && url.search ? cache.delete(request) : false;
+            }}));
+            return true;
+        }}).catch(() => false);
+        event.waitUntil(work);
+        return;
+    }}
     if (event.data.type === "GET_VERSION" && event.ports && event.ports[0]) {{
         event.ports[0].postMessage({{
             version: CACHE_NAME,

@@ -133,8 +133,22 @@
         return (Date.parse(candidate.generated_at || "") || 0) > (Date.parse(baseline.generated_at || "") || 0);
     }
 
+    /* То же принятие ковша (серверный или местный номер). */
+    function sameAcceptance(state, ended) {
+        if (!state || !ended) return false;
+        return (!!ended.local_id && text(state.acceptance_local_id) === text(ended.local_id))
+            || (!!positive(ended.id) && positive(state.acceptance_id) === positive(ended.id));
+    }
+
     function resolveInstalledState(serverState, savedState) {
         var fresh = normalizeState(serverState);
+        /* Телефон погасил именно это принятие (отмена или рейс под ковш): страница
+           из кэша, нарисованная раньше, его не воскрешает. Раньше после отмены
+           запись просто удалялась, и перезапуск без сети снова показывал ковш
+           активным (матрица без сети, 30.09.2026). Новое принятие — другой номер. */
+        if (savedState && savedState.ended_acceptance && fresh.active && sameAcceptance(fresh, savedState.ended_acceptance)) {
+            return normalizeState({active: false, status: text(savedState.status) || "cancelled", sync_mode: "local"});
+        }
         var saved = normalizeState(savedState);
         /* "review" значит сервер уже ОТКЛОНИЛ эту попытку — она не может быть
            достовернее свежего ответа сервера. Держать её как активную здесь
@@ -224,6 +238,30 @@
             try { storage.removeItem(key); } catch (error) {}
         }
 
+        /* Состояние на телефоне: активный ковш — целиком; погашенный — след
+           «это принятие закончено» (см. resolveInstalledState), который живёт
+           под ключом смены, пока его не сменит новый выбор. */
+        function persistState(previous) {
+            var key = stateKey();
+            if (state.active) {
+                storageWrite(key, state);
+                return;
+            }
+            if (previous && previous.active && (previous.acceptance_local_id || previous.acceptance_id)) {
+                storageWrite(key, {
+                    schema: STATE_SCHEMA,
+                    active: false,
+                    status: text(state.status) || "cancelled",
+                    sync_mode: "local",
+                    ended_acceptance: {local_id: text(previous.acceptance_local_id), id: positive(previous.acceptance_id)},
+                    ended_at: new Date().toISOString()
+                });
+                return;
+            }
+            var saved = storageRead(key);
+            if (!(saved && saved.ended_acceptance)) storageRemove(key);
+        }
+
         function installCatalog(serverCatalog) {
             var fresh = isAuthoritativeCatalog(serverCatalog)
                 ? normalizeCatalog(serverCatalog, false)
@@ -249,9 +287,9 @@
         function installState(serverState) {
             var fresh = normalizeState(serverState);
             lastServerState = fresh;
-            var saved = normalizeState(storageRead(stateKey()));
-            state = resolveInstalledState(fresh, saved);
-            if (state.active) storageWrite(stateKey(), state); else storageRemove(stateKey());
+            var previous = state;
+            state = resolveInstalledState(fresh, storageRead(stateKey()));
+            persistState(previous);
             renderState();
             return state;
         }
@@ -533,8 +571,9 @@
                     dependsOn: (request && !requestRejected) ? [request.event_id] : []
                 }));
             }).then(function (event) {
+                var previous = state;
                 state = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
-                storageRemove(stateKey());
+                persistState(previous);
                 renderState();
                 setOpen(false);
                 return event;
@@ -651,8 +690,9 @@
                     projected = normalizeState({active: false, status: "used", sync_mode: "local"});
                 }
             });
+            var previous = state;
             state = projected;
-            if (state.active) storageWrite(stateKey(), state); else storageRemove(stateKey());
+            persistState(previous);
             renderState();
             return clone(state);
         }

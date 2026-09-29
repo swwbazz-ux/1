@@ -69,19 +69,21 @@ async function createExpiredSessionRuntime({missingDependency = "", freshShell =
         "/static/js/native-background-connection-v1.js?v=release-231",
         "/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v315",
     ];
-    const renderedDriverShell = [
+    let shellText = "old authenticated shell";
+    const shellMarkup = () => [
         '<link rel="stylesheet" href="' + exactDependencies[0] + '">',
         '<script src="' + exactDependencies[1] + '" defer></script>',
         '<script src="' + exactDependencies[2] + '"></script>',
-        '<main data-driver-shell data-driver-access-id="77">old authenticated shell</main>',
+        '<main data-driver-shell data-driver-access-id="77">' + shellText + '</main>',
     ].join("");
+    const renderedDriverShell = shellMarkup();
     const fetcher = async (request) => {
         if (offline) throw new TypeError("offline");
         const url = new URL(request.url);
         const pathname = url.pathname;
         if (pathname === "/driver/" || pathname === "/driver/shift/") {
             if (freshShell) {
-                return new FakeResponse(renderedDriverShell, {
+                return new FakeResponse(shellMarkup(), {
                     url: request.url,
                     contentType: "text/html; charset=utf-8",
                 });
@@ -141,6 +143,7 @@ async function createExpiredSessionRuntime({missingDependency = "", freshShell =
         oldName,
         exactDependencies,
         setOffline(value) { offline = value; },
+        setShellText(value) { shellText = value; },
     };
 }
 
@@ -234,4 +237,50 @@ test("confirmed logout clears authenticated Driver shells but keeps exact assets
     assert.equal(await runtime.stores.get(runtime.oldName).match("/driver/"), undefined);
     assert.ok(await current.match(runtime.exactDependencies[0]));
     assert.equal(acknowledged, true);
+});
+
+/* Матрица без сети A2/B4 (30.09.2026): без сети после перезапуска экран берётся
+   из кэша — со страницы последней загрузки (не свежее 15 мин), и подтверждённые
+   с тех пор действия (отмена ковша, разгрузка) на ней не видны. Страница просит
+   положить свежую копию: она ложится под /driver/, а устаревшие записи того же
+   адреса с параметрами убираются, чтобы не перекрыть её при холодном старте. */
+test("REFRESH_AUTHENTICATED_SHELL stores the current page so an offline cold start shows it", async () => {
+    const runtime = await createExpiredSessionRuntime({freshShell: true});
+    let installPromise;
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
+    await installPromise;
+    const current = runtime.stores.get("driver-mobile-shell-v315");
+    await current.put("/driver/?tab=work", (await current.match("/driver/")).clone());
+
+    runtime.setShellText("bucket cancelled on the phone");
+    let messagePromise;
+    runtime.listeners.get("message")({
+        data: {type: "REFRESH_AUTHENTICATED_SHELL"},
+        waitUntil(value) { messagePromise = value; },
+    });
+    assert.equal(await messagePromise, true);
+
+    runtime.setOffline(true);
+    let responsePromise;
+    runtime.listeners.get("fetch")({
+        request: new FakeRequest("/driver/?tab=work", {mode: "navigate"}),
+        respondWith(value) { responsePromise = value; },
+        waitUntil() {},
+    });
+    assert.match((await responsePromise).body, /bucket cancelled on the phone/);
+});
+
+test("a shell refresh that gets the login page keeps the cached authenticated shell", async () => {
+    const runtime = await createExpiredSessionRuntime();
+    let installPromise;
+    runtime.listeners.get("install")({waitUntil(value) { installPromise = value; }});
+    await installPromise;
+    let messagePromise;
+    runtime.listeners.get("message")({
+        data: {type: "REFRESH_AUTHENTICATED_SHELL"},
+        waitUntil(value) { messagePromise = value; },
+    });
+    assert.equal(await messagePromise, false);
+    const current = runtime.stores.get("driver-mobile-shell-v315");
+    assert.match((await current.match("/driver/")).body, /old authenticated shell/);
 });

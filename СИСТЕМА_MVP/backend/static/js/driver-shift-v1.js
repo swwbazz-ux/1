@@ -1407,6 +1407,33 @@ window.bindDriverMobileShell = function () {
         }
     }
 
+    /* Страница в кэше телефона — та, что была при последней загрузке. Без
+       сети после перезапуска она и показывается, поэтому после подтверждений
+       сервера и при уходе приложения в фон просим service worker положить
+       свежую (users/views.py, REFRESH_AUTHENTICATED_SHELL). Не чаще раза в 20 с. */
+    function requestDriverShellCacheRefresh(delayMs) {
+        var worker = navigator.serviceWorker && navigator.serviceWorker.controller;
+        if (!worker || navigator.onLine === false) return;
+        if (window.__driverShellCacheRefreshTimer) return;
+        window.__driverShellCacheRefreshTimer = window.setTimeout(function () {
+            window.__driverShellCacheRefreshTimer = null;
+            var last = Number(window.__driverShellCacheRefreshAt || 0);
+            if (Date.now() - last < 20000) return;
+            window.__driverShellCacheRefreshAt = Date.now();
+            var current = navigator.serviceWorker && navigator.serviceWorker.controller;
+            if (current) {
+                try { current.postMessage({type: "REFRESH_AUTHENTICATED_SHELL"}); } catch (error) {}
+            }
+        }, Math.max(0, Number(delayMs) || 0));
+    }
+    window.driverRequestShellCacheRefresh = requestDriverShellCacheRefresh;
+    if (!window.__driverShellCacheRefreshBound) {
+        window.__driverShellCacheRefreshBound = true;
+        document.addEventListener("visibilitychange", function () {
+            if (document.hidden) requestDriverShellCacheRefresh(0);
+        });
+    }
+
     function driverOfflineBindings() {
         return {
             context: driverOfflineContext,
@@ -1414,6 +1441,7 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
+                if (typeof window.driverRequestShellCacheRefresh === "function") window.driverRequestShellCacheRefresh(4000);
                 if (window.DriverLocalShift && typeof window.DriverLocalShift.onConfirmed === "function") {
                     window.DriverLocalShift.onConfirmed(event, args[1] || {});
                 }

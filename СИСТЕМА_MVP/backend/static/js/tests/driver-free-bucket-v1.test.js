@@ -631,3 +631,45 @@ test("free-bucket state is saved under the shift now on screen, including a shif
     assert.ok(saved.getItem("driver-free-bucket-state-v1:3:driver-shift-open:local-1:17"));
     assert.equal(saved.getItem("driver-free-bucket-state-v1:3:11:17"), null);
 });
+
+/* Матрица без сети A2/B4 (30.09.2026): ковш отменён на телефоне (отмена уже
+   даже ушла на сервер), затем перезапуск без сети — страница из кэша нарисована
+   до отмены и показывает ковш активным. Раньше отмена просто стирала запись,
+   и телефон «забывал», что этот ковш погашен. */
+test("a bucket ended on the phone is not revived by an older cached page after a restart", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const saved = storage();
+    const windowObject = {
+        localStorage: saved,
+        createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        createDriverFreeBucketCancelledEvent: outboxModule.createDriverFreeBucketCancelledEvent,
+    };
+    const queued = [];
+    const outbox = {
+        enqueue(event) { queued.push(event); return Promise.resolve(event); },
+        pending() { return Promise.resolve([]); },
+    };
+    const first = createDriverFreeBucketController({shell: shell(), storage: saved, window: windowObject, outbox});
+    first.installCatalog(serverCatalog());
+    const selected = await first.select(first.catalog().excavators[0]);
+    await first.cancel();
+    assert.equal(first.state().active, false);
+
+    const cachedPageState = {
+        schema: "driver-free-bucket-state-v1",
+        active: true,
+        acceptance_id: 41,
+        acceptance_local_id: selected.event_id,
+        status: "requested",
+        can_cancel: true,
+        selection: item(),
+        version: 12,
+        generated_at: "2026-09-14T03:00:30Z",
+    };
+    const restarted = createDriverFreeBucketController({shell: shell(), storage: saved, window: windowObject, outbox});
+    restarted.installCatalog(serverCatalog());
+    assert.equal(restarted.installState(cachedPageState).active, false);
+
+    const another = Object.assign({}, cachedPageState, {acceptance_id: 42, acceptance_local_id: "driver-free-bucket-select:other"});
+    assert.equal(restarted.installState(another).active, true, "a different acceptance is a new bucket");
+});
