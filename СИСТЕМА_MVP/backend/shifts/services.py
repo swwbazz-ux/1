@@ -251,13 +251,17 @@ def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
     )
 
 
-def handover_other_role_shift(shift, *, closed_by):
+def handover_other_role_shift(shift, *, closed_by, closed_at=None):
     """Служебно закрыть смену в другой роли по подтверждению самого сотрудника.
 
     Конечные показания техники не запрашиваются — их некому и негде ввести на
     экране другой роли; смена помечается служебным закрытием, как при закрытии
-    диспетчером, незавершённые рейсы уходят в перенос."""
-    now = timezone.now()
+    диспетчером, незавершённые рейсы уходят в перенос.
+
+    ``closed_at`` — время открытия новой смены с телефона: смена, открытая без
+    связи, закрывает прежнюю тем моментом, когда человек действительно
+    пересел, а не моментом, когда событие дошло до сервера."""
+    now = closed_at or timezone.now()
     shift.closed_at = now
     shift.closed_by = closed_by
     shift.is_service_closed = True
@@ -766,6 +770,127 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 equipment=work_assignment.equipment,
             )
         ) from error
+
+
+def open_driver_shift_from_device(
+    *, employee, equipment, shift_type, readings, client_action_id, opened_at,
+):
+    """Открыть смену водителя по факту действия на телефоне (очередь без связи).
+
+    Телефон — источник истины: смена уже идёт на телефоне, сервер её только
+    записывает. Поэтому здесь нет отказов по бизнес-причинам:
+    * время открытия — время телефона (``opened_at``);
+    * открытая смена того же сотрудника в любой роли и на любом устройстве, а
+      также чужая открытая смена на этом самосвале закрываются служебно
+      моментом открытия новой (решение Б «завершить и начать»);
+    * показания пишутся как введены, проверка топлива по баку — только в журнал.
+
+    Возвращает ``(shift, created, notes)``; ``notes`` — расхождения для
+    технического журнала вызывающего кода. Повтор того же ``client_action_id``
+    возвращает уже созданную смену без второй записи.
+    """
+    existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
+    if existing_shift:
+        return existing_shift, False, []
+    from references.models import Equipment
+    from users.models import Employee
+
+    notes = []
+    with transaction.atomic():
+        lock_idempotency_key('driver_shift_opened', client_action_id)
+        existing_shift = _existing_driver_shift_action('driver_shift_opened', client_action_id)
+        if existing_shift:
+            return existing_shift, False, []
+        employee = Employee.objects.select_for_update().get(pk=employee.pk)
+        equipment = (
+            Equipment.objects
+            .select_for_update(of=('self',))
+            .select_related('model')
+            .get(pk=equipment.pk)
+        )
+        displaced = list(
+            EmployeeShift.objects
+            .select_for_update(of=('self',))
+            .select_related('equipment', 'equipment__equipment_type')
+            .filter(closed_at__isnull=True)
+            .filter(Q(employee=employee) | Q(equipment=equipment))
+            .order_by('opened_at', 'id')
+        )
+        for previous in displaced:
+            # Открытие не может закрыть смену раньше её собственного начала:
+            # если прежняя открыта позже (отметка долго лежала без связи),
+            # она закрывается своим же началом — интервалы не пересекаются.
+            closed_at = max(opened_at, previous.opened_at)
+            handover_other_role_shift(previous, closed_by=employee, closed_at=closed_at)
+            notes.append(
+                f'служебно закрыта смена #{previous.pk} ({previous.workplace_code or "без роли"}, '
+                f'сотрудник #{previous.employee_id}, техника #{previous.equipment_id}) '
+                f'временем {closed_at.isoformat()}'
+            )
+        for field_name in ('start_fuel', 'start_mileage', 'start_engine_hours'):
+            if not shift_reading_is_whole(readings.get(field_name)):
+                notes.append(f'{field_name}={readings.get(field_name)} не целое — записано как введено')
+        try:
+            validate_driver_fuel_reading(equipment, readings.get('start_fuel'))
+        except ValidationError as error:
+            notes.append('топливо: ' + '; '.join(error.messages))
+        previous_shift = EmployeeShift.objects.filter(
+            equipment=equipment, closed_at__isnull=False,
+        ).order_by('-closed_at').first()
+        watch_period = resolve_published_watch_period_for_shift(
+            employee=employee,
+            equipment=equipment,
+            shift_type=shift_type,
+            role_code='driver',
+            opened_at=opened_at,
+        )
+        shift = EmployeeShift.objects.create(
+            employee=employee,
+            opened_by=employee,
+            shift_type=shift_type,
+            workplace_code='driver',
+            watch_period=watch_period,
+            equipment=equipment,
+            opened_at=opened_at,
+            **readings,
+        )
+        assign_shift_plan_snapshot(shift)
+        corrections = []
+        if previous_shift:
+            for start_field, end_field, metric in DRIVER_SHIFT_READING_FIELDS:
+                inherited = getattr(previous_shift, end_field)
+                actual = getattr(shift, start_field)
+                if inherited is not None and actual != inherited:
+                    corrections.append(ShiftReadingCorrection(
+                        equipment=equipment,
+                        new_shift=shift,
+                        previous_shift=previous_shift,
+                        metric=metric,
+                        transferred_value=inherited,
+                        actual_value=actual,
+                        employee=employee,
+                    ))
+            ShiftReadingCorrection.objects.bulk_create(corrections)
+        response = {'ok': True, 'shift_id': shift.pk, 'truck_id': equipment.pk, 'driver_id': employee.pk}
+        ShiftClientAction.objects.create(
+            action_type='driver_shift_opened',
+            client_action_id=client_action_id,
+            employee=employee,
+            shift=shift,
+            response_payload=response,
+        )
+        from core.models import bump_operational_state
+        if corrections:
+            bump_operational_state(
+                'DriverShift:readings_corrected', event_type='shift_readings_corrected',
+                object_type='EmployeeShift', object_id=shift.pk,
+                payload={**response, 'previous_shift_id': previous_shift.pk, 'fields': [item.metric for item in corrections]},
+            )
+        bump_operational_state(
+            'DriverShift:opened', event_type='driver_shift_opened', object_type='EmployeeShift', object_id=shift.pk,
+            payload=response,
+        )
+        return shift, True, notes
 
 
 def close_driver_shift(

@@ -9,6 +9,7 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
+<script src="{% static 'js/driver-local-shift-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-drum-label-fit-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
@@ -50,7 +51,7 @@
    признак стоит давно; водителю он нужен ровно по той же причине.
 {% endcomment %}
 <script>document.body.dataset.realtimeVisibilityOnly = "true";</script>
-<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-auth-generation="{{ driver_auth_generation }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{{ driver_manual_workspace.active_trip_id|default:'' }}" data-driver-active-trip-origin="{{ driver_manual_workspace.active_trip_origin }}" data-driver-active-trip-loaded-at="{{ driver_manual_workspace.active_trip_loaded_at }}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-actual-dump-point-id="{{ active_trip_actual_dump_point_id|default:'' }}" data-driver-actual-dump-point-name="{% if active_trip_current_dump_point %}{{ active_trip_current_dump_point }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-free-bucket-enabled="{% if driver_free_bucket_can_open %}true{% else %}false{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sw-scope="{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}" data-driver-sync-state="confirmed">
+<main class="driver-shell" data-driver-shell data-driver-access-id="{{ access.id }}" data-driver-actor-id="{{ access.employee_id }}" data-driver-auth-generation="{{ driver_auth_generation }}" data-driver-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-driver-server-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}" data-driver-shift-open="{% if open_shift %}true{% else %}false{% endif %}" data-driver-prepared-truck-id="{% if driver_prepared_truck %}{{ driver_prepared_truck.id }}{% endif %}" data-driver-shift-type="{% if work_assignment %}{{ work_assignment.shift_type }}{% endif %}" data-active-tab="{{ active_tab }}" data-driver-current-truck-id="{% if current_truck %}{{ current_truck.id }}{% endif %}" data-driver-has-open-trip="{% if driver_has_open_trip %}true{% else %}false{% endif %}" data-driver-has-loaded-trip="{% if driver_has_loaded_trip %}true{% else %}false{% endif %}" data-driver-active-trip-id="{{ driver_manual_workspace.active_trip_id|default:'' }}" data-driver-active-trip-origin="{{ driver_manual_workspace.active_trip_origin }}" data-driver-active-trip-loaded-at="{{ driver_manual_workspace.active_trip_loaded_at }}" data-driver-assigned-dump-point-id="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point.id }}{% endif %}" data-driver-actual-dump-point-id="{{ active_trip_actual_dump_point_id|default:'' }}" data-driver-actual-dump-point-name="{% if active_trip_current_dump_point %}{{ active_trip_current_dump_point }}{% endif %}" data-driver-assigned-dump-point-name="{% if active_trip_assigned_dump_point %}{{ active_trip_assigned_dump_point }}{% endif %}" data-driver-free-bucket-enabled="{% if driver_free_bucket_can_open %}true{% else %}false{% endif %}" data-driver-pwa-version="{{ driver_shell_version }}" data-driver-sw-scope="{% if role_app.role_code == 'driver' %}/{% else %}/driver/{% endif %}" data-driver-sync-state="confirmed">
     {% if driver_operational_fragment %}
         {# A legacy open shell must reload before it adopts markup that needs newer CSS/JS. #}
         <img hidden alt="" aria-hidden="true" data-driver-fragment-shell="{{ driver_shell_version }}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" onload="(function(node){var runtime=window.__driverPwaUpdateRuntime;var loaded=String(runtime&amp;&amp;runtime.currentShellVersion||'');var fresh=String(node.dataset.driverFragmentShell||'');if(loaded&amp;&amp;fresh&amp;&amp;loaded!==fresh){window.location.reload();return;}node.remove();})(this)">
@@ -88,7 +89,7 @@
 
         <div class="driver-work-dial-zone">
             <div class="driver-work-dial {% if active_trip %}is-loaded{% else %}is-empty{% endif %}{% if driver_waiting_operation_active %} is-waiting-operation{% endif %}{% if driver_loading_wait_active %} is-waiting-loading{% endif %}{% if driver_unloading_wait_active %} is-waiting-unload{% endif %}{% if not shift_plan_has_plan %} is-plan-missing{% endif %}{% if shift_plan_visual.is_overrun %} is-over-plan{% endif %}" style="--driver-progress: {% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}; --driver-progress-capped: {% if shift_plan_visual.is_overrun %}100{% else %}{{ shift_plan_visual.loop_progress }}{% endif %}; --driver-over-progress: {% if shift_plan_visual.is_overrun %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %};" data-driver-progress="{% if shift_plan_has_plan %}{{ shift_plan_percent }}{% else %}0{% endif %}" data-driver-loop-progress="{% if shift_plan_has_plan %}{{ shift_plan_visual.loop_progress }}{% else %}0{% endif %}" data-driver-completed-loops="{{ shift_plan_visual.completed_loops|default:0 }}" data-driver-has-plan="{% if shift_plan_has_plan %}1{% else %}0{% endif %}" data-plan-progress-phase="{% if shift_plan_has_plan %}{{ shift_plan_visual.phase }}{% endif %}" data-plan-status="{{ shift_plan_status|default:'no_plan_group' }}">
-                {% include "includes/mobile_dial_actions.html" with mobile_dial_manual_enabled=driver_manual_workspace.can_open mobile_dial_manual_blocked_reason=driver_manual_workspace.blocked_reason mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck %}
+                {% include "includes/mobile_dial_actions.html" with mobile_dial_manual_enabled=driver_manual_workspace.can_open mobile_dial_manual_blocked_reason=driver_manual_workspace.blocked_reason mobile_dial_dump_point_enabled=active_trip mobile_dial_free_bucket_enabled=driver_free_bucket_can_open mobile_dial_has_active_trip=active_trip mobile_dial_has_open_shift=open_shift mobile_dial_has_current_truck=current_truck mobile_dial_shift_gated=driver_prepared_truck %}
                 <form method="post"{% if active_trip %} action="{% url 'driver_complete_trip' active_trip.id %}"{% endif %} class="driver-work-dial-form" data-driver-hold-form{% if active_trip %} data-driver-trip-id="{{ active_trip.id }}"{% endif %} data-driver-unload-one-tap="false">
                     {% csrf_token %}
                     <input type="hidden" name="client_action_id" value="" data-driver-client-action>
@@ -214,7 +215,7 @@
 
     <section class="driver-panel driver-tab {% if active_tab == 'shift' %}is-active{% endif %}" data-driver-tab-panel="shift">
         {% if open_shift %}
-            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="{{ open_shift.id }}" data-driver-in-place="shift-close">
+            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="{{ open_shift.id }}" data-driver-in-place="shift-close" data-driver-local-shift-form="close">
                 {% csrf_token %}
                 <input type="hidden" name="shift_id" value="{{ open_shift.id }}">
                 {{ close_form.client_action_id }}
@@ -246,7 +247,7 @@
                 </div>
             </form>
         {% elif form %}
-            <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open">
+            <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open" data-driver-local-shift-form="open">
                 {% csrf_token %}
                 {{ form.client_action_id }}
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="closed" mobile_shift_form=form mobile_shift_previous=last_closed_shift %}
@@ -255,6 +256,23 @@
             <div class="mobile-shift-host">
                 {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="blocked" mobile_shift_previous=False %}
             </div>
+        {% endif %}
+        {% comment %} Вторая форма смены, скрытая: телефон сам переключает «открыта ↔ закрыта»
+           без ответа сервера (driver-local-shift-v1.js, владелец 30.09.2026). {% endcomment %}
+        {% if driver_next_open_form %}
+            <form method="post" class="mobile-shift-host driver-shift-opening-form" data-driver-in-place="shift-open" data-driver-local-shift-form="open" hidden>
+                {% csrf_token %}
+                {{ driver_next_open_form.client_action_id }}
+                {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="closed" mobile_shift_form=driver_next_open_form mobile_shift_previous=open_shift open_shift=None other_role_shift_prompt=None %}
+            </form>
+        {% elif driver_local_close_form %}
+            <form method="post" action="{% url 'driver_close_shift' %}" class="mobile-shift-host" data-driver-shift-close-form data-native-shift-id="" data-driver-in-place="shift-close" data-driver-local-shift-form="close" hidden>
+                {% csrf_token %}
+                <input type="hidden" name="shift_id" value="">
+                {{ driver_local_close_form.client_action_id }}
+                {{ driver_local_close_form.reading_confirmation_token }}
+                {% include "includes/mobile_shift_screen.html" with mobile_shift_role="driver" mobile_shift_state="open" mobile_shift_form=driver_local_close_form mobile_shift_previous=False %}
+            </form>
         {% endif %}
         <div class="driver-haptic-level" data-driver-haptic-level-control role="group" aria-label="Уровень виброотклика">
             <span class="driver-haptic-level__title">Виброотклик</span>

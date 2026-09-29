@@ -9,6 +9,11 @@ window.bindDriverMobileShell = function () {
         return;
     }
     shell.dataset.driverShellBound = "true";
+    /* Смена, открытая или закрытая на телефоне без связи, переключает экран
+       раньше всех остальных модулей: они читают ID смены из оболочки. */
+    if (window.DriverLocalShift && typeof window.DriverLocalShift.project === "function") {
+        window.DriverLocalShift.project(shell);
+    }
     if (typeof window.bindMobileShiftScreens === "function") {
         window.bindMobileShiftScreens();
     }
@@ -506,6 +511,31 @@ window.bindDriverMobileShell = function () {
         }
     }
     bindDriverShiftControls();
+    /* Форм смены на странице две: вторая скрыта и включается, когда смену
+       открывают или закрывают на телефоне без сервера (driver-local-shift-v1.js).
+       Её кнопке «Выйти» — то же удержание, что и у основной. */
+    Array.prototype.slice.call(shell.querySelectorAll("[data-driver-shift-logout]")).forEach(function (extraLogout) {
+        if (extraLogout.dataset.driverLogoutBound === "true" || !window.MobileShiftHold) return;
+        extraLogout.dataset.driverLogoutBound = "true";
+        window.MobileShiftHold.bind(extraLogout, {
+            holdMs: 2000,
+            readyLabel: "Выйти",
+            onShortPress: function () {
+                if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
+            },
+            onComplete: function () {
+                var url = extraLogout.dataset.driverLogoutUrl;
+                if (typeof window.navigateAfterNativeConnectionStop === "function") {
+                    window.navigateAfterNativeConnectionStop(url);
+                    return;
+                }
+                var stop = window.NativeBackgroundConnection && typeof window.NativeBackgroundConnection.stop === "function"
+                    ? window.NativeBackgroundConnection.stop()
+                    : null;
+                Promise.resolve(stop).finally(function () { window.location.href = url; });
+            }
+        });
+    });
     function isTextEditable(target) {
         return Boolean(target && target.closest && target.closest("input, textarea, select, option, [contenteditable='true'], [contenteditable='']"));
     }
@@ -1036,6 +1066,7 @@ window.bindDriverMobileShell = function () {
             actorId: current && current.dataset.driverActorId,
             accessId: current && current.dataset.driverAccessId,
             shiftId: current && current.dataset.driverShiftId,
+            localShiftId: current && current.dataset.driverLocalShiftId,
             equipmentId: current && current.dataset.driverCurrentTruckId,
             authGeneration: current && current.dataset.driverAuthGeneration,
             deviceId: driverInstallId()
@@ -1383,6 +1414,9 @@ window.bindDriverMobileShell = function () {
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
+                if (window.DriverLocalShift && typeof window.DriverLocalShift.onConfirmed === "function") {
+                    window.DriverLocalShift.onConfirmed(event, args[1] || {});
+                }
                 /* Разгрузку и завершение ручного рейса голос подтверждает сразу, по
                    записи на телефоне (showDriverDialConfirmed). Ответ сервера приходит
                    позже, иногда пачкой — второй голос тогда звучал бы невпопад. */
@@ -1507,6 +1541,53 @@ window.bindDriverMobileShell = function () {
     }
 
     var driverOfflineOutbox = createDriverOfflineRuntime();
+    /* Замок контракта не должен включаться из-за отсутствия сети (владелец,
+       30.09.2026). Оболочка из кэша той же версии, что service worker, — её
+       скрипты и воркер сверяются на месте; сервер лишь подтверждает, что не
+       ушёл на новую версию. Раньше замок ждал его ответа: без сети — до 12 с
+       «грейса», на слабом сигнале — до таймаута опроса, и всё это время кнопки
+       не работали. Теперь ответ сервера не ждём: пришёл и не совпал — замок и
+       обновление включатся штатно (acceptServerContract). */
+    (function releaseServerContractWait() {
+        var guard = window.AppPwaContractGuard;
+        if (!guard || typeof guard.getState !== "function" || typeof guard.markServerUnavailable !== "function") return;
+        var contract = guard.getState();
+        if (contract && !contract.server && !contract.serverUnavailable) guard.markServerUnavailable();
+    })();
+    /* Оболочка теперь приходит из кэша сразу (service worker, 30.09.2026) и
+       может быть старше сервера: другая сессия после повторного входа (очередь
+       ждёт новый auth-generation), иное состояние смены или рейса. Один раз за
+       загрузку страницы со связью сверяемся с сервером фрагментом: совпал со
+       снимком — экран не трогается, не совпал — обновляется, и очередь
+       возобновляется уже с текущим входом. */
+    if (
+        !window.__driverCachedShellVerified
+        && navigator.onLine !== false
+        && typeof window.applyOperationalStateRefresh === "function"
+    ) {
+        window.__driverCachedShellVerified = true;
+        var verifyAttempts = 0;
+        var verifyCachedShell = function () {
+            verifyAttempts += 1;
+            Promise.resolve(window.applyOperationalStateRefresh({
+                version: Number(document.body.dataset.operationalStateVersion || 0),
+                reason: "driver_cached_shell_start"
+            })).then(function (result) {
+                /* Экран занят (ввод, скрытая вкладка) — сверка откладывается,
+                   а не пропадает: повторяем, пока не получится. */
+                if (result && result.deferred && verifyAttempts < 12) {
+                    window.setTimeout(verifyCachedShell, 5000);
+                }
+                var outbox = window.driverOfflineOutbox;
+                var current = document.querySelector("[data-driver-shell]");
+                if (!outbox || !current || typeof outbox.resumeAuthRequired !== "function") return null;
+                return outbox.resumeAuthRequired(String(current.dataset.driverAuthGeneration || "")).then(function () {
+                    return outbox.flush();
+                });
+            }).catch(function () {});
+        };
+        window.setTimeout(verifyCachedShell, 400);
+    }
     function restoreDriverConfirmedDowntime(outbox) {
         var context = driverOfflineContext();
         if (!downtimeCard || !outbox || typeof outbox.getDowntimeProjectionReceipt !== "function") {
@@ -1987,8 +2068,17 @@ window.bindDriverMobileShell = function () {
             return Promise.reject(new Error("Не выбрана причина простоя."));
         }
         return driverOfflineOutbox.pending().then(function (events) {
+            /* Смена, открытая на телефоне без связи, пока без серверного ID: её
+               события несут local_shift_id, а после подтверждения новые — уже
+               серверный ID. Простой той же смены — любой из двух ключей. */
+            var localShiftState = window.DriverLocalShift && typeof window.DriverLocalShift.state === "function"
+                ? window.DriverLocalShift.state(shell)
+                : null;
+            var shiftKeys = [String(context.shiftId || "")];
+            if (localShiftState && localShiftState.local_shift_id) shiftKeys.push(String(localShiftState.local_shift_id));
+            if (localShiftState && localShiftState.server_shift_id) shiftKeys.push(String(localShiftState.server_shift_id));
             function isSameDowntimeContext(event) {
-                return Number(event && event.shift_id) === Number(context.shiftId)
+                return shiftKeys.indexOf(String(event && (event.shift_id || event.local_shift_id) || "")) >= 0
                     && Number(event && event.equipment_id) === Number(context.equipmentId);
             }
             var latestPendingDowntime = events.slice().reverse().find(function (event) {
@@ -2589,9 +2679,25 @@ window.bindDriverMobileShell = function () {
             if (actionInput && !actionInput.value) {
                 actionInput.value = generateClientActionId(form.dataset.driverInPlace || "driver-action");
             }
-            var submitPromise = form.dataset.driverInPlace === "shift-close"
-                ? window.DriverShiftCloseOutbox.submit(form)
-                : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
+            var localShift = window.DriverLocalShift;
+            var shiftKind = form.dataset.driverInPlace;
+            /* Смена открывается и закрывается на телефоне сразу, событием очереди;
+               сервер догонит, когда появится связь (владелец, 30.09.2026). */
+            var submitPromise = localShift && (shiftKind === "shift-open" || shiftKind === "shift-close")
+                ? (shiftKind === "shift-open" ? localShift.open(form) : localShift.close(form)).then(function () {
+                    var tabButton = document.querySelector(
+                        '[data-driver-tab-open="' + (shiftKind === "shift-open" ? "work" : "shift") + '"]'
+                    );
+                    if (tabButton) tabButton.click();
+                    if (typeof playDriverVoice === "function") {
+                        if (shiftKind === "shift-open") playDriverVoice("shift_start", "voice_shift_opened");
+                        else playDriverVoice("shift_end", "voice_shift_closed");
+                    }
+                    return true;
+                })
+                : shiftKind === "shift-close"
+                    ? window.DriverShiftCloseOutbox.submit(form)
+                    : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
             Promise.resolve(submitPromise).then(function (applied) {
                 if (!applied && form.isConnected) {
                     form.dataset.driverInPlacePending = "false";

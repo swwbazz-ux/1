@@ -29,7 +29,7 @@ function functionSource(source, name) {
 test("current Driver shell precaches the durable runtime and exact authenticated dependencies", () => {
     assert.match(template, /driver-offline-outbox-v2\.js/);
     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v370'/);
+    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v371'/);
     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-haptics-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
     assert.match(views, /driver-native-push-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
@@ -40,13 +40,15 @@ test("current Driver shell precaches the durable runtime and exact authenticated
     assert.match(views, /function driverShellStaticDependencies/);
     assert.match(views, /async function driverShellClosureComplete/);
     assert.match(views, /cacheAuthenticatedDriverShell/);
-    assert.match(views, /networkFirstDriverShell/);
+    // Оболочка — проверенная копия из кэша сразу, свежая в фоне (владелец, 30.09.2026).
+    assert.match(views, /cacheFirstDriverShell/);
+    assert.doesNotMatch(views, /networkFirstDriverShell/);
     assert.match(views, /migratePreviousAuthenticatedShell/);
     assert.match(views, /Authenticated driver shell is unavailable/);
     assert.match(views, /hasValidatedCurrentShell/);
     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
-    assert.match(roleApps, /shell_version='driver-mobile-shell-v370'/);
+    assert.match(roleApps, /shell_version='driver-mobile-shell-v371'/);
 });
 
 test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
@@ -91,7 +93,7 @@ test("expired session update migrates a valid shell without touching a nonempty 
     assert.doesNotMatch(views, /deleteDatabase|indexedDB\.delete/);
 });
 
-test("driver shell exposes confirmed identity and shift context without granting offline shift open", () => {
+test("driver shell exposes confirmed identity and shift context; the shift opens through the local shift module", () => {
     assert.match(template, /data-driver-actor-id="\{\{ access\.employee_id \}\}"/);
     assert.match(template, /data-driver-shift-id=/);
     assert.match(template, /data-driver-current-truck-id=/);
@@ -102,7 +104,10 @@ test("driver shell exposes confirmed identity and shift context without granting
     assert.match(template, /depends_on: pendingPoint \? \[pendingPoint\.event_id\] : \[\]/);
     assert.match(template, /"driver\.downtime\.started"/);
     assert.match(template, /"driver\.downtime\.ended"/);
+    // Смена открывается на телефоне без сервера (владелец, 30.09.2026): не прямым
+    // событием из экрана, а модулем местной смены, который ведёт её состояние.
     assert.doesNotMatch(template, /event_type: "driver\.shift\.opened"/);
+    assert.match(template, /localShift\.open\(form\)/);
     assert.match(template, /createDriverPointChangeEvent/);
     assert.match(template, /String\(pointId\) === String\(shell\.dataset\.driverActualDumpPointId/);
     assert.match(template, /applyDriverPointSelection\(shell, pointId, pointName, "local"\)/);
