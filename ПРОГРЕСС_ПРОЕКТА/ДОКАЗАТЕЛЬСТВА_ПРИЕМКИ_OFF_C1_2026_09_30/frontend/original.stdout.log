@@ -1,0 +1,21 @@
+✔ OFF-01: open and first load are durable before any server response (19.214417ms)
+✔ OFF-02/OFF-03: a failed or lost transport write is recovered with the exact envelope (1.563076ms)
+✔ OFF-02/OFF-09: restart keeps the local shift usable while delivery storage is still unavailable (0.532803ms)
+✔ OFF-04/OFF-05: 35 loads, cancellation, hour boundary and more than 200 receipts do not truncate facts (483.843415ms)
+ℹ 235 durable loads plus cancellation: 483.5 ms in Node memory adapter
+✔ OFF-04/OFF-07: a controlled full shift across midnight retains separate hourly and shift totals (1.314632ms)
+✔ OFF-06: a free-bucket load remains a fact independently of card TTL (0.538782ms)
+✔ OFF-07: a pending close does not mix two consecutive local shifts (0.943763ms)
+✔ OFF-08: receipt mapping does not remove facts and covering server projection does not double count (1.055351ms)
+✔ OFF-09: IndexedDB failure falls back, both storages unavailable reject without false success (1.095271ms)
+✔ OFF-09: successful IndexedDB writes are mirrored for a later fallback-only restart (0.905696ms)
+✔ OFF-10: another identity cannot open the stored ledger (0.246622ms)
+✔ OFF-08: a stale server shift cannot replace a newer unmapped local shift (0.283167ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 605.179204

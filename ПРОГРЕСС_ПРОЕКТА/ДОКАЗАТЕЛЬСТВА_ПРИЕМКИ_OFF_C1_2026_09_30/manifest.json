@@ -1,0 +1,146 @@
+[
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ПРИЕМКА_OFF_C1_2026_09_30.md",
+    "sha256": "2e4e1a5c501d5bf3ba70e3b66b1c72be66ab905a0dcc7c8607f18aa6f3201cac",
+    "size": 11816,
+    "sha": "708e7674dbf3348178dbaf42a6060a501fef5715"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ЗАДАНИЕ_OFF_C1_R1_2026_09_30.md",
+    "sha256": "d677829f149d80e59c967bf942118c4d8d5a541589f10c8ff2fae5c635b9ae6a",
+    "size": 8618,
+    "sha": "df197085862006d79d4f917f84af68c93465205e"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/backend/REVIEW.md",
+    "sha256": "8c4e7d336ed8eae8baa77f7d9dffd1fbce51577fd9484a13aa03ec5f70c66b18",
+    "size": 6567,
+    "sha": "4845476b527edd11407cc2b763fe9b7db5b2de84"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/backend/probe_legacy_fingerprint.py",
+    "sha256": "ff084a88a4b326c3bc32ae1ce035907e5007c3f8939096811952eeb013dd3f82",
+    "size": 4312,
+    "sha": "8a17993b6b02fed92cade4a64e646acefca09aad"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/backend/probe_legacy_fingerprint.stdout.json",
+    "sha256": "3049136f17a4c061e957b75d41b932ea8ed258ff17989ba059fb5d7090ed5156",
+    "size": 2127,
+    "sha": "4c6d625354c7ca43ca7eb5a78c2908cced186051"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/FRONTEND_REVIEW.md",
+    "sha256": "9427c472d9f18e4b134838092d3c5e51c4310b4f9cef364c113cc841ad73deff",
+    "size": 9956,
+    "sha": "8f325b9436d19b860209cf1fd0519b91877417c0"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/frontend-probes.cjs",
+    "sha256": "f8d3572f4d318080c0c456273ff794856f93f17e48051cbb5125c5c455536132",
+    "size": 3728,
+    "sha": "cc10da63104c174626cdd007774f4d3d0537a861"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/probe.stdout.log",
+    "sha256": "b9dbed33d93adb7bfc490a536aa8cf804a18a8bfb1f7a172ca9fc3a012be2d20",
+    "size": 5596,
+    "sha": "71d8c6872961fb096b6ba39d7b648c407965fa70"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/probe.stderr.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size": 0,
+    "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/original.stdout.log",
+    "sha256": "984e2379a47a18f320080d321d312a4608da03012b700eb18947ba315a61ee73",
+    "size": 1380,
+    "sha": "4094f4687f125752607471b71d218e8922492b37"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/original.stderr.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size": 0,
+    "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/root/probe_sw_body.cjs",
+    "sha256": "751e60bdc61da2ddbf49771d9610dc7cb47702c6b5fcc51ef49397d313078f6d",
+    "size": 2863,
+    "sha": "5aff698f395fdc2c9fcb80516c29bcfc8061fc44"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/root/probe_sw_body.stdout.log",
+    "sha256": "9c4465d9c8529ba9c209d68c0c3d8870c16ad5fe305e4de6f5599bd0e6d88128",
+    "size": 1053,
+    "sha": "22a5601b345705a0289dc824a5be852f66f27fad"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/root/probe_sw_body.stderr.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size": 0,
+    "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/evidence/REVIEW.md",
+    "sha256": "eedfb6999d6bc7a095f4c7263f0176e441bb2620d1185f8cf8eff0e644e29bcf",
+    "size": 5969,
+    "sha": "c1a0c197c4a3708bdf08865e1d74b7c865b7cbdc"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/evidence/review.json",
+    "sha256": "a6ced404215076d6890eda7978b3b230ce6bb4de24db40da66f79fa702518ac4",
+    "size": 1788,
+    "sha": "0b5dc267160532f4df1e3f76abecf1f4c1214d65"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/evidence/hash-verification.json",
+    "sha256": "af1a0719fae36800f4871e22a5b362f45d21ae8395507c4e7436905d3b4eda8e",
+    "size": 12078,
+    "sha": "84a1346ed27d0e1dddec2cf8e7d91423e04265f2"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/evidence/source-hash-verification.json",
+    "sha256": "2959dcc3df30703dc2edc9e48a30c6a2e65700f28c04d85303b34552989113c0",
+    "size": 10340,
+    "sha": "2bdb75eade7df038cd7d329b7716c37a6f324ae8"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/backend/base_offline_sync.py",
+    "sha256": "5167c300c20bded724f81809eb95ee47a67b170c4a0b81a808e525fad244a6e6",
+    "size": 177851,
+    "sha": "a3dff96867e2323635aedc2b1fb82bf0c3b051d2"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/backend/СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "sha256": "2d6177684c762ccca54fbe9721dc85b6d8bea4e6d1ab651fe805d18a71005f9d",
+    "size": 183519,
+    "sha": "a936545d8f3769d36974721222ed442794f57670"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/source/СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js",
+    "sha256": "be6739c2e3e8cb1a32e00ce6767d83e45692a81cfd51785a971546d2f5ec2d65",
+    "size": 28429,
+    "sha": "a9d4b4facad5c82729c9f6f92b2e1dd23cdd48ea"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/frontend/source/СИСТЕМА_MVP/backend/static/js/tests/excavator-local-shift-v1.test.js",
+    "sha256": "58163fd84903733c6adf829539751bbd79c2f8184a3188dbdd3d9ef2c8735d87",
+    "size": 17668,
+    "sha": "cd85edd88bdd22f91415bc6bf3eb5eabe5cfc292"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/root/source/СИСТЕМА_MVP/backend/trips/views.py",
+    "sha256": "d7bd564a9bf6b583a5bcf6cf306b6ed4fc2743d8a5b084baf1082543fc1245e6",
+    "size": 321013,
+    "sha": "cc597d8b980a42ac51dfe8f8f8b7bb5439c406ba"
+  },
+  {
+    "path": "ПРОГРЕСС_ПРОЕКТА/ДОКАЗАТЕЛЬСТВА_ПРИЕМКИ_OFF_C1_2026_09_30/README.md",
+    "size": 2275,
+    "sha256": "cfda745e517bf61b6e7adc456d71c714b6aaa813177fb5ef03c34d66ef2480e6",
+    "sha": "ef77e61835a608656cb35b2cbbde5869673d9fb5"
+  }
+]

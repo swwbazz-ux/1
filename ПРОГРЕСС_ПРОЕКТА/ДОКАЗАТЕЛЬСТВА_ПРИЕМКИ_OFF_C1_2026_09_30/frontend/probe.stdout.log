@@ -1,0 +1,124 @@
+FR1 {"period":{"start":"2026-09-29T00:00:00.000Z","end":"2026-09-29T00:05:00.000Z","label":"10:00–10:00"},"trip_count":0,"local_facts":1}
+FR2 {"summary":{"trip_count":2,"volume_m3":98.8,"unknown_volume_trip_count":0,"local_shift_id":"shift1"},"hourly":{"belaz":2,"nhl":0,"trip_count":2,"volume_m3":98.8},"local_fact":{"event_id":"L2","local_trip_id":"local-L2","occurred_at":"2026-09-29T00:06:00Z","truck_id":17,"truck_number":"","fleet_code":"belaz","dump_point_id":4,"dump_point":"P1","volume_m3":49.4,"server_trip_id":null,"cancelled":false}}
+FR3 {"current":{"local_shift_id":"shift1","open_event_id":"shift1","equipment_id":7,"opened_at":"2026-09-29T00:00:00Z","readings":{"fuel":"100","engine_hours":"1200"},"status":"open","server_shift_id":null,"events":[{"event":{"event_id":"shift1","event_type":"excavator.shift.opened","local_shift_id":"shift1","actor_id":12,"access_id":7,"role_code":"excavator_operator","device_id":"D1","equipment_id":7,"sequence":1,"occurred_at":"2026-09-29T00:00:00Z","payload":{"local_shift_id":"shift1","engine_hours":"1200","fuel":"100"}},"delivery_state":"awaiting_outbox","saved_at":"2026-09-29T16:14:23.415Z"}]}}
+FR4 {"readyError":"outbox IDB unavailable","saved_shift":"shift1"}
+✖ FR1: cached 00:05 report must include durable 00:06 load viewed at 00:15 (16.893078ms)
+✖ FR2: server projection arriving before lost load receipt must not double count (1.371157ms)
+✖ FR3: failed durable write must not leave an unsaved open shift in authoritative memory (1.686543ms)
+✖ FR4: unavailable transport confirmation storage must not block healthy independent ledger restart (0.760867ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 105.543907
+
+✖ failing tests:
+
+test at offc1-review/frontend/frontend-probes.cjs:9:1
+✖ FR1: cached 00:05 report must include durable 00:06 load viewed at 00:15 (16.893078ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/a66293d272e2/offc1-review/frontend/frontend-probes.cjs:15:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at offc1-review/frontend/frontend-probes.cjs:17:1
+✖ FR2: server projection arriving before lost load receipt must not double count (1.371157ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/a66293d272e2/offc1-review/frontend/frontend-probes.cjs:26:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at offc1-review/frontend/frontend-probes.cjs:28:1
+✖ FR3: failed durable write must not leave an unsaved open shift in authoritative memory (1.686543ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   equipment_id: 7,
+  +   events: [
+  +     {
+  +       delivery_state: 'awaiting_outbox',
+  +       event: {
+  +         access_id: 7,
+  +         actor_id: 12,
+  +         device_id: 'D1',
+  +         equipment_id: 7,
+  +         event_id: 'shift1',
+  +         event_type: 'excavator.shift.opened',
+  +         local_shift_id: 'shift1',
+  +         occurred_at: '2026-09-29T00:00:00Z',
+  +         payload: {
+  +           engine_hours: '1200',
+  +           fuel: '100',
+  +           local_shift_id: 'shift1'
+  +         },
+  +         role_code: 'excavator_operator',
+  +         sequence: 1
+  +       },
+  +       saved_at: '2026-09-29T16:14:23.415Z'
+  +     }
+  +   ],
+  +   local_shift_id: 'shift1',
+  +   open_event_id: 'shift1',
+  +   opened_at: '2026-09-29T00:00:00Z',
+  +   readings: {
+  +     engine_hours: '1200',
+  +     fuel: '100'
+  +   },
+  +   server_shift_id: null,
+  +   status: 'open'
+  + }
+  - null
+  
+      at TestContext.<anonymous> (/workspace/scratch/a66293d272e2/offc1-review/frontend/frontend-probes.cjs:32:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { local_shift_id: 'shift1', open_event_id: 'shift1', equipment_id: 7, opened_at: '2026-09-29T00:00:00Z', readings: { fuel: '100', engine_hours: '1200' }, status: 'open', server_shift_id: null, events: [ [Object] ] },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at offc1-review/frontend/frontend-probes.cjs:34:1
+✖ FR4: unavailable transport confirmation storage must not block healthy independent ledger restart (0.760867ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'outbox IDB unavailable'
+  - undefined
+  
+      at TestContext.<anonymous> (/workspace/scratch/a66293d272e2/offc1-review/frontend/frontend-probes.cjs:39:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'outbox IDB unavailable',
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

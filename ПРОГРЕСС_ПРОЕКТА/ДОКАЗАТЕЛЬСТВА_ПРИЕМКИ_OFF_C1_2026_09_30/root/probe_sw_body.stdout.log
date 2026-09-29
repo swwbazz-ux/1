@@ -1,0 +1,30 @@
+✔ control: no response headers -> deadline returns prepared cache (15.514449ms)
+SW1 {"active_deadlines":0,"settled":false,"cache_reads":0}
+✖ SW1: headers arrived but body stalled -> same deadline must return prepared cache (22.952783ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 122.779601
+
+✖ failing tests:
+
+test at offc1-review/root/probe_sw_body.cjs:38:1
+✖ SW1: headers arrived but body stalled -> same deadline must return prepared cache (22.952783ms)
+  AssertionError [ERR_ASSERTION]: navigation remains pending after deadline; timer ended at headers
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/workspace/scratch/a66293d272e2/offc1-review/root/probe_sw_body.cjs:45:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

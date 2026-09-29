@@ -1,0 +1,60 @@
+{
+  "scope": "Evidence review; no CI or DB run and no publication performed",
+  "docs_sha": "73006fef8d703eae7fdb04ac2eab4a0dff1f3253",
+  "candidate_sha": "c05a59259c95e8e0e19ad316f7a1dc6eed3e45c3",
+  "package_git_blobs": {
+    "pass": 25,
+    "total": 25
+  },
+  "raw_manifest": {
+    "pass": 21,
+    "total": 21
+  },
+  "source_git_blobs": {
+    "pass": 22,
+    "total": 22
+  },
+  "source_worktree_sha256_vs_git": {
+    "equal": 3,
+    "total": 22,
+    "meaning": "Source metadata hashes local worktree bytes, not Git blobs. Several old-file differences reproduced by mixed CRLF/LF. No content-equivalence claim for remaining mismatches."
+  },
+  "reported_run_counts": {
+    "node_off_c1": {
+      "pass": 49,
+      "skip": 0,
+      "fail": 0
+    },
+    "django_off_c1": {
+      "total": 289,
+      "pass": 281,
+      "skip": 8,
+      "fail": 0
+    },
+    "mobile": {
+      "pass": 44,
+      "skip": 0,
+      "fail": 0
+    },
+    "node_full_candidate": {
+      "total": 922,
+      "pass": 920,
+      "skip": 1,
+      "fail": 1
+    },
+    "baseline_driver_contract": {
+      "total": 16,
+      "pass": 15,
+      "skip": 0,
+      "fail": 1
+    }
+  },
+  "limits": [
+    "Node local ledger memory/fake IndexedDB tests do not prove actual WebView storage or cold start",
+    "Rendered shell dependency test requires unpublished HTML and no generator is provided; without it test is skipped",
+    "Runner checks HEAD and base ancestry but not dirty tree",
+    "Runner does not force DB isolation or assert actual SQLite; --postgres vendor verification occurs after wide Django test group",
+    "Full Node suite diagnostic return code never influences ok; present known Driver failure appears on both candidate and baseline",
+    "Android, PostgreSQL, DOM, phone and radio off are NOT_RUN"
+  ]
+}

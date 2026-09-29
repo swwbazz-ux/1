@@ -1,0 +1,200 @@
+[
+  {
+    "path": ".github/ci/django-test-matrix.json",
+    "sha256_expected_worktree": "F2CD9E1C14E687BFF863CA223DCE6B6CC50FBF2E46E7352FFDFFC36D7D12EA0F",
+    "sha256_actual_git_bytes": "6720FE7607D9A9C21FD51B8BC82D18603406FBA5CD5695B0DFEC453D845393FE",
+    "sha256_match": false,
+    "git_sha_expected": "d3f14fe1c2df8469f87466679d11c391a87e9273",
+    "git_sha_actual": "d3f14fe1c2df8469f87466679d11c391a87e9273",
+    "git_match": true
+  },
+  {
+    "path": ".github/deploy/production-files.txt",
+    "sha256_expected_worktree": "E0B8004B6DDB91D07FFC5AB6624500791320BDD9CD68467879E161C4DDBC9816",
+    "sha256_actual_git_bytes": "F92DE816CAFD3AD0D1930884264648EEE9EEBD7DB203EB4B29E3BEAF86DB1280",
+    "sha256_match": false,
+    "git_sha_expected": "19f612a0ff66b97dd4578ae305a9c2595ca39739",
+    "git_sha_actual": "19f612a0ff66b97dd4578ae305a9c2595ca39739",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "sha256_expected_worktree": "CBF438345B3242195158F5E4DA22820A2656E10E4BC207333F852D866110A3CB",
+    "sha256_actual_git_bytes": "2D6177684C762CCCA54FBE9721DC85B6D8BEA4E6D1AB651FE805D18A71005F9D",
+    "sha256_match": false,
+    "git_sha_expected": "a936545d8f3769d36974721222ed442794f57670",
+    "git_sha_actual": "a936545d8f3769d36974721222ed442794f57670",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/core/test_offline_autonomous_shift.py",
+    "sha256_expected_worktree": "22FC1E304759B6BD0744853E030306ECA05A26CD497FE91F8D1A4FFB4EC58D38",
+    "sha256_actual_git_bytes": "22FC1E304759B6BD0744853E030306ECA05A26CD497FE91F8D1A4FFB4EC58D38",
+    "sha256_match": true,
+    "git_sha_expected": "d31b62c0ef1e9343af674b2a17e99fda99c2513d",
+    "git_sha_actual": "d31b62c0ef1e9343af674b2a17e99fda99c2513d",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/shifts/services.py",
+    "sha256_expected_worktree": "6D1D5D886804988F8B5AA8D9CA81D5338DBEFAEFDF4C6C02BE86A599B091B4B0",
+    "sha256_actual_git_bytes": "235FBCA8D802F8022FB7EB4AF0C9585F45101EDC17217A864EE85CF576C70727",
+    "sha256_match": false,
+    "git_sha_expected": "1e562ee6dc60e7794421afef2e3869836361e21c",
+    "git_sha_actual": "1e562ee6dc60e7794421afef2e3869836361e21c",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js",
+    "sha256_expected_worktree": "7B7AEBA50A59FB725173036DB137BC1A0D6E8B0F1DFD0D538B8F624C282DD451",
+    "sha256_actual_git_bytes": "6BF00A5365AA42AE2A8FA22D4E39AD6E1D35CB7FFC55B146D660366518078F81",
+    "sha256_match": false,
+    "git_sha_expected": "18f37a6fcf84df8ccd825475a07d3feebe108bf4",
+    "git_sha_actual": "18f37a6fcf84df8ccd825475a07d3feebe108bf4",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js",
+    "sha256_expected_worktree": "BE6739C2E3E8CB1A32E00CE6767D83E45692A81CFD51785A971546D2F5EC2D65",
+    "sha256_actual_git_bytes": "BE6739C2E3E8CB1A32E00CE6767D83E45692A81CFD51785A971546D2F5EC2D65",
+    "sha256_match": true,
+    "git_sha_expected": "a9d4b4facad5c82729c9f6f92b2e1dd23cdd48ea",
+    "git_sha_actual": "a9d4b4facad5c82729c9f6f92b2e1dd23cdd48ea",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js",
+    "sha256_expected_worktree": "3663715ABF0D32D4D4B957983350ECDC8372611FB5B5A70D19E9B28EAF9232EE",
+    "sha256_actual_git_bytes": "82BE104D2F0555261E515F5706187094A5CFDD17E62E623CA890A4A9DDEE774C",
+    "sha256_match": false,
+    "git_sha_expected": "ba02b8b75242f3491bf5737c477618e20b46f40f",
+    "git_sha_actual": "ba02b8b75242f3491bf5737c477618e20b46f40f",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-hourly-report-contract.test.js",
+    "sha256_expected_worktree": "D13D56A647A1C25C31D195506729A4E7FC5F588245B6A1A5385B4BC6545A6B5C",
+    "sha256_actual_git_bytes": "1A6DB3656BE625DE41F226C84FA8749F58F73E73875D8214DFA3EC95DB723D46",
+    "sha256_match": false,
+    "git_sha_expected": "25a31886513dff58ca308ff3d1bca00eab5bfdd5",
+    "git_sha_actual": "25a31886513dff58ca308ff3d1bca00eab5bfdd5",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-local-shift-v1.test.js",
+    "sha256_expected_worktree": "58163FD84903733C6ADF829539751BBD79C2F8184A3188DBDD3D9EF2C8735D87",
+    "sha256_actual_git_bytes": "58163FD84903733C6ADF829539751BBD79C2F8184A3188DBDD3D9EF2C8735D87",
+    "sha256_match": true,
+    "git_sha_expected": "cd85edd88bdd22f91415bc6bf3eb5eabe5cfc292",
+    "git_sha_actual": "cd85edd88bdd22f91415bc6bf3eb5eabe5cfc292",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-manual-pickup.test.js",
+    "sha256_expected_worktree": "1C395E33F37A6E1FBADB36B68C07BA08573A47705AC458A13AFE61A9C53F4038",
+    "sha256_actual_git_bytes": "E424EAD24EFF00AB71AECA7F19151AB7E14BA4B1DA3FA093861C8C46D038768A",
+    "sha256_match": false,
+    "git_sha_expected": "3e09d5dd842c64d481363e0da586ff30fb1aa139",
+    "git_sha_actual": "3e09d5dd842c64d481363e0da586ff30fb1aa139",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js",
+    "sha256_expected_worktree": "F139FA760CC54A70A2C6A3AA9E873C68F608D1544B15316329C19760EE7FF350",
+    "sha256_actual_git_bytes": "489D9B67BA4ED633F41F695C43B9F372BF55DAB2F3C9E1FBA317CE3330957A24",
+    "sha256_match": false,
+    "git_sha_expected": "33201c82635c5f65a09967a198876e87dc6579eb",
+    "git_sha_actual": "33201c82635c5f65a09967a198876e87dc6579eb",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/excavator-service-worker-update-runtime.test.js",
+    "sha256_expected_worktree": "48E89A484E9EBE41E1D3733EA590855FA8766BEDD0965AD5FBD7A5AF33121205",
+    "sha256_actual_git_bytes": "51E286717DE2B6EDD43E0E5D261698310B19E30ADA917C99B27C268BDFAAFC3D",
+    "sha256_match": false,
+    "git_sha_expected": "7fec663fa80a3dc7a72185631373b4f1176c8c08",
+    "git_sha_actual": "7fec663fa80a3dc7a72185631373b4f1176c8c08",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/static/js/tests/trip-lost-response-runtime.test.js",
+    "sha256_expected_worktree": "5670E8C10E0E495679A3808B5E16F65CBA8C550F02511465D10FC7B7D5F63D28",
+    "sha256_actual_git_bytes": "1037FFEB5A0BFF7D93D0183436F9AD4691081AAF7AB0A211FA589A52CB6C0466",
+    "sha256_match": false,
+    "git_sha_expected": "423759477c51219cdcc1215f45cc03779b175fcc",
+    "git_sha_actual": "423759477c51219cdcc1215f45cc03779b175fcc",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html",
+    "sha256_expected_worktree": "91D8DBAB4E18B3E745764A83130E969E63BE13B3231CE28D276280C5DECC9B27",
+    "sha256_actual_git_bytes": "79E1AE5E6CB1B7CBBB53617A0084EBC12D519F0C435A2C38C2B9920E2ADC8AC7",
+    "sha256_match": false,
+    "git_sha_expected": "1d34c9ea2cfe1dc057483f327190fb96798c5726",
+    "git_sha_actual": "1d34c9ea2cfe1dc057483f327190fb96798c5726",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html",
+    "sha256_expected_worktree": "3F4B2C271632707E7182A0C55C25C2FD86D3189D3E619EA31E12C52002C609C2",
+    "sha256_actual_git_bytes": "364356F57457AAD594EBA487555DC663372375E6A9C6DCDB4BB60208DD58E6C2",
+    "sha256_match": false,
+    "git_sha_expected": "15628213fc385ee8ebb26e69f4966275b028566a",
+    "git_sha_actual": "15628213fc385ee8ebb26e69f4966275b028566a",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/templates/trips/excavator_work.html",
+    "sha256_expected_worktree": "5B282910671ECF83026128837CA3F124CC419A837E5F586C57ACE4B6A9783FF5",
+    "sha256_actual_git_bytes": "63441BAF02ECC8923700E718F8E88D4D07E3FB2A496324B23DF7A69C850C7A19",
+    "sha256_match": false,
+    "git_sha_expected": "e4aab689d5d0c277d7d7c5d9c7df3b8e473c1740",
+    "git_sha_actual": "e4aab689d5d0c277d7d7c5d9c7df3b8e473c1740",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py",
+    "sha256_expected_worktree": "B2917ECC1892A90D9580F1CFF3DD4924C41D406C53EAEACD82AD1B50DD3DE52D",
+    "sha256_actual_git_bytes": "C0184F065736D71AFE74CA5B7F9B1548CA75CC44718CA88CF53FF3B3486C84F8",
+    "sha256_match": false,
+    "git_sha_expected": "598ba177c427b1ed86f1f094286b864abaa1e8c7",
+    "git_sha_actual": "598ba177c427b1ed86f1f094286b864abaa1e8c7",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/test_excavator_hourly_report.py",
+    "sha256_expected_worktree": "394884D27D31926DF993CCFF08D11116482BD90780FCB3932CB455911F0D223B",
+    "sha256_actual_git_bytes": "CB9B59C771F8A39419486B0EFACA166E974D6E64A104A7C0B073E1D8B4B61721",
+    "sha256_match": false,
+    "git_sha_expected": "98a6e1b2cf49b8047d1091a6f273be174b2e74bb",
+    "git_sha_actual": "98a6e1b2cf49b8047d1091a6f273be174b2e74bb",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/tests.py",
+    "sha256_expected_worktree": "57A0DB02A9959BCF61C395523BEB4EA00FE16FEE52A03D92DCA407820B5AAFFF",
+    "sha256_actual_git_bytes": "AB3786E4B41DF896A664A8D4250EB0278785A9DD5DAC15001534736E451426A2",
+    "sha256_match": false,
+    "git_sha_expected": "d0d19940cf0794d3006b2905803548fd7a47189c",
+    "git_sha_actual": "d0d19940cf0794d3006b2905803548fd7a47189c",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/views.py",
+    "sha256_expected_worktree": "A1C9442E7BF9372169A7D699A343E868F804A40EDDD7311C335C5080D2F26C62",
+    "sha256_actual_git_bytes": "D7BD564A9BF6B583A5BCF6CF306B6ED4FC2743D8A5B084BAF1082543FC1245E6",
+    "sha256_match": false,
+    "git_sha_expected": "cc597d8b980a42ac51dfe8f8f8b7bb5439c406ba",
+    "git_sha_actual": "cc597d8b980a42ac51dfe8f8f8b7bb5439c406ba",
+    "git_match": true
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/users/role_apps.py",
+    "sha256_expected_worktree": "0C023DF25A623B983B298A4F978571E5F6DC7FB481587183B7A100C4A2176DF6",
+    "sha256_actual_git_bytes": "2F4273A77742500040C1C4934B861DA70FE213FA4E66A8F0FD0448C555B375C9",
+    "sha256_match": false,
+    "git_sha_expected": "737e186d2f6e69a30a227a1344750f80e73398e2",
+    "git_sha_actual": "737e186d2f6e69a30a227a1344750f80e73398e2",
+    "git_match": true
+  }
+]

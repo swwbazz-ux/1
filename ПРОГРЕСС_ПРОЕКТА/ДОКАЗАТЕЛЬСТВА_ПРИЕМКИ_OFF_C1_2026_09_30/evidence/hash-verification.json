@@ -1,0 +1,282 @@
+{
+  "git_blob_checks": [
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/.gitattributes",
+      "git_sha_expected": "2546a4fa8fbe7a3ec8ff751331def863b7ae1a28",
+      "git_sha_actual": "2546a4fa8fbe7a3ec8ff751331def863b7ae1a28",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/README.md",
+      "git_sha_expected": "c15e984699fcaed1217c05871dea5836d422b962",
+      "git_sha_actual": "c15e984699fcaed1217c05871dea5836d422b962",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/android.NOT_RUN.txt",
+      "git_sha_expected": "6eec4a063db225119b19175dbd0ba4ad9ffbe08b",
+      "git_sha_actual": "6eec4a063db225119b19175dbd0ba4ad9ffbe08b",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/candidate.patch",
+      "git_sha_expected": "71f25f6fe6dd18e812caa06f202caf87c560a0e7",
+      "git_sha_actual": "71f25f6fe6dd18e812caa06f202caf87c560a0e7",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_check.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_check.stdout.log",
+      "git_sha_expected": "90567b8298d8652afe34c27eadfdc978119d2d49",
+      "git_sha_actual": "90567b8298d8652afe34c27eadfdc978119d2d49",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_migrations.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_migrations.stdout.log",
+      "git_sha_expected": "4f76f6273d60f2de688d5d9efbf1e4fe7581a111",
+      "git_sha_actual": "4f76f6273d60f2de688d5d9efbf1e4fe7581a111",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_off_c1.stderr.log",
+      "git_sha_expected": "a3fd77843b4d470e87569307b73f2ca791c7033a",
+      "git_sha_actual": "a3fd77843b4d470e87569307b73f2ca791c7033a",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/django_off_c1.stdout.log",
+      "git_sha_expected": "619c8e0f9202c685cb18b3f28e1a4897c0c0101d",
+      "git_sha_actual": "619c8e0f9202c685cb18b3f28e1a4897c0c0101d",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/environment.json",
+      "git_sha_expected": "65de88a8c3eef3514e654d44a89efdbbee6be031",
+      "git_sha_actual": "65de88a8c3eef3514e654d44a89efdbbee6be031",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/mobile_node.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/mobile_node.stdout.log",
+      "git_sha_expected": "955150c56684486bfc8a4aff473f2a6388c77235",
+      "git_sha_actual": "955150c56684486bfc8a4aff473f2a6388c77235",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_baseline_driver_contract.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_baseline_driver_contract.stdout.log",
+      "git_sha_expected": "5dffae71c6d1326321f9e6aed48e45ee14c1f283",
+      "git_sha_actual": "5dffae71c6d1326321f9e6aed48e45ee14c1f283",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_full_candidate.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_full_candidate.stdout.log",
+      "git_sha_expected": "5c94c949c0b7a83e68fbbddd96eb6a3ca66e24a6",
+      "git_sha_actual": "5c94c949c0b7a83e68fbbddd96eb6a3ca66e24a6",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_off_c1.stderr.log",
+      "git_sha_expected": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "git_sha_actual": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/node_off_c1.stdout.log",
+      "git_sha_expected": "ed357f8280ffbb5bfe3e365e07acc8b83c7dd4c3",
+      "git_sha_actual": "ed357f8280ffbb5bfe3e365e07acc8b83c7dd4c3",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/postgresql.NOT_RUN.txt",
+      "git_sha_expected": "886d9dedc290fa8513e766eb866462ff4d8a512a",
+      "git_sha_actual": "886d9dedc290fa8513e766eb866462ff4d8a512a",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/runner-result.json",
+      "git_sha_expected": "4c0715c51a68ff0705829b10e4b0432ee50ce1ab",
+      "git_sha_actual": "4c0715c51a68ff0705829b10e4b0432ee50ce1ab",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/scope.json",
+      "git_sha_expected": "f8ce15b40fa71b31a48f61bdc28b324bd474207c",
+      "git_sha_actual": "f8ce15b40fa71b31a48f61bdc28b324bd474207c",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/sha256.json",
+      "git_sha_expected": "0627e5169090c7952aa5bd66920c59bd1ad23f23",
+      "git_sha_actual": "0627e5169090c7952aa5bd66920c59bd1ad23f23",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/raw/source-metadata.json",
+      "git_sha_expected": "e7a7b1b166fc4ca5176cf326ddaeb680303a8b6a",
+      "git_sha_actual": "e7a7b1b166fc4ca5176cf326ddaeb680303a8b6a",
+      "match": true
+    },
+    {
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_OFF_C1_2026_09_30/run_off_c1.py",
+      "git_sha_expected": "e802a9f96a60465b19d2140287f160ff2b3ca812",
+      "git_sha_actual": "e802a9f96a60465b19d2140287f160ff2b3ca812",
+      "match": true
+    }
+  ],
+  "manifest_checks": [
+    {
+      "path": "android.NOT_RUN.txt",
+      "expected": "B993770C8F00F8B64D4890CC9567C0354D5AB94C88ACDF8C88ACA3365F9C9265",
+      "actual": "B993770C8F00F8B64D4890CC9567C0354D5AB94C88ACDF8C88ACA3365F9C9265",
+      "match": true
+    },
+    {
+      "path": "candidate.patch",
+      "expected": "97B432EB7FAFBED58BCCA54591A946B396429D64B0BE341E728872859CCF732A",
+      "actual": "97B432EB7FAFBED58BCCA54591A946B396429D64B0BE341E728872859CCF732A",
+      "match": true
+    },
+    {
+      "path": "django_check.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "django_check.stdout.log",
+      "expected": "F87CEB15410BDE28FF826CE26228E0576558258FA64D145847921A593A61EE63",
+      "actual": "F87CEB15410BDE28FF826CE26228E0576558258FA64D145847921A593A61EE63",
+      "match": true
+    },
+    {
+      "path": "django_migrations.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "django_migrations.stdout.log",
+      "expected": "93E6E2D5BE3C054ADD80C0F19101608803F7CA8A7DF1FA41F76BBB9A1F570F4A",
+      "actual": "93E6E2D5BE3C054ADD80C0F19101608803F7CA8A7DF1FA41F76BBB9A1F570F4A",
+      "match": true
+    },
+    {
+      "path": "django_off_c1.stderr.log",
+      "expected": "8F176F7CEAEA4561C6B2304855F5FB155D57BC3A59DB0EC669FAA3DC89E51A56",
+      "actual": "8F176F7CEAEA4561C6B2304855F5FB155D57BC3A59DB0EC669FAA3DC89E51A56",
+      "match": true
+    },
+    {
+      "path": "django_off_c1.stdout.log",
+      "expected": "82BD2C6D6187144995845E72313C7782D160045CFD469C5A840A024457991F2C",
+      "actual": "82BD2C6D6187144995845E72313C7782D160045CFD469C5A840A024457991F2C",
+      "match": true
+    },
+    {
+      "path": "environment.json",
+      "expected": "CF1FE1508A82E706656134E6BEB8656181E38C55D19F5486B22FE997ED7CFC08",
+      "actual": "CF1FE1508A82E706656134E6BEB8656181E38C55D19F5486B22FE997ED7CFC08",
+      "match": true
+    },
+    {
+      "path": "mobile_node.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "mobile_node.stdout.log",
+      "expected": "93EEA052DD0D0F400B9206850D5A2F15AE1FBE4F1D04B20F94CD34B0B0F48321",
+      "actual": "93EEA052DD0D0F400B9206850D5A2F15AE1FBE4F1D04B20F94CD34B0B0F48321",
+      "match": true
+    },
+    {
+      "path": "node_baseline_driver_contract.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "node_baseline_driver_contract.stdout.log",
+      "expected": "D4B7861B40EC8939AD328D3B20BC602F1526B5A387FE49D9D303E24BEE2E1100",
+      "actual": "D4B7861B40EC8939AD328D3B20BC602F1526B5A387FE49D9D303E24BEE2E1100",
+      "match": true
+    },
+    {
+      "path": "node_full_candidate.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "node_full_candidate.stdout.log",
+      "expected": "255C3545506679EE74056CFEA8804111FB6098A76D667FA96469B78ACD2DE57D",
+      "actual": "255C3545506679EE74056CFEA8804111FB6098A76D667FA96469B78ACD2DE57D",
+      "match": true
+    },
+    {
+      "path": "node_off_c1.stderr.log",
+      "expected": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "actual": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "match": true
+    },
+    {
+      "path": "node_off_c1.stdout.log",
+      "expected": "0AA18B1B74EBB29C2802445FC1867C6EA3C3345C4E02E035EFB3282535C696FB",
+      "actual": "0AA18B1B74EBB29C2802445FC1867C6EA3C3345C4E02E035EFB3282535C696FB",
+      "match": true
+    },
+    {
+      "path": "postgresql.NOT_RUN.txt",
+      "expected": "3B800DD84D74F563E20928FCCA01556D24679B579DBE0C6983E7242BD709D3BC",
+      "actual": "3B800DD84D74F563E20928FCCA01556D24679B579DBE0C6983E7242BD709D3BC",
+      "match": true
+    },
+    {
+      "path": "runner-result.json",
+      "expected": "87D0244D40A05E8023E27C98E1C00B8FDDE6555F5DE11042378D85ECA1C0C280",
+      "actual": "87D0244D40A05E8023E27C98E1C00B8FDDE6555F5DE11042378D85ECA1C0C280",
+      "match": true
+    },
+    {
+      "path": "scope.json",
+      "expected": "51D9674B26BBD8FBC9E4584636C1F044F9851DF67B7F9F962325AB78B87426C8",
+      "actual": "51D9674B26BBD8FBC9E4584636C1F044F9851DF67B7F9F962325AB78B87426C8",
+      "match": true
+    },
+    {
+      "path": "source-metadata.json",
+      "expected": "401FEBB4E9D310422B3648CAF6D0B22E1910D5F4BBF942FFC808E4C6EAE64E40",
+      "actual": "401FEBB4E9D310422B3648CAF6D0B22E1910D5F4BBF942FFC808E4C6EAE64E40",
+      "match": true
+    }
+  ]
+}

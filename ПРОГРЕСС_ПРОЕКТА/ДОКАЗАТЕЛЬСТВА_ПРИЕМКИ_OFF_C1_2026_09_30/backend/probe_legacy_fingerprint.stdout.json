@@ -1,0 +1,63 @@
+{
+  "probe_kind": "exact-source functions with ORM doubles; no Django/DB",
+  "cases": [
+    {
+      "role": "driver",
+      "wire_changed": false,
+      "base_fingerprint": "21343bdb5234702fae523c7f9a4004dfe314b10a783621c6377baf2d991dc384",
+      "candidate_fingerprint": "98744e37a7b310bf05937092ec3f81427bd90234bfea7cbb30d28dfda2c6e9a3",
+      "new_normalized_keys": [
+        "local_shift_id"
+      ],
+      "base_replay": {
+        "event_id": "legacy-driver",
+        "status": "deduplicated",
+        "retryable": false,
+        "code": "",
+        "message": "",
+        "server_ids": {},
+        "server_received_at": "2026-09-29T12:00:00+00:00",
+        "version": null
+      },
+      "candidate_replay": {
+        "event_id": "legacy-driver",
+        "status": "conflict",
+        "retryable": false,
+        "code": "event_id_reused",
+        "message": "Идентификатор уже использован для другого события.",
+        "server_ids": {},
+        "server_received_at": "2026-09-29T12:00:00+00:00",
+        "version": null
+      }
+    },
+    {
+      "role": "excavator_operator",
+      "wire_changed": false,
+      "base_fingerprint": "03ceadf2b0aa3a1e9dfb4f81721431772e8482a605dd83e834d1642f8cc16eec",
+      "candidate_fingerprint": "1f6a585ecaf69ea26fc4473023d352d355d48637da50bae340e2698e6b6d8507",
+      "new_normalized_keys": [
+        "local_shift_id"
+      ],
+      "base_replay": {
+        "event_id": "legacy-excavator_operator",
+        "status": "deduplicated",
+        "retryable": false,
+        "code": "",
+        "message": "",
+        "server_ids": {},
+        "server_received_at": "2026-09-29T12:00:00+00:00",
+        "version": null
+      },
+      "candidate_replay": {
+        "event_id": "legacy-excavator_operator",
+        "status": "conflict",
+        "retryable": false,
+        "code": "event_id_reused",
+        "message": "Идентификатор уже использован для другого события.",
+        "server_ids": {},
+        "server_received_at": "2026-09-29T12:00:00+00:00",
+        "version": null
+      }
+    }
+  ]
+}
