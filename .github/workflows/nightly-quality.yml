@@ -23,6 +23,11 @@ on:
         description: "Exact immutable commit SHA to verify"
         required: true
         type: string
+      s106_c2_only:
+        description: "Run only the S106-C2 PostgreSQL concurrency classes"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "17 18 * * *"
 
@@ -143,6 +148,7 @@ jobs:
             --manifest ../../.github/ci/django-test-matrix.json
 
       - name: Run the complete Django test suite sequentially
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.s106_c2_only }}
         shell: bash
         run: |
           set -o pipefail
@@ -159,6 +165,17 @@ jobs:
             python manage.py test --verbosity 1 2>&1 \
               | tee artifacts/django-full-postgresql.log
           fi
+
+      - name: Run the S106-C2 PostgreSQL concurrency classes
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.s106_c2_only }}
+        shell: bash
+        run: |
+          set -o pipefail
+          python manage.py test \
+            core.test_free_bucket_sync.FreeBucketPostgreSQLConcurrencyTests \
+            core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests \
+            --verbosity 2 2>&1 \
+            | tee artifacts/django-full-postgresql.log
 
       - name: Build report-only coverage artifacts
         if: always()
