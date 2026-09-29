@@ -2230,15 +2230,14 @@ window.bindDriverMobileShell = function () {
             if (holdButton.dataset.driverManualDial === "true") {
                 if (holdButton.disabled || driverRoleIsReadonly() || !window.DriverPointDrum) return false;
                 var started = window.DriverPointDrum.completeFromDial(showDriverDialConfirmed);
-                /* Как у обычного рейса: круг сразу показывает отправку. Возвращаем true —
-                   иначе кольцо сбросилось бы и заглушило длинный виброотклик завершения. */
+                /* Возвращаем true — иначе кольцо сбросилось бы и заглушило длинный
+                   виброотклик завершения. Подпись круга не трогаем: промежуточной
+                   «ОТПРАВКИ» больше нет (владелец, 30.09.2026) — телефон решает сам и
+                   сразу, круг идёт от удержания прямо к «РАЗГРУЖЕНО» и следующему
+                   экскаватору; is-pending остаётся только замком от повторного нажатия. */
                 if (started) {
                     holdButton.classList.remove("is-loaded", "is-holding");
                     holdButton.classList.add("is-pending");
-                    if (dialLabel) {
-                        renderDriverDialLabel(dialLabel, holdButton.dataset.driverPendingLabel || "ОТПРАВКА");
-                        scheduleDriverDialLabelFit();
-                    }
                     return true;
                 }
                 return false;
@@ -2259,14 +2258,8 @@ window.bindDriverMobileShell = function () {
             holdForm.dataset.driverUnloadSubmitting = "true";
             holdForm.dataset.holdComplete = "true";
             holdButton.classList.remove("is-loaded", "is-holding");
+            // Без «ОТПРАВКИ» на круге (владелец, 30.09.2026): подпись сменит проекция.
             holdButton.classList.add("is-pending");
-            if (dialLabel) {
-                renderDriverDialLabel(
-                    dialLabel,
-                    holdButton.dataset.driverPendingLabel || "ОТПРАВКА"
-                );
-                scheduleDriverDialLabelFit();
-            }
             holdButton.disabled = true;
             var actionId = holdForm.querySelector("[data-driver-client-action]").value;
             var unloadTripId = String(holdForm.dataset.driverTripId || "");

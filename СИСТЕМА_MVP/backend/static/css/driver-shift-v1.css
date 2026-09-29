@@ -1426,31 +1426,11 @@ body.driver-mobile-screen .driver-work-dial-button.is-waiting-operation .driver-
     50% { opacity: 1; }
 }
 
+/* Удержание завершено, отметка уходит: круг не перекрашивается и подпись не
+   меняется — бирюзовой «ОТПРАВКИ» больше нет (владелец, 30.09.2026). Класс
+   остаётся замком от повторного нажатия, пока проекция не сменит круг. */
 body.driver-mobile-screen .driver-work-dial-button.is-pending {
-    color: var(--driver-cyan);
     pointer-events: none;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-dial-core {
-    gap: clamp(8px, 1.1vw, 12px);
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-percent {
-    min-width: 0;
-    font-size: clamp(20px, 3.4vw, 32px);
-    opacity: 0.62;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-label {
-    width: 88%;
-    max-width: 88%;
-    justify-self: center;
-    line-height: 1;
-    text-align: center;
-}
-
-body.driver-mobile-screen .driver-work-dial-button.is-pending .driver-work-progress {
-    stroke: var(--driver-cyan);
 }
 
 body.driver-mobile-screen .driver-work-dial-button.is-error {

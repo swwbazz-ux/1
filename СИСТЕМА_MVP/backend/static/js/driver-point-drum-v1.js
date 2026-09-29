@@ -387,7 +387,7 @@
             var name = pointName(id) || "РУЧНОЙ РЕЙС";
             button.dataset.driverManualDial = "true";
             if (button.dataset.driverManualDialLabel !== name) button.dataset.driverManualDialLabel = name;
-            // Идёт отправка завершения: круг показывает «ОТПРАВКА», не трогаем.
+            // Завершение уже отправляется: круг не трогаем, его сменит проекция.
             if (button.classList.contains("is-pending")) return;
             if (button.disabled) button.disabled = false;
             if (button.hasAttribute("aria-disabled")) button.removeAttribute("aria-disabled");
