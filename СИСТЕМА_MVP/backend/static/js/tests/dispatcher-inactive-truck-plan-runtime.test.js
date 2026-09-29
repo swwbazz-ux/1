@@ -22,4 +22,16 @@ test("inactive truck plan fill uses the neutral desktop presentation", () => {
         CSS,
         /\.dispatcher-truck-tile\.is-inactive-plan-fill\[data-plan-progress-phase\]:not\(\[data-plan-progress-phase=""\]\)[^}]+--dispatcher-plan-color:\s*rgba\(139, 159, 170,/s
     );
+    assert.match(
+        CSS,
+        /\.dispatcher-complex-card \.complex-assigned-trucks\s*\{[^}]+position:\s*relative;[^}]+z-index:\s*5;/s
+    );
+    assert.match(
+        CSS,
+        /\.dispatcher-complex-card \.complex-truck-tile\.is-inactive-plan-fill\s*\{[^}]+background-color:\s*var\(--gd-panel\);[^}]+isolation:\s*isolate;/s
+    );
+    assert.match(
+        CSS,
+        /\.dispatcher-complex-card \.complex-truck-tile\.is-inactive-plan-fill img\s*\{[^}]+z-index:\s*4;[^}]+opacity:\s*1;[^}]+filter:\s*grayscale\(1\)/s
+    );
 });

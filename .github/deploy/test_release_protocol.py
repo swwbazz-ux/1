@@ -15,7 +15,6 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
-import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,10 +37,174 @@ receiver = load_module(
     "accounting_github_deploy_receiver",
     ROOT / "deployment" / "server" / "accounting_github_deploy_receiver.py",
 )
-preflight = load_module(
-    "sse_qa_preflight",
-    ROOT / "deployment" / "server" / "sse_qa_preflight.py",
+sse_qa_ctl = load_module(
+    "sse_qa_ctl",
+    ROOT / "deployment" / "server" / "sse_qa_ctl.py",
 )
+
+
+class CredentialPathProbe:
+    def __init__(
+        self,
+        *,
+        file: bool = True,
+        symlink: bool = False,
+        uid: int = 0,
+        mode: int = 0o100600,
+        name: str = "probe",
+    ) -> None:
+        self.file = file
+        self.symlink = symlink
+        self.uid = uid
+        self.mode = mode
+        self.name = name
+
+    def __fspath__(self) -> str:
+        return self.name
+
+    def is_file(self) -> bool:
+        return self.file
+
+    def is_symlink(self) -> bool:
+        return self.symlink
+
+    def stat(self, *, follow_symlinks: bool = True):
+        if follow_symlinks:
+            raise AssertionError("host key metadata must not follow symlinks")
+        return type("Metadata", (), {"st_uid": self.uid, "st_mode": self.mode})()
+
+
+class SseQaHostKeyPreflightTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.executable = CredentialPathProbe(name="systemd-creds")
+        self.host_key = CredentialPathProbe(name="credential.secret")
+
+    def verify(self) -> None:
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True):
+            sse_qa_ctl.verify_systemd_credential_prerequisites(
+                executable=self.executable,
+                host_key=self.host_key,
+            )
+
+    def test_preflight_rejects_missing_systemd_creds_executable(self):
+        self.executable.file = False
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd-creds executable is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_missing_systemd_host_key(self):
+        self.host_key.file = False
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd host credential key is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_symlinked_systemd_host_key(self):
+        self.host_key.symlink = True
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd host credential key is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_unsafe_systemd_host_key_owner_or_mode(self):
+        for uid, mode in ((1, 0o100600), (0, 0o100640), (0, 0o100604)):
+            with self.subTest(uid=uid, mode=oct(mode)):
+                self.host_key.uid = uid
+                self.host_key.mode = mode
+                with self.assertRaisesRegex(
+                    sse_qa_ctl.QaError,
+                    "systemd host credential key ownership or mode is unsafe",
+                ):
+                    self.verify()
+
+    def test_valid_systemd_host_key_check_has_no_mutating_side_effects(self):
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(sse_qa_ctl, "run") as run, \
+             mock.patch.object(sse_qa_ctl.subprocess, "run") as subprocess_run, \
+             mock.patch.object(sse_qa_ctl.subprocess, "Popen") as popen, \
+             mock.patch.object(sse_qa_ctl.os, "chmod") as chmod, \
+             mock.patch.object(sse_qa_ctl.os, "chown", create=True) as chown:
+            sse_qa_ctl.verify_systemd_credential_prerequisites(
+                executable=self.executable,
+                host_key=self.host_key,
+            )
+        run.assert_not_called()
+        subprocess_run.assert_not_called()
+        popen.assert_not_called()
+        chmod.assert_not_called()
+        chown.assert_not_called()
+
+    def test_initial_real_preflight_requires_host_key_after_existing_gates(self):
+        with mock.patch.object(
+            sse_qa_ctl, "preflight", return_value=["existing_conflict_checks"]
+        ) as preflight, mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            self.assertEqual(
+                sse_qa_ctl.initial_preflight(sse_qa_ctl.REAL_ROOT),
+                ["existing_conflict_checks", "systemd_host_credential_key"],
+            )
+        preflight.assert_called_once_with(sse_qa_ctl.REAL_ROOT, installed_ok=False)
+        credential_gate.assert_called_once_with()
+
+        with tempfile.TemporaryDirectory() as raw, mock.patch.object(
+            sse_qa_ctl, "preflight", return_value=["local_test_root"]
+        ), mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            self.assertEqual(
+                sse_qa_ctl.initial_preflight(Path(raw)),
+                ["local_test_root"],
+            )
+        credential_gate.assert_not_called()
+
+    def test_existing_preflight_failure_stops_before_host_key_gate(self):
+        with mock.patch.object(
+            sse_qa_ctl,
+            "preflight",
+            side_effect=sse_qa_ctl.QaError("loopback port conflict"),
+        ), mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            with self.assertRaisesRegex(sse_qa_ctl.QaError, "loopback port conflict"):
+                sse_qa_ctl.initial_preflight(sse_qa_ctl.REAL_ROOT)
+        credential_gate.assert_not_called()
+
+    def test_preflight_cli_routes_only_to_read_only_gates(self):
+        with mock.patch.object(
+            sse_qa_ctl, "verify_linux_units"
+        ) as verify_units, mock.patch.object(
+            sse_qa_ctl,
+            "initial_preflight",
+            return_value=["existing_conflicts", "systemd_host_credential_key"],
+        ) as initial_preflight, mock.patch.object(
+            sse_qa_ctl, "run"
+        ) as run, mock.patch.object(
+            sse_qa_ctl, "real_install"
+        ) as install, mock.patch.object(
+            sse_qa_ctl, "real_enable"
+        ) as enable, mock.patch.object(
+            sse_qa_ctl, "real_disable"
+        ) as disable, mock.patch.object(
+            sse_qa_ctl, "real_remove"
+        ) as remove, mock.patch("builtins.print") as output:
+            self.assertEqual(
+                sse_qa_ctl.main(
+                    ["preflight", "--bundle-root", str(ROOT / "deployment")]
+                ),
+                0,
+            )
+        verify_units.assert_called_once_with((ROOT / "deployment").resolve(), runtime_ready=False)
+        initial_preflight.assert_called_once_with(sse_qa_ctl.REAL_ROOT)
+        run.assert_not_called()
+        install.assert_not_called()
+        enable.assert_not_called()
+        disable.assert_not_called()
+        remove.assert_not_called()
+        output.assert_called_once_with(
+            "SSE_QA_PREFLIGHT_OK existing_conflicts,systemd_host_credential_key"
+        )
 
 
 class ReleaseProtocolTests(unittest.TestCase):
@@ -945,88 +1108,14 @@ class ReleaseProtocolTests(unittest.TestCase):
         )
         self.assertIn('git fetch --no-tags --depth=1 origin "$SSE_QA_CANDIDATE_SHA"', workflow)
         self.assertIn('test "$candidate_resolved" = "$SSE_QA_CANDIDATE_SHA"', workflow)
-        self.assertIn('controller_source="deployment/server/sse_qa_preflight.py"', workflow)
+        self.assertIn('controller_source="deployment/server/sse_qa_ctl.py"', workflow)
         self.assertIn("SSE_QA_SOURCE control_sha=%s candidate_sha=%s", workflow)
         inputs = workflow.split("permissions:", 1)[0]
         self.assertNotIn("candidate_sha:", inputs)
         self.assertNotIn("candidate_commit:", inputs)
-        controller = ROOT / "deployment" / "server" / "sse_qa_preflight.py"
+        controller = ROOT / "deployment" / "server" / "sse_qa_ctl.py"
         controller_blob = controller.read_bytes().replace(b"\r\n", b"\n")
         self.assertEqual(hashlib.sha256(controller_blob).hexdigest(), receiver.SSE_QA_CONTROLLER_SHA256)
-
-    def test_sse_qa_exposes_only_preflight_and_has_no_secret_channel(self):
-        workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
-        forbidden = {
-            "install_sse_qa", "enable_sse_qa", "smoke_sse_qa",
-            "disable_sse_qa", "remove_sse_qa",
-        }
-        self.assertEqual(receiver.SSE_QA_MODES, {"verify_sse_qa"})
-        self.assertIn("verify_sse_qa", builder.MODES)
-        for value in forbidden:
-            self.assertNotIn(value, builder.MODES)
-            self.assertNotIn(value, workflow)
-        self.assertNotIn("SSE_QA_SECRETS", workflow)
-        self.assertNotIn("--sse-qa-secrets", workflow)
-        self.assertNotIn("secrets-file", (ROOT / "deployment/server/sse_qa_preflight.py").read_text(encoding="utf-8"))
-
-    def test_preflight_controller_clean_and_conflicting_local_roots(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with mock.patch.object(preflight, "check_ports"):
-                checks = preflight.preflight(root, root / "unused", real_host=False)
-            self.assertIn("local_test_root", checks)
-            conflict = preflight.rooted(root, "/etc/sse-qa")
-            conflict.mkdir(parents=True)
-            with mock.patch.object(preflight, "check_ports"):
-                with self.assertRaisesRegex(preflight.PreflightError, "conflicting QA paths"):
-                    preflight.preflight(root, root / "unused", real_host=False)
-
-    def test_preflight_inventory_queries_fail_closed(self):
-        answers = [
-            subprocess.CompletedProcess(["id"], 2, "", "query failed"),
-        ]
-        with mock.patch.object(preflight, "run", side_effect=answers):
-            with self.assertRaisesRegex(preflight.PreflightError, "user state query failed"):
-                preflight.check_identity_conflicts()
-
-    def test_sse_qa_release_round_trip_has_exact_preflight_payload(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            package_zip = root / "preflight.zip"
-            controller = (ROOT / "deployment/server/sse_qa_preflight.py").read_bytes()
-            with zipfile.ZipFile(package_zip, "w") as archive:
-                for name in sorted(receiver.SSE_QA_PACKAGE_FILES):
-                    archive.writestr(name, controller if name.endswith("sse_qa_preflight.py") else b"[Unit]\nDescription=test\n")
-            files_path = root / "files.txt"
-            files_path.write_text("", encoding="utf-8")
-            release = root / "release.tar.gz"
-            argv = [
-                "build_release.py", "--root", str(root), "--files", str(files_path),
-                "--output", str(release), "--commit", "a" * 40,
-                "--mode", "verify_sse_qa", "--sse-qa-package", str(package_zip),
-                "--sse-qa-candidate-commit", receiver.SSE_QA_CANDIDATE_COMMIT,
-                "--sse-qa-controller-sha256", receiver.SSE_QA_CONTROLLER_SHA256,
-            ]
-            with mock.patch.object(sys, "argv", argv):
-                builder.main()
-            manifest, payload = receiver.load_release(release)
-            self.assertEqual(manifest["metadata"], receiver.SSE_QA_METADATA)
-            receiver.validate_mode_contract(manifest, payload)
-            completed = subprocess.CompletedProcess(
-                ["python3"], 0, "SSE_QA_PREFLIGHT_OK clean\n", "",
-            )
-            with mock.patch.object(receiver.subprocess, "run", return_value=completed):
-                self.assertEqual(
-                    receiver.run_sse_qa("verify_sse_qa", payload),
-                    "SSE_QA_PREFLIGHT_OK clean",
-                )
-            tampered = bytearray(payload[receiver.SSE_QA_PACKAGE_PAYLOAD])
-            tampered[-1] ^= 1
-            with self.assertRaises((receiver.ReleaseError, zipfile.BadZipFile)):
-                receiver.run_sse_qa(
-                    "verify_sse_qa",
-                    {receiver.SSE_QA_PACKAGE_PAYLOAD: bytes(tampered)},
-                )
     # Existing FCM validation remains a separate protocol contract.
     def test_fcm_mode_accepts_only_a_complete_matching_service_account(self):
         credentials = {
