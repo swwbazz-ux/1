@@ -1,0 +1,2 @@
+﻿COMMAND: node --check static/js/excavator-local-shift-v1.js
+EXIT_CODE: 0

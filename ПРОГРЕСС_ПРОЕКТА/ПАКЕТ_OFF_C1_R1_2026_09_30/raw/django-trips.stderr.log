@@ -1,0 +1,37 @@
+Creating test database for alias 'default'...
+.......................................................................................................Internal Server Error: /excavator/truck-loaded/
+Traceback (most recent call last):
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\—»—“≈Ã¿_MVP\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\—»—“≈Ã¿_MVP\.venv\Lib\site-packages\django\core\handlers\base.py", line 198, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\—»—“≈Ã¿_MVP\.venv\Lib\site-packages\django\views\decorators\http.py", line 64, in inner
+    return func(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-r1-autonomous-shift-20260930\—»—“≈Ã¿_MVP\backend\trips\views.py", line 4823, in excavator_truck_loaded_view
+    trip = create_loaded_waiting_unload_trip(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-r1-autonomous-shift-20260930\—»—“≈Ã¿_MVP\backend\trips\trip_creation.py", line 197, in create_loaded_waiting_unload_trip
+    resolve_haul_handoffs_for_trip(trip)
+  File "C:\codex-tmp\off-c1-r1-autonomous-shift-20260930\—»—“≈Ã¿_MVP\backend\assignments\services.py", line 1485, in resolve_haul_handoffs_for_trip
+    _emit_assignment_changed(
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: forced rollback
+.............................................
+----------------------------------------------------------------------
+Ran 148 tests in 19.286s
+
+OK
+Destroying test database for alias 'default'...

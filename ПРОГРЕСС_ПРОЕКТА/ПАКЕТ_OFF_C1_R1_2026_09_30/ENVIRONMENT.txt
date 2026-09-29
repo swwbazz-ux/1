@@ -1,0 +1,25 @@
+OFF-C1-R1 evidence environment, 2026-09-30 Asia/Vladivostok
+candidate=6c31e8545fd5f5da727ce077774ab4eaf07fd21b
+release_base=f7302f4346f64f5e8bfe89c7a4da232f7caed648
+branch=codex/off-c1-r1-autonomous-shift-20260930
+powershell=5.1.27924.1000
+node=v24.16.0
+python=3.12.10
+django_test_engine=django.db.backends.sqlite3
+django_test_database=file:memorydb_default?mode=memory&cache=shared
+OPENBLAS_NUM_THREADS=1
+OMP_NUM_THREADS=1
+DJANGO_DB_ENGINE_before_runner=<unset>
+POSTGRES_DB=<unset>
+POSTGRES_USER=<unset>
+POSTGRES_HOST=<unset>
+POSTGRES_PORT=<unset>
+DJANGO_DB_NAME=<unset>
+psql=NOT_FOUND
+docker=NOT_FOUND
+podman=NOT_FOUND
+postgres_services=0
+postgresql_result=NOT_RUN
+browser_cdp_result=NOT_RUN
+installed_apk_xiaomi_result=NOT_RUN
+production_result=NOT_RUN

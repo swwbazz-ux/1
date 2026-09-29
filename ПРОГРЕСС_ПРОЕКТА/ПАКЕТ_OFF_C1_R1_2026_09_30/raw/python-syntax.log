@@ -1,0 +1,2 @@
+﻿COMMAND: C:\codex-tmp\off-c1-autonomous-shift-20260929\СИСТЕМА_MVP\.venv\Scripts\python.exe -m py_compile core/offline_sync.py core/test_free_bucket_sync.py core/test_offline_autonomous_shift.py core/test_offline_sync.py trips/excavator_hourly_report.py trips/test_excavator_hourly_report.py trips/tests.py trips/views.py
+EXIT_CODE: 0

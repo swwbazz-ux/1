@@ -1,0 +1,3 @@
+﻿NOT_RUN
+Required: DJANGO_DB_ENGINE=postgres and POSTGRES_DB containing test, qa, or ci.
+The runner intentionally does not infer PostgreSQL from DJANGO_DB_NAME and does not touch production.

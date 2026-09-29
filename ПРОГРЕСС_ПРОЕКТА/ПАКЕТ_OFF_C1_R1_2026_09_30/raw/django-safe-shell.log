@@ -1,0 +1,13 @@
+﻿COMMAND: C:\codex-tmp\off-c1-autonomous-shift-20260929\СИСТЕМА_MVP\.venv\Scripts\python.exe manage.py test core.test_offline_autonomous_shift.AutonomousExcavatorShiftTests.test_authenticated_shell_can_be_exported_as_safe_service_worker_fixture --noinput
+Found 1 test(s).
+System check identified no issues (0 silenced).
+Creating test database for alias 'default'...
+
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.276s
+
+OK
+Destroying test database for alias 'default'...
+
+EXIT_CODE: 0

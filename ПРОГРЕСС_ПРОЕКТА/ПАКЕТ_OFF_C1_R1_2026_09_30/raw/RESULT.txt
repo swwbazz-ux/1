@@ -1,0 +1,6 @@
+﻿PASS
+candidate=6c31e8545fd5f5da727ce077774ab4eaf07fd21b
+release_base=f7302f4346f64f5e8bfe89c7a4da232f7caed648
+output=C:\codex-tmp\mechanics-passport\ПРОГРЕСС_ПРОЕКТА\ПАКЕТ_OFF_C1_R1_2026_09_30\raw
+rendered_shell_sha256=23E73E9FE3504D6863DB4533C28FE3211E3897BDB3F8366F74594473FF6582C4
+postgres=NOT_RUN

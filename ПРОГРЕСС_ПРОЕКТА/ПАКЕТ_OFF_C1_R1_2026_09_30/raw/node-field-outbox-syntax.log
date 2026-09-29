@@ -1,0 +1,2 @@
+﻿COMMAND: node --check static/js/excavator-field-outbox-v1.js
+EXIT_CODE: 0
