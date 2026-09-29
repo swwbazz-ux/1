@@ -1,0 +1,104 @@
+Performing system checks...
+
+System check identified no issues (0 silenced).
+September 30, 2026 - 08:18:30
+Django version 6.0.6, using settings 'config.settings'
+Starting development server at http://127.0.0.1:8048/
+Quit the server with CTRL-BREAK.
+
+WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+For more information on production servers see: https://docs.djangoproject.com/en/6.0/howto/deployment/
+[30/Sep/2026 08:18:31] "HEAD / HTTP/1.1" 200 0
+[30/Sep/2026 08:18:31] "GET / HTTP/1.1" 200 165289
+[30/Sep/2026 08:18:31] "GET /static/css/app.css?v=ready-core-traffic-v184 HTTP/1.1" 200 930552
+[30/Sep/2026 08:18:31] "GET /static/css/max-support-link-v1.css?v=6 HTTP/1.1" 200 3002
+[30/Sep/2026 08:18:31] "GET /static/vendor/bulma/button-1.0.4.min.css HTTP/1.1" 200 11997
+[30/Sep/2026 08:18:31] "GET /static/css/entry-action-button-v2.css HTTP/1.1" 200 4279
+[30/Sep/2026 08:18:31] "GET /static/js/role-readonly.js?v=role-readonly-v6 HTTP/1.1" 200 20170
+[30/Sep/2026 08:18:31] "GET /static/css/login-v2.css?v=5 HTTP/1.1" 200 19477
+[30/Sep/2026 08:18:31] "GET /static/img/start/login-hero-tall-v2.webp HTTP/1.1" 200 210296
+[30/Sep/2026 08:18:31] "GET /static/js/realtime-client.js?v=ready-core-traffic-v184 HTTP/1.1" 200 57670
+[30/Sep/2026 08:18:31] "GET /static/js/connection-indicators-v1.js?v=ready-core-traffic-v184 HTTP/1.1" 200 1633
+[30/Sep/2026 08:18:31] "GET /static/js/client-error-report.js?v=ready-core-traffic-v184 HTTP/1.1" 200 9071
+[30/Sep/2026 08:18:31] "GET /static/img/start/start-hero-v1.webp HTTP/1.1" 200 39178
+[30/Sep/2026 08:18:31] "GET /static/favicon.ico HTTP/1.1" 200 3879
+[30/Sep/2026 08:18:52] "GET / HTTP/1.1" 200 165289
+[30/Sep/2026 08:18:52] "GET /static/css/native-app-update-v1.css?v=1 HTTP/1.1" 200 2103
+[30/Sep/2026 08:18:52] "GET /static/js/role-readonly.js?v=role-readonly-v6 HTTP/1.1" 200 20170
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 97191
+[30/Sep/2026 08:18:52] "GET /static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 29655
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 117524
+[30/Sep/2026 08:18:52] "GET /static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 7892
+[30/Sep/2026 08:18:52] "GET /static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 12046
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 182518
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-offline-v1.css?v=1 HTTP/1.1" 200 2337
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-manual-loading-v1.css?v=4 HTTP/1.1" 200 4973
+[30/Sep/2026 08:18:52] "GET /static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 14996
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 15961
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 25110
+[30/Sep/2026 08:18:52] "GET /static/css/app.css?v=ready-core-traffic-v184 HTTP/1.1" 200 930552
+[30/Sep/2026 08:18:52] "GET /excavator.webmanifest HTTP/1.1" 200 1541
+[30/Sep/2026 08:18:52] "GET /static/img/equipment/truck-blue.png HTTP/1.1" 200 48406
+[30/Sep/2026 08:18:52] "GET /static/img/equipment/excavator-yellow.png HTTP/1.1" 200 68719
+[30/Sep/2026 08:18:52] "GET /static/js/realtime-client.js?v=ready-core-traffic-v184 HTTP/1.1" 200 57670
+[30/Sep/2026 08:18:52] "POST /session-heartbeat/ HTTP/1.1" 204 0
+[30/Sep/2026 08:18:52] "GET /static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 12331
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 1437
+[30/Sep/2026 08:18:52] "GET /static/img/pwa/excavator-180.png HTTP/1.1" 200 5421
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 4268
+[30/Sep/2026 08:18:52] "GET /static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 24223
+[30/Sep/2026 08:18:52] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 39073
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 33514
+[30/Sep/2026 08:18:52] "GET /static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 14575
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 5269
+[30/Sep/2026 08:18:52] "GET /static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 45435
+[30/Sep/2026 08:18:53] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1693 HTTP/1.1" 200 75409
+[30/Sep/2026 08:18:53] "GET /excavator/work/ HTTP/1.1" 200 442478
+[30/Sep/2026 08:18:54] "GET /api/achievements/current/ HTTP/1.1" 200 33
+[30/Sep/2026 08:18:54] "GET /excavator-sw.js HTTP/1.1" 200 23634
+[30/Sep/2026 08:18:54] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:18:55] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1693 HTTP/1.1" 200 75409
+[30/Sep/2026 08:18:56] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+Forbidden (CSRF token from the 'X-Csrftoken' HTTP header incorrect.): /offline-events/sync/
+[30/Sep/2026 08:18:57] "POST /offline-events/sync/ HTTP/1.1" 403 2580
+[30/Sep/2026 08:18:57] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:18:57] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1693 HTTP/1.1" 200 75409
+[30/Sep/2026 08:18:59] "GET /excavator/work/?_operational_fragment=excavator&_operational_version=1693 HTTP/1.1" 200 75409
+[30/Sep/2026 08:18:59] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:01] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_truck_assigned.wav HTTP/1.1" 200 79424
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_action_error.wav HTTP/1.1" 200 72368
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_action_ok.wav HTTP/1.1" 200 26504
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_connection_lost.wav HTTP/1.1" 200 121760
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_shift_end.wav HTTP/1.1" 200 148844
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_connection_restored.wav HTTP/1.1" 200 42380
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_shift_start.wav HTTP/1.1" 200 115244
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_action_success_notice.wav HTTP/1.1" 200 207348
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_assignment_removed_notice.wav HTTP/1.1" 200 236454
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_assignment_notice.wav HTTP/1.1" 200 278702
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_shift_notice.wav HTTP/1.1" 200 411090
+[30/Sep/2026 08:19:02] "GET /static/favicon.ico HTTP/1.1" 200 3879
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_action_failed_notice.wav HTTP/1.1" 200 370518
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_connection_lost_notice.wav HTTP/1.1" 200 370518
+[30/Sep/2026 08:19:02] "GET /static/audio/excavator/excavator_connection_restored_notice.wav HTTP/1.1" 200 373164
+[30/Sep/2026 08:19:02] "GET /static/img/equipment/truck-green.png HTTP/1.1" 200 73402
+[30/Sep/2026 08:19:03] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:05] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:07] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:09] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:11] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:13] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:15] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:17] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:19] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:21] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:22] "POST /session-heartbeat/ HTTP/1.1" 204 0
+[30/Sep/2026 08:19:22] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:24] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:26] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:28] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:30] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:32] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:34] "GET /realtime/state/?after=1693&include_events=1&role_app_code=excavator_operator HTTP/1.1" 200 604
+[30/Sep/2026 08:19:35,062] - Broken pipe from ('127.0.0.1', 21445)
