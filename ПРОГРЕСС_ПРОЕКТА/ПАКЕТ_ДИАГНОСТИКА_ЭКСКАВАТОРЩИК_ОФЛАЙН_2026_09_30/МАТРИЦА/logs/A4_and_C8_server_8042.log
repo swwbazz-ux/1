@@ -1,0 +1,72 @@
+# c05a5925 (excavator-mobile-shell-v263), стенд :8042, runserver --noreload, 30.09.2026. Время лога — местное (UTC+10).
+
+# ============ A4. Перезапуск приложения С СЕТЬЮ — полный перезапуск браузера (Browser.close → новый процесс Chrome) ============
+# 07:21:24 новый процесс, кука сессии, переход на /excavator/work/. SW v263 уже установлен и активен, кэш excavator-mobile-shell-v263 (68 записей).
+# Итог: оболочка (через SW из кэша, т.к. сеанс оказался просрочен → 302) и ВСЕ 26 версионированных файлов /static/ скачаны заново полными 200.
+[30/Sep/2026 07:21:24] "GET /excavator/work/ HTTP/1.1" 302 0
+[30/Sep/2026 07:21:24] "GET /static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 7892
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 117524
+[30/Sep/2026 07:21:24] "GET /static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 29655
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 97191
+[30/Sep/2026 07:21:24] "GET /static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 12046
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 182518
+[30/Sep/2026 07:21:24] "GET /static/css/native-app-update-v1.css?v=1 HTTP/1.1" 200 2103
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-manual-loading-v1.css?v=4 HTTP/1.1" 200 4973
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 9941
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-offline-v1.css?v=1 HTTP/1.1" 200 2337
+[30/Sep/2026 07:21:24] "GET /static/js/role-readonly.js?v=role-readonly-v6 HTTP/1.1" 200 20170
+[30/Sep/2026 07:21:24] "GET /static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263 HTTP/1.1" 200 14996
+[30/Sep/2026 07:21:24] "GET /static/img/equipment/excavator-yellow.png HTTP/1.1" 200 68719
+[30/Sep/2026 07:21:24] "GET /static/img/equipment/truck-blue.png HTTP/1.1" 200 48406
+[30/Sep/2026 07:21:24] "GET /excavator.webmanifest HTTP/1.1" 200 1541
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 15961
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 25110
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 1437
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 4268
+[30/Sep/2026 07:21:24] "GET /static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 12331
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 18362
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 35534
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 45435
+[30/Sep/2026 07:21:24] "GET /static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 14575
+[30/Sep/2026 07:21:24] "GET /static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 24223
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 29032
+[30/Sep/2026 07:21:24] "GET /static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263 HTTP/1.1" 200 5269
+[30/Sep/2026 07:21:24] "POST /session-heartbeat/ HTTP/1.1" 401 0
+[30/Sep/2026 07:21:24] "GET /realtime/state/?after=1639&include_events=1&role_app_code=excavator_operator HTTP/1.1" 401 24
+[30/Sep/2026 07:21:24] "GET /static/img/pwa/excavator-180.png HTTP/1.1" 200 5421
+[30/Sep/2026 07:21:24] "GET / HTTP/1.1" 200 165289
+[30/Sep/2026 07:21:25] "GET /excavator-sw.js HTTP/1.1" 200 19818
+# 302/401 здесь — артефакт стенда: ключ сессии в файле был устаревшим (сессия пересоздана, в отчёт не входит).
+# На статику это не влияет: SW (networkFirstStatic, cache:"no-store") тянет файлы до ответа по сессии.
+
+# ЛОВУШКА ЗАМЕРА. Перезапуск в НОВОЙ ВКЛАДКЕ того же живого процесса браузера (07:19:52) дал «чистую» картину —
+# только оболочка 436881 + манифест + иконка, ни одного /static/*.js. Но performance показал: из 32 ресурсов /static/
+# лишь 6 прошли через worker, остальные взяты из памяти процесса (Blink memory cache). На телефоне после выгрузки
+# приложения этой памяти нет. Пункт A4 принимать только по полному перезапуску процесса.
+[30/Sep/2026 07:19:52] "GET /excavator/work/ HTTP/1.1" 200 436881
+[30/Sep/2026 07:19:52] "GET /excavator.webmanifest HTTP/1.1" 200 1541
+[30/Sep/2026 07:19:52] "GET /static/img/pwa/excavator-180.png HTTP/1.1" 200 5421
+[30/Sep/2026 07:19:54] "GET /excavator-sw.js HTTP/1.1" 200 19818
+
+# ============ B5. Возврат сервера после прогона 1 (сервер был выключен) ============
+# Один POST — вся очередь; дальше телефон очередь не повторяет (66–68 на сервере «retry», на телефоне «conflict»).
+# Строки offline_sync выводились в cp866 и в консоли превью искажены; смысл восстановлен по базе (timelines/run1_server_off.md):
+# «accepted despite discrepancy (…/downtime_switch_before_start) employee=3 role=8 … простой 21:11:26.621 … сдвинут за активный простой #31 (21:16:35.396)»
+# «accepted despite discrepancy (…/downtime_switch_before_start) employee=3 role=8 … простой 21:11:38.938 … сдвинут за активный простой #32 (21:16:35.396)»
+[30/Sep/2026 07:16:35] "POST /offline-events/sync/ HTTP/1.1" 200 4593
+
+# ============ C8. Новые действия после возврата сервера, пока в очереди висят отказы ============
+# 07:18:2x погрузка «Тест 1» — на сервер НЕ отправлена: телефон сам пометил conflict/dependency_rejected (attempt_count 0).
+# 07:19:10 «БВР», 07:19:21 «Завершить простой» — телефон повторяет каждые 2–8 с, сервер каждый раз отвечает retry:
+[30/Sep/2026 07:19:11] "POST /offline-events/sync/ HTTP/1.1" 200 634
+[30/Sep/2026 07:19:13] "POST /offline-events/sync/ HTTP/1.1" 200 634
+[30/Sep/2026 07:19:17] "POST /offline-events/sync/ HTTP/1.1" 200 634
+[30/Sep/2026 07:19:25] "POST /offline-events/sync/ HTTP/1.1" 200 1066
+[30/Sep/2026 07:19:33] "POST /offline-events/sync/ HTTP/1.1" 200 1066
+[30/Sep/2026 07:19:41] "POST /offline-events/sync/ HTTP/1.1" 200 1066
+[30/Sep/2026 07:19:52] "POST /offline-events/sync/ HTTP/1.1" 200 1066
+[30/Sep/2026 07:20:00] "POST /offline-events/sync/ HTTP/1.1" 200 1066
+# Квитанции в базе:
+# 69 excavator.downtime.started  retry  shift_reference_pending  shift=None  телефон 21:19:10  сервер 21:19:10
+# 70 excavator.downtime.ended    retry  dependency_pending       shift=None  телефон 21:19:21  сервер 21:19:25
+# Местная смена 3 (…rd736l) на сервере не появится никогда: её открытие зависит от отклонённого открытия смены 2.
