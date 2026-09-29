@@ -4736,10 +4736,30 @@ body.management-dynamics-chart-modal-open {
     grid-template-columns: 1fr;
     grid-template-rows: repeat(12, var(--gd-equipment-slot-h));
     grid-auto-rows: var(--gd-equipment-slot-h);
-    align-content: stretch;
+    align-content: start;
     gap: var(--gd-equipment-slot-gap);
     height: 100%;
-    overflow: hidden;
+    min-height: 0;
+    padding-right: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(31, 192, 255, .55) rgba(5, 17, 23, .48);
+}
+
+.dispatcher-excavators::-webkit-scrollbar {
+    width: 4px;
+}
+
+.dispatcher-excavators::-webkit-scrollbar-track {
+    background: rgba(5, 17, 23, .48);
+    border-radius: 999px;
+}
+
+.dispatcher-excavators::-webkit-scrollbar-thumb {
+    background: rgba(31, 192, 255, .55);
+    border-radius: 999px;
 }
 
 .dispatcher-equipment-tile {

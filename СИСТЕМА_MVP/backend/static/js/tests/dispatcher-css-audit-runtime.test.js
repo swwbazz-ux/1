@@ -32,8 +32,8 @@ test("dispatcher CSS audit characterizes the current six-file cascade", () => {
     const report = auditDefaultDispatcherCss();
 
     assert.deepEqual(report.files, DEFAULT_CSS_FILES);
-    assert.equal(report.totalRules, 1981);
-    assert.equal(report.uniqueContextSelectors, 1922);
+    assert.equal(report.totalRules, 1984);
+    assert.equal(report.uniqueContextSelectors, 1925);
     assert.equal(report.repeatedContextSelectors, 54);
     assert.equal(report.additiveRepeatedSelectors, 18);
     assert.equal(report.exactDuplicateRuleGroups, 0);
