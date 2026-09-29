@@ -1,0 +1,335 @@
+[
+  {
+    "path": "../gate-results.json",
+    "equal": true,
+    "published_sha256": "384fc61ddf3400de16bc8664a0a8e337b3eae2d1233025ac62448c4085bea86a",
+    "declared_raw_sha256": "384fc61ddf3400de16bc8664a0a8e337b3eae2d1233025ac62448c4085bea86a",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 21
+  },
+  {
+    "path": "ancestry.txt",
+    "equal": false,
+    "published_sha256": "526cf6d8062af407121d5009a3c22a62aa7a8e0bc5fda8ddce973f39aca5923a",
+    "declared_raw_sha256": "94dc810aa4b6ef53f115666e39fe718f0c409ca71b904e74b31aefc81e8de57b",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 7
+  },
+  {
+    "path": "backend_node.stderr.log",
+    "equal": true,
+    "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "backend_node.stdout.log",
+    "equal": true,
+    "published_sha256": "dc78a315803819c2ee83042ae1a56f3fdd8ffb0e7438c1fe1d31a2b720375fbb",
+    "declared_raw_sha256": "dc78a315803819c2ee83042ae1a56f3fdd8ffb0e7438c1fe1d31a2b720375fbb",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 970
+  },
+  {
+    "path": "candidate-log.txt",
+    "equal": false,
+    "published_sha256": "7f384df084309b39ccd4d03ccba0a3d5b8420ed7c8d8816d379968ce76545f89",
+    "declared_raw_sha256": "6ad06a367d9c49a47f00843e43cbd2093ec113095698ae9e8af3a5080136f7df",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 45
+  },
+  {
+    "path": "ci-evidence-workflow.diff",
+    "equal": false,
+    "published_sha256": "eb822c9c59c27f2f74e40b4c667a025020c31d23ae3f11482fb9390b38a3a272",
+    "declared_raw_sha256": "3bd0a5605fb086a81a760d7f1b9e847b6f8ded92e324d6e05bcdaf6991835425",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 66
+  },
+  {
+    "path": "discarded-run-36558180943.json",
+    "equal": false,
+    "published_sha256": "40a1435eb1936b80ef71c78541eb2908f3b66a40c6e4667c71c012cf9fecdbc2",
+    "declared_raw_sha256": "4b78b564cbe0f802aa16c562d04c5900f5cd50168072ca701db486cd07ffc78d",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "discarded-run-36560287803.json",
+    "equal": false,
+    "published_sha256": "957af335e8b1ec7424fce8f43c79bfba4c2a41029fddd017350c2997c9d64809",
+    "declared_raw_sha256": "6c46a05ece9bf10d73aa8c760575b04f91d319c5301cd18e2875d27a03a14ea2",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "discarded-run-36562618490.json",
+    "equal": false,
+    "published_sha256": "ba18a1680c4dd330f7157bb5cc416f1106c47394f46731cccbb0825cd0b10c01",
+    "declared_raw_sha256": "2f7884a6da607c63ece87aa67a5853513a210695878f0091dc990cc90d441c83",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "discarded-run-36562778235.json",
+    "equal": false,
+    "published_sha256": "7c382aff8f644cceaf2e0eec3a96a7e3b45c2d8cf5c1f28fd18c19b7a75c5793",
+    "declared_raw_sha256": "3271c52665f118358954f00efd2839b10c351f8e6af70c0a8450b62cbae12421",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "discarded-run-resolve.log",
+    "equal": false,
+    "published_sha256": "e66da33ce0ea02ea7d11231a245b89e9aa2c5b04bfdc69fb69a1efb8c5e3d523",
+    "declared_raw_sha256": "94c68a0e3bd027d6821bbe825336f49bfacdcfa244d7b83a39afdd487cac2d0f",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 179
+  },
+  {
+    "path": "django_check.stderr.log",
+    "equal": true,
+    "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "django_check.stdout.log",
+    "equal": false,
+    "published_sha256": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1",
+    "declared_raw_sha256": "f87ceb15410bde28ff826ce26228e0576558258fa64d145847921a593a61ee63",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "django_migrations.stderr.log",
+    "equal": true,
+    "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "django_migrations.stdout.log",
+    "equal": false,
+    "published_sha256": "a2bfa7b376c38062f77ce2b1e703876aaa04662f96355cdf5dc9d0d075302b05",
+    "declared_raw_sha256": "93e6e2d5be3c054add80c0f19101608803f7ca8a7df1fa41f76bbb9a1f570f4a",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "django_offline_free_bucket.stderr.log",
+    "equal": true,
+    "published_sha256": "69e0fd5098d5b3002131ebe61245d92718548b3ad793f0fa2976491520cb445a",
+    "declared_raw_sha256": "69e0fd5098d5b3002131ebe61245d92718548b3ad793f0fa2976491520cb445a",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 101,
+    "lf": 99
+  },
+  {
+    "path": "django_offline_free_bucket.stdout.log",
+    "equal": false,
+    "published_sha256": "4d16a55cf576e953d1407403c297ac575dd725080466853db1cc6078e20752a1",
+    "declared_raw_sha256": "f6d0c0ef5907f8dc87e7e70470562cb8a1564f85c0dedc150e49e3bc8e53dda1",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 2
+  },
+  {
+    "path": "django_shell_versions.stderr.log",
+    "equal": true,
+    "published_sha256": "8a1235e50bd321845578ecc3d2610fe499846d0ff1936658550a32398f03c3cc",
+    "declared_raw_sha256": "8a1235e50bd321845578ecc3d2610fe499846d0ff1936658550a32398f03c3cc",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 9,
+    "lf": 7
+  },
+  {
+    "path": "django_shell_versions.stdout.log",
+    "equal": false,
+    "published_sha256": "60836e7982155c1dd07ba13a60b0373dbf91224eba8d6d4afa78faf0fc33b2b9",
+    "declared_raw_sha256": "7344220c1efd25af3d4b95485f82e2d7db6ea6c6f5d957fb9b72fe823c9d1796",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 14
+  },
+  {
+    "path": "final-release-merge.diff",
+    "equal": false,
+    "published_sha256": "b9f9c5e7bb4b5656b18df8f58a08f95a83c4d16cb9986a4321abd5587f06a40b",
+    "declared_raw_sha256": "fffbe5c86fddaccf407bd1676d448188bcc92ef447fd1dc9bba1e9a21b95e34e",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 8
+  },
+  {
+    "path": "github-run-36564441695.json",
+    "equal": false,
+    "published_sha256": "4f484f782fde799b86871ead5065262b0fecf3820da3a859f41b96a9f31c8572",
+    "declared_raw_sha256": "18eeac6dffa5dad86b058818c662b16efaf1610c05b67140b63193fde670947a",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "github-run-36564441695/django-full-postgresql.log",
+    "equal": true,
+    "published_sha256": "4cde4da8f7427e3d3e25a284ffa7f5b3a5ffe6ab15f4660e365cd34bd9a92f0d",
+    "declared_raw_sha256": "4cde4da8f7427e3d3e25a284ffa7f5b3a5ffe6ab15f4660e365cd34bd9a92f0d",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 185
+  },
+  {
+    "path": "github-run-36564441695/django-tools-contracts.log",
+    "equal": true,
+    "published_sha256": "109185467c23b6370acb4343469bd334aa2b82631fdd7182dc5aa9882d38da12",
+    "declared_raw_sha256": "109185467c23b6370acb4343469bd334aa2b82631fdd7182dc5aa9882d38da12",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 5
+  },
+  {
+    "path": "github-run-36564441695/resolve-job.log",
+    "equal": false,
+    "published_sha256": "f1bf1ae3b8011631b9cd9a18a237b78a35868f6ebbbafa14f4d16b6ed8d26cf9",
+    "declared_raw_sha256": "0c54cdb5323d48a41ddafcd8da7af8eaf6478bc36900fabe059b9a83276c5916",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 195
+  },
+  {
+    "path": "integration-remerge.diff",
+    "equal": false,
+    "published_sha256": "1b3ab9d7a53413963597d23966d9ec59f5619b6ba3d5adb098afeddb62ca703c",
+    "declared_raw_sha256": "0550546c8ae6d3418621d0c90e3fff0bc7ae8a154a3ca280ffea431bcd8e598b",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 246
+  },
+  {
+    "path": "mobile_npm.stderr.log",
+    "equal": true,
+    "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "mobile_npm.stdout.log",
+    "equal": true,
+    "published_sha256": "965f4e1fc3ea88220d2543028484b6cf7f4f497cb237fe66eb0a70ee6484ddd3",
+    "declared_raw_sha256": "965f4e1fc3ea88220d2543028484b6cf7f4f497cb237fe66eb0a70ee6484ddd3",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 56
+  },
+  {
+    "path": "postgres_local.NOT_RUN.txt",
+    "equal": true,
+    "published_sha256": "31be877d1b206f0fe044608e5bde5ea979f42d69b4ee74b752b1c5e7d7a3d053",
+    "declared_raw_sha256": "31be877d1b206f0fe044608e5bde5ea979f42d69b4ee74b752b1c5e7d7a3d053",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "release-scope.txt",
+    "equal": false,
+    "published_sha256": "3fc11e421e03ea3d5e325fcf78e83a56b09fb2b60ff758676ea84cd4727dff20",
+    "declared_raw_sha256": "0bf3c2f6dc36e5c6c3061ff8155982a96dd730cd0389e60df59ca54179a22358",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 72
+  },
+  {
+    "path": "runner-result.json",
+    "equal": false,
+    "published_sha256": "3d284dd0a2546de33dd6c04a9251e302eaa8e649e60f5697779dcc8d40e79fd0",
+    "declared_raw_sha256": "0f090c7ef2e1634a5bcff5e208885fef9091d03c4c2184d0c1376b694b5edf21",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 203
+  },
+  {
+    "path": "subject-e5438f95.patch",
+    "equal": false,
+    "published_sha256": "30d705338db689d47d35fd596a63e253ffec2ac234865ee4f42c68f852b9e2da",
+    "declared_raw_sha256": "278305ace54575ab1e5e2495c12414e5c53bb6fe47d6ce3997b7a1c72bb25eab",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 1539
+  },
+  {
+    "path": "subject-files.txt",
+    "equal": false,
+    "published_sha256": "f9e7de1695d990d3da2c79f16bd98d2a7c24ae17a5acfd7b2ff17e12cf523637",
+    "declared_raw_sha256": "bf8f06df948c198d77527e3e74e936973c99578ffeea1075812768a47f99bcd2",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 18
+  },
+  {
+    "path": "tools_contracts.stderr.log",
+    "equal": false,
+    "published_sha256": "e7b3e876333f5faef4494dfb728f1ab80f3bd779706751abf4ab699bef984a27",
+    "declared_raw_sha256": "1c5b11b9ba906899f1f893bfdc5ba6707a4846b21ad4400744a243e9caa61b64",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 5
+  },
+  {
+    "path": "tools_contracts.stdout.log",
+    "equal": true,
+    "published_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "declared_raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lf_to_crlf_copy_matches": true,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "../README.md",
+    "equal": true,
+    "published_sha256": "7ff0b54696f0b0901449ce4f31cf64218f7551b055bc420d0b394a37c6edca2b",
+    "declared_raw_sha256": "7ff0b54696f0b0901449ce4f31cf64218f7551b055bc420d0b394a37c6edca2b",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 27
+  },
+  {
+    "path": "../run_s106_c2.py",
+    "equal": true,
+    "published_sha256": "30944a386d927d2b140985465597630ac5629ba48989d60013e11495e8c12b3d",
+    "declared_raw_sha256": "30944a386d927d2b140985465597630ac5629ba48989d60013e11495e8c12b3d",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 191
+  },
+  {
+    "path": "../source-metadata.json",
+    "equal": true,
+    "published_sha256": "6f4a328d9d6d8367d29acdebfbf581bda26097577acc2be37614bbe9f9ae3418",
+    "declared_raw_sha256": "6f4a328d9d6d8367d29acdebfbf581bda26097577acc2be37614bbe9f9ae3418",
+    "lf_to_crlf_copy_matches": false,
+    "cr": 0,
+    "lf": 25
+  }
+]

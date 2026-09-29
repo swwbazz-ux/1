@@ -1,0 +1,58 @@
+[
+  {
+    "local": "upload/ПАСПОРТ_МЕХАНИК_ДОКАЗАТЕЛЬНЫЙ_ОТЧЕТ_S106_C2_2026_09_29.md",
+    "remote": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК_ДОКАЗАТЕЛЬНЫЙ_ОТЧЕТ_S106_C2_2026_09_29.md",
+    "sha": "498619916b081b0a312e3db1016e02bb79744b5c",
+    "actual": "498619916b081b0a312e3db1016e02bb79744b5c",
+    "match": true,
+    "bytes": 15325
+  },
+  {
+    "local": "upload/README(20260929-120603).md",
+    "remote": "ПРОГРЕСС_ПРОЕКТА/ПАКЕТ_S106_C2_2026_09_29/README.md",
+    "sha": "c9acfd520a765efe5be1780c7dbd1fa6ba5ef70a",
+    "actual": "c9acfd520a765efe5be1780c7dbd1fa6ba5ef70a",
+    "match": true,
+    "bytes": 2992
+  },
+  {
+    "local": "s106c2-review/runtime/СИСТЕМА_MVP/backend/core/fixtures/offline_replay_contract.json",
+    "remote": "candidate:core/fixtures/offline_replay_contract.json",
+    "sha": "823e02389bf3c6757fc2fc24d33d8c671c76f81b",
+    "actual": "823e02389bf3c6757fc2fc24d33d8c671c76f81b",
+    "match": true,
+    "bytes": 2557
+  },
+  {
+    "local": "s106c2-review/runtime/СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+    "remote": "candidate:static/js/driver-offline-outbox-v2.js",
+    "sha": "e2d4531dd0124725370fbb437351a661e66cb054",
+    "actual": "e2d4531dd0124725370fbb437351a661e66cb054",
+    "match": true,
+    "bytes": 70172
+  },
+  {
+    "local": "s106c2-review/runtime/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js",
+    "remote": "candidate:static/js/excavator-field-outbox-v1.js",
+    "sha": "729897e8b3273c585002f3b27f4c97af26b13bfb",
+    "actual": "729897e8b3273c585002f3b27f4c97af26b13bfb",
+    "match": true,
+    "bytes": 33635
+  },
+  {
+    "local": "s106c2-review/runtime/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js",
+    "remote": "candidate:static/js/tests/driver-offline-outbox-v2.test.js",
+    "sha": "b6e54904057833c54873c0aa3bfcd550c16dcaf8",
+    "actual": "b6e54904057833c54873c0aa3bfcd550c16dcaf8",
+    "match": true,
+    "bytes": 58427
+  },
+  {
+    "local": "s106c2-review/runtime/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js",
+    "remote": "candidate:static/js/tests/excavator-field-outbox.test.js",
+    "sha": "a81e855ac0cfe8b91aa172b77b788dace7c30130",
+    "actual": "a81e855ac0cfe8b91aa172b77b788dace7c30130",
+    "match": true,
+    "bytes": 32350
+  }
+]

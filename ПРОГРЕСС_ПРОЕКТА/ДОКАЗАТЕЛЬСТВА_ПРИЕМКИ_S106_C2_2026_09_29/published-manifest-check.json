@@ -1,0 +1,314 @@
+[
+  {
+    "path": "README.md",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 2992,
+    "cr": 0,
+    "lf": 27
+  },
+  {
+    "path": "gate-results.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 1139,
+    "cr": 0,
+    "lf": 21
+  },
+  {
+    "path": "manifest.git-bytes.sha256.json",
+    "git_sha_match": true,
+    "sha256_match": null,
+    "bytes": 3912,
+    "cr": 0,
+    "lf": 40
+  },
+  {
+    "path": "raw/ancestry.txt",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 337,
+    "cr": 0,
+    "lf": 7
+  },
+  {
+    "path": "raw/backend_node.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 0,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "raw/backend_node.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 89833,
+    "cr": 0,
+    "lf": 970
+  },
+  {
+    "path": "raw/candidate-log.txt",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 1821,
+    "cr": 0,
+    "lf": 45
+  },
+  {
+    "path": "raw/ci-evidence-workflow.diff",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 2396,
+    "cr": 0,
+    "lf": 66
+  },
+  {
+    "path": "raw/discarded-run-36558180943.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 8907,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/discarded-run-36560287803.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 8907,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/discarded-run-36562618490.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 179,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/discarded-run-36562778235.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 8907,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/discarded-run-resolve.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 26866,
+    "cr": 0,
+    "lf": 179
+  },
+  {
+    "path": "raw/django_check.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 0,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "raw/django_check.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 48,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/django_migrations.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 0,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "raw/django_migrations.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 20,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/django_offline_free_bucket.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 31478,
+    "cr": 101,
+    "lf": 99
+  },
+  {
+    "path": "raw/django_offline_free_bucket.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 67,
+    "cr": 0,
+    "lf": 2
+  },
+  {
+    "path": "raw/django_shell_versions.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 354,
+    "cr": 9,
+    "lf": 7
+  },
+  {
+    "path": "raw/django_shell_versions.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 1203,
+    "cr": 0,
+    "lf": 14
+  },
+  {
+    "path": "raw/final-release-merge.diff",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 290,
+    "cr": 0,
+    "lf": 8
+  },
+  {
+    "path": "raw/github-run-36564441695.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 9087,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/github-run-36564441695/django-full-postgresql.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 12439,
+    "cr": 0,
+    "lf": 185
+  },
+  {
+    "path": "raw/github-run-36564441695/django-tools-contracts.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 155,
+    "cr": 0,
+    "lf": 5
+  },
+  {
+    "path": "raw/github-run-36564441695/resolve-job.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 28563,
+    "cr": 0,
+    "lf": 195
+  },
+  {
+    "path": "raw/integration-remerge.diff",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 13022,
+    "cr": 0,
+    "lf": 246
+  },
+  {
+    "path": "raw/mobile_npm.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 0,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "raw/mobile_npm.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 3866,
+    "cr": 0,
+    "lf": 56
+  },
+  {
+    "path": "raw/postgres_local.NOT_RUN.txt",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 102,
+    "cr": 0,
+    "lf": 1
+  },
+  {
+    "path": "raw/release-scope.txt",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 11137,
+    "cr": 0,
+    "lf": 72
+  },
+  {
+    "path": "raw/runner-result.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 16503,
+    "cr": 0,
+    "lf": 203
+  },
+  {
+    "path": "raw/sha256.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 3814,
+    "cr": 0,
+    "lf": 39
+  },
+  {
+    "path": "raw/subject-e5438f95.patch",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 79176,
+    "cr": 0,
+    "lf": 1539
+  },
+  {
+    "path": "raw/subject-files.txt",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 1159,
+    "cr": 0,
+    "lf": 18
+  },
+  {
+    "path": "raw/tools_contracts.stderr.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 155,
+    "cr": 0,
+    "lf": 5
+  },
+  {
+    "path": "raw/tools_contracts.stdout.log",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 0,
+    "cr": 0,
+    "lf": 0
+  },
+  {
+    "path": "run_s106_c2.py",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 6119,
+    "cr": 0,
+    "lf": 191
+  },
+  {
+    "path": "source-metadata.json",
+    "git_sha_match": true,
+    "sha256_match": true,
+    "bytes": 1313,
+    "cr": 0,
+    "lf": 25
+  }
+]
