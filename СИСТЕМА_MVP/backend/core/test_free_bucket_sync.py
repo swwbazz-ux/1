@@ -1284,6 +1284,37 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(result['code'], 'free_bucket_request_stale')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
 
+    def test_selection_after_offline_trip_is_not_stale_because_the_trip_reached_the_server_later(self):
+        # Матрица без сети, стенд 30.09.2026: без связи водитель сделал ручной
+        # рейс (погрузка и завершение по часам телефона), потом выбрал свободный
+        # ковш. Очередь дошла пачками: рейс записан раньше выбора, и его
+        # created_at — время сервера, позже нажатия «выбрать». Сервер считал это
+        # «состояние рейса изменилось после выбора» и отклонял выбор.
+        from shifts.models import EmployeeShift
+
+        now = timezone.now()
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(opened_at=now - timedelta(hours=1))
+        self.truck_shift.refresh_from_db()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.COMPLETED,
+            loaded_at=now - timedelta(seconds=20),
+            completed_at=now - timedelta(seconds=10),
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=now)
+        selected = self.select_event(
+            event_id='driver-free-select-after-offline-trip',
+            occurred_at=now - timedelta(seconds=5),
+        )
+        result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+
     def test_duplicate_and_late_driver_selection_do_not_revive_cancelled_request(self):
         selected_at = timezone.now()
         selected = self.select_event(occurred_at=selected_at)

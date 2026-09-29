@@ -673,3 +673,25 @@ test("a bucket ended on the phone is not revived by an older cached page after a
     const another = Object.assign({}, cachedPageState, {acceptance_id: 42, acceptance_local_id: "driver-free-bucket-select:other"});
     assert.equal(restarted.installState(another).active, true, "a different acceptance is a new bucket");
 });
+
+test("after a bucket trip is done (used, inactive) a new free bucket can be chosen without the server", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {
+            localStorage: storage(),
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        },
+        outbox: {enqueue(event) { return Promise.resolve(event); }},
+    });
+    controller.installCatalog(serverCatalog({excavators: [item(), item({id: 23, label: "EX-23"})]}));
+    controller.installState({
+        schema: "driver-free-bucket-state-v1", active: false, status: "used", sync_mode: "local",
+        version: 12, generated_at: "2026-09-14T03:00:00Z",
+    });
+    assert.equal(controller.state().status, "used");
+    await controller.select(controller.catalog().excavators[1]);
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().selection.id, 23);
+});

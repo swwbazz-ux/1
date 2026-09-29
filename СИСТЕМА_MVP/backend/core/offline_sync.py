@@ -158,8 +158,13 @@ def _free_bucket_primary_assignment(truck):
 def _free_bucket_trip_changed_between(truck, *, occurred_at, received_at):
     from trips.models import Trip
 
+    # created_at — время записи на сервере. Рейс, сделанный без связи до выбора
+    # (погрузка по часам телефона раньше нажатия), приходит на сервер позже —
+    # по created_at он выглядел «изменившимся после выбора», и выбор ковша
+    # отклонялся (матрица без сети, 30.09.2026). У рейса с погрузкой в счёт
+    # идёт её время, created_at — только у рейса без погрузки.
     return Trip.objects.select_for_update().filter(truck=truck).filter(
-        Q(created_at__gt=occurred_at, created_at__lte=received_at)
+        Q(created_at__gt=occurred_at, created_at__lte=received_at, loaded_at__isnull=True)
         | Q(loaded_at__gt=occurred_at, loaded_at__lte=received_at)
         | Q(completed_at__gt=occurred_at, completed_at__lte=received_at)
         | Q(cancelled_at__gt=occurred_at, cancelled_at__lte=received_at)

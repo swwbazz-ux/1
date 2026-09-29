@@ -518,7 +518,11 @@
         }
 
         function select(item) {
-            if (!outbox || !item || item.is_primary || !item.available || state.active || state.status === "used") return Promise.reject(new Error("free_bucket_unavailable"));
+            /* Выбор закрыт, только пока ковш активен (выбран или погружен под
+               ним). Погашенный после рейса («used», не активен) нового выбора не
+               держит: раньше без сети второй свободный ковш взять было нельзя до
+               свежего ответа сервера (матрица без сети C4, 30.09.2026). */
+            if (!outbox || !item || item.is_primary || !item.available || state.active) return Promise.reject(new Error("free_bucket_unavailable"));
             setMessage("Сохраняю выбор на телефоне…", false);
             return outbox.enqueue(selectedSpec(item)).then(function (event) {
                 state = normalizeState({
@@ -534,6 +538,7 @@
                     catalog_generated_at: catalog.generated_at
                 });
                 storageWrite(stateKey(), state);
+                setMessage("", false);
                 renderState();
                 setOpen(false);
                 return event;
@@ -574,6 +579,7 @@
                 var previous = state;
                 state = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
                 persistState(previous);
+                setMessage("", false);
                 renderState();
                 setOpen(false);
                 return event;
