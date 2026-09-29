@@ -41,7 +41,10 @@ DATA_MODES = {"verify_data", "apply_data"}
 RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
-SSE_QA_MODES = {"verify_sse_qa", "install_sse_qa", "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa"}
+SSE_QA_MODES = {
+    "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
+    "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
+}
 ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
 VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
@@ -58,7 +61,7 @@ SSE_QA_SLICE_CGROUP = "/sse.slice/sse-qa.slice"
 SSE_QA_RUNTIME_SLICE_PATH = Path("/run/systemd/system/sse-qa.slice")
 SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
-SSE_QA_CONTROLLER_SHA256 = "d39d9c23e66e1be62052b66aab29b71d3fea90cc798dfd9c324ba450b447f971"
+SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
 SSE_QA_METADATA = {
     "qa_schema": 2,
@@ -2422,6 +2425,7 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
     operation = {
         "verify_sse_qa": "preflight",
+        "prepare_sse_qa_host_key": "prepare-host-key",
         "install_sse_qa": "install",
         "enable_sse_qa": "enable",
         "smoke_sse_qa": "smoke",
@@ -2461,7 +2465,10 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             archive.extractall(root / "bundle")
         controller = root / "bundle" / "scripts" / "sse_qa_ctl.py"
         checker = root / "bundle" / "scripts" / "package_self_check.py"
-        control_only = mode in {"enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa"}
+        control_only = mode in {
+            "prepare_sse_qa_host_key", "enable_sse_qa", "smoke_sse_qa",
+            "disable_sse_qa", "remove_sse_qa",
+        }
         if not controller.is_file():
             raise ReleaseError("SSE QA controller is missing")
         if digest(controller.read_bytes()) != SSE_QA_CONTROLLER_SHA256:
