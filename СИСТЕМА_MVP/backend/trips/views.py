@@ -122,6 +122,7 @@ from .dispatcher_dashboard_projection import (
     dispatcher_employee_for_equipment,
     dispatcher_equipment_card_requested,
     dispatcher_equipment_presence_fields,
+    dispatcher_equipment_sort_key,
     dispatcher_equipment_state_tuple,
     dispatcher_excavator_state_code,
     dispatcher_garage_number_int,
@@ -1819,7 +1820,10 @@ def build_dispatcher_dashboard_context(
     recent_completed_trips_list = list(recent_completed_trips)
     open_downtime_list = list(open_mechanic_downtimes)
     trucks_list = list(trucks)
-    excavators_list = list(excavators)
+    excavators_list = sorted(
+        list(excavators),
+        key=dispatcher_equipment_sort_key,
+    )
     # The dispatcher keeps a truck in its primary complex.  This separate
     # annotation explains a temporary free-bucket operation without turning it
     # into a dispatcher reassignment.
@@ -2381,7 +2385,7 @@ def build_dispatcher_dashboard_context(
     excavator_by_id = {excavator.id: excavator for excavator in excavators_list}
     shown_excavators = sorted(
         [excavator_by_id[equipment_id] for equipment_id in active_excavator_ids if equipment_id in excavator_by_id],
-        key=dispatcher_garage_number_int,
+        key=dispatcher_equipment_sort_key,
     )
 
     trips_by_excavator_id = defaultdict(list)
@@ -2591,7 +2595,7 @@ def build_dispatcher_dashboard_context(
         })
 
     excavator_tiles = []
-    for index, excavator in enumerate(excavators_list[:12], start=1):
+    for index, excavator in enumerate(excavators_list, start=1):
         board_number = dispatcher_garage_number_int(excavator)
         status, label, equipment_state_code = excavator_state_by_id[excavator.id]
         excavator_plan = dispatcher_plan_for_equipment(excavator)
@@ -2629,12 +2633,9 @@ def build_dispatcher_dashboard_context(
     excavator_garage_tiles = []
     inactive_excavator_tiles = sorted(
         [tile for tile in excavator_tiles if tile.get('equipment') and tile['equipment'].id not in active_excavator_ids],
-        key=lambda tile: (
-            tile.get('board_number') or 9999,
-            tile.get('complex_label') or '',
-        ),
+        key=lambda tile: dispatcher_equipment_sort_key(tile['equipment']),
     )
-    for index, tile in enumerate(inactive_excavator_tiles[:12], start=1):
+    for index, tile in enumerate(inactive_excavator_tiles, start=1):
         garage_tile = tile.copy()
         garage_tile['display_name'] = str(tile.get('complex_label') or f'K-{index}')[2:]
         garage_tile['is_placeholder'] = False
@@ -3412,7 +3413,7 @@ def build_dispatcher_dashboard_context(
         'mobile_excavator_garage_tiles': mobile_excavator_garage_tiles,
         'mobile_excavator_garage_row_count': mobile_excavator_garage_row_count,
         'complex_cards': complex_cards,
-        'complex_zones': complex_zones[:12],
+        'complex_zones': complex_zones,
         'mobile_complex_zones': mobile_complex_zones,
         'truck_garage_tiles': truck_garage_tiles,
         'mobile_truck_garage_tiles': mobile_truck_garage_tiles,

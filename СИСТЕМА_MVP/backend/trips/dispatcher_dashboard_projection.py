@@ -195,6 +195,19 @@ def dispatcher_garage_number_int(equipment):
     return int(match.group(0)) if match else 9999
 
 
+def dispatcher_equipment_sort_key(equipment):
+    """Естественная и стабильная сортировка смешанных гаражных номеров."""
+    raw = str(getattr(equipment, 'garage_number', '') or '').strip()
+    match = re.search(r'\d+', raw)
+    number = int(match.group(0)) if match else 0
+    return (
+        0 if match else 1,
+        number,
+        raw.casefold(),
+        int(getattr(equipment, 'id', 0) or 0),
+    )
+
+
 def dispatcher_complex_label(equipment):
     """Вернуть человекочитаемое и однозначное имя комплекса."""
     raw = str(

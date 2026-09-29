@@ -24,7 +24,12 @@ test("inactive truck plan fill uses the neutral desktop presentation", () => {
     );
     assert.match(
         CSS,
-        /\.dispatcher-complex-card \.complex-assigned-trucks\s*\{[^}]+position:\s*relative;[^}]+z-index:\s*5;/s
+        /\.dispatcher-complex-card \.complex-assigned-trucks\s*\{[^}]+z-index:\s*5;/s
+    );
+    assert.doesNotMatch(
+        CSS,
+        /\.dispatcher-complex-card \.complex-assigned-trucks\s*\{[^}]*position:\s*relative;/s,
+        "foreground layering must not reactivate the inherited bottom offset"
     );
     assert.match(
         CSS,

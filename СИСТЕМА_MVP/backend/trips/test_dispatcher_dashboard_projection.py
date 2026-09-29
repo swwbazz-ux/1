@@ -42,6 +42,10 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
             dispatcher_dashboard_projection.dispatcher_garage_number_int,
         )
         self.assertIs(
+            trips_views.dispatcher_equipment_sort_key,
+            dispatcher_dashboard_projection.dispatcher_equipment_sort_key,
+        )
+        self.assertIs(
             trips_views.dispatcher_complex_label,
             dispatcher_dashboard_projection.dispatcher_complex_label,
         )
@@ -84,6 +88,24 @@ class DispatcherDashboardProjectionBoundaryTests(SimpleTestCase):
         self.assertIs(
             trips_views.dispatcher_truck_state_code,
             dispatcher_dashboard_projection.dispatcher_truck_state_code,
+        )
+
+    def test_equipment_sort_key_is_natural_and_stable_for_mixed_numbers(self):
+        equipment = [
+            SimpleNamespace(id=4, garage_number='ТВИ16'),
+            SimpleNamespace(id=2, garage_number='Э-1'),
+            SimpleNamespace(id=3, garage_number='10'),
+            SimpleNamespace(id=1, garage_number='1'),
+        ]
+
+        ordered = sorted(
+            equipment,
+            key=dispatcher_dashboard_projection.dispatcher_equipment_sort_key,
+        )
+
+        self.assertEqual(
+            [item.garage_number for item in ordered],
+            ['1', 'Э-1', '10', 'ТВИ16'],
         )
 
     def test_views_keeps_compatibility_wrapper_for_report_formatters(self):

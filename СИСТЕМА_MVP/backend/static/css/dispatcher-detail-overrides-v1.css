@@ -1069,10 +1069,10 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-tru
 }
 
 /* Самосвалы остаются самостоятельным передним слоем поверх синего сектора
-   прогресса комплекса. Непрозрачная плитка не даёт фону комплекса окрашивать
-   серый силуэт через полупрозрачность. */
+   прогресса комплекса. Это grid-item, поэтому z-index работает без смены
+   position. position: relative здесь запрещён: он активирует унаследованный
+   bottom и сдвигает весь адаптивный rack вверх за границы карточки. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
-    position: relative;
     z-index: 5;
 }
 
