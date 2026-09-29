@@ -2057,10 +2057,15 @@
         return !!(root.document && root.document.querySelector("[data-driver-point-drum]"));
     }
 
+    /* Всегда живой узел страницы. После полной подмены экрана сервером старый
+       узел снят, а перепривязка шла только по событию обновления — если его не
+       было, завершение и отмена ручного рейса искали точку в снятом узле и
+       отвечали «Рейс ещё сохраняется, повторите» до перезапуска (стенд без
+       сети, 30.09.2026: свежая загрузка → ковш → погрузка → удержание). */
     function dialWorkspace() {
-        var workspace = currentWorkspace || root.document.querySelector("[data-driver-manual-workspace]");
-        if (workspace && workspace !== currentWorkspace) bindWorkspace(workspace);
-        return workspace;
+        var live = root.document.querySelector("[data-driver-manual-workspace]");
+        if (live && live !== currentWorkspace) bindWorkspace(live);
+        return live || currentWorkspace;
     }
 
     function activeDumpTarget(workspace) {

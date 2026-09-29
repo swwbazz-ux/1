@@ -30,3 +30,14 @@ test("complete, cancel and start of a manual trip consult the stale-aware guard"
     assert.match(body("startManualLoad"), /sourceShouldBeLocked\(savingBlocks\(\), currentTripProjection\)/);
     assert.doesNotMatch(SOURCE, /[;{]\s*savingLocal = (true|false);/, "the lock is set only through setSavingLocal");
 });
+
+/* Настоящая причина «Рейс ещё сохраняется» (стенд, 30.09.2026): после полной
+   подмены экрана движок держал снятый со страницы узел ручного режима. Жест
+   круга обязан брать живой узел документа и перепривязываться к нему. */
+test("the dial gesture always works with the live workspace node of the page", () => {
+    const start = SOURCE.indexOf("function dialWorkspace()");
+    const body = SOURCE.slice(start, SOURCE.indexOf("\n    }\n", start));
+    assert.match(body, /var live = root\.document\.querySelector\("\[data-driver-manual-workspace\]"\);/);
+    assert.match(body, /if \(live && live !== currentWorkspace\) bindWorkspace\(live\);/);
+    assert.match(body, /return live \|\| currentWorkspace;/);
+});
