@@ -249,6 +249,11 @@
         if (openForm && !open && state && state.status === "closed") {
             resetOpeningForm(openForm, state.end_readings);
         }
+        /* Рейс и простой, нарисованные сервером для другой смены, не
+           принадлежат смене на экране (driver-shift-v1.js). */
+        if (typeof root.driverDropForeignShiftState === "function") {
+            try { root.driverDropForeignShiftState(shell); } catch (error) {}
+        }
     }
 
     function createController(options) {
@@ -324,6 +329,36 @@
             });
         }
 
+        /* Идущий простой заканчивается закрытием смены — так же считает сервер
+           (правило 8 владельца). Телефон ставит его завершение в очередь временем
+           закрытия, до самого закрытия: иначе новая местная смена наследовала
+           «простой уже идёт» и кнопки причин молчали (матрица B3a, 30.09.2026). */
+        function endActiveDowntimeBeforeClose(shell, box) {
+            var card = shell.querySelector("[data-driver-active-downtime-id]");
+            var activeId = text(card && card.dataset.driverActiveDowntimeId);
+            if (!activeId || typeof root.createDriverDowntimeEndEvent !== "function") return Promise.resolve(null);
+            var localStart = activeId.indexOf("local:") === 0 ? activeId.slice(6) : "";
+            var serverId = localStart ? null : positive(activeId);
+            var pending = typeof box.pending === "function" ? Promise.resolve(box.pending()) : Promise.resolve([]);
+            return pending.catch(function () { return []; }).then(function (events) {
+                var startPending = localStart && (Array.isArray(events) ? events : []).some(function (item) {
+                    return item && item.event_id === localStart && item.state === "pending";
+                });
+                if (localStart && !startPending && typeof box.getServerMapping === "function") {
+                    return Promise.resolve(box.getServerMapping(localStart)).catch(function () { return null; }).then(function (mapping) {
+                        return {pendingStartId: "", serverId: positive(mapping && (mapping.downtime_event_id || mapping.downtime_id))};
+                    });
+                }
+                return {pendingStartId: startPending ? localStart : "", serverId: serverId};
+            }).then(function (reference) {
+                return box.enqueue(root.createDriverDowntimeEndEvent({
+                    pendingStartId: reference.pendingStartId || null,
+                    serverId: reference.serverId,
+                    contextSnapshot: {source: "driver_local_shift_close"}
+                }));
+            }).catch(function () { return null; });
+        }
+
         function closeShift(form) {
             var shell = form && form.closest("[data-driver-shell]");
             var box = outbox();
@@ -347,7 +382,9 @@
             if (localShiftId) shiftKeys.push(localShiftId);
             if (state && state.local_shift_id) shiftKeys.push(text(state.local_shift_id));
             if (state && state.server_shift_id) shiftKeys.push(String(state.server_shift_id));
-            var pendingList = typeof box.pending === "function" ? box.pending() : Promise.resolve([]);
+            var pendingList = endActiveDowntimeBeforeClose(shell, box).then(function () {
+                return typeof box.pending === "function" ? box.pending() : [];
+            });
             return Promise.resolve(pendingList).catch(function () { return []; }).then(function (events) {
                 var dependsOn = (Array.isArray(events) ? events : []).filter(function (item) {
                     return item

@@ -172,14 +172,16 @@ def _free_bucket_trip_changed_between(truck, *, occurred_at, received_at, exclud
     ).exists()
 
 
-def _release_open_trips_for_free_bucket(access, truck, *, occurred_at, process):
+def _release_open_trips_unknown_to_worker(access, truck, *, occurred_at, process):
     """Открытый рейс самосвала, о котором работник не знал, не отменяет его действие.
 
-    Водитель без связи выбрал свободный ковш, а на сервере у самосвала висел
-    рейс, погруженный машинистом (стенд, 30.09.2026: вся цепочка ковша ушла
-    в open_trip_exists и dependency_rejected). Телефон — истина: старый рейс
-    снимается с контроля (UNCONTROLLED) временем нажатия, как при погрузке
-    машинистом уже гружёного самосвала, а действие принимается.
+    Водитель без связи выбрал свободный ковш или сам отметил погрузку, а на
+    сервере у самосвала висел рейс, погруженный машинистом (стенды, 30.09.2026:
+    цепочка ковша — open_trip_exists, ручные погрузки новой смены —
+    open_trip_changed). Телефон — истина: раз самосвал снова грузится, прежний
+    рейс уже не везётся — он снимается с контроля (UNCONTROLLED) временем
+    нажатия, как при погрузке машинистом уже гружёного самосвала, а действие
+    принимается.
     """
     from trips.free_bucket import close_free_bucket_acceptance_for_trip
     from trips.models import OPEN_TRIP_STATUSES, Trip, TripStatus
@@ -222,7 +224,7 @@ def _process_driver_free_bucket_selected(access, normalized):
     except ValidationError as error:
         _conflict('free_bucket_equipment_changed', '; '.join(error.messages))
     _validate_free_bucket_participants(excavator, truck)
-    released = _release_open_trips_for_free_bucket(
+    released = _release_open_trips_unknown_to_worker(
         access, truck, occurred_at=normalized['occurred_at'], process='Выбор свободного ковша',
     )
     if _free_bucket_trip_changed_between(
@@ -552,7 +554,7 @@ def _process_free_bucket_loaded(access, normalized):
     if normalized['occurred_at'] < acceptance.accepted_at:
         _conflict('free_bucket_load_before_accept', 'Время погрузки раньше времени приёма под свободный ковш.')
     if not merge_driver_trip:
-        _release_open_trips_for_free_bucket(
+        _release_open_trips_unknown_to_worker(
             access, truck, occurred_at=normalized['occurred_at'], process='Погрузка под свободный ковш',
         )
     truck_downtime = (
@@ -1110,13 +1112,15 @@ def _manual_load_matches_trip(trip, payload, *, acceptance=None):
     return trip_acceptance_id is None
 
 
-def _trip_terminal_changed_between(truck_id, *, after, through):
+def _trip_terminal_changed_between(truck_id, *, after, through, exclude_trip_ids=()):
     """Return whether another trip cycle ended inside the supplied interval."""
     from trips.models import Trip
 
     if not after or not through or through <= after:
         return False
-    return Trip.objects.select_for_update(of=('self',)).filter(truck_id=truck_id).filter(
+    return Trip.objects.select_for_update(of=('self',)).filter(truck_id=truck_id).exclude(
+        pk__in=list(exclude_trip_ids),
+    ).filter(
         Q(completed_at__gt=after, completed_at__lte=through)
         | Q(cancelled_at__gt=after, cancelled_at__lte=through)
         | Q(operationally_closed_at__gt=after, operationally_closed_at__lte=through)
@@ -1518,6 +1522,7 @@ def _process_driver_loaded(access, normalized):
     ):
         _conflict('equipment_downtime_active', 'Ручная отправка невозможна: открыт блокирующий простой.')
 
+    released_trip_ids = []
     open_trip = (
         Trip.objects.select_for_update(of=('self',))
         .filter(truck=truck, status__in=OPEN_TRIP_STATUSES)
@@ -1574,7 +1579,10 @@ def _process_driver_loaded(access, normalized):
             or not authority_matches
             or not _manual_load_matches_trip(open_trip, payload, acceptance=acceptance)
         ):
-            _conflict('open_trip_changed', 'У самосвала уже есть другой незавершённый рейс.')
+            released_trip_ids = [trip.id for trip in _release_open_trips_unknown_to_worker(
+                access, truck, occurred_at=normalized['occurred_at'], process='Ручная погрузка водителя',
+            )]
+            open_trip = None
         if open_trip:
             _claim_trip_for_driver_manual_event(
                 open_trip,
@@ -1594,10 +1602,13 @@ def _process_driver_loaded(access, normalized):
                 'version': state.version,
             }, {'trip': open_trip, 'shift': shift, 'equipment': truck}
 
+    # Рейс, только что снятый с контроля этой же погрузкой, — не «изменение
+    # после отметки» и не кандидат на слияние.
     terminal_candidates = list(
         Trip.objects.select_for_update(of=('self',))
         .filter(truck=truck, excavator=excavator, created_at__lte=normalized['received_at'])
         .exclude(status__in=OPEN_TRIP_STATUSES)
+        .exclude(pk__in=released_trip_ids)
         .filter(
             Q(completed_at__gte=normalized['occurred_at'], completed_at__lte=normalized['received_at'])
             | Q(cancelled_at__gte=normalized['occurred_at'], cancelled_at__lte=normalized['received_at'])
@@ -1651,6 +1662,7 @@ def _process_driver_loaded(access, normalized):
         truck.id,
         after=normalized['occurred_at'],
         through=normalized['received_at'],
+        exclude_trip_ids=released_trip_ids,
     ):
         _conflict(
             'stale_driver_manual_load',

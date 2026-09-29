@@ -271,3 +271,58 @@ test("closing a shift the server opened earlier references its server id", async
     local.project(view.shell);
     assert.equal(view.shell.dataset.driverShiftOpen, "false");
 });
+
+/* Матрица без сети B3a (30.09.2026): смена закрывалась на телефоне при идущем
+   простое, и новая местная смена наследовала «простой уже идёт» — кнопки
+   причин молчали. Простой заканчивается закрытием смены (так же считает
+   сервер): телефон ставит его завершение в очередь раньше самого закрытия. */
+test("closing a shift with a running downtime queues its end before the close", async () => {
+    const view = page({serverShiftId: "27"});
+    const card = node({
+        dataset: {driverActiveDowntimeId: "local:driver-downtime-start-1"},
+        matches: matcher(selector => selector === "[data-driver-active-downtime-id]"),
+    });
+    view.shell.children.push(card);
+    const {createDriverLocalShift} = load(view.document);
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    globalThis.createDriverDowntimeEndEvent = outboxModule.createDriverDowntimeEndEvent;
+    const box = outbox();
+    const queuedView = () => box.queued.map((event) => ({
+        event_id: event.event_id, event_type: event.event_type, state: "pending", shift_id: 27, local_shift_id: null,
+    }));
+    box.pending = () => Promise.resolve([
+        {event_id: "driver-downtime-start-1", event_type: "driver.downtime.started", state: "pending", shift_id: 27, local_shift_id: null},
+    ].concat(queuedView()));
+    const local = createDriverLocalShift({storage: storage(), outbox: box});
+    local.project(view.shell);
+
+    await local.close(view.closeForm);
+
+    assert.deepEqual(box.queued.map((event) => event.event_type), ["driver.downtime.ended", "driver.shift.closed"]);
+    assert.equal(box.queued[0].local_downtime_id, "driver-downtime-start-1");
+    assert.deepEqual(box.queued[0].depends_on, ["driver-downtime-start-1"]);
+    assert.ok(box.queued[1].depends_on.includes(box.queued[0].event_id), "the close waits for the downtime end");
+    delete globalThis.createDriverDowntimeEndEvent;
+});
+
+test("closing a shift ends a running downtime the server already confirmed by its server id", async () => {
+    const view = page({serverShiftId: "27"});
+    view.shell.children.push(node({
+        dataset: {driverActiveDowntimeId: "102"},
+        matches: matcher(selector => selector === "[data-driver-active-downtime-id]"),
+    }));
+    const {createDriverLocalShift} = load(view.document);
+    globalThis.createDriverDowntimeEndEvent = require("../driver-offline-outbox-v2.js").createDriverDowntimeEndEvent;
+    const box = outbox();
+    box.pending = () => Promise.resolve([]);
+    const local = createDriverLocalShift({storage: storage(), outbox: box});
+    local.project(view.shell);
+
+    await local.close(view.closeForm);
+
+    assert.equal(box.queued[0].event_type, "driver.downtime.ended");
+    assert.equal(box.queued[0].payload.downtime_id, 102);
+    assert.deepEqual(box.queued[0].depends_on, []);
+    assert.equal(box.queued[1].event_type, "driver.shift.closed");
+    delete globalThis.createDriverDowntimeEndEvent;
+});

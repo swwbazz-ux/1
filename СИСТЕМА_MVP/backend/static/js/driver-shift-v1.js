@@ -1269,6 +1269,89 @@ window.bindDriverMobileShell = function () {
         }) || null;
     }
 
+    /* Круг без рейса: самосвал пустеет и едет за погрузкой. Общая отрисовка для
+       разгрузки из очереди и для рейса прошлой смены, снятого с экрана новой
+       местной смены (driverDropForeignShiftState). */
+    function showDriverTripGone(current, unloadNeedsReview) {
+        current.dataset.driverHasOpenTrip = "false";
+        current.dataset.driverHasLoadedTrip = "false";
+        current.dataset.driverActiveTripId = "";
+        current.dataset.driverActiveTripOrigin = "";
+        current.dataset.driverActiveTripLoadedAt = "";
+        var dial = current.querySelector(".driver-work-dial");
+        var button = current.querySelector("[data-driver-hold-button]");
+        var dialLabel = current.querySelector("[data-driver-dial-label]");
+        var note = current.querySelector(".driver-work-note");
+        if (dial) { dial.classList.remove("is-loaded"); dial.classList.add("is-empty"); }
+        if (button) {
+            button.disabled = true;
+            button.classList.remove("is-loaded", "is-pending", "is-holding");
+            button.classList.add("is-empty");
+        }
+        if (dialLabel) {
+            /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
+               прежний ключ подгонки оставался прежним, и длинная надпись выводилась
+               кеглем короткой — она вылезала за круг и обрезалась. */
+            /* Куда ехать дальше после разгрузки телефон знает сам, без сервера:
+               назначение на экскаватор разгрузкой не снимается, самосвал просто
+               пустеет и едет за новой погрузкой к тому же экскаватору. Раньше
+               тут держали заглушку «ожидание синхронизации» до ответа сервера —
+               на нестабильной связи это давало задержку в минуты (реальный
+               полевой тест 26.09.2026). */
+            var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
+            // Разгрузка рейса под свободным ковшом — ковш был на один рейс,
+            // дальше основной экскаватор (29.09.2026).
+            var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
+            var nextExcavatorLabel = manualWorkspace
+                ? String(
+                    (bucketTrip
+                        ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                        : manualWorkspace.dataset.driverManualExcavatorLabel)
+                    || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                    || manualWorkspace.dataset.driverManualExcavatorLabel
+                    || ""
+                )
+                : "";
+            var unloadDialText = unloadNeedsReview
+                ? "НЕ ПОДТВЕРЖДЕНО"
+                : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
+            dialLabel.textContent = unloadDialText;
+            dialLabel.dataset.driverDialRaw = unloadDialText;
+            delete dialLabel.dataset.driverDialFitKey;
+            if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
+        }
+        if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
+        var pointCard = current.querySelector("[data-driver-point-open]");
+        if (pointCard) {
+            pointCard.disabled = true;
+            pointCard.hidden = true;
+            pointCard.setAttribute("aria-expanded", "false");
+        }
+        var sheet = current.querySelector("[data-driver-point-sheet]");
+        if (sheet) sheet.hidden = true;
+    }
+
+    /* Пересменка без сети (матрица B3a, 30.09.2026): страница нарисована
+       сервером для прошлой смены с идущим простоем. После местного закрытия и
+       открытия новая смена несла его на себе: кнопки причин молчали («простой
+       уже идёт»). Простой заканчивается закрытием смены (правило 8; телефон
+       ставит завершение в очередь — driver-local-shift-v1.js), поэтому
+       простой, нарисованный сервером для другой смены, снимаем с экрана. Свои
+       простои новой смены («local:…») не трогаем. Гружёный рейс остаётся:
+       он переходит к следующей смене (решение 13 владельца), его разгружают. */
+    function driverShellShowsForeignShift(current) {
+        return String(current.dataset.driverShiftId || "") !== String(current.dataset.driverServerShiftId || "");
+    }
+    window.driverDropForeignShiftState = function (target) {
+        var current = target || document.querySelector("[data-driver-shell]");
+        if (!current || current !== shell || !driverShellShowsForeignShift(current)) return false;
+        var activeDowntimeId = String(downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || "");
+        if (!activeDowntimeId || activeDowntimeId.indexOf("local:") === 0) return false;
+        clearDriverActiveDowntime();
+        document.documentElement.classList.remove("is-driver-downtime-active");
+        return true;
+    };
+
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
@@ -1278,63 +1361,7 @@ window.bindDriverMobileShell = function () {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
-            var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
-            current.dataset.driverHasOpenTrip = "false";
-            current.dataset.driverHasLoadedTrip = "false";
-            current.dataset.driverActiveTripId = "";
-            current.dataset.driverActiveTripOrigin = "";
-            current.dataset.driverActiveTripLoadedAt = "";
-            var dial = current.querySelector(".driver-work-dial");
-            var button = current.querySelector("[data-driver-hold-button]");
-            var dialLabel = current.querySelector("[data-driver-dial-label]");
-            var note = current.querySelector(".driver-work-note");
-            if (dial) { dial.classList.remove("is-loaded"); dial.classList.add("is-empty"); }
-            if (button) {
-                button.disabled = true;
-                button.classList.remove("is-loaded", "is-pending", "is-holding");
-                button.classList.add("is-empty");
-            }
-            if (dialLabel) {
-                /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
-                   прежний ключ подгонки оставался прежним, и длинная надпись выводилась
-                   кеглем короткой — она вылезала за круг и обрезалась. */
-                /* Куда ехать дальше после разгрузки телефон знает сам, без сервера:
-                   назначение на экскаватор разгрузкой не снимается, самосвал просто
-                   пустеет и едет за новой погрузкой к тому же экскаватору. Раньше
-                   тут держали заглушку «ожидание синхронизации» до ответа сервера —
-                   на нестабильной связи это давало задержку в минуты (реальный
-                   полевой тест 26.09.2026). */
-                var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
-                // Разгрузка рейса под свободным ковшом — ковш был на один рейс,
-                // дальше основной экскаватор (29.09.2026).
-                var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
-                var nextExcavatorLabel = manualWorkspace
-                    ? String(
-                        (bucketTrip
-                            ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
-                            : manualWorkspace.dataset.driverManualExcavatorLabel)
-                        || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
-                        || manualWorkspace.dataset.driverManualExcavatorLabel
-                        || ""
-                    )
-                    : "";
-                var unloadDialText = unloadNeedsReview
-                    ? "НЕ ПОДТВЕРЖДЕНО"
-                    : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
-                dialLabel.textContent = unloadDialText;
-                dialLabel.dataset.driverDialRaw = unloadDialText;
-                delete dialLabel.dataset.driverDialFitKey;
-                if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
-            }
-            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
-            var pointCard = current.querySelector("[data-driver-point-open]");
-            if (pointCard) {
-                pointCard.disabled = true;
-                pointCard.hidden = true;
-                pointCard.setAttribute("aria-expanded", "false");
-            }
-            var sheet = current.querySelector("[data-driver-point-sheet]");
-            if (sheet) sheet.hidden = true;
+            showDriverTripGone(current, ["conflict", "auth_required", "invalid"].includes(unload.state));
         }
         var pointEvents = ordered.filter(function (event) {
             return event.event_type === "driver.trip.dump_point_changed" && String(event.trip_id || "") === activeTripId;
@@ -1581,6 +1608,8 @@ window.bindDriverMobileShell = function () {
     }
 
     var driverOfflineOutbox = createDriverOfflineRuntime();
+    // Проекция смены шла раньше привязки экрана — чужое состояние снимаем здесь.
+    window.driverDropForeignShiftState(shell);
     /* Замок контракта не должен включаться из-за отсутствия сети (владелец,
        30.09.2026). Оболочка из кэша той же версии, что service worker, — её
        скрипты и воркер сверяются на месте; сервер лишь подтверждает, что не
