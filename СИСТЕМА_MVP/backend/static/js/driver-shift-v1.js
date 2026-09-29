@@ -2547,6 +2547,11 @@ window.bindDriverMobileShell = function () {
         /* Удержание завершено: сброс удержания после этого (восстановление
            формы, отмена) не должен глушить длинный отклик завершения. */
         var unloadHoldCompleted = false;
+        /* Разгрузка по удержанию записана: подписью круга дальше владеет
+           проекция (следующий экскаватор), а не подпись с момента привязки
+           экрана. Иначе отпускание пальца возвращало «ККД» поверх «ЭКС-1»
+           (матрица без сети, 30.09.2026). */
+        var unloadHoldSubmitted = false;
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
                чтобы случайное касание не отправило рейс, и не утомляет за смену.
@@ -2555,6 +2560,7 @@ window.bindDriverMobileShell = function () {
             holdMs: 500,
             onStart: function () {
                 unloadHoldCompleted = false;
+                unloadHoldSubmitted = false;
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
@@ -2568,7 +2574,7 @@ window.bindDriverMobileShell = function () {
                 // После обычного отпускания подпись и так исходная — подгонка текста
                 // (замеры ширины в цикле) на слабом телефоне стоила заметного кадра.
                 var resetLabel = holdButton.dataset.driverManualDialLabel || readyDialLabel;
-                if (dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
+                if (!unloadHoldSubmitted && dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
                     renderDriverDialLabel(dialLabel, resetLabel);
                     scheduleDriverDialLabelFit();
                 }
@@ -2579,7 +2585,9 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
+                    return;
                 }
+                unloadHoldSubmitted = true;
             }
         });
         window.driverUnloadHoldGuard = unloadHoldGuard;
