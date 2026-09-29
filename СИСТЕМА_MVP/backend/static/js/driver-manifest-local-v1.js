@@ -712,7 +712,7 @@
 
         function reasonLabelFor(shell, reasonId) {
             if (!shell || !reasonId || typeof shell.querySelector !== "function") return "";
-            var button = shell.querySelector('[data-driver-downtime-reason-id="' + String(reasonId) + '"]');
+            var button = shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + String(reasonId) + '"]');
             return button ? text(button.dataset.driverReasonLabel) : "";
         }
 
@@ -813,12 +813,18 @@
             return changed;
         }
 
+        /* Данные сервера — атрибутом панели путёвки: <script> с JSON разбор
+           фрагмента при подмене экрана выбрасывает, атрибут переживает и
+           подмену, и послойное обновление. */
         function serverData(shell) {
-            var node = shell && typeof shell.querySelector === "function"
-                ? shell.querySelector("#driver-manifest-data")
+            var panel = shell && typeof shell.querySelector === "function"
+                ? shell.querySelector('[data-driver-tab-panel="manifest"]')
                 : null;
-            if (!node) return null;
-            try { return JSON.parse(node.textContent || "null"); } catch (error) { return null; }
+            var raw = panel && typeof panel.getAttribute === "function"
+                ? panel.getAttribute("data-driver-manifest-data")
+                : null;
+            if (!raw) return null;
+            try { return JSON.parse(raw); } catch (error) { return null; }
         }
 
         function pageVersion() {

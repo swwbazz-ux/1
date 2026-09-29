@@ -76,6 +76,7 @@ function shellFor({shiftId = LOCAL_SHIFT, open = true, page = null} = {}) {
     const timeline = node();
     const panel = {
         dataset: {},
+        getAttribute(name) { return name === "data-driver-manifest-data" && page ? JSON.stringify(page) : null; },
         querySelector(selector) {
             if (selector === "[data-driver-report-trip-scroll]") return trips;
             if (selector === "[data-driver-report-downtime-scroll]") return downtimes;
@@ -88,8 +89,7 @@ function shellFor({shiftId = LOCAL_SHIFT, open = true, page = null} = {}) {
         dataset: {driverAccessId: ACCESS, driverShiftOpen: open ? "true" : "false", driverShiftId: shiftId, driverShiftType: "day"},
         querySelector(selector) {
             if (selector === '[data-driver-tab-panel="manifest"]') return panel;
-            if (selector === "#driver-manifest-data") return page ? {textContent: JSON.stringify(page)} : null;
-            if (selector.indexOf("data-driver-downtime-reason-id") >= 0) {
+            if (selector.indexOf("[data-driver-downtime-reason-button][data-driver-downtime-reason-id") === 0) {
                 return {dataset: {driverReasonLabel: selector.indexOf('"13"') >= 0 ? "Заправка" : "ОФР"}};
             }
             return null;

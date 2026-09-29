@@ -3034,7 +3034,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-driver-report-trip-total="35"')
-        self.assertContains(response, 'id="driver-manifest-data"')
+        self.assertContains(response, 'data-driver-manifest-data="{&quot;shift&quot;')
         data = response.context['driver_manifest_data']
         self.assertEqual(data['shift']['id'], shift.id)
         self.assertEqual(len(data['trips']), 35)

@@ -5692,6 +5692,9 @@ def driver_shift_view(request):
             'driver_shift_downtime_rows': driver_shift_downtime_rows,
             'driver_shift_timeline': driver_shift_timeline,
             'driver_manifest_data': driver_manifest_data,
+            # Атрибутом, а не <script>: разбор фрагмента при подмене экрана
+            # выбрасывает скрипты, и путёвка оставалась без свежих данных.
+            'driver_manifest_json': json.dumps(driver_manifest_data, ensure_ascii=False),
             'driver_shift_report_date': timezone.localtime(report_shift.opened_at).strftime('%d.%m.%Y') if report_shift else '—',
             'driver_shift_report_shift': report_shift.get_shift_type_display() if report_shift else 'Смена не открыта',
             'driver_shift_report_driver': driver_employee_short_name(access.employee),
