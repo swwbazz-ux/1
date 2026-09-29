@@ -126,7 +126,7 @@ test("control template delegates desktop and phone fitting to the canvas module"
     assert.match(TEMPLATE, /data-dispatcher-phone-fit/);
     assert.match(
         TEMPLATE,
-        /dispatcher-canvas-v1\.js[^\n]+dispatcher-desktop-shell-v165/
+        /dispatcher-canvas-v1\.js[^\n]+dispatcher-desktop-shell-v166/
     );
     assert.equal(
         (TEMPLATE.match(/function fitDispatcherShellToScreen/g) || []).length,

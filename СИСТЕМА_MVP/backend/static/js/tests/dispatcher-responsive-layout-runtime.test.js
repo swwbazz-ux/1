@@ -198,6 +198,34 @@ test("номер не лежит поверх картинки", () => {
     );
 });
 
+test("полное имя экскаватора в гараже не делит верхнюю строку с планом", () => {
+    assert.match(
+        TEMPLATE,
+        /<strong title="\{\{ tile\.display_name \}\}">\{\{ tile\.display_name \}\}<\/strong>/
+    );
+    assert.doesNotMatch(TEMPLATE, /tile\.display_name\|truncate/);
+    assert.match(
+        TEMPLATE,
+        /\{% if tile\.plan_has_plan %\}<em class="dispatcher-tile-plan-percent">\{\{ tile\.plan_percent_label \}\}<\/em>\{% endif %\}/
+    );
+
+    const nameRule = CSS.match(/\.dispatcher-excavator-garage-tile strong \{([^}]*)\}/);
+    assert.ok(nameRule, "стиль полного имени гаражного экскаватора не найден");
+    assert.match(nameRule[1], /right:\s*14px;/);
+    assert.match(nameRule[1], /font-size:\s*clamp\(10px, \.68vw, 12px\);/);
+    assert.match(nameRule[1], /white-space:\s*nowrap;/);
+
+    const planRule = CSS.match(/\.dispatcher-excavator-garage-tile \.dispatcher-tile-plan-percent \{([^}]*)\}/);
+    assert.ok(planRule, "стиль процента плана гаражного экскаватора не найден");
+    assert.match(planRule[1], /top:\s*17px;/);
+    assert.doesNotMatch(planRule[1], /top:\s*3px;/);
+
+    assert.match(
+        MUTATIONS_RUNTIME,
+        /slot \? "<strong>" \+ escapeHtml\(slot\) \+ "<\/strong>"/
+    );
+});
+
 test("карточка разделена на столбец информации и поле машин", () => {
     assert.match(CSS, /grid-template-areas:\s*\n?\s*"head trucks"\s*\n?\s*"info trucks"/);
     assert.match(CSS, /\.complex-assigned-trucks \{[^}]*grid-area: trucks;/s);
