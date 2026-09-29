@@ -353,7 +353,7 @@
        местных записей могут относиться к одной серверной строке (погрузка и
        отдельная разгрузка того же рейса, повторное начало простоя той же
        причины): все они сводятся в неё, ни одна не становится второй строкой. */
-    function merge(local, server, fallbackLabels) {
+    function merge(local, server, fallbackLabels, fallbackTrips) {
         server = server || {};
         var labels = server.labels || fallbackLabels || {};
         var excavators = labels.excavators || {};
@@ -432,6 +432,16 @@
         });
         unmatched.forEach(function (trip) {
             if (!trip.loaded_at && !trip.completed_at) return;
+            /* Переходящий рейс (погружен в прошлой смене, разгружен в этой):
+               подписи и время погрузки — из данных сервера о прошлой смене. */
+            var known = trip.trip_id && (Array.isArray(fallbackTrips) ? fallbackTrips : []).find(function (item) {
+                return item && item.id === trip.trip_id;
+            });
+            if (known) {
+                trip.loaded_at = trip.loaded_at || known.loaded_at;
+                trip.excavator_label = trip.excavator_label || known.excavator;
+                trip.dump_point_label = trip.dump_point_label || known.dump_point;
+            }
             trips.push({
                 trip_id: trip.trip_id || null,
                 local_ids: trip.local_ids,
@@ -901,7 +911,7 @@
                     replayed.downtimes.forEach(function (row) {
                         if (!row.reason_label && row.reason_id) row.reason_label = reasonLabelFor(shell, row.reason_id);
                     });
-                    var rows = merge(replayed, data, page && page.labels);
+                    var rows = merge(replayed, data, page && page.labels, page && page.trips);
                     var offsetSource = data || page;
                     result = {
                         shift: shown,

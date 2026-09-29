@@ -279,3 +279,21 @@ test("the journal of a shift closed more than 7 days ago is dropped", () => {
     assert.equal(shifts.length, 1);
     assert.ok(shifts[0].aliases.includes("l:driver-shift-open:new"));
 });
+
+test("a carryover trip loaded in the previous shift and unloaded in this one keeps its labels", () => {
+    const storage = memoryStorage();
+    sequence = 0;
+    const previousShiftPage = {
+        shift: {id: 22, local_id: "", opened_at: at(-600), closed_at: null},
+        utc_offset_minutes: 600,
+        trips: [{id: 127, local_ids: [], status: "loaded_waiting_unload", excavator_id: 54, excavator: "1", dump_point_id: 1, dump_point: "ККД", loaded_at: at(-10), completed_at: null, load_time_source: "excavator_device", unload_time_source: "unknown"}],
+        downtimes: [],
+        labels: {excavators: {"54": "1"}},
+    };
+    const unload = event("driver.trip.unloaded", 20, {trip_id: 127, payload: {trip_id: 127}});
+    const c = controller(storage, 25);
+    c.observe([unload]);
+    const view = shellFor({page: previousShiftPage});
+    c.render(view.shell);
+    assert.deepEqual(tripRows(view), ["1|ККД|1"]);
+});
