@@ -208,6 +208,32 @@ test("closing waits for every unsent event of its own shift", async () => {
     assert.deepEqual(box.queued[1].depends_on, ["downtime-a", "bucket-a"]);
 });
 
+test("a finished local close leaves no pending marks on the close form", async () => {
+    /* Удержание «Закрыть смену» ставит кнопке is-pending, отправке — признак
+       driverInPlacePending; проверка «экран занят» ловит .is-pending в оболочке.
+       Местное закрытие экран не подменяет — признаки обязан снять модуль
+       (бой v371, 30.09.2026: та же картина у открытия). */
+    const view = page();
+    const {createDriverLocalShift} = load(view.document);
+    const box = outbox();
+    const local = createDriverLocalShift({storage: storage(), outbox: box});
+    local.project(view.shell);
+    await local.open(view.openForm);
+    const closeButton = node({matches: matcher(selector => selector === "[data-driver-shift-close-button]")});
+    view.closeForm.children.push(closeButton);
+    closeButton.classList.add("is-pending");
+    closeButton.disabled = true;
+    view.closeForm.dataset.driverInPlacePending = "true";
+    view.openForm.dataset.driverShiftOpeningPending = "true";
+
+    await local.close(view.closeForm);
+
+    assert.equal(closeButton.classList.contains("is-pending"), false);
+    assert.equal(closeButton.disabled, false);
+    assert.equal(view.closeForm.dataset.driverInPlacePending, "false");
+    assert.equal(view.openForm.dataset.driverShiftOpeningPending, "false");
+});
+
 test("server confirmation of the opening gives later actions the real shift id", async () => {
     const view = page();
     const {createDriverLocalShift} = load(view.document);
