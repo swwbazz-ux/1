@@ -271,3 +271,76 @@ test('missing fresh dependency rejects install before old cache deletion or acti
     assert.equal(skippedWaiting, false);
     assert.equal(claimedClients, false);
 });
+
+test('OFF-02: cached shell wins over HTTP 503 and a hung navigation fetch', async () => {
+    const shellHtml = '<main data-eo-shell data-eo-role-code="excavator_operator">offline-ready</main>';
+    const currentCache = fakeCache([
+        ['/excavator/work/', new FakeResponse(shellHtml, {
+            url: 'https://excavator.test/excavator/work/',
+            type: 'text/html',
+        })],
+    ]);
+    const listeners = {};
+    let fetchMode = '503';
+    class ImmediateAbortController {
+        constructor() {
+            const handlers = [];
+            this.signal = {
+                aborted: false,
+                addEventListener: (name, handler) => {
+                    if (name === 'abort') handlers.push(handler);
+                },
+            };
+            this.abort = () => {
+                this.signal.aborted = true;
+                handlers.forEach(handler => handler());
+            };
+        }
+    }
+    const fetcher = (request, options = {}) => {
+        if (fetchMode === '503') {
+            return Promise.resolve(new FakeResponse('unavailable', {
+                url: request.url,
+                type: 'text/html',
+                ok: false,
+            }));
+        }
+        return new Promise((resolve, reject) => {
+            if (options.signal && options.signal.aborted) reject(new Error('aborted'));
+            else if (options.signal) options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+    };
+    const context = {
+        URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
+        AbortController: ImmediateAbortController,
+        fetch: fetcher,
+        caches: {
+            open: async () => currentCache,
+            keys: async () => [currentShellVersion],
+            delete: async () => true,
+        },
+        self: {
+            location: {origin: 'https://excavator.test'},
+            addEventListener: (name, fn) => { listeners[name] = fn; },
+            clients: {claim: async () => {}},
+            skipWaiting: async () => {},
+        },
+        setTimeout: fn => { Promise.resolve().then(fn); return 1; },
+        clearTimeout: () => {},
+    };
+    vm.createContext(context);
+    vm.runInContext(workerSource, context);
+
+    async function navigate() {
+        let responseWork;
+        listeners.fetch({
+            request: new FakeRequest('/excavator/work/'),
+            respondWith: promise => { responseWork = promise; },
+        });
+        return responseWork;
+    }
+
+    assert.equal(await (await navigate()).text(), shellHtml, '503 must not replace a prepared shell');
+    fetchMode = 'hang';
+    assert.equal(await (await navigate()).text(), shellHtml, 'a hung fetch must abort and reopen the cache');
+});

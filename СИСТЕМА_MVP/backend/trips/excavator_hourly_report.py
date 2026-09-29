@@ -46,10 +46,18 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     source_counts = [0, 0]
     unclassified_counts = [0, 0]
     unknown_point_counts = [0, 0]
+    volume_totals = [0, 0]
+    unknown_volume_counts = [0, 0]
+    source_trip_ids = [[], []]
 
     for trip in trips:
         bucket = 0 if trip.loaded_at < current_start else 1
         source_counts[bucket] += 1
+        source_trip_ids[bucket].append(trip.id)
+        if trip.volume_m3 is None:
+            unknown_volume_counts[bucket] += 1
+        else:
+            volume_totals[bucket] += trip.volume_m3
 
         # assigned_dump_point is the immutable destination captured when the
         # Excavator operator sends the truck. The mutable dump_point and the
@@ -107,9 +115,12 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
                 'belaz': belaz_total,
                 'nhl': nhl_total,
                 'trip_count': belaz_total + nhl_total,
+                'volume_m3': str(volume_totals[bucket]),
             },
             'source_trip_count': source_counts[bucket],
+            'source_trip_ids': source_trip_ids[bucket],
             'unclassified_trip_count': unclassified_counts[bucket],
+            'unknown_volume_trip_count': unknown_volume_counts[bucket],
             'is_empty': source_counts[bucket] == 0,
         })
 

@@ -93,10 +93,15 @@
         interval.dateTime = period.start || "";
         headingText.appendChild(interval);
         heading.appendChild(headingText);
+        var volume = hour.totals && hour.totals.volume_m3;
+        var totalLabel = classifiedTotal + " " + tripWord(classifiedTotal);
+        if (volume !== null && volume !== undefined && volume !== "") {
+            totalLabel += " · " + Number(volume).toLocaleString("ru-RU", {maximumFractionDigits: 2}) + " м³";
+        }
         heading.appendChild(element(
             "span",
             "eo-hourly-report__hour-total",
-            classifiedTotal + " " + tripWord(classifiedTotal)
+            totalLabel
         ));
         block.appendChild(heading);
 
@@ -184,10 +189,16 @@
             content.appendChild(element(
                 "p",
                 "eo-hourly-report__note",
-                "Локально сохранённые, но ещё не синхронизированные погрузки появятся после подтверждения сервера."
+                "В отчёт включены факты, устойчиво сохранённые на этом телефоне."
             ));
         }
         scheduleHourRefresh(payload);
+    }
+
+    function withLocalProjection(payload) {
+        var ledger = window.eoExcavatorLocalShiftLedger;
+        if (!ledger || typeof ledger.hourlyReport !== "function") return Promise.resolve(payload);
+        return ledger.hourlyReport(payload || null, Date.now());
     }
 
     function scheduleHourRefresh(payload) {
@@ -241,23 +252,27 @@
                 throw new Error("Получена несовместимая версия почасового отчёта");
             }
             safeCacheWrite(payload);
-            renderPayload(payload, false);
-            modal.dataset.eoHourlyState = "ready";
-            return true;
+            return withLocalProjection(payload).then(function (projected) {
+                renderPayload(projected, false);
+                modal.dataset.eoHourlyState = "ready";
+                return true;
+            });
         }).catch(function (error) {
             if (error && error.name === "AbortError") return false;
             if (generation !== requestGeneration || modal.hidden) return false;
             var cached = safeCacheRead();
-            if (cached) {
-                renderPayload(cached, true);
-                modal.dataset.eoHourlyState = "offline";
-            } else {
-                renderState(navigator.onLine === false
-                    ? "Нет связи. Сохранённого отчёта пока нет."
-                    : (error.message || "Почасовой отчёт временно недоступен"));
-                modal.dataset.eoHourlyState = "error";
-            }
-            return false;
+            return withLocalProjection(cached).then(function (projected) {
+                if (projected) {
+                    renderPayload(projected, true);
+                    modal.dataset.eoHourlyState = "offline";
+                } else {
+                    renderState(navigator.onLine === false
+                        ? "Нет связи. Местный журнал недоступен."
+                        : (error.message || "Почасовой отчёт временно недоступен"));
+                    modal.dataset.eoHourlyState = "error";
+                }
+                return false;
+            });
         }).finally(function () {
             if (generation === requestGeneration) {
                 modal.dataset.eoHourlyLoading = "false";
@@ -345,8 +360,10 @@
         setUnderlyingBlocked(true);
         bindOpenLifecycle();
         var cached = safeCacheRead();
-        if (cached) renderPayload(cached, navigator.onLine === false);
-        else renderState("Загружаем рейсы…");
+        renderState("Загружаем рейсы…");
+        withLocalProjection(cached).then(function (projected) {
+            if (projected && modal && !modal.hidden) renderPayload(projected, navigator.onLine === false);
+        });
         if (!(history.state && history.state[OPEN_STATE_KEY])) {
             var state = Object.assign({}, history.state || {});
             state[OPEN_STATE_KEY] = true;
