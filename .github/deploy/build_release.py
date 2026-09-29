@@ -8,7 +8,10 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import sys
 import tarfile
+import tempfile
+from typing import Callable
 
 
 BACKEND_PREFIX = PurePosixPath("СИСТЕМА_MVP/backend")
@@ -26,6 +29,11 @@ MODES = {
     "verify_fcm",
     "configure_fcm",
     "verify_sse_qa",
+    "install_sse_qa",
+    "enable_sse_qa",
+    "smoke_sse_qa",
+    "disable_sse_qa",
+    "remove_sse_qa",
     "diagnose",
     "rollback",
 }
@@ -55,8 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rollback-id")
     parser.add_argument("--event-file", type=Path)
     parser.add_argument("--sse-qa-package", type=Path)
+    parser.add_argument("--sse-qa-secrets", type=Path)
+    parser.add_argument("--sse-qa-secrets-stdin", action="store_true")
     parser.add_argument("--sse-qa-candidate-commit")
     parser.add_argument("--sse-qa-controller-sha256")
+    parser.add_argument("--sse-qa-runtime-sha256")
     return parser.parse_args()
 
 
@@ -183,10 +194,63 @@ def add_bytes(archive: tarfile.TarFile, name: str, data: bytes, mode: int = 0o64
     archive.addfile(info, io.BytesIO(data))
 
 
+def _reject_symlink_components(path: Path) -> None:
+    for candidate in (path, *path.parents):
+        if candidate.is_symlink():
+            raise OSError(f"refusing symlink in release output path: {candidate}")
+
+
+def write_private_archive(
+    output: Path, populate: Callable[[tarfile.TarFile], None],
+) -> None:
+    """Create a 0600 archive and publish it atomically without replacement."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _reject_symlink_components(output.parent)
+    if output.exists() or output.is_symlink():
+        raise FileExistsError(f"release output already exists: {output}")
+    descriptor = -1
+    temporary: Path | None = None
+    try:
+        descriptor, raw_temporary = tempfile.mkstemp(
+            prefix=f".{output.name}.", suffix=".tmp", dir=output.parent,
+        )
+        temporary = Path(raw_temporary)
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:
+            os.chmod(temporary, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as raw_output:
+            descriptor = -1
+            with tarfile.open(
+                fileobj=raw_output, mode="w:gz", format=tarfile.PAX_FORMAT,
+            ) as archive:
+                populate(archive)
+            raw_output.flush()
+            os.fsync(raw_output.fileno())
+        try:
+            os.link(temporary, output, follow_symlinks=False)
+        except (FileExistsError, FileNotFoundError) as exc:
+            raise FileExistsError(f"release output changed before publish: {output}") from exc
+        temporary.unlink()
+        temporary = None
+        if os.name != "nt":
+            directory_fd = os.open(output.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def main() -> None:
     args = parse_args()
     root = args.root.resolve()
     metadata: dict[str, object] = {}
+    inline_payload: list[tuple[PurePosixPath, bytes]] = []
     if args.mode == "rollback":
         if not args.rollback_id or not args.rollback_id.startswith("github-"):
             raise SystemExit("rollback mode requires --rollback-id github-...")
@@ -234,20 +298,38 @@ def main() -> None:
                 source,
             )
         ]
-    elif args.mode == "verify_sse_qa":
+    elif args.mode in {
+        "verify_sse_qa", "install_sse_qa", "enable_sse_qa", "smoke_sse_qa",
+        "disable_sse_qa", "remove_sse_qa",
+    }:
         if not args.sse_qa_package or not args.sse_qa_package.is_file():
             raise SystemExit("SSE QA mode requires --sse-qa-package")
         paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]
+        if args.mode == "install_sse_qa":
+            if bool(args.sse_qa_secrets) == bool(args.sse_qa_secrets_stdin):
+                raise SystemExit("install_sse_qa requires exactly one secrets input")
+            if args.sse_qa_secrets:
+                if not args.sse_qa_secrets.is_file():
+                    raise SystemExit("SSE QA secrets file is missing")
+                paths.append((PurePosixPath("deploy/sse-qa/secrets.json"), args.sse_qa_secrets.resolve()))
+            else:
+                raw_secrets = sys.stdin.buffer.read(64 * 1024 + 1)
+                if not raw_secrets or len(raw_secrets) > 64 * 1024:
+                    raise SystemExit("SSE QA secrets stdin is empty or too large")
+                inline_payload.append((PurePosixPath("deploy/sse-qa/secrets.json"), raw_secrets))
+        elif args.sse_qa_secrets or args.sse_qa_secrets_stdin:
+            raise SystemExit("SSE QA secrets are accepted only by install_sse_qa")
         provenance = {
             "candidate_commit": args.sse_qa_candidate_commit,
             "controller_sha256": args.sse_qa_controller_sha256,
+            "runtime_sha256": args.sse_qa_runtime_sha256,
         }
         if not re.fullmatch(r"[0-9a-f]{40}", provenance["candidate_commit"] or ""):
             raise SystemExit("SSE QA candidate commit must be a full lowercase SHA")
-        for field in ("controller_sha256",):
+        for field in ("controller_sha256", "runtime_sha256"):
             if not re.fullmatch(r"[0-9a-f]{64}", provenance[field] or ""):
                 raise SystemExit(f"SSE QA {field} must be a lowercase SHA-256")
-        metadata.update({"qa_schema": 3, "capability": "preflight_only", **provenance})
+        metadata.update({"qa_schema": 2, **provenance})
     else:
         paths = load_paths(
             root,
@@ -282,6 +364,12 @@ def main() -> None:
             {"path": target_text, "sha256": sha256(data), "size": len(data)}
         )
         payload.append((f"payload/{target_text}", data))
+    for target, data in inline_payload:
+        target_text = target.as_posix()
+        manifest_files.append(
+            {"path": target_text, "sha256": sha256(data), "size": len(data)}
+        )
+        payload.append((f"payload/{target_text}", data))
 
     manifest = {
         "schema": 2,
@@ -291,11 +379,11 @@ def main() -> None:
         "metadata": metadata,
     }
     manifest_data = (json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n").encode()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(args.output, "w:gz", format=tarfile.PAX_FORMAT) as archive:
+    def populate(archive: tarfile.TarFile) -> None:
         add_bytes(archive, "release-manifest.json", manifest_data)
         for name, data in payload:
             add_bytes(archive, name, data)
+    write_private_archive(args.output, populate)
     if args.mode == "diagnose":
         print("PACKAGE_READY mode=diagnose files=0")
     else:
