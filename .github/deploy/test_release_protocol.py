@@ -37,6 +37,174 @@ receiver = load_module(
     "accounting_github_deploy_receiver",
     ROOT / "deployment" / "server" / "accounting_github_deploy_receiver.py",
 )
+sse_qa_ctl = load_module(
+    "sse_qa_ctl",
+    ROOT / "deployment" / "server" / "sse_qa_ctl.py",
+)
+
+
+class CredentialPathProbe:
+    def __init__(
+        self,
+        *,
+        file: bool = True,
+        symlink: bool = False,
+        uid: int = 0,
+        mode: int = 0o100600,
+        name: str = "probe",
+    ) -> None:
+        self.file = file
+        self.symlink = symlink
+        self.uid = uid
+        self.mode = mode
+        self.name = name
+
+    def __fspath__(self) -> str:
+        return self.name
+
+    def is_file(self) -> bool:
+        return self.file
+
+    def is_symlink(self) -> bool:
+        return self.symlink
+
+    def stat(self, *, follow_symlinks: bool = True):
+        if follow_symlinks:
+            raise AssertionError("host key metadata must not follow symlinks")
+        return type("Metadata", (), {"st_uid": self.uid, "st_mode": self.mode})()
+
+
+class SseQaHostKeyPreflightTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.executable = CredentialPathProbe(name="systemd-creds")
+        self.host_key = CredentialPathProbe(name="credential.secret")
+
+    def verify(self) -> None:
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True):
+            sse_qa_ctl.verify_systemd_credential_prerequisites(
+                executable=self.executable,
+                host_key=self.host_key,
+            )
+
+    def test_preflight_rejects_missing_systemd_creds_executable(self):
+        self.executable.file = False
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd-creds executable is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_missing_systemd_host_key(self):
+        self.host_key.file = False
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd host credential key is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_symlinked_systemd_host_key(self):
+        self.host_key.symlink = True
+        with self.assertRaisesRegex(
+            sse_qa_ctl.QaError, "systemd host credential key is unavailable"
+        ):
+            self.verify()
+
+    def test_preflight_rejects_unsafe_systemd_host_key_owner_or_mode(self):
+        for uid, mode in ((1, 0o100600), (0, 0o100640), (0, 0o100604)):
+            with self.subTest(uid=uid, mode=oct(mode)):
+                self.host_key.uid = uid
+                self.host_key.mode = mode
+                with self.assertRaisesRegex(
+                    sse_qa_ctl.QaError,
+                    "systemd host credential key ownership or mode is unsafe",
+                ):
+                    self.verify()
+
+    def test_valid_systemd_host_key_check_has_no_mutating_side_effects(self):
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(sse_qa_ctl, "run") as run, \
+             mock.patch.object(sse_qa_ctl.subprocess, "run") as subprocess_run, \
+             mock.patch.object(sse_qa_ctl.subprocess, "Popen") as popen, \
+             mock.patch.object(sse_qa_ctl.os, "chmod") as chmod, \
+             mock.patch.object(sse_qa_ctl.os, "chown", create=True) as chown:
+            sse_qa_ctl.verify_systemd_credential_prerequisites(
+                executable=self.executable,
+                host_key=self.host_key,
+            )
+        run.assert_not_called()
+        subprocess_run.assert_not_called()
+        popen.assert_not_called()
+        chmod.assert_not_called()
+        chown.assert_not_called()
+
+    def test_initial_real_preflight_requires_host_key_after_existing_gates(self):
+        with mock.patch.object(
+            sse_qa_ctl, "preflight", return_value=["existing_conflict_checks"]
+        ) as preflight, mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            self.assertEqual(
+                sse_qa_ctl.initial_preflight(sse_qa_ctl.REAL_ROOT),
+                ["existing_conflict_checks", "systemd_host_credential_key"],
+            )
+        preflight.assert_called_once_with(sse_qa_ctl.REAL_ROOT, installed_ok=False)
+        credential_gate.assert_called_once_with()
+
+        with tempfile.TemporaryDirectory() as raw, mock.patch.object(
+            sse_qa_ctl, "preflight", return_value=["local_test_root"]
+        ), mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            self.assertEqual(
+                sse_qa_ctl.initial_preflight(Path(raw)),
+                ["local_test_root"],
+            )
+        credential_gate.assert_not_called()
+
+    def test_existing_preflight_failure_stops_before_host_key_gate(self):
+        with mock.patch.object(
+            sse_qa_ctl,
+            "preflight",
+            side_effect=sse_qa_ctl.QaError("loopback port conflict"),
+        ), mock.patch.object(
+            sse_qa_ctl, "verify_systemd_credential_prerequisites"
+        ) as credential_gate:
+            with self.assertRaisesRegex(sse_qa_ctl.QaError, "loopback port conflict"):
+                sse_qa_ctl.initial_preflight(sse_qa_ctl.REAL_ROOT)
+        credential_gate.assert_not_called()
+
+    def test_preflight_cli_routes_only_to_read_only_gates(self):
+        with mock.patch.object(
+            sse_qa_ctl, "verify_linux_units"
+        ) as verify_units, mock.patch.object(
+            sse_qa_ctl,
+            "initial_preflight",
+            return_value=["existing_conflicts", "systemd_host_credential_key"],
+        ) as initial_preflight, mock.patch.object(
+            sse_qa_ctl, "run"
+        ) as run, mock.patch.object(
+            sse_qa_ctl, "real_install"
+        ) as install, mock.patch.object(
+            sse_qa_ctl, "real_enable"
+        ) as enable, mock.patch.object(
+            sse_qa_ctl, "real_disable"
+        ) as disable, mock.patch.object(
+            sse_qa_ctl, "real_remove"
+        ) as remove, mock.patch("builtins.print") as output:
+            self.assertEqual(
+                sse_qa_ctl.main(
+                    ["preflight", "--bundle-root", str(ROOT / "deployment")]
+                ),
+                0,
+            )
+        verify_units.assert_called_once_with((ROOT / "deployment").resolve(), runtime_ready=False)
+        initial_preflight.assert_called_once_with(sse_qa_ctl.REAL_ROOT)
+        run.assert_not_called()
+        install.assert_not_called()
+        enable.assert_not_called()
+        disable.assert_not_called()
+        remove.assert_not_called()
+        output.assert_called_once_with(
+            "SSE_QA_PREFLIGHT_OK existing_conflicts,systemd_host_credential_key"
+        )
 
 
 class ReleaseProtocolTests(unittest.TestCase):

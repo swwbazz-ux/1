@@ -523,11 +523,15 @@ def credential_path(name: str) -> Path:
     return CREDENTIAL_ROOT / f"{name}.cred"
 
 
-def verify_systemd_credential_prerequisites() -> None:
-    executable = Path("/usr/bin/systemd-creds")
+def verify_systemd_credential_prerequisites(
+    executable: Path | None = None,
+    host_key: Path | None = None,
+) -> None:
+    """Validate the existing systemd host-key metadata without reading it."""
+    executable = Path("/usr/bin/systemd-creds") if executable is None else executable
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise QaError("systemd-creds executable is unavailable")
-    path = SYSTEMD_HOST_CREDENTIAL_KEY
+    path = SYSTEMD_HOST_CREDENTIAL_KEY if host_key is None else host_key
     if path.is_symlink() or not path.is_file():
         raise QaError("systemd host credential key is unavailable")
     details = path.stat(follow_symlinks=False)
@@ -1101,7 +1105,11 @@ def initial_preflight(root: Path) -> list[str]:
         raise QaError("existing QA installation marker blocks initial preflight")
     if ownership.exists() or ownership.is_symlink():
         raise QaError("partial or complete QA ownership journal blocks initial preflight")
-    return preflight(root, installed_ok=False)
+    checks = preflight(root, installed_ok=False)
+    if root == REAL_ROOT:
+        verify_systemd_credential_prerequisites()
+        checks.append("systemd_host_credential_key")
+    return checks
 
 
 def verify_linux_units(bundle: Path, *, runtime_ready: bool) -> None:
