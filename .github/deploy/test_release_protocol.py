@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
 from pathlib import Path
@@ -15,6 +16,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest import mock
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -204,6 +206,180 @@ class SseQaHostKeyPreflightTests(unittest.TestCase):
         remove.assert_not_called()
         output.assert_called_once_with(
             "SSE_QA_PREFLIGHT_OK existing_conflicts,systemd_host_credential_key"
+        )
+
+
+class SseQaHostKeyPreparationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.executable = CredentialPathProbe(name="systemd-creds")
+        self.host_key = Path("credential.secret")
+        self.ready = type("Metadata", (), {"st_uid": 0, "st_mode": 0o100600})()
+
+    def prepare(self, lstat_side_effect, runner=None):
+        runner = runner or mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                ["/usr/bin/systemd-creds", "setup"], 0, stdout=""
+            )
+        )
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(sse_qa_ctl.os, "lstat", side_effect=lstat_side_effect):
+            result = sse_qa_ctl.prepare_systemd_host_credential_key(
+                executable=self.executable,
+                host_key=self.host_key,
+                command_runner=runner,
+            )
+        return result, runner
+
+    def test_existing_safe_key_is_a_noop(self):
+        result, runner = self.prepare([self.ready])
+        self.assertEqual(result, "state=existing action=noop")
+        runner.assert_not_called()
+
+    def test_missing_key_uses_only_fixed_setup_command_and_rechecks_metadata(self):
+        result, runner = self.prepare([FileNotFoundError(), self.ready])
+        self.assertEqual(
+            result,
+            "state=available_after_setup_attempt action=setup_attempted attribution=unassigned",
+        )
+        runner.assert_called_once_with(
+            ["/usr/bin/systemd-creds", "setup"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
+            cwd="/",
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+        )
+
+    def test_second_call_after_setup_is_idempotent_and_does_not_replace_key(self):
+        runner = mock.Mock(
+            return_value=subprocess.CompletedProcess(
+                ["/usr/bin/systemd-creds", "setup"], 0, stdout=""
+            )
+        )
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(
+                 sse_qa_ctl.os, "lstat",
+                 side_effect=[FileNotFoundError(), self.ready, self.ready],
+             ):
+            first = sse_qa_ctl.prepare_systemd_host_credential_key(
+                executable=self.executable, host_key=self.host_key,
+                command_runner=runner,
+            )
+            second = sse_qa_ctl.prepare_systemd_host_credential_key(
+                executable=self.executable, host_key=self.host_key,
+                command_runner=runner,
+            )
+        self.assertIn("attribution=unassigned", first)
+        self.assertEqual(second, "state=existing action=noop")
+        self.assertEqual(runner.call_count, 1)
+
+    def test_symlink_other_type_and_unsafe_metadata_refuse_without_repair(self):
+        cases = (
+            (type("Metadata", (), {"st_uid": 0, "st_mode": 0o120777})(), "symlink"),
+            (type("Metadata", (), {"st_uid": 0, "st_mode": 0o040700})(), "not a regular"),
+            (type("Metadata", (), {"st_uid": 1, "st_mode": 0o100600})(), "ownership or mode"),
+            (type("Metadata", (), {"st_uid": 0, "st_mode": 0o100640})(), "ownership or mode"),
+        )
+        for metadata, message in cases:
+            with self.subTest(message=message), \
+                 mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+                 mock.patch.object(sse_qa_ctl.os, "lstat", return_value=metadata), \
+                 mock.patch.object(sse_qa_ctl.os, "unlink") as unlink, \
+                 mock.patch.object(sse_qa_ctl.os, "chmod") as chmod, \
+                 mock.patch.object(sse_qa_ctl.os, "chown", create=True) as chown:
+                runner = mock.Mock()
+                with self.assertRaisesRegex(sse_qa_ctl.QaError, message):
+                    sse_qa_ctl.prepare_systemd_host_credential_key(
+                        executable=self.executable, host_key=self.host_key,
+                        command_runner=runner,
+                    )
+            runner.assert_not_called()
+            unlink.assert_not_called()
+            chmod.assert_not_called()
+            chown.assert_not_called()
+
+    def test_metadata_access_error_is_not_treated_as_absence(self):
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(sse_qa_ctl.os, "lstat", side_effect=PermissionError()), \
+             self.assertRaisesRegex(sse_qa_ctl.QaError, "metadata check failed"):
+            sse_qa_ctl.prepare_systemd_host_credential_key(
+                executable=self.executable, host_key=self.host_key,
+                command_runner=mock.Mock(),
+            )
+
+    def test_failed_or_timed_out_setup_reports_observed_state_without_cleanup(self):
+        failures = (
+            (
+                mock.Mock(return_value=subprocess.CompletedProcess(
+                    ["/usr/bin/systemd-creds", "setup"], 1, stdout="hidden"
+                )),
+                "setup failed; state=ready",
+            ),
+            (
+                mock.Mock(side_effect=subprocess.TimeoutExpired(
+                    ["/usr/bin/systemd-creds", "setup"], 30
+                )),
+                "setup timed out; state=ready",
+            ),
+        )
+        for runner, message in failures:
+            with self.subTest(message=message), \
+                 mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+                 mock.patch.object(
+                     sse_qa_ctl.os, "lstat",
+                     side_effect=[FileNotFoundError(), self.ready],
+                 ), \
+                 mock.patch.object(sse_qa_ctl.os, "unlink") as unlink, \
+                 mock.patch.object(sse_qa_ctl.os, "chmod") as chmod, \
+                 mock.patch.object(sse_qa_ctl.os, "chown", create=True) as chown:
+                with self.assertRaisesRegex(sse_qa_ctl.QaError, message):
+                    sse_qa_ctl.prepare_systemd_host_credential_key(
+                        executable=self.executable, host_key=self.host_key,
+                        command_runner=runner,
+                    )
+            unlink.assert_not_called()
+            chmod.assert_not_called()
+            chown.assert_not_called()
+
+    def test_success_without_safe_key_is_failure_and_key_is_not_removed(self):
+        with mock.patch.object(sse_qa_ctl.os, "access", return_value=True), \
+             mock.patch.object(
+                 sse_qa_ctl.os, "lstat",
+                 side_effect=[FileNotFoundError(), FileNotFoundError()],
+             ), \
+             mock.patch.object(sse_qa_ctl.os, "unlink") as unlink, \
+             self.assertRaisesRegex(
+                 sse_qa_ctl.QaError, "returned success; state=missing"
+             ):
+            sse_qa_ctl.prepare_systemd_host_credential_key(
+                executable=self.executable, host_key=self.host_key,
+                command_runner=mock.Mock(return_value=subprocess.CompletedProcess(
+                    ["/usr/bin/systemd-creds", "setup"], 0, stdout=""
+                )),
+            )
+        unlink.assert_not_called()
+
+    def test_cli_route_does_not_install_or_start_services(self):
+        with mock.patch.object(
+            sse_qa_ctl, "prepare_systemd_host_credential_key",
+            return_value="state=existing action=noop",
+        ) as prepare, mock.patch.object(
+            sse_qa_ctl, "real_install"
+        ) as install, mock.patch.object(
+            sse_qa_ctl, "real_enable"
+        ) as enable, mock.patch.object(
+            sse_qa_ctl, "run"
+        ) as run, mock.patch("builtins.print") as output:
+            self.assertEqual(sse_qa_ctl.main(["prepare-host-key"]), 0)
+        prepare.assert_called_once_with()
+        install.assert_not_called()
+        enable.assert_not_called()
+        run.assert_not_called()
+        output.assert_called_once_with(
+            "SSE_QA_HOST_KEY_OK state=existing action=noop"
         )
 
 
@@ -1090,9 +1266,120 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn("diagnostic-recipient-private.pem", ignore)
         self.assertIn(".github/deploy/diagnostic-recipient-private.pem", ignore)
 
+    def test_host_key_builder_uses_exact_mode_commit_payload_and_rejects_extra_inputs(self):
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            qa_package = temporary / "sse-qa.zip"
+            with zipfile.ZipFile(qa_package, "w") as archive:
+                archive.writestr("scripts/sse_qa_ctl.py", b"controller")
+            output = temporary / "release.tar.gz"
+            commit = "a" * 40
+            command = [
+                sys.executable,
+                str(ROOT / ".github" / "deploy" / "build_release.py"),
+                "--root", str(ROOT),
+                "--files", str(ROOT / ".github" / "deploy" / "production-files.txt"),
+                "--output", str(output),
+                "--commit", commit,
+                "--mode", "prepare_sse_qa_host_key",
+                "--sse-qa-package", str(qa_package),
+                "--sse-qa-candidate-commit", receiver.SSE_QA_CANDIDATE_COMMIT,
+                "--sse-qa-controller-sha256", receiver.SSE_QA_CONTROLLER_SHA256,
+                "--sse-qa-runtime-sha256", receiver.SSE_QA_RUNTIME_SHA256,
+            ]
+            completed = subprocess.run(
+                command, cwd=ROOT, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stdout)
+            with tarfile.open(output, "r:gz") as archive:
+                manifest_file = archive.extractfile("release-manifest.json")
+                self.assertIsNotNone(manifest_file)
+                manifest = json.loads(manifest_file.read())
+                self.assertEqual(manifest["mode"], "prepare_sse_qa_host_key")
+                self.assertEqual(manifest["commit"], commit)
+                self.assertEqual(manifest["metadata"], receiver.SSE_QA_METADATA)
+                self.assertEqual(
+                    [entry["path"] for entry in manifest["files"]],
+                    [receiver.SSE_QA_PACKAGE_PAYLOAD],
+                )
+                payload = archive.extractfile(
+                    "payload/" + receiver.SSE_QA_PACKAGE_PAYLOAD
+                )
+                self.assertIsNotNone(payload)
+                self.assertEqual(payload.read(), qa_package.read_bytes())
+
+            rejected = subprocess.run(
+                [*command, "--operation", "unexpected"], cwd=ROOT, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn(
+                "prepare_sse_qa_host_key accepts no additional inputs",
+                rejected.stdout,
+            )
+
+    def test_host_key_receiver_route_is_controller_only_and_never_starts_qa_services(self):
+        buffer = io.BytesIO()
+        controller = (
+            ROOT / "deployment" / "server" / "sse_qa_ctl.py"
+        ).read_bytes().replace(b"\r\n", b"\n")
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("scripts/sse_qa_ctl.py", controller)
+        payload = {receiver.SSE_QA_PACKAGE_PAYLOAD: buffer.getvalue()}
+        process = mock.Mock()
+        process.communicate.return_value = (
+            "SSE_QA_HOST_KEY_OK state=existing action=noop\n", None
+        )
+        process.returncode = 0
+        with mock.patch.object(receiver.subprocess, "Popen", return_value=process) as popen, \
+             mock.patch.object(receiver, "_sse_qa_slice_cgroup") as slice_cgroup, \
+             mock.patch.object(receiver, "_stage_sse_qa_runtime_slice") as stage_slice:
+            summary = receiver.run_sse_qa("prepare_sse_qa_host_key", payload)
+        self.assertEqual(summary, "SSE_QA_HOST_KEY_OK state=existing action=noop")
+        command = popen.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/python3")
+        self.assertEqual(command[2], "prepare-host-key")
+        self.assertEqual(command[3], "--bundle-root")
+        self.assertNotIn("systemd-run", " ".join(command))
+        self.assertNotIn("systemctl", " ".join(command))
+        slice_cgroup.assert_not_called()
+        stage_slice.assert_not_called()
+
+    def test_host_key_workflow_has_fixed_confirmation_and_rejects_unrelated_inputs(self):
+        workflow = (
+            ROOT / ".github" / "workflows" / "production-deploy.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("- prepare_sse_qa_host_key", workflow)
+        self.assertIn(
+            "prepare_sse_qa_host_key) expected=PREPARE_SSE_QA_HOST_KEY",
+            workflow,
+        )
+        self.assertIn('[[ "$MODE" == *sse_qa* ]]', workflow)
+        self.assertIn('test "$APK_PROFILE" = "none"', workflow)
+        self.assertIn('python - "$GITHUB_EVENT_PATH"', workflow)
+        self.assertIn(
+            'raise SystemExit("prepare_sse_qa_host_key rejects unrelated inputs")',
+            workflow,
+        )
+        self.assertNotIn("host_key_path", workflow)
+        self.assertNotIn("host_key_secret", workflow)
+        self.assertIn(
+            "inputs.mode == 'install_sse_qa' && secrets.SSE_QA_SECRETS_JSON_B64 || ''",
+            workflow,
+        )
+
+    def test_host_key_is_never_owned_or_removed_by_qa_lifecycle(self):
+        cleanup_source = inspect.getsource(sse_qa_ctl.cleanup_owned_installation)
+        remove_source = inspect.getsource(sse_qa_ctl.real_remove)
+        self.assertNotIn("SYSTEMD_HOST_CREDENTIAL_KEY", cleanup_source)
+        self.assertNotIn("credential.secret", cleanup_source)
+        self.assertNotIn("SYSTEMD_HOST_CREDENTIAL_KEY", remove_source)
+        self.assertNotIn("credential.secret", remove_source)
+
     def test_sensitive_modes_require_control_branch_and_actions_are_sha_pinned(self):
         workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
-        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa ]]', workflow)
+        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* ]]', workflow)
         self.assertIn('test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"', workflow)
         uses_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses:")]
         self.assertTrue(uses_lines)
