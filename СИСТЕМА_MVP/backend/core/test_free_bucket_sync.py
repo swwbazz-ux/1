@@ -833,6 +833,48 @@ class FreeBucketServerIntegrationTests(TestCase):
                 status=FreeBucketAcceptanceStatus.REQUESTED, accepted_at=None,
             ).save()
 
+    def test_driver_screen_keeps_the_bucket_module_on_while_the_bucket_trip_is_open(self):
+        """Пока рейс под ковшом не разгружен, модуль ковша на экране водителя включён.
+
+        Боевой Infinix 29.09.2026 (v367/v368): после ручной погрузки под ковшом
+        сервер рендерил data-driver-free-bucket-enabled="false" и не отдавал окно
+        ковша (любой открытый рейс выключал модуль) — телефон терял состояние
+        ковша через полсекунды, круг становился синим. После разгрузки модуль
+        снова обычный: рейса нет, выбрать можно.
+        """
+        self.backdate_truck_shift()
+        select = self.select_event(
+            event_id='driver-free-select-screen',
+            occurred_at=timezone.now() - timedelta(minutes=2),
+        )
+        self.assertEqual(self.sync_driver([select]).json()['results'][0]['status'], 'accepted')
+        loaded = self.driver_manual_load_under_bucket(
+            select, event_id='driver-manual-load-screen', sequence=2,
+            occurred_at=timezone.now() - timedelta(minutes=1),
+        )
+        self.assertEqual(self.sync_driver([loaded]).json()['results'][0]['status'], 'accepted')
+
+        page = self.driver_client.get('/driver/').content.decode()
+        self.assertIn('data-driver-free-bucket-enabled="true"', page)
+        self.assertIn('id="driver-free-bucket-dialog"', page)
+        state = json.loads(
+            page.split('id="driver-free-bucket-state-data" type="application/json">', 1)[1].split('</script>', 1)[0]
+        )
+        self.assertTrue(state['active'])
+        self.assertEqual(state['status'], 'used')
+        self.assertEqual(state['selection']['id'], self.other_excavator.id)
+
+        completed = self.driver_manual_complete_under_bucket(
+            loaded, event_id='driver-manual-complete-screen', sequence=3, occurred_at=timezone.now(),
+        )
+        self.assertEqual(self.sync_driver([completed]).json()['results'][0]['status'], 'accepted')
+        page = self.driver_client.get('/driver/').content.decode()
+        self.assertIn('data-driver-free-bucket-enabled="true"', page)
+        state = json.loads(
+            page.split('id="driver-free-bucket-state-data" type="application/json">', 1)[1].split('</script>', 1)[0]
+        )
+        self.assertFalse(state['active'])
+
     def test_manual_load_under_requested_bucket_without_operator_shift_is_accepted_by_driver_action(self):
         """Типичный ручной режим: у экскаватора никого на смене — принято действием водителя.
 
