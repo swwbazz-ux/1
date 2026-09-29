@@ -1,0 +1,195 @@
+﻿Resolve one immutable revision	Set up job	﻿2026-09-29T11:53:08.7304234Z Current runner version: '2.337.0'
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7329933Z ##[group]Runner Image Provisioner
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7331011Z Hosted Compute Agent
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7331714Z Version: 20260828.587
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7332358Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7333073Z Build Date: 2026-08-28T16:44:25Z
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7333813Z Worker ID: {a5c49865-bfed-4571-8f5d-e3a01211ab87}
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7334534Z Azure Region: westus2
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7335108Z ##[endgroup]
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7337133Z ##[group]Operating System
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7337786Z Ubuntu
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7338416Z 24.04.5
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7338924Z LTS
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7339441Z ##[endgroup]
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7340042Z ##[group]Runner Image
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7340629Z Image: ubuntu-24.04
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7341223Z Version: 20260920.314.1
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7342292Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7344092Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7345110Z ##[endgroup]
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7346595Z ##[group]GITHUB_TOKEN Permissions
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7348736Z Contents: read
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7349418Z Metadata: read
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7349984Z ##[endgroup]
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7351999Z Secret source: Actions
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7353479Z Cache mode: write
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7354434Z Prepare workflow directory
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7899251Z Prepare all required actions
+Resolve one immutable revision	Set up job	2026-09-29T11:53:08.7947539Z Getting action download info
+Resolve one immutable revision	Set up job	2026-09-29T11:53:09.1268472Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Resolve one immutable revision	Set up job	2026-09-29T11:53:09.2964434Z Complete job name: Resolve one immutable revision
+Resolve one immutable revision	Checkout requested revision once	﻿2026-09-29T11:53:09.3755756Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3757077Z with:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3757593Z   ref: f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3758207Z   persist-credentials: false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3758726Z   repository: swwbazz-ux/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3762578Z   token: ***
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3763008Z   ssh-strict: true
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3763440Z   ssh-user: git
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3763854Z   clean: true
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3764288Z   sparse-checkout-cone-mode: true
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3764809Z   fetch-depth: 1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3765242Z   fetch-tags: false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3765691Z   show-progress: true
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3766381Z   lfs: false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3766805Z   submodules: false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3767255Z   set-safe-directory: true
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3767764Z   allow-unsafe-pr-checkout: false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3768782Z env:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3769346Z   QUALITY_TARGET_REF: f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3770088Z   DJANGO_SECRET_KEY: ci-secret-key
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3770609Z   DJANGO_DEBUG: True
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3771146Z   DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,.localhost
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.3771750Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4782171Z Syncing repository: swwbazz-ux/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4783943Z ##[group]Getting Git version info
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4784613Z Working directory is '/home/runner/work/1/1'
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4785920Z [command]/usr/bin/git version
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4880632Z git version 2.55.0
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4895721Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4909084Z Temporarily overriding HOME='/home/runner/work/_temp/c82a26e8-abc4-4d07-8f05-e4326f081407' before making global git config changes
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4910916Z Adding repository directory to the temporary git global config as a safe directory
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4914996Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/1/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4968389Z Deleting the contents of '/home/runner/work/1/1'
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4972431Z ##[group]Determining repository object format
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4974234Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4976586Z ##[group]Initializing the repository
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.4979393Z [command]/usr/bin/git init /home/runner/work/1/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5084596Z hint: Using 'master' as the name for the initial branch. This default branch name
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5086989Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5088998Z hint: to use in all of your new repositories, which will suppress this warning,
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5090594Z hint: call:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5091570Z hint:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5092946Z hint: 	git config --global init.defaultBranch <name>
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5094351Z hint:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5095937Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5098298Z hint: 'development'. The just-created branch can be renamed via this command:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5099967Z hint:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5101149Z hint: 	git branch -m <name>
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5102498Z hint:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5104052Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5106405Z Initialized empty Git repository in /home/runner/work/1/1/.git/
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5109823Z [command]/usr/bin/git remote add origin https://github.com/swwbazz-ux/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5157733Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5158964Z ##[group]Disabling automatic garbage collection
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5161988Z [command]/usr/bin/git config --local gc.auto 0
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5203787Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5205497Z ##[group]Setting up auth
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5206831Z Removing SSH command configuration
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5213338Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5251372Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5602678Z Removing HTTP extra header
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5610064Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5653691Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5860962Z Removing includeIf entries pointing to credentials config files
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5865796Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.5899794Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6129522Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6167825Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/1/1/.git.path /home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6200927Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/1/1/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6238027Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6273752Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6311379Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6312266Z ##[group]Fetching the repository
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:09.6317451Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9447134Z From https://github.com/swwbazz-ux/1
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9449581Z  * branch            f238aa51fbb80909d5e7f9e84e49b67f1ee5184e -> FETCH_HEAD
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9456564Z [command]/usr/bin/git rev-parse --verify --quiet f238aa51fbb80909d5e7f9e84e49b67f1ee5184e^{object}
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9485338Z f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9491127Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9492288Z ##[group]Determining the checkout info
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9493883Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9495210Z [command]/usr/bin/git sparse-checkout disable
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9549923Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9584315Z ##[group]Checking out the ref
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:11.9587085Z [command]/usr/bin/git checkout --progress --force f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3712197Z Note: switching to 'f238aa51fbb80909d5e7f9e84e49b67f1ee5184e'.
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3713037Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3713505Z You are in 'detached HEAD' state. You can look around, make experimental
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3714535Z changes and commit them, and you can discard any commits you make in this
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3715495Z state without impacting any branches by switching back to a branch.
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3716272Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3716653Z If you want to create a new branch to retain commits you create, you may
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3717498Z do so (now or later) by using -c with the switch command. Example:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3717984Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3718205Z   git switch -c <new-branch-name>
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3718566Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3718856Z Or undo this operation with:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3719160Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3719353Z   git switch -
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3719587Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3720007Z Turn off this advice by setting config variable advice.detachedHead to false
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3720871Z 
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3721499Z HEAD is now at f238aa5 Интегрировать свежий release в S106-C2
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3741597Z ##[endgroup]
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3792438Z [command]/usr/bin/git log -1 --format=%H
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3821419Z f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3831499Z ##[group]Removing auth
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3832101Z Removing SSH command configuration
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3836621Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.3872384Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4098478Z Removing HTTP extra header
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4104748Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4140775Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4377851Z Removing includeIf entries pointing to credentials config files
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4380347Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4410903Z includeif.gitdir:/home/runner/work/1/1/.git.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4411824Z includeif.gitdir:/home/runner/work/1/1/.git/worktrees/*.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4412394Z includeif.gitdir:/github/workspace/.git.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4419593Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4421567Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/1/1/.git.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4446808Z /home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4455823Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/1/1/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-a4e7f2e9\-124a\-45e8\-93eb\-03e225db231e\.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4494742Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/1/1/.git/worktrees/*.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4522163Z /home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4530522Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/1/1/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-a4e7f2e9\-124a\-45e8\-93eb\-03e225db231e\.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4570912Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4597257Z /github/runner_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4605071Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-a4e7f2e9\-124a\-45e8\-93eb\-03e225db231e\.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4698301Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4725034Z /github/runner_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4732324Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-a4e7f2e9\-124a\-45e8\-93eb\-03e225db231e\.config
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4769949Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.4990893Z Removing credentials config '/home/runner/work/_temp/git-credentials-a4e7f2e9-124a-45e8-93eb-03e225db231e.config'
+Resolve one immutable revision	Checkout requested revision once	2026-09-29T11:53:12.5000112Z ##[endgroup]
+Resolve one immutable revision	Export immutable commit SHA	﻿2026-09-29T11:53:12.5190018Z ##[group]Run sha="$(git rev-parse HEAD)"
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5190522Z ^[[36;1msha="$(git rev-parse HEAD)"^[[0m
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5190993Z ^[[36;1mprintf 'sha=%s\nshort_sha=%s\n' "$sha" "${sha:0:12}" >> "$GITHUB_OUTPUT"^[[0m
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5191549Z ^[[36;1mprintf 'Verified commit: `%s`\n' "$sha" >> "$GITHUB_STEP_SUMMARY"^[[0m
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5449365Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5450010Z env:
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5450430Z   QUALITY_TARGET_REF: f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5450971Z   DJANGO_SECRET_KEY: ci-secret-key
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5451362Z   DJANGO_DEBUG: True
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5451758Z   DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,.localhost
+Resolve one immutable revision	Export immutable commit SHA	2026-09-29T11:53:12.5452215Z ##[endgroup]
+Resolve one immutable revision	Post Checkout requested revision once	﻿2026-09-29T11:53:12.5742484Z Post job cleanup.
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6575529Z [command]/usr/bin/git version
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6619827Z git version 2.55.0
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6670010Z Temporarily overriding HOME='/home/runner/work/_temp/e2909752-c1dd-4f2b-b291-ff9d43972214' before making global git config changes
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6671263Z Adding repository directory to the temporary git global config as a safe directory
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6677703Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/1/1
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6710580Z Removing SSH command configuration
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6718036Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.6753076Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7012254Z Removing HTTP extra header
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7018773Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7141139Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7317558Z Removing includeIf entries pointing to credentials config files
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7324934Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Resolve one immutable revision	Post Checkout requested revision once	2026-09-29T11:53:12.7363907Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Resolve one immutable revision	Complete job	﻿2026-09-29T11:53:12.7761503Z Evaluate and set job outputs
+Resolve one immutable revision	Complete job	2026-09-29T11:53:12.7768497Z Set output 'sha'
+Resolve one immutable revision	Complete job	2026-09-29T11:53:12.7770145Z Set output 'short_sha'
+Resolve one immutable revision	Complete job	2026-09-29T11:53:12.7771299Z Cleaning up orphan processes

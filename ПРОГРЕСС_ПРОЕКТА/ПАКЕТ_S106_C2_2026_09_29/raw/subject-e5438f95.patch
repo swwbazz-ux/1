@@ -1,0 +1,1539 @@
+﻿From e5438f95a5cd1aafe07a5121ae41dcbb5d99625d Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Tue, 29 Sep 2026 20:51:06 +1000
+Subject: [PATCH] =?UTF-8?q?S106-C2:=20=D1=81=D0=BE=D0=B3=D0=BB=D0=B0=D1=81?=
+ =?UTF-8?q?=D0=BE=D0=B2=D0=B0=D1=82=D1=8C=20=D0=BF=D0=BE=D0=B2=D1=82=D0=BE?=
+ =?UTF-8?q?=D1=80=D0=BD=D1=83=D1=8E=20=D0=BE=D0=B1=D1=80=D0=B0=D0=B1=D0=BE?=
+ =?UTF-8?q?=D1=82=D0=BA=D1=83=20=D0=BF=D0=BE=D0=BB=D0=B5=D0=B2=D1=8B=D1=85?=
+ =?UTF-8?q?=20=D1=81=D0=BE=D0=B1=D1=8B=D1=82=D0=B8=D0=B9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ .../fixtures/offline_replay_contract.json     |  90 +++++
+ СИСТЕМА_MVP/backend/core/offline_sync.py      | 343 ++++++++++--------
+ .../backend/core/test_free_bucket_sync.py     |   8 +-
+ СИСТЕМА_MVP/backend/core/test_offline_sync.py | 234 +++++++++++-
+ .../static/js/driver-offline-outbox-v2.js     |  84 ++---
+ .../static/js/excavator-field-outbox-v1.js    |  63 ++--
+ .../js/tests/driver-free-bucket-v1.test.js    |   1 +
+ .../js/tests/driver-offline-outbox-v2.test.js |  26 ++
+ .../driver-offline-template-contract.test.js  |   4 +-
+ .../js/tests/excavator-field-outbox.test.js   |  29 ++
+ .../excavator-free-bucket-contract.test.js    |   4 +-
+ ...avator-native-capabilities-runtime.test.js |   4 +-
+ .../templates/trips/excavator_work.html       |  40 +-
+ СИСТЕМА_MVP/backend/trips/free_bucket.py      |  46 +++
+ СИСТЕМА_MVP/backend/trips/views.py            |  40 +-
+ СИСТЕМА_MVP/backend/users/role_apps.py        |   4 +-
+ СИСТЕМА_MVP/backend/users/tests.py            |  24 +-
+ СИСТЕМА_MVP/backend/users/views.py            |   2 +-
+ 18 files changed, 757 insertions(+), 289 deletions(-)
+ create mode 100644 СИСТЕМА_MVP/backend/core/fixtures/offline_replay_contract.json
+
+diff --git a/СИСТЕМА_MVP/backend/core/fixtures/offline_replay_contract.json b/СИСТЕМА_MVP/backend/core/fixtures/offline_replay_contract.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..823e02389bf3c6757fc2fc24d33d8c671c76f81b
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/core/fixtures/offline_replay_contract.json
+@@ -0,0 +1,90 @@
++[
++  {
++    "id": "driver_clock",
++    "role_code": "driver",
++    "event_type": "driver.downtime.started",
++    "error_code": "device_clock_ahead",
++    "own_clock_adjusted": true,
++    "expected_recoverable": true
++  },
++  {
++    "id": "driver_dependency",
++    "role_code": "driver",
++    "event_type": "driver.trip.manual_completed",
++    "error_code": "dependency_rejected",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "driver_dependency_with_own_clock_evidence",
++    "role_code": "driver",
++    "event_type": "driver.trip.manual_completed",
++    "error_code": "dependency_rejected",
++    "own_clock_adjusted": true,
++    "expected_recoverable": true
++  },
++  {
++    "id": "driver_free_bucket_root",
++    "role_code": "driver",
++    "event_type": "driver.trip.loaded",
++    "error_code": "free_bucket_not_available",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "driver_unload_transition",
++    "role_code": "driver",
++    "event_type": "driver.trip.unloaded",
++    "error_code": "trip_driver_shift_changed",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "driver_wrong_code",
++    "role_code": "driver",
++    "event_type": "driver.trip.loaded",
++    "error_code": "equipment_context_changed",
++    "own_clock_adjusted": true,
++    "expected_recoverable": false
++  },
++  {
++    "id": "excavator_clock",
++    "role_code": "excavator_operator",
++    "event_type": "excavator.downtime.started",
++    "error_code": "device_clock_ahead",
++    "own_clock_adjusted": true,
++    "expected_recoverable": true
++  },
++  {
++    "id": "excavator_dependency",
++    "role_code": "excavator_operator",
++    "event_type": "excavator.trip.loaded.cancelled",
++    "error_code": "dependency_owner_mismatch",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "excavator_factual_load",
++    "role_code": "excavator_operator",
++    "event_type": "excavator.free_bucket.loaded",
++    "error_code": "open_trip_changed",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "excavator_shift_close",
++    "role_code": "excavator_operator",
++    "event_type": "excavator.shift.closed",
++    "error_code": "shift_already_closed",
++    "own_clock_adjusted": false,
++    "expected_recoverable": true
++  },
++  {
++    "id": "excavator_wrong_event_for_code",
++    "role_code": "excavator_operator",
++    "event_type": "excavator.downtime.ended",
++    "error_code": "open_trip_changed",
++    "own_clock_adjusted": false,
++    "expected_recoverable": false
++  }
++]
+diff --git a/СИСТЕМА_MVP/backend/core/offline_sync.py b/СИСТЕМА_MVP/backend/core/offline_sync.py
+index 3506b0134bf4b7f535fdb5c6bf5442aedf1b627b..3007f42a408f35de9662f4c68be22f07880c447e 100644
+--- a/СИСТЕМА_MVP/backend/core/offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/offline_sync.py
+@@ -2,6 +2,7 @@ import hashlib
+ import json
+ import logging
+ import re
++from dataclasses import dataclass
+ from datetime import timedelta
+ from decimal import Decimal, InvalidOperation
+ 
+@@ -77,6 +78,54 @@ SUPPORTED_EVENT_ROLES = {
+     'driver.shift.closed': 'driver',
+ }
+ 
++_REPLAY_DEPENDENCY_CODES = frozenset({
++    'dependency_rejected',
++    'dependency_owner_mismatch',
++    'dependency_order_invalid',
++})
++_REPLAY_EVENT_CODES = {
++    ('driver', 'driver.trip.unloaded'): frozenset({
++        'open_trip_changed',
++        'late_unload_after_supersede',
++        'trip_driver_shift_changed',
++        'unload_before_load',
++    }),
++    ('driver', 'driver.trip.dump_point_changed'): frozenset({
++        'trip_driver_shift_changed',
++    }),
++    ('driver', 'driver.free_bucket.selected'): frozenset({
++        'driver_shift_closed',
++    }),
++    ('driver', 'driver.shift.closed'): frozenset({
++        'shift_already_closed',
++    }),
++    ('excavator_operator', 'excavator.shift.closed'): frozenset({
++        'shift_already_closed',
++    }),
++}
++_REPLAY_FACTUAL_LOAD_CODES = frozenset({
++    'active_downtime',
++    'equipment_downtime_active',
++    'excavator_unavailable',
++    'free_bucket_excavator_unavailable',
++    'free_bucket_truck_unavailable',
++    'open_trip_changed',
++})
++_REPLAY_FACTUAL_LOAD_TYPES = frozenset({
++    'driver.trip.loaded',
++    'excavator.trip.loaded',
++    'excavator.free_bucket.loaded',
++})
++_REPLAY_EVIDENCE_KEY = '_offline_replay_evidence'
++
++
++@dataclass(frozen=True)
++class OfflineReplayDecision:
++    allowed: bool
++    reason: str = ''
++    time_policy: str = 'device_occurred_at'
++    dependency_policy: str = 'normal'
++
+ 
+ def _resolve_free_bucket_acceptance(access, normalized):
+     from trips.models import FreeBucketAcceptance
+@@ -1540,13 +1589,14 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
+     # при повторной отправке, не сломав идентичность события.
+     sent_live = _clock_hint(raw_event, payload, 'sent_live')
+     clock_unreliable = _clock_hint(raw_event, payload, 'clock_unreliable')
++    clock_ahead = occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
+     normalized['device_occurred_at'] = occurred_at
+     normalized['sent_live'] = sent_live
+     normalized['clock_unreliable'] = clock_unreliable
+     normalized['clock_adjusted'] = bool(
+         role_code in {'driver', 'excavator_operator'}
+         and (
+-            occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
++            clock_ahead
+             # Событие ушло сразу после нажатия — расписка сервера и есть его
+             # настоящее время, каким бы ни был сдвиг часов телефона.
+             or sent_live
+@@ -1554,6 +1604,12 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
+             or clock_unreliable
+         )
+     )
++    normalized['clock_adjustment_reason'] = (
++        'future_clock_skew' if clock_ahead
++        else 'sent_live' if sent_live
++        else 'clock_unreliable' if clock_unreliable
++        else ''
++    )
+     if normalized['clock_adjusted']:
+         normalized['occurred_at'] = received_at
+     return normalized
+@@ -1561,6 +1617,7 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
+ 
+ def _result(event_id, status, *, retryable=False, code='', message='', payload=None):
+     payload = dict(payload or {})
++    payload.pop(_REPLAY_EVIDENCE_KEY, None)
+     return {
+         'event_id': event_id,
+         'status': status,
+@@ -1574,6 +1631,41 @@ def _result(event_id, status, *, retryable=False, code='', message='', payload=N
+     }
+ 
+ 
++def _normalized_replay_evidence(normalized):
++    return {
++        'clock_adjusted': bool(normalized.get('clock_adjusted')),
++        'clock_adjustment_reason': str(normalized.get('clock_adjustment_reason') or ''),
++        'effective_occurred_at': normalized['occurred_at'].isoformat(),
++    }
++
++
++def _stored_replay_evidence(receipt):
++    stored = (receipt.result_payload or {}).get(_REPLAY_EVIDENCE_KEY)
++    if isinstance(stored, dict) and 'clock_adjusted' in stored:
++        return {
++            'clock_adjusted': bool(stored.get('clock_adjusted')),
++            'clock_adjustment_reason': str(stored.get('clock_adjustment_reason') or ''),
++            'effective_occurred_at': str(stored.get('effective_occurred_at') or ''),
++        }
++    # Legacy receipts predate the explicit evidence record. A raw timestamp
++    # beyond the first server receipt is nevertheless immutable proof of the
++    # same correction that normalize_offline_event applies to new events.
++    clock_adjusted = receipt.occurred_at > receipt.received_at + MAX_FUTURE_CLOCK_SKEW
++    return {
++        'clock_adjusted': clock_adjusted,
++        'clock_adjustment_reason': 'future_clock_skew' if clock_adjusted else '',
++        'effective_occurred_at': (
++            receipt.received_at if clock_adjusted else receipt.occurred_at
++        ).isoformat(),
++    }
++
++
++def _result_payload_with_replay_evidence(payload, replay_evidence):
++    result = dict(payload or {})
++    result[_REPLAY_EVIDENCE_KEY] = dict(replay_evidence)
++    return result
++
++
+ def _stored_result(event, *, deduplicated=False):
+     status = 'deduplicated' if deduplicated and event.status == OfflineFieldEventStatus.ACCEPTED else event.status
+     payload = dict(event.result_payload or {})
+@@ -4337,79 +4429,71 @@ def _dependency_state(access, normalized):
+             )
+ 
+ 
+-def _clock_skewed_dependency_exists(existing):
+-    """Признак цепочки именно «часового» конфликта, а не настоящего доменного.
++def _offline_replay_decision(existing):
++    """Return admission, time and dependency policies for one stored receipt.
+ 
+-    Телефон может пересинхронизировать часы между двумя действиями очереди
+-    (перезапуск, автоматическое время сети).  Тогда родительское событие
+-    остаётся с временем в будущем и получает ``device_clock_ahead``, а
+-    зависимое сохраняет честное время и падает только по ``dependency_rejected``.
+-    Собственный сдвиг у такого события отсутствует, поэтому восстанавливать
+-    цепочку нужно по сдвигу её родителя.
++    The event identity is checked by the caller before this decision.  A
++    recoverable domain code never decides the timestamp: the timestamp policy
++    comes only from evidence saved with this exact receipt.  Likewise a
++    dependency conflict permits the handler to evaluate the child's own
++    references; it never lends object ids or authority from the parent.
+     """
+-    if not existing.depends_on:
+-        return False
+-    dependencies = OfflineFieldEvent.objects.filter(
+-        event_id__in=existing.depends_on[:MAX_DEPENDENCIES],
+-        actor_id=existing.actor_id,
+-        access_id=existing.access_id,
+-        role_code=existing.role_code,
+-        device_id=existing.device_id,
+-    ).only('occurred_at', 'received_at')
+-    return any(
+-        dependency.occurred_at > dependency.received_at + MAX_FUTURE_CLOCK_SKEW
+-        for dependency in dependencies
++    replay_evidence = _stored_replay_evidence(existing)
++    time_policy = (
++        'first_received_at'
++        if replay_evidence['clock_adjusted']
++        else 'device_occurred_at'
+     )
+-
+-
+-def _worker_truth_conflict_is_reprocessable(existing):
+-    """Legacy terminal receipts whose domain policy is now deterministic."""
+-    if existing.error_code in {
+-        'dependency_rejected',
+-        'dependency_owner_mismatch',
+-        'dependency_order_invalid',
+-    }:
+-        return True
+-    if (
+-        existing.event_type == 'driver.trip.unloaded'
+-        and existing.error_code in {
+-            'open_trip_changed',
+-            'late_unload_after_supersede',
+-            'trip_driver_shift_changed',
+-            'unload_before_load',
+-        }
+-    ):
+-        return True
+-    if (
+-        existing.event_type == 'driver.trip.dump_point_changed'
+-        and existing.error_code == 'trip_driver_shift_changed'
+-    ):
+-        return True
+-    if (
+-        existing.event_type == 'driver.free_bucket.selected'
+-        and existing.error_code == 'driver_shift_closed'
+-    ):
+-        return True
++    if existing.status == OfflineFieldEventStatus.RETRY:
++        return OfflineReplayDecision(
++            allowed=True,
++            reason='retry',
++            time_policy=time_policy,
++        )
++    if existing.status != OfflineFieldEventStatus.CONFLICT:
++        return OfflineReplayDecision(allowed=False)
++
++    role_code = existing.role_code
++    event_type = existing.event_type
++    error_code = existing.error_code
++    if SUPPORTED_EVENT_ROLES.get(event_type) != role_code:
++        return OfflineReplayDecision(allowed=False)
++    if error_code == 'device_clock_ahead':
++        return OfflineReplayDecision(
++            allowed=bool(replay_evidence['clock_adjusted']),
++            reason='own_clock_evidence' if replay_evidence['clock_adjusted'] else '',
++            time_policy=time_policy,
++        )
++    if error_code in _REPLAY_DEPENDENCY_CODES:
++        return OfflineReplayDecision(
++            allowed=True,
++            reason='dependency_own_refs',
++            time_policy=time_policy,
++            dependency_policy='advisory_own_refs',
++        )
++    if error_code in _REPLAY_EVENT_CODES.get((role_code, event_type), frozenset()):
++        return OfflineReplayDecision(
++            allowed=True,
++            reason='worker_truth_transition',
++            time_policy=time_policy,
++        )
++    if event_type in _REPLAY_FACTUAL_LOAD_TYPES and error_code in _REPLAY_FACTUAL_LOAD_CODES:
++        return OfflineReplayDecision(
++            allowed=True,
++            reason='factual_load_transition',
++            time_policy=time_policy,
++        )
+     if (
+-        existing.event_type in {'driver.shift.closed', 'excavator.shift.closed'}
+-        and existing.error_code == 'shift_already_closed'
++        role_code == 'driver'
++        and event_type == 'driver.trip.loaded'
++        and error_code == 'free_bucket_not_available'
+     ):
+-        return True
+-    return bool(
+-        existing.event_type in {
+-            'driver.trip.loaded',
+-            'excavator.trip.loaded',
+-            'excavator.free_bucket.loaded',
+-        }
+-        and existing.error_code in {
+-            'active_downtime',
+-            'equipment_downtime_active',
+-            'excavator_unavailable',
+-            'free_bucket_excavator_unavailable',
+-            'free_bucket_truck_unavailable',
+-            'open_trip_changed',
+-        }
+-    )
++        return OfflineReplayDecision(
++            allowed=True,
++            reason='free_bucket_factual_load',
++            time_policy=time_policy,
++        )
++    return OfflineReplayDecision(allowed=False)
+ 
+ 
+ def process_one_offline_event(access, normalized):
+@@ -4436,93 +4520,24 @@ def process_one_offline_event(access, normalized):
+                         normalized['event_id'], 'conflict', code='event_id_reused',
+                         message='Идентификатор уже использован для другого события.',
+                     )
+-                device_clock_was_invalid = bool(
+-                    existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
+-                )
+-                dependency_chain_is_ready = False
+-                if (
+-                    normalized['role_code'] == 'driver'
+-                    and existing.status == OfflineFieldEventStatus.CONFLICT
+-                    and existing.error_code == 'dependency_rejected'
+-                    and existing.depends_on
+-                ):
+-                    dependency_receipts = list(
+-                        OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+-                            event_id__in=existing.depends_on,
+-                        )
+-                    )
+-                    dependency_chain_is_ready = bool(
+-                        len(dependency_receipts) == len(set(existing.depends_on))
+-                        and all(
+-                            dependency.actor_id == access.employee_id
+-                            and dependency.access_id == access.id
+-                            and dependency.role_code == normalized['role_code']
+-                            and dependency.device_id == normalized['device_id']
+-                            and dependency.sequence < existing.sequence
+-                            and dependency.status == OfflineFieldEventStatus.ACCEPTED
+-                            for dependency in dependency_receipts
+-                        )
+-                    )
+-                recoverable_clock_conflict = bool(
+-                    existing.status == OfflineFieldEventStatus.CONFLICT
+-                    and (
+-                        (
+-                            normalized['role_code'] == 'driver'
+-                            and (
+-                                (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
+-                                or dependency_chain_is_ready
+-                                # Ручная погрузка под ковшом, который сервер сам погасил
+-                                # до прихода отметки: теперь она записывается по факту
+-                                # (_revive_cancelled_free_bucket_by_driver_load), а уже
+-                                # отклонённая на телефоне — принимается при повторе.
+-                                or (
+-                                    existing.event_type == 'driver.trip.loaded'
+-                                    and existing.error_code == 'free_bucket_not_available'
+-                                )
+-                            )
+-                        )
+-                        or (
+-                            normalized['role_code'] == 'excavator_operator'
+-                            and existing.error_code in {'device_clock_ahead', 'dependency_rejected'}
+-                            and (
+-                                device_clock_was_invalid
+-                                or (
+-                                    existing.error_code == 'dependency_rejected'
+-                                    and _clock_skewed_dependency_exists(existing)
+-                                )
+-                            )
+-                        )
+-                    )
+-                )
+-                recoverable_worker_truth_conflict = bool(
+-                    existing.status == OfflineFieldEventStatus.CONFLICT
+-                    and _worker_truth_conflict_is_reprocessable(existing)
+-                )
+-                recoverable_conflict = (
+-                    recoverable_clock_conflict
+-                    or recoverable_worker_truth_conflict
+-                )
+-                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_conflict:
++                replay_decision = _offline_replay_decision(existing)
++                if not replay_decision.allowed:
+                     return _stored_result(existing, deduplicated=True)
+-                if recoverable_conflict:
+-                    # Reprocess the same immutable event at its original server
+-                    # receipt time. The id, sequence, dependencies and raw
+-                    # device timestamp stay unchanged, so no duplicate action
+-                    # can be created and the dependent queue keeps its order.
+-                    clock_adjusted = bool(
+-                        recoverable_clock_conflict
+-                        and (
+-                            device_clock_was_invalid
+-                            if normalized['role_code'] == 'driver'
+-                            else True
+-                        )
+-                    )
+-                    normalized['device_occurred_at'] = existing.occurred_at
+-                    normalized['received_at'] = existing.received_at
+-                    normalized['clock_adjusted'] = clock_adjusted
+-                    normalized['occurred_at'] = (
+-                        existing.received_at if clock_adjusted else existing.occurred_at
+-                    )
++                # Reprocess the same immutable event at its first server
++                # receipt. The domain error may have changed since the prior
++                # attempt; its own saved clock evidence does not.
++                replay_evidence = _stored_replay_evidence(existing)
++                normalized['device_occurred_at'] = existing.occurred_at
++                normalized['received_at'] = existing.received_at
++                normalized['clock_adjusted'] = replay_decision.time_policy == 'first_received_at'
++                normalized['clock_adjustment_reason'] = replay_evidence['clock_adjustment_reason']
++                normalized['occurred_at'] = (
++                    existing.received_at
++                    if normalized['clock_adjusted']
++                    else existing.occurred_at
++                )
++                normalized['replay_reason'] = replay_decision.reason
++                normalized['replay_dependency_policy'] = replay_decision.dependency_policy
+                 receipt = existing
+                 receipt.status = OfflineFieldEventStatus.PROCESSING
+                 receipt.retryable = False
+@@ -4530,6 +4545,7 @@ def process_one_offline_event(access, normalized):
+                 receipt.error_message = ''
+                 receipt.save(update_fields=['status', 'retryable', 'error_code', 'error_message', 'updated_at'])
+             else:
++                replay_evidence = _normalized_replay_evidence(normalized)
+                 sequence_collision = OfflineFieldEvent.objects.select_for_update().filter(
+                     actor=access.employee,
+                     role_code=normalized['role_code'],
+@@ -4564,6 +4580,7 @@ def process_one_offline_event(access, normalized):
+                     context_snapshot=normalized['context_snapshot'],
+                     payload=normalized['payload'],
+                     fingerprint=normalized['fingerprint'],
++                    result_payload={_REPLAY_EVIDENCE_KEY: replay_evidence},
+                 )
+             try:
+                 with transaction.atomic():
+@@ -4581,10 +4598,10 @@ def process_one_offline_event(access, normalized):
+                 receipt.retryable = problem.retryable
+                 receipt.error_code = problem.code
+                 receipt.error_message = problem.message
+-                receipt.result_payload = {
++                receipt.result_payload = _result_payload_with_replay_evidence({
+                     'server_received_at': receipt.received_at.isoformat(),
+                     **problem.details,
+-                }
++                }, replay_evidence)
+                 receipt.save(update_fields=[
+                     'status', 'retryable', 'error_code', 'error_message',
+                     'result_payload', 'updated_at',
+@@ -4598,7 +4615,9 @@ def process_one_offline_event(access, normalized):
+                 receipt.retryable = True
+                 receipt.error_code = 'concurrent_state_retry'
+                 receipt.error_message = 'Состояние изменилось одновременно. Событие будет повторено.'
+-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
++                receipt.result_payload = _result_payload_with_replay_evidence({
++                    'server_received_at': receipt.received_at.isoformat(),
++                }, replay_evidence)
+                 receipt.save(update_fields=[
+                     'status', 'retryable', 'error_code', 'error_message',
+                     'result_payload', 'updated_at',
+@@ -4619,7 +4638,9 @@ def process_one_offline_event(access, normalized):
+                 receipt.error_message = 'Временная ошибка сервера ({}: {}). Событие сохранено и будет повторено.'.format(
+                     type(error).__name__, str(error)[:120].replace(chr(10), ' '),
+                 )
+-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
++                receipt.result_payload = _result_payload_with_replay_evidence({
++                    'server_received_at': receipt.received_at.isoformat(),
++                }, replay_evidence)
+                 receipt.save(update_fields=[
+                     'status', 'retryable', 'error_code', 'error_message',
+                     'result_payload', 'updated_at',
+@@ -4629,7 +4650,9 @@ def process_one_offline_event(access, normalized):
+             receipt.retryable = False
+             receipt.error_code = ''
+             receipt.error_message = ''
+-            result_payload = dict(result_payload or {})
++            result_payload = _result_payload_with_replay_evidence(
++                result_payload, replay_evidence,
++            )
+             if normalized.get('ignored_missing_dependencies'):
+                 result_payload['dependency_recovery'] = {
+                     'reason': 'exact_terminal_reference',
+diff --git a/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py b/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
+index 66ef4b9930649a8cfc48ecf5d88f4a4006e354c7..bd0d4b99589d98bb2f5b886eaf33a29abe76aecf 100644
+--- a/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
++++ b/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
+@@ -1319,7 +1319,13 @@ class FreeBucketServerIntegrationTests(TestCase):
+             rejected = self.sync_driver([loaded, completed]).json()['results']
+         self.assertEqual(
+             [(item['status'], item.get('code')) for item in rejected],
+-            [('conflict', 'free_bucket_not_available'), ('conflict', 'dependency_rejected')],
++            [
++                ('conflict', 'free_bucket_not_available'),
++                # The integrated worker-truth contract no longer copies the
++                # parent's terminal conflict to the child.  The completion is
++                # evaluated independently and waits for its own trip reference.
++                ('retry', 'trip_reference_pending'),
++            ],
+             rejected,
+         )
+         self.assertFalse(Trip.objects.exists())
+diff --git a/СИСТЕМА_MVP/backend/core/test_offline_sync.py b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+index 626e429eef16ccb467a63311b9ed630ca0855f1b..f49e6b66abf874e70306a2a6d4fb9836f4e1215c 100644
+--- a/СИСТЕМА_MVP/backend/core/test_offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+@@ -1,6 +1,8 @@
+ import json
+ from datetime import timedelta
+ from concurrent.futures import ThreadPoolExecutor
++from pathlib import Path
++from types import SimpleNamespace
+ 
+ from django.db import close_old_connections, connection
+ from django.core.management.color import no_style
+@@ -16,8 +18,8 @@ from assignments.models import (
+     HaulAssignment,
+     HaulAssignmentAction,
+ )
+-from core.models import OfflineFieldEvent, OfflineFieldEventConflict
+-from core.offline_sync import normalize_offline_event
++from core.models import OfflineFieldEvent, OfflineFieldEventConflict, OfflineFieldEventStatus
++from core.offline_sync import _offline_replay_decision, normalize_offline_event
+ from downtimes.models import DowntimeEvent, DowntimeReason
+ from trips import tests as trip_fixtures
+ from trips.models import (
+@@ -1909,6 +1911,128 @@ class OfflineEventSyncTests(TestCase):
+         self.assertEqual(trip.loaded_at, device_occurred_at)
+         self.assertEqual(trip.load_time_source, 'excavator_device')
+ 
++    def test_replay_contract_fixture_executes_server_decision(self):
++        fixture_path = Path(__file__).with_name('fixtures') / 'offline_replay_contract.json'
++        scenarios = json.loads(fixture_path.read_text(encoding='utf-8'))
++        self.assertGreater(len(scenarios), 0)
++        received_at = timezone.now()
++        for scenario in scenarios:
++            with self.subTest(scenario=scenario['id']):
++                raw_at = (
++                    received_at + timedelta(minutes=6)
++                    if scenario['own_clock_adjusted']
++                    else received_at - timedelta(seconds=5)
++                )
++                receipt = SimpleNamespace(
++                    status=OfflineFieldEventStatus.CONFLICT,
++                    role_code=scenario['role_code'],
++                    event_type=scenario['event_type'],
++                    error_code=scenario['error_code'],
++                    occurred_at=raw_at,
++                    received_at=received_at,
++                    result_payload={},
++                )
++                decision = _offline_replay_decision(receipt)
++                self.assertEqual(
++                    decision.allowed,
++                    scenario['expected_recoverable'],
++                    decision,
++                )
++                if scenario['expected_recoverable']:
++                    self.assertEqual(
++                        decision.time_policy,
++                        'first_received_at' if scenario['own_clock_adjusted'] else 'device_occurred_at',
++                        decision,
++                    )
++                if scenario['error_code'].startswith('dependency_'):
++                    self.assertEqual(decision.dependency_policy, 'advisory_own_refs', decision)
++
++    def test_device_clock_conflict_without_own_evidence_is_not_reprocessed(self):
++        received_at = timezone.now()
++        receipt = SimpleNamespace(
++            status=OfflineFieldEventStatus.CONFLICT,
++            role_code='driver',
++            event_type='driver.downtime.started',
++            error_code='device_clock_ahead',
++            occurred_at=received_at - timedelta(seconds=5),
++            received_at=received_at,
++            result_payload={},
++        )
++
++        decision = _offline_replay_decision(receipt)
++
++        self.assertFalse(decision.allowed)
++
++    def test_domain_conflict_retries_keep_first_clock_correction_without_alternating(self):
++        trip, _original_driver, _original_shift, _replacement, _replacement_shift = (
++            self._prepare_controlled_driver_handover_trip()
++        )
++        trip.is_carryover = False
++        trip.save(update_fields=['is_carryover'])
++        received_at = timezone.now()
++        raw_at = received_at + timedelta(minutes=40)
++        event = {
++            'event_id': 'driver-domain-clock-does-not-alternate',
++            'event_type': 'driver.trip.unloaded',
++            'format_version': 1,
++            'occurred_at': raw_at.isoformat(),
++            'sequence': 1,
++            'depends_on': [],
++            'shift_id': self.truck_shift.id,
++            'equipment_id': self.truck.id,
++            'trip_id': trip.id,
++            'payload': {'trip_id': trip.id},
++        }
++        device_id = 'driver-domain-clock-stable-device'
++        normalized = normalize_offline_event(
++            event,
++            role_code='driver',
++            device_id=device_id,
++            received_at=received_at,
++        )
++        OfflineFieldEvent.objects.create(
++            event_id=event['event_id'],
++            event_type=event['event_type'],
++            format_version=1,
++            actor=self.driver,
++            access=self.driver_access,
++            role_code='driver',
++            device_id=device_id,
++            sequence=1,
++            depends_on=[],
++            occurred_at=raw_at,
++            received_at=received_at,
++            shift=self.truck_shift,
++            equipment=self.truck,
++            trip=trip,
++            context_snapshot=normalized['context_snapshot'],
++            payload=normalized['payload'],
++            fingerprint=normalized['fingerprint'],
++            status=OfflineFieldEventStatus.CONFLICT,
++            error_code='trip_driver_shift_changed',
++            error_message='legacy domain conflict after a corrected clock',
++        )
++
++        results = [
++            self.sync(
++                [event],
++                client=self.driver_client(),
++                role_code='driver',
++                device_id=device_id,
++            ).json()['results'][0]
++            for _ in range(4)
++        ]
++
++        self.assertEqual(
++            [(item['status'], item['code']) for item in results],
++            [('conflict', 'trip_driver_shift_changed')] * 4,
++        )
++        receipt = OfflineFieldEvent.objects.get(event_id=event['event_id'])
++        self.assertEqual(receipt.occurred_at, raw_at)
++        self.assertEqual(receipt.received_at, received_at)
++        trip.refresh_from_db()
++        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
++
+     def test_excavator_clock_ahead_uses_server_time_without_blocking_work(self):
+         device_occurred_at = timezone.now() + timedelta(minutes=6)
+         event = self.load_event(occurred_at=device_occurred_at)
+@@ -4276,6 +4400,38 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
+         close_old_connections()
+         return response.status_code, response.json()['results'][0]
+ 
++    def store_legacy_conflict(self, event, *, device_id, error_code):
++        """Persist the immutable legacy envelope before concurrent replay."""
++        received_at = timezone.now()
++        normalized = normalize_offline_event(
++            event,
++            role_code='excavator_operator',
++            device_id=device_id,
++            received_at=received_at,
++        )
++        return OfflineFieldEvent.objects.create(
++            event_id=event['event_id'],
++            event_type=event['event_type'],
++            format_version=event['format_version'],
++            actor=self.operator,
++            access=self.access,
++            role_code='excavator_operator',
++            device_id=device_id,
++            sequence=event['sequence'],
++            depends_on=event['depends_on'],
++            occurred_at=timezone.datetime.fromisoformat(event['occurred_at']),
++            received_at=received_at,
++            shift=self.shift,
++            equipment=self.excavator,
++            local_trip_id=normalized['local_trip_id'],
++            context_snapshot=normalized['context_snapshot'],
++            payload=normalized['payload'],
++            fingerprint=normalized['fingerprint'],
++            status=OfflineFieldEventStatus.CONFLICT,
++            error_code=error_code,
++            error_message='legacy conflict before S106-C2',
++        )
++
+     def test_same_event_parallel_requests_create_one_trip(self):
+         event = self.event('parallel-same-event', 1)
+         with ThreadPoolExecutor(max_workers=2) as pool:
+@@ -4293,6 +4449,80 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
+         self.assertEqual(OfflineFieldEvent.objects.count(), 1)
+         self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+ 
++    def test_same_legacy_conflict_parallel_replay_creates_one_trip(self):
++        event = self.event('parallel-replay-same-event', 1)
++        device_id = 'parallel-replay-same-device'
++        self.store_legacy_conflict(
++            event,
++            device_id=device_id,
++            error_code='open_trip_changed',
++        )
++
++        with ThreadPoolExecutor(max_workers=2) as pool:
++            results = list(pool.map(
++                lambda _: self.post_from_thread(event, device_id),
++                range(2),
++            ))
++
++        self.assertEqual([item[0] for item in results], [200, 200])
++        self.assertEqual(
++            sorted(item[1]['status'] for item in results),
++            ['accepted', 'deduplicated'],
++        )
++        self.assertEqual(Trip.objects.count(), 1)
++        self.assertEqual(OfflineFieldEvent.objects.count(), 1)
++        self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
++
++    def test_parallel_root_and_child_replay_converge_without_losing_child(self):
++        device_id = 'parallel-replay-chain-device'
++        root = self.event('parallel-replay-root', 1)
++        loaded_at = timezone.now() - timedelta(seconds=2)
++        root['occurred_at'] = loaded_at.isoformat()
++        child = {
++            'event_id': 'parallel-replay-child',
++            'event_type': 'excavator.trip.loaded.cancelled',
++            'format_version': 1,
++            'occurred_at': (loaded_at + timedelta(seconds=1)).isoformat(),
++            'sequence': 2,
++            'depends_on': [root['event_id']],
++            'shift_id': self.shift.id,
++            'equipment_id': self.excavator.id,
++            'local_trip_id': root['local_trip_id'],
++            'payload': {'local_trip_id': root['local_trip_id']},
++        }
++        self.store_legacy_conflict(
++            root,
++            device_id=device_id,
++            error_code='open_trip_changed',
++        )
++        self.store_legacy_conflict(
++            child,
++            device_id=device_id,
++            error_code='dependency_rejected',
++        )
++
++        with ThreadPoolExecutor(max_workers=2) as pool:
++            futures = [
++                pool.submit(self.post_from_thread, root, device_id),
++                pool.submit(self.post_from_thread, child, device_id),
++            ]
++            first_results = [future.result() for future in futures]
++
++        self.assertEqual([item[0] for item in first_results], [200, 200])
++        by_event = {item[1]['event_id']: item[1] for item in first_results}
++        self.assertEqual(by_event[root['event_id']]['status'], 'accepted', by_event)
++        self.assertIn(by_event[child['event_id']]['status'], {'accepted', 'retry'}, by_event)
++
++        child_repeat = self.post_from_thread(child, device_id)
++        self.assertEqual(child_repeat[0], 200)
++        self.assertIn(child_repeat[1]['status'], {'accepted', 'deduplicated'}, child_repeat)
++        self.assertEqual(Trip.objects.count(), 1)
++        self.assertEqual(Trip.objects.get().status, TripStatus.CANCELLED)
++        self.assertEqual(
++            set(OfflineFieldEvent.objects.values_list('status', flat=True)),
++            {OfflineFieldEventStatus.ACCEPTED},
++        )
++
+     def test_same_driver_manual_event_parallel_requests_create_one_trip(self):
+         event = self.driver_event('parallel-driver-same-event', 1)
+         with ThreadPoolExecutor(max_workers=2) as pool:
+diff --git a/СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js b/СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+index 278bb30bfa314ecf53b548d46b588bbb98be0966..e2d4531dd0124725370fbb437351a661e66cb054 100644
+--- a/СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
++++ b/СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+@@ -71,48 +71,53 @@
+     function errorCode(event) {
+         return String(event && event.last_error && event.last_error.code || "");
+     }
+-    function recoverableDeviceClockConflict(event) {
+-        if (!event || event.state !== "conflict") return false;
+-        return errorCode(event) === "device_clock_ahead"
+-            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error && event.last_error.message || ""));
+-    }
+-    /* Погрузка под свободным ковшом, который сервер сам погасил, пока отметка
+-       висела в очереди: раньше сервер отвечал free_bucket_not_available
+-       окончательно, теперь записывает её по факту (PR #128). Отклонённую старым
+-       сервером отметку и её цепочку отправляем заново при старте — иначе три
+-       рейса владельца так и остались бы «на сверке» (бой 29.09.2026). */
+-    function recoverableServerRefusedConflict(event) {
+-        return !!event && event.state === "conflict"
+-            && event.event_type === "driver.trip.loaded"
+-            && errorCode(event) === "free_bucket_not_available";
+-    }
+-    function recoverableDependencyConflict(event) {
+-        return !!event && event.state === "conflict"
+-            && ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(errorCode(event)) >= 0;
+-    }
+-    function recoverableWorkerTruthConflict(event) {
+-        if (!event || event.state !== "conflict") return false;
++    var REPLAY_DEPENDENCY_CODES = new Set([
++        "dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"
++    ]);
++    var REPLAY_FACTUAL_LOAD_CODES = new Set([
++        "active_downtime", "equipment_downtime_active", "excavator_unavailable",
++        "free_bucket_excavator_unavailable", "free_bucket_truck_unavailable", "open_trip_changed"
++    ]);
++    function replayConflictDecision(event) {
++        if (!event || event.state !== "conflict" || !SUPPORTED_TYPES.has(event.event_type)) {
++            return {recoverable: false, reason: ""};
++        }
+         var code = errorCode(event);
+-        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(code) >= 0) return true;
++        if (code === "device_clock_ahead") return {recoverable: true, reason: "own_clock_evidence"};
++        if (REPLAY_DEPENDENCY_CODES.has(code)) return {recoverable: true, reason: "dependency_own_refs"};
+         if (
+             event.event_type === "driver.trip.unloaded"
+             && ["open_trip_changed", "late_unload_after_supersede", "trip_driver_shift_changed", "unload_before_load"].indexOf(code) >= 0
+-        ) return true;
+-        if (event.event_type === "driver.trip.dump_point_changed" && code === "trip_driver_shift_changed") return true;
+-        if (event.event_type === "driver.free_bucket.selected" && code === "driver_shift_closed") return true;
+-        if (event.event_type === "driver.shift.closed" && code === "shift_already_closed") return true;
++        ) return {recoverable: true, reason: "worker_truth_transition"};
++        if (
++            event.event_type === "driver.trip.dump_point_changed"
++            && code === "trip_driver_shift_changed"
++        ) return {recoverable: true, reason: "worker_truth_transition"};
++        if (
++            event.event_type === "driver.free_bucket.selected"
++            && code === "driver_shift_closed"
++        ) return {recoverable: true, reason: "worker_truth_transition"};
++        if (
++            event.event_type === "driver.shift.closed"
++            && code === "shift_already_closed"
++        ) return {recoverable: true, reason: "worker_truth_transition"};
+         if (
+             event.event_type === "driver.trip.loaded"
+-            && [
+-                "active_downtime",
+-                "equipment_downtime_active",
+-                "excavator_unavailable",
+-                "free_bucket_excavator_unavailable",
+-                "free_bucket_truck_unavailable",
+-                "open_trip_changed",
+-            ].indexOf(code) >= 0
+-        ) return true;
+-        return false;
++            && (REPLAY_FACTUAL_LOAD_CODES.has(code) || code === "free_bucket_not_available")
++        ) return {
++            recoverable: true,
++            reason: code === "free_bucket_not_available" ? "free_bucket_factual_load" : "factual_load_transition"
++        };
++        return {recoverable: false, reason: ""};
++    }
++    function recoverableDeviceClockConflict(event) {
++        return replayConflictDecision(event).reason === "own_clock_evidence";
++    }
++    function recoverableDependencyConflict(event) {
++        return replayConflictDecision(event).reason === "dependency_own_refs";
++    }
++    function recoverableWorkerTruthConflict(event) {
++        return replayConflictDecision(event).recoverable;
+     }
+     function identityRecord(event) {
+         return IMMUTABLE_FIELDS.reduce(function (result, field) {
+@@ -1112,11 +1117,7 @@
+             });
+             var recoverable = Object.create(null);
+             events.forEach(function (event) {
+-                if (
+-                    recoverableDeviceClockConflict(event)
+-                    || recoverableWorkerTruthConflict(event)
+-                    || recoverableServerRefusedConflict(event)
+-                ) {
++                if (recoverableWorkerTruthConflict(event)) {
+                     recoverable[event.event_id] = true;
+                 }
+             });
+@@ -1243,6 +1244,7 @@
+             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
+             createDriverDowntimeEndEvent: createDriverDowntimeEndEvent,
+             selectDriverDowntimeProjection: selectDriverDowntimeProjection,
++            replayConflictDecision: replayConflictDecision,
+             backoff: backoff
+         };
+     }
+diff --git a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+index 74f27be85b868cf23b07466630c09eb166949b4f..729897e8b3273c585002f3b27f4c97af26b13bfb 100644
+--- a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
++++ b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+@@ -12,6 +12,23 @@
+     // повтором раз в 8 с — для сервера не нагрузка.
+     var RETRY_MAX_MS = 8000;
+     var DEFAULT_BATCH_SIZE = 25;
++    var SUPPORTED_TYPES = new Set([
++        "excavator.free_bucket.accepted",
++        "excavator.free_bucket.cancelled",
++        "excavator.free_bucket.loaded",
++        "excavator.trip.loaded",
++        "excavator.trip.loaded.cancelled",
++        "excavator.downtime.started",
++        "excavator.downtime.ended",
++        "excavator.shift.closed"
++    ]);
++    var REPLAY_DEPENDENCY_CODES = new Set([
++        "dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"
++    ]);
++    var REPLAY_FACTUAL_LOAD_CODES = new Set([
++        "active_downtime", "equipment_downtime_active", "excavator_unavailable",
++        "free_bucket_excavator_unavailable", "free_bucket_truck_unavailable", "open_trip_changed"
++    ]);
+ 
+     function clone(value) {
+         return JSON.parse(JSON.stringify(value));
+@@ -82,34 +99,29 @@
+             JSON.stringify(canonicalValue(wireEvent(right)));
+     }
+ 
+-    function recoverableDeviceClockConflict(event) {
+-        if (!event || event.sync_state !== "conflict") return false;
+-        return event.last_error_code === "device_clock_ahead"
+-            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error || ""));
++    function replayConflictDecision(event) {
++        if (!event || event.sync_state !== "conflict" || !SUPPORTED_TYPES.has(event.event_type)) {
++            return {recoverable: false, reason: ""};
++        }
++        var code = String(event.last_error_code || "");
++        if (code === "device_clock_ahead") return {recoverable: true, reason: "own_clock_evidence"};
++        if (REPLAY_DEPENDENCY_CODES.has(code)) return {recoverable: true, reason: "dependency_own_refs"};
++        if (event.event_type === "excavator.shift.closed" && code === "shift_already_closed") {
++            return {recoverable: true, reason: "worker_truth_transition"};
++        }
++        if (
++            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
++            && REPLAY_FACTUAL_LOAD_CODES.has(code)
++        ) return {recoverable: true, reason: "factual_load_transition"};
++        return {recoverable: false, reason: ""};
+     }
+ 
+     function recoverableDependencyConflict(event) {
+-        if (!event || event.sync_state !== "conflict") return false;
+-        return ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(event.last_error_code) >= 0
+-            || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
++        return replayConflictDecision(event).reason === "dependency_own_refs";
+     }
+ 
+     function recoverableWorkerTruthConflict(event) {
+-        if (!event || event.sync_state !== "conflict") return false;
+-        var code = String(event.last_error_code || "");
+-        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid", "shift_already_closed"].indexOf(code) >= 0) return true;
+-        if (
+-            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
+-            && [
+-                "active_downtime",
+-                "equipment_downtime_active",
+-                "excavator_unavailable",
+-                "free_bucket_excavator_unavailable",
+-                "free_bucket_truck_unavailable",
+-                "open_trip_changed",
+-            ].indexOf(code) >= 0
+-        ) return true;
+-        return false;
++        return replayConflictDecision(event).recoverable;
+     }
+ 
+     function createLocalStorageAdapter(storage, queueKey) {
+@@ -572,7 +584,7 @@
+             return list().then(function (events) {
+                 var recoverable = Object.create(null);
+                 events.forEach(function (event) {
+-                    if (recoverableDeviceClockConflict(event) || recoverableWorkerTruthConflict(event)) {
++                    if (recoverableWorkerTruthConflict(event)) {
+                         recoverable[event.event_id] = true;
+                     }
+                 });
+@@ -651,5 +663,8 @@
+     }
+ 
+     root.createExcavatorFieldOutbox = createOutbox;
+-    if (typeof module !== "undefined") module.exports = createOutbox;
++    if (typeof module !== "undefined") {
++        createOutbox.replayConflictDecision = replayConflictDecision;
++        module.exports = createOutbox;
++    }
+ })(typeof window !== "undefined" ? window : globalThis);
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/driver-free-bucket-v1.test.js b/СИСТЕМА_MVP/backend/static/js/tests/driver-free-bucket-v1.test.js
+index 71e46469145929714b577d9034012bd059a33b23..151f90abd92cea573d3d205e16db85191e590883 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/driver-free-bucket-v1.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/driver-free-bucket-v1.test.js
+@@ -855,6 +855,7 @@ test("the one-load right is consumed by its load and switched off locally by tha
+         shell: shell(),
+         storage: storage(),
+         window: {localStorage: storage()},
++        now: () => Date.parse("2026-09-28T10:02:00Z"),
+         outbox: {enqueue() { return Promise.resolve({}); }},
+     });
+     controller.installCatalog(serverCatalog());
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js b/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js
+index bde6bfb3972c1801be30dd590d24c237d58c0eba..b6e54904057833c54873c0aa3bfcd550c16dcaf8 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-outbox-v2.test.js
+@@ -2,6 +2,8 @@
+ 
+ const test = require("node:test");
+ const assert = require("node:assert/strict");
++const fs = require("node:fs");
++const path = require("node:path");
+ const {
+     createDriverOfflineOutbox,
+     createDriverManualLoadEvent,
+@@ -14,9 +16,33 @@ const {
+     createDriverDowntimeEndEvent,
+     selectDriverDowntimeProjection,
+     localRepository,
++    replayConflictDecision,
+     backoff,
+ } = require("../driver-offline-outbox-v2.js");
+ 
++const replayContract = JSON.parse(fs.readFileSync(
++    path.resolve(__dirname, "../../../core/fixtures/offline_replay_contract.json"),
++    "utf8",
++));
++
++test("driver replay predicate satisfies the executable server-client contract", () => {
++    const scenarios = replayContract.filter(item => item.role_code === "driver");
++    assert.ok(scenarios.length > 0);
++    for (const scenario of scenarios) {
++        const decision = replayConflictDecision({
++            state: "conflict",
++            event_type: scenario.event_type,
++            last_error: {code: scenario.error_code, message: "fixture"},
++        });
++        assert.equal(decision.recoverable, scenario.expected_recoverable, scenario.id);
++    }
++    assert.equal(replayConflictDecision({
++        state: "conflict",
++        event_type: "driver.downtime.started",
++        last_error: {code: "equipment_context_changed", message: "Часы устройства опережают сервер"},
++    }).recoverable, false);
++});
++
+ test("manual-load cancellation keeps an exact trip reference and the latest dependency", () => {
+     const serverCancel = createDriverManualLoadCancelledEvent({
+         eventId: "manual-cancel-server",
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-template-contract.test.js b/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-template-contract.test.js
+index 3d6c66b15b99b60ea63e87a1a82999cca0fc744e..2bab8a2decb66beeacc77bbe2d3aab9ea0ecbeee 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-template-contract.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/driver-offline-template-contract.test.js
+@@ -30,7 +30,7 @@ function functionSource(source, name) {
+ test("current Driver shell precaches the durable runtime and exact authenticated dependencies", () => {
+     assert.match(template, /driver-offline-outbox-v2\.js/);
+     assert.doesNotMatch(template, /createDriverUnloadOutbox/);
+-    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v367'/);
++    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v368'/);
+     assert.match(views, /driver-offline-outbox-v2\.js\?v=\{DRIVER_SHELL_VERSION\}/);
+     assert.match(views, /driver-haptics-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
+     assert.match(views, /driver-native-push-v1\.js\?v=\{DRIVER_SHELL_VERSION\}/);
+@@ -47,7 +47,7 @@ test("current Driver shell precaches the durable runtime and exact authenticated
+     assert.match(views, /hasValidatedCurrentShell/);
+     const coreAssets = views.match(/const CORE_ASSETS = \[([\s\S]*?)\];/)[1];
+     assert.doesNotMatch(coreAssets, /APP_SHELL_URL|LEGACY_SHELL_URL/);
+-    assert.match(roleApps, /shell_version='driver-mobile-shell-v367'/);
++    assert.match(roleApps, /shell_version='driver-mobile-shell-v368'/);
+ });
+ 
+ test("a legacy loaded shell reloads before adopting a fragment that requires newer assets", () => {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+index 74ce12f46849dae3058055b3f7f1c1210d551185..a81e855ac0cfe8b91aa172b77b788dace7c30130 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+@@ -1,7 +1,34 @@
+ const test = require('node:test');
+ const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
+ const createOutbox = require('../excavator-field-outbox-v1.js');
+ 
++const replayContract = JSON.parse(fs.readFileSync(
++    path.resolve(__dirname, '../../../core/fixtures/offline_replay_contract.json'),
++    'utf8',
++));
++
++test('excavator replay predicate satisfies the executable server-client contract', () => {
++    const scenarios = replayContract.filter(item => item.role_code === 'excavator_operator');
++    assert.ok(scenarios.length > 0);
++    for (const scenario of scenarios) {
++        const decision = createOutbox.replayConflictDecision({
++            sync_state: 'conflict',
++            event_type: scenario.event_type,
++            last_error_code: scenario.error_code,
++            last_error: 'fixture',
++        });
++        assert.equal(decision.recoverable, scenario.expected_recoverable, scenario.id);
++    }
++    assert.equal(createOutbox.replayConflictDecision({
++        sync_state: 'conflict',
++        event_type: 'excavator.downtime.started',
++        last_error_code: 'equipment_context_changed',
++        last_error: 'Часы устройства опережают сервер',
++    }).recoverable, false);
++});
++
+ function storage() {
+     const values = new Map();
+     return {
+@@ -480,11 +507,13 @@ test('restart retries a legacy device clock conflict and its dependency chain',
+                 ? {
+                     event_id: event.event_id,
+                     status: 'conflict',
++                    code: 'device_clock_ahead',
+                     message: 'Часы устройства заметно опережают сервер. Требуется сверка.',
+                 }
+                 : {
+                     event_id: event.event_id,
+                     status: 'conflict',
++                    code: 'dependency_rejected',
+                     message: 'Предыдущее событие требует сверки или отклонено.',
+                 }),
+         }),
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+index e764eb8f5ad6a5805412bb1a5a4d10ec9cbb5997..886d473ddb4c081602945f61fe0c6deb7471c0e1 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+@@ -428,8 +428,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
+ });
+ 
+ test('all free bucket assets share the current shell marker', () => {
+-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v263/);
+-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v263/);
++    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v264/);
++    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v264/);
+ });
+ 
+ test('temporary card adds semantics without replacing production status', () => {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+index 33201c82635c5f65a09967a198876e87dc6579eb..bcf743afb1e5eb5d2222e39e6dc7862e8b2c000d 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+@@ -95,8 +95,8 @@ test("Excavator haptics prefer the native media bridge and preserve gesture timi
+ });
+ 
+ test("Excavator shell wires native capabilities and routes existing feedback through them", () => {
+-    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v263/);
+-    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v263/);
++    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v264/);
++    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v264/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(\[180, 90, 180\], 255\)/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(70, 220\)/);
+     assert.doesNotMatch(TEMPLATE, /navigator\.vibrate/);
+diff --git a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+index 213f3727763de48a3cdb72b7449565751fcaa687..1b3965cbd9f9b9c1a105910f82d1ff3475697e88 100644
+--- a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
++++ b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+@@ -6,28 +6,28 @@
+ {% block viewport_extra %}, viewport-fit=cover{% endblock %}
+ {% block extra_head %}
+ <link rel="manifest" href="{% url 'excavator_manifest' %}">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v263">
+-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v263">
+-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v263" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v264">
++<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v264" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
++<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+ <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
+ <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
+ <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
+-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v263">
+-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v263"></script>
+-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v263"></script>
++<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v264">
++<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v264"></script>
++<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v264"></script>
+ <meta name="theme-color" content="#D58B14">
+ <meta name="apple-mobile-web-app-capable" content="yes">
+ <meta name="apple-mobile-web-app-title" content="Погрузка">
+@@ -397,7 +397,7 @@
+ 
+ <script>
+ (function () {
+-var excavatorShellVersion = "excavator-mobile-shell-v263";
++var excavatorShellVersion = "excavator-mobile-shell-v264";
+ var staticPrefix = "{{ static_prefix|escapejs }}";
+ var viewportSyncFrame = null;
+ var excavatorStableViewportHeight = 0;
+diff --git a/СИСТЕМА_MVP/backend/trips/free_bucket.py b/СИСТЕМА_MVP/backend/trips/free_bucket.py
+index f452164d90c9df10141216f8795be5da7e1269b8..62bb79cdf911500088093a3a1f002f66b9e4d05d 100644
+--- a/СИСТЕМА_MVP/backend/trips/free_bucket.py
++++ b/СИСТЕМА_MVP/backend/trips/free_bucket.py
+@@ -214,6 +214,52 @@ def reconcile_expired_free_bucket_acceptances(*, now=None):
+     return len(expired)
+ 
+ 
++def expire_stale_free_bucket_requests(truck, *, now=None):
++    """Persist the exact TTL boundary for stale unaccepted Driver requests.
++
++    The active-state filter already hides a REQUESTED reservation once its
++    ten-minute window ends.  Keeping that row non-terminal, however, leaves a
++    partial-unique slot occupied and breaks the release recovery path in which
++    a delayed factual Driver load revives the same request.  Only REQUESTED
++    rows are retired here: ACCEPTED and USED rows have their own lifecycle in
++    the current worker-truth workflow.  The caller already holds the truck
++    transaction/lock in the online path; the explicit row lock also keeps the
++    helper safe for the isolated reconciliation/test path.
++    """
++    from core.models import bump_operational_state
++    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
++
++    now = now or timezone.now()
++    expired = list(
++        FreeBucketAcceptance.objects
++        .select_for_update(of=('self',))
++        .filter(
++            truck=truck,
++            status=FreeBucketAcceptanceStatus.REQUESTED,
++            occurred_at__lte=now - FREE_BUCKET_REQUEST_TTL,
++        )
++        .order_by('id')
++    )
++    if not expired:
++        return []
++    for acceptance in expired:
++        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
++        acceptance.cancelled_at = acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
++    FreeBucketAcceptance.objects.bulk_update(expired, ['status', 'cancelled_at'])
++    bump_operational_state(
++        'FreeBucketAcceptance:expired',
++        event_type='trip_changed',
++        object_type='FreeBucketAcceptance',
++        payload={
++            'action': 'free_bucket_expired',
++            'acceptance_ids': [item.id for item in expired],
++            'truck_ids': [truck.id],
++            'excavator_ids': sorted({item.excavator_id for item in expired}),
++        },
++    )
++    return expired
++
++
+ def canonical_free_bucket_work_context_snapshot(excavator):
+     """Freeze the target excavator's persisted work context for one load.
+ 
+diff --git a/СИСТЕМА_MVP/backend/trips/views.py b/СИСТЕМА_MVP/backend/trips/views.py
+index 0e055931de6659973dca8cce2b3cfb4c4ca9ec9e..a67824b1bf7ea70ee6e382c0cb3f62660539520b 100644
+--- a/СИСТЕМА_MVP/backend/trips/views.py
++++ b/СИСТЕМА_MVP/backend/trips/views.py
+@@ -627,7 +627,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
+ const APP_CONTRACT_VERSION = "pwa-contract-v1";
+ const ROLE_CODE = "excavator_operator";
+ const CACHE_PREFIX = "excavator-mobile-shell-";
+-const CACHE_NAME = "excavator-mobile-shell-v263";
++const CACHE_NAME = "excavator-mobile-shell-v264";
+ const APP_SHELL_URL = "/excavator/work/";
+ const MANIFEST_URL = "/excavator.webmanifest";
+ const PRIVACY_POLICY_PATH = "/company/privacy/";
+@@ -641,26 +641,26 @@ const CORE_ASSETS = [
+   "/static/js/role-readonly.js",
+   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
+   "/static/css/excavator-manual-loading-v1.css?v=4",
+-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263",
+-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263",
+-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263",
+-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263",
+-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263",
+-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263",
+-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v263",
++  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+   "/static/css/mobile-role-login-v1.css",
+-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263",
+-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263",
++  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
+   "/static/css/excavator-offline-v1.css?v=1",
+   "/static/css/native-app-update-v1.css",
+   "/static/favicon.ico",
+diff --git a/СИСТЕМА_MVP/backend/users/role_apps.py b/СИСТЕМА_MVP/backend/users/role_apps.py
+index d7c760f900b42fe296184f3ac8c5e3065586306a..0fe71f12c8256b4edb335f9008c7fa698900055e 100644
+--- a/СИСТЕМА_MVP/backend/users/role_apps.py
++++ b/СИСТЕМА_MVP/backend/users/role_apps.py
+@@ -237,7 +237,7 @@ ROLE_APPS = (
+         icon_slug='driver',
+         manifest_url='/driver.webmanifest',
+         service_worker_url='/driver-sw.js',
+-        shell_version='driver-mobile-shell-v367',
++        shell_version='driver-mobile-shell-v368',
+     ),
+     RoleApp(
+         role_code='excavator_operator',
+@@ -254,7 +254,7 @@ ROLE_APPS = (
+         icon_slug='excavator',
+         manifest_url='/excavator.webmanifest',
+         service_worker_url='/excavator-sw.js',
+-        shell_version='excavator-mobile-shell-v263',
++        shell_version='excavator-mobile-shell-v264',
+     ),
+     RoleApp(
+         role_code='mining_master',
+diff --git a/СИСТЕМА_MVP/backend/users/tests.py b/СИСТЕМА_MVP/backend/users/tests.py
+index 8e7d41f8979bf2077e348dabc23227d43ebfbdc2..358e7a9ef284527db0558c24b66bf2644a891157 100644
+--- a/СИСТЕМА_MVP/backend/users/tests.py
++++ b/СИСТЕМА_MVP/backend/users/tests.py
+@@ -511,19 +511,19 @@ class AccessLoginTests(TestCase):
+         self.assertContains(response, reverse('driver_manifest'))
+         self.assertContains(response, 'rel="manifest"')
+         self.assertContains(response, '/driver-sw.js')
+-        self.assertContains(response, 'driver-mobile-shell-v367')
++        self.assertContains(response, 'driver-mobile-shell-v368')
+         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
+         self.assertContains(
+             response,
+-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v367',
++            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v368',
+         )
+         self.assertContains(
+             response,
+-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v367',
++            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v368',
+         )
+         self.assertContains(
+             response,
+-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v367',
++            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v368',
+         )
+         self.assertContains(response, 'data-mobile-sound-profile="driver"')
+         self.assertIn('playDriverSound("truck_assigned")', driver_script())
+@@ -746,7 +746,7 @@ class AccessLoginTests(TestCase):
+ 
+         self.assertEqual(response.status_code, 200)
+         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
+-        self.assertIn('driver-mobile-shell-v367', script)
++        self.assertIn('driver-mobile-shell-v368', script)
+         self.assertIn(
+             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
+             script,
+@@ -3222,12 +3222,12 @@ class AccessLoginTests(TestCase):
+         self.assertContains(response, 'Бл. 55')
+         self.assertContains(response, 'data-driver-manual-result')
+         self.assertNotContains(response, 'рейс не создан')
+-        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v367')
+-        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v367')
+-        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v367')
+-        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v367')
+-        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v367')
+-        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v367')
++        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v368')
++        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v368')
++        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v368')
++        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v368')
++        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v368')
++        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v368')
+ 
+         active_trip = Trip.objects.create(
+             truck=truck,
+@@ -3860,7 +3860,7 @@ class AccessLoginTests(TestCase):
+         self.assertContains(driver_shift_response, 'ККД')
+         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
+         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
+-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v367')
++        self.assertContains(driver_shift_response, 'driver-mobile-shell-v368')
+ 
+     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
+         self.create_registered_driver_shift()
+diff --git a/СИСТЕМА_MVP/backend/users/views.py b/СИСТЕМА_MVP/backend/users/views.py
+index 96a701cec832bdc0c67f87407e5b2444cfd35027..6ea7f12e43b17378be6fc1388bad3c2b1146ee73 100644
+--- a/СИСТЕМА_MVP/backend/users/views.py
++++ b/СИСТЕМА_MVP/backend/users/views.py
+@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
+ ]
+ 
+ 
+-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v367'
++DRIVER_SHELL_VERSION = 'driver-mobile-shell-v368'
+ 
+ DRIVER_MANIFEST = {
+     'id': '/driver/',
+-- 
+2.54.0.windows.1
+

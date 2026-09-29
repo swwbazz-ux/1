@@ -1,0 +1,45 @@
+﻿commit f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+Merge: e5438f95 33ee7bb0
+Author:     Codex <codex@local>
+AuthorDate: Tue Sep 29 21:26:04 2026 +1000
+Commit:     Codex <codex@local>
+CommitDate: Tue Sep 29 21:26:04 2026 +1000
+
+    Интегрировать свежий release в S106-C2
+
+commit 33ee7bb09d99c651d95e5187b1c2593f51ae9607
+Author:     swwbazz-ux <swwbazz@gmail.com>
+AuthorDate: Tue Sep 29 21:19:47 2026 +1000
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Sep 29 21:19:47 2026 +1000
+
+    SSE-QA: encrypted installer control with host-key preflight (#130)
+    
+    Required CI and final CodeQL passed for ab1b1c85ef0ded124753a7e7b3ace7e9cf1f59e1. Source C2 and runtime pins remain unchanged. QA installation is not authorized by this merge.
+
+commit 5646570a8bb9ab103cae9d4973c8b25b45e4ce79
+Author:     swwbazz-ux <swwbazz@gmail.com>
+AuthorDate: Tue Sep 29 21:15:50 2026 +1000
+Commit:     GitHub <noreply@github.com>
+CommitDate: Tue Sep 29 21:15:50 2026 +1000
+
+    fix(dispatcher): keep inactive trucks above complex fill (#134)
+    
+    Dispatcher v164: keep inactive assigned truck tiles visually above the complex progress fill, preserve Driver v367, and update the CSS cascade audit baseline.
+
+commit e5438f95a5cd1aafe07a5121ae41dcbb5d99625d
+Author:     Codex <codex@local>
+AuthorDate: Tue Sep 29 20:51:06 2026 +1000
+Commit:     Codex <codex@local>
+CommitDate: Tue Sep 29 20:51:06 2026 +1000
+
+    S106-C2: согласовать повторную обработку полевых событий
+
+commit 1a169392d5dd1cefc5cfd0dabb081059eee88480
+Merge: 17cbb3e9 35d11e1f
+Author:     Codex <codex@local>
+AuthorDate: Tue Sep 29 07:50:31 2026 +1000
+Commit:     Codex <codex@local>
+CommitDate: Tue Sep 29 07:50:31 2026 +1000
+
+    Интегрировать release v367 в кандидат S106-C2

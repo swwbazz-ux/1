@@ -1,0 +1,66 @@
+﻿diff --git a/.github/workflows/nightly-quality.yml b/.github/workflows/nightly-quality.yml
+index 0b34d3c9..4d0bfe44 100644
+--- a/.github/workflows/nightly-quality.yml
++++ b/.github/workflows/nightly-quality.yml
+@@ -18,6 +18,16 @@ on:
+       - СИСТЕМА_MVP/backend/requirements.txt
+       - СИСТЕМА_MVP/backend/tools/validate_ci_test_matrix.py
+   workflow_dispatch:
++    inputs:
++      target_sha:
++        description: "Exact immutable commit SHA to verify"
++        required: true
++        type: string
++      s106_c2_only:
++        description: "Run only the S106-C2 PostgreSQL concurrency classes"
++        required: false
++        default: false
++        type: boolean
+   schedule:
+     - cron: "17 18 * * *"
+ 
+@@ -25,12 +35,16 @@ permissions:
+   contents: read
+ 
+ concurrency:
+-  group: full-nightly-quality
++  group: >-
++    ${{ github.event_name == 'workflow_dispatch' &&
++    format('full-nightly-quality-evidence-{0}', inputs.target_sha) ||
++    'full-nightly-quality' }}
+   cancel-in-progress: false
+ 
+ env:
+   QUALITY_TARGET_REF: >-
+-    ${{ github.event_name == 'pull_request' && github.sha ||
++    ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha ||
++    github.event_name == 'pull_request' && github.sha ||
+     github.event_name == 'push' && github.sha ||
+     'codex/github-production-deploy-20260916' }}
+   DJANGO_SECRET_KEY: ci-secret-key
+@@ -134,6 +148,7 @@ jobs:
+             --manifest ../../.github/ci/django-test-matrix.json
+ 
+       - name: Run the complete Django test suite sequentially
++        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.s106_c2_only }}
+         shell: bash
+         run: |
+           set -o pipefail
+@@ -151,6 +166,17 @@ jobs:
+               | tee artifacts/django-full-postgresql.log
+           fi
+ 
++      - name: Run the S106-C2 PostgreSQL concurrency classes
++        if: ${{ github.event_name == 'workflow_dispatch' && inputs.s106_c2_only }}
++        shell: bash
++        run: |
++          set -o pipefail
++          python manage.py test \
++            core.test_free_bucket_sync.FreeBucketPostgreSQLConcurrencyTests \
++            core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests \
++            --verbosity 2 2>&1 \
++            | tee artifacts/django-full-postgresql.log
++
+       - name: Build report-only coverage artifacts
+         if: always()
+         continue-on-error: true

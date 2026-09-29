@@ -1,0 +1,1 @@
+NOT_RUN: DJANGO_DB_ENGINE=postgres and an isolated PostgreSQL test database were unavailable locally.

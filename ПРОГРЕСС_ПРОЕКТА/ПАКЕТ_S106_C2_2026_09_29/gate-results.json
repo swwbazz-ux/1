@@ -1,0 +1,21 @@
+{
+  "candidate_sha": "f238aa51fbb80909d5e7f9e84e49b67f1ee5184e",
+  "local": {
+    "django_offline_and_free_bucket": {"tests": 175, "passed": 175, "failed": 0, "errors": 0, "skipped": 0},
+    "django_shell_versions": {"tests": 144, "passed": 144, "failed": 0, "errors": 0, "skipped": 0},
+    "backend_node": {"tests": 939, "passed": 938, "failed": 0, "skipped": 1},
+    "mobile_node": {"tests": 44, "passed": 44, "failed": 0, "skipped": 0},
+    "tools": {"tests": 44, "passed": 43, "failed": 0, "errors": 0, "skipped": 1}
+  },
+  "github_actions": {
+    "run_id": 36564441695,
+    "resolved_sha": "f238aa51fbb80909d5e7f9e84e49b67f1ee5184e",
+    "postgresql": {"tests": 9, "passed": 9, "failed": 0, "errors": 0, "skipped": 0, "conclusion": "success"},
+    "tools": {"tests": 44, "passed": 43, "failed": 0, "errors": 0, "skipped": 1, "conclusion": "success"},
+    "javascript_mobile": {"conclusion": "success"},
+    "android_all_debug_profiles": {"conclusion": "success"},
+    "summary": {"conclusion": "success"}
+  },
+  "not_run": ["local PostgreSQL", "physical phone/WebView", "production", "verify", "deploy"],
+  "known_gap": ["S106-T1"]
+}

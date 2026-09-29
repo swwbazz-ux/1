@@ -1,0 +1,72 @@
+candidate=f238aa51fbb80909d5e7f9e84e49b67f1ee5184e
+manifest duplicate groups:
+count=0
+runtime entries:
+core/offline_sync.py count=1
+static/js/driver-offline-outbox-v2.js count=1
+static/js/excavator-field-outbox-v1.js count=1
+templates/trips/excavator_work.html count=1
+trips/free_bucket.py count=1
+trips/views.py count=1
+users/role_apps.py count=1
+users/views.py count=1
+versions:
+driver v368
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\static\js\tests\driver-offline-template-contract.test.js:33:    assert.match(views, /DRIVER_SHELL_VERSION = 'driver-mobile-shell-v368'/);
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\static\js\tests\driver-offline-template-contract.test.js:50:    assert.match(roleApps, /shell_version='driver-mobile-shell-v368'/);
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\role_apps.py:240:        shell_version='driver-mobile-shell-v368',
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\views.py:286:DRIVER_SHELL_VERSION = 'driver-mobile-shell-v368'
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:514:        self.assertContains(response, 'driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:518:            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v368',
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:522:            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v368',
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:526:            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v368',
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:749:        self.assertIn('driver-mobile-shell-v368', script)
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3225:        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3226:        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3227:        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3228:        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3229:        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3230:        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v368')
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\tests.py:3863:        self.assertContains(driver_shift_response, 'driver-mobile-shell-v368')
+excavator v264
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\users\role_apps.py:257:        shell_version='excavator-mobile-shell-v264',
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:9:<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:10:<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:11:<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:12:<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:13:<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:14:<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:15:<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:16:<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:17:<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v264" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:18:<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:19:<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:20:<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:24:<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v264">
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:25:<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:26:<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:27:<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:28:<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:29:<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v264"></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:30:<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v264"></script>
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\templates\trips\excavator_work.html:400:var excavatorShellVersion = "excavator-mobile-shell-v264";
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:630:const CACHE_NAME = "excavator-mobile-shell-v264";
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:644:  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:645:  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:646:  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:647:  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:648:  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:649:  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:650:  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:652:  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:653:  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:654:  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:655:  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:656:  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:657:  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:658:  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:659:  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:660:  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:661:  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:662:  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
+C:\codex-tmp\s106-c2-integration-20260929\СИСТЕМА_MVP\backend\trips\views.py:663:  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
