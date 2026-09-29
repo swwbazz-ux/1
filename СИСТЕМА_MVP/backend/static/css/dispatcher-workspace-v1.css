@@ -4857,12 +4857,18 @@ body.management-dynamics-chart-modal-open {
 .dispatcher-excavator-garage-tile strong {
     position: absolute;
     left: 4px;
+    right: 14px;
     top: 4px;
     z-index: 2;
+    display: block;
+    min-width: 0;
     color: var(--gd-ink);
-    font-size: 12px;
+    font-size: clamp(10px, .68vw, 12px);
     font-weight: 900;
+    letter-spacing: -.02em;
     line-height: 1;
+    text-align: left;
+    white-space: nowrap;
 }
 
 .dispatcher-excavator-garage-tile span {
@@ -5406,13 +5412,13 @@ body.management-dynamics-chart-modal-open {
 
 .dispatcher-excavator-garage-tile .dispatcher-tile-plan-percent {
     position: absolute;
-    top: 3px;
-    right: 3px;
+    top: 17px;
+    right: 24px;
     z-index: 3;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    max-width: 52%;
+    max-width: calc(100% - 30px);
     min-height: 12px;
     padding: 1px 4px;
     border-radius: 4px;
