@@ -2719,6 +2719,16 @@ window.bindDriverMobileShell = function () {
             }).catch(function (error) {
                 if (form.isConnected) {
                     form.dataset.driverInPlacePending = "false";
+                    /* Открытие не записалось — форма снова в руках водителя: без
+                       этого признак отправки оставался и держал экран (opening_form). */
+                    form.dataset.driverShiftOpeningPending = "false";
+                    var failedOpenButton = form.querySelector("[data-driver-shift-open-button]");
+                    if (failedOpenButton) {
+                        failedOpenButton.disabled = false;
+                        failedOpenButton.classList.remove("is-pending");
+                        var failedOpenLabel = failedOpenButton.querySelector("[data-mobile-shift-label]");
+                        if (failedOpenLabel) failedOpenLabel.textContent = "Начать смену";
+                    }
                     var closeButton = form.querySelector("[data-driver-shift-close-button]");
                     if (closeButton) {
                         closeButton.disabled = false;

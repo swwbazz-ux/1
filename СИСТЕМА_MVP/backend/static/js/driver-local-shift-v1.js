@@ -134,6 +134,25 @@
                 return text(input.value) === "" || (typeof input.checkValidity === "function" && !input.checkValidity());
             });
         }
+        rebaseOpeningForm(form);
+    }
+
+    /* Подставленные телефоном показания — новая точка отсчёта формы открытия
+       (driver-shift-close-v1.js, bindDriverShiftOpeningForm): иначе любой
+       следующий input сравнивал их со старыми серверными и ставил «в наборе». */
+    function rebaseOpeningForm(form) {
+        if (typeof form.__driverShiftOpeningRebase === "function") {
+            try { form.__driverShiftOpeningRebase(); } catch (error) {}
+        }
+    }
+
+    /* Поле скрытой формы с фокусом держит клавиатуру и признак «водитель
+       вводит» (focus:input): форма скрыта — фокус с неё снимаем. */
+    function releaseFocus(form) {
+        var active = root.document && root.document.activeElement;
+        if (active && active !== form && typeof form.contains === "function" && form.contains(active) && typeof active.blur === "function") {
+            try { active.blur(); } catch (error) {}
+        }
     }
 
     /* Удержание «Начать смену» ставит форме признак отправки (pending), ввод
@@ -156,12 +175,16 @@
             var label = button.querySelector("[data-mobile-shift-label]");
             if (label) label.textContent = "Начать смену";
         }
+        releaseFocus(form);
+        rebaseOpeningForm(form);
     }
 
     /* То же для формы закрытия, когда смена закрыта: отправка завершена. */
     function clearClosingBusy(form) {
         form.dataset.driverInPlacePending = "false";
+        form.dataset.driverShiftDirty = "false";
         delete form.dataset.driverShiftHoldComplete;
+        releaseFocus(form);
         var button = form.querySelector("[data-driver-shift-close-button]");
         if (button) {
             button.disabled = false;

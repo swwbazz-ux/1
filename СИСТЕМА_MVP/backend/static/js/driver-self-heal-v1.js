@@ -69,13 +69,14 @@
     }
 
     function driverIsTypingIntoForm(shell) {
+        /* Скрытая форма — не набор (см. isDriverOperationalRefreshUnsafe). */
         var opening = shell.querySelector(".driver-shift-opening-form");
-        if (opening && (
+        if (opening && !opening.hidden && (
             opening.dataset.driverShiftOpeningDirty === "true"
             || opening.dataset.driverShiftOpeningPending === "true"
         )) return true;
         var closing = shell.querySelector("[data-driver-shift-close-form]");
-        return !!(closing && closing.dataset.driverShiftDirty === "true");
+        return !!(closing && !closing.hidden && closing.dataset.driverShiftDirty === "true");
     }
 
     /* Перезагрузка стирает то, что водитель уже выбрал в открытой шторке, но
