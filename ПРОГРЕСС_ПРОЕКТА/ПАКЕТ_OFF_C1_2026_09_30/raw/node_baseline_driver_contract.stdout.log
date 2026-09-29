@@ -1,0 +1,37 @@
+✔ drum card label and body get an explicit pixel width, not a percentage (1.485ms)
+✔ drum name size is pure CSS from the label container, not a JS measurement (11.0883ms)
+✔ line layout keeps every word whole and picks the split that gives the biggest name (1.444ms)
+✔ active-downtime timer is not tied to the reason-name tier and reads clearly on its own (0.2257ms)
+✔ the timer is pinned to the card's bottom edge and the text group is centered above it (0.931ms)
+✔ dump-point tiles in the change-point sheet match the excavator face-settings card look (0.7598ms)
+✔ dial label multiline width stays large — the loaded trip's dump point name is read for the whole trip (0.9374ms)
+✔ templates mark drum labels for JS fitting instead of classifying by character length (0.1896ms)
+✔ downtime link/halo blink color follows the active reason's status, not a hardcoded yellow (11.4524ms)
+✔ without an open shift, the top drum keeps its full three-card shape and outline instead of collapsing (0.3206ms)
+✔ the keyhole outline still finds the top drum's empty center card (0.582ms)
+✔ downtime drum front card is never highlighted yellow without an open shift (0.3688ms)
+✔ labels are laid out only when a card is built, never on spin, resize observers or font loads (12.5912ms)
+✔ the point card blinks with the outline from one shared ancestor animation, hard on/off (1.1181ms)
+✖ the swipe arrow is a fixed slot outside the card, sized from the real gap to the dial (1.056ms)
+✔ the shared outline is stationary: never recomputed while either drum is being dragged (0.6183ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 143.9865
+
+✖ failing tests:
+
+test at static\js\tests\driver-drum-readability-contract.test.js:253:1
+✖ the swipe arrow is a fixed slot outside the card, sized from the real gap to the dial (1.056ms)
+  TypeError: Cannot read properties of null (reading '0')
+      at TestContext.<anonymous> (C:\codex-tmp\off-c1-baseline-33ee7bb\СИСТЕМА_MVP\backend\static\js\tests\driver-drum-readability-contract.test.js:282:87)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7)

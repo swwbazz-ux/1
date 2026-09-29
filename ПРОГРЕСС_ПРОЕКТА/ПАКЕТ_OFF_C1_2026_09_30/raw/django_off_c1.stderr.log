@@ -1,0 +1,57 @@
+Creating test database for alias 'default'...
+
+........................offline_sync: accepted despite discrepancy (������ ������� ��������/loaded_trip_required) employee=2 role=7 � ���� ������� �������� ������ ����� �������� ���������. ������� ������ �� ������� ��������.
+...........offline_sync: accepted despite discrepancy (������ ��������/cancel_before_load) employee=1 role=6 � ������ ����� #1 �� 2026-09-29 15:57:18.814832+00:00 ������ ������� �������� (2026-09-29 15:57:23.814832+00:00). ������� �� ������� �������.
+...........offline_sync: accepted despite discrepancy (�������� ������������/assignment_context_changed) employee=1 role=6 � �������� �������� 21 �� ������ �������� (2026-09-29 15:57:27.528321+00:00) ������� �������� �� ������ ������������. �������� ��������� ������� ����� ��������� ���� (���� #1, ����� �����������), �������� ���������� ��������� �� ������ �� �������.
+.offline_sync: accepted despite discrepancy (������������ ������� �������/downtime_switch_before_start) employee=1 role=6 � �������� ����������� ������� ������� �� 2026-09-29 15:27:24.626506+00:00, ������ ������ �������� ������� #1 (2026-09-29 15:57:24.618517+00:00). ������� �� ������������ ������� ������ �������� �������.
+...offline_sync: event excavator-after-shift occurred_at=2026-09-29 15:02:24.817203+00:00 after shift 2 closed_at=2026-09-29 14:57:24.817203+00:00; accepted into shift history anyway
+.offline_sync: accepted despite discrepancy (�������� ������������/open_trip_changed) employee=1 role=6 � ���������� ������� �������� ��������� �������� 21 �� 2026-09-29 15:29:24.866081+00:00 ������ � ���������� ����� ������ #2 � ������ ������������ ���� #3, ����� �������� ��� ��������������������� �� ������ ������ #2. ����������� ���� #2 �� ������.
+.offline_sync: accepted despite discrepancy (�������� ������������/open_trip_changed) employee=1 role=6 � ���������� ������� �������� ��������� �������� 21 �� 2026-09-29 15:52:25.970923+00:00 �������� � ���� ��� ���������� ����� #1 � �� �� ��������, �������� ����������. ����� ���� �� ������, ����������� ���� #2 �� ������.
+.........offline_sync: accepted despite discrepancy (�������� ������������/assignment_context_changed) employee=1 role=6 � ��� ���� �������� 1/���������� 3 �� ������ �������� (2026-09-29 15:57:25.552109+00:00) �� ������� ������ �������� ����������. �������� ��������� �������, �������� ���������� #3 �� ����� ���� ��������.
+.offline_sync: accepted despite discrepancy (�������� ������������/assignment_context_changed) employee=1 role=6 � �������� �������� 21 �� ������ �������� (2026-09-29 15:57:25.634463+00:00) ������� �������� �� ������ ������������. �������� ��������� ������� ����� ��������� ���� (���� #1, ����� �����������), �������� ���������� ��������� �� ������ �� �������.
+.....offline_sync: accepted despite discrepancy (�������� ������������/open_trip_changed) employee=1 role=6 � �������� ������ �������� �������� 21, �� �������� ���� #1 �� ������� �� ������ � ��������� (#�). �������� �������, ������ ���� ������ ��� ��������������������� (uncontrolled), �������� ����, ��� ������.
+............offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 � ���� #1 ��� ������� �������� 2026-09-29T15:27:26.909601+00:00; �������� �������� 2026-09-29T15:18:26.909601+00:00 �������� �� �����
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 � ������ ���������� ����� #1 ������ �������� �������� 2026-09-29T15:18:26.909601+00:00; �������� �� �����: ���
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 � ������ ���������� ����� #1 ������ �������� �������� 2026-09-29T15:49:27.008486+00:00; �������� �� �����: ���
+offline_sync: accepted despite discrepancy (driver.trip.manual_completed/manual_complete_excavator_mismatch) employee=2 role=7 � ���� #1 ����������� #4, � ������� ���������� ���������� #3
+................................offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 � ���� #1 ��� ������� �������� 2026-09-29T15:27:30.032742+00:00; �������� �������� 2026-09-29T15:18:30.032742+00:00 �������� �� �����
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 � ������ ���������� ����� #1 ������ �������� �������� 2026-09-29T15:18:30.032742+00:00; �������� �� �����: ���
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 � ������ ���������� ����� #1 ������ �������� �������� 2026-09-29T15:49:30.133924+00:00; �������� �� �����: ����
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 � ������ ���������� ����� #1 ������ �������� �������� 2026-09-29T15:49:30.230565+00:00; �������� �� �����: ���
+..........................................................................................................................Internal Server Error: /excavator/truck-loaded/
+Traceback (most recent call last):
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\.venv\Lib\site-packages\django\core\handlers\exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\.venv\Lib\site-packages\django\core\handlers\base.py", line 198, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\.venv\Lib\site-packages\django\views\decorators\http.py", line 64, in inner
+    return func(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\backend\trips\views.py", line 4563, in excavator_truck_loaded_view
+    trip = create_loaded_waiting_unload_trip(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\backend\trips\trip_creation.py", line 197, in create_loaded_waiting_unload_trip
+    resolve_haul_handoffs_for_trip(trip)
+  File "C:\codex-tmp\off-c1-autonomous-shift-20260929\�������_MVP\backend\assignments\services.py", line 1485, in resolve_haul_handoffs_for_trip
+    _emit_assignment_changed(
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: forced rollback
+.............................................ssssssss
+----------------------------------------------------------------------
+Ran 289 tests in 23.573s
+
+OK (skipped=8)
+Destroying test database for alias 'default'...
+

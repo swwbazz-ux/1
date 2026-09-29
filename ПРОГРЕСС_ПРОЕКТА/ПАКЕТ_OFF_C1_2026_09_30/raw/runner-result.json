@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-29T15:57:54.433954+00:00",
+  "base_sha": "33ee7bb09d99c651d95e5187b1c2593f51ae9607",
+  "head_sha": "c05a59259c95e8e0e19ad316f7a1dc6eed3e45c3",
+  "product_root": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929",
+  "python": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\.venv\\Scripts\\python.exe",
+  "rendered_shell": "C:\\codex-tmp\\off-c1-evidence\\excavator-prepared-shell.html",
+  "rendered_shell_sha256": "DF9F177D00F7D543930482BCA209CDAAE93677A0412D805AE99684D3964100C3",
+  "database": "sqlite (PostgreSQL NOT_RUN)",
+  "android": "NOT_RUN",
+  "scope_ok": true,
+  "commands": [
+    {
+      "name": "node_off_c1",
+      "argv": [
+        "node",
+        "--test",
+        "static/js/tests/excavator-local-shift-v1.test.js",
+        "static/js/tests/excavator-manual-pickup.test.js",
+        "static/js/tests/trip-lost-response-runtime.test.js",
+        "static/js/tests/excavator-hourly-report-contract.test.js",
+        "static/js/tests/excavator-service-worker-update-runtime.test.js"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\backend",
+      "returncode": 0,
+      "stdout": "node_off_c1.stdout.log",
+      "stderr": "node_off_c1.stderr.log"
+    },
+    {
+      "name": "django_off_c1",
+      "argv": [
+        "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\.venv\\Scripts\\python.exe",
+        "manage.py",
+        "test",
+        "core.test_offline_sync",
+        "core.test_free_bucket_sync",
+        "core.test_offline_autonomous_shift",
+        "trips.test_excavator_hourly_report",
+        "trips.tests.ExcavatorWorkServerIntegrationTests",
+        "--verbosity",
+        "1"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\backend",
+      "returncode": 0,
+      "stdout": "django_off_c1.stdout.log",
+      "stderr": "django_off_c1.stderr.log"
+    },
+    {
+      "name": "django_check",
+      "argv": [
+        "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\.venv\\Scripts\\python.exe",
+        "manage.py",
+        "check"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\backend",
+      "returncode": 0,
+      "stdout": "django_check.stdout.log",
+      "stderr": "django_check.stderr.log"
+    },
+    {
+      "name": "django_migrations",
+      "argv": [
+        "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\.venv\\Scripts\\python.exe",
+        "manage.py",
+        "makemigrations",
+        "--check",
+        "--dry-run"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\backend",
+      "returncode": 0,
+      "stdout": "django_migrations.stdout.log",
+      "stderr": "django_migrations.stderr.log"
+    },
+    {
+      "name": "mobile_node",
+      "argv": [
+        "C:\\Program Files\\nodejs\\npm.cmd",
+        "test"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\mobile\\capacitor-shell",
+      "returncode": 0,
+      "stdout": "mobile_node.stdout.log",
+      "stderr": "mobile_node.stderr.log"
+    }
+  ],
+  "diagnostics_not_candidate_gates": [
+    {
+      "name": "node_full_candidate",
+      "argv": [
+        "node",
+        "--test",
+        "static/js/tests/*.test.js"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-autonomous-shift-20260929\\СИСТЕМА_MVP\\backend",
+      "returncode": 1,
+      "stdout": "node_full_candidate.stdout.log",
+      "stderr": "node_full_candidate.stderr.log"
+    },
+    {
+      "name": "node_baseline_driver_contract",
+      "argv": [
+        "node",
+        "--test",
+        "static/js/tests/driver-drum-readability-contract.test.js"
+      ],
+      "cwd": "C:\\codex-tmp\\off-c1-baseline-33ee7bb\\СИСТЕМА_MVP\\backend",
+      "returncode": 1,
+      "stdout": "node_baseline_driver_contract.stdout.log",
+      "stderr": "node_baseline_driver_contract.stderr.log"
+    }
+  ],
+  "ok": true
+}

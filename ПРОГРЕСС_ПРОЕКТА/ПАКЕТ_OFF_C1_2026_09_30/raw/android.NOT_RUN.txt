@@ -1,0 +1,1 @@
+NOT_RUN: pass --android only when ANDROID_HOME/ANDROID_SDK_ROOT points to an installed SDK.

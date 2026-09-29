@@ -1,0 +1,9 @@
+{
+  "duplicates": 0,
+  "migration_entries": [],
+  "required_runtime_counts": {
+    "СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js": 1,
+    "СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js": 1,
+    "СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py": 1
+  }
+}

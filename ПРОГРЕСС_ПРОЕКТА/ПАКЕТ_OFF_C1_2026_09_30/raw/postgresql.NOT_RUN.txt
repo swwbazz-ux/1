@@ -1,0 +1,1 @@
+NOT_RUN: use --postgres only with an isolated DJANGO_DB_ENGINE=postgres test database.

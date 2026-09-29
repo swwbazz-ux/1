@@ -1,0 +1,2758 @@
+diff --git a/.github/ci/django-test-matrix.json b/.github/ci/django-test-matrix.json
+index 75d77528..d3f14fe1 100644
+--- a/.github/ci/django-test-matrix.json
++++ b/.github/ci/django-test-matrix.json
+@@ -39,7 +39,7 @@
+   "postgresql": [
+     {
+       "name": "field-operations",
+-      "tests": "core.test_free_bucket_sync.FreeBucketPostgreSQLConcurrencyTests core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests core.test_postgresql_ready_core_post_smoke.PostgreSQLReadyCorePostSmokeTests downtimes.test_chaos_p01_005_postgresql.DowntimePostgreSQLConcurrencyRegressionTests shifts.test_chaos_p04_009_postgresql.ExcavatorConcurrentShiftStartPostgreSQLTests shifts.test_watch_period_linkage_postgresql.DriverWatchPeriodCatalogPostgreSQLTests trips.test_chaos_dispatcher_active_role.DispatcherActiveRolePostgreSQLConcurrencyTests trips.test_chaos_dispatcher_active_role.ExcavatorActiveRolePostgreSQLConcurrencyTests trips.test_chaos_trip_terminal_idempotency.TripTerminalPostgreSQLConcurrencyTests"
++      "tests": "core.test_free_bucket_sync.FreeBucketPostgreSQLConcurrencyTests core.test_offline_autonomous_shift.AutonomousExcavatorShiftPostgreSQLTests core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests core.test_postgresql_ready_core_post_smoke.PostgreSQLReadyCorePostSmokeTests downtimes.test_chaos_p01_005_postgresql.DowntimePostgreSQLConcurrencyRegressionTests shifts.test_chaos_p04_009_postgresql.ExcavatorConcurrentShiftStartPostgreSQLTests shifts.test_watch_period_linkage_postgresql.DriverWatchPeriodCatalogPostgreSQLTests trips.test_chaos_dispatcher_active_role.DispatcherActiveRolePostgreSQLConcurrencyTests trips.test_chaos_dispatcher_active_role.ExcavatorActiveRolePostgreSQLConcurrencyTests trips.test_chaos_trip_terminal_idempotency.TripTerminalPostgreSQLConcurrencyTests"
+     },
+     {
+       "name": "users-and-reports",
+diff --git a/.github/deploy/production-files.txt b/.github/deploy/production-files.txt
+index 89c31cd3..19f612a0 100644
+--- a/.github/deploy/production-files.txt
++++ b/.github/deploy/production-files.txt
+@@ -65,12 +65,15 @@
+ СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
+ СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+ СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
++СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
+ СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
++СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js
+ СИСТЕМА_MVP/backend/static/js/excavator-native-push-v1.js
+ СИСТЕМА_MVP/backend/static/js/excavator-truck-number-fit-v1.js
+ СИСТЕМА_MVP/backend/static/js/mobile-dial-actions-v1.js
+ СИСТЕМА_MVP/backend/templates/includes/mobile_dial_actions.html
+ СИСТЕМА_MVP/backend/trips/free_bucket.py
++СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py
+ СИСТЕМА_MVP/backend/trips/manual_loading.py
+ СИСТЕМА_MVP/backend/trips/models.py
+ СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
+diff --git a/СИСТЕМА_MVP/backend/core/offline_sync.py b/СИСТЕМА_MVP/backend/core/offline_sync.py
+index a3dff968..a936545d 100644
+--- a/СИСТЕМА_MVP/backend/core/offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/offline_sync.py
+@@ -47,6 +47,7 @@ def _log_discrepancy(*, access, code, process, description):
+ 
+ 
+ SUPPORTED_EVENT_ROLES = {
++    'excavator.shift.opened': 'excavator_operator',
+     'excavator.free_bucket.accepted': 'excavator_operator',
+     'excavator.free_bucket.cancelled': 'excavator_operator',
+     'excavator.free_bucket.loaded': 'excavator_operator',
+@@ -742,6 +743,12 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
+         'depends_on': depends_on,
+         'occurred_at': occurred_at,
+         'shift_id': raw_event.get('shift_id') or context_snapshot.get('shift_id'),
++        'local_shift_id': str(
++            raw_event.get('local_shift_id')
++            or payload.get('local_shift_id')
++            or context_snapshot.get('local_shift_id')
++            or ''
++        ).strip()[:128],
+         'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
+         'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
+         'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
+@@ -785,6 +792,14 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
+             or clock_unreliable
+         )
+     )
++    # Opening a local shift defines the time base for every later fact.  A
++    # quick online send is not evidence that the phone clock is wrong, so the
++    # generic ``sent_live`` shortcut must not move an opening to receipt time.
++    # An explicitly unreliable clock remains honest: the immutable device
++    # timestamp stays in the receipt, while the effective time is marked as a
++    # server-receipt fallback in the result.
++    if event_type == 'excavator.shift.opened':
++        normalized['clock_adjusted'] = bool(clock_unreliable)
+     if normalized['clock_adjusted']:
+         normalized['occurred_at'] = received_at
+     return normalized
+@@ -876,7 +891,27 @@ def _validate_claimed_context(access, normalized):
+ def _locked_shift(access, normalized, *, role_code):
+     from shifts.models import EmployeeShift
+ 
+-    shift_id = _positive_int(normalized['shift_id'], field='shift_id')
++    shift_id = _positive_int(normalized['shift_id'], field='shift_id', required=False)
++    if not shift_id and role_code == 'excavator_operator' and normalized.get('local_shift_id'):
++        source = (
++            OfflineFieldEvent.objects.select_for_update(of=('self',))
++            .filter(
++                event_id=normalized['local_shift_id'],
++                event_type='excavator.shift.opened',
++                actor=access.employee,
++                access=access,
++                role_code=role_code,
++                device_id=normalized['device_id'],
++            )
++            .first()
++        )
++        if not source or source.status != OfflineFieldEventStatus.ACCEPTED:
++            _retry('shift_reference_pending', 'Локальная смена ещё не сопоставлена с сервером.')
++        shift_id = source.shift_id or (source.result_payload or {}).get('server_ids', {}).get('shift_id')
++        if not shift_id:
++            _retry('shift_reference_pending', 'Квитанция открытия ещё не содержит ID смены.')
++    if not shift_id:
++        _invalid('shift_id_required', 'Не передана ссылка на смену.')
+     shift = (
+         EmployeeShift.objects.select_for_update(of=('self',))
+         .select_related('equipment', 'equipment__equipment_type')
+@@ -935,6 +970,67 @@ def _locked_shift(access, normalized, *, role_code):
+     return shift
+ 
+ 
++def _process_excavator_shift_opened(access, normalized):
++    from assignments.services import get_active_equipment_assignment, work_assignment_state
++    from shifts.models import EmployeeShift
++    from shifts.services import (
++        ExcavatorShiftError,
++        excavator_fuel_liters_from_percent,
++        open_excavator_shift,
++    )
++
++    local_shift_id = normalized.get('local_shift_id')
++    if not local_shift_id or local_shift_id != normalized['event_id']:
++        _invalid('local_shift_id_invalid', 'Локальный ID смены должен совпадать с ID открытия.')
++    assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
++    assignment_state = work_assignment_state(access.employee, assignment)
++    if assignment_state not in {'assigned', 'assignment_conflict'} or not assignment:
++        _conflict('assignment_not_available', 'Действующая расстановка машиниста не найдена.')
++    equipment_id = _positive_int(normalized['equipment_id'], field='equipment_id')
++    if assignment.equipment_id != equipment_id:
++        _conflict('equipment_context_changed', 'Техника локальной смены не совпадает с действующей расстановкой.')
++
++    payload = normalized['payload']
++    fuel_value = payload.get('fuel')
++    fuel_limit_override = None
++    if payload.get('fuel_percent') not in (None, ''):
++        fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
++            assignment.equipment,
++            payload.get('fuel_percent'),
++        )
++    try:
++        result = open_excavator_shift(
++            employee=access.employee,
++            equipment=assignment.equipment,
++            shift_type=assignment.shift_type,
++            fuel_value=fuel_value,
++            engine_hours_value=payload.get('engine_hours'),
++            client_action_id=normalized['event_id'],
++            fuel_limit_override=fuel_limit_override,
++            close_other_role_shift=False,
++            opened_at=normalized['occurred_at'],
++        )
++    except ExcavatorShiftError as error:
++        _conflict(
++            getattr(error, 'code', 'shift_open_failed'),
++            str(error),
++            details={
++                'field_errors': getattr(error, 'field_errors', {}),
++                **getattr(error, 'extra', {}),
++            },
++        )
++    shift = EmployeeShift.objects.select_related('equipment').get(pk=result['shift_id'])
++    return {
++        'server_ids': {'shift_id': shift.id, 'equipment_id': shift.equipment_id},
++        'version': result.get('version'),
++        'local_shift_id': local_shift_id,
++        'opened_at': shift.opened_at.isoformat(),
++        'device_occurred_at': normalized['device_occurred_at'].isoformat(),
++        'effective_occurred_at': normalized['occurred_at'].isoformat(),
++        'time_source': 'server_receipt' if normalized.get('clock_adjusted') else 'device',
++    }, {'shift': shift, 'equipment': shift.equipment}
++
++
+ def _resolve_trip_reference(access, normalized):
+     from trips.models import Trip
+ 
+@@ -2953,6 +3049,7 @@ def _process_shift_closed(access, normalized, *, role_code):
+ 
+ 
+ PROCESSORS = {
++    'excavator.shift.opened': _process_excavator_shift_opened,
+     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
+     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,
+     'excavator.free_bucket.loaded': _process_free_bucket_loaded,
+@@ -3050,6 +3147,16 @@ def _dependency_state(access, normalized):
+         if dependency.sequence >= normalized['sequence']:
+             _conflict('dependency_order_invalid', 'Зависимость должна иметь меньший номер порядка.')
+         if dependency.status != OfflineFieldEventStatus.ACCEPTED:
++            if (
++                normalized['role_code'] == 'excavator_operator'
++                and normalized.get('local_shift_id') == dependency.event_id
++                and dependency.event_type == 'excavator.shift.opened'
++            ):
++                # A disputed or not-yet-applied opening must never cascade into
++                # a terminal rejection of facts already kept by the phone.
++                # The child stays retryable until the opening is mapped or an
++                # explicit production policy resolves the shift conflict.
++                _retry('shift_reference_pending', 'Открытие локальной смены ещё не принято.')
+             if dependency.status == OfflineFieldEventStatus.RETRY:
+                 _retry('dependency_pending', 'Предыдущее событие ещё не принято.')
+             _conflict('dependency_rejected', 'Предыдущее событие требует сверки или отклонено.')
+diff --git a/СИСТЕМА_MVP/backend/core/test_offline_autonomous_shift.py b/СИСТЕМА_MVP/backend/core/test_offline_autonomous_shift.py
+new file mode 100644
+index 00000000..d31b62c0
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/core/test_offline_autonomous_shift.py
+@@ -0,0 +1,317 @@
++import json
++from concurrent.futures import ThreadPoolExecutor
++from datetime import timedelta
++
++from django.db import close_old_connections, connection
++from django.test import Client, TestCase, TransactionTestCase, skipUnlessDBFeature
++from django.urls import reverse
++from django.utils import timezone
++
++from assignments.models import AssignmentStatus, HaulAssignment
++from core.models import OfflineFieldEvent
++from shifts.models import EmployeeShift, ShiftClientAction
++from trips import tests as trip_fixtures
++from trips.models import Trip
++
++
++class AutonomousExcavatorShiftMixin:
++    create_registered_driver_shift = (
++        trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
++    )
++    create_driver_assignment = (
++        trip_fixtures.ExcavatorWorkServerIntegrationTests.create_driver_assignment
++    )
++
++    def prepare_fixture(self):
++        trip_fixtures.ExcavatorWorkServerIntegrationTests.setUp(self)
++        self.create_driver_assignment(self.truck, driver=self.driver, shift=self.truck_shift)
++        baseline = timezone.now() - timedelta(hours=1)
++        self.truck_shift.opened_at = baseline
++        self.truck_shift.save(update_fields=['opened_at'])
++        EmployeeShift.objects.filter(employee=self.operator).delete()
++        self.url = reverse('offline_events_sync')
++        self.haul_assignment = HaulAssignment.objects.get(
++            truck=self.truck,
++            excavator=self.excavator,
++            status=AssignmentStatus.ACCEPTED,
++        )
++        self.haul_assignment.assigned_at = baseline
++        self.haul_assignment.save(update_fields=['assigned_at'])
++
++    def opening(self, event_id='local-shift-1', sequence=1, occurred_at=None, **changes):
++        occurred_at = occurred_at or timezone.now() - timedelta(minutes=2)
++        event = {
++            'event_id': event_id,
++            'event_type': 'excavator.shift.opened',
++            'format_version': 1,
++            'actor_id': self.operator.id,
++            'access_id': self.access.id,
++            'role_code': 'excavator_operator',
++            'device_id': 'off-c1-device-001',
++            'local_shift_id': event_id,
++            'shift_id': 0,
++            'equipment_id': self.excavator.id,
++            'occurred_at': occurred_at.isoformat(),
++            'sequence': sequence,
++            'depends_on': [],
++            'payload': {
++                'local_shift_id': event_id,
++                'excavator_id': self.excavator.id,
++                'fuel_percent': '50',
++                'fuel': '3500',
++                'engine_hours': '1200',
++            },
++        }
++        event.update(changes)
++        return event
++
++    def load(self, opening, event_id='local-load-1', sequence=2, occurred_at=None, **changes):
++        occurred_at = occurred_at or timezone.now() - timedelta(minutes=1)
++        event = {
++            'event_id': event_id,
++            'event_type': 'excavator.trip.loaded',
++            'format_version': 1,
++            'actor_id': self.operator.id,
++            'access_id': self.access.id,
++            'role_code': 'excavator_operator',
++            'device_id': 'off-c1-device-001',
++            'local_shift_id': opening['local_shift_id'],
++            'shift_id': 0,
++            'equipment_id': self.excavator.id,
++            'local_trip_id': f'trip-{event_id}',
++            'occurred_at': occurred_at.isoformat(),
++            'sequence': sequence,
++            'depends_on': [opening['event_id']],
++            'payload': {
++                'local_shift_id': opening['local_shift_id'],
++                'truck_id': self.truck.id,
++                'assignment_id': self.haul_assignment.id,
++                'dump_point_id': self.dump_point.id,
++                'rock_type_id': self.rock.id,
++                'manual_control': True,
++                'loading_horizon': '125',
++                'loading_block': '4',
++            },
++        }
++        event.update(changes)
++        return event
++
++    def sync(self, events, *, client=None):
++        return (client or self.client).post(
++            self.url,
++            data=json.dumps({
++                'protocol_version': 1,
++                'actor_id': self.operator.id,
++                'access_id': self.access.id,
++                'role_code': 'excavator_operator',
++                'device_id': 'off-c1-device-001',
++                'events': events,
++            }),
++            content_type='application/json',
++        )
++
++
++class AutonomousExcavatorShiftTests(AutonomousExcavatorShiftMixin, TestCase):
++    def setUp(self):
++        self.prepare_fixture()
++
++    def test_open_and_child_preserve_local_identity_time_and_deduplicate(self):
++        opened_at = timezone.now() - timedelta(minutes=3)
++        loaded_at = opened_at + timedelta(minutes=1)
++        opening = self.opening(occurred_at=opened_at)
++        load = self.load(opening, occurred_at=loaded_at)
++
++        first = self.sync([load, opening])
++
++        self.assertEqual(first.status_code, 200, first.content)
++        by_id = {item['event_id']: item for item in first.json()['results']}
++        self.assertEqual(by_id[opening['event_id']]['status'], 'accepted')
++        self.assertEqual(by_id[load['event_id']]['status'], 'accepted', by_id[load['event_id']])
++        shift = EmployeeShift.objects.get(employee=self.operator)
++        trip = OfflineFieldEvent.objects.get(event_id=load['event_id']).trip
++        self.assertEqual(shift.opened_at, opened_at)
++        self.assertEqual(trip.loaded_at, loaded_at)
++        self.assertEqual(trip.loading_shift_id, shift.id)
++        self.assertEqual(by_id[opening['event_id']]['server_ids']['shift_id'], shift.id)
++
++        repeated = self.sync([opening, load])
++
++        self.assertEqual(repeated.status_code, 200, repeated.content)
++        self.assertEqual(EmployeeShift.objects.filter(employee=self.operator).count(), 1)
++        self.assertEqual(Trip.objects.count(), 1)
++        self.assertEqual(
++            ShiftClientAction.objects.filter(
++                action_type='excavator_shift_opened',
++                client_action_id=opening['event_id'],
++            ).count(),
++            1,
++        )
++
++    def test_child_received_before_opening_retries_then_links_automatically(self):
++        opening = self.opening()
++        load = self.load(opening)
++
++        child_first = self.sync([load]).json()['results'][0]
++        self.assertEqual(child_first['status'], 'retry')
++        self.assertEqual(child_first['code'], 'dependency_pending')
++        self.assertEqual(Trip.objects.count(), 0)
++
++        self.assertEqual(self.sync([opening]).json()['results'][0]['status'], 'accepted')
++        replayed = self.sync([load]).json()['results'][0]
++
++        self.assertEqual(replayed['status'], 'accepted', replayed)
++        self.assertEqual(Trip.objects.count(), 1)
++        receipt = OfflineFieldEvent.objects.get(event_id=load['event_id'])
++        self.assertEqual(receipt.shift_id, EmployeeShift.objects.get(employee=self.operator).id)
++
++    def test_incompatible_repeat_keeps_original_opening(self):
++        opening = self.opening()
++        accepted = self.sync([opening]).json()['results'][0]
++        changed = json.loads(json.dumps(opening))
++        changed['payload']['engine_hours'] = '1300'
++
++        conflict = self.sync([changed]).json()['results'][0]
++
++        self.assertEqual(accepted['status'], 'accepted')
++        self.assertEqual(conflict['status'], 'conflict')
++        self.assertEqual(conflict['code'], 'event_id_reused')
++        self.assertEqual(EmployeeShift.objects.get(employee=self.operator).start_engine_hours, 1200)
++
++    def test_opening_rejects_foreign_identity_device_and_equipment_without_mutation(self):
++        cases = (
++            ('actor', {'actor_id': self.driver.id}, 'actor_context_changed'),
++            ('device', {'device_id': 'foreign-device'}, 'device_context_changed'),
++            ('equipment', {'equipment_id': self.truck.id}, 'equipment_context_changed'),
++        )
++        for index, (label, changes, expected_code) in enumerate(cases, start=1):
++            with self.subTest(label=label):
++                event = self.opening(f'foreign-{label}', sequence=index, **changes)
++                result = self.sync([event]).json()['results'][0]
++                self.assertEqual(result['status'], 'conflict', result)
++                self.assertEqual(result['code'], expected_code, result)
++                self.assertEqual(EmployeeShift.objects.filter(employee=self.operator).count(), 0)
++
++    def test_conflicting_server_shift_keeps_child_retryable_without_cascade(self):
++        other = self.driver
++        self.truck_shift.closed_at = timezone.now()
++        self.truck_shift.save(update_fields=['closed_at'])
++        EmployeeShift.objects.create(
++            employee=other,
++            equipment=self.excavator,
++            shift_type='day',
++            workplace_code='excavator_operator',
++            opened_at=timezone.now() - timedelta(minutes=5),
++        )
++        opening = self.opening()
++        load = self.load(opening)
++
++        open_result = self.sync([opening]).json()['results'][0]
++        child_result = self.sync([load]).json()['results'][0]
++
++        self.assertEqual(open_result['status'], 'conflict')
++        self.assertEqual(open_result['code'], 'equipment_shift_already_open')
++        self.assertEqual(child_result['status'], 'retry')
++        self.assertEqual(child_result['code'], 'shift_reference_pending')
++        self.assertEqual(Trip.objects.count(), 0)
++        self.assertTrue(OfflineFieldEvent.objects.filter(event_id=load['event_id']).exists())
++
++    def test_future_clock_is_explicit_conflict_but_declared_unreliable_uses_receipt(self):
++        future = timezone.now() + timedelta(minutes=10)
++        disputed = self.opening('local-shift-future', occurred_at=future)
++        disputed_result = self.sync([disputed]).json()['results'][0]
++        self.assertEqual(disputed_result['status'], 'conflict')
++        self.assertEqual(disputed_result['code'], 'device_clock_ahead')
++
++        fallback = self.opening('local-shift-fallback', sequence=2, occurred_at=future)
++        fallback['clock_unreliable'] = True
++        fallback_result = self.sync([fallback]).json()['results'][0]
++
++        self.assertEqual(fallback_result['status'], 'accepted')
++        self.assertTrue(fallback_result['device_clock_adjusted'])
++        self.assertEqual(fallback_result['time_source'], 'server_receipt')
++        receipt = OfflineFieldEvent.objects.get(event_id=fallback['event_id'])
++        self.assertEqual(receipt.occurred_at, future)
++        self.assertEqual(receipt.shift.opened_at, receipt.received_at)
++
++    def test_close_then_next_local_open_maps_to_two_distinct_server_shifts(self):
++        first_at = timezone.now() - timedelta(minutes=8)
++        close_at = first_at + timedelta(minutes=3)
++        second_at = close_at + timedelta(minutes=1)
++        first = self.opening('local-shift-first', sequence=1, occurred_at=first_at)
++        close = {
++            'event_id': 'local-shift-first-close',
++            'event_type': 'excavator.shift.closed',
++            'format_version': 1,
++            'actor_id': self.operator.id,
++            'access_id': self.access.id,
++            'role_code': 'excavator_operator',
++            'device_id': 'off-c1-device-001',
++            'local_shift_id': first['local_shift_id'],
++            'shift_id': 0,
++            'equipment_id': self.excavator.id,
++            'occurred_at': close_at.isoformat(),
++            'sequence': 2,
++            'depends_on': [first['event_id']],
++            'payload': {
++                'local_shift_id': first['local_shift_id'],
++                'excavator_id': self.excavator.id,
++                'fuel_percent': '50',
++                'fuel': '3500',
++                'engine_hours': '1200',
++            },
++        }
++        second = self.opening('local-shift-second', sequence=3, occurred_at=second_at)
++        second['depends_on'] = [close['event_id']]
++
++        response = self.sync([second, close, first])
++
++        self.assertEqual(response.status_code, 200, response.content)
++        by_id = {item['event_id']: item for item in response.json()['results']}
++        self.assertEqual(by_id[first['event_id']]['status'], 'accepted', by_id)
++        self.assertEqual(by_id[close['event_id']]['status'], 'accepted', by_id)
++        self.assertEqual(by_id[second['event_id']]['status'], 'accepted', by_id)
++        shifts = list(EmployeeShift.objects.filter(employee=self.operator).order_by('opened_at'))
++        self.assertEqual(len(shifts), 2)
++        self.assertEqual(shifts[0].opened_at, first_at)
++        self.assertEqual(shifts[0].closed_at, close_at)
++        self.assertEqual(shifts[1].opened_at, second_at)
++        self.assertIsNone(shifts[1].closed_at)
++        self.assertNotEqual(
++            by_id[first['event_id']]['server_ids']['shift_id'],
++            by_id[second['event_id']]['server_ids']['shift_id'],
++        )
++
++
++@skipUnlessDBFeature('has_select_for_update')
++class AutonomousExcavatorShiftPostgreSQLTests(AutonomousExcavatorShiftMixin, TransactionTestCase):
++    reset_sequences = True
++
++    def setUp(self):
++        self.prepare_fixture()
++
++    def test_concurrent_same_opening_creates_one_shift_and_mapping(self):
++        if connection.vendor != 'postgresql':
++            self.skipTest('PostgreSQL is required for real row-lock concurrency.')
++        opening = self.opening()
++
++        def send():
++            close_old_connections()
++            client = Client()
++            session = client.session
++            session['employee_access_id'] = self.access.id
++            session.save()
++            try:
++                return self.sync([opening], client=client).json()['results'][0]
++            finally:
++                close_old_connections()
++
++        with ThreadPoolExecutor(max_workers=2) as executor:
++            results = list(executor.map(lambda _: send(), range(2)))
++
++        self.assertTrue(all(item['status'] in {'accepted', 'deduplicated'} for item in results), results)
++        self.assertEqual(EmployeeShift.objects.filter(employee=self.operator).count(), 1)
++        self.assertEqual(OfflineFieldEvent.objects.filter(event_id=opening['event_id']).count(), 1)
++        self.assertEqual(
++            ShiftClientAction.objects.filter(client_action_id=opening['event_id']).count(),
++            1,
++        )
+diff --git a/СИСТЕМА_MVP/backend/shifts/services.py b/СИСТЕМА_MVP/backend/shifts/services.py
+index 7fe1b862..1e562ee6 100644
+--- a/СИСТЕМА_MVP/backend/shifts/services.py
++++ b/СИСТЕМА_MVP/backend/shifts/services.py
+@@ -1827,6 +1827,7 @@ def _open_excavator_shift_atomic(
+     client_action_id,
+     fuel_limit_override=None,
+     close_other_role_shift=False,
++    opened_at=None,
+ ):
+     from references.models import Equipment
+ 
+@@ -1906,6 +1907,7 @@ def _open_excavator_shift_atomic(
+         .order_by('-closed_at', '-opened_at')
+         .first()
+     )
++    effective_opened_at = opened_at or timezone.now()
+     shift = EmployeeShift.objects.create(
+         employee=employee,
+         equipment=equipment,
+@@ -1914,7 +1916,7 @@ def _open_excavator_shift_atomic(
+         start_fuel=fuel,
+         start_mileage=None,
+         start_engine_hours=engine_hours,
+-        opened_at=timezone.now(),
++        opened_at=effective_opened_at,
+         opened_by=employee,
+     )
+     shift_progress = assign_shift_plan_snapshot(shift)
+@@ -2001,6 +2003,7 @@ def open_excavator_shift(
+     client_action_id,
+     fuel_limit_override=None,
+     close_other_role_shift=False,
++    opened_at=None,
+ ):
+     try:
+         return _open_excavator_shift_atomic(
+@@ -2012,6 +2015,7 @@ def open_excavator_shift(
+             client_action_id=client_action_id,
+             fuel_limit_override=fuel_limit_override,
+             close_other_role_shift=close_other_role_shift,
++            opened_at=opened_at,
+         )
+     except IntegrityError as error:
+         existing = existing_shift_action_payload(
+diff --git a/СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js b/СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
+index 5952584a..18f37a6f 100644
+--- a/СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
++++ b/СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
+@@ -93,10 +93,15 @@
+         interval.dateTime = period.start || "";
+         headingText.appendChild(interval);
+         heading.appendChild(headingText);
++        var volume = hour.totals && hour.totals.volume_m3;
++        var totalLabel = classifiedTotal + " " + tripWord(classifiedTotal);
++        if (volume !== null && volume !== undefined && volume !== "") {
++            totalLabel += " · " + Number(volume).toLocaleString("ru-RU", {maximumFractionDigits: 2}) + " м³";
++        }
+         heading.appendChild(element(
+             "span",
+             "eo-hourly-report__hour-total",
+-            classifiedTotal + " " + tripWord(classifiedTotal)
++            totalLabel
+         ));
+         block.appendChild(heading);
+ 
+@@ -184,12 +189,18 @@
+             content.appendChild(element(
+                 "p",
+                 "eo-hourly-report__note",
+-                "Локально сохранённые, но ещё не синхронизированные погрузки появятся после подтверждения сервера."
++                "В отчёт включены факты, устойчиво сохранённые на этом телефоне."
+             ));
+         }
+         scheduleHourRefresh(payload);
+     }
+ 
++    function withLocalProjection(payload) {
++        var ledger = window.eoExcavatorLocalShiftLedger;
++        if (!ledger || typeof ledger.hourlyReport !== "function") return Promise.resolve(payload);
++        return ledger.hourlyReport(payload || null, Date.now());
++    }
++
+     function scheduleHourRefresh(payload) {
+         window.clearTimeout(hourTimer);
+         hourTimer = 0;
+@@ -241,23 +252,27 @@
+                 throw new Error("Получена несовместимая версия почасового отчёта");
+             }
+             safeCacheWrite(payload);
+-            renderPayload(payload, false);
+-            modal.dataset.eoHourlyState = "ready";
+-            return true;
++            return withLocalProjection(payload).then(function (projected) {
++                renderPayload(projected, false);
++                modal.dataset.eoHourlyState = "ready";
++                return true;
++            });
+         }).catch(function (error) {
+             if (error && error.name === "AbortError") return false;
+             if (generation !== requestGeneration || modal.hidden) return false;
+             var cached = safeCacheRead();
+-            if (cached) {
+-                renderPayload(cached, true);
+-                modal.dataset.eoHourlyState = "offline";
+-            } else {
+-                renderState(navigator.onLine === false
+-                    ? "Нет связи. Сохранённого отчёта пока нет."
+-                    : (error.message || "Почасовой отчёт временно недоступен"));
+-                modal.dataset.eoHourlyState = "error";
+-            }
+-            return false;
++            return withLocalProjection(cached).then(function (projected) {
++                if (projected) {
++                    renderPayload(projected, true);
++                    modal.dataset.eoHourlyState = "offline";
++                } else {
++                    renderState(navigator.onLine === false
++                        ? "Нет связи. Местный журнал недоступен."
++                        : (error.message || "Почасовой отчёт временно недоступен"));
++                    modal.dataset.eoHourlyState = "error";
++                }
++                return false;
++            });
+         }).finally(function () {
+             if (generation === requestGeneration) {
+                 modal.dataset.eoHourlyLoading = "false";
+@@ -345,8 +360,10 @@
+         setUnderlyingBlocked(true);
+         bindOpenLifecycle();
+         var cached = safeCacheRead();
+-        if (cached) renderPayload(cached, navigator.onLine === false);
+-        else renderState("Загружаем рейсы…");
++        renderState("Загружаем рейсы…");
++        withLocalProjection(cached).then(function (projected) {
++            if (projected && modal && !modal.hidden) renderPayload(projected, navigator.onLine === false);
++        });
+         if (!(history.state && history.state[OPEN_STATE_KEY])) {
+             var state = Object.assign({}, history.state || {});
+             state[OPEN_STATE_KEY] = true;
+diff --git a/СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js b/СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js
+new file mode 100644
+index 00000000..a9d4b4fa
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js
+@@ -0,0 +1,603 @@
++(function (root) {
++    "use strict";
++
++    var DB_NAME = "copper-excavator-local-shifts-v1";
++    var DB_VERSION = 1;
++    var STORE_NAME = "states";
++    var STORAGE_PREFIX = "excavator-local-shift-v1:";
++    var LOAD_TYPES = ["excavator.trip.loaded", "excavator.free_bucket.loaded"];
++
++    function clone(value) {
++        return JSON.parse(JSON.stringify(value));
++    }
++
++    function canonical(value) {
++        if (Array.isArray(value)) return value.map(canonical);
++        if (value && typeof value === "object") {
++            return Object.keys(value).sort().reduce(function (result, key) {
++                if (typeof value[key] !== "undefined") result[key] = canonical(value[key]);
++                return result;
++            }, {});
++        }
++        return value;
++    }
++
++    function sameEvent(left, right) {
++        return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
++    }
++
++    function requestPromise(request) {
++        return new Promise(function (resolve, reject) {
++            request.onsuccess = function () { resolve(request.result); };
++            request.onerror = function () { reject(request.error || new Error("IndexedDB unavailable")); };
++        });
++    }
++
++    function indexedAdapter(indexedDB, storageId) {
++        var dbPromise = new Promise(function (resolve, reject) {
++            var request;
++            try { request = indexedDB.open(DB_NAME, DB_VERSION); } catch (error) { reject(error); return; }
++            request.onupgradeneeded = function () {
++                if (!request.result.objectStoreNames.contains(STORE_NAME)) {
++                    request.result.createObjectStore(STORE_NAME, {keyPath: "storage_id"});
++                }
++            };
++            request.onsuccess = function () { resolve(request.result); };
++            request.onerror = function () { reject(request.error || new Error("IndexedDB unavailable")); };
++        });
++
++        function transaction(mode, operation) {
++            return dbPromise.then(function (db) {
++                return new Promise(function (resolve, reject) {
++                    var tx;
++                    try { tx = db.transaction(STORE_NAME, mode); } catch (error) { reject(error); return; }
++                    var result;
++                    try { result = operation(tx.objectStore(STORE_NAME)); } catch (error) { reject(error); return; }
++                    tx.oncomplete = function () { resolve(result); };
++                    tx.onerror = function () { reject(tx.error || new Error("IndexedDB write failed")); };
++                    tx.onabort = function () { reject(tx.error || new Error("IndexedDB write aborted")); };
++                });
++            });
++        }
++
++        return {
++            kind: "indexedDB",
++            read: function () {
++                return dbPromise.then(function (db) {
++                    return requestPromise(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(storageId));
++                }).then(function (row) { return row ? clone(row.state) : null; });
++            },
++            write: function (state) {
++                return transaction("readwrite", function (store) {
++                    store.put({storage_id: storageId, state: clone(state)});
++                });
++            }
++        };
++    }
++
++    function localStorageAdapter(storage, storageId) {
++        if (!storage) throw new Error("localStorage unavailable");
++        var key = STORAGE_PREFIX + storageId;
++        return {
++            kind: "localStorage",
++            read: function () {
++                return Promise.resolve().then(function () {
++                    var raw = storage.getItem(key);
++                    return raw ? JSON.parse(raw) : null;
++                });
++            },
++            write: function (state) {
++                return Promise.resolve().then(function () {
++                    storage.setItem(key, JSON.stringify(state));
++                });
++            }
++        };
++    }
++
++    function createStorage(options, storageId) {
++        if (options.adapter) return Promise.resolve(options.adapter);
++        var fallback;
++        try { fallback = localStorageAdapter(options.localStorage, storageId); } catch (error) { fallback = null; }
++        if (!options.indexedDB) {
++            if (!fallback) return Promise.reject(new Error("Локальное хранилище недоступно."));
++            return fallback.read().then(function () { return fallback; }).catch(function () {
++                throw new Error("Локальное хранилище недоступно.");
++            });
++        }
++        var indexed = indexedAdapter(options.indexedDB, storageId);
++        return indexed.read().then(function () {
++            if (!fallback) return indexed;
++            return {
++                kind: "indexedDB+localStorage-fallback",
++                read: function () {
++                    return Promise.allSettled([indexed.read(), fallback.read()]).then(function (results) {
++                        var values = results.filter(function (result) {
++                            return result.status === "fulfilled" && result.value;
++                        }).map(function (result) { return result.value; });
++                        if (!values.length) return null;
++                        values.sort(function (left, right) {
++                            return Date.parse(right.updated_at || "") - Date.parse(left.updated_at || "");
++                        });
++                        return clone(values[0]);
++                    });
++                },
++                write: function (state) {
++                    return Promise.allSettled([
++                        indexed.write(state),
++                        fallback.write(state)
++                    ]).then(function (results) {
++                        if (results.some(function (result) { return result.status === "fulfilled"; })) return;
++                        throw new Error("Локальное хранилище недоступно.");
++                    });
++                }
++            };
++        }).catch(function () {
++            if (!fallback) throw new Error("Локальное хранилище недоступно.");
++            return fallback.read().then(function () { return fallback; }).catch(function () {
++                throw new Error("Локальное хранилище недоступно.");
++            });
++        });
++    }
++
++    function emptyState(identity) {
++        return {
++            schema_version: 1,
++            identity: clone(identity),
++            current_local_shift_id: "",
++            shifts: []
++        };
++    }
++
++    function eventLocalShiftId(event) {
++        return String(event && (event.local_shift_id || (event.payload || {}).local_shift_id) || "");
++    }
++
++    function findShift(state, localShiftId) {
++        return (state.shifts || []).find(function (shift) {
++            return String(shift.local_shift_id) === String(localShiftId || "");
++        }) || null;
++    }
++
++    function eventEntry(shift, eventId) {
++        return (shift.events || []).find(function (entry) {
++            return String(entry.event && entry.event.event_id || "") === String(eventId || "");
++        }) || null;
++    }
++
++    function volumeNumber(value) {
++        if (value === null || value === undefined || value === "") return null;
++        var parsed = Number(String(value).replace(",", "."));
++        return Number.isFinite(parsed) ? parsed : null;
++    }
++
++    function loadFacts(shift) {
++        var cancelled = {};
++        (shift.events || []).forEach(function (entry) {
++            if (!entry || !entry.event || entry.event.event_type !== "excavator.trip.loaded.cancelled") return;
++            var payload = entry.event.payload || {};
++            [payload.source_load_event_id, payload.load_event_id, payload.local_trip_id, entry.event.local_trip_id]
++                .filter(Boolean).forEach(function (value) { cancelled[String(value)] = true; });
++        });
++        return (shift.events || []).filter(function (entry) {
++            return entry && entry.event && LOAD_TYPES.indexOf(entry.event.event_type) >= 0;
++        }).map(function (entry) {
++            var event = entry.event;
++            var payload = event.payload || {};
++            return {
++                event_id: event.event_id,
++                local_trip_id: event.local_trip_id || payload.local_trip_id || "",
++                occurred_at: event.occurred_at,
++                truck_id: payload.truck_id || null,
++                truck_number: payload.truck_number || "",
++                fleet_code: payload.local_fleet_code || "unknown",
++                dump_point_id: payload.dump_point_id || null,
++                dump_point: payload.dump_point_name || "Точка не определена",
++                volume_m3: volumeNumber(payload.local_volume_m3),
++                server_trip_id: entry.server_ids && entry.server_ids.trip_id || null,
++                cancelled: Boolean(cancelled[String(event.event_id)] || cancelled[String(event.local_trip_id || "")])
++            };
++        });
++    }
++
++    function twoDigits(value) {
++        return String(value).padStart(2, "0");
++    }
++
++    function localHourPayload(code, title, start, end) {
++        return {
++            code: code,
++            title: title,
++            period: {
++                start: start.toISOString(),
++                end: end.toISOString(),
++                label: twoDigits(start.getHours()) + ":00–" + twoDigits(end.getHours()) + ":00"
++            },
++            rows: [],
++            totals: {belaz: 0, nhl: 0, trip_count: 0, volume_m3: 0},
++            source_trip_count: 0,
++            source_trip_ids: [],
++            unclassified_trip_count: 0,
++            unknown_volume_trip_count: 0,
++            is_empty: true
++        };
++    }
++
++    function emptyHourlyReport(shift, capturedAt) {
++        var now = new Date(capturedAt || Date.now());
++        var currentStart = new Date(now.getTime());
++        currentStart.setMinutes(0, 0, 0);
++        var previousStart = new Date(currentStart.getTime() - 3600000);
++        return {
++            schema_version: 2,
++            generated_at: now.toISOString(),
++            freshness_label: "Данные на " + twoDigits(now.getHours()) + ":" + twoDigits(now.getMinutes()),
++            excavator: {id: shift ? shift.equipment_id : null, name: "Экскаватор"},
++            work_date: now.toLocaleDateString("ru-RU", {day: "numeric", month: "long"}),
++            hours: [
++                localHourPayload("current", "Текущий час", currentStart, now),
++                localHourPayload("previous", "Предыдущий час", previousStart, currentStart)
++            ],
++            data_quality: {unclassified_trip_count: 0, unknown_dump_point_trip_count: 0, complete: true}
++        };
++    }
++
++    function mergeFact(hour, fact, direction) {
++        var fleet = fact.fleet_code === "belaz" || fact.fleet_code === "nhl" ? fact.fleet_code : "unknown";
++        hour.source_trip_count = Math.max(0, Number(hour.source_trip_count || 0) + direction);
++        hour.is_empty = hour.source_trip_count === 0;
++        hour.totals = hour.totals || {belaz: 0, nhl: 0, trip_count: 0};
++        if (fleet === "unknown") {
++            hour.unclassified_trip_count = Math.max(0, Number(hour.unclassified_trip_count || 0) + direction);
++        } else {
++            var pointId = fact.dump_point_id === null || fact.dump_point_id === "" ? null : Number(fact.dump_point_id);
++            var row = (hour.rows || []).find(function (item) {
++                return String(item.dump_point_id || "") === String(pointId || "");
++            });
++            if (!row && direction > 0) {
++                row = {dump_point_id: pointId, dump_point: fact.dump_point, belaz: 0, nhl: 0};
++                hour.rows.push(row);
++            }
++            if (row) {
++                row[fleet] = Math.max(0, Number(row[fleet] || 0) + direction);
++                if (!row.belaz && !row.nhl) hour.rows = hour.rows.filter(function (item) { return item !== row; });
++            }
++            hour.totals[fleet] = Math.max(0, Number(hour.totals[fleet] || 0) + direction);
++            hour.totals.trip_count = Math.max(0, Number(hour.totals.trip_count || 0) + direction);
++        }
++        var volume = volumeNumber(fact.volume_m3);
++        if (volume === null) {
++            hour.unknown_volume_trip_count = Math.max(0, Number(hour.unknown_volume_trip_count || 0) + direction);
++        } else {
++            hour.totals.volume_m3 = Math.max(0, Number(hour.totals.volume_m3 || 0) + (direction * volume));
++        }
++    }
++
++    function mergeHourlyReport(serverPayload, shift, facts, capturedAt) {
++        var payload = serverPayload && serverPayload.schema_version === 2
++            ? clone(serverPayload)
++            : emptyHourlyReport(shift, capturedAt);
++        var covered = {};
++        (payload.hours || []).forEach(function (hour) {
++            hour.rows = Array.isArray(hour.rows) ? hour.rows : [];
++            (hour.source_trip_ids || []).forEach(function (id) { covered[String(id)] = hour; });
++        });
++        (facts || []).forEach(function (fact) {
++            var coveredHour = fact.server_trip_id ? covered[String(fact.server_trip_id)] : null;
++            if (coveredHour) {
++                if (fact.cancelled) mergeFact(coveredHour, fact, -1);
++                return;
++            }
++            if (fact.cancelled) return;
++            var occurred = Date.parse(fact.occurred_at || "");
++            var hour = (payload.hours || []).find(function (candidate) {
++                var start = Date.parse(candidate.period && candidate.period.start || "");
++                var end = Date.parse(candidate.period && candidate.period.end || "");
++                return Number.isFinite(occurred) && occurred >= start && occurred < end;
++            });
++            if (hour) mergeFact(hour, fact, 1);
++        });
++        payload.local_projection = {
++            local_shift_id: shift ? shift.local_shift_id : "",
++            retained_event_count: facts ? facts.length : 0,
++            generated_at: new Date(capturedAt || Date.now()).toISOString()
++        };
++        return payload;
++    }
++
++    function mergeShiftSummary(serverProjection, shift) {
++        var projection = serverProjection || {};
++        var covered = {};
++        (projection.source_trip_ids || []).forEach(function (id) { covered[String(id)] = true; });
++        var result = {
++            trip_count: Math.max(0, Number(projection.trip_count || 0)),
++            volume_m3: Math.max(0, Number(projection.volume_m3 || 0)),
++            unknown_volume_trip_count: 0,
++            local_shift_id: shift ? shift.local_shift_id : ""
++        };
++        (shift ? loadFacts(shift) : []).forEach(function (fact) {
++            var isCovered = fact.server_trip_id && covered[String(fact.server_trip_id)];
++            var direction = fact.cancelled ? -1 : 1;
++            if (!isCovered && fact.cancelled) return;
++            if (isCovered && !fact.cancelled) return;
++            result.trip_count = Math.max(0, result.trip_count + direction);
++            var volume = volumeNumber(fact.volume_m3);
++            if (volume === null) {
++                result.unknown_volume_trip_count = Math.max(
++                    0,
++                    result.unknown_volume_trip_count + direction
++                );
++            } else {
++                result.volume_m3 = Math.max(0, result.volume_m3 + (direction * volume));
++            }
++        });
++        return result;
++    }
++
++    function createLedger(options) {
++        options = options || {};
++        var identity = {
++            access_id: Number(options.accessId || 0),
++            actor_id: Number(options.actorId || 0),
++            role_code: String(options.roleCode || "excavator_operator"),
++            device_id: String(options.deviceId || "")
++        };
++        var storageId = [identity.role_code, identity.access_id, identity.device_id].join(":");
++        var storagePromise = createStorage(options, storageId);
++        var state = null;
++        var readyPromise = null;
++        var outbox = options.outbox || null;
++
++        function persist() {
++            return storagePromise.then(function (storage) {
++                state.updated_at = new Date().toISOString();
++                return storage.write(state).then(function () {
++                    if (typeof options.onChange === "function") options.onChange(clone(state));
++                    return clone(state);
++                });
++            });
++        }
++
++        function validIdentity(stored) {
++            if (!stored || !stored.identity) return false;
++            return Number(stored.identity.access_id || 0) === identity.access_id
++                && Number(stored.identity.actor_id || 0) === identity.actor_id
++                && String(stored.identity.role_code || "") === identity.role_code
++                && String(stored.identity.device_id || "") === identity.device_id;
++        }
++
++        function applyConfirmation(event, result) {
++            var shift = findShift(state, eventLocalShiftId(event));
++            if (!shift) return false;
++            var entry = eventEntry(shift, event.event_id);
++            if (!entry) return false;
++            entry.delivery_state = "confirmed";
++            entry.confirmed_at = new Date().toISOString();
++            entry.server_ids = clone(result && result.server_ids || {});
++            entry.server_result = clone(result || {});
++            if (event.event_type === "excavator.shift.opened" && entry.server_ids.shift_id) {
++                shift.server_shift_id = Number(entry.server_ids.shift_id);
++                shift.server_opened_at = result.effective_occurred_at || result.opened_at || "";
++            }
++            if (event.event_type === "excavator.shift.closed") shift.server_closed = true;
++            return true;
++        }
++
++        function replayConfirmations() {
++            if (!outbox || typeof outbox.confirmed !== "function") return Promise.resolve();
++            return outbox.confirmed().then(function (items) {
++                var changed = false;
++                (items || []).forEach(function (item) {
++                    if (item && item.event) changed = applyConfirmation(item.event, item.result || {}) || changed;
++                });
++                return changed ? persist() : null;
++            });
++        }
++
++        function recoverDelivery() {
++            if (!outbox || typeof outbox.queue !== "function") return Promise.resolve();
++            var entries = [];
++            (state.shifts || []).forEach(function (shift) {
++                (shift.events || []).forEach(function (entry) {
++                    if (entry.delivery_state !== "confirmed") entries.push(entry);
++                });
++            });
++            var chain = Promise.resolve();
++            entries.sort(function (left, right) {
++                return Number(left.event.sequence || 0) - Number(right.event.sequence || 0);
++            }).forEach(function (entry) {
++                chain = chain.then(function () {
++                    return outbox.queue(entry.event).then(function (queued) {
++                        entry.delivery_state = queued && queued.sync_state === "confirmed" ? "confirmed" : "queued";
++                        if (queued && queued.server_result) applyConfirmation(entry.event, queued.server_result);
++                        return persist();
++                    }).catch(function () {
++                        // Delivery storage/network readiness is independent
++                        // from the durable local shift.  Keep the exact
++                        // envelope awaiting a later recovery without making
++                        // the offline shell unusable after restart.
++                        entry.delivery_state = "awaiting_outbox";
++                        return persist();
++                    });
++                });
++            });
++            return chain;
++        }
++
++        function ready() {
++            if (readyPromise) return readyPromise;
++            readyPromise = storagePromise.then(function (storage) { return storage.read(); }).then(function (stored) {
++                state = validIdentity(stored) ? stored : emptyState(identity);
++                state.shifts = Array.isArray(state.shifts) ? state.shifts : [];
++                return replayConfirmations();
++            }).then(recoverDelivery).then(function () { return clone(state); });
++            return readyPromise;
++        }
++
++        function currentShift() {
++            return state ? findShift(state, state.current_local_shift_id) : null;
++        }
++
++        function ensureImportedServerShift(serverShift) {
++            if (!serverShift || !serverShift.id) return Promise.resolve(null);
++            var serverId = Number(serverShift.id);
++            var existing = (state.shifts || []).find(function (shift) {
++                return Number(shift.server_shift_id || 0) === serverId;
++            });
++            if (existing) {
++                if (existing.status !== "closed") state.current_local_shift_id = existing.local_shift_id;
++                return Promise.resolve(existing);
++            }
++            var localCurrent = currentShift();
++            if (localCurrent && localCurrent.status === "open" && !localCurrent.server_shift_id) {
++                // A late HTML/realtime snapshot may still describe the shift
++                // that was open before this device created its durable local
++                // shift.  It is evidence to reconcile later, not permission
++                // to replace the phone's newer working context.
++                return Promise.resolve(localCurrent);
++            }
++            var localId = "server-shift:" + serverId;
++            var imported = {
++                local_shift_id: localId,
++                open_event_id: "",
++                equipment_id: Number(serverShift.equipment_id || 0),
++                opened_at: serverShift.opened_at || new Date().toISOString(),
++                readings: {},
++                status: "open",
++                server_shift_id: serverId,
++                imported: true,
++                events: []
++            };
++            state.shifts.push(imported);
++            state.current_local_shift_id = localId;
++            return persist().then(function () { return imported; });
++        }
++
++        function recordEvent(event) {
++            var localShiftId = eventLocalShiftId(event);
++            var shift = findShift(state, localShiftId);
++            if (event.event_type === "excavator.shift.opened") {
++                if (!localShiftId || localShiftId !== event.event_id) {
++                    return Promise.reject(new Error("Открытие смены должно иметь устойчивый локальный ID."));
++                }
++                var active = currentShift();
++                if (active && active.status === "open") {
++                    if (active.open_event_id === event.event_id) return Promise.resolve(eventEntry(active, event.event_id));
++                    return Promise.reject(new Error("Текущая смена уже открыта на телефоне."));
++                }
++                shift = shift || {
++                    local_shift_id: localShiftId,
++                    open_event_id: event.event_id,
++                    equipment_id: Number(event.equipment_id || (event.payload || {}).excavator_id || 0),
++                    opened_at: event.occurred_at,
++                    readings: {
++                        fuel: (event.payload || {}).fuel,
++                        fuel_percent: (event.payload || {}).fuel_percent,
++                        engine_hours: (event.payload || {}).engine_hours
++                    },
++                    status: "open",
++                    server_shift_id: null,
++                    events: []
++                };
++                if (!findShift(state, localShiftId)) state.shifts.push(shift);
++                state.current_local_shift_id = localShiftId;
++            }
++            if (!shift) return Promise.reject(new Error("Локальная смена для действия не найдена."));
++            var existing = eventEntry(shift, event.event_id);
++            if (existing) {
++                if (!sameEvent(existing.event, event)) return Promise.reject(new Error("Локальный ID уже занят другим действием."));
++                return Promise.resolve(existing);
++            }
++            var entry = {event: clone(event), delivery_state: "awaiting_outbox", saved_at: new Date().toISOString()};
++            shift.events.push(entry);
++            if (event.event_type === "excavator.shift.closed") {
++                shift.status = "closed";
++                shift.closed_at = event.occurred_at;
++                shift.close_event_id = event.event_id;
++            }
++            return persist().then(function () { return entry; });
++        }
++
++        function recordAndQueue(event) {
++            return ready().then(function () { return recordEvent(event); }).then(function (entry) {
++                if (!outbox || typeof outbox.queue !== "function") {
++                    throw new Error("Очередь досылки недоступна.");
++                }
++                return outbox.queue(event).then(function (queued) {
++                    entry.delivery_state = queued && queued.sync_state === "confirmed" ? "confirmed" : "queued";
++                    if (queued && queued.server_result) applyConfirmation(event, queued.server_result);
++                    return persist().then(function () { return clone(event); });
++                }).catch(function () {
++                    // The immutable envelope is already in the independent ledger.
++                    // Startup recovery will enqueue exactly this event again.
++                    return persist().then(function () { return clone(event); });
++                });
++            });
++        }
++
++        function confirm(event, result) {
++            return ready().then(function () {
++                if (!applyConfirmation(event, result || {})) return false;
++                return persist().then(function () { return true; });
++            });
++        }
++
++        function snapshot() {
++            return ready().then(function () { return clone(state); });
++        }
++
++        function facts(localShiftId) {
++            return ready().then(function () {
++                var shift = findShift(state, localShiftId || state.current_local_shift_id);
++                return shift ? loadFacts(shift) : [];
++            });
++        }
++
++        function getEvent(eventId) {
++            return ready().then(function () {
++                var found = null;
++                (state.shifts || []).some(function (shift) {
++                    var entry = eventEntry(shift, eventId);
++                    if (!entry) return false;
++                    found = clone(entry.event);
++                    return true;
++                });
++                return found;
++            });
++        }
++
++        function storageKind() {
++            return storagePromise.then(function (storage) { return storage.kind || "custom"; });
++        }
++
++        function hourlyReport(serverPayload, capturedAt, localShiftId) {
++            return ready().then(function () {
++                var shift = findShift(state, localShiftId || state.current_local_shift_id);
++                return mergeHourlyReport(serverPayload, shift, shift ? loadFacts(shift) : [], capturedAt);
++            });
++        }
++
++        function shiftSummary(serverProjection, localShiftId) {
++            return ready().then(function () {
++                var shift = findShift(state, localShiftId || state.current_local_shift_id);
++                return mergeShiftSummary(serverProjection, shift);
++            });
++        }
++
++        return {
++            ready: ready,
++            currentShift: function () { return currentShift() ? clone(currentShift()) : null; },
++            ensureImportedServerShift: function (value) { return ready().then(function () { return ensureImportedServerShift(value); }); },
++            recordAndQueue: recordAndQueue,
++            confirm: confirm,
++            snapshot: snapshot,
++            facts: facts,
++            getEvent: getEvent,
++            hourlyReport: hourlyReport,
++            shiftSummary: shiftSummary,
++            storageKind: storageKind
++        };
++    }
++
++    root.createExcavatorLocalShiftLedger = createLedger;
++    if (typeof module !== "undefined") module.exports = createLedger;
++})(typeof window !== "undefined" ? window : globalThis);
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+index a7836729..ba02b8b7 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+@@ -121,8 +121,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
+ });
+ 
+ test('all free bucket assets share the current shell marker', () => {
+-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v262/);
+-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v262/);
++    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v263/);
++    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v263/);
+ });
+ 
+ test('temporary card adds semantics without replacing production status', () => {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-hourly-report-contract.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-hourly-report-contract.test.js
+index ec791210..25a31886 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-hourly-report-contract.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-hourly-report-contract.test.js
+@@ -53,11 +53,13 @@ test('report lifecycle is coalesced, stale guarded and closes only once', () =>
+     assert.match(template, /eo-hourly-report__backdrop" type="button" tabindex="-1"/);
+ });
+ 
+-test('offline cache is explicit and unresolved local loads are not claimed', () => {
++test('offline cache is merged with the durable local ledger before rendering', () => {
+     assert.match(source, /eo-hourly-report-v2:/);
+     assert.match(source, /"Нет связи · " \+ cachedAt/);
+-    assert.match(source, /Локально сохранённые, но ещё не синхронизированные погрузки/);
+-    assert.match(source, /Сохранённого отчёта пока нет/);
++    assert.match(source, /window\.eoExcavatorLocalShiftLedger/);
++    assert.match(source, /ledger\.hourlyReport\(payload \|\| null, Date\.now\(\)\)/);
++    assert.match(source, /В отчёт включены факты, устойчиво сохранённые на этом телефоне/);
++    assert.match(source, /Нет связи\. Местный журнал недоступен/);
+ });
+ 
+ test('layout matches mobile block structure without horizontal overflow', () => {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-local-shift-v1.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-local-shift-v1.test.js
+new file mode 100644
+index 00000000..cd85edd8
+--- /dev/null
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-local-shift-v1.test.js
+@@ -0,0 +1,406 @@
++const assert = require('node:assert/strict');
++const test = require('node:test');
++
++const createLedger = require('../excavator-local-shift-v1.js');
++
++function clone(value) {
++    return JSON.parse(JSON.stringify(value));
++}
++
++function memoryAdapter(seed) {
++    let value = seed ? clone(seed) : null;
++    return {
++        kind: 'memory',
++        read: async () => value ? clone(value) : null,
++        write: async (next) => { value = clone(next); },
++        inspect: () => value ? clone(value) : null,
++    };
++}
++
++function fakeIndexedDatabase() {
++    const rows = new Map();
++    let created = false;
++    return {
++        open() {
++            const request = {};
++            queueMicrotask(() => {
++                const database = {
++                    objectStoreNames: {contains: () => created},
++                    createObjectStore() { created = true; },
++                    transaction() {
++                        const tx = {
++                            objectStore() {
++                                return {
++                                    get(key) {
++                                        const read = {};
++                                        queueMicrotask(() => {
++                                            read.result = rows.get(key) || undefined;
++                                            if (read.onsuccess) read.onsuccess();
++                                        });
++                                        return read;
++                                    },
++                                    put(row) {
++                                        rows.set(row.storage_id, clone(row));
++                                        queueMicrotask(() => { if (tx.oncomplete) tx.oncomplete(); });
++                                    },
++                                };
++                            },
++                        };
++                        return tx;
++                    },
++                };
++                request.result = database;
++                if (!created && request.onupgradeneeded) request.onupgradeneeded();
++                if (request.onsuccess) request.onsuccess();
++            });
++            return request;
++        },
++    };
++}
++
++function fakeOutbox(options = {}) {
++    const pending = new Map();
++    const confirmed = [];
++    let fail = Boolean(options.fail);
++    return {
++        queue: async (event) => {
++            if (fail) throw new Error('queue unavailable');
++            const existing = pending.get(event.event_id);
++            if (existing) assert.deepEqual(existing, event);
++            pending.set(event.event_id, clone(event));
++            return Object.assign(clone(event), {sync_state: 'pending'});
++        },
++        confirmed: async () => clone(confirmed),
++        confirm(event, result) {
++            pending.delete(event.event_id);
++            confirmed.push({event: clone(event), result: clone(result), confirmed_at: new Date().toISOString()});
++        },
++        setFail(value) { fail = value; },
++        events: () => Array.from(pending.values()).map(clone),
++    };
++}
++
++function create(options = {}) {
++    return createLedger(Object.assign({
++        adapter: memoryAdapter(),
++        outbox: fakeOutbox(),
++        accessId: 7,
++        actorId: 12,
++        roleCode: 'excavator_operator',
++        deviceId: 'off-c1-device',
++    }, options));
++}
++
++function opening(id = 'shift-local-1', sequence = 1, at = '2026-09-29T00:05:00.000Z') {
++    return {
++        event_id: id,
++        event_type: 'excavator.shift.opened',
++        format_version: 1,
++        actor_id: 12,
++        access_id: 7,
++        role_code: 'excavator_operator',
++        device_id: 'off-c1-device',
++        local_shift_id: id,
++        shift_id: 0,
++        equipment_id: 7,
++        occurred_at: at,
++        sequence,
++        depends_on: [],
++        payload: {local_shift_id: id, excavator_id: 7, fuel: '3500', fuel_percent: '50', engine_hours: '1200'},
++    };
++}
++
++function load(open, id, sequence, at, changes = {}) {
++    const localTripId = `trip-${id}`;
++    return {
++        event_id: id,
++        event_type: changes.event_type || 'excavator.trip.loaded',
++        format_version: 1,
++        actor_id: 12,
++        access_id: 7,
++        role_code: 'excavator_operator',
++        device_id: 'off-c1-device',
++        local_shift_id: open.local_shift_id,
++        shift_id: 0,
++        equipment_id: 7,
++        local_trip_id: localTripId,
++        occurred_at: at,
++        sequence,
++        depends_on: [open.event_id],
++        payload: Object.assign({
++            local_shift_id: open.local_shift_id,
++            truck_id: sequence,
++            truck_number: String(sequence),
++            dump_point_id: 4,
++            dump_point_name: 'Дробилка',
++            local_fleet_code: 'belaz',
++            local_volume_m3: '49.40',
++        }, changes.payload || {}),
++    };
++}
++
++test('OFF-01: open and first load are durable before any server response', async () => {
++    const ledger = create();
++    const open = opening();
++    const first = load(open, 'load-1', 2, '2026-09-29T00:10:00.000Z');
++
++    await ledger.recordAndQueue(open);
++    await ledger.recordAndQueue(first);
++
++    const current = ledger.currentShift();
++    assert.equal(current.status, 'open');
++    assert.equal(current.local_shift_id, open.event_id);
++    assert.equal(current.server_shift_id, null);
++    assert.equal((await ledger.facts()).length, 1);
++    const report = await ledger.hourlyReport(null, Date.parse('2026-09-29T00:15:00.000Z'));
++    assert.equal(report.hours[0].totals.trip_count, 1);
++    assert.equal(report.hours[0].totals.volume_m3, 49.4);
++});
++
++test('OFF-02/OFF-03: a failed or lost transport write is recovered with the exact envelope', async () => {
++    const adapter = memoryAdapter();
++    const unavailable = fakeOutbox({fail: true});
++    const first = create({adapter, outbox: unavailable});
++    const open = opening();
++
++    await first.recordAndQueue(open);
++    assert.equal(first.currentShift().status, 'open');
++    assert.equal(unavailable.events().length, 0);
++
++    const restoredOutbox = fakeOutbox();
++    const restarted = create({adapter, outbox: restoredOutbox});
++    await restarted.ready();
++
++    assert.equal(restoredOutbox.events().length, 1);
++    assert.deepEqual(restoredOutbox.events()[0], open);
++    assert.equal(restarted.currentShift().opened_at, open.occurred_at);
++});
++
++test('OFF-02/OFF-09: restart keeps the local shift usable while delivery storage is still unavailable', async () => {
++    const adapter = memoryAdapter();
++    const first = create({adapter, outbox: fakeOutbox({fail: true})});
++    const open = opening('shift-awaiting-delivery');
++    await first.recordAndQueue(open);
++
++    const restarted = create({adapter, outbox: fakeOutbox({fail: true})});
++    await restarted.ready();
++
++    assert.equal(restarted.currentShift().local_shift_id, open.event_id);
++    const snapshot = await restarted.snapshot();
++    assert.equal(snapshot.shifts[0].events[0].delivery_state, 'awaiting_outbox');
++    assert.deepEqual(snapshot.shifts[0].events[0].event, open);
++});
++
++test('OFF-04/OFF-05: 35 loads, cancellation, hour boundary and more than 200 receipts do not truncate facts', async (t) => {
++    const ledger = create();
++    const open = opening();
++    const startedAt = process.hrtime.bigint();
++    await ledger.recordAndQueue(open);
++    for (let index = 0; index < 235; index += 1) {
++        const minute = index % 60;
++        const hour = index < 35 ? (index < 20 ? '00' : '01') : '03';
++        const event = load(open, `load-${index}`, index + 2, `2026-09-29T${hour}:${String(minute).padStart(2, '0')}:00.000Z`, {
++            payload: {local_volume_m3: index === 2 ? '' : '49.40'},
++        });
++        await ledger.recordAndQueue(event);
++        if (index === 0) await ledger.recordAndQueue(event);
++    }
++    const cancel = {
++        event_id: 'cancel-1', event_type: 'excavator.trip.loaded.cancelled', format_version: 1,
++        actor_id: 12, access_id: 7, role_code: 'excavator_operator', device_id: 'off-c1-device',
++        local_shift_id: open.local_shift_id, shift_id: 0, equipment_id: 7,
++        local_trip_id: 'trip-load-1', occurred_at: '2026-09-29T01:20:00.000Z', sequence: 500,
++        depends_on: ['load-1'], payload: {local_shift_id: open.local_shift_id, source_load_event_id: 'load-1'},
++    };
++    await ledger.recordAndQueue(cancel);
++
++    const facts = await ledger.facts();
++    assert.equal(facts.length, 235);
++    assert.equal(facts.filter((fact) => fact.cancelled).length, 1);
++    const report = await ledger.hourlyReport(null, Date.parse('2026-09-29T01:30:00.000Z'));
++    assert.equal(report.hours[0].totals.trip_count, 10);
++    assert.equal(report.hours[1].totals.trip_count, 19);
++    assert.equal(report.hours[1].unknown_volume_trip_count, 1);
++    const shiftSummary = await ledger.shiftSummary(null);
++    assert.equal(shiftSummary.trip_count, 234);
++    assert.equal(shiftSummary.unknown_volume_trip_count, 1);
++    assert.ok(Math.abs(shiftSummary.volume_m3 - (233 * 49.4)) < 0.001);
++    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
++    t.diagnostic(`235 durable loads plus cancellation: ${elapsedMs.toFixed(1)} ms in Node memory adapter`);
++    assert.ok(elapsedMs < 5000, `local write path took ${elapsedMs.toFixed(1)} ms`);
++});
++
++test('OFF-04/OFF-07: a controlled full shift across midnight retains separate hourly and shift totals', async () => {
++    const ledger = create();
++    const open = opening('night-shift', 1, '2026-09-29T09:00:00.000Z');
++    await ledger.recordAndQueue(open);
++    await ledger.recordAndQueue(load(open, 'before-midnight', 2, '2026-09-29T14:59:00.000Z'));
++    await ledger.recordAndQueue(load(open, 'after-midnight', 3, '2026-09-29T15:01:00.000Z'));
++    await ledger.recordAndQueue({
++        event_id: 'night-shift-close', event_type: 'excavator.shift.closed', format_version: 1,
++        actor_id: 12, access_id: 7, role_code: 'excavator_operator', device_id: 'off-c1-device',
++        local_shift_id: open.local_shift_id, shift_id: 0, equipment_id: 7,
++        occurred_at: '2026-09-29T21:00:00.000Z', sequence: 4,
++        depends_on: ['after-midnight'],
++        payload: {local_shift_id: open.local_shift_id, fuel: '3300', engine_hours: '1212'},
++    });
++
++    const restarted = create({adapter: memoryAdapter(await ledger.snapshot()), outbox: fakeOutbox()});
++    await restarted.ready();
++    const summary = await restarted.shiftSummary(null, open.local_shift_id);
++    const report = await restarted.hourlyReport(null, Date.parse('2026-09-29T15:30:00.000Z'), open.local_shift_id);
++
++    assert.equal(summary.trip_count, 2);
++    assert.equal(summary.volume_m3, 98.8);
++    assert.equal(report.hours[0].totals.trip_count, 1);
++    assert.equal(report.hours[1].totals.trip_count, 1);
++    assert.equal((await restarted.snapshot()).shifts[0].status, 'closed');
++});
++
++test('OFF-06: a free-bucket load remains a fact independently of card TTL', async () => {
++    const ledger = create();
++    const open = opening();
++    await ledger.recordAndQueue(open);
++    const first = load(open, 'free-load-1', 2, '2026-09-29T00:10:00.000Z', {event_type: 'excavator.free_bucket.loaded'});
++    await ledger.recordAndQueue(first);
++
++    const restarted = create({adapter: memoryAdapter(await ledger.snapshot()), outbox: fakeOutbox()});
++    await restarted.ready();
++
++    assert.equal((await restarted.facts()).length, 1);
++    assert.equal((await restarted.facts())[0].event_id, first.event_id);
++});
++
++test('OFF-07: a pending close does not mix two consecutive local shifts', async () => {
++    const ledger = create();
++    const first = opening('shift-a', 1, '2026-09-29T00:00:00.000Z');
++    await ledger.recordAndQueue(first);
++    await ledger.recordAndQueue(load(first, 'load-a', 2, '2026-09-29T00:10:00.000Z'));
++    await ledger.recordAndQueue({
++        event_id: 'close-a', event_type: 'excavator.shift.closed', format_version: 1,
++        actor_id: 12, access_id: 7, role_code: 'excavator_operator', device_id: 'off-c1-device',
++        local_shift_id: 'shift-a', shift_id: 0, equipment_id: 7, occurred_at: '2026-09-29T01:00:00.000Z',
++        sequence: 3, depends_on: ['load-a'], payload: {local_shift_id: 'shift-a', fuel: '3400', engine_hours: '1201'},
++    });
++    const second = opening('shift-b', 4, '2026-09-29T01:01:00.000Z');
++    await ledger.recordAndQueue(second);
++    await ledger.recordAndQueue(load(second, 'load-b', 5, '2026-09-29T01:10:00.000Z'));
++
++    const snapshot = await ledger.snapshot();
++    assert.equal(snapshot.shifts.length, 2);
++    assert.equal(snapshot.shifts[0].status, 'closed');
++    assert.equal(snapshot.shifts[0].events.filter((entry) => entry.event.event_type.includes('.loaded')).length, 1);
++    assert.equal(snapshot.shifts[1].status, 'open');
++    assert.equal((await ledger.facts('shift-b')).length, 1);
++});
++
++test('OFF-08: receipt mapping does not remove facts and covering server projection does not double count', async () => {
++    const outbox = fakeOutbox();
++    const ledger = create({outbox});
++    const open = opening();
++    const fact = load(open, 'load-covered', 2, '2026-09-29T00:10:00.000Z');
++    await ledger.recordAndQueue(open);
++    await ledger.recordAndQueue(fact);
++    await ledger.confirm(open, {server_ids: {shift_id: 81}, effective_occurred_at: open.occurred_at});
++    await ledger.confirm(fact, {server_ids: {trip_id: 901, shift_id: 81}});
++
++    const server = await ledger.hourlyReport(null, Date.parse('2026-09-29T00:15:00.000Z'));
++    server.hours[0].rows = [{dump_point_id: 4, dump_point: 'Дробилка', belaz: 1, nhl: 0}];
++    server.hours[0].totals = {belaz: 1, nhl: 0, trip_count: 1, volume_m3: '49.40'};
++    server.hours[0].source_trip_count = 1;
++    server.hours[0].source_trip_ids = [901];
++    server.hours[0].is_empty = false;
++    const merged = await ledger.hourlyReport(server, Date.parse('2026-09-29T00:15:00.000Z'));
++    const shiftSummary = await ledger.shiftSummary({
++        trip_count: 1,
++        volume_m3: '49.40',
++        source_trip_ids: [901],
++    });
++
++    assert.equal(ledger.currentShift().server_shift_id, 81);
++    assert.equal((await ledger.facts()).length, 1);
++    assert.equal(merged.hours[0].totals.trip_count, 1);
++    assert.equal(merged.hours[0].totals.volume_m3, '49.40');
++    assert.equal(shiftSummary.trip_count, 1);
++    assert.equal(shiftSummary.volume_m3, 49.4);
++});
++
++test('OFF-09: IndexedDB failure falls back, both storages unavailable reject without false success', async () => {
++    const values = new Map();
++    const storage = {
++        getItem: (key) => values.has(key) ? values.get(key) : null,
++        setItem: (key, value) => values.set(key, String(value)),
++    };
++    const brokenIndexedDB = {open() { throw new Error('idb blocked'); }};
++    const fallback = createLedger({
++        indexedDB: brokenIndexedDB, localStorage: storage, outbox: fakeOutbox(),
++        accessId: 7, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
++    });
++    await fallback.ready();
++    assert.equal(await fallback.storageKind(), 'localStorage');
++    await fallback.recordAndQueue(opening());
++
++    const unavailable = createLedger({
++        indexedDB: brokenIndexedDB,
++        localStorage: {getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }},
++        outbox: fakeOutbox(), accessId: 8, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
++    });
++    await assert.rejects(unavailable.ready(), /хранилище недоступно/i);
++});
++
++test('OFF-09: successful IndexedDB writes are mirrored for a later fallback-only restart', async () => {
++    const values = new Map();
++    const storage = {
++        getItem: (key) => values.has(key) ? values.get(key) : null,
++        setItem: (key, value) => values.set(key, String(value)),
++    };
++    const first = createLedger({
++        indexedDB: fakeIndexedDatabase(), localStorage: storage, outbox: fakeOutbox(),
++        accessId: 7, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
++    });
++    await first.ready();
++    await first.recordAndQueue(opening());
++    assert.equal(await first.storageKind(), 'indexedDB+localStorage-fallback');
++
++    const restarted = createLedger({
++        indexedDB: {open() { throw new Error('idb unavailable after restart'); }},
++        localStorage: storage, outbox: fakeOutbox(),
++        accessId: 7, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
++    });
++    await restarted.ready();
++
++    assert.equal(await restarted.storageKind(), 'localStorage');
++    assert.equal(restarted.currentShift().local_shift_id, 'shift-local-1');
++});
++
++test('OFF-10: another identity cannot open the stored ledger', async () => {
++    const adapter = memoryAdapter();
++    const first = create({adapter});
++    await first.recordAndQueue(opening());
++    const other = createLedger({
++        adapter, outbox: fakeOutbox(), accessId: 8, actorId: 99,
++        roleCode: 'excavator_operator', deviceId: 'other-device',
++    });
++    await other.ready();
++    assert.equal(other.currentShift(), null);
++    assert.equal((await other.snapshot()).shifts.length, 0);
++});
++
++test('OFF-08: a stale server shift cannot replace a newer unmapped local shift', async () => {
++    const adapter = memoryAdapter();
++    const outbox = fakeOutbox();
++    const ledger = create({adapter, outbox});
++    const open = opening('local-shift-newer');
++
++    await ledger.recordAndQueue(open);
++    await ledger.ensureImportedServerShift({
++        id: 998,
++        equipment_id: open.equipment_id,
++        opened_at: '2026-09-28T20:00:00.000Z',
++    });
++
++    const current = ledger.currentShift();
++    assert.equal(current.local_shift_id, open.event_id);
++    assert.equal(current.server_shift_id, null);
++    assert.equal((await ledger.snapshot()).shifts.length, 1);
++});
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-manual-pickup.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-manual-pickup.test.js
+index e26d2169..3e09d5dd 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-manual-pickup.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-manual-pickup.test.js
+@@ -369,13 +369,22 @@ test('truck loaded outbox event carries exact assignment state and immutable con
+     assert.match(source, /occurred_at:\s*new Date\(\)\.toISOString\(\)/);
+     assert.match(source, /local_trip_id:\s*localTripId/);
+     assert.match(source, /depends_on:\s*\[[\s\S]*previous \? previous\.event_id : ""[\s\S]*\.filter/);
+-    assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
++    assert.match(source, /localShiftLedger\.recordAndQueue\(event\)\.then/);
++    assert.match(source, /local_shift_id:\s*currentLocalShift\.local_shift_id/);
++    assert.match(source, /currentLocalShift\.open_event_id/);
+     assert.match(source, /fieldOutbox\.allocateSequence\(legacyExcavatorFieldSequence/);
+     assert.match(source, /rock_type_id:/);
+     assert.match(source, /invalidateExcavatorWorkRefresh\(\)/);
+     assert.doesNotMatch(template, /nextExcavatorFieldSequence/);
+ });
+ 
++test('next local opening depends on a durable close even when the transport queue missed it', () => {
++    assert.match(
++        template,
++        /currentLocalShift\.status === "closed"[\s\S]*currentLocalShift\.close_event_id[\s\S]*dependencies\.push\(currentLocalShift\.close_event_id\)/
++    );
++});
++
+ test('successful outgoing load removes only the source card and keeps exact trip badge', () => {
+     const confirmStart = template.indexOf('    function confirmTruckLoaded(card, payload)');
+     const confirmEnd = template.indexOf('    function restoreTruckCard', confirmStart);
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+index 603328c1..33201c82 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+@@ -95,8 +95,8 @@ test("Excavator haptics prefer the native media bridge and preserve gesture timi
+ });
+ 
+ test("Excavator shell wires native capabilities and routes existing feedback through them", () => {
+-    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v262/);
+-    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v262/);
++    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v263/);
++    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v263/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(\[180, 90, 180\], 255\)/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(70, 220\)/);
+     assert.doesNotMatch(TEMPLATE, /navigator\.vibrate/);
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-service-worker-update-runtime.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-service-worker-update-runtime.test.js
+index affbb2fe..7fec663f 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-service-worker-update-runtime.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-service-worker-update-runtime.test.js
+@@ -271,3 +271,76 @@ test('missing fresh dependency rejects install before old cache deletion or acti
+     assert.equal(skippedWaiting, false);
+     assert.equal(claimedClients, false);
+ });
++
++test('OFF-02: cached shell wins over HTTP 503 and a hung navigation fetch', async () => {
++    const shellHtml = '<main data-eo-shell data-eo-role-code="excavator_operator">offline-ready</main>';
++    const currentCache = fakeCache([
++        ['/excavator/work/', new FakeResponse(shellHtml, {
++            url: 'https://excavator.test/excavator/work/',
++            type: 'text/html',
++        })],
++    ]);
++    const listeners = {};
++    let fetchMode = '503';
++    class ImmediateAbortController {
++        constructor() {
++            const handlers = [];
++            this.signal = {
++                aborted: false,
++                addEventListener: (name, handler) => {
++                    if (name === 'abort') handlers.push(handler);
++                },
++            };
++            this.abort = () => {
++                this.signal.aborted = true;
++                handlers.forEach(handler => handler());
++            };
++        }
++    }
++    const fetcher = (request, options = {}) => {
++        if (fetchMode === '503') {
++            return Promise.resolve(new FakeResponse('unavailable', {
++                url: request.url,
++                type: 'text/html',
++                ok: false,
++            }));
++        }
++        return new Promise((resolve, reject) => {
++            if (options.signal && options.signal.aborted) reject(new Error('aborted'));
++            else if (options.signal) options.signal.addEventListener('abort', () => reject(new Error('aborted')));
++        });
++    };
++    const context = {
++        URL, Set, Promise, Request: FakeRequest, Response: FakeResponse,
++        AbortController: ImmediateAbortController,
++        fetch: fetcher,
++        caches: {
++            open: async () => currentCache,
++            keys: async () => [currentShellVersion],
++            delete: async () => true,
++        },
++        self: {
++            location: {origin: 'https://excavator.test'},
++            addEventListener: (name, fn) => { listeners[name] = fn; },
++            clients: {claim: async () => {}},
++            skipWaiting: async () => {},
++        },
++        setTimeout: fn => { Promise.resolve().then(fn); return 1; },
++        clearTimeout: () => {},
++    };
++    vm.createContext(context);
++    vm.runInContext(workerSource, context);
++
++    async function navigate() {
++        let responseWork;
++        listeners.fetch({
++            request: new FakeRequest('/excavator/work/'),
++            respondWith: promise => { responseWork = promise; },
++        });
++        return responseWork;
++    }
++
++    assert.equal(await (await navigate()).text(), shellHtml, '503 must not replace a prepared shell');
++    fetchMode = 'hang';
++    assert.equal(await (await navigate()).text(), shellHtml, 'a hung fetch must abort and reopen the cache');
++});
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/trip-lost-response-runtime.test.js b/СИСТЕМА_MVP/backend/static/js/tests/trip-lost-response-runtime.test.js
+index e5c308e2..42375947 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/trip-lost-response-runtime.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/trip-lost-response-runtime.test.js
+@@ -6,6 +6,7 @@ const fs = require("node:fs");
+ const path = require("node:path");
+ const test = require("node:test");
+ const vm = require("node:vm");
++const createExcavatorLocalShiftLedger = require("../excavator-local-shift-v1.js");
+ 
+ 
+ const driverTemplatePath = path.resolve(
+@@ -415,6 +416,29 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
+     }
+     const outbox = newOutbox();
+     context.fieldOutbox = outbox;
++    let ledgerState = {
++        schema_version: 1,
++        identity: {access_id: 7, actor_id: 17, role_code: "excavator_operator", device_id: "device-A"},
++        current_local_shift_id: "server-shift:11",
++        shifts: [{
++            local_shift_id: "server-shift:11", open_event_id: "", equipment_id: 3,
++            opened_at: "2026-09-29T00:00:00.000Z", status: "open", server_shift_id: 11,
++            imported: true, events: [],
++        }],
++    };
++    const ledgerAdapter = {
++        kind: "memory",
++        read: async () => JSON.parse(JSON.stringify(ledgerState)),
++        write: async value => { ledgerState = JSON.parse(JSON.stringify(value)); },
++    };
++    context.localShiftLedger = createExcavatorLocalShiftLedger({
++        adapter: ledgerAdapter,
++        outbox,
++        accessId: 7,
++        actorId: 17,
++        roleCode: "excavator_operator",
++        deviceId: "device-A",
++    });
+     const declarations = [
+         "var excavatorWorkMutationGeneration = 0, excavatorWorkRefreshRequestGeneration = 0, excavatorWorkAppliedRequestGeneration = 0;",
+         ...[
+@@ -433,6 +457,7 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
+         requests, reconcile, card, badge, document,
+         serverTripCount: () => serverTripCount, serverActionCount: () => serverActions.size,
+         generated: () => idCount, restoredCards: () => restoredCards,
++        ledger: context.localShiftLedger,
+         fragmentCount: () => fragmentCount, terminal: () => currentShell.terminal,
+     };
+ }
+@@ -449,6 +474,8 @@ test("production Excavator load survives a lost response and a restarted durable
+     assert.equal(event.event_type, "excavator.trip.loaded");
+     assert.equal(event.payload.assignment_id, "8");
+     assert.equal(event.payload.dump_point_id, "9");
++    assert.equal(event.local_shift_id, "server-shift:11");
++    assert.equal((await r.ledger.facts()).length, 1);
+ 
+     const restarted = r.restartOutbox();
+     await restarted.ready(); await restarted.retryNow(); await flushPromiseChain();
+diff --git a/СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html b/СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
+index 093b94e1..1d34c9ea 100644
+--- a/СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
++++ b/СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
+@@ -12,10 +12,14 @@
+     {% if card.transfer %}data-eo-transfer-id="{{ card.transfer.id }}" data-eo-transfer-kind="{{ card.transfer.kind }}" data-eo-transfer-direction="{{ card.transfer.direction }}" data-eo-transfer-created="{{ card.transfer.created_at|date:'c' }}" data-eo-transfer-deadline="{{ card.transfer.deadline|date:'c' }}"{% endif %}
+     data-truck-id="{{ card.assignment.truck.id }}"
+     data-eo-truck-number="{{ card.number }}"
++    data-eo-local-fleet-code="{{ card.local_fleet_code|default:'unknown' }}"
++    data-eo-local-volume-by-rock="{{ card.local_volume_by_rock_json|default:'{}'|escape }}"
+     data-eo-number-plain="{% if card.number_is_plain %}1{% else %}0{% endif %}"
+     data-eo-truck-detail-id="{{ card.detail_card_id }}"
+     data-eo-equipment-state="{{ card.equipment_state_code }}"
+     data-eo-can-load="{% if open_shift and card.can_load %}1{% else %}0{% endif %}"
++    data-eo-prepared-can-load="{% if card.can_load %}1{% else %}0{% endif %}"
++    data-eo-prepared-manual-available="{% if card.manual_available %}1{% else %}0{% endif %}"
+     data-eo-handoff-completion="{% if card.is_handoff_completion %}1{% else %}0{% endif %}"
+     {% if card.load_block_reason_code %}data-eo-load-block-reason-code="{{ card.load_block_reason_code }}"{% endif %}
+     {% if card.load_block_reason_label %}data-eo-load-block-reason-label="{{ card.load_block_reason_label }}"{% endif %}
+diff --git a/СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html b/СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html
+index ee285e90..15628213 100644
+--- a/СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html
++++ b/СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html
+@@ -93,7 +93,7 @@
+             <header class="mobile-shift__section-head"><span>Итог смены</span><b>Сейчас</b></header>
+             <div class="mobile-shift__grid">
+                 <div class="mobile-shift__cell"><span>План</span><strong>{% if shift_plan_has_plan %}{{ shift_plan_percent }}%{% else %}Нет плана{% endif %}</strong></div>
+-                <div class="mobile-shift__cell"><span>Факт</span><strong>{% if mobile_shift_role == "driver" %}{{ shift_trip_count }} шт.{% else %}{{ shift_fact_value }}{% endif %}</strong>{% if mobile_shift_role == "excavator" and shift_fact_meta %}<em>{{ shift_fact_meta }}</em>{% endif %}</div>
++                <div class="mobile-shift__cell"><span>Факт</span><strong{% if mobile_shift_role == "excavator" %} data-eo-local-shift-fact-value data-eo-server-trip-count="{{ completed_shift_count }}" data-eo-server-volume-m3="{{ completed_shift_volume }}" data-eo-server-source-trip-ids="{{ shift_source_trip_ids_json|default:'[]'|escape }}"{% endif %}>{% if mobile_shift_role == "driver" %}{{ shift_trip_count }} шт.{% else %}{{ shift_fact_value }}{% endif %}</strong>{% if mobile_shift_role == "excavator" and shift_fact_meta %}<em data-eo-local-shift-fact-meta>{{ shift_fact_meta }}</em>{% endif %}</div>
+                 <div class="mobile-shift__cell"><span>Техника</span><strong>{% if mobile_shift_role == "driver" %}{% if mobile_shift_state == "blocked" %}—{% elif current_truck %}{{ current_truck.garage_number }}{% elif work_assignment_equipment %}{{ work_assignment_equipment.garage_number }}{% else %}—{% endif %}{% else %}{{ shift_start_excavator.garage_number|default:"—" }}{% endif %}</strong></div>
+                 <div class="mobile-shift__cell"><span>Состояние</span><strong>{% if mobile_shift_role == "driver" %}{% if mobile_shift_state == "open" %}{% if active_trip %}В пути{% else %}Свободен{% endif %}{% elif mobile_shift_state == "blocked" %}Недоступен{% else %}Смена закрыта{% endif %}{% else %}{% if open_shift %}{% if active_trips_count %}В работе{% else %}Свободен{% endif %}{% elif equipment_open_shift %}Занят{% elif work_assignment_state == "assigned" %}Смена закрыта{% else %}Недоступен{% endif %}{% endif %}</strong></div>
+             </div>
+diff --git a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+index 68c3fee4..e4aab689 100644
+--- a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
++++ b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+@@ -6,28 +6,29 @@
+ {% block viewport_extra %}, viewport-fit=cover{% endblock %}
+ {% block extra_head %}
+ <link rel="manifest" href="{% url 'excavator_manifest' %}">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v262">
+-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v262" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v263">
++<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v263">
++<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v263" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
++<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
+ <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
+ <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
+ <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
+-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v262">
+-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v262"></script>
+-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v262"></script>
++<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v263">
++<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-local-shift-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v263" defer></script>
++<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v263"></script>
++<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v263"></script>
+ <meta name="theme-color" content="#D58B14">
+ <meta name="apple-mobile-web-app-capable" content="yes">
+ <meta name="apple-mobile-web-app-title" content="Погрузка">
+@@ -43,6 +44,8 @@
+     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
+     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
+     data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
++    data-eo-server-rendered-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
++    data-native-shift-opened-at="{% if open_shift %}{{ open_shift.opened_at|date:'c' }}{% endif %}"
+     data-eo-settings-url="{% url 'excavator_work_settings' %}"
+     data-eo-shift-url="{% url 'excavator_shift_action' %}"
+     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
+@@ -397,7 +400,7 @@
+ 
+ <script>
+ (function () {
+-var excavatorShellVersion = "excavator-mobile-shell-v262";
++var excavatorShellVersion = "excavator-mobile-shell-v263";
+ var staticPrefix = "{{ static_prefix|escapejs }}";
+ var viewportSyncFrame = null;
+ var excavatorStableViewportHeight = 0;
+@@ -1410,6 +1413,11 @@ function ensureExcavatorFieldOutbox(shell) {
+             }
+         },
+         onConfirmed: function (event, result) {
++            if (window.eoExcavatorLocalShiftLedger) {
++                window.eoExcavatorLocalShiftLedger.confirm(event, result).catch(function () {
++                    /* Transport confirmation is durable in the outbox and is replayed on restart. */
++                });
++            }
+             if (typeof window.confirmExcavatorFieldEvent === "function") {
+                 return window.confirmExcavatorFieldEvent(event, result);
+             }
+@@ -1485,6 +1493,129 @@ function ensureExcavatorFieldOutbox(shell) {
+     return window.eoExcavatorFieldOutbox;
+ }
+ 
++function projectExcavatorLocalShift(shell, ledger) {
++    if (!shell || !ledger) return;
++    var shift = ledger.currentShift();
++    var isOpen = Boolean(shift && shift.status === "open");
++    var shiftButton = shell.querySelector("[data-eo-shift-button]");
++    var shiftLabel = shell.querySelector("[data-eo-shift-label]");
++    var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
++    var workScreen = shell.querySelector('[data-eo-screen="trucks"]');
++    var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
++    if (shift) {
++        shell.dataset.eoLocalShiftId = shift.local_shift_id || "";
++        shell.dataset.eoCurrentExcavatorId = String(shift.equipment_id || shell.dataset.eoCurrentExcavatorId || "");
++        shell.dataset.nativeShiftId = shift.server_shift_id ? String(shift.server_shift_id) : "";
++    }
++    shell.dataset.eoLocalShiftOpen = isOpen ? "true" : "false";
++    if (shiftScreen) {
++        shiftScreen.dataset.eoShiftState = isOpen ? "open" : "closed";
++        shiftScreen.dataset.mobileShiftState = isOpen ? "open" : "closed";
++    }
++    if (workScreen) {
++        workScreen.dataset.eoWorkAvailable = isOpen ? "true" : "false";
++        workScreen.classList.toggle("is-shift-inactive", !isOpen);
++    }
++    if (eventsScreen) {
++        eventsScreen.dataset.eoDowntimeAvailable = isOpen ? "true" : "false";
++        eventsScreen.classList.toggle("is-shift-inactive", !isOpen);
++        eventsScreen.setAttribute("aria-disabled", isOpen ? "false" : "true");
++    }
++    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
++        var enabled = isOpen && card.dataset.eoPreparedCanLoad === "1";
++        card.dataset.eoCanLoad = enabled ? "1" : "0";
++        card.dataset.eoManualAvailable = isOpen && card.dataset.eoPreparedManualAvailable === "1" ? "1" : "0";
++        card.draggable = enabled;
++        card.disabled = !enabled;
++        card.setAttribute("aria-disabled", enabled ? "false" : "true");
++    });
++    shell.querySelectorAll("[data-eo-dump-target], [data-eo-downtime-reason-id]").forEach(function (control) {
++        control.disabled = !isOpen;
++        control.setAttribute("aria-disabled", isOpen ? "false" : "true");
++    });
++    var factValue = shell.querySelector("[data-eo-local-shift-fact-value]");
++    var factMeta = shell.querySelector("[data-eo-local-shift-fact-meta]");
++    if (shift && factValue && typeof ledger.shiftSummary === "function") {
++        var projectedLocalShiftId = shift.local_shift_id;
++        var renderedServerShiftId = Number(shell.dataset.eoServerRenderedShiftId || 0);
++        var useServerProjection = Boolean(
++            shift.server_shift_id && Number(shift.server_shift_id) === renderedServerShiftId
++        );
++        var sourceTripIds = [];
++        try { sourceTripIds = JSON.parse(factValue.dataset.eoServerSourceTripIds || "[]"); } catch (error) {}
++        ledger.shiftSummary(useServerProjection ? {
++            trip_count: Number(factValue.dataset.eoServerTripCount || 0),
++            volume_m3: Number(factValue.dataset.eoServerVolumeM3 || 0),
++            source_trip_ids: sourceTripIds
++        } : {}, projectedLocalShiftId).then(function (summary) {
++            var current = ledger.currentShift();
++            if (!current || current.local_shift_id !== projectedLocalShiftId) return;
++            factValue.textContent = Number(summary.volume_m3 || 0).toLocaleString("ru-RU", {
++                maximumFractionDigits: 2
++            }) + " м³";
++            if (factMeta) {
++                factMeta.textContent = String(summary.trip_count || 0) + " маш."
++                    + (summary.unknown_volume_trip_count
++                        ? " · объём " + summary.unknown_volume_trip_count + " не определён"
++                        : "");
++            }
++        }).catch(function () {
++            /* Main local-shift projection remains usable if only this counter cannot be read. */
++        });
++    }
++    if (shiftButton) {
++        shiftButton.dataset.eoShiftAction = isOpen ? "close" : "open";
++        shiftButton.disabled = false;
++        shiftButton.classList.remove("is-disabled", "is-pending");
++        shiftButton.classList.toggle("mobile-shift__action--danger", isOpen);
++        shiftButton.classList.toggle("mobile-shift__action--primary", !isOpen);
++        shiftButton.setAttribute("aria-disabled", "false");
++        shiftButton.setAttribute("aria-label", isOpen
++            ? "Удерживайте 1 секунду, чтобы закрыть смену"
++            : "Удерживайте 1 секунду, чтобы начать смену");
++    }
++    if (shiftLabel) shiftLabel.textContent = isOpen ? "Закрыть смену" : "Начать смену";
++}
++
++function ensureExcavatorLocalShiftLedger(shell, fieldOutbox) {
++    if (!shell || !fieldOutbox || !window.createExcavatorLocalShiftLedger) return null;
++    var deviceId = excavatorInstallDeviceId();
++    var key = [shell.dataset.eoAccessId || "", deviceId].join(":");
++    var ledger = window.eoExcavatorLocalShiftLedger;
++    if (!ledger || window.eoExcavatorLocalShiftLedgerKey !== key) {
++        window.eoExcavatorLocalShiftLedgerKey = key;
++        ledger = window.createExcavatorLocalShiftLedger({
++            indexedDB: window.indexedDB,
++            localStorage: window.localStorage,
++            accessId: shell.dataset.eoAccessId,
++            actorId: shell.dataset.eoEmployeeId,
++            roleCode: shell.dataset.eoRoleCode || "excavator_operator",
++            deviceId: deviceId,
++            outbox: fieldOutbox,
++            onChange: function () {
++                var current = document.querySelector("[data-eo-shell]");
++                if (current) projectExcavatorLocalShift(current, window.eoExcavatorLocalShiftLedger);
++                window.dispatchEvent(new CustomEvent("excavator-local-shift-changed"));
++            }
++        });
++        window.eoExcavatorLocalShiftLedger = ledger;
++    }
++    ledger.ready().then(function () {
++        var nativeId = Number(shell.dataset.nativeShiftId || 0);
++        if (!nativeId) return null;
++        return ledger.ensureImportedServerShift({
++            id: nativeId,
++            equipment_id: Number(shell.dataset.eoCurrentExcavatorId || 0),
++            opened_at: shell.dataset.nativeShiftOpenedAt || ""
++        });
++    }).then(function () {
++        projectExcavatorLocalShift(shell, ledger);
++    }).catch(function () {
++        renderExcavatorOfflineStatus({storage_failed: true, total: 0});
++    });
++    return ledger;
++}
++
+ window.initExcavatorWorkShell = function () {
+     var shell = document.querySelector("[data-eo-shell]");
+     if (!shell) return;
+@@ -1514,6 +1645,7 @@ window.initExcavatorWorkShell = function () {
+     var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
+     var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
+     var fieldOutbox = ensureExcavatorFieldOutbox(shell);
++    var localShiftLedger = ensureExcavatorLocalShiftLedger(shell, fieldOutbox);
+     var freeBucketController = null;
+     var activeTruckDrag = null;
+     var activeQueueDrag = null;
+@@ -1547,12 +1679,18 @@ window.initExcavatorWorkShell = function () {
+ 
+     function queueExcavatorFieldEvent(eventType, payload, options) {
+         options = options || {};
+-        if (!fieldOutbox) return Promise.reject(new Error("Локальное сохранение недоступно."));
+-        return fieldOutbox.pending().then(function (events) {
++        if (!fieldOutbox || !localShiftLedger) return Promise.reject(new Error("Локальное сохранение недоступно."));
++        return localShiftLedger.ready().then(function () { return fieldOutbox.pending(); }).then(function (events) {
++            var currentLocalShift = localShiftLedger.currentShift();
++            var currentLocalShiftId = currentLocalShift ? currentLocalShift.local_shift_id : "";
+             var dependencyTypes = options.dependencyTypes || [];
+             var predecessors = events.filter(function (event) {
+                 return (!dependencyTypes.length || dependencyTypes.indexOf(event.event_type) >= 0)
+-                    && String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
++                    && (
++                        currentLocalShiftId
++                            ? String(event.local_shift_id || "") === String(currentLocalShiftId)
++                            : String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
++                    )
+                     && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
+             }).sort(function (left, right) { return Number(right.sequence || 0) - Number(left.sequence || 0); });
+             var dependencies = Array.isArray(options.dependsOn)
+@@ -1563,7 +1701,28 @@ window.initExcavatorWorkShell = function () {
+                         ? predecessors.map(function (event) { return event.event_id; })
+                         : (predecessors[0] ? [predecessors[0].event_id] : [])));
+             var deviceId = excavatorInstallDeviceId();
+-            var eventId = newExcavatorFieldId(options.idPrefix || "excavator-event");
++            var eventId = options.eventId || newExcavatorFieldId(options.idPrefix || "excavator-event");
++            var localShiftId = eventType === "excavator.shift.opened" ? eventId : currentLocalShiftId;
++            if (!localShiftId) throw new Error("Сначала сохраните смену на телефоне.");
++            if (eventType === "excavator.shift.opened") {
++                if (
++                    currentLocalShift
++                    && currentLocalShift.status === "closed"
++                    && currentLocalShift.close_event_id
++                    && dependencies.indexOf(currentLocalShift.close_event_id) < 0
++                ) {
++                    dependencies.push(currentLocalShift.close_event_id);
++                }
++                var priorClose = events.filter(function (event) {
++                    return event.event_type === "excavator.shift.closed"
++                        && ["conflict", "invalid", "auth_required"].indexOf(event.sync_state) < 0;
++                }).sort(function (left, right) {
++                    return Number(right.sequence || 0) - Number(left.sequence || 0);
++                })[0];
++                if (priorClose && dependencies.indexOf(priorClose.event_id) < 0) {
++                    dependencies.push(priorClose.event_id);
++                }
++            }
+             return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
+                 var event = {
+                 event_id: eventId,
+@@ -1573,7 +1732,10 @@ window.initExcavatorWorkShell = function () {
+                 access_id: Number(shell.dataset.eoAccessId || 0),
+                 role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                 device_id: deviceId,
+-                shift_id: Number(shell.dataset.nativeShiftId || 0),
++                shift_id: currentLocalShift && currentLocalShift.server_shift_id
++                    ? Number(currentLocalShift.server_shift_id)
++                    : Number(shell.dataset.nativeShiftId || 0),
++                local_shift_id: localShiftId,
+                 equipment_id: Number(shell.dataset.eoCurrentExcavatorId || shell.dataset.eoShiftExcavatorId || 0),
+                 trip_id: options.tripId || null,
+                 local_trip_id: options.localTripId || null,
+@@ -1583,9 +1745,9 @@ window.initExcavatorWorkShell = function () {
+                 occurred_at: new Date().toISOString(),
+                 sequence: sequence,
+                 depends_on: dependencies,
+-                payload: payload || {}
++                payload: Object.assign({}, payload || {}, {local_shift_id: localShiftId})
+                 };
+-                return fieldOutbox.queue(event).then(function () {
++                return localShiftLedger.recordAndQueue(event).then(function () {
+                     if (navigator.onLine !== false) fieldOutbox.flush();
+                     return event;
+                 });
+@@ -2540,10 +2702,9 @@ window.initExcavatorWorkShell = function () {
+             var loadEventId = item.dataset.eoOfflineEventId;
+             var saveCancellation;
+             if (loadEventId) {
+-                saveCancellation = fieldOutbox.discardUnsent(loadEventId).then(function (discarded) {
+-                    if (discarded) return {discarded: true};
++                saveCancellation = localShiftLedger.getEvent(loadEventId).then(function (storedSource) {
+                     return fieldOutbox.pending().then(function (events) {
+-                        var source = events.find(function (event) { return event.event_id === loadEventId; });
++                        var source = events.find(function (event) { return event.event_id === loadEventId; }) || storedSource;
+                         if (!source) throw new Error("Сохранённая погрузка уже подтверждена. Обновите экран.");
+                         var deviceId = excavatorInstallDeviceId();
+                         return fieldOutbox.allocateSequence(legacyExcavatorFieldSequence(shell.dataset.eoAccessId || "", deviceId)).then(function (sequence) {
+@@ -2556,6 +2717,7 @@ window.initExcavatorWorkShell = function () {
+                             role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                             device_id: deviceId,
+                             shift_id: Number(source.shift_id || shell.dataset.nativeShiftId || 0),
++                            local_shift_id: source.local_shift_id,
+                             equipment_id: Number(source.equipment_id || shell.dataset.eoCurrentExcavatorId || 0),
+                             trip_id: null,
+                             local_trip_id: source.local_trip_id,
+@@ -2565,10 +2727,12 @@ window.initExcavatorWorkShell = function () {
+                             payload: {
+                                 truck_id: source.payload && source.payload.truck_id,
+                                 dump_point_id: source.payload && source.payload.dump_point_id,
+-                                local_trip_id: source.local_trip_id
++                                local_trip_id: source.local_trip_id,
++                                source_load_event_id: source.event_id,
++                                local_shift_id: source.local_shift_id
+                             }
+                             };
+-                            return fieldOutbox.queue(cancelEvent).then(function () { return {discarded: false}; });
++                            return localShiftLedger.recordAndQueue(cancelEvent).then(function () { return {discarded: false}; });
+                         });
+                     });
+                 });
+@@ -2990,6 +3154,10 @@ window.initExcavatorWorkShell = function () {
+         var freeBucketAcceptanceLocalId = card.dataset.eoFreeBucketAcceptanceLocalId || "";
+         var freeBucketAcceptanceReference = freeBucketAcceptanceId || freeBucketAcceptanceLocalId;
+         var isFreeBucketLoad = card.dataset.eoFreeBucket === "1" && Boolean(freeBucketAcceptanceReference);
++        var rockTypeId = shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "";
++        var localVolumeByRock = {};
++        try { localVolumeByRock = JSON.parse(card.dataset.eoLocalVolumeByRock || "{}"); } catch (error) {}
++        var localVolume = localVolumeByRock[String(rockTypeId)] || localVolumeByRock.default || "";
+         var payload = {
+             assignment_id: isFreeBucketLoad ? "" : (card.dataset.assignmentId || ""),
+             // Свободный ковш определяет фактический экскаватор, но не отключает
+@@ -3004,17 +3172,24 @@ window.initExcavatorWorkShell = function () {
+             truck_id: card.dataset.truckId || "",
+             excavator_id: shell.dataset.eoCurrentExcavatorId || "",
+             dump_point_id: dumpTarget.dataset.eoDumpTarget || "",
+-            rock_type_id: shell.querySelector("select[name='rock_type']") ? shell.querySelector("select[name='rock_type']").value : "",
++            rock_type_id: rockTypeId,
+             loading_horizon: shell.querySelector("input[name='loading_horizon']") ? shell.querySelector("input[name='loading_horizon']").value : "",
+             loading_block: shell.querySelector("input[name='loading_block']") ? shell.querySelector("input[name='loading_block']").value : "",
+             planned_volume_m3: shell.querySelector("input[name='planned_volume_m3']") ? shell.querySelector("input[name='planned_volume_m3']").value : "",
+             transport_distance_km: dumpTarget.dataset.eoDumpDistance || (transportDistanceInput ? transportDistanceInput.value : ""),
+             downtime_text: downtimeInput ? downtimeInput.value : "",
+-            note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : ""
++            note: shell.querySelector("input[name='note']") ? shell.querySelector("input[name='note']").value : "",
++            truck_number: truckNumber,
++            dump_point_name: dumpPointName,
++            local_fleet_code: card.dataset.eoLocalFleetCode || "unknown",
++            local_volume_m3: localVolume
+         };
+-        if (isFreeBucketLoad) payload.truck_number = truckNumber;
+         card.classList.add("is-pending");
+-        fieldOutbox.pending().then(function (events) {
++        localShiftLedger.ready().then(function () { return fieldOutbox.pending(); }).then(function (events) {
++            var currentLocalShift = localShiftLedger.currentShift();
++            if (!currentLocalShift || currentLocalShift.status !== "open") {
++                throw new Error("Смена не сохранена на телефоне.");
++            }
+             var previous = events.filter(function (event) {
+                 return (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
+                     && String(event.payload && event.payload.truck_id || "") === String(truckId)
+@@ -3039,13 +3214,15 @@ window.initExcavatorWorkShell = function () {
+                 access_id: Number(shell.dataset.eoAccessId || 0),
+                 role_code: shell.dataset.eoRoleCode || "excavator_operator",
+                 device_id: deviceId,
+-                shift_id: Number(shell.dataset.nativeShiftId || 0),
++                shift_id: Number(currentLocalShift.server_shift_id || shell.dataset.nativeShiftId || 0),
++                local_shift_id: currentLocalShift.local_shift_id,
+                 equipment_id: Number(shell.dataset.eoCurrentExcavatorId || 0),
+                 trip_id: null,
+                 local_trip_id: localTripId,
+                 occurred_at: new Date().toISOString(),
+                 sequence: sequence,
+                 depends_on: [
++                    currentLocalShift.open_event_id || "",
+                     isFreeBucketLoad
+                         ? (freeBucketAcceptanceId ? "" : freeBucketAcceptanceLocalId)
+                         : (acceptanceEvent ? acceptanceEvent.event_id : ""),
+@@ -3053,9 +3230,9 @@ window.initExcavatorWorkShell = function () {
+                 ].filter(function (value, index, values) {
+                     return value && values.indexOf(value) === index;
+                 }),
+-                payload: payload
++                payload: Object.assign({}, payload, {local_shift_id: currentLocalShift.local_shift_id})
+                 };
+-                return fieldOutbox.queue(event).then(function () { return event; });
++                return localShiftLedger.recordAndQueue(event).then(function () { return event; });
+             });
+         }).then(function (event) {
+             invalidateExcavatorWorkRefresh();
+@@ -3102,8 +3279,13 @@ window.initExcavatorWorkShell = function () {
+     }
+ 
+     window.applyExcavatorPendingFieldEvents = function (events) {
++        var projectedShift = localShiftLedger ? localShiftLedger.currentShift() : null;
+         var allCurrentEvents = (events || []).filter(function (event) {
+-            return String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
++            return (
++                projectedShift && projectedShift.local_shift_id
++                    ? String(event.local_shift_id || "") === String(projectedShift.local_shift_id)
++                    : String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
++            )
+                 && String(event.equipment_id || "") === String(shell.dataset.eoCurrentExcavatorId || "");
+         });
+         if (freeBucketController) freeBucketController.reconcileEvents(allCurrentEvents);
+@@ -4121,7 +4303,7 @@ window.initExcavatorWorkShell = function () {
+             !shiftUrl
+             || shiftButton.disabled
+             || shiftButton.classList.contains("is-pending")
+-            || shiftServerBlocked
++            || (shiftServerBlocked && !(localShiftLedger && localShiftLedger.currentShift() && localShiftLedger.currentShift().status === "open"))
+             || (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly())
+         ) {
+             return Promise.resolve(false);
+@@ -4187,6 +4369,7 @@ window.initExcavatorWorkShell = function () {
+                 engine_hours: payload.engine_hours,
+                 confirmation_token: payload.confirmation_token || ""
+             }, {
++                eventId: shiftPendingActionId,
+                 idPrefix: "excavator-shift-close",
+                 dependsOnAll: true,
+                 dependencyTypes: [
+@@ -4197,24 +4380,16 @@ window.initExcavatorWorkShell = function () {
+                     "excavator.shift.closed"
+                 ]
+             }).then(function (event) { return {ok: true, local_saved: true, event_id: event.event_id}; })
+-            : fetch(shiftUrl, {
+-            method: "POST",
+-            credentials: "same-origin",
+-            headers: {
+-                "Content-Type": "application/json",
+-                "Accept": "application/json",
+-                "X-CSRFToken": csrfToken,
+-                "X-Requested-With": "XMLHttpRequest"
+-            },
+-            body: JSON.stringify(payload)
+-        }).then(function (response) {
+-            return response.json().catch(function () { return {}; }).then(function (data) {
+-                if (!response.ok || !data.ok) {
+-                    throw data;
+-                }
+-                return data;
+-            });
+-        });
++            : queueExcavatorFieldEvent("excavator.shift.opened", {
++                excavator_id: Number(payload.excavator_id || 0),
++                fuel_percent: payload.fuel_percent,
++                fuel: payload.fuel,
++                engine_hours: payload.engine_hours
++            }, {
++                eventId: shiftPendingActionId,
++                idPrefix: "excavator-shift-open",
++                noDependency: true
++            }).then(function (event) { return {ok: true, local_saved: true, event_id: event.event_id}; });
+         return shiftRequest.then(function (result) {
+             hideShiftConfirmation();
+             playExcavatorVoice(
+@@ -4226,10 +4401,16 @@ window.initExcavatorWorkShell = function () {
+             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
+             clearShiftErrors();
+             if (result && result.local_saved) {
+-                applyLocalShiftClose();
+-                showExcavatorNotice(navigator.onLine === false
+-                    ? "Закрытие смены сохранено на телефоне"
+-                    : "Закрытие смены сохранено. Отправляем на сервер...");
++                if (action === "close") applyLocalShiftClose();
++                projectExcavatorLocalShift(shell, localShiftLedger);
++                showExcavatorNotice(action === "close"
++                    ? (navigator.onLine === false
++                        ? "Закрытие смены сохранено на телефоне"
++                        : "Закрытие смены сохранено. Отправляем на сервер..."
++                    )
++                    : (navigator.onLine === false
++                        ? "Смена открыта и сохранена на телефоне"
++                        : "Смена открыта на телефоне. Отправляем на сервер..."));
+                 return true;
+             }
+             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
+diff --git a/СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py b/СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py
+index 772ffc80..598ba177 100644
+--- a/СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py
++++ b/СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py
+@@ -46,10 +46,18 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
+     source_counts = [0, 0]
+     unclassified_counts = [0, 0]
+     unknown_point_counts = [0, 0]
++    volume_totals = [0, 0]
++    unknown_volume_counts = [0, 0]
++    source_trip_ids = [[], []]
+ 
+     for trip in trips:
+         bucket = 0 if trip.loaded_at < current_start else 1
+         source_counts[bucket] += 1
++        source_trip_ids[bucket].append(trip.id)
++        if trip.volume_m3 is None:
++            unknown_volume_counts[bucket] += 1
++        else:
++            volume_totals[bucket] += trip.volume_m3
+ 
+         # assigned_dump_point is the immutable destination captured when the
+         # Excavator operator sends the truck. The mutable dump_point and the
+@@ -107,9 +115,12 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
+                 'belaz': belaz_total,
+                 'nhl': nhl_total,
+                 'trip_count': belaz_total + nhl_total,
++                'volume_m3': str(volume_totals[bucket]),
+             },
+             'source_trip_count': source_counts[bucket],
++            'source_trip_ids': source_trip_ids[bucket],
+             'unclassified_trip_count': unclassified_counts[bucket],
++            'unknown_volume_trip_count': unknown_volume_counts[bucket],
+             'is_empty': source_counts[bucket] == 0,
+         })
+ 
+diff --git a/СИСТЕМА_MVP/backend/trips/test_excavator_hourly_report.py b/СИСТЕМА_MVP/backend/trips/test_excavator_hourly_report.py
+index da96457d..98a6e1b2 100644
+--- a/СИСТЕМА_MVP/backend/trips/test_excavator_hourly_report.py
++++ b/СИСТЕМА_MVP/backend/trips/test_excavator_hourly_report.py
+@@ -70,7 +70,8 @@ class ExcavatorHourlyReportTests(TestCase):
+ 
+     def trip(self, truck, loaded_at, *, excavator=None, status=TripStatus.COMPLETED,
+              dump_point=None, assigned_dump_point=None, actual_dump_point=None,
+-             loading_shift=None, passive=False, legacy_without_assignment=False):
++             loading_shift=None, passive=False, legacy_without_assignment=False,
++             volume_m3=None):
+         dump_point = dump_point or self.point_a
+         return Trip.objects.create(
+             excavator=excavator or self.excavator,
+@@ -86,6 +87,7 @@ class ExcavatorHourlyReportTests(TestCase):
+             actual_dump_point=actual_dump_point,
+             status=status,
+             loaded_at=loaded_at,
++            volume_m3=volume_m3,
+             driver_participation_recorded=passive,
+             driver_control_shift=None if passive else loading_shift,
+         )
+@@ -133,10 +135,22 @@ class ExcavatorHourlyReportTests(TestCase):
+         self.assertEqual(current_by_point['ККД']['nhl'], 1)
+         self.assertEqual(current_by_point['Точка не определена']['belaz'], 1)
+         self.assertNotIn('СКДР', current_by_point)
+-        self.assertEqual(current['totals'], {'belaz': 2, 'nhl': 1, 'trip_count': 3})
++        self.assertEqual(current['totals'], {
++            'belaz': 2,
++            'nhl': 1,
++            'trip_count': 3,
++            'volume_m3': '0',
++        })
+         self.assertEqual(current['source_trip_count'], 4)
++        self.assertEqual(len(current['source_trip_ids']), 4)
+         self.assertEqual(current['unclassified_trip_count'], 1)
+-        self.assertEqual(previous['totals'], {'belaz': 1, 'nhl': 0, 'trip_count': 1})
++        self.assertEqual(current['unknown_volume_trip_count'], 4)
++        self.assertEqual(previous['totals'], {
++            'belaz': 1,
++            'nhl': 0,
++            'trip_count': 1,
++            'volume_m3': '0',
++        })
+         self.assertEqual(report['data_quality']['unknown_dump_point_trip_count'], 1)
+         self.assertFalse(report['data_quality']['complete'])
+ 
+@@ -168,6 +182,21 @@ class ExcavatorHourlyReportTests(TestCase):
+         self.assertEqual(current['totals']['trip_count'], 1)
+         self.assertEqual(previous['totals']['trip_count'], 1)
+ 
++    def test_report_exposes_exact_trip_coverage_and_known_volume_for_local_reconciliation(self):
++        captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
++        covered = self.trip(
++            self.belaz,
++            captured_at - timedelta(minutes=5),
++            volume_m3='49.40',
++        )
++
++        report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
++
++        current = report['hours'][0]
++        self.assertEqual(current['source_trip_ids'], [covered.id])
++        self.assertEqual(current['totals']['volume_m3'], '49.40')
++        self.assertEqual(current['unknown_volume_trip_count'], 0)
++
+     def test_endpoint_uses_only_excavator_from_open_shift(self):
+         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
+         EmployeeShift.objects.create(
+diff --git a/СИСТЕМА_MVP/backend/trips/tests.py b/СИСТЕМА_MVP/backend/trips/tests.py
+index f439d1ff..d0d19940 100644
+--- a/СИСТЕМА_MVP/backend/trips/tests.py
++++ b/СИСТЕМА_MVP/backend/trips/tests.py
+@@ -2128,7 +2128,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+         self.assertContains(response, '<em>м/ч</em>')
+         self.assertContains(response, 'Факт')
+         self.assertContains(response, '0 м³')
+-        self.assertContains(response, '<em>0 маш.</em>')
++        self.assertContains(response, '<em data-eo-local-shift-fact-meta>0 маш.</em>', html=True)
+         self.assertNotContains(response, 'Факт</span><strong>0 рейс.</strong>')
+         self.assertNotContains(response, 'data-eo-open-face-settings')
+         self.assertNotContains(response, '+ Добавить')
+@@ -4009,6 +4009,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+         self.assertContains(response, 'data-eo-face-settings-available="false"')
+         self.assertContains(response, 'data-eo-downtime-available="false"')
+         self.assertContains(response, 'data-eo-screen="trucks" data-eo-work-available="false" aria-disabled="true"')
++        self.assertContains(response, '/static/js/excavator-local-shift-v1.js?v=')
++        self.assertContains(response, 'data-eo-prepared-can-load="1"')
++        self.assertContains(response, 'function projectExcavatorLocalShift(shell, ledger)')
++        self.assertContains(response, 'data-eo-local-shift-fact-value')
++        self.assertContains(response, 'data-eo-server-source-trip-ids="[]"')
+         self.assertContains(response, 'data-eo-face-horizon disabled aria-disabled="true"')
+         self.assertContains(response, 'data-eo-face-block disabled aria-disabled="true"')
+         self.assertContains(response, 'data-eo-rock-select disabled aria-disabled="true"')
+diff --git a/СИСТЕМА_MVP/backend/trips/views.py b/СИСТЕМА_MVP/backend/trips/views.py
+index 8c37b5cf..cc597d8b 100644
+--- a/СИСТЕМА_MVP/backend/trips/views.py
++++ b/СИСТЕМА_MVP/backend/trips/views.py
+@@ -57,6 +57,7 @@ from references.equipment_states import DEFAULT_EQUIPMENT_STATES
+ from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
+ from references.rock_catalog import CANONICAL_ROCK_NAMES
+ from shifts.models import EmployeeShift, EquipmentPlanGroup, ShiftClientAction
++from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
+ from shifts.models import PlanAssignmentStatus, PlanCalculationMode
+ from shifts.services import (
+     ExcavatorShiftCloseConfirmationRequired,
+@@ -625,7 +626,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
+ const APP_CONTRACT_VERSION = "pwa-contract-v1";
+ const ROLE_CODE = "excavator_operator";
+ const CACHE_PREFIX = "excavator-mobile-shell-";
+-const CACHE_NAME = "excavator-mobile-shell-v262";
++const CACHE_NAME = "excavator-mobile-shell-v263";
+ const APP_SHELL_URL = "/excavator/work/";
+ const MANIFEST_URL = "/excavator.webmanifest";
+ const PRIVACY_POLICY_PATH = "/company/privacy/";
+@@ -639,26 +640,27 @@ const CORE_ASSETS = [
+   "/static/js/role-readonly.js",
+   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
+   "/static/css/excavator-manual-loading-v1.css?v=4",
+-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
++  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263",
++  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263",
++  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263",
++  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263",
++  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263",
++  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263",
++  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v263",
+   "/static/css/mobile-role-login-v1.css",
+-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
++  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263",
++  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263",
++  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263",
+   "/static/css/excavator-offline-v1.css?v=1",
+   "/static/css/native-app-update-v1.css",
+   "/static/favicon.ico",
+@@ -847,10 +849,23 @@ async function migratePreviousExcavatorCache(cacheNames) {
+   return false;
+ }
+ 
++const NETWORK_FALLBACK_TIMEOUT_MS = 2500;
++
++async function fetchWithExcavatorTimeout(request, options) {
++  if (typeof AbortController !== "function") return fetch(request, options);
++  const controller = new AbortController();
++  const timeout = setTimeout(() => controller.abort(), NETWORK_FALLBACK_TIMEOUT_MS);
++  try {
++    return await fetch(request, Object.assign({}, options || {}, { signal: controller.signal }));
++  } finally {
++    clearTimeout(timeout);
++  }
++}
++
+ async function networkFirst(request, fallbackUrl, responseValidator) {
+   const cache = await caches.open(CACHE_NAME);
+   try {
+-    const response = await fetch(request);
++    const response = await fetchWithExcavatorTimeout(request);
+     const canCache = response && response.ok &&
+       (!responseValidator || await responseValidator(response));
+     if (canCache) {
+@@ -859,7 +874,10 @@ async function networkFirst(request, fallbackUrl, responseValidator) {
+         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
+       }
+     }
+-    return response;
++    if (canCache) return response;
++    return (await cache.match(request)) ||
++      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
++      response;
+   } catch (error) {
+     return (await cache.match(request)) ||
+       (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
+@@ -884,11 +902,12 @@ async function networkOnly(request) {
+ async function networkFirstStatic(request) {
+   const cache = await caches.open(CACHE_NAME);
+   try {
+-    const response = await fetch(request, { cache: "no-store" });
++    const response = await fetchWithExcavatorTimeout(request, { cache: "no-store" });
+     if (response && response.ok) {
+       cache.put(request, response.clone()).catch(() => undefined);
++      return response;
+     }
+-    return response;
++    return (await cache.match(request)) || response;
+   } catch (error) {
+     return (await cache.match(request)) ||
+       new Response("Resource unavailable offline.", {
+@@ -5152,7 +5171,17 @@ def excavator_work_view(request):
+     open_shift = get_excavator_open_shift(access.employee)
+     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
+     assignment_state = work_assignment_state(access.employee, work_assignment)
+-    current_excavator = open_shift.equipment if open_shift else None
++    # A cached GET shell must contain the last verified assignment and its
++    # resources before a server shift exists. They stay disabled in rendered
++    # HTML and are enabled only after OFF-C1 durably writes a local opening.
++    # Mutating legacy POSTs keep the old server-shift guard.
++    current_excavator = (
++        open_shift.equipment
++        if open_shift
++        else work_assignment.equipment
++        if request.method == 'GET' and work_assignment and assignment_state == 'assigned'
++        else None
++    )
+     reconcile_excavator_waiting_for_trucks(
+         current_excavator,
+         access.employee,
+@@ -6098,7 +6127,34 @@ def excavator_work_view(request):
+     shift_plan_percent = shift_plan['percent']
+     shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
+ 
++    capacity_by_model = defaultdict(dict)
++    truck_model_ids = {
++        card['assignment'].truck.model_id
++        for card in truck_cards
++        if card['assignment'].truck.model_id
++    }
++    for model_id, rock_type_id, volume_m3 in (
++        TruckCapacityRule.objects
++        .filter(equipment_model_id__in=truck_model_ids)
++        .values_list('equipment_model_id', 'rock_type_id', 'volume_m3')
++    ):
++        capacity_by_model[model_id][str(rock_type_id)] = str(volume_m3)
++
+     for card in truck_cards:
++        truck = card['assignment'].truck
++        local_volume_by_rock = dict(capacity_by_model.get(truck.model_id, {}))
++        if truck.model_id and truck.model and truck.model.body_volume_m3:
++            local_volume_by_rock['default'] = str(truck.model.body_volume_m3)
++        card['local_volume_by_rock_json'] = json.dumps(
++            local_volume_by_rock,
++            ensure_ascii=False,
++            separators=(',', ':'),
++        )
++        card['local_fleet_code'] = (
++            'belaz' if equipment_is_belaz_truck(truck)
++            else 'nhl' if equipment_is_nhl_truck(truck)
++            else 'unknown'
++        )
+         truck_progress = None
+         if open_shift:
+             truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
+@@ -6242,6 +6298,10 @@ def excavator_work_view(request):
+ 
+     completed_shift_count = shift_trip_queryset.count()
+     completed_shift_volume = shift_trip_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
++    shift_source_trip_ids_json = json.dumps(
++        list(shift_trip_queryset.values_list('id', flat=True)),
++        separators=(',', ':'),
++    )
+     shift_fact_label = 'Факт'
+     shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
+     shift_fact_meta = f'{completed_shift_count} маш.'
+@@ -6365,6 +6425,9 @@ def excavator_work_view(request):
+             'shift_fact_label': shift_fact_label,
+             'shift_fact_value': shift_fact_value,
+             'shift_fact_meta': shift_fact_meta,
++            'completed_shift_count': completed_shift_count,
++            'completed_shift_volume': completed_shift_volume,
++            'shift_source_trip_ids_json': shift_source_trip_ids_json,
+             'shift_fuel_display': excavator_fuel_percent_from_liters(
+                 open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None),
+                 shift_fuel_limit,
+diff --git a/СИСТЕМА_MVP/backend/users/role_apps.py b/СИСТЕМА_MVP/backend/users/role_apps.py
+index ef86a7b5..737e186d 100644
+--- a/СИСТЕМА_MVP/backend/users/role_apps.py
++++ b/СИСТЕМА_MVP/backend/users/role_apps.py
+@@ -254,7 +254,7 @@ ROLE_APPS = (
+         icon_slug='excavator',
+         manifest_url='/excavator.webmanifest',
+         service_worker_url='/excavator-sw.js',
+-        shell_version='excavator-mobile-shell-v262',
++        shell_version='excavator-mobile-shell-v263',
+     ),
+     RoleApp(
+         role_code='mining_master',
