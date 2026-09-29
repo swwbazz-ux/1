@@ -1060,12 +1060,31 @@ body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-tru
     --dispatcher-plan-color: rgba(251, 146, 60, .24);
 }
 
-/* Самосвал без открытой смены продолжает выполнять план по своим рейсам,
+/* Самосвал без открытой смены показывает прогресс назначенного комплекса,
    но нейтральный серый цвет не выдаёт его за активную сменную машину. */
 body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-truck-tile.is-inactive-plan-fill[data-plan-progress-phase]:not([data-plan-progress-phase=""]) {
     --dispatcher-plan-color: rgba(139, 159, 170, .32);
     --dispatcher-plan-glow: rgba(139, 159, 170, .14);
     --dispatcher-plan-complete-color: rgba(139, 159, 170, .24);
+}
+
+/* Самосвалы остаются самостоятельным передним слоем поверх синего сектора
+   прогресса комплекса. Непрозрачная плитка не даёт фону комплекса окрашивать
+   серый силуэт через полупрозрачность. */
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-assigned-trucks {
+    position: relative;
+    z-index: 5;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile.is-inactive-plan-fill {
+    background-color: var(--gd-panel);
+    isolation: isolate;
+}
+
+body.dispatcher-control-screen:not(.mining-master-mobile-screen) .dispatcher-complex-card .complex-truck-tile.is-inactive-plan-fill img {
+    z-index: 4;
+    opacity: 1;
+    filter: grayscale(1) brightness(1.08) contrast(1.04) drop-shadow(0 1px 2px rgba(0, 0, 0, .72));
 }
 
 /* Текст поверх заливки: своя тень вместо расчёта на контраст фона. */

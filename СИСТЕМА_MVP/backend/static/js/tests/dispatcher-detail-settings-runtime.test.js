@@ -162,7 +162,7 @@ test("settings module is loaded before detail and packaged exactly once", () => 
     assert.ok(settingsIndex >= 0, "settings module is absent from dispatcher template");
     assert.ok(chartsIndex > settingsIndex, "charts must load after settings presenter");
     assert.ok(detailIndex > chartsIndex, "detail must load after its presenters");
-    assert.match(TEMPLATE, /dispatcher-detail-settings-v1\.js[^\n]+dispatcher-desktop-shell-v163/);
+    assert.match(TEMPLATE, /dispatcher-detail-settings-v1\.js[^\n]+dispatcher-desktop-shell-v164/);
 
     const pwaMatches = PWA_SOURCE.match(/\/static\/js\/dispatcher-detail-settings-v1\.js/g) || [];
     assert.equal(pwaMatches.length, 1, "settings module must occur once in PWA CORE_ASSETS");
