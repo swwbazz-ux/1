@@ -18,6 +18,11 @@ on:
       - СИСТЕМА_MVP/backend/requirements.txt
       - СИСТЕМА_MVP/backend/tools/validate_ci_test_matrix.py
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Exact immutable commit SHA to verify"
+        required: true
+        type: string
   schedule:
     - cron: "17 18 * * *"
 
@@ -30,7 +35,8 @@ concurrency:
 
 env:
   QUALITY_TARGET_REF: >-
-    ${{ github.event_name == 'pull_request' && github.sha ||
+    ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha ||
+    github.event_name == 'pull_request' && github.sha ||
     github.event_name == 'push' && github.sha ||
     'codex/github-production-deploy-20260916' }}
   DJANGO_SECRET_KEY: ci-secret-key
