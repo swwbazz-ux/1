@@ -539,6 +539,15 @@
                 var rejected = ["conflict", "auth_required", "invalid"].indexOf(event.state) >= 0;
                 if (event.event_type === "driver.free_bucket.selected" && positive(event.payload && event.payload.truck_id) === positive(truckId)) {
                     if (rejected) {
+                        /* Старый отклонённый выбор (другое принятие) не трогает
+                           текущий живой ковш. Записи «на сверке» лежат в очереди до
+                           суток и идут по порядку раньше новых; когда новые выбор и
+                           погрузка подтверждались и уходили из очереди, этот старый
+                           отказ откатывал проекцию к серверному состоянию ДО выбора —
+                           ковш гас через полсекунды после погрузки, и круг становился
+                           синим, как в обычном ручном режиме (боевой Infinix,
+                           29.09.2026, v367). */
+                        if (projected.active && projected.acceptance_local_id !== event.event_id) return;
                         // Сервер не принял ЭТОТ выбор — местного ковша нет. Раньше
                         // это всё равно оставляло active:true с sync_mode "review"
                         // ("НУЖНА СВЕРКА") — самосвал застревал навсегда, ни выбрать
