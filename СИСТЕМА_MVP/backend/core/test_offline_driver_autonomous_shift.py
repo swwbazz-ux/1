@@ -256,6 +256,21 @@ class DriverAutonomousShiftTests(TestCase):
         self.assertEqual(first.end_fuel, Decimal('5000'))
         self.assertIsNone(second.closed_at)
 
+    def test_shared_normalizer_does_not_carry_the_local_shift_id(self):
+        """Отпечаток события считается по нормализованному событию: новое общее поле
+        изменило бы отпечаток уже принятых событий обеих ролей, и их неизменённые
+        повторы получали бы event_id_reused (разбор c05a5925, 30.09.2026). Местный
+        ID смены водителя живёт только в payload его собственных событий."""
+        from core.offline_sync import normalize_offline_event
+
+        opening = self.opening('driver-shift-open:fingerprint', 1, self.base)
+        with_top_level = normalize_offline_event(dict(opening), role_code='driver', device_id='d-1')
+        without_top_level = dict(opening)
+        without_top_level.pop('local_shift_id')
+        plain = normalize_offline_event(without_top_level, role_code='driver', device_id='d-1')
+        self.assertNotIn('local_shift_id', with_top_level)
+        self.assertEqual(with_top_level['fingerprint'], plain['fingerprint'])
+
     def test_opening_does_not_move_the_phone_time_for_a_quick_send(self):
         """Быстрая отправка (sent_live) не подменяет начало смены временем сервера."""
         opened_at = timezone.now() - timedelta(minutes=2)

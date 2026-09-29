@@ -1081,10 +1081,77 @@ test("actual IndexedDB repository path survives a new runtime instance", async (
     assert.equal(restored.attempt_count, 1);
 });
 
+test("a shift opened on the phone without a network is queued and later actions reference it", async () => {
+    /* Владелец, 30.09.2026: смена открывается по нажатию, без ожидания сервера.
+       Открытие — событие очереди; действия в этой смене несут local_shift_id и
+       зависят от открытия, пока у смены нет серверного ID. */
+    const sent = [];
+    const context = {actorId: 11, accessId: 7, shiftId: "", localShiftId: "", equipmentId: 58, deviceId: "install-uuid-1"};
+    const box = runtime({
+        context,
+        send: async batch => { sent.push(batch); throw new Error("offline"); },
+    });
+    const opening = await box.enqueue({
+        event_id: "driver-shift-open:one",
+        event_type: "driver.shift.opened",
+        local_shift_id: "driver-shift-open:one",
+        payload: {truck_id: 58, start_fuel: "410", start_mileage: "12000", start_engine_hours: "3000"},
+    });
+    assert.equal(opening.shift_id, null);
+    assert.equal(opening.local_shift_id, "driver-shift-open:one");
+    assert.deepEqual(opening.depends_on, []);
+
+    context.shiftId = "driver-shift-open:one";
+    context.localShiftId = "driver-shift-open:one";
+    const downtime = await box.enqueue({
+        event_id: "downtime-in-local-shift",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 3},
+    });
+    assert.equal(downtime.shift_id, null);
+    assert.equal(downtime.local_shift_id, "driver-shift-open:one");
+    assert.deepEqual(downtime.depends_on, ["driver-shift-open:one"]);
+    assert.equal(downtime.payload.local_shift_id, "driver-shift-open:one");
+
+    context.shiftId = "44";
+    context.localShiftId = "";
+    const later = await box.enqueue({
+        event_id: "downtime-after-server-id",
+        event_type: "driver.downtime.started",
+        payload: {reason_id: 3},
+    });
+    assert.equal(later.shift_id, 44);
+    assert.equal(later.local_shift_id, null);
+    assert.deepEqual(later.depends_on, []);
+    assert.equal(later.payload.local_shift_id, undefined);
+});
+
+test("a shift opening must name itself as the local shift and its own truck", async () => {
+    const box = runtime({context: {actorId: 11, accessId: 7, shiftId: "", equipmentId: 58, deviceId: "install-uuid-1"}});
+    await assert.rejects(
+        box.enqueue({
+            event_id: "driver-shift-open:x", event_type: "driver.shift.opened",
+            local_shift_id: "driver-shift-open:other", payload: {truck_id: 58},
+        }),
+        /offline_shift_open_identity_invalid/
+    );
+    await assert.rejects(
+        box.enqueue({
+            event_id: "driver-shift-open:y", event_type: "driver.shift.opened",
+            local_shift_id: "driver-shift-open:y", payload: {truck_id: 59},
+        }),
+        /offline_shift_open_truck_mismatch/
+    );
+    await assert.rejects(
+        box.enqueue({event_id: "no-shift", event_type: "driver.downtime.started", payload: {reason_id: 1}}),
+        /offline_event_context_incomplete/
+    );
+});
+
 test("local guards reject ungranted or incomplete driver actions before storage", async () => {
     const box = runtime();
     await assert.rejects(
-        box.enqueue({event_id: "open", event_type: "driver.shift.opened", payload: {}}),
+        box.enqueue({event_id: "open", event_type: "driver.shift.reopened", payload: {}}),
         /offline_event_type_not_permitted/
     );
     await assert.rejects(

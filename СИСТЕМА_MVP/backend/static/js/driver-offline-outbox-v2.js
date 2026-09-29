@@ -16,13 +16,14 @@
         "driver.free_bucket.cancelled",
         "driver.downtime.started",
         "driver.downtime.ended",
-        "driver.shift.closed"
+        "driver.shift.closed",
+        "driver.shift.opened"
     ]);
     var IMMUTABLE_FIELDS = [
         "event_id", "event_type", "format_version", "actor_id", "access_id",
         "role_code", "device_id", "shift_id", "equipment_id", "trip_id",
         "local_trip_id", "local_downtime_id", "occurred_at", "depends_on", "payload",
-        "context_snapshot"
+        "context_snapshot", "local_shift_id"
     ];
 
     function nowIso() { return new Date().toISOString(); }
@@ -64,8 +65,13 @@
         return value;
     }
     function sameIdentity(left, right) {
+        /* Поле, которого не было у записи старой версии, равно пустому:
+           local_shift_id добавлен 30.09.2026, прежние записи его не несут. */
+        function value(record, field) {
+            return record[field] === undefined ? null : record[field];
+        }
         return IMMUTABLE_FIELDS.every(function (field) {
-            return JSON.stringify(canonical(left[field])) === JSON.stringify(canonical(right[field]));
+            return JSON.stringify(canonical(value(left, field))) === JSON.stringify(canonical(value(right, field)));
         });
     }
     function errorCode(event) {
@@ -97,8 +103,22 @@
     }
     function validateEvent(event) {
         if (!SUPPORTED_TYPES.has(event.event_type)) throw new Error("offline_event_type_not_permitted");
-        if (!event.actor_id || !event.access_id || !event.device_id || !event.shift_id || !event.equipment_id) {
+        /* Смена, открытая на телефоне без связи, ещё не имеет серверного ID:
+           событие ссылается на неё local_shift_id (= ID события открытия), сервер
+           привязывает его по квитанции открытия (core/offline_sync.py). */
+        if (
+            !event.actor_id || !event.access_id || !event.device_id || !event.equipment_id
+            || (!event.shift_id && !event.local_shift_id)
+        ) {
             throw new Error("offline_event_context_incomplete");
+        }
+        if (event.event_type === "driver.shift.opened") {
+            if (event.shift_id || !event.local_shift_id || event.local_shift_id !== event.event_id) {
+                throw new Error("offline_shift_open_identity_invalid");
+            }
+            if (number(event.payload.truck_id) !== number(event.equipment_id)) {
+                throw new Error("offline_shift_open_truck_mismatch");
+            }
         }
         if (!event.context_snapshot || typeof event.context_snapshot !== "object" || Array.isArray(event.context_snapshot)) {
             throw new Error("offline_event_snapshot_invalid");
@@ -442,8 +462,17 @@
             .pop() || null;
     }
 
+    /* Ключ смены для расписок: серверный ID или местный ID смены, открытой
+       без связи ("driver-shift-open:…"). */
+    function shiftReceiptKey(shiftId) {
+        var numeric = number(shiftId);
+        if (numeric) return numeric;
+        var local = String(shiftId || "");
+        return local.indexOf("driver-shift-open:") === 0 ? local : null;
+    }
+
     function downtimeProjectionReceiptKey(shiftId, equipmentId) {
-        shiftId = number(shiftId);
+        shiftId = shiftReceiptKey(shiftId);
         equipmentId = number(equipmentId);
         return shiftId && equipmentId
             ? "downtime-projection:" + shiftId + ":" + equipmentId
@@ -451,7 +480,7 @@
     }
 
     function manualTripProjectionReceiptKey(shiftId, equipmentId) {
-        shiftId = number(shiftId);
+        shiftId = shiftReceiptKey(shiftId);
         equipmentId = number(equipmentId);
         return shiftId && equipmentId ? "manual-trip-projection:" + shiftId + ":" + equipmentId : "";
     }
@@ -738,15 +767,32 @@
             contextSnapshot.actor_id = number(ctx.actorId) || actorId;
             contextSnapshot.access_id = number(ctx.accessId || accessId) || eventAccessId;
             contextSnapshot.role_code = "driver";
+            var eventType = String(spec.event_type || "");
+            var shiftId = eventType === "driver.shift.opened" ? null : number(spec.shift_id || ctx.shiftId);
+            var localShiftId = spec.local_shift_id
+                ? String(spec.local_shift_id)
+                : (!shiftId && ctx.localShiftId ? String(ctx.localShiftId) : null);
+            var dependsOn = Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [];
+            /* Действие в смене, которую сервер ещё не видел, ждёт её открытия:
+               пакет повезёт открытие первым, сервер привяжет действие к смене. */
+            if (localShiftId && !shiftId && eventType !== "driver.shift.opened" && dependsOn.indexOf(localShiftId) < 0) {
+                dependsOn.push(localShiftId);
+            }
+            /* Сервер читает местный ID смены только из payload самого события:
+               общая нормализация его не трогает, чтобы не менять отпечаток уже
+               принятых событий (core/offline_sync.py, _driver_event_local_shift_id). */
+            var eventPayload = clone(spec.payload || {});
+            if (localShiftId && !shiftId && !eventPayload.local_shift_id) eventPayload.local_shift_id = localShiftId;
             var event = {
                 event_id: requestedId,
-                event_type: String(spec.event_type || ""),
+                event_type: eventType,
                 format_version: FORMAT_VERSION,
                 actor_id: actorId,
                 access_id: eventAccessId,
                 role_code: "driver",
                 device_id: deviceId,
-                shift_id: number(spec.shift_id || ctx.shiftId),
+                shift_id: shiftId,
+                local_shift_id: localShiftId,
                 equipment_id: number(spec.equipment_id || ctx.equipmentId),
                 trip_id: number(spec.trip_id),
                 local_trip_id: spec.local_trip_id ? String(spec.local_trip_id) : null,
@@ -757,8 +803,8 @@
                         : (spec.payload && spec.payload.local_downtime_id ? String(spec.payload.local_downtime_id) : null)),
                 occurred_at: occurredAt,
                 sequence: null,
-                depends_on: Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [],
-                payload: clone(spec.payload || {}),
+                depends_on: dependsOn,
+                payload: eventPayload,
                 context_snapshot: contextSnapshot,
                 state: "pending",
                 attempt_count: 0,
@@ -842,7 +888,7 @@
                             root.driverDowntimeIdAliases[String(event.event_id)] = String(confirmedDowntimeId);
                         }
                     }
-                    var downtimeReceiptKey = downtimeProjectionReceiptKey(event.shift_id, event.equipment_id);
+                    var downtimeReceiptKey = downtimeProjectionReceiptKey(event.shift_id || event.local_shift_id, event.equipment_id);
                     if (downtimeReceiptKey && (event.event_type === "driver.downtime.started" || event.event_type === "driver.downtime.ended")) {
                         await repo.setMeta(downtimeReceiptKey, {
                             event_id: event.event_id,
@@ -862,7 +908,7 @@
                             server_ids: clone(result.server_ids || null)
                         });
                     }
-                    var manualReceiptKey = manualTripProjectionReceiptKey(event.shift_id, event.equipment_id);
+                    var manualReceiptKey = manualTripProjectionReceiptKey(event.shift_id || event.local_shift_id, event.equipment_id);
                     if (manualReceiptKey && event.event_type === "driver.trip.loaded") {
                         await repo.setMeta(manualReceiptKey, {
                             event_id: event.event_id,

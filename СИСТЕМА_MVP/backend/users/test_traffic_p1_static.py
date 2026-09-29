@@ -155,7 +155,13 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     if path in expected_paths:
                         self.assertEqual(core_url, f'{path}?v={EXPECTED_RELEASE}')
                 self.assertIn('request.mode === "navigate"', script)
-                self.assertIn('networkFirstStatic(request)', script)
+                if role_code == 'driver':
+                    # Водитель не ждёт сеть: версионированная статика из кэша,
+                    # прочая — из кэша с обновлением в фоне (30.09.2026).
+                    self.assertIn('cacheFirstVersionedStatic(request)', script)
+                    self.assertIn('staleWhileRevalidateStatic(event, request)', script)
+                else:
+                    self.assertIn('networkFirstStatic(request)', script)
 
     def test_dispatcher_precaches_every_declared_release_asset(self):
         response = Client().get('/dispatcher-sw.js', HTTP_HOST='dispatcher.localhost')

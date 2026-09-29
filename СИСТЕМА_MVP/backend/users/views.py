@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v370'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v371'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -339,6 +339,7 @@ const CORE_ASSETS = [
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-local-shift-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-haptics-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-native-push-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/css/mobile-dial-actions-v1.css?v={DRIVER_SHELL_VERSION}",
@@ -373,6 +374,18 @@ const CORE_ASSETS = [
     "/static/img/pwa/driver-maskable-512.png",
     "/static/img/start/start-hero-v1.webp",
     "/static/img/start/start-hero-v1.jpg",
+    // Иконки техники окна свободного ковша и ручного режима: без них окно
+    // без сети показывало пустые плитки, на слабой сети ждало их каждый раз.
+    "/static/img/equipment/excavator-gray.png",
+    "/static/img/equipment/excavator-yellow.png",
+    "/static/img/equipment/excavator-blue.png",
+    "/static/img/equipment/excavator-green.png",
+    "/static/img/equipment/excavator-red.png",
+    "/static/img/equipment/truck-gray.png",
+    "/static/img/equipment/truck-yellow.png",
+    "/static/img/equipment/truck-blue.png",
+    "/static/img/equipment/truck-green.png",
+    "/static/img/equipment/truck-red.png",
     "/static/audio/driver/driver_truck_assigned.wav",
     "/static/audio/driver/driver_action_ok.wav",
     "/static/audio/driver/driver_action_error.wav",
@@ -424,11 +437,42 @@ self.addEventListener("activate", (event) => {{
     );
 }});
 
+// Приложение не ждёт сеть (владелец, 30.09.2026). Раньше всё — оболочка,
+// статика, картинки — шло «сначала сеть» без срока: на слабом сигнале каждый
+// запуск и каждый файл висели, пока сеть не ответит или не оборвётся. Теперь:
+// версионированная статика (?v=) — из кэша, в сеть только если её там нет;
+// прочая статика и картинки — из кэша сразу, обновление в фоне; оболочка —
+// проверенная копия из кэша сразу, свежая в фоне; сеть без кэша — со сроком,
+// как у машиниста (fetchWithExcavatorTimeout, Codex c05a5925).
+const NETWORK_FALLBACK_TIMEOUT_MS = 3500;
+// Проверенная оболочка из кэша моложе этого срока в сеть не перепроверяется:
+// быстрый перезапуск не должен давать ни одного запроса оболочки и статики.
+// Текущее состояние экран всё равно сверяет фрагментом (driver-shift-v1.js).
+const SHELL_REVALIDATE_AFTER_MS = 15 * 60 * 1000;
+
+async function fetchWithDriverTimeout(request, options) {{
+    if (typeof AbortController !== "function") return fetch(request, options);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), NETWORK_FALLBACK_TIMEOUT_MS);
+    try {{
+        return await fetch(request, Object.assign({{}}, options || {{}}, {{ signal: controller.signal }}));
+    }} finally {{
+        clearTimeout(timeout);
+    }}
+}}
+
+function offlineStaticResponse() {{
+    return new Response(
+        "Ресурс недоступен без сети.",
+        {{ status: 503, headers: {{ "Content-Type": "text/plain; charset=utf-8" }} }}
+    );
+}}
+
 async function networkFirst(request, fallbackUrl) {{
     const cache = await caches.open(CACHE_NAME);
     try {{
         const freshRequest = new Request(request, {{ cache: "no-store" }});
-        const response = await fetch(freshRequest);
+        const response = await fetchWithDriverTimeout(freshRequest);
         if (response && response.ok) {{
             cache.put(request, response.clone());
         }}
@@ -486,6 +530,13 @@ async function cacheAuthenticatedDriverShell(cache, shellUrl, response) {{
     if (!dependencies.length) return false;
     try {{
         for (const dependency of dependencies) {{
+            // Файл с версией в адресе не меняется, пока версия та же: повторно
+            // его не качаем — фоновое обновление оболочки при каждом запуске
+            // иначе тянуло бы всю статику заново.
+            if (dependency.includes("?v=") || dependency.includes("&v=")) {{
+                const cached = await cache.match(dependency);
+                if (cached && cached.ok) continue;
+            }}
             const request = new Request(dependency, {{ cache: "no-store", credentials: "same-origin" }});
             const asset = await fetch(request);
             if (!asset || !asset.ok) return false;
@@ -555,32 +606,110 @@ async function matchDriverShellAcrossCaches(request) {{
     return null;
 }}
 
-async function networkFirstDriverShell(request) {{
+async function matchCurrentDriverShell(request) {{
     const cache = await caches.open(CACHE_NAME);
+    for (const candidate of [request, APP_SHELL_URL, LEGACY_SHELL_URL]) {{
+        const response = await cache.match(candidate);
+        if (await driverShellClosureComplete(cache, response)) return response;
+    }}
+    return null;
+}}
+
+function offlineShellResponse() {{
+    return new Response(
+        '<!doctype html><html lang="ru"><head><meta charset="utf-8">'
+        + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        + '<title>Нет связи</title><style>body{{margin:0;min-height:100vh;display:grid;place-items:center;'
+        + 'background:#030708;color:#e6f0f2;font:18px/1.4 system-ui,sans-serif;text-align:center;padding:24px}}'
+        + 'button{{margin-top:20px;padding:14px 28px;font-size:18px;border-radius:12px;border:0;'
+        + 'background:#1f8a70;color:#fff}}</style></head><body><main><h1>Нет связи с сервером</h1>'
+        + '<p>Приложение ещё ни разу не открывалось на этом телефоне с сетью, поэтому показать его нечем.'
+        + ' Как только появится связь, экран откроется сам.</p>'
+        + '<button type="button" onclick="location.reload()">Повторить</button></main>'
+        + '<script>setTimeout(function(){{location.reload()}},10000)</script></body></html>',
+        {{ status: 503, headers: {{ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }} }}
+    );
+}}
+
+async function cacheFirstDriverShell(event, request) {{
+    const cache = await caches.open(CACHE_NAME);
+    // Ответ отдаётся, как только пришли заголовки; тело кладётся в кэш в фоне.
+    // Если дожидаться записи в кэш, остановившееся после заголовков тело
+    // подвешивало бы и открытие экрана (разбор c05a5925, 30.09.2026).
+    const revalidation = async () => {{
+        try {{
+            const response = await fetch(new Request(request, {{ cache: "no-store" }}));
+            event.waitUntil(
+                cacheAuthenticatedDriverShell(cache, request, response.clone()).catch(() => false)
+            );
+            return response;
+        }} catch (error) {{
+            return null;
+        }}
+    }};
+    const cached = await matchCurrentDriverShell(request);
+    // Экран — сразу из проверенного кэша; свежая оболочка ложится в кэш в фоне
+    // (не чаще SHELL_REVALIDATE_AFTER_MS) и пригодится при следующем запуске.
+    // Текущее состояние смены и рейса экран догружает сам (фрагмент).
+    if (cached) {{
+        const cachedAt = Date.parse(cached.headers.get("Date") || "") || 0;
+        if (!cachedAt || Date.now() - cachedAt > SHELL_REVALIDATE_AFTER_MS) {{
+            event.waitUntil(revalidation());
+        }}
+        return cached;
+    }}
+    const pending = revalidation();
+    event.waitUntil(pending);
+    const fresh = await Promise.race([
+        pending,
+        new Promise((resolve) => setTimeout(() => resolve(null), NETWORK_FALLBACK_TIMEOUT_MS)),
+    ]);
+    if (fresh) return fresh;
+    return (await matchDriverShellAcrossCaches(request)) || offlineShellResponse();
+}}
+
+async function cacheFirstVersionedStatic(request) {{
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
+    if (cached && cached.ok) return cached;
     try {{
-        const freshRequest = new Request(request, {{ cache: "no-store" }});
-        const response = await fetch(freshRequest);
-        await cacheAuthenticatedDriverShell(cache, request, response);
+        const response = await fetchWithDriverTimeout(request);
+        if (response && response.ok) cache.put(request, response.clone()).catch(() => undefined);
         return response;
     }} catch (error) {{
-        return (await matchDriverShellAcrossCaches(request)) || Response.error();
+        return (await matchStaticAcrossDriverCaches(request)) || offlineStaticResponse();
     }}
 }}
 
-async function networkFirstStatic(request) {{
-    const cache = await caches.open(CACHE_NAME);
-    try {{
-        const response = await fetch(request, {{ cache: "no-store" }});
-        if (response && response.ok) {{
-            await cache.put(request, response.clone());
-        }}
-        return response;
-    }} catch (error) {{
-        return (await cache.match(request)) || new Response(
-            "Ресурс недоступен без сети.",
-            {{ status: 503, headers: {{ "Content-Type": "text/plain; charset=utf-8" }} }}
-        );
+// Тот же файл из кэша прежней версии оболочки — пока новая ещё докачивается.
+async function matchStaticAcrossDriverCaches(request) {{
+    const names = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX));
+    for (const name of names.reverse()) {{
+        const cached = await (await caches.open(name)).match(request, {{ ignoreSearch: false }});
+        if (cached && cached.ok) return cached;
     }}
+    return null;
+}}
+
+async function staleWhileRevalidateStatic(event, request) {{
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(request);
+    const refresh = (async () => {{
+        try {{
+            const response = await fetchWithDriverTimeout(request, {{ cache: "no-store" }});
+            if (response && response.ok) {{
+                event.waitUntil(cache.put(request, response.clone()).catch(() => undefined));
+            }}
+            return response;
+        }} catch (error) {{
+            return null;
+        }}
+    }})();
+    if (cached && cached.ok) {{
+        event.waitUntil(refresh);
+        return cached;
+    }}
+    return (await refresh) || offlineStaticResponse();
 }}
 
 self.addEventListener("fetch", (event) => {{
@@ -601,7 +730,7 @@ self.addEventListener("fetch", (event) => {{
         return;
     }}
     if (request.mode === "navigate" || url.pathname === APP_SHELL_URL || url.pathname === LEGACY_SHELL_URL) {{
-        event.respondWith(networkFirstDriverShell(request));
+        event.respondWith(cacheFirstDriverShell(event, request));
         return;
     }}
     if (url.pathname === MANIFEST_URL) {{
@@ -609,7 +738,18 @@ self.addEventListener("fetch", (event) => {{
         return;
     }}
     if (url.pathname.startsWith("/static/")) {{
-        event.respondWith(networkFirstStatic(request));
+        // Статика выпуска (общий сборщик role_apps.add_release_static_cache) —
+        // своим штатным путём, прочая версионированная — из кэша, остальное —
+        // из кэша с обновлением в фоне.
+        event.respondWith(
+            typeof isReleaseStaticRequest === "function" && isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request)
+                : url.searchParams.has("v") ? cacheFirstVersionedStatic(request)
+                // Картинки и звуки предзагружены при установке каждой версии
+                // (CORE_ASSETS) — берутся из кэша без фоновых запросов.
+                : url.pathname.startsWith("/static/img/") || url.pathname.startsWith("/static/audio/")
+                    ? cacheFirstVersionedStatic(request)
+                : staleWhileRevalidateStatic(event, request)
+        );
     }}
 }});
 
@@ -4445,7 +4585,23 @@ def driver_shift_view(request):
             busy_shift,
             equipment=work_assignment.equipment,
         )
-    current_truck = open_shift.equipment if open_shift else None
+    # Смена открывается на телефоне без ожидания сервера (владелец, 30.09.2026).
+    # Поэтому страница при закрытой смене рисует рабочий экран назначенного
+    # самосвала — выключенным; driver-local-shift-v1.js включает его сразу после
+    # того, как открытие записано в очередь телефона. Так же сделано у
+    # машиниста (Codex, c05a5925). Только GET: POST-действия по-прежнему требуют
+    # серверной смены.
+    driver_prepared_truck = (
+        work_assignment.equipment
+        if (
+            request.method == 'GET'
+            and not open_shift
+            and work_assignment
+            and assignment_state == 'assigned'
+        )
+        else None
+    )
+    current_truck = open_shift.equipment if open_shift else driver_prepared_truck
     assignment_truck = (
         work_assignment.equipment
         if work_assignment and assignment_state in {'assigned', 'assignment_conflict'}
@@ -4711,8 +4867,11 @@ def driver_shift_view(request):
         and driver_free_bucket_acceptance.status == 'used'
         and driver_free_bucket_acceptance.used_trip_id == active_trip.id
     )
+    # current_truck есть либо у открытой смены, либо у подготовленной (см.
+    # driver_prepared_truck): окно ковша и каталог рисуются заранее, кнопка при
+    # закрытой смене выключена до открытия на телефоне.
     driver_free_bucket_can_open = bool(
-        open_shift and current_truck and (not active_trip or driver_free_bucket_trip_open)
+        current_truck and (not active_trip or driver_free_bucket_trip_open)
     )
     driver_free_bucket_primary_label = driver_excavator_short_label(
         current_assignment.excavator if current_assignment else None
@@ -5093,16 +5252,17 @@ def driver_shift_view(request):
             for setting in driver_manual_primary_dump_points
         ],
     }
+    # Как и ковш: при подготовленном самосвале кнопка рисуется рабочей, но
+    # выключенной, пока смена не открыта на телефоне (data-driver-shift-gated).
     driver_manual_can_open = bool(
-        open_shift
-        and current_truck
+        current_truck
         and (not active_trip or driver_active_trip_origin == 'driver_manual')
     )
     driver_manual_blocked_reason = (
         'Ручной режим недоступен во время активного рейса'
         if active_trip and driver_active_trip_origin != 'driver_manual' else
         'Откройте смену, чтобы использовать ручной режим'
-        if not open_shift else
+        if not open_shift and not current_truck else
         'Сначала выберите самосвал для текущей смены'
         if not current_truck else
         ''
@@ -5335,6 +5495,30 @@ def driver_shift_view(request):
             instance=open_shift,
             initial={'client_action_id': secrets.token_urlsafe(24)},
         )
+    # Вторая, скрытая форма смены: телефон переключает «открыта ↔ закрыта» сам,
+    # без ответа сервера (driver-local-shift-v1.js). При открытой смене
+    # заготовлена форма открытия следующей, при закрытой — форма закрытия.
+    # Свои id полей, чтобы не совпасть с основной формой на той же странице.
+    driver_next_open_form = None
+    driver_local_close_form = None
+    if request.method == 'GET' and assignment_state == 'assigned':
+        if open_shift:
+            driver_next_open_form = DriverOpenShiftForm(
+                initial={
+                    'start_fuel': open_shift.start_fuel,
+                    'start_mileage': open_shift.start_mileage,
+                    'start_engine_hours': open_shift.start_engine_hours,
+                    'client_action_id': secrets.token_urlsafe(24),
+                },
+                employee=access.employee,
+                work_assignment=work_assignment,
+                auto_id='driver_next_open_%s',
+            )
+        elif driver_prepared_truck:
+            driver_local_close_form = DriverCloseShiftForm(
+                initial={'client_action_id': secrets.token_urlsafe(24)},
+                auto_id='driver_local_close_%s',
+            )
 
     response = render(
         request,
@@ -5355,6 +5539,9 @@ def driver_shift_view(request):
             'active_trip': driver_standard_active_trip,
             'form': form,
             'close_form': close_form,
+            'driver_next_open_form': driver_next_open_form,
+            'driver_local_close_form': driver_local_close_form,
+            'driver_prepared_truck': driver_prepared_truck,
             'close_review': getattr(request, '_driver_close_confirmation', None),
             'last_closed_shift': last_closed_shift,
             'active_tab': active_tab,

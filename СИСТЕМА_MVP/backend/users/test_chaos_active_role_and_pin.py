@@ -133,7 +133,9 @@ class LiveRoleReadOnlyClientContractTests(TestCase):
             'return !unloadSubmissionPending && !driverRoleIsReadonly();',
             driver_template,
         )
-        self.assertEqual(driver_template.count('data-driver-in-place='), 4)
+        # 4 серверные формы + 2 скрытые формы смены, которые телефон переключает
+        # сам без связи (открытие следующей / закрытие открытой на телефоне).
+        self.assertEqual(driver_template.count('data-driver-in-place='), 6)
         self.assertIn('window.submitDriverFormInPlace = function (form, options)', driver_template)
         self.assertIn('form.getAttribute("action") || window.location.href', driver_template)
         self.assertIn('window.history.replaceState(', driver_template)

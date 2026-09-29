@@ -855,6 +855,9 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     assert.match(runtime, /if \(dialHostsManualMode\(\)\) \{\s*if \(kind === "cancelled"[^\n]*playDriverSound\("action_error"\)/);
     // Старые стили под новой разметкой (пойманный на телефоне случай) лечатся сами.
     assert.match(drum, /function healStaleStyles\(\)[\s\S]*indexOf\("pointdrum"\)/);
+    // Сетка «pointdrum» есть только у активного экрана «Работа»: запуск на вкладке
+    // «Смена» (закрытая смена) не должен перекачивать стили в обход кэша.
+    assert.match(drum, /function healStaleStyles\(\)[\s\S]*?if \(!screen \|\| !screen\.classList\.contains\("is-active"\)\) return;[\s\S]*?indexOf\("pointdrum"\)/);
     // Разгрузка всегда удержанием со шкалой, одного касания нет.
     assert.doesNotMatch(drum, /driverUnloadOneTap = /);
     assert.match(shift, /holdForm\.dataset\.driverUnloadOneTap = "false";/);

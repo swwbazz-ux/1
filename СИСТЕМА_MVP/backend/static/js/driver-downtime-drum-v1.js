@@ -378,6 +378,15 @@
             if (!isActive && card.dataset.driverDrumTemp === "1") { delete card.dataset.driverDrumTemp; card.hidden = card.dataset.driverDrumQuick !== "1"; changed = true; }
         });
         if (changed) rebuildDrum(id !== "" ? id : null);
+        /* Временная грань причины вне быстрого набора прячется после конца
+           простоя, а cards() берёт только видимые — пометка «идёт простой» на
+           ней оставалась, и ручная погрузка отказывала «Сначала завершите
+           простой» (driver-point-drum-v1.js, blockingDowntime). С сетью это
+           скрывала перерисовка сервером, без сети — держало до перезапуска
+           (стенд, 30.09.2026). Снимаем пометку со всех спрятанных граней. */
+        allCards().forEach(function (card) {
+            if (card.hidden) card.classList.remove("is-active-downtime");
+        });
         cards().forEach(function (card, index) {
             var on = id !== "" && String(card.dataset.driverDrumReasonId) === id;
             card.classList.toggle("is-active-downtime", on);

@@ -698,7 +698,13 @@
     function healStaleStyles() {
         if (staleStylesHealed || !drum()) return;
         var screen = q(".driver-work-screen");
-        if (!screen) return;
+        /* Сетка с «pointdrum» задана только у активного экрана «Работа»
+           (.driver-work-screen.is-active). При закрытой смене запуск идёт на
+           вкладку «Смена», и проверка неактивного экрана принимала свежие стили
+           за старые: каждый запуск перекачивал пять CSS в обход кэша (стенд,
+           30.09.2026). Судим только по активному экрану — вкладка «Работа»
+           откроется, и проверка пройдёт при следующем обновлении. */
+        if (!screen || !screen.classList.contains("is-active")) return;
         var areas = root.getComputedStyle(screen).gridTemplateAreas || "";
         if (areas.indexOf("pointdrum") >= 0) return;
         staleStylesHealed = true;

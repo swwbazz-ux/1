@@ -217,6 +217,12 @@ window.applyOperationalStateRefresh = function (context) {
         }]).slice(-20);
         if (!morphed && typeof window.driverAdoptClientLayout === "function") window.driverAdoptClientLayout(oldShell, freshShell);
         if (!morphed) oldShell.replaceWith(freshShell);
+        /* Послойная подмена возвращает серверные атрибуты смены, а уже
+           привязанная оболочка заново не привязывается — проекцию смены на
+           телефоне накладываем здесь. */
+        if (window.DriverLocalShift && typeof window.DriverLocalShift.project === "function") {
+            window.DriverLocalShift.project(appliedShell);
+        }
         if (typeof window.bindDriverMobileShell === "function") {
             window.bindDriverMobileShell();
         }

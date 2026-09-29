@@ -743,12 +743,6 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'depends_on': depends_on,
         'occurred_at': occurred_at,
         'shift_id': raw_event.get('shift_id') or context_snapshot.get('shift_id'),
-        'local_shift_id': str(
-            raw_event.get('local_shift_id')
-            or payload.get('local_shift_id')
-            or context_snapshot.get('local_shift_id')
-            or ''
-        ).strip()[:128],
         'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
         'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
         'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
@@ -792,14 +786,6 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
             or clock_unreliable
         )
     )
-    # Opening a local shift defines the time base for every later fact.  A
-    # quick online send is not evidence that the phone clock is wrong, so the
-    # generic ``sent_live`` shortcut must not move an opening to receipt time.
-    # An explicitly unreliable clock remains honest: the immutable device
-    # timestamp stays in the receipt, while the effective time is marked as a
-    # server-receipt fallback in the result.
-    if event_type == 'excavator.shift.opened':
-        normalized['clock_adjusted'] = bool(clock_unreliable)
     if normalized['clock_adjusted']:
         normalized['occurred_at'] = received_at
     return normalized
@@ -2985,16 +2971,21 @@ def _process_driver_shift_opened(access, normalized):
     телефоне, сервер её только записывает временем телефона. Отказов по
     бизнес-причинам нет: чужая открытая смена сотрудника или самосвала
     закрывается моментом открытия новой (решение Б «завершить и начать»),
-    расхождения — в технический журнал. Тот же приём, что у машиниста
-    (_process_excavator_shift_opened): local_shift_id = ID события открытия,
+    расхождения — в технический журнал. local_shift_id = ID события открытия,
     последующие события ссылаются на него (см. _bind_driver_local_shift).
+
+    Местный ID берётся только из payload самого события: общая нормализация
+    его не читает, иначе отпечаток уже принятых событий обеих ролей изменился
+    бы и их неизменённые повторы получили бы event_id_reused. Общий слой для
+    местной смены делает Codex (OFF-C1-R1); до него водитель от общего слоя
+    ничего не требует.
     """
     from assignments.services import get_active_equipment_assignment
     from references.models import Equipment
     from shifts.models import ShiftType
     from shifts.services import open_driver_shift_from_device
 
-    local_shift_id = normalized.get('local_shift_id')
+    local_shift_id = _driver_event_local_shift_id(normalized)
     if not local_shift_id or local_shift_id != normalized['event_id']:
         _invalid('local_shift_id_invalid', 'Локальный ID смены должен совпадать с ID открытия.')
     equipment_id = _positive_int(normalized['equipment_id'], field='equipment_id')
@@ -3058,7 +3049,24 @@ def _process_driver_shift_opened(access, normalized):
         'effective_occurred_at': shift.opened_at.isoformat(),
         'time_source': 'device' if shift.opened_at == device_opened_at else 'server_receipt',
         'created': created,
+        'version': _current_operational_version(),
     }, {'shift': shift, 'equipment': shift.equipment}
+
+
+def _current_operational_version():
+    """Версия состояния, в которой смена уже видна серверному экрану: телефон
+    по ней понимает, что свежая отрисовка сервера учла его открытие/закрытие."""
+    from core.models import OperationalStateVersion
+
+    return (
+        OperationalStateVersion.objects.filter(key='production')
+        .values_list('version', flat=True).first()
+    ) or 0
+
+
+def _driver_event_local_shift_id(normalized):
+    """Местный ID смены водителя — из payload события (там его пишет телефон)."""
+    return str((normalized.get('payload') or {}).get('local_shift_id') or '').strip()[:128]
 
 
 def _bind_driver_local_shift(access, normalized):
@@ -3073,7 +3081,7 @@ def _bind_driver_local_shift(access, normalized):
         return
     if _positive_int(normalized['shift_id'], field='shift_id', required=False):
         return
-    local_shift_id = normalized.get('local_shift_id')
+    local_shift_id = _driver_event_local_shift_id(normalized)
     if not local_shift_id:
         return
     source = (
@@ -3116,9 +3124,12 @@ def _process_driver_shift_closed_by_device(access, normalized):
         return {
             'server_ids': {'shift_id': shift.id},
             'already_closed': True,
+            'version': _current_operational_version(),
         }, {'shift': shift, 'equipment': shift.equipment}
     try:
-        return _process_shift_closed(access, normalized, role_code='driver')
+        result, links = _process_shift_closed(access, normalized, role_code='driver')
+        result['version'] = result.get('version') or _current_operational_version()
+        return result, links
     except OfflineEventProblem as problem:
         token = problem.details.get('confirmation_token') if problem.code == 'confirmation_required' else ''
         if token:
@@ -3129,7 +3140,9 @@ def _process_driver_shift_closed_by_device(access, normalized):
                 description=f'смена #{shift.pk}: {problem.message}',
             )
             normalized['payload'] = {**normalized['payload'], 'confirmation_token': token}
-            return _process_shift_closed(access, normalized, role_code='driver')
+            result, links = _process_shift_closed(access, normalized, role_code='driver')
+            result['version'] = result.get('version') or _current_operational_version()
+            return result, links
         if problem.code != 'shift_close_failed':
             raise
         failure = problem.message
@@ -3159,6 +3172,7 @@ def _process_driver_shift_closed_by_device(access, normalized):
     return {
         'server_ids': {'shift_id': shift.id},
         'readings_unvalidated': True,
+        'version': _current_operational_version(),
     }, {'shift': shift, 'equipment': shift.equipment}
 
 
