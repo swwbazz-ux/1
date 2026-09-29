@@ -8,6 +8,35 @@
     var tripTimerInterval = null;
     var currentTripProjection = null;
     var savingLocal = false;
+    /* Когда поставлен признак «идёт запись на телефоне». Запись в очередь
+       занимает миллисекунды; на стенде без сети (30.09.2026) признак изредка
+       оставался навсегда — завершение и отмена ручного рейса отвечали «Рейс ещё
+       сохраняется», лечил только перезапуск. Источник не пойман, поэтому
+       признак старше SAVING_LOCAL_STALE_MS действия больше не держит. */
+    var savingLocalSince = 0;
+    var SAVING_LOCAL_STALE_MS = 8000;
+
+    function savingLockIsStale(since, now) {
+        return !!since && Number(now) - Number(since) >= SAVING_LOCAL_STALE_MS;
+    }
+
+    function setSavingLocal(on) {
+        savingLocal = !!on;
+        savingLocalSince = on ? Date.now() : 0;
+    }
+
+    function savingBlocks() {
+        if (!savingLocal) return false;
+        if (!savingLockIsStale(savingLocalSince, Date.now())) return true;
+        root.driverManualSavingRecovered = (root.driverManualSavingRecovered || 0) + 1;
+        if (root.console && typeof root.console.warn === "function") {
+            root.console.warn("driver_manual_workspace: stale saving lock released", {
+                heldMs: Date.now() - savingLocalSince
+            });
+        }
+        setSavingLocal(false);
+        return false;
+    }
     var dismissedRejectedManualLoadKey = "";
     var lastShownRejectedManualLoadKey = "";
     var workspaceRequestedOpen = false;
@@ -1587,13 +1616,13 @@
         var outbox = root.driverOfflineOutbox;
         var projection = currentTripProjection;
         if (
-            savingLocal
+            savingBlocks()
             || !projection
             || !outbox
             || !target
             || target.dataset.eoReturnEnabled !== "true"
         ) return Promise.resolve(false);
-        savingLocal = true;
+        setSavingLocal(true);
         target.classList.add("is-complete-pending");
         setSourceLocked(workspace, true);
         return outbox.pending().then(function (events) {
@@ -1601,7 +1630,7 @@
         }).then(function (event) {
             return outbox.enqueue(event);
         }).then(function (saved) {
-            savingLocal = false;
+            setSavingLocal(false);
             manualCompletionPendingKey = String(saved.event_id || "pending");
             currentTripProjection = null;
             stopTripTimer(workspace);
@@ -1613,7 +1642,7 @@
             playManualFeedback("completed");
             return saved;
         }).catch(function (error) {
-            savingLocal = false;
+            setSavingLocal(false);
             currentTripProjection = projection;
             setSourceLocked(workspace, sourceShouldBeLocked(false, projection));
             setResult(workspace, "storage-error", null, true);
@@ -1627,14 +1656,14 @@
     /* Погрузка ручного рейса на выбранную точку: одно и то же событие и для броска
        самосвала на плитку, и для свайпа точки из барабана в круг основного экрана. */
     function startManualLoad(workspace, target) {
-        if (sourceShouldBeLocked(savingLocal, currentTripProjection)) return Promise.resolve(false);
+        if (sourceShouldBeLocked(savingBlocks(), currentTripProjection)) return Promise.resolve(false);
         var outbox = root.driverOfflineOutbox;
         if (!outbox) {
             setResult(workspace, "storage-error", null, true);
             return Promise.resolve(false);
         }
         var previousProjection = currentTripProjection;
-        savingLocal = true;
+        setSavingLocal(true);
         setSourceLocked(workspace, true);
         setResult(workspace, "saving", null, true);
         return outbox.pending().then(function (events) {
@@ -1642,7 +1671,7 @@
         }).then(function (event) {
             return outbox.enqueue(event);
         }).then(function (saved) {
-            savingLocal = false;
+            setSavingLocal(false);
             manualCompletionPendingKey = "";
             delete workspace.dataset.driverManualLastError;
             currentTripProjection = saved;
@@ -1662,7 +1691,7 @@
             announceManualTrip();
             return saved;
         }).catch(function (error) {
-            savingLocal = false;
+            setSavingLocal(false);
             workspace.dataset.driverManualLastError = String(error && error.message || "manual_load_failed");
             currentTripProjection = previousProjection;
             if (!previousProjection) stopTripTimer(workspace);
@@ -1677,13 +1706,13 @@
         var projection = currentTripProjection;
         var outbox = root.driverOfflineOutbox;
         if (
-            savingLocal
+            savingBlocks()
             || !projection
             || !outbox
             || !target
             || target.dataset.eoReturnEnabled !== "true"
         ) return Promise.resolve(false);
-        savingLocal = true;
+        setSavingLocal(true);
         target.classList.add("is-return-pending");
         setSourceLocked(workspace, true);
         return outbox.pending().then(function (events) {
@@ -1691,7 +1720,7 @@
         }).then(function (event) {
             return outbox.enqueue(event);
         }).then(function (saved) {
-            savingLocal = false;
+            setSavingLocal(false);
             updateManualTripCount(
                 workspace,
                 positive(projection.payload && projection.payload.assigned_dump_point_id)
@@ -1710,7 +1739,7 @@
             playManualFeedback("cancelled");
             return saved;
         }).catch(function (error) {
-            savingLocal = false;
+            setSavingLocal(false);
             currentTripProjection = projection;
             target.classList.remove("is-return-pending");
             setSourceLocked(workspace, sourceShouldBeLocked(false, projection));
@@ -1972,7 +2001,7 @@
                 if (target) applyDumpMagnetScale(target);
             },
             canDrag: function () {
-                return !sourceShouldBeLocked(savingLocal, currentTripProjection);
+                return !sourceShouldBeLocked(savingBlocks(), currentTripProjection);
             },
             isManual: function () { return false; },
             isInactive: function () { return false; },
@@ -1996,7 +2025,7 @@
                 shell: excavatorShell,
                 targetSelector: "[data-driver-manual-dump-target]",
                 canStart: function (target) {
-                    return !savingLocal
+                    return !savingBlocks()
                         && !!currentTripProjection
                         && !isTerminalState(currentTripProjection.state)
                         && target.dataset.eoReturnEnabled === "true";
@@ -2315,6 +2344,7 @@
 
     root.bindDriverManualExcavatorWorkspace = bindAll;
     root.DriverManualExcavatorWorkspace = {
+        savingLockIsStale: savingLockIsStale,
         bindAll: bindAll,
         readWorkspaceContext: readWorkspaceContext,
         readWorkspaceTripContext: readWorkspaceTripContext,
