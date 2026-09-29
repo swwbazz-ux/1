@@ -65,6 +65,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.downtime.started': 'driver',
     'driver.downtime.ended': 'driver',
     'driver.shift.closed': 'driver',
+    'driver.shift.opened': 'driver',
 }
 
 
@@ -742,6 +743,12 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'depends_on': depends_on,
         'occurred_at': occurred_at,
         'shift_id': raw_event.get('shift_id') or context_snapshot.get('shift_id'),
+        'local_shift_id': str(
+            raw_event.get('local_shift_id')
+            or payload.get('local_shift_id')
+            or context_snapshot.get('local_shift_id')
+            or ''
+        ).strip()[:128],
         'equipment_id': raw_event.get('equipment_id') or context_snapshot.get('equipment_id'),
         'trip_id': raw_event.get('trip_id') or payload.get('trip_id'),
         'local_trip_id': str(raw_event.get('local_trip_id') or payload.get('local_trip_id') or '').strip()[:128],
@@ -785,6 +792,14 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
             or clock_unreliable
         )
     )
+    # Opening a local shift defines the time base for every later fact.  A
+    # quick online send is not evidence that the phone clock is wrong, so the
+    # generic ``sent_live`` shortcut must not move an opening to receipt time.
+    # An explicitly unreliable clock remains honest: the immutable device
+    # timestamp stays in the receipt, while the effective time is marked as a
+    # server-receipt fallback in the result.
+    if event_type == 'excavator.shift.opened':
+        normalized['clock_adjusted'] = bool(clock_unreliable)
     if normalized['clock_adjusted']:
         normalized['occurred_at'] = received_at
     return normalized
@@ -2952,6 +2967,201 @@ def _process_shift_closed(access, normalized, *, role_code):
     }, {'shift': shift, 'equipment': shift.equipment}
 
 
+def _device_shift_reading(value):
+    """Показание с телефона — как введено; нечитаемое не отклоняет смену."""
+    if value in (None, ''):
+        return None
+    try:
+        parsed = Decimal(str(value).strip().replace(',', '.'))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() else None
+
+
+def _process_driver_shift_opened(access, normalized):
+    """Смена водителя, открытая на телефоне (в том числе без связи).
+
+    Телефон — источник истины (владелец, 30.09.2026): смена уже идёт на
+    телефоне, сервер её только записывает временем телефона. Отказов по
+    бизнес-причинам нет: чужая открытая смена сотрудника или самосвала
+    закрывается моментом открытия новой (решение Б «завершить и начать»),
+    расхождения — в технический журнал. Тот же приём, что у машиниста
+    (_process_excavator_shift_opened): local_shift_id = ID события открытия,
+    последующие события ссылаются на него (см. _bind_driver_local_shift).
+    """
+    from assignments.services import get_active_equipment_assignment
+    from references.models import Equipment
+    from shifts.models import ShiftType
+    from shifts.services import open_driver_shift_from_device
+
+    local_shift_id = normalized.get('local_shift_id')
+    if not local_shift_id or local_shift_id != normalized['event_id']:
+        _invalid('local_shift_id_invalid', 'Локальный ID смены должен совпадать с ID открытия.')
+    equipment_id = _positive_int(normalized['equipment_id'], field='equipment_id')
+    truck = Equipment.objects.select_related('equipment_type').filter(pk=equipment_id).first()
+    if not truck or truck.equipment_type.name != 'Самосвал':
+        _invalid('shift_equipment_invalid', 'Техника открытия смены не найдена или это не самосвал.')
+    payload = normalized['payload']
+    assignment = get_active_equipment_assignment(access.employee, 'driver')
+    if assignment and assignment.equipment_id == truck.id:
+        shift_type = assignment.shift_type
+    else:
+        requested = str(payload.get('shift_type') or '')
+        shift_type = (
+            requested if requested in ShiftType.values
+            else assignment.shift_type if assignment
+            else ShiftType.DAY
+        )
+        _log_discrepancy(
+            access=access,
+            code='driver_shift_opened_without_matching_assignment',
+            process='driver.shift.opened',
+            description=(
+                f'самосвал #{truck.id}, действующая расстановка '
+                f'{"#" + str(assignment.pk) + " на технику #" + str(assignment.equipment_id) if assignment else "не найдена"}'
+            ),
+        )
+    # Открытие задаёт начало смены для всех последующих фактов, поэтому быстрая
+    # отправка (sent_live) не повод подменять его временем расписки — как у
+    # машиниста. Часы, заведомо ушедшие вперёд или помеченные ненадёжными,
+    # по-прежнему заменяются временем сервера.
+    opened_at = normalized['occurred_at']
+    device_opened_at = normalized['device_occurred_at']
+    if (
+        not normalized.get('clock_unreliable')
+        and device_opened_at <= normalized['received_at'] + MAX_FUTURE_CLOCK_SKEW
+    ):
+        opened_at = device_opened_at
+    shift, created, notes = open_driver_shift_from_device(
+        employee=access.employee,
+        equipment=truck,
+        shift_type=shift_type,
+        readings={
+            field: _device_shift_reading(payload.get(field))
+            for field in ('start_fuel', 'start_mileage', 'start_engine_hours')
+        },
+        client_action_id=normalized['event_id'],
+        opened_at=opened_at,
+    )
+    for note in notes:
+        _log_discrepancy(
+            access=access,
+            code='driver_shift_opened_by_device',
+            process='driver.shift.opened',
+            description=f'смена #{shift.pk}: {note}',
+        )
+    return {
+        'server_ids': {'shift_id': shift.id, 'equipment_id': shift.equipment_id},
+        'local_shift_id': local_shift_id,
+        'opened_at': shift.opened_at.isoformat(),
+        'device_occurred_at': device_opened_at.isoformat(),
+        'effective_occurred_at': shift.opened_at.isoformat(),
+        'time_source': 'device' if shift.opened_at == device_opened_at else 'server_receipt',
+        'created': created,
+    }, {'shift': shift, 'equipment': shift.equipment}
+
+
+def _bind_driver_local_shift(access, normalized):
+    """Событие водителя, сохранённое в смене, открытой на телефоне без связи.
+
+    Пока открытие не дошло до сервера, у события нет серверного ID смены —
+    только local_shift_id (= ID события driver.shift.opened). Смена берётся из
+    квитанции открытия тем же способом, что у машиниста в _locked_shift;
+    открытие ещё не принято — событие ждёт (retry), а не отклоняется.
+    """
+    if normalized['role_code'] != 'driver' or normalized['event_type'] == 'driver.shift.opened':
+        return
+    if _positive_int(normalized['shift_id'], field='shift_id', required=False):
+        return
+    local_shift_id = normalized.get('local_shift_id')
+    if not local_shift_id:
+        return
+    source = (
+        OfflineFieldEvent.objects.select_for_update(of=('self',))
+        .filter(
+            event_id=local_shift_id,
+            event_type='driver.shift.opened',
+            actor=access.employee,
+            access=access,
+            role_code='driver',
+            device_id=normalized['device_id'],
+        )
+        .first()
+    )
+    if not source or source.status != OfflineFieldEventStatus.ACCEPTED:
+        _retry('shift_reference_pending', 'Локальная смена ещё не сопоставлена с сервером.')
+    shift_id = source.shift_id or (source.result_payload or {}).get('server_ids', {}).get('shift_id')
+    if not shift_id:
+        _retry('shift_reference_pending', 'Квитанция открытия ещё не содержит ID смены.')
+    normalized['shift_id'] = shift_id
+
+
+def _process_driver_shift_closed_by_device(access, normalized):
+    """Закрытие смены водителя из очереди телефона — без отказов по делу.
+
+    Смена уже закрыта на телефоне. Подозрительные показания раньше
+    возвращались «на сверку» (confirmation_required), и смена оставалась
+    открытой на сервере, а следующая — висела за ней. Показания пишутся как
+    введены с подтверждением, выданным самим сервером; уже закрытая смена
+    (служебно, диспетчером или открытием новой) — принятое без изменений.
+    """
+    shift = _locked_shift(access, normalized, role_code='driver')
+    if shift.closed_at:
+        _log_discrepancy(
+            access=access,
+            code='driver_shift_close_already_closed',
+            process='driver.shift.closed',
+            description=f'смена #{shift.pk} уже закрыта {shift.closed_at.isoformat()}',
+        )
+        return {
+            'server_ids': {'shift_id': shift.id},
+            'already_closed': True,
+        }, {'shift': shift, 'equipment': shift.equipment}
+    try:
+        return _process_shift_closed(access, normalized, role_code='driver')
+    except OfflineEventProblem as problem:
+        token = problem.details.get('confirmation_token') if problem.code == 'confirmation_required' else ''
+        if token:
+            _log_discrepancy(
+                access=access,
+                code='driver_shift_close_readings_confirmed_by_device',
+                process='driver.shift.closed',
+                description=f'смена #{shift.pk}: {problem.message}',
+            )
+            normalized['payload'] = {**normalized['payload'], 'confirmation_token': token}
+            return _process_shift_closed(access, normalized, role_code='driver')
+        if problem.code != 'shift_close_failed':
+            raise
+        failure = problem.message
+    # Показания не прошли проверку сервера (например, у модели не настроен бак
+    # или значение вне справочника). Смена на телефоне уже закрыта — сервер
+    # закрывает её тем же моментом, показания пишет как введены, причину — в
+    # журнал; сверку показаний делает человек, а не блокировка смены.
+    from shifts.services import handover_other_role_shift
+
+    shift = _locked_shift(access, normalized, role_code='driver')
+    closed_at = max(normalized['occurred_at'], shift.opened_at)
+    handover_other_role_shift(shift, closed_by=access.employee, closed_at=closed_at)
+    payload = normalized['payload']
+    readings = {
+        field: _device_shift_reading(payload.get(field))
+        for field in ('end_fuel', 'end_mileage', 'end_engine_hours')
+    }
+    for field, value in readings.items():
+        setattr(shift, field, value)
+    shift.save(update_fields=list(readings))
+    _log_discrepancy(
+        access=access,
+        code='driver_shift_close_readings_unvalidated',
+        process='driver.shift.closed',
+        description=f'смена #{shift.pk} закрыта с показаниями как введены: {failure}',
+    )
+    return {
+        'server_ids': {'shift_id': shift.id},
+        'readings_unvalidated': True,
+    }, {'shift': shift, 'equipment': shift.equipment}
+
+
 PROCESSORS = {
     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,
@@ -2970,7 +3180,8 @@ PROCESSORS = {
     'driver.downtime.started': lambda access, event: _process_downtime(access, event, role_code='driver', close=False),
     'driver.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='driver', close=True),
     'excavator.shift.closed': lambda access, event: _process_shift_closed(access, event, role_code='excavator_operator'),
-    'driver.shift.closed': lambda access, event: _process_shift_closed(access, event, role_code='driver'),
+    'driver.shift.closed': lambda access, event: _process_driver_shift_closed_by_device(access, event),
+    'driver.shift.opened': lambda access, event: _process_driver_shift_opened(access, event),
 }
 
 
@@ -3232,6 +3443,7 @@ def process_one_offline_event(access, normalized):
                     if normalized['occurred_at'] > normalized['received_at'] + MAX_FUTURE_CLOCK_SKEW:
                         _conflict('device_clock_ahead', 'Часы устройства заметно опережают сервер. Требуется сверка.')
                     _dependency_state(access, normalized)
+                    _bind_driver_local_shift(access, normalized)
                     legacy_result = _legacy_action_result(access, normalized)
                     if legacy_result is not None:
                         result_payload, links = legacy_result
