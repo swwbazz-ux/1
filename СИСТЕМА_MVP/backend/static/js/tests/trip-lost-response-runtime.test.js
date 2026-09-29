@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const createExcavatorLocalShiftLedger = require("../excavator-local-shift-v1.js");
 
 
 const driverTemplatePath = path.resolve(
@@ -415,6 +416,29 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
     }
     const outbox = newOutbox();
     context.fieldOutbox = outbox;
+    let ledgerState = {
+        schema_version: 1,
+        identity: {access_id: 7, actor_id: 17, role_code: "excavator_operator", device_id: "device-A"},
+        current_local_shift_id: "server-shift:11",
+        shifts: [{
+            local_shift_id: "server-shift:11", open_event_id: "", equipment_id: 3,
+            opened_at: "2026-09-29T00:00:00.000Z", status: "open", server_shift_id: 11,
+            imported: true, events: [],
+        }],
+    };
+    const ledgerAdapter = {
+        kind: "memory",
+        read: async () => JSON.parse(JSON.stringify(ledgerState)),
+        write: async value => { ledgerState = JSON.parse(JSON.stringify(value)); },
+    };
+    context.localShiftLedger = createExcavatorLocalShiftLedger({
+        adapter: ledgerAdapter,
+        outbox,
+        accessId: 7,
+        actorId: 17,
+        roleCode: "excavator_operator",
+        deviceId: "device-A",
+    });
     const declarations = [
         "var excavatorWorkMutationGeneration = 0, excavatorWorkRefreshRequestGeneration = 0, excavatorWorkAppliedRequestGeneration = 0;",
         ...[
@@ -433,6 +457,7 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
         requests, reconcile, card, badge, document,
         serverTripCount: () => serverTripCount, serverActionCount: () => serverActions.size,
         generated: () => idCount, restoredCards: () => restoredCards,
+        ledger: context.localShiftLedger,
         fragmentCount: () => fragmentCount, terminal: () => currentShell.terminal,
     };
 }
@@ -449,6 +474,8 @@ test("production Excavator load survives a lost response and a restarted durable
     assert.equal(event.event_type, "excavator.trip.loaded");
     assert.equal(event.payload.assignment_id, "8");
     assert.equal(event.payload.dump_point_id, "9");
+    assert.equal(event.local_shift_id, "server-shift:11");
+    assert.equal((await r.ledger.facts()).length, 1);
 
     const restarted = r.restartOutbox();
     await restarted.ready(); await restarted.retryNow(); await flushPromiseChain();

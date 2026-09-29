@@ -57,6 +57,7 @@ from references.equipment_states import DEFAULT_EQUIPMENT_STATES
 from references.models import DumpPoint, Equipment, EquipmentState, RockType, TruckCapacityRule
 from references.rock_catalog import CANONICAL_ROCK_NAMES
 from shifts.models import EmployeeShift, EquipmentPlanGroup, ShiftClientAction
+from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
 from shifts.models import PlanAssignmentStatus, PlanCalculationMode
 from shifts.services import (
     ExcavatorShiftCloseConfirmationRequired,
@@ -626,7 +627,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v262";
+const CACHE_NAME = "excavator-mobile-shell-v263";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -640,26 +641,27 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v263",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v263",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v263",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v263",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -848,10 +850,23 @@ async function migratePreviousExcavatorCache(cacheNames) {
   return false;
 }
 
+const NETWORK_FALLBACK_TIMEOUT_MS = 2500;
+
+async function fetchWithExcavatorTimeout(request, options) {
+  if (typeof AbortController !== "function") return fetch(request, options);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), NETWORK_FALLBACK_TIMEOUT_MS);
+  try {
+    return await fetch(request, Object.assign({}, options || {}, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function networkFirst(request, fallbackUrl, responseValidator) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const response = await fetch(request);
+    const response = await fetchWithExcavatorTimeout(request);
     const canCache = response && response.ok &&
       (!responseValidator || await responseValidator(response));
     if (canCache) {
@@ -860,7 +875,10 @@ async function networkFirst(request, fallbackUrl, responseValidator) {
         cache.put(fallbackUrl, response.clone()).catch(() => undefined);
       }
     }
-    return response;
+    if (canCache) return response;
+    return (await cache.match(request)) ||
+      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
+      response;
   } catch (error) {
     return (await cache.match(request)) ||
       (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
@@ -885,11 +903,12 @@ async function networkOnly(request) {
 async function networkFirstStatic(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const response = await fetch(request, { cache: "no-store" });
+    const response = await fetchWithExcavatorTimeout(request, { cache: "no-store" });
     if (response && response.ok) {
       cache.put(request, response.clone()).catch(() => undefined);
+      return response;
     }
-    return response;
+    return (await cache.match(request)) || response;
   } catch (error) {
     return (await cache.match(request)) ||
       new Response("Resource unavailable offline.", {
@@ -5153,7 +5172,17 @@ def excavator_work_view(request):
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
     assignment_state = work_assignment_state(access.employee, work_assignment)
-    current_excavator = open_shift.equipment if open_shift else None
+    # A cached GET shell must contain the last verified assignment and its
+    # resources before a server shift exists. They stay disabled in rendered
+    # HTML and are enabled only after OFF-C1 durably writes a local opening.
+    # Mutating legacy POSTs keep the old server-shift guard.
+    current_excavator = (
+        open_shift.equipment
+        if open_shift
+        else work_assignment.equipment
+        if request.method == 'GET' and work_assignment and assignment_state == 'assigned'
+        else None
+    )
     reconcile_excavator_waiting_for_trucks(
         current_excavator,
         access.employee,
@@ -6099,7 +6128,34 @@ def excavator_work_view(request):
     shift_plan_percent = shift_plan['percent']
     shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
+    capacity_by_model = defaultdict(dict)
+    truck_model_ids = {
+        card['assignment'].truck.model_id
+        for card in truck_cards
+        if card['assignment'].truck.model_id
+    }
+    for model_id, rock_type_id, volume_m3 in (
+        TruckCapacityRule.objects
+        .filter(equipment_model_id__in=truck_model_ids)
+        .values_list('equipment_model_id', 'rock_type_id', 'volume_m3')
+    ):
+        capacity_by_model[model_id][str(rock_type_id)] = str(volume_m3)
+
     for card in truck_cards:
+        truck = card['assignment'].truck
+        local_volume_by_rock = dict(capacity_by_model.get(truck.model_id, {}))
+        if truck.model_id and truck.model and truck.model.body_volume_m3:
+            local_volume_by_rock['default'] = str(truck.model.body_volume_m3)
+        card['local_volume_by_rock_json'] = json.dumps(
+            local_volume_by_rock,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+        card['local_fleet_code'] = (
+            'belaz' if equipment_is_belaz_truck(truck)
+            else 'nhl' if equipment_is_nhl_truck(truck)
+            else 'unknown'
+        )
         truck_progress = None
         if open_shift:
             truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
@@ -6243,6 +6299,10 @@ def excavator_work_view(request):
 
     completed_shift_count = shift_trip_queryset.count()
     completed_shift_volume = shift_trip_queryset.aggregate(total=Sum('volume_m3'))['total'] or Decimal('0')
+    shift_source_trip_ids_json = json.dumps(
+        list(shift_trip_queryset.values_list('id', flat=True)),
+        separators=(',', ':'),
+    )
     shift_fact_label = 'Факт'
     shift_fact_value = format_whole_value_with_unit(completed_shift_volume, 'м³')
     shift_fact_meta = f'{completed_shift_count} маш.'
@@ -6366,6 +6426,9 @@ def excavator_work_view(request):
             'shift_fact_label': shift_fact_label,
             'shift_fact_value': shift_fact_value,
             'shift_fact_meta': shift_fact_meta,
+            'completed_shift_count': completed_shift_count,
+            'completed_shift_volume': completed_shift_volume,
+            'shift_source_trip_ids_json': shift_source_trip_ids_json,
             'shift_fuel_display': excavator_fuel_percent_from_liters(
                 open_shift.end_fuel if open_shift else getattr(previous_equipment_shift, 'end_fuel', None),
                 shift_fuel_limit,

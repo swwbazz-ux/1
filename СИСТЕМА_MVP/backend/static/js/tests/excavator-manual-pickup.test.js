@@ -369,11 +369,20 @@ test('truck loaded outbox event carries exact assignment state and immutable con
     assert.match(source, /occurred_at:\s*new Date\(\)\.toISOString\(\)/);
     assert.match(source, /local_trip_id:\s*localTripId/);
     assert.match(source, /depends_on:\s*\[[\s\S]*previous \? previous\.event_id : ""[\s\S]*\.filter/);
-    assert.match(source, /fieldOutbox\.queue\(event\)\.then/);
+    assert.match(source, /localShiftLedger\.recordAndQueue\(event\)\.then/);
+    assert.match(source, /local_shift_id:\s*currentLocalShift\.local_shift_id/);
+    assert.match(source, /currentLocalShift\.open_event_id/);
     assert.match(source, /fieldOutbox\.allocateSequence\(legacyExcavatorFieldSequence/);
     assert.match(source, /rock_type_id:/);
     assert.match(source, /invalidateExcavatorWorkRefresh\(\)/);
     assert.doesNotMatch(template, /nextExcavatorFieldSequence/);
+});
+
+test('next local opening depends on a durable close even when the transport queue missed it', () => {
+    assert.match(
+        template,
+        /currentLocalShift\.status === "closed"[\s\S]*currentLocalShift\.close_event_id[\s\S]*dependencies\.push\(currentLocalShift\.close_event_id\)/
+    );
 });
 
 test('successful outgoing load removes only the source card and keeps exact trip badge', () => {

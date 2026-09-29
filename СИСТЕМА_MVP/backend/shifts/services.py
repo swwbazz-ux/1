@@ -1827,6 +1827,7 @@ def _open_excavator_shift_atomic(
     client_action_id,
     fuel_limit_override=None,
     close_other_role_shift=False,
+    opened_at=None,
 ):
     from references.models import Equipment
 
@@ -1906,6 +1907,7 @@ def _open_excavator_shift_atomic(
         .order_by('-closed_at', '-opened_at')
         .first()
     )
+    effective_opened_at = opened_at or timezone.now()
     shift = EmployeeShift.objects.create(
         employee=employee,
         equipment=equipment,
@@ -1914,7 +1916,7 @@ def _open_excavator_shift_atomic(
         start_fuel=fuel,
         start_mileage=None,
         start_engine_hours=engine_hours,
-        opened_at=timezone.now(),
+        opened_at=effective_opened_at,
         opened_by=employee,
     )
     shift_progress = assign_shift_plan_snapshot(shift)
@@ -2001,6 +2003,7 @@ def open_excavator_shift(
     client_action_id,
     fuel_limit_override=None,
     close_other_role_shift=False,
+    opened_at=None,
 ):
     try:
         return _open_excavator_shift_atomic(
@@ -2012,6 +2015,7 @@ def open_excavator_shift(
             client_action_id=client_action_id,
             fuel_limit_override=fuel_limit_override,
             close_other_role_shift=close_other_role_shift,
+            opened_at=opened_at,
         )
     except IntegrityError as error:
         existing = existing_shift_action_payload(

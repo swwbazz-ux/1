@@ -53,11 +53,13 @@ test('report lifecycle is coalesced, stale guarded and closes only once', () => 
     assert.match(template, /eo-hourly-report__backdrop" type="button" tabindex="-1"/);
 });
 
-test('offline cache is explicit and unresolved local loads are not claimed', () => {
+test('offline cache is merged with the durable local ledger before rendering', () => {
     assert.match(source, /eo-hourly-report-v2:/);
     assert.match(source, /"Нет связи · " \+ cachedAt/);
-    assert.match(source, /Локально сохранённые, но ещё не синхронизированные погрузки/);
-    assert.match(source, /Сохранённого отчёта пока нет/);
+    assert.match(source, /window\.eoExcavatorLocalShiftLedger/);
+    assert.match(source, /ledger\.hourlyReport\(payload \|\| null, Date\.now\(\)\)/);
+    assert.match(source, /В отчёт включены факты, устойчиво сохранённые на этом телефоне/);
+    assert.match(source, /Нет связи\. Местный журнал недоступен/);
 });
 
 test('layout matches mobile block structure without horizontal overflow', () => {

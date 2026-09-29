@@ -70,7 +70,8 @@ class ExcavatorHourlyReportTests(TestCase):
 
     def trip(self, truck, loaded_at, *, excavator=None, status=TripStatus.COMPLETED,
              dump_point=None, assigned_dump_point=None, actual_dump_point=None,
-             loading_shift=None, passive=False, legacy_without_assignment=False):
+             loading_shift=None, passive=False, legacy_without_assignment=False,
+             volume_m3=None):
         dump_point = dump_point or self.point_a
         return Trip.objects.create(
             excavator=excavator or self.excavator,
@@ -86,6 +87,7 @@ class ExcavatorHourlyReportTests(TestCase):
             actual_dump_point=actual_dump_point,
             status=status,
             loaded_at=loaded_at,
+            volume_m3=volume_m3,
             driver_participation_recorded=passive,
             driver_control_shift=None if passive else loading_shift,
         )
@@ -133,10 +135,22 @@ class ExcavatorHourlyReportTests(TestCase):
         self.assertEqual(current_by_point['ККД']['nhl'], 1)
         self.assertEqual(current_by_point['Точка не определена']['belaz'], 1)
         self.assertNotIn('СКДР', current_by_point)
-        self.assertEqual(current['totals'], {'belaz': 2, 'nhl': 1, 'trip_count': 3})
+        self.assertEqual(current['totals'], {
+            'belaz': 2,
+            'nhl': 1,
+            'trip_count': 3,
+            'volume_m3': '0',
+        })
         self.assertEqual(current['source_trip_count'], 4)
+        self.assertEqual(len(current['source_trip_ids']), 4)
         self.assertEqual(current['unclassified_trip_count'], 1)
-        self.assertEqual(previous['totals'], {'belaz': 1, 'nhl': 0, 'trip_count': 1})
+        self.assertEqual(current['unknown_volume_trip_count'], 4)
+        self.assertEqual(previous['totals'], {
+            'belaz': 1,
+            'nhl': 0,
+            'trip_count': 1,
+            'volume_m3': '0',
+        })
         self.assertEqual(report['data_quality']['unknown_dump_point_trip_count'], 1)
         self.assertFalse(report['data_quality']['complete'])
 
@@ -167,6 +181,21 @@ class ExcavatorHourlyReportTests(TestCase):
         current, previous = report['hours']
         self.assertEqual(current['totals']['trip_count'], 1)
         self.assertEqual(previous['totals']['trip_count'], 1)
+
+    def test_report_exposes_exact_trip_coverage_and_known_volume_for_local_reconciliation(self):
+        captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
+        covered = self.trip(
+            self.belaz,
+            captured_at - timedelta(minutes=5),
+            volume_m3='49.40',
+        )
+
+        report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
+
+        current = report['hours'][0]
+        self.assertEqual(current['source_trip_ids'], [covered.id])
+        self.assertEqual(current['totals']['volume_m3'], '49.40')
+        self.assertEqual(current['unknown_volume_trip_count'], 0)
 
     def test_endpoint_uses_only_excavator_from_open_shift(self):
         captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
