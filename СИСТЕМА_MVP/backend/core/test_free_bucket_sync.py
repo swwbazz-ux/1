@@ -1319,7 +1319,13 @@ class FreeBucketServerIntegrationTests(TestCase):
             rejected = self.sync_driver([loaded, completed]).json()['results']
         self.assertEqual(
             [(item['status'], item.get('code')) for item in rejected],
-            [('conflict', 'free_bucket_not_available'), ('conflict', 'dependency_rejected')],
+            [
+                ('conflict', 'free_bucket_not_available'),
+                # The integrated worker-truth contract no longer copies the
+                # parent's terminal conflict to the child.  The completion is
+                # evaluated independently and waits for its own trip reference.
+                ('retry', 'trip_reference_pending'),
+            ],
             rejected,
         )
         self.assertFalse(Trip.objects.exists())

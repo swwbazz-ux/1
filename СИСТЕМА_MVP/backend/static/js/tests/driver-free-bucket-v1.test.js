@@ -855,6 +855,7 @@ test("the one-load right is consumed by its load and switched off locally by tha
         shell: shell(),
         storage: storage(),
         window: {localStorage: storage()},
+        now: () => Date.parse("2026-09-28T10:02:00Z"),
         outbox: {enqueue() { return Promise.resolve({}); }},
     });
     controller.installCatalog(serverCatalog());

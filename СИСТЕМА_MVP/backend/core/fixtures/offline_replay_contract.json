@@ -1,0 +1,90 @@
+[
+  {
+    "id": "driver_clock",
+    "role_code": "driver",
+    "event_type": "driver.downtime.started",
+    "error_code": "device_clock_ahead",
+    "own_clock_adjusted": true,
+    "expected_recoverable": true
+  },
+  {
+    "id": "driver_dependency",
+    "role_code": "driver",
+    "event_type": "driver.trip.manual_completed",
+    "error_code": "dependency_rejected",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "driver_dependency_with_own_clock_evidence",
+    "role_code": "driver",
+    "event_type": "driver.trip.manual_completed",
+    "error_code": "dependency_rejected",
+    "own_clock_adjusted": true,
+    "expected_recoverable": true
+  },
+  {
+    "id": "driver_free_bucket_root",
+    "role_code": "driver",
+    "event_type": "driver.trip.loaded",
+    "error_code": "free_bucket_not_available",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "driver_unload_transition",
+    "role_code": "driver",
+    "event_type": "driver.trip.unloaded",
+    "error_code": "trip_driver_shift_changed",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "driver_wrong_code",
+    "role_code": "driver",
+    "event_type": "driver.trip.loaded",
+    "error_code": "equipment_context_changed",
+    "own_clock_adjusted": true,
+    "expected_recoverable": false
+  },
+  {
+    "id": "excavator_clock",
+    "role_code": "excavator_operator",
+    "event_type": "excavator.downtime.started",
+    "error_code": "device_clock_ahead",
+    "own_clock_adjusted": true,
+    "expected_recoverable": true
+  },
+  {
+    "id": "excavator_dependency",
+    "role_code": "excavator_operator",
+    "event_type": "excavator.trip.loaded.cancelled",
+    "error_code": "dependency_owner_mismatch",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "excavator_factual_load",
+    "role_code": "excavator_operator",
+    "event_type": "excavator.free_bucket.loaded",
+    "error_code": "open_trip_changed",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "excavator_shift_close",
+    "role_code": "excavator_operator",
+    "event_type": "excavator.shift.closed",
+    "error_code": "shift_already_closed",
+    "own_clock_adjusted": false,
+    "expected_recoverable": true
+  },
+  {
+    "id": "excavator_wrong_event_for_code",
+    "role_code": "excavator_operator",
+    "event_type": "excavator.downtime.ended",
+    "error_code": "open_trip_changed",
+    "own_clock_adjusted": false,
+    "expected_recoverable": false
+  }
+]

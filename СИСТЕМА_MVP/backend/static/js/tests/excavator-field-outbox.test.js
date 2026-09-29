@@ -1,6 +1,33 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const createOutbox = require('../excavator-field-outbox-v1.js');
+
+const replayContract = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, '../../../core/fixtures/offline_replay_contract.json'),
+    'utf8',
+));
+
+test('excavator replay predicate satisfies the executable server-client contract', () => {
+    const scenarios = replayContract.filter(item => item.role_code === 'excavator_operator');
+    assert.ok(scenarios.length > 0);
+    for (const scenario of scenarios) {
+        const decision = createOutbox.replayConflictDecision({
+            sync_state: 'conflict',
+            event_type: scenario.event_type,
+            last_error_code: scenario.error_code,
+            last_error: 'fixture',
+        });
+        assert.equal(decision.recoverable, scenario.expected_recoverable, scenario.id);
+    }
+    assert.equal(createOutbox.replayConflictDecision({
+        sync_state: 'conflict',
+        event_type: 'excavator.downtime.started',
+        last_error_code: 'equipment_context_changed',
+        last_error: 'Часы устройства опережают сервер',
+    }).recoverable, false);
+});
 
 function storage() {
     const values = new Map();
@@ -480,11 +507,13 @@ test('restart retries a legacy device clock conflict and its dependency chain', 
                 ? {
                     event_id: event.event_id,
                     status: 'conflict',
+                    code: 'device_clock_ahead',
                     message: 'Часы устройства заметно опережают сервер. Требуется сверка.',
                 }
                 : {
                     event_id: event.event_id,
                     status: 'conflict',
+                    code: 'dependency_rejected',
                     message: 'Предыдущее событие требует сверки или отклонено.',
                 }),
         }),

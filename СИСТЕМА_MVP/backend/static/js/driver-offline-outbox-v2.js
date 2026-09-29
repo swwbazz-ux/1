@@ -71,48 +71,53 @@
     function errorCode(event) {
         return String(event && event.last_error && event.last_error.code || "");
     }
-    function recoverableDeviceClockConflict(event) {
-        if (!event || event.state !== "conflict") return false;
-        return errorCode(event) === "device_clock_ahead"
-            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error && event.last_error.message || ""));
-    }
-    /* Погрузка под свободным ковшом, который сервер сам погасил, пока отметка
-       висела в очереди: раньше сервер отвечал free_bucket_not_available
-       окончательно, теперь записывает её по факту (PR #128). Отклонённую старым
-       сервером отметку и её цепочку отправляем заново при старте — иначе три
-       рейса владельца так и остались бы «на сверке» (бой 29.09.2026). */
-    function recoverableServerRefusedConflict(event) {
-        return !!event && event.state === "conflict"
-            && event.event_type === "driver.trip.loaded"
-            && errorCode(event) === "free_bucket_not_available";
-    }
-    function recoverableDependencyConflict(event) {
-        return !!event && event.state === "conflict"
-            && ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(errorCode(event)) >= 0;
-    }
-    function recoverableWorkerTruthConflict(event) {
-        if (!event || event.state !== "conflict") return false;
+    var REPLAY_DEPENDENCY_CODES = new Set([
+        "dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"
+    ]);
+    var REPLAY_FACTUAL_LOAD_CODES = new Set([
+        "active_downtime", "equipment_downtime_active", "excavator_unavailable",
+        "free_bucket_excavator_unavailable", "free_bucket_truck_unavailable", "open_trip_changed"
+    ]);
+    function replayConflictDecision(event) {
+        if (!event || event.state !== "conflict" || !SUPPORTED_TYPES.has(event.event_type)) {
+            return {recoverable: false, reason: ""};
+        }
         var code = errorCode(event);
-        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(code) >= 0) return true;
+        if (code === "device_clock_ahead") return {recoverable: true, reason: "own_clock_evidence"};
+        if (REPLAY_DEPENDENCY_CODES.has(code)) return {recoverable: true, reason: "dependency_own_refs"};
         if (
             event.event_type === "driver.trip.unloaded"
             && ["open_trip_changed", "late_unload_after_supersede", "trip_driver_shift_changed", "unload_before_load"].indexOf(code) >= 0
-        ) return true;
-        if (event.event_type === "driver.trip.dump_point_changed" && code === "trip_driver_shift_changed") return true;
-        if (event.event_type === "driver.free_bucket.selected" && code === "driver_shift_closed") return true;
-        if (event.event_type === "driver.shift.closed" && code === "shift_already_closed") return true;
+        ) return {recoverable: true, reason: "worker_truth_transition"};
+        if (
+            event.event_type === "driver.trip.dump_point_changed"
+            && code === "trip_driver_shift_changed"
+        ) return {recoverable: true, reason: "worker_truth_transition"};
+        if (
+            event.event_type === "driver.free_bucket.selected"
+            && code === "driver_shift_closed"
+        ) return {recoverable: true, reason: "worker_truth_transition"};
+        if (
+            event.event_type === "driver.shift.closed"
+            && code === "shift_already_closed"
+        ) return {recoverable: true, reason: "worker_truth_transition"};
         if (
             event.event_type === "driver.trip.loaded"
-            && [
-                "active_downtime",
-                "equipment_downtime_active",
-                "excavator_unavailable",
-                "free_bucket_excavator_unavailable",
-                "free_bucket_truck_unavailable",
-                "open_trip_changed",
-            ].indexOf(code) >= 0
-        ) return true;
-        return false;
+            && (REPLAY_FACTUAL_LOAD_CODES.has(code) || code === "free_bucket_not_available")
+        ) return {
+            recoverable: true,
+            reason: code === "free_bucket_not_available" ? "free_bucket_factual_load" : "factual_load_transition"
+        };
+        return {recoverable: false, reason: ""};
+    }
+    function recoverableDeviceClockConflict(event) {
+        return replayConflictDecision(event).reason === "own_clock_evidence";
+    }
+    function recoverableDependencyConflict(event) {
+        return replayConflictDecision(event).reason === "dependency_own_refs";
+    }
+    function recoverableWorkerTruthConflict(event) {
+        return replayConflictDecision(event).recoverable;
     }
     function identityRecord(event) {
         return IMMUTABLE_FIELDS.reduce(function (result, field) {
@@ -1112,11 +1117,7 @@
             });
             var recoverable = Object.create(null);
             events.forEach(function (event) {
-                if (
-                    recoverableDeviceClockConflict(event)
-                    || recoverableWorkerTruthConflict(event)
-                    || recoverableServerRefusedConflict(event)
-                ) {
+                if (recoverableWorkerTruthConflict(event)) {
                     recoverable[event.event_id] = true;
                 }
             });
@@ -1243,6 +1244,7 @@
             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
             createDriverDowntimeEndEvent: createDriverDowntimeEndEvent,
             selectDriverDowntimeProjection: selectDriverDowntimeProjection,
+            replayConflictDecision: replayConflictDecision,
             backoff: backoff
         };
     }

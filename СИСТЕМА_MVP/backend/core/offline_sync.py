@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -76,6 +77,54 @@ SUPPORTED_EVENT_ROLES = {
     'driver.downtime.ended': 'driver',
     'driver.shift.closed': 'driver',
 }
+
+_REPLAY_DEPENDENCY_CODES = frozenset({
+    'dependency_rejected',
+    'dependency_owner_mismatch',
+    'dependency_order_invalid',
+})
+_REPLAY_EVENT_CODES = {
+    ('driver', 'driver.trip.unloaded'): frozenset({
+        'open_trip_changed',
+        'late_unload_after_supersede',
+        'trip_driver_shift_changed',
+        'unload_before_load',
+    }),
+    ('driver', 'driver.trip.dump_point_changed'): frozenset({
+        'trip_driver_shift_changed',
+    }),
+    ('driver', 'driver.free_bucket.selected'): frozenset({
+        'driver_shift_closed',
+    }),
+    ('driver', 'driver.shift.closed'): frozenset({
+        'shift_already_closed',
+    }),
+    ('excavator_operator', 'excavator.shift.closed'): frozenset({
+        'shift_already_closed',
+    }),
+}
+_REPLAY_FACTUAL_LOAD_CODES = frozenset({
+    'active_downtime',
+    'equipment_downtime_active',
+    'excavator_unavailable',
+    'free_bucket_excavator_unavailable',
+    'free_bucket_truck_unavailable',
+    'open_trip_changed',
+})
+_REPLAY_FACTUAL_LOAD_TYPES = frozenset({
+    'driver.trip.loaded',
+    'excavator.trip.loaded',
+    'excavator.free_bucket.loaded',
+})
+_REPLAY_EVIDENCE_KEY = '_offline_replay_evidence'
+
+
+@dataclass(frozen=True)
+class OfflineReplayDecision:
+    allowed: bool
+    reason: str = ''
+    time_policy: str = 'device_occurred_at'
+    dependency_policy: str = 'normal'
 
 
 def _resolve_free_bucket_acceptance(access, normalized):
@@ -1540,19 +1589,26 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     # при повторной отправке, не сломав идентичность события.
     sent_live = _clock_hint(raw_event, payload, 'sent_live')
     clock_unreliable = _clock_hint(raw_event, payload, 'clock_unreliable')
+    clock_ahead = occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
     normalized['device_occurred_at'] = occurred_at
     normalized['sent_live'] = sent_live
     normalized['clock_unreliable'] = clock_unreliable
     normalized['clock_adjusted'] = bool(
         role_code in {'driver', 'excavator_operator'}
         and (
-            occurred_at > received_at + MAX_FUTURE_CLOCK_SKEW
+            clock_ahead
             # Событие ушло сразу после нажатия — расписка сервера и есть его
             # настоящее время, каким бы ни был сдвиг часов телефона.
             or sent_live
             # Оболочка увидела скачок собственных часов и не ручается за них.
             or clock_unreliable
         )
+    )
+    normalized['clock_adjustment_reason'] = (
+        'future_clock_skew' if clock_ahead
+        else 'sent_live' if sent_live
+        else 'clock_unreliable' if clock_unreliable
+        else ''
     )
     if normalized['clock_adjusted']:
         normalized['occurred_at'] = received_at
@@ -1561,6 +1617,7 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
 
 def _result(event_id, status, *, retryable=False, code='', message='', payload=None):
     payload = dict(payload or {})
+    payload.pop(_REPLAY_EVIDENCE_KEY, None)
     return {
         'event_id': event_id,
         'status': status,
@@ -1572,6 +1629,41 @@ def _result(event_id, status, *, retryable=False, code='', message='', payload=N
         'version': payload.pop('version', None),
         **payload,
     }
+
+
+def _normalized_replay_evidence(normalized):
+    return {
+        'clock_adjusted': bool(normalized.get('clock_adjusted')),
+        'clock_adjustment_reason': str(normalized.get('clock_adjustment_reason') or ''),
+        'effective_occurred_at': normalized['occurred_at'].isoformat(),
+    }
+
+
+def _stored_replay_evidence(receipt):
+    stored = (receipt.result_payload or {}).get(_REPLAY_EVIDENCE_KEY)
+    if isinstance(stored, dict) and 'clock_adjusted' in stored:
+        return {
+            'clock_adjusted': bool(stored.get('clock_adjusted')),
+            'clock_adjustment_reason': str(stored.get('clock_adjustment_reason') or ''),
+            'effective_occurred_at': str(stored.get('effective_occurred_at') or ''),
+        }
+    # Legacy receipts predate the explicit evidence record. A raw timestamp
+    # beyond the first server receipt is nevertheless immutable proof of the
+    # same correction that normalize_offline_event applies to new events.
+    clock_adjusted = receipt.occurred_at > receipt.received_at + MAX_FUTURE_CLOCK_SKEW
+    return {
+        'clock_adjusted': clock_adjusted,
+        'clock_adjustment_reason': 'future_clock_skew' if clock_adjusted else '',
+        'effective_occurred_at': (
+            receipt.received_at if clock_adjusted else receipt.occurred_at
+        ).isoformat(),
+    }
+
+
+def _result_payload_with_replay_evidence(payload, replay_evidence):
+    result = dict(payload or {})
+    result[_REPLAY_EVIDENCE_KEY] = dict(replay_evidence)
+    return result
 
 
 def _stored_result(event, *, deduplicated=False):
@@ -4337,79 +4429,71 @@ def _dependency_state(access, normalized):
             )
 
 
-def _clock_skewed_dependency_exists(existing):
-    """Признак цепочки именно «часового» конфликта, а не настоящего доменного.
+def _offline_replay_decision(existing):
+    """Return admission, time and dependency policies for one stored receipt.
 
-    Телефон может пересинхронизировать часы между двумя действиями очереди
-    (перезапуск, автоматическое время сети).  Тогда родительское событие
-    остаётся с временем в будущем и получает ``device_clock_ahead``, а
-    зависимое сохраняет честное время и падает только по ``dependency_rejected``.
-    Собственный сдвиг у такого события отсутствует, поэтому восстанавливать
-    цепочку нужно по сдвигу её родителя.
+    The event identity is checked by the caller before this decision.  A
+    recoverable domain code never decides the timestamp: the timestamp policy
+    comes only from evidence saved with this exact receipt.  Likewise a
+    dependency conflict permits the handler to evaluate the child's own
+    references; it never lends object ids or authority from the parent.
     """
-    if not existing.depends_on:
-        return False
-    dependencies = OfflineFieldEvent.objects.filter(
-        event_id__in=existing.depends_on[:MAX_DEPENDENCIES],
-        actor_id=existing.actor_id,
-        access_id=existing.access_id,
-        role_code=existing.role_code,
-        device_id=existing.device_id,
-    ).only('occurred_at', 'received_at')
-    return any(
-        dependency.occurred_at > dependency.received_at + MAX_FUTURE_CLOCK_SKEW
-        for dependency in dependencies
+    replay_evidence = _stored_replay_evidence(existing)
+    time_policy = (
+        'first_received_at'
+        if replay_evidence['clock_adjusted']
+        else 'device_occurred_at'
     )
+    if existing.status == OfflineFieldEventStatus.RETRY:
+        return OfflineReplayDecision(
+            allowed=True,
+            reason='retry',
+            time_policy=time_policy,
+        )
+    if existing.status != OfflineFieldEventStatus.CONFLICT:
+        return OfflineReplayDecision(allowed=False)
 
-
-def _worker_truth_conflict_is_reprocessable(existing):
-    """Legacy terminal receipts whose domain policy is now deterministic."""
-    if existing.error_code in {
-        'dependency_rejected',
-        'dependency_owner_mismatch',
-        'dependency_order_invalid',
-    }:
-        return True
+    role_code = existing.role_code
+    event_type = existing.event_type
+    error_code = existing.error_code
+    if SUPPORTED_EVENT_ROLES.get(event_type) != role_code:
+        return OfflineReplayDecision(allowed=False)
+    if error_code == 'device_clock_ahead':
+        return OfflineReplayDecision(
+            allowed=bool(replay_evidence['clock_adjusted']),
+            reason='own_clock_evidence' if replay_evidence['clock_adjusted'] else '',
+            time_policy=time_policy,
+        )
+    if error_code in _REPLAY_DEPENDENCY_CODES:
+        return OfflineReplayDecision(
+            allowed=True,
+            reason='dependency_own_refs',
+            time_policy=time_policy,
+            dependency_policy='advisory_own_refs',
+        )
+    if error_code in _REPLAY_EVENT_CODES.get((role_code, event_type), frozenset()):
+        return OfflineReplayDecision(
+            allowed=True,
+            reason='worker_truth_transition',
+            time_policy=time_policy,
+        )
+    if event_type in _REPLAY_FACTUAL_LOAD_TYPES and error_code in _REPLAY_FACTUAL_LOAD_CODES:
+        return OfflineReplayDecision(
+            allowed=True,
+            reason='factual_load_transition',
+            time_policy=time_policy,
+        )
     if (
-        existing.event_type == 'driver.trip.unloaded'
-        and existing.error_code in {
-            'open_trip_changed',
-            'late_unload_after_supersede',
-            'trip_driver_shift_changed',
-            'unload_before_load',
-        }
+        role_code == 'driver'
+        and event_type == 'driver.trip.loaded'
+        and error_code == 'free_bucket_not_available'
     ):
-        return True
-    if (
-        existing.event_type == 'driver.trip.dump_point_changed'
-        and existing.error_code == 'trip_driver_shift_changed'
-    ):
-        return True
-    if (
-        existing.event_type == 'driver.free_bucket.selected'
-        and existing.error_code == 'driver_shift_closed'
-    ):
-        return True
-    if (
-        existing.event_type in {'driver.shift.closed', 'excavator.shift.closed'}
-        and existing.error_code == 'shift_already_closed'
-    ):
-        return True
-    return bool(
-        existing.event_type in {
-            'driver.trip.loaded',
-            'excavator.trip.loaded',
-            'excavator.free_bucket.loaded',
-        }
-        and existing.error_code in {
-            'active_downtime',
-            'equipment_downtime_active',
-            'excavator_unavailable',
-            'free_bucket_excavator_unavailable',
-            'free_bucket_truck_unavailable',
-            'open_trip_changed',
-        }
-    )
+        return OfflineReplayDecision(
+            allowed=True,
+            reason='free_bucket_factual_load',
+            time_policy=time_policy,
+        )
+    return OfflineReplayDecision(allowed=False)
 
 
 def process_one_offline_event(access, normalized):
@@ -4436,93 +4520,24 @@ def process_one_offline_event(access, normalized):
                         normalized['event_id'], 'conflict', code='event_id_reused',
                         message='Идентификатор уже использован для другого события.',
                     )
-                device_clock_was_invalid = bool(
-                    existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
-                )
-                dependency_chain_is_ready = False
-                if (
-                    normalized['role_code'] == 'driver'
-                    and existing.status == OfflineFieldEventStatus.CONFLICT
-                    and existing.error_code == 'dependency_rejected'
-                    and existing.depends_on
-                ):
-                    dependency_receipts = list(
-                        OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
-                            event_id__in=existing.depends_on,
-                        )
-                    )
-                    dependency_chain_is_ready = bool(
-                        len(dependency_receipts) == len(set(existing.depends_on))
-                        and all(
-                            dependency.actor_id == access.employee_id
-                            and dependency.access_id == access.id
-                            and dependency.role_code == normalized['role_code']
-                            and dependency.device_id == normalized['device_id']
-                            and dependency.sequence < existing.sequence
-                            and dependency.status == OfflineFieldEventStatus.ACCEPTED
-                            for dependency in dependency_receipts
-                        )
-                    )
-                recoverable_clock_conflict = bool(
-                    existing.status == OfflineFieldEventStatus.CONFLICT
-                    and (
-                        (
-                            normalized['role_code'] == 'driver'
-                            and (
-                                (existing.error_code == 'device_clock_ahead' and device_clock_was_invalid)
-                                or dependency_chain_is_ready
-                                # Ручная погрузка под ковшом, который сервер сам погасил
-                                # до прихода отметки: теперь она записывается по факту
-                                # (_revive_cancelled_free_bucket_by_driver_load), а уже
-                                # отклонённая на телефоне — принимается при повторе.
-                                or (
-                                    existing.event_type == 'driver.trip.loaded'
-                                    and existing.error_code == 'free_bucket_not_available'
-                                )
-                            )
-                        )
-                        or (
-                            normalized['role_code'] == 'excavator_operator'
-                            and existing.error_code in {'device_clock_ahead', 'dependency_rejected'}
-                            and (
-                                device_clock_was_invalid
-                                or (
-                                    existing.error_code == 'dependency_rejected'
-                                    and _clock_skewed_dependency_exists(existing)
-                                )
-                            )
-                        )
-                    )
-                )
-                recoverable_worker_truth_conflict = bool(
-                    existing.status == OfflineFieldEventStatus.CONFLICT
-                    and _worker_truth_conflict_is_reprocessable(existing)
-                )
-                recoverable_conflict = (
-                    recoverable_clock_conflict
-                    or recoverable_worker_truth_conflict
-                )
-                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_conflict:
+                replay_decision = _offline_replay_decision(existing)
+                if not replay_decision.allowed:
                     return _stored_result(existing, deduplicated=True)
-                if recoverable_conflict:
-                    # Reprocess the same immutable event at its original server
-                    # receipt time. The id, sequence, dependencies and raw
-                    # device timestamp stay unchanged, so no duplicate action
-                    # can be created and the dependent queue keeps its order.
-                    clock_adjusted = bool(
-                        recoverable_clock_conflict
-                        and (
-                            device_clock_was_invalid
-                            if normalized['role_code'] == 'driver'
-                            else True
-                        )
-                    )
-                    normalized['device_occurred_at'] = existing.occurred_at
-                    normalized['received_at'] = existing.received_at
-                    normalized['clock_adjusted'] = clock_adjusted
-                    normalized['occurred_at'] = (
-                        existing.received_at if clock_adjusted else existing.occurred_at
-                    )
+                # Reprocess the same immutable event at its first server
+                # receipt. The domain error may have changed since the prior
+                # attempt; its own saved clock evidence does not.
+                replay_evidence = _stored_replay_evidence(existing)
+                normalized['device_occurred_at'] = existing.occurred_at
+                normalized['received_at'] = existing.received_at
+                normalized['clock_adjusted'] = replay_decision.time_policy == 'first_received_at'
+                normalized['clock_adjustment_reason'] = replay_evidence['clock_adjustment_reason']
+                normalized['occurred_at'] = (
+                    existing.received_at
+                    if normalized['clock_adjusted']
+                    else existing.occurred_at
+                )
+                normalized['replay_reason'] = replay_decision.reason
+                normalized['replay_dependency_policy'] = replay_decision.dependency_policy
                 receipt = existing
                 receipt.status = OfflineFieldEventStatus.PROCESSING
                 receipt.retryable = False
@@ -4530,6 +4545,7 @@ def process_one_offline_event(access, normalized):
                 receipt.error_message = ''
                 receipt.save(update_fields=['status', 'retryable', 'error_code', 'error_message', 'updated_at'])
             else:
+                replay_evidence = _normalized_replay_evidence(normalized)
                 sequence_collision = OfflineFieldEvent.objects.select_for_update().filter(
                     actor=access.employee,
                     role_code=normalized['role_code'],
@@ -4564,6 +4580,7 @@ def process_one_offline_event(access, normalized):
                     context_snapshot=normalized['context_snapshot'],
                     payload=normalized['payload'],
                     fingerprint=normalized['fingerprint'],
+                    result_payload={_REPLAY_EVIDENCE_KEY: replay_evidence},
                 )
             try:
                 with transaction.atomic():
@@ -4581,10 +4598,10 @@ def process_one_offline_event(access, normalized):
                 receipt.retryable = problem.retryable
                 receipt.error_code = problem.code
                 receipt.error_message = problem.message
-                receipt.result_payload = {
+                receipt.result_payload = _result_payload_with_replay_evidence({
                     'server_received_at': receipt.received_at.isoformat(),
                     **problem.details,
-                }
+                }, replay_evidence)
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',
@@ -4598,7 +4615,9 @@ def process_one_offline_event(access, normalized):
                 receipt.retryable = True
                 receipt.error_code = 'concurrent_state_retry'
                 receipt.error_message = 'Состояние изменилось одновременно. Событие будет повторено.'
-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.result_payload = _result_payload_with_replay_evidence({
+                    'server_received_at': receipt.received_at.isoformat(),
+                }, replay_evidence)
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',
@@ -4619,7 +4638,9 @@ def process_one_offline_event(access, normalized):
                 receipt.error_message = 'Временная ошибка сервера ({}: {}). Событие сохранено и будет повторено.'.format(
                     type(error).__name__, str(error)[:120].replace(chr(10), ' '),
                 )
-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.result_payload = _result_payload_with_replay_evidence({
+                    'server_received_at': receipt.received_at.isoformat(),
+                }, replay_evidence)
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',
@@ -4629,7 +4650,9 @@ def process_one_offline_event(access, normalized):
             receipt.retryable = False
             receipt.error_code = ''
             receipt.error_message = ''
-            result_payload = dict(result_payload or {})
+            result_payload = _result_payload_with_replay_evidence(
+                result_payload, replay_evidence,
+            )
             if normalized.get('ignored_missing_dependencies'):
                 result_payload['dependency_recovery'] = {
                     'reason': 'exact_terminal_reference',

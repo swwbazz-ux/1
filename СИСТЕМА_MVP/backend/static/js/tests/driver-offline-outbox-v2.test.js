@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
     createDriverOfflineOutbox,
     createDriverManualLoadEvent,
@@ -14,8 +16,32 @@ const {
     createDriverDowntimeEndEvent,
     selectDriverDowntimeProjection,
     localRepository,
+    replayConflictDecision,
     backoff,
 } = require("../driver-offline-outbox-v2.js");
+
+const replayContract = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, "../../../core/fixtures/offline_replay_contract.json"),
+    "utf8",
+));
+
+test("driver replay predicate satisfies the executable server-client contract", () => {
+    const scenarios = replayContract.filter(item => item.role_code === "driver");
+    assert.ok(scenarios.length > 0);
+    for (const scenario of scenarios) {
+        const decision = replayConflictDecision({
+            state: "conflict",
+            event_type: scenario.event_type,
+            last_error: {code: scenario.error_code, message: "fixture"},
+        });
+        assert.equal(decision.recoverable, scenario.expected_recoverable, scenario.id);
+    }
+    assert.equal(replayConflictDecision({
+        state: "conflict",
+        event_type: "driver.downtime.started",
+        last_error: {code: "equipment_context_changed", message: "Часы устройства опережают сервер"},
+    }).recoverable, false);
+});
 
 test("manual-load cancellation keeps an exact trip reference and the latest dependency", () => {
     const serverCancel = createDriverManualLoadCancelledEvent({

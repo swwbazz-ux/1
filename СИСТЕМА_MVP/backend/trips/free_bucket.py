@@ -214,6 +214,52 @@ def reconcile_expired_free_bucket_acceptances(*, now=None):
     return len(expired)
 
 
+def expire_stale_free_bucket_requests(truck, *, now=None):
+    """Persist the exact TTL boundary for stale unaccepted Driver requests.
+
+    The active-state filter already hides a REQUESTED reservation once its
+    ten-minute window ends.  Keeping that row non-terminal, however, leaves a
+    partial-unique slot occupied and breaks the release recovery path in which
+    a delayed factual Driver load revives the same request.  Only REQUESTED
+    rows are retired here: ACCEPTED and USED rows have their own lifecycle in
+    the current worker-truth workflow.  The caller already holds the truck
+    transaction/lock in the online path; the explicit row lock also keeps the
+    helper safe for the isolated reconciliation/test path.
+    """
+    from core.models import bump_operational_state
+    from .models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+
+    now = now or timezone.now()
+    expired = list(
+        FreeBucketAcceptance.objects
+        .select_for_update(of=('self',))
+        .filter(
+            truck=truck,
+            status=FreeBucketAcceptanceStatus.REQUESTED,
+            occurred_at__lte=now - FREE_BUCKET_REQUEST_TTL,
+        )
+        .order_by('id')
+    )
+    if not expired:
+        return []
+    for acceptance in expired:
+        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+        acceptance.cancelled_at = acceptance.occurred_at + FREE_BUCKET_REQUEST_TTL
+    FreeBucketAcceptance.objects.bulk_update(expired, ['status', 'cancelled_at'])
+    bump_operational_state(
+        'FreeBucketAcceptance:expired',
+        event_type='trip_changed',
+        object_type='FreeBucketAcceptance',
+        payload={
+            'action': 'free_bucket_expired',
+            'acceptance_ids': [item.id for item in expired],
+            'truck_ids': [truck.id],
+            'excavator_ids': sorted({item.excavator_id for item in expired}),
+        },
+    )
+    return expired
+
+
 def canonical_free_bucket_work_context_snapshot(excavator):
     """Freeze the target excavator's persisted work context for one load.
 

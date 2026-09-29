@@ -1,6 +1,8 @@
 import json
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
 
 from django.db import close_old_connections, connection
 from django.core.management.color import no_style
@@ -16,8 +18,8 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
 )
-from core.models import OfflineFieldEvent, OfflineFieldEventConflict
-from core.offline_sync import normalize_offline_event
+from core.models import OfflineFieldEvent, OfflineFieldEventConflict, OfflineFieldEventStatus
+from core.offline_sync import _offline_replay_decision, normalize_offline_event
 from downtimes.models import DowntimeEvent, DowntimeReason
 from trips import tests as trip_fixtures
 from trips.models import (
@@ -1908,6 +1910,128 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(receipt.occurred_at, device_occurred_at)
         self.assertEqual(trip.loaded_at, device_occurred_at)
         self.assertEqual(trip.load_time_source, 'excavator_device')
+
+    def test_replay_contract_fixture_executes_server_decision(self):
+        fixture_path = Path(__file__).with_name('fixtures') / 'offline_replay_contract.json'
+        scenarios = json.loads(fixture_path.read_text(encoding='utf-8'))
+        self.assertGreater(len(scenarios), 0)
+        received_at = timezone.now()
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario['id']):
+                raw_at = (
+                    received_at + timedelta(minutes=6)
+                    if scenario['own_clock_adjusted']
+                    else received_at - timedelta(seconds=5)
+                )
+                receipt = SimpleNamespace(
+                    status=OfflineFieldEventStatus.CONFLICT,
+                    role_code=scenario['role_code'],
+                    event_type=scenario['event_type'],
+                    error_code=scenario['error_code'],
+                    occurred_at=raw_at,
+                    received_at=received_at,
+                    result_payload={},
+                )
+                decision = _offline_replay_decision(receipt)
+                self.assertEqual(
+                    decision.allowed,
+                    scenario['expected_recoverable'],
+                    decision,
+                )
+                if scenario['expected_recoverable']:
+                    self.assertEqual(
+                        decision.time_policy,
+                        'first_received_at' if scenario['own_clock_adjusted'] else 'device_occurred_at',
+                        decision,
+                    )
+                if scenario['error_code'].startswith('dependency_'):
+                    self.assertEqual(decision.dependency_policy, 'advisory_own_refs', decision)
+
+    def test_device_clock_conflict_without_own_evidence_is_not_reprocessed(self):
+        received_at = timezone.now()
+        receipt = SimpleNamespace(
+            status=OfflineFieldEventStatus.CONFLICT,
+            role_code='driver',
+            event_type='driver.downtime.started',
+            error_code='device_clock_ahead',
+            occurred_at=received_at - timedelta(seconds=5),
+            received_at=received_at,
+            result_payload={},
+        )
+
+        decision = _offline_replay_decision(receipt)
+
+        self.assertFalse(decision.allowed)
+
+    def test_domain_conflict_retries_keep_first_clock_correction_without_alternating(self):
+        trip, _original_driver, _original_shift, _replacement, _replacement_shift = (
+            self._prepare_controlled_driver_handover_trip()
+        )
+        trip.is_carryover = False
+        trip.save(update_fields=['is_carryover'])
+        received_at = timezone.now()
+        raw_at = received_at + timedelta(minutes=40)
+        event = {
+            'event_id': 'driver-domain-clock-does-not-alternate',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': raw_at.isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'trip_id': trip.id,
+            'payload': {'trip_id': trip.id},
+        }
+        device_id = 'driver-domain-clock-stable-device'
+        normalized = normalize_offline_event(
+            event,
+            role_code='driver',
+            device_id=device_id,
+            received_at=received_at,
+        )
+        OfflineFieldEvent.objects.create(
+            event_id=event['event_id'],
+            event_type=event['event_type'],
+            format_version=1,
+            actor=self.driver,
+            access=self.driver_access,
+            role_code='driver',
+            device_id=device_id,
+            sequence=1,
+            depends_on=[],
+            occurred_at=raw_at,
+            received_at=received_at,
+            shift=self.truck_shift,
+            equipment=self.truck,
+            trip=trip,
+            context_snapshot=normalized['context_snapshot'],
+            payload=normalized['payload'],
+            fingerprint=normalized['fingerprint'],
+            status=OfflineFieldEventStatus.CONFLICT,
+            error_code='trip_driver_shift_changed',
+            error_message='legacy domain conflict after a corrected clock',
+        )
+
+        results = [
+            self.sync(
+                [event],
+                client=self.driver_client(),
+                role_code='driver',
+                device_id=device_id,
+            ).json()['results'][0]
+            for _ in range(4)
+        ]
+
+        self.assertEqual(
+            [(item['status'], item['code']) for item in results],
+            [('conflict', 'trip_driver_shift_changed')] * 4,
+        )
+        receipt = OfflineFieldEvent.objects.get(event_id=event['event_id'])
+        self.assertEqual(receipt.occurred_at, raw_at)
+        self.assertEqual(receipt.received_at, received_at)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD)
 
     def test_excavator_clock_ahead_uses_server_time_without_blocking_work(self):
         device_occurred_at = timezone.now() + timedelta(minutes=6)
@@ -4276,6 +4400,38 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         close_old_connections()
         return response.status_code, response.json()['results'][0]
 
+    def store_legacy_conflict(self, event, *, device_id, error_code):
+        """Persist the immutable legacy envelope before concurrent replay."""
+        received_at = timezone.now()
+        normalized = normalize_offline_event(
+            event,
+            role_code='excavator_operator',
+            device_id=device_id,
+            received_at=received_at,
+        )
+        return OfflineFieldEvent.objects.create(
+            event_id=event['event_id'],
+            event_type=event['event_type'],
+            format_version=event['format_version'],
+            actor=self.operator,
+            access=self.access,
+            role_code='excavator_operator',
+            device_id=device_id,
+            sequence=event['sequence'],
+            depends_on=event['depends_on'],
+            occurred_at=timezone.datetime.fromisoformat(event['occurred_at']),
+            received_at=received_at,
+            shift=self.shift,
+            equipment=self.excavator,
+            local_trip_id=normalized['local_trip_id'],
+            context_snapshot=normalized['context_snapshot'],
+            payload=normalized['payload'],
+            fingerprint=normalized['fingerprint'],
+            status=OfflineFieldEventStatus.CONFLICT,
+            error_code=error_code,
+            error_message='legacy conflict before S106-C2',
+        )
+
     def test_same_event_parallel_requests_create_one_trip(self):
         event = self.event('parallel-same-event', 1)
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -4292,6 +4448,80 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         self.assertEqual(Trip.objects.count(), 1)
         self.assertEqual(OfflineFieldEvent.objects.count(), 1)
         self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+
+    def test_same_legacy_conflict_parallel_replay_creates_one_trip(self):
+        event = self.event('parallel-replay-same-event', 1)
+        device_id = 'parallel-replay-same-device'
+        self.store_legacy_conflict(
+            event,
+            device_id=device_id,
+            error_code='open_trip_changed',
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(
+                lambda _: self.post_from_thread(event, device_id),
+                range(2),
+            ))
+
+        self.assertEqual([item[0] for item in results], [200, 200])
+        self.assertEqual(
+            sorted(item[1]['status'] for item in results),
+            ['accepted', 'deduplicated'],
+        )
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(OfflineFieldEvent.objects.count(), 1)
+        self.assertEqual(TripClientAction.objects.filter(action_type='truck_loaded').count(), 1)
+
+    def test_parallel_root_and_child_replay_converge_without_losing_child(self):
+        device_id = 'parallel-replay-chain-device'
+        root = self.event('parallel-replay-root', 1)
+        loaded_at = timezone.now() - timedelta(seconds=2)
+        root['occurred_at'] = loaded_at.isoformat()
+        child = {
+            'event_id': 'parallel-replay-child',
+            'event_type': 'excavator.trip.loaded.cancelled',
+            'format_version': 1,
+            'occurred_at': (loaded_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 2,
+            'depends_on': [root['event_id']],
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'local_trip_id': root['local_trip_id'],
+            'payload': {'local_trip_id': root['local_trip_id']},
+        }
+        self.store_legacy_conflict(
+            root,
+            device_id=device_id,
+            error_code='open_trip_changed',
+        )
+        self.store_legacy_conflict(
+            child,
+            device_id=device_id,
+            error_code='dependency_rejected',
+        )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(self.post_from_thread, root, device_id),
+                pool.submit(self.post_from_thread, child, device_id),
+            ]
+            first_results = [future.result() for future in futures]
+
+        self.assertEqual([item[0] for item in first_results], [200, 200])
+        by_event = {item[1]['event_id']: item[1] for item in first_results}
+        self.assertEqual(by_event[root['event_id']]['status'], 'accepted', by_event)
+        self.assertIn(by_event[child['event_id']]['status'], {'accepted', 'retry'}, by_event)
+
+        child_repeat = self.post_from_thread(child, device_id)
+        self.assertEqual(child_repeat[0], 200)
+        self.assertIn(child_repeat[1]['status'], {'accepted', 'deduplicated'}, child_repeat)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(Trip.objects.get().status, TripStatus.CANCELLED)
+        self.assertEqual(
+            set(OfflineFieldEvent.objects.values_list('status', flat=True)),
+            {OfflineFieldEventStatus.ACCEPTED},
+        )
 
     def test_same_driver_manual_event_parallel_requests_create_one_trip(self):
         event = self.driver_event('parallel-driver-same-event', 1)

@@ -12,6 +12,23 @@
     // повтором раз в 8 с — для сервера не нагрузка.
     var RETRY_MAX_MS = 8000;
     var DEFAULT_BATCH_SIZE = 25;
+    var SUPPORTED_TYPES = new Set([
+        "excavator.free_bucket.accepted",
+        "excavator.free_bucket.cancelled",
+        "excavator.free_bucket.loaded",
+        "excavator.trip.loaded",
+        "excavator.trip.loaded.cancelled",
+        "excavator.downtime.started",
+        "excavator.downtime.ended",
+        "excavator.shift.closed"
+    ]);
+    var REPLAY_DEPENDENCY_CODES = new Set([
+        "dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"
+    ]);
+    var REPLAY_FACTUAL_LOAD_CODES = new Set([
+        "active_downtime", "equipment_downtime_active", "excavator_unavailable",
+        "free_bucket_excavator_unavailable", "free_bucket_truck_unavailable", "open_trip_changed"
+    ]);
 
     function clone(value) {
         return JSON.parse(JSON.stringify(value));
@@ -82,34 +99,29 @@
             JSON.stringify(canonicalValue(wireEvent(right)));
     }
 
-    function recoverableDeviceClockConflict(event) {
-        if (!event || event.sync_state !== "conflict") return false;
-        return event.last_error_code === "device_clock_ahead"
-            || /(часы|время) устройства.*опережа(ют|ет) сервер/i.test(String(event.last_error || ""));
+    function replayConflictDecision(event) {
+        if (!event || event.sync_state !== "conflict" || !SUPPORTED_TYPES.has(event.event_type)) {
+            return {recoverable: false, reason: ""};
+        }
+        var code = String(event.last_error_code || "");
+        if (code === "device_clock_ahead") return {recoverable: true, reason: "own_clock_evidence"};
+        if (REPLAY_DEPENDENCY_CODES.has(code)) return {recoverable: true, reason: "dependency_own_refs"};
+        if (event.event_type === "excavator.shift.closed" && code === "shift_already_closed") {
+            return {recoverable: true, reason: "worker_truth_transition"};
+        }
+        if (
+            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
+            && REPLAY_FACTUAL_LOAD_CODES.has(code)
+        ) return {recoverable: true, reason: "factual_load_transition"};
+        return {recoverable: false, reason: ""};
     }
 
     function recoverableDependencyConflict(event) {
-        if (!event || event.sync_state !== "conflict") return false;
-        return ["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid"].indexOf(event.last_error_code) >= 0
-            || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
+        return replayConflictDecision(event).reason === "dependency_own_refs";
     }
 
     function recoverableWorkerTruthConflict(event) {
-        if (!event || event.sync_state !== "conflict") return false;
-        var code = String(event.last_error_code || "");
-        if (["dependency_rejected", "dependency_owner_mismatch", "dependency_order_invalid", "shift_already_closed"].indexOf(code) >= 0) return true;
-        if (
-            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")
-            && [
-                "active_downtime",
-                "equipment_downtime_active",
-                "excavator_unavailable",
-                "free_bucket_excavator_unavailable",
-                "free_bucket_truck_unavailable",
-                "open_trip_changed",
-            ].indexOf(code) >= 0
-        ) return true;
-        return false;
+        return replayConflictDecision(event).recoverable;
     }
 
     function createLocalStorageAdapter(storage, queueKey) {
@@ -572,7 +584,7 @@
             return list().then(function (events) {
                 var recoverable = Object.create(null);
                 events.forEach(function (event) {
-                    if (recoverableDeviceClockConflict(event) || recoverableWorkerTruthConflict(event)) {
+                    if (recoverableWorkerTruthConflict(event)) {
                         recoverable[event.event_id] = true;
                     }
                 });
@@ -651,5 +663,8 @@
     }
 
     root.createExcavatorFieldOutbox = createOutbox;
-    if (typeof module !== "undefined") module.exports = createOutbox;
+    if (typeof module !== "undefined") {
+        createOutbox.replayConflictDecision = replayConflictDecision;
+        module.exports = createOutbox;
+    }
 })(typeof window !== "undefined" ? window : globalThis);
