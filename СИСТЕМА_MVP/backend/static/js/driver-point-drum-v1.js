@@ -430,6 +430,39 @@
         if (button.classList.contains("is-waiting-unload") !== !!on) button.classList.toggle("is-waiting-unload", !!on);
     }
 
+    /* Двойная отметка (01.10.2026): водитель смахнул точку в ручном режиме, машинист
+       той же погрузкой отправил машину на разгрузку, сервер свёл обе отметки в один
+       рейс машиниста. Ручная проекция телефона гаснет («automatic»), но рейс не
+       закончен — круг принадлежит серверному гружёному рейсу. Раньше здесь круг
+       красился пустым «НА ЗАГРУЗКУ», а следующие ответы сервера совпадали со снимком,
+       из которого собран экран, и подмена пропускалась: круг оставался тёмным. */
+    function serverTripOwnsDial() {
+        var api = engine();
+        var s = shell();
+        return !!(s && api && typeof api.projectionState === "function"
+            && api.projectionState() === "automatic"
+            && s.dataset.driverActiveTripOrigin === "excavator"
+            && s.dataset.driverHasLoadedTrip === "true");
+    }
+
+    function handDialToServerTrip(button, wrap) {
+        var s = shell();
+        if (button.disabled) button.disabled = false;
+        button.removeAttribute("aria-disabled");
+        button.setAttribute("aria-label", "Подтвердить разгрузку. Удерживайте 1 секунду.");
+        button.classList.remove("is-empty", "is-pending");
+        if (!button.classList.contains("is-holding")) button.classList.add("is-loaded");
+        wrap.classList.remove("is-empty");
+        wrap.classList.add("is-loaded");
+        var name = s ? String(s.dataset.driverActualDumpPointName || s.dataset.driverAssignedDumpPointName || "") : "";
+        if (name) setDialLabel(name);
+        // Точную серверную разметку круга возвращает подмена — без сверки со снимком.
+        root.driverForceFragmentApply = true;
+        var client = root.AppRealtime;
+        if (client && typeof client.requestReconcile === "function") client.requestReconcile("driver_manual_handover");
+        else if (client && typeof client.wake === "function") client.wake("driver_manual_handover");
+    }
+
     function syncDial() {
         var button = holdButton();
         var wrap = dial();
@@ -463,6 +496,10 @@
            ручного режима, который сервер обновляет при каждой отрисовке. */
         delete button.dataset.driverManualDial;
         delete button.dataset.driverManualDialLabel;
+        if (serverTripOwnsDial()) {
+            handDialToServerTrip(button, wrap);
+            return;
+        }
         button.disabled = true;
         button.setAttribute("aria-disabled", "true");
         button.setAttribute("aria-label", "Разгрузка недоступна: нет загруженного рейса");
