@@ -379,6 +379,51 @@ test("restart resends a free-bucket selection refused as free_bucket_request_sta
     assert.equal((await restarted.pending()).length, 0);
 });
 
+test("restart resends bucket refusals the v375 server accepts: point outside the snapshot, another excavator", async () => {
+    const local = storage();
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: "conflict",
+                code: event.event_id === "fb-select-2" ? "free_bucket_target_changed" : "free_bucket_work_context_changed",
+                message: "Отклонено.",
+            })),
+        }),
+    });
+    await rejected.enqueue({
+        event_id: "fb-select-2",
+        event_type: "driver.free_bucket.selected",
+        occurred_at: "2026-10-01T08:00:00.000Z",
+        payload: {truck_id: 58, excavator_id: 9},
+    });
+    await rejected.enqueue({
+        event_id: "fb-load-2",
+        event_type: "driver.trip.loaded",
+        occurred_at: "2026-10-01T08:01:00.000Z",
+        local_trip_id: "fb-load-2",
+        payload: {
+            manual_control: true, truck_id: 58, excavator_id: 9, dump_point_id: 3, rock_type_id: 2,
+            assignment_id: null, free_bucket_acceptance_id: null, free_bucket_acceptance_local_id: "fb-select-2",
+        },
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await restarted.initialize();
+    assert.deepEqual(delivered.flat(), ["fb-select-2", "fb-load-2"]);
+    assert.equal((await restarted.pending()).length, 0);
+});
+
 test("restart never retries a real domain conflict", async () => {
     const local = storage();
     const rejected = runtime({

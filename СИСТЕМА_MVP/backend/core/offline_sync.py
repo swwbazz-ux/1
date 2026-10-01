@@ -207,6 +207,56 @@ def _release_open_trips_unknown_to_worker(access, truck, *, occurred_at, process
     return released
 
 
+def _driver_free_bucket_load_context(access, acceptance, payload):
+    """Контекст погрузки водителя под свободный ковш — без отказа.
+
+    Строгая сверка со снимком принятия (resolve_free_bucket_load_context)
+    отклоняла погрузку, если точка или порода не совпали со снимком: без сети
+    барабан точек оставался от основного экскаватора, и рейс под ковш уходил с
+    его точкой (Infinix v374, 01.10.2026). Телефон — истина: самосвал поехал на
+    ту точку, что в отметке; порода — из снимка ковша (это его забой).
+    Расхождение — в технический журнал.
+    """
+    from references.models import DumpPoint, RockType
+    from trips.free_bucket import resolve_free_bucket_load_context
+
+    try:
+        return resolve_free_bucket_load_context(acceptance, payload)
+    except ValidationError as error:
+        problem = '; '.join(error.messages)
+    snapshot = acceptance.work_context_snapshot or {}
+    rows = [row for row in (snapshot.get('dump_points') or []) if isinstance(row, dict)]
+    rock = (
+        RockType.objects.filter(pk=_positive_int(snapshot.get('rock_type_id'), field='rock_type_id', required=False)).first()
+        or RockType.objects.filter(
+            pk=_positive_int(payload.get('rock_type_id') or payload.get('rock_type'), field='rock_type_id', required=False),
+        ).first()
+    )
+    requested_dump_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id', required=False)
+    dump_point = DumpPoint.objects.select_for_update().filter(pk=requested_dump_id).first() if requested_dump_id else None
+    if dump_point is None and rows:
+        dump_point = DumpPoint.objects.select_for_update().filter(
+            pk=_positive_int(rows[0].get('id'), field='dump_point_id', required=False),
+        ).first()
+    if not rock or not dump_point:
+        _conflict('reference_data_changed', 'Справочные данные ручного рейса больше недоступны.')
+    selected_row = next((row for row in rows if str(row.get('id')) == str(dump_point.id)), {})
+    _log_discrepancy(
+        access=access, code='free_bucket_work_context_changed', process='Погрузка под свободный ковш',
+        description=(
+            f'Право #{acceptance.id}: {problem} Принято по отметке водителя — точка {dump_point.id}, '
+            f'порода {rock.id}.'
+        ),
+    )
+    return {
+        'rock_type': rock,
+        'dump_point': dump_point,
+        'loading_horizon': str(snapshot.get('loading_horizon') or payload.get('loading_horizon') or '')[:64],
+        'loading_block': str(snapshot.get('loading_block') or payload.get('loading_block') or '')[:64],
+        'transport_distance_km': selected_row.get('transport_distance_km', payload.get('transport_distance_km')),
+    }
+
+
 def _process_driver_free_bucket_selected(access, normalized):
     from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, OPEN_TRIP_STATUSES, Trip
     from trips.trip_creation import lock_trip_participant_equipment
@@ -266,6 +316,28 @@ def _process_driver_free_bucket_selected(access, normalized):
         .order_by('-occurred_at', '-id')
         .first()
     )
+    replaced_acceptance_id = None
+    if (
+        existing
+        and existing.excavator_id != excavator.id
+        and existing.status != FreeBucketAcceptanceStatus.USED
+        and existing.requested_by_id in (None, access.employee_id)
+    ):
+        # Водитель выбрал другой экскаватор: прежнее право гаснет временем нового
+        # выбора, новый выбор принимается (телефон — истина; Infinix v374,
+        # 01.10.2026: второй ковш отклонялся free_bucket_target_changed).
+        _log_discrepancy(
+            access=access, code='free_bucket_target_changed', process='Выбор свободного ковша',
+            description=(
+                f'Право свободного ковша #{existing.id} (экскаватор {existing.excavator_id}) заменено '
+                f'выбором экскаватора {excavator.id} на {normalized["occurred_at"]}.'
+            ),
+        )
+        existing.status = FreeBucketAcceptanceStatus.CANCELLED
+        existing.cancelled_at = max(normalized['occurred_at'], existing.occurred_at)
+        existing.save(update_fields=['status', 'cancelled_at'])
+        replaced_acceptance_id = existing.id
+        existing = None
     if existing:
         if existing.excavator_id != excavator.id:
             _conflict('free_bucket_target_changed', 'Для самосвала уже выбран другой экскаватор.')
@@ -304,6 +376,7 @@ def _process_driver_free_bucket_selected(access, normalized):
     latest = (
         FreeBucketAcceptance.objects.select_for_update()
         .filter(truck=truck)
+        .exclude(pk=replaced_acceptance_id)
         .order_by('-received_at', '-id')
         .first()
     )
@@ -1496,10 +1569,7 @@ def _process_driver_loaded(access, normalized):
             acceptance.requested_by = access.employee
             acceptance.requesting_shift = shift
             acceptance.save(update_fields=['requested_by', 'requesting_shift'])
-        try:
-            load_context = resolve_free_bucket_load_context(acceptance, payload)
-        except ValidationError as error:
-            _conflict('free_bucket_work_context_changed', '; '.join(error.messages))
+        load_context = _driver_free_bucket_load_context(access, acceptance, payload)
         rock_type = load_context['rock_type']
         dump_point = load_context['dump_point']
 

@@ -93,8 +93,14 @@
        исправлен в v373) — при старте отправляем его и цепочку заново. */
     function recoverableServerRefusedConflict(event) {
         if (!event || event.state !== "conflict") return false;
-        return (event.event_type === "driver.trip.loaded" && errorCode(event) === "free_bucket_not_available")
-            || (event.event_type === "driver.free_bucket.selected" && errorCode(event) === "free_bucket_request_stale");
+        /* v375 (Infinix v374, 01.10.2026): погрузка под ковш с точкой вне снимка
+           и второй выбор ковша сервер теперь принимает — прежние отказы
+           отправляются заново с теми же ID. */
+        var code = errorCode(event);
+        return (event.event_type === "driver.trip.loaded"
+                && (code === "free_bucket_not_available" || code === "free_bucket_work_context_changed"))
+            || (event.event_type === "driver.free_bucket.selected"
+                && (code === "free_bucket_request_stale" || code === "free_bucket_target_changed"));
     }
     function recoverableDependencyConflict(event) {
         return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
