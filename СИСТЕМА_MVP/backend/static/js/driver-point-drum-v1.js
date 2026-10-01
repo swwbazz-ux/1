@@ -116,6 +116,56 @@
         }).join(",");
     }
 
+    /* Точки барабана — экскаватора, с которым работает водитель: при свободном
+       ковше — выбранного экскаватора (каталог ковша на странице, есть и без
+       сети), иначе основного. Раньше барабан рисовал только сервер: без сети
+       после выбора ковша оставались точки основного экскаватора, погрузка под
+       ковш уходила с чужой точкой и сервер отклонял её (Infinix v374,
+       01.10.2026; матрица C4b). */
+    function desiredPoints() {
+        var bucket = root.DriverFreeBucket && typeof root.DriverFreeBucket.currentState === "function"
+            ? root.DriverFreeBucket.currentState()
+            : null;
+        var selection = bucket && bucket.active && bucket.selection;
+        if (selection && Array.isArray(selection.dump_points) && selection.dump_points.length) {
+            return selection.dump_points;
+        }
+        var api = engine();
+        var base = api && typeof api.readWorkspaceContext === "function" ? api.readWorkspaceContext() : null;
+        return base && Array.isArray(base.dump_points) ? base.dump_points : [];
+    }
+
+    function makePointCard(point) {
+        var card = doc.createElement("button");
+        card.className = "driver-drum-card";
+        card.type = "button";
+        card.setAttribute("data-driver-point-card", "");
+        card.dataset.driverPointId = String(point.id);
+        card.dataset.driverPointName = String(point.name || "");
+        card.setAttribute("aria-label", "Точка разгрузки: " + String(point.name || "") + ". Проведите вниз на круг, чтобы отправиться на неё");
+        card.innerHTML = '<span class="driver-drum-card-face" aria-hidden="true"></span>'
+            + '<span class="driver-drum-card-arrow" aria-hidden="true"></span>'
+            + '<span class="driver-drum-card-body"><span class="driver-drum-card-label" data-driver-drum-label></span></span>';
+        card.querySelector("[data-driver-drum-label]").textContent = String(point.name || "");
+        return card;
+    }
+
+    function syncPointCards() {
+        var c = cylinder();
+        // Пока точка в круге (рейс идёт), барабан не перестраиваем.
+        if (!c || assignedPointId() !== "") return false;
+        var points = desiredPoints().filter(function (point) { return point && point.id && point.name; });
+        if (!points.length) return false;
+        var sorted = function (list) { return list.slice().sort().join(","); };
+        var wanted = points.map(function (point) { return String(point.id); });
+        // Тот же набор точек (порядок сервера) — ничего не трогаем.
+        if (sorted(signatureOf(c).split(",").filter(Boolean)) === sorted(wanted)) return false;
+        all("[data-driver-point-card], .driver-drum-card-empty", c).forEach(function (card) { card.parentNode.removeChild(card); });
+        points.forEach(function (point) { c.appendChild(makePointCard(point)); });
+        geo.built = null;
+        return true;
+    }
+
     function build() {
         var c = cylinder();
         if (!c) return false;
@@ -327,7 +377,9 @@
             return;
         }
         haptic([35, 45, 70]); click(1.6);
-        api.startManualLoadAtPoint(pointId);
+        // Имя точки — для путёвки и событий: точки ковша может не быть в сетке
+        // ручного режима, и тогда погрузка уходила без названия («—»).
+        api.startManualLoadAtPoint(pointId, card.dataset.driverPointName);
     }
 
     function recallPoint() {
@@ -664,6 +716,7 @@
 
     // --- состояние после подмены экрана и смены рейса ---
     function refresh() {
+        syncPointCards();
         var c = cylinder();
         // Новая копия экрана: грани собираются заново, поворот сохраняется (см. build).
         var fresh = !!(c && geo.built !== c);
@@ -744,6 +797,8 @@
             resizeTimer = root.setTimeout(function () { geo.built = null; refresh(); }, 150);
         });
         // Движок ручного рейса сообщает о каждой погрузке, отмене и завершении.
+        // Выбор, отмена и погашение ковша меняют набор точек барабана.
+        root.addEventListener("driver-free-bucket-state-changed", function () { refresh(); });
         root.addEventListener("driver-manual-trip-changed", function (event) {
             if (event.detail && event.detail.pointId && !isManual()) setManual(true);
             refresh();

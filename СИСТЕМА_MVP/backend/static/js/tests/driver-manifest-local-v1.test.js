@@ -297,3 +297,19 @@ test("a carryover trip loaded in the previous shift and unloaded in this one kee
     c.render(view.shell);
     assert.deepEqual(tripRows(view), ["1|ККД|1"]);
 });
+
+test("a load that left without a point name gets it from the free-bucket catalog", () => {
+    const storage = memoryStorage();
+    sequence = 0;
+    globalThis.DriverFreeBucket = {currentCatalog: () => ({excavators: [{id: 55, dump_points: [{id: 2, name: "СКДР"}]}]})};
+    const load = manualLoad(5, 2, "");
+    load.payload.excavator_id = 55;
+    load.context_snapshot.excavator_label = "ЭКС-2";
+    const done = manualComplete(load, 10);
+    const c = controller(storage, 20);
+    c.observe([load, done]);
+    const view = shellFor();
+    c.render(view.shell);
+    delete globalThis.DriverFreeBucket;
+    assert.deepEqual(tripRows(view), ["ЭКС-2|СКДР|1"]);
+});
