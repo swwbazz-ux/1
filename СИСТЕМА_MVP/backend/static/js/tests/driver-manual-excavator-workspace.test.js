@@ -841,7 +841,7 @@ test("dial manual mode drives the same manual-trip queue: send, cancel, complete
     assert.match(runtime, /function cancelActiveManualLoad\([\s\S]*?return cancelManualLoad\(workspace, target\);/);
     assert.match(runtime, /function completeActiveManualLoad\([\s\S]*?return completeManualLoad\(workspace, target\);/);
     assert.match(runtime, /"driver-manual-trip-changed"/);
-    assert.match(drum, /api\.startManualLoadAtPoint\(pointId\)/);
+    assert.match(drum, /api\.startManualLoadAtPoint\(pointId, card\.dataset\.driverPointName\)/);
     assert.match(drum, /api\.cancelActiveManualLoad\(\)/);
     assert.match(drum, /api\.completeActiveManualLoad\(\)/);
     // Звуки как у рейса экскаваторщика: «едем на …» при появлении ручного рейса на экране,

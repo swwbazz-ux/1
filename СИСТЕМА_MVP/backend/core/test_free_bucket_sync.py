@@ -396,16 +396,17 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(fresh.excavator_id, self.other_excavator.id)
         self.assertEqual(fresh.status, FreeBucketAcceptanceStatus.REQUESTED)
 
-    def test_fresh_driver_request_still_blocks_a_different_pick(self):
-        # Правило ковша не меняется: живой запрос на другой экскаватор — отказ.
+    def test_fresh_own_request_is_replaced_by_a_different_pick(self):
+        # Было: живой запрос на другой экскаватор — отказ free_bucket_target_changed.
+        # С 01.10.2026 (Infinix v374, телефон — истина): свой прежний запрос
+        # водителя гаснет временем нового выбора, новый принимается.
         fresh, _ = self.stale_driver_request(age=timedelta(minutes=1))
         selected = self.select_event(event_id='driver-free-select-while-fresh', excavator=self.other_excavator)
         result = self.sync_driver([selected]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_target_changed')
+        self.assertEqual(result['status'], 'accepted', result)
         fresh.refresh_from_db()
-        self.assertEqual(fresh.status, FreeBucketAcceptanceStatus.REQUESTED)
-        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+        self.assertEqual(fresh.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 2)
 
     def test_driver_can_cancel_own_accepted_request_before_load(self):
         selected = self.select_event()
@@ -1428,6 +1429,61 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(late_result['code'], 'free_bucket_request_stale')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
         self.assertEqual(FreeBucketAcceptance.objects.get().status, FreeBucketAcceptanceStatus.CANCELLED)
+
+    def test_driver_load_under_bucket_with_a_point_outside_the_snapshot_is_accepted(self):
+        # Infinix v374, 01.10.2026: без сети барабан точек остался от основного
+        # экскаватора, погрузка под ковш ушла с точкой, которой нет у ковша, —
+        # отказ free_bucket_work_context_changed и вся цепочка за ним. Телефон —
+        # истина: рейс записан на точку из отметки, порода — из снимка ковша.
+        self.backdate_truck_shift()
+        foreign_point = DumpPoint.objects.create(name='Точка основного экскаватора')
+        select = self.select_event(
+            event_id='driver-free-select-foreign-point',
+            occurred_at=timezone.now() - timedelta(minutes=9),
+        )
+        self.assertEqual(self.sync_driver([select]).json()['results'][0]['status'], 'accepted')
+        loaded = self.driver_manual_load_under_bucket(
+            select, event_id='driver-manual-load-foreign-point', sequence=2,
+            occurred_at=timezone.now() - timedelta(minutes=8),
+        )
+        loaded['payload']['dump_point_id'] = foreign_point.id
+        result = self.sync_driver([loaded]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        self.assertEqual(trip.dump_point_id, foreign_point.id)
+        self.assertEqual(trip.rock_type_id, self.rock.id)
+
+    def test_driver_choosing_another_excavator_replaces_the_previous_free_bucket(self):
+        # Infinix v374, 01.10.2026: второй выбор ковша отклонялся
+        # free_bucket_target_changed. Теперь прежнее право гаснет временем нового
+        # выбора, новый принимается.
+        self.backdate_truck_shift()
+        third = Equipment.objects.create(
+            equipment_type=self.other_excavator.equipment_type,
+            model=self.other_excavator.model,
+            garage_number='77',
+        )
+        placement = ExcavatorPlacement.objects.create(
+            excavator=third, zone=ExcavatorPlacement.Zone.ACTIVE, work_rock_type=self.rock,
+            work_dump_point=self.dump_point, loading_horizon='125', loading_block='4',
+        )
+        ExcavatorDumpPointSetting.objects.create(placement=placement, dump_point=self.dump_point, position=0)
+        first_at = timezone.now() - timedelta(seconds=20)
+        first = self.select_event(event_id='driver-free-select-first', occurred_at=first_at)
+        self.assertEqual(self.sync_driver([first]).json()['results'][0]['status'], 'accepted')
+        second = self.select_event(
+            event_id='driver-free-select-second', sequence=2, excavator=third,
+            occurred_at=first_at + timedelta(seconds=10),
+        )
+        result = self.sync_driver([second]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        previous = FreeBucketAcceptance.objects.get(client_acceptance_id='driver-free-select-first')
+        self.assertEqual(previous.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(previous.cancelled_at, first_at + timedelta(seconds=10))
+        current = FreeBucketAcceptance.objects.get(client_acceptance_id='driver-free-select-second')
+        self.assertEqual(current.excavator_id, third.id)
+        self.assertEqual(current.status, FreeBucketAcceptanceStatus.REQUESTED)
 
     def test_driver_snapshot_survives_context_and_dispatcher_changes_and_drives_trip(self):
         selected = self.select_event()

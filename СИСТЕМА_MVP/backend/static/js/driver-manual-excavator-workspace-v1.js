@@ -867,8 +867,18 @@
         }));
     }
 
+    /* Чем закончилась последняя сверка ручного рейса. «automatic» — ручную погрузку
+       перекрыл рейс машиниста: оба отметили одну погрузку, сервер свёл их в один рейс
+       (01.10.2026). Круг тогда принадлежит серверному рейсу, а не «пустому» состоянию. */
+    var lastProjectionState = "";
+
+    function projectionState() {
+        return lastProjectionState;
+    }
+
     function renderProjection(workspace, events, receipt) {
         var result = renderProjectionState(workspace, events, receipt);
+        lastProjectionState = String(result && result.state || "");
         announceManualTrip();
         return result;
     }
@@ -2403,6 +2413,7 @@
         startManualLoad: startManualLoad,
         activeManualPointId: activeManualPointId,
         activeManualPointName: activeManualPointName,
+        projectionState: projectionState,
         startManualLoadAtPoint: startManualLoadAtPoint,
         cancelActiveManualLoad: cancelActiveManualLoad,
         completeActiveManualLoad: completeActiveManualLoad

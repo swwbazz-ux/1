@@ -166,6 +166,25 @@
         return "pending";
     }
 
+    /* Название точки по её номеру из каталога ковша (точки всех экскаваторов,
+       есть на странице и без сети) — для погрузок, ушедших без названия. */
+    function catalogPointName(pointId) {
+        var catalog = root.DriverFreeBucket && typeof root.DriverFreeBucket.currentCatalog === "function"
+            ? root.DriverFreeBucket.currentCatalog()
+            : null;
+        var found = "";
+        (catalog && Array.isArray(catalog.excavators) ? catalog.excavators : []).some(function (item) {
+            return (item && Array.isArray(item.dump_points) ? item.dump_points : []).some(function (point) {
+                if (point && Number(point.id) === Number(pointId) && point.name) {
+                    found = String(point.name);
+                    return true;
+                }
+                return false;
+            });
+        });
+        return found;
+    }
+
     function logEntry(event, reasonLabel) {
         var payload = event.payload || {};
         var snapshot = event.context_snapshot || {};
@@ -181,7 +200,8 @@
             excavator_id: positive(payload.excavator_id),
             excavator_label: text(snapshot.excavator_label),
             dump_point_id: positive(payload.dump_point_id),
-            dump_point_label: text(snapshot.selected_dump_point_name),
+            dump_point_label: text(snapshot.selected_dump_point_name)
+                || (positive(payload.dump_point_id) ? catalogPointName(payload.dump_point_id) : ""),
             reason_id: positive(payload.reason_id),
             reason_label: text(reasonLabel),
             status: statusOf(event)

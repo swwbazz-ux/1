@@ -54,10 +54,21 @@ window.applyOperationalStateRefresh = function (context) {
     var activeTab = currentShell.dataset.activeTab || "work";
     var targetVersion = Number(context && context.version || 0);
     var requestShell = currentShell;
+    /* Матрица C1b (01.10.2026): после возврата сети экран, запрошенный в тот же
+       миг, что и отправка очереди, сервер собирал ещё ДО её событий (рейс гружёный,
+       «Ожидание разгрузки» идёт), а приходил он уже после подтверждения — когда
+       событий в очереди не осталось и наложить на него нажатое было нечем. Экран
+       откатывался к прошлому до следующего обновления. Если пока шёл запрос сервер
+       подтвердил хоть одно событие очереди, ответ мог его не видеть: не применяем,
+       через секунду просим свежий. */
+    var acceptedAtRequest = Number(window.driverOutboxAcceptedCount) || 0;
     var refreshPromise = window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!oldShell || oldShell !== requestShell || isDriverOperationalRefreshUnsafe(oldShell)) {
             return {deferred: true, reason: "driver_busy"};
+        }
+        if ((Number(window.driverOutboxAcceptedCount) || 0) !== acceptedAtRequest) {
+            return {deferred: true, reason: "driver_outbox_accepted_during_fragment"};
         }
         var freshShell = window.AppOperationalFragment.parseRoot(
             payload.html,
