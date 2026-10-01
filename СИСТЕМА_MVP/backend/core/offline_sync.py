@@ -3442,14 +3442,23 @@ def process_one_offline_event(access, normalized):
                         )
                     )
                 )
-                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_clock_conflict:
+                recoverable_removed_refusal = bool(
+                    existing.status == OfflineFieldEventStatus.CONFLICT
+                    and normalized['role_code'] == 'excavator_operator'
+                    and existing.event_type == 'excavator.trip.loaded'
+                    and existing.error_code == 'post_unload_cooldown'
+                )
+                recoverable_existing_conflict = bool(
+                    recoverable_clock_conflict or recoverable_removed_refusal
+                )
+                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_existing_conflict:
                     return _stored_result(existing, deduplicated=True)
-                if recoverable_clock_conflict:
+                if recoverable_existing_conflict:
                     # Reprocess the same immutable event at its original server
                     # receipt time. The id, sequence, dependencies and raw
                     # device timestamp stay unchanged, so no duplicate action
                     # can be created and the dependent queue keeps its order.
-                    clock_adjusted = (
+                    clock_adjusted = False if recoverable_removed_refusal else (
                         device_clock_was_invalid
                         if normalized['role_code'] == 'driver'
                         else True

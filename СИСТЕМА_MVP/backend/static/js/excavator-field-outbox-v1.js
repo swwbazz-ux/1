@@ -94,6 +94,12 @@
             || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
     }
 
+    function recoverableRemovedRefusal(event) {
+        if (!event || event.sync_state !== "conflict") return false;
+        return event.event_type === "excavator.trip.loaded"
+            && event.last_error_code === "post_unload_cooldown";
+    }
+
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
         var sequenceKey = key + ":sequence";
@@ -610,7 +616,9 @@
             return list().then(function (events) {
                 var recoverable = Object.create(null);
                 events.forEach(function (event) {
-                    if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
+                    if (recoverableDeviceClockConflict(event) || recoverableRemovedRefusal(event)) {
+                        recoverable[event.event_id] = true;
+                    }
                 });
                 var changed = true;
                 while (changed) {

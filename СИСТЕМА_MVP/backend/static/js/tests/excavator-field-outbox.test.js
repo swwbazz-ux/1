@@ -520,6 +520,58 @@ test('restart retries a legacy device clock conflict and its dependency chain', 
     assert.deepEqual(await afterUpdate.pending(), []);
 });
 
+test('restart retries a legacy post-unload cooldown refusal with the immutable event', async () => {
+    const local = storage();
+    const original = loadEvent('legacy-post-unload-cooldown', 17);
+    original.occurred_at = '2026-10-02T01:02:03.000Z';
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2',
+        send: async events => ({
+            ok: true,
+            results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'conflict',
+                code: 'post_unload_cooldown',
+                message: 'Возвращается к экскаватору · 10 мин.',
+            })),
+        }),
+    });
+    await beforeUpdate.queue(original);
+    await beforeUpdate.flush();
+    assert.deepEqual((await beforeUpdate.pending()).map(event => [event.event_id, event.sync_state]), [
+        [original.event_id, 'conflict'],
+    ]);
+
+    let replayed = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2',
+        send: async events => {
+            replayed = events.map(event => ({
+                event_id: event.event_id,
+                sequence: event.sequence,
+                occurred_at: event.occurred_at,
+                payload: event.payload,
+            }));
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+
+    const restored = await afterUpdate.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [original.event_id, 'pending'],
+    ]);
+    await afterUpdate.flush();
+    assert.deepEqual(replayed, [{
+        event_id: original.event_id,
+        sequence: original.sequence,
+        occurred_at: original.occurred_at,
+        payload: original.payload,
+    }]);
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
 test('restart does not retry an unrelated terminal conflict', async () => {
     const local = storage();
     const before = createOutbox({
