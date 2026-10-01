@@ -576,3 +576,122 @@ test("free-bucket tiles show only the excavator number and status, no place/rock
     assert.doesNotMatch(source, /driver-free-bucket-tile-missing/);
     assert.match(styles, /\.driver-free-bucket-tile-number\s*\{/);
 });
+
+/* Матрица без сети C4 (30.09.2026): «Отменить свободный ковш» без сети не
+   создавала события и не гасила режим — «Отмена не сохранена». Контроллер
+   передавал acceptanceLocalId, а построитель события очереди ждёт
+   localAcceptanceId; без серверного номера приёма он отказывал всегда.
+   Тесты выше подменяли построитель заглушкой — здесь настоящий. */
+test("cancel without a server acceptance id (offline) queues a real cancel event and switches the bucket off", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const queued = [];
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {
+            localStorage: storage(),
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+            createDriverFreeBucketCancelledEvent: outboxModule.createDriverFreeBucketCancelledEvent,
+        },
+        outbox: {
+            enqueue(event) { queued.push(event); return Promise.resolve(Object.assign({state: "pending"}, event)); },
+            pending() { return Promise.resolve(queued.map((event) => Object.assign({state: "pending"}, event))); },
+        },
+    });
+    controller.installCatalog(serverCatalog());
+    const selected = await controller.select(controller.catalog().excavators[0]);
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().acceptance_id, null);
+
+    const cancelled = await controller.cancel();
+
+    assert.ok(cancelled, "cancel must be queued");
+    assert.equal(cancelled.event_type, "driver.free_bucket.cancelled");
+    assert.equal(cancelled.payload.free_bucket_acceptance_local_id, selected.event_id);
+    assert.deepEqual(cancelled.depends_on, [selected.event_id]);
+    assert.equal(controller.state().active, false);
+});
+
+test("free-bucket state is saved under the shift now on screen, including a shift opened on the phone", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const saved = storage();
+    const liveShell = shell();
+    const controller = createDriverFreeBucketController({
+        shell: liveShell,
+        storage: saved,
+        window: {
+            localStorage: saved,
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        },
+        outbox: {enqueue(event) { return Promise.resolve(event); }},
+    });
+    controller.installCatalog(serverCatalog());
+    liveShell.dataset.driverShiftId = "driver-shift-open:local-1";
+    await controller.select(controller.catalog().excavators[0]);
+    assert.ok(saved.getItem("driver-free-bucket-state-v1:3:driver-shift-open:local-1:17"));
+    assert.equal(saved.getItem("driver-free-bucket-state-v1:3:11:17"), null);
+});
+
+/* Матрица без сети A2/B4 (30.09.2026): ковш отменён на телефоне (отмена уже
+   даже ушла на сервер), затем перезапуск без сети — страница из кэша нарисована
+   до отмены и показывает ковш активным. Раньше отмена просто стирала запись,
+   и телефон «забывал», что этот ковш погашен. */
+test("a bucket ended on the phone is not revived by an older cached page after a restart", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const saved = storage();
+    const windowObject = {
+        localStorage: saved,
+        createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        createDriverFreeBucketCancelledEvent: outboxModule.createDriverFreeBucketCancelledEvent,
+    };
+    const queued = [];
+    const outbox = {
+        enqueue(event) { queued.push(event); return Promise.resolve(event); },
+        pending() { return Promise.resolve([]); },
+    };
+    const first = createDriverFreeBucketController({shell: shell(), storage: saved, window: windowObject, outbox});
+    first.installCatalog(serverCatalog());
+    const selected = await first.select(first.catalog().excavators[0]);
+    await first.cancel();
+    assert.equal(first.state().active, false);
+
+    const cachedPageState = {
+        schema: "driver-free-bucket-state-v1",
+        active: true,
+        acceptance_id: 41,
+        acceptance_local_id: selected.event_id,
+        status: "requested",
+        can_cancel: true,
+        selection: item(),
+        version: 12,
+        generated_at: "2026-09-14T03:00:30Z",
+    };
+    const restarted = createDriverFreeBucketController({shell: shell(), storage: saved, window: windowObject, outbox});
+    restarted.installCatalog(serverCatalog());
+    assert.equal(restarted.installState(cachedPageState).active, false);
+
+    const another = Object.assign({}, cachedPageState, {acceptance_id: 42, acceptance_local_id: "driver-free-bucket-select:other"});
+    assert.equal(restarted.installState(another).active, true, "a different acceptance is a new bucket");
+});
+
+test("after a bucket trip is done (used, inactive) a new free bucket can be chosen without the server", async () => {
+    const outboxModule = require("../driver-offline-outbox-v2.js");
+    const controller = createDriverFreeBucketController({
+        shell: shell(),
+        storage: storage(),
+        window: {
+            localStorage: storage(),
+            createDriverFreeBucketSelectedEvent: outboxModule.createDriverFreeBucketSelectedEvent,
+        },
+        outbox: {enqueue(event) { return Promise.resolve(event); }},
+    });
+    controller.installCatalog(serverCatalog({excavators: [item(), item({id: 23, label: "EX-23"})]}));
+    controller.installState({
+        schema: "driver-free-bucket-state-v1", active: false, status: "used", sync_mode: "local",
+        version: 12, generated_at: "2026-09-14T03:00:00Z",
+    });
+    assert.equal(controller.state().status, "used");
+    await controller.select(controller.catalog().excavators[1]);
+    assert.equal(controller.state().active, true);
+    assert.equal(controller.state().selection.id, 23);
+});

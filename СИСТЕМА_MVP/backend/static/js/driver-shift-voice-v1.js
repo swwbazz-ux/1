@@ -25,8 +25,12 @@ function isDriverOperationalRefreshUnsafe(shell) {
     ) {
         return busy("focus:" + activeTag + (active.name ? ":" + active.name : ""));
     }
+    /* Скрытая форма смены — не набор: водитель физически не может в неё
+       вводить. На Infinix (v372, 30.09.2026) поздний input клавиатуры Android
+       после местного открытия помечал уже скрытую форму открытия «в наборе», и
+       каждое обновление с сервера откладывалось навсегда (busy=opening_form). */
     var openingShiftForm = shell.querySelector(".driver-shift-opening-form");
-    if (openingShiftForm && (
+    if (openingShiftForm && !openingShiftForm.hidden && (
         openingShiftForm.dataset.driverShiftOpeningDirty === "true" ||
         openingShiftForm.dataset.driverShiftOpeningPending === "true" ||
         openingShiftForm.querySelector(".errorlist")
@@ -34,7 +38,7 @@ function isDriverOperationalRefreshUnsafe(shell) {
         return busy("opening_form");
     }
     var activeShiftForm = shell.querySelector("[data-driver-shift-close-form]");
-    if (activeShiftForm && (
+    if (activeShiftForm && !activeShiftForm.hidden && (
         activeShiftForm.dataset.driverShiftDirty === "true" ||
         activeShiftForm.querySelector(".errorlist")
     )) {

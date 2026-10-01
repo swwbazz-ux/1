@@ -64,6 +64,7 @@
 СИСТЕМА_MVP/backend/static/css/mobile-dial-actions-v1.css
 СИСТЕМА_MVP/backend/static/js/driver-free-bucket-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js
+СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
 СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js

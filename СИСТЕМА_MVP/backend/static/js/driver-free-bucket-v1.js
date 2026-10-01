@@ -133,8 +133,22 @@
         return (Date.parse(candidate.generated_at || "") || 0) > (Date.parse(baseline.generated_at || "") || 0);
     }
 
+    /* То же принятие ковша (серверный или местный номер). */
+    function sameAcceptance(state, ended) {
+        if (!state || !ended) return false;
+        return (!!ended.local_id && text(state.acceptance_local_id) === text(ended.local_id))
+            || (!!positive(ended.id) && positive(state.acceptance_id) === positive(ended.id));
+    }
+
     function resolveInstalledState(serverState, savedState) {
         var fresh = normalizeState(serverState);
+        /* Телефон погасил именно это принятие (отмена или рейс под ковш): страница
+           из кэша, нарисованная раньше, его не воскрешает. Раньше после отмены
+           запись просто удалялась, и перезапуск без сети снова показывал ковш
+           активным (матрица без сети, 30.09.2026). Новое принятие — другой номер. */
+        if (savedState && savedState.ended_acceptance && fresh.active && sameAcceptance(fresh, savedState.ended_acceptance)) {
+            return normalizeState({active: false, status: text(savedState.status) || "cancelled", sync_mode: "local"});
+        }
         var saved = normalizeState(savedState);
         /* "review" значит сервер уже ОТКЛОНИЛ эту попытку — она не может быть
            достовернее свежего ответа сервера. Держать её как активную здесь
@@ -189,7 +203,13 @@
         var shiftId = text(shell && shell.dataset.driverShiftId);
         var truckId = text(shell && shell.dataset.driverCurrentTruckId);
         var catalogKey = CATALOG_SCHEMA + ":" + accessId + ":" + authGeneration;
-        var stateKey = STATE_SCHEMA + ":" + accessId + ":" + shiftId + ":" + truckId;
+        /* Ключ — по смене, которая сейчас на экране: смена, открытая на
+           телефоне без связи, несёт местный ID, и после её открытия ключ тоже
+           её (а не смены, с которой страница была нарисована). */
+        function stateKey() {
+            var currentShift = text(shell && shell.dataset.driverShiftId) || shiftId;
+            return STATE_SCHEMA + ":" + accessId + ":" + currentShift + ":" + truckId;
+        }
         var trigger = shell && shell.querySelector('[data-mobile-dial-action="free-bucket"]');
         var sheet = shell && shell.querySelector("[data-driver-free-bucket-sheet]");
         var grid = shell && shell.querySelector("[data-driver-free-bucket-grid]");
@@ -218,6 +238,30 @@
             try { storage.removeItem(key); } catch (error) {}
         }
 
+        /* Состояние на телефоне: активный ковш — целиком; погашенный — след
+           «это принятие закончено» (см. resolveInstalledState), который живёт
+           под ключом смены, пока его не сменит новый выбор. */
+        function persistState(previous) {
+            var key = stateKey();
+            if (state.active) {
+                storageWrite(key, state);
+                return;
+            }
+            if (previous && previous.active && (previous.acceptance_local_id || previous.acceptance_id)) {
+                storageWrite(key, {
+                    schema: STATE_SCHEMA,
+                    active: false,
+                    status: text(state.status) || "cancelled",
+                    sync_mode: "local",
+                    ended_acceptance: {local_id: text(previous.acceptance_local_id), id: positive(previous.acceptance_id)},
+                    ended_at: new Date().toISOString()
+                });
+                return;
+            }
+            var saved = storageRead(key);
+            if (!(saved && saved.ended_acceptance)) storageRemove(key);
+        }
+
         function installCatalog(serverCatalog) {
             var fresh = isAuthoritativeCatalog(serverCatalog)
                 ? normalizeCatalog(serverCatalog, false)
@@ -243,9 +287,9 @@
         function installState(serverState) {
             var fresh = normalizeState(serverState);
             lastServerState = fresh;
-            var saved = normalizeState(storageRead(stateKey));
-            state = resolveInstalledState(fresh, saved);
-            if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
+            var previous = state;
+            state = resolveInstalledState(fresh, storageRead(stateKey()));
+            persistState(previous);
             renderState();
             return state;
         }
@@ -474,7 +518,11 @@
         }
 
         function select(item) {
-            if (!outbox || !item || item.is_primary || !item.available || state.active || state.status === "used") return Promise.reject(new Error("free_bucket_unavailable"));
+            /* Выбор закрыт, только пока ковш активен (выбран или погружен под
+               ним). Погашенный после рейса («used», не активен) нового выбора не
+               держит: раньше без сети второй свободный ковш взять было нельзя до
+               свежего ответа сервера (матрица без сети C4, 30.09.2026). */
+            if (!outbox || !item || item.is_primary || !item.available || state.active) return Promise.reject(new Error("free_bucket_unavailable"));
             setMessage("Сохраняю выбор на телефоне…", false);
             return outbox.enqueue(selectedSpec(item)).then(function (event) {
                 state = normalizeState({
@@ -489,7 +537,8 @@
                     catalog_version: catalog.version,
                     catalog_generated_at: catalog.generated_at
                 });
-                storageWrite(stateKey, state);
+                storageWrite(stateKey(), state);
+                setMessage("", false);
                 renderState();
                 setOpen(false);
                 return event;
@@ -517,14 +566,20 @@
                     return null;
                 }
                 if (typeof windowObject.createDriverFreeBucketCancelledEvent !== "function") throw new Error("offline_runtime_unavailable");
+                /* Имя параметра — как у построителя (localAcceptanceId). Раньше
+                   здесь было acceptanceLocalId: без серверного номера приёма (то
+                   есть всегда без сети) построитель отказывал, и отмена ковша
+                   не сохранялась — «Отмена не сохранена» (матрица C4, 30.09.2026). */
                 return outbox.enqueue(windowObject.createDriverFreeBucketCancelledEvent({
                     acceptanceId: state.acceptance_id,
-                    acceptanceLocalId: state.acceptance_local_id,
+                    localAcceptanceId: state.acceptance_local_id,
                     dependsOn: (request && !requestRejected) ? [request.event_id] : []
                 }));
             }).then(function (event) {
+                var previous = state;
                 state = normalizeState({active: false, status: "cancelled", sync_mode: "local"});
-                storageRemove(stateKey);
+                persistState(previous);
+                setMessage("", false);
                 renderState();
                 setOpen(false);
                 return event;
@@ -641,8 +696,9 @@
                     projected = normalizeState({active: false, status: "used", sync_mode: "local"});
                 }
             });
+            var previous = state;
             state = projected;
-            if (state.active) storageWrite(stateKey, state); else storageRemove(stateKey);
+            persistState(previous);
             renderState();
             return clone(state);
         }

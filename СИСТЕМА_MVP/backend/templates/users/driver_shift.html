@@ -10,6 +10,7 @@
 {% block extra_head %}
 <script src="{% static 'js/driver-offline-outbox-v2.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/driver-local-shift-v1.js' %}?v={{ driver_shell_version }}"></script>
+<script src="{% static 'js/driver-manifest-local-v1.js' %}?v={{ driver_shell_version }}"></script>
 <script src="{% static 'js/mobile-dial-actions-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-drum-label-fit-v1.js' %}?v={{ driver_shell_version }}" defer></script>
 <script src="{% static 'js/driver-downtime-drum-v1.js' %}?v={{ driver_shell_version }}" defer></script>
@@ -317,7 +318,7 @@
         <button class="driver-primary-action driver-downtime-close driver-downtime-hold{% if not active_downtime %} is-disabled{% endif %}" type="button" data-driver-close-downtime {% if not active_downtime %}disabled aria-disabled="true"{% else %}aria-label="Завершить простой"{% endif %}><span data-driver-footer-action-label>Завершить простой</span></button>
     </section>
 
-    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}" data-driver-report-end-fuel="{{ driver_shift_report_end_fuel|default_if_none:'' }}" data-driver-report-end-mileage="{{ driver_shift_report_end_mileage|default_if_none:'' }}" data-driver-report-end-engine-hours="{{ driver_shift_report_end_engine_hours|default_if_none:'' }}">
+    <section class="driver-panel driver-tab {% if active_tab == 'manifest' %}is-active{% endif %}" data-driver-tab-panel="manifest" data-driver-manifest-data="{{ driver_manifest_json }}" data-driver-report-date="{{ driver_shift_report_date }}" data-driver-report-shift="{{ driver_shift_report_shift }}" data-driver-report-driver="{{ driver_shift_report_driver }}" data-driver-report-truck="{{ driver_shift_report_truck }}" data-driver-report-trip-total="{{ shift_trip_count }}" data-driver-report-downtime-total="{{ shift_downtime_report_total_label }}" data-driver-report-end-fuel="{{ driver_shift_report_end_fuel|default_if_none:'' }}" data-driver-report-end-mileage="{{ driver_shift_report_end_mileage|default_if_none:'' }}" data-driver-report-end-engine-hours="{{ driver_shift_report_end_engine_hours|default_if_none:'' }}">
         <div class="driver-manifest-head">
             <h2>Путёвка</h2>
             <div class="driver-manifest-tabs" role="tablist" aria-label="Вид путёвки">
@@ -373,7 +374,7 @@
             </div>
         </div>
         <div class="driver-manifest-view" data-driver-manifest-view="timeline">
-            <div class="driver-timeline">
+            <div class="driver-timeline" data-driver-timeline>
                 {% for event in driver_shift_timeline %}
                     <div class="driver-timeline-row is-{{ event.kind }}"><time>{{ event.time }}</time><strong>{{ event.title }}</strong><span>{{ event.meta }}</span></div>
                 {% empty %}<div class="driver-empty-state">Событий в текущей смене пока нет.</div>{% endfor %}

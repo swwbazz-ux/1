@@ -1235,8 +1235,11 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(self.assignment.status, AssignmentStatus.ACCEPTED)
         self.assertIsNone(self.assignment.ended_at)
 
-    def test_driver_request_is_rejected_while_truck_has_open_trip(self):
-        Trip.objects.create(
+    def test_driver_request_while_truck_has_an_unknown_open_trip_releases_that_trip(self):
+        # Раньше: отказ open_trip_exists. Телефон — истина (владелец): водитель
+        # выбрал ковш, значит самосвал свободен; открытый рейс, о котором он не
+        # знал, снимается с контроля временем нажатия, выбор принимается.
+        open_trip = Trip.objects.create(
             excavator=self.excavator,
             truck=self.truck,
             rock_type=self.rock,
@@ -1244,12 +1247,96 @@ class FreeBucketServerIntegrationTests(TestCase):
             assigned_dump_point=self.dump_point,
             actual_dump_point=self.dump_point,
             status=TripStatus.LOADED_WAITING_UNLOAD,
-            loaded_at=timezone.now(),
+            loaded_at=timezone.now() - timedelta(seconds=30),
         )
-        result = self.sync_driver([self.select_event()]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'open_trip_exists')
-        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+        selected_at = timezone.now()
+        result = self.sync_driver([self.select_event(occurred_at=selected_at)]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
+        open_trip.refresh_from_db()
+        self.assertEqual(open_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(open_trip.operationally_closed_at, selected_at)
+        self.assertEqual(open_trip.closure_recorded_by_id, self.driver.id)
+
+    def test_excavator_free_bucket_load_releases_an_open_trip_it_did_not_know_about(self):
+        # Та же проверка в погрузке под свободный ковш машинистом: открытый рейс
+        # самосвала, появившийся между приёмом и погрузкой, больше не отказ.
+        selected = self.select_event(event_id='driver-free-select-release')
+        self.assertEqual(self.sync_driver([selected]).json()['results'][0]['status'], 'accepted')
+        other_client, identity = self.other_excavator_identity()
+        accepted = self.accept_event(event_id='free-accept-release', **identity)
+        accepted_result = self.sync(
+            [accepted], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='free-bucket-release-device',
+        ).json()['results'][0]
+        self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
+        stray_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=timezone.datetime.fromisoformat(accepted['occurred_at']),
+        )
+        loaded = self.load_event(accepted, event_id='free-load-release', sequence=2, **identity)
+        loaded_result = self.sync(
+            [loaded], client=other_client, actor=identity['actor'], access=identity['access'],
+            device_id='free-bucket-release-device',
+        ).json()['results'][0]
+        self.assertEqual(loaded_result['status'], 'accepted', loaded_result)
+        stray_trip.refresh_from_db()
+        self.assertEqual(stray_trip.status, TripStatus.UNCONTROLLED)
+
+    def test_offline_bucket_chain_is_accepted_over_an_excavator_trip_the_phone_never_saw(self):
+        # Стенд координатора, 30.09.2026: пока водитель был без связи, машинист
+        # погрузил самосвал (рейс #132). Цепочка ковша с телефона — выбор, отмена,
+        # выбор, погрузка, завершение — вся упала: open_trip_exists и
+        # dependency_rejected. Теперь всё принято, рейс машиниста снят с контроля.
+        self.backdate_truck_shift()
+        base = timezone.now() - timedelta(minutes=9)
+        excavator_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=base + timedelta(minutes=2),
+            load_time_source='excavator_device',
+        )
+        first = self.select_event(event_id='fb-offline-select-1', sequence=1, occurred_at=base)
+        cancel = self.driver_event(
+            'fb-offline-cancel-1', 'driver.free_bucket.cancelled', 2,
+            occurred_at=base + timedelta(seconds=20),
+            depends_on=[first['event_id']],
+            payload={'free_bucket_acceptance_local_id': first['event_id']},
+        )
+        second = self.select_event(
+            event_id='fb-offline-select-2', sequence=3, occurred_at=base + timedelta(minutes=3),
+            depends_on=[cancel['event_id']],
+        )
+        _, identity = self.other_excavator_identity()
+        loaded = self.driver_manual_load_under_bucket(
+            second, event_id='fb-offline-load', sequence=4, occurred_at=base + timedelta(minutes=4),
+        )
+        completed = self.driver_manual_complete_under_bucket(
+            loaded, event_id='fb-offline-complete', sequence=5, occurred_at=base + timedelta(minutes=6),
+        )
+        results = self.sync_driver([first, cancel, second, loaded, completed]).json()['results']
+        self.assertEqual(
+            [(item['event_id'], item['status']) for item in results],
+            [(event['event_id'], 'accepted') for event in (first, cancel, second, loaded, completed)],
+            results,
+        )
+        excavator_trip.refresh_from_db()
+        self.assertEqual(excavator_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(excavator_trip.operationally_closed_at, excavator_trip.loaded_at)
+        bucket_trip = Trip.objects.get(pk=results[3]['server_ids']['trip_id'])
+        self.assertEqual(bucket_trip.status, TripStatus.COMPLETED)
+        self.assertEqual(bucket_trip.excavator_id, self.other_excavator.id)
 
     def test_driver_cannot_request_the_current_primary_excavator(self):
         result = self.sync_driver([
@@ -1283,6 +1370,37 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(result['status'], 'conflict', result)
         self.assertEqual(result['code'], 'free_bucket_request_stale')
         self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+
+    def test_selection_after_offline_trip_is_not_stale_because_the_trip_reached_the_server_later(self):
+        # Матрица без сети, стенд 30.09.2026: без связи водитель сделал ручной
+        # рейс (погрузка и завершение по часам телефона), потом выбрал свободный
+        # ковш. Очередь дошла пачками: рейс записан раньше выбора, и его
+        # created_at — время сервера, позже нажатия «выбрать». Сервер считал это
+        # «состояние рейса изменилось после выбора» и отклонял выбор.
+        from shifts.models import EmployeeShift
+
+        now = timezone.now()
+        EmployeeShift.objects.filter(pk=self.truck_shift.pk).update(opened_at=now - timedelta(hours=1))
+        self.truck_shift.refresh_from_db()
+        trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.COMPLETED,
+            loaded_at=now - timedelta(seconds=20),
+            completed_at=now - timedelta(seconds=10),
+        )
+        Trip.objects.filter(pk=trip.pk).update(created_at=now)
+        selected = self.select_event(
+            event_id='driver-free-select-after-offline-trip',
+            occurred_at=now - timedelta(seconds=5),
+        )
+        result = self.sync_driver([selected]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(FreeBucketAcceptance.objects.count(), 1)
 
     def test_duplicate_and_late_driver_selection_do_not_revive_cancelled_request(self):
         selected_at = timezone.now()

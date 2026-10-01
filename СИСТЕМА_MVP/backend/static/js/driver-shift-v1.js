@@ -1269,6 +1269,89 @@ window.bindDriverMobileShell = function () {
         }) || null;
     }
 
+    /* Круг без рейса: самосвал пустеет и едет за погрузкой. Общая отрисовка для
+       разгрузки из очереди и для рейса прошлой смены, снятого с экрана новой
+       местной смены (driverDropForeignShiftState). */
+    function showDriverTripGone(current, unloadNeedsReview) {
+        current.dataset.driverHasOpenTrip = "false";
+        current.dataset.driverHasLoadedTrip = "false";
+        current.dataset.driverActiveTripId = "";
+        current.dataset.driverActiveTripOrigin = "";
+        current.dataset.driverActiveTripLoadedAt = "";
+        var dial = current.querySelector(".driver-work-dial");
+        var button = current.querySelector("[data-driver-hold-button]");
+        var dialLabel = current.querySelector("[data-driver-dial-label]");
+        var note = current.querySelector(".driver-work-note");
+        if (dial) { dial.classList.remove("is-loaded"); dial.classList.add("is-empty"); }
+        if (button) {
+            button.disabled = true;
+            button.classList.remove("is-loaded", "is-pending", "is-holding");
+            button.classList.add("is-empty");
+        }
+        if (dialLabel) {
+            /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
+               прежний ключ подгонки оставался прежним, и длинная надпись выводилась
+               кеглем короткой — она вылезала за круг и обрезалась. */
+            /* Куда ехать дальше после разгрузки телефон знает сам, без сервера:
+               назначение на экскаватор разгрузкой не снимается, самосвал просто
+               пустеет и едет за новой погрузкой к тому же экскаватору. Раньше
+               тут держали заглушку «ожидание синхронизации» до ответа сервера —
+               на нестабильной связи это давало задержку в минуты (реальный
+               полевой тест 26.09.2026). */
+            var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
+            // Разгрузка рейса под свободным ковшом — ковш был на один рейс,
+            // дальше основной экскаватор (29.09.2026).
+            var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
+            var nextExcavatorLabel = manualWorkspace
+                ? String(
+                    (bucketTrip
+                        ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                        : manualWorkspace.dataset.driverManualExcavatorLabel)
+                    || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
+                    || manualWorkspace.dataset.driverManualExcavatorLabel
+                    || ""
+                )
+                : "";
+            var unloadDialText = unloadNeedsReview
+                ? "НЕ ПОДТВЕРЖДЕНО"
+                : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
+            dialLabel.textContent = unloadDialText;
+            dialLabel.dataset.driverDialRaw = unloadDialText;
+            delete dialLabel.dataset.driverDialFitKey;
+            if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
+        }
+        if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
+        var pointCard = current.querySelector("[data-driver-point-open]");
+        if (pointCard) {
+            pointCard.disabled = true;
+            pointCard.hidden = true;
+            pointCard.setAttribute("aria-expanded", "false");
+        }
+        var sheet = current.querySelector("[data-driver-point-sheet]");
+        if (sheet) sheet.hidden = true;
+    }
+
+    /* Пересменка без сети (матрица B3a, 30.09.2026): страница нарисована
+       сервером для прошлой смены с идущим простоем. После местного закрытия и
+       открытия новая смена несла его на себе: кнопки причин молчали («простой
+       уже идёт»). Простой заканчивается закрытием смены (правило 8; телефон
+       ставит завершение в очередь — driver-local-shift-v1.js), поэтому
+       простой, нарисованный сервером для другой смены, снимаем с экрана. Свои
+       простои новой смены («local:…») не трогаем. Гружёный рейс остаётся:
+       он переходит к следующей смене (решение 13 владельца), его разгружают. */
+    function driverShellShowsForeignShift(current) {
+        return String(current.dataset.driverShiftId || "") !== String(current.dataset.driverServerShiftId || "");
+    }
+    window.driverDropForeignShiftState = function (target) {
+        var current = target || document.querySelector("[data-driver-shell]");
+        if (!current || current !== shell || !driverShellShowsForeignShift(current)) return false;
+        var activeDowntimeId = String(downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || "");
+        if (!activeDowntimeId || activeDowntimeId.indexOf("local:") === 0) return false;
+        clearDriverActiveDowntime();
+        document.documentElement.classList.remove("is-driver-downtime-active");
+        return true;
+    };
+
     function applyDriverOfflineProjection(current, events) {
         if (!current) return;
         var ordered = (events || []).slice().sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
@@ -1278,63 +1361,7 @@ window.bindDriverMobileShell = function () {
             return event.event_type === "driver.trip.unloaded" && String(event.trip_id || "") === activeTripId;
         });
         if (unload) {
-            var unloadNeedsReview = ["conflict", "auth_required", "invalid"].includes(unload.state);
-            current.dataset.driverHasOpenTrip = "false";
-            current.dataset.driverHasLoadedTrip = "false";
-            current.dataset.driverActiveTripId = "";
-            current.dataset.driverActiveTripOrigin = "";
-            current.dataset.driverActiveTripLoadedAt = "";
-            var dial = current.querySelector(".driver-work-dial");
-            var button = current.querySelector("[data-driver-hold-button]");
-            var dialLabel = current.querySelector("[data-driver-dial-label]");
-            var note = current.querySelector(".driver-work-note");
-            if (dial) { dial.classList.remove("is-loaded"); dial.classList.add("is-empty"); }
-            if (button) {
-                button.disabled = true;
-                button.classList.remove("is-loaded", "is-pending", "is-holding");
-                button.classList.add("is-empty");
-            }
-            if (dialLabel) {
-                /* Подпись обязана пройти подгонку под круг: раньше сюда писали только текст,
-                   прежний ключ подгонки оставался прежним, и длинная надпись выводилась
-                   кеглем короткой — она вылезала за круг и обрезалась. */
-                /* Куда ехать дальше после разгрузки телефон знает сам, без сервера:
-                   назначение на экскаватор разгрузкой не снимается, самосвал просто
-                   пустеет и едет за новой погрузкой к тому же экскаватору. Раньше
-                   тут держали заглушку «ожидание синхронизации» до ответа сервера —
-                   на нестабильной связи это давало задержку в минуты (реальный
-                   полевой тест 26.09.2026). */
-                var manualWorkspace = current.querySelector("[data-driver-manual-workspace]");
-                // Разгрузка рейса под свободным ковшом — ковш был на один рейс,
-                // дальше основной экскаватор (29.09.2026).
-                var bucketTrip = manualWorkspace && manualWorkspace.dataset.driverManualAuthorityType === "free_bucket";
-                var nextExcavatorLabel = manualWorkspace
-                    ? String(
-                        (bucketTrip
-                            ? manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
-                            : manualWorkspace.dataset.driverManualExcavatorLabel)
-                        || manualWorkspace.dataset.driverManualPrimaryExcavatorLabel
-                        || manualWorkspace.dataset.driverManualExcavatorLabel
-                        || ""
-                    )
-                    : "";
-                var unloadDialText = unloadNeedsReview
-                    ? "НЕ ПОДТВЕРЖДЕНО"
-                    : (nextExcavatorLabel || "НА ЗАГРУЗКУ");
-                dialLabel.textContent = unloadDialText;
-                dialLabel.dataset.driverDialRaw = unloadDialText;
-                delete dialLabel.dataset.driverDialFitKey;
-                if (typeof scheduleDriverDialLabelFit === "function") scheduleDriverDialLabelFit();
-            }
-            if (note) note.textContent = unloadNeedsReview ? "ПРОВЕРЬТЕ СОБЫТИЕ" : "НА ЗАГРУЗКУ";
-            var pointCard = current.querySelector("[data-driver-point-open]");
-            if (pointCard) {
-                pointCard.disabled = true;
-                pointCard.hidden = true;
-                pointCard.setAttribute("aria-expanded", "false");
-            }
-            var sheet = current.querySelector("[data-driver-point-sheet]");
-            if (sheet) sheet.hidden = true;
+            showDriverTripGone(current, ["conflict", "auth_required", "invalid"].includes(unload.state));
         }
         var pointEvents = ordered.filter(function (event) {
             return event.event_type === "driver.trip.dump_point_changed" && String(event.trip_id || "") === activeTripId;
@@ -1407,13 +1434,50 @@ window.bindDriverMobileShell = function () {
         }
     }
 
+    /* Страница в кэше телефона — та, что была при последней загрузке. Без
+       сети после перезапуска она и показывается, поэтому после подтверждений
+       сервера и при уходе приложения в фон просим service worker положить
+       свежую (users/views.py, REFRESH_AUTHENTICATED_SHELL). Не чаще раза в 20 с. */
+    function requestDriverShellCacheRefresh(delayMs) {
+        var worker = navigator.serviceWorker && navigator.serviceWorker.controller;
+        if (!worker || navigator.onLine === false) return;
+        if (window.__driverShellCacheRefreshTimer) return;
+        window.__driverShellCacheRefreshTimer = window.setTimeout(function () {
+            window.__driverShellCacheRefreshTimer = null;
+            var last = Number(window.__driverShellCacheRefreshAt || 0);
+            if (Date.now() - last < 20000) return;
+            window.__driverShellCacheRefreshAt = Date.now();
+            var current = navigator.serviceWorker && navigator.serviceWorker.controller;
+            if (current) {
+                try { current.postMessage({type: "REFRESH_AUTHENTICATED_SHELL"}); } catch (error) {}
+            }
+        }, Math.max(0, Number(delayMs) || 0));
+    }
+    window.driverRequestShellCacheRefresh = requestDriverShellCacheRefresh;
+    if (!window.__driverShellCacheRefreshBound) {
+        window.__driverShellCacheRefreshBound = true;
+        document.addEventListener("visibilitychange", function () {
+            if (document.hidden) requestDriverShellCacheRefresh(0);
+        });
+    }
+
     function driverOfflineBindings() {
         return {
             context: driverOfflineContext,
-            onState: renderDriverOfflineState,
+            onState: function (state) {
+                renderDriverOfflineState(state);
+                /* Путёвка ведёт свой журнал смены из тех же событий очереди. */
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.observe === "function") {
+                    try { window.DriverManifestLocal.observe(state && state.events); } catch (error) {}
+                }
+            },
             onConfirmed: function () {
                 var args = arguments;
                 var event = args[0] || {};
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.confirmed === "function") {
+                    try { window.DriverManifestLocal.confirmed(event, args[1] || {}); } catch (error) {}
+                }
+                if (typeof window.driverRequestShellCacheRefresh === "function") window.driverRequestShellCacheRefresh(4000);
                 if (window.DriverLocalShift && typeof window.DriverLocalShift.onConfirmed === "function") {
                     window.DriverLocalShift.onConfirmed(event, args[1] || {});
                 }
@@ -1451,6 +1515,9 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onReview: function (event, result) {
+                if (window.DriverManifestLocal && typeof window.DriverManifestLocal.review === "function") {
+                    try { window.DriverManifestLocal.review(event, result || {}); } catch (error) {}
+                }
                 showDriverToast(result.message || "Действие не подтверждено сервером. Обновите экран; если состояние неверное — сообщите диспетчеру.");
                 if (
                     event
@@ -1541,6 +1608,8 @@ window.bindDriverMobileShell = function () {
     }
 
     var driverOfflineOutbox = createDriverOfflineRuntime();
+    // Проекция смены шла раньше привязки экрана — чужое состояние снимаем здесь.
+    window.driverDropForeignShiftState(shell);
     /* Замок контракта не должен включаться из-за отсутствия сети (владелец,
        30.09.2026). Оболочка из кэша той же версии, что service worker, — её
        скрипты и воркер сверяются на месте; сервер лишь подтверждает, что не
@@ -2519,6 +2588,11 @@ window.bindDriverMobileShell = function () {
         /* Удержание завершено: сброс удержания после этого (восстановление
            формы, отмена) не должен глушить длинный отклик завершения. */
         var unloadHoldCompleted = false;
+        /* Разгрузка по удержанию записана: подписью круга дальше владеет
+           проекция (следующий экскаватор), а не подпись с момента привязки
+           экрана. Иначе отпускание пальца возвращало «ККД» поверх «ЭКС-1»
+           (матрица без сети, 30.09.2026). */
+        var unloadHoldSubmitted = false;
         unloadHoldGuard = window.createDriverRoleHoldGuard({
             /* Разгрузка повторяется десятки раз за смену: полсекунды — достаточно,
                чтобы случайное касание не отправило рейс, и не утомляет за смену.
@@ -2527,6 +2601,7 @@ window.bindDriverMobileShell = function () {
             holdMs: 500,
             onStart: function () {
                 unloadHoldCompleted = false;
+                unloadHoldSubmitted = false;
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
@@ -2540,7 +2615,7 @@ window.bindDriverMobileShell = function () {
                 // После обычного отпускания подпись и так исходная — подгонка текста
                 // (замеры ширины в цикле) на слабом телефоне стоила заметного кадра.
                 var resetLabel = holdButton.dataset.driverManualDialLabel || readyDialLabel;
-                if (dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
+                if (!unloadHoldSubmitted && dialLabel && resetLabel && (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " ")) !== resetLabel) {
                     renderDriverDialLabel(dialLabel, resetLabel);
                     scheduleDriverDialLabelFit();
                 }
@@ -2551,7 +2626,9 @@ window.bindDriverMobileShell = function () {
                 driverVibrate(160);   // кольцо заполнено
                 if (!submitDriverUnloadOnce()) {
                     unloadHoldGuard.cancel();
+                    return;
                 }
+                unloadHoldSubmitted = true;
             }
         });
         window.driverUnloadHoldGuard = unloadHoldGuard;
@@ -2719,6 +2796,16 @@ window.bindDriverMobileShell = function () {
             }).catch(function (error) {
                 if (form.isConnected) {
                     form.dataset.driverInPlacePending = "false";
+                    /* Открытие не записалось — форма снова в руках водителя: без
+                       этого признак отправки оставался и держал экран (opening_form). */
+                    form.dataset.driverShiftOpeningPending = "false";
+                    var failedOpenButton = form.querySelector("[data-driver-shift-open-button]");
+                    if (failedOpenButton) {
+                        failedOpenButton.disabled = false;
+                        failedOpenButton.classList.remove("is-pending");
+                        var failedOpenLabel = failedOpenButton.querySelector("[data-mobile-shift-label]");
+                        if (failedOpenLabel) failedOpenLabel.textContent = "Начать смену";
+                    }
                     var closeButton = form.querySelector("[data-driver-shift-close-button]");
                     if (closeButton) {
                         closeButton.disabled = false;
@@ -3036,10 +3123,83 @@ window.bindDriverMobileShell = function () {
                 });
                 return runtime.applyPromise;
             };
+            /* Переход на новую версию оболочки (матрица без сети A5, 30.09.2026).
+               Раньше метка версии во фрагменте перезагружала страницу через 1,5 с —
+               раньше, чем ставился новый service worker: старый отдавал старую
+               страницу, и она оставалась под замком «service-worker-mismatch».
+               А разовая перезагрузка после смены воркера откладывалась, пока
+               страница скрыта или занята, и больше не повторялась — «Позже» и
+               сворачивание приложения оставляли его замороженным. Теперь экран
+               ждёт, пока base.html (он один ведёт обновление воркера) сообщит о
+               новом воркере (app-pwa-contract-state), и перезагружается, только
+               когда контроллер уже новый; скрытая страница — при возврате,
+               занятая вводом — чуть позже. */
+            runtime.followTarget = "";
+            runtime.followShellVersion = function (targetVersion) {
+                targetVersion = String(targetVersion || "");
+                if (!targetVersion || versionNumber(targetVersion) <= versionNumber(runtime.currentShellVersion)) {
+                    return false;
+                }
+                if (versionNumber(targetVersion) > versionNumber(runtime.followTarget)) {
+                    runtime.followTarget = targetVersion;
+                }
+                if (!runtime.followBound) {
+                    runtime.followBound = true;
+                    document.addEventListener("visibilitychange", function () {
+                        if (!document.hidden) runtime.checkFollow();
+                    });
+                }
+                runtime.checkFollow();
+                return true;
+            };
+            runtime.checkFollow = function () {
+                var target = runtime.followTarget;
+                if (!target) return;
+                runtime.requestWorkerVersion(navigator.serviceWorker.controller).then(function (controllerVersion) {
+                    if (versionNumber(controllerVersion) >= versionNumber(target)) {
+                        runtime.reloadIntoWorker(target);
+                        return;
+                    }
+                    var registration = runtime.registration;
+                    var waiting = registration && registration.waiting;
+                    if (!waiting) return;
+                    runtime.requestWorkerVersion(waiting).then(function (waitingVersion) {
+                        if (versionNumber(waitingVersion) >= versionNumber(target) && runtime.activationRequestedWorker !== waiting) {
+                            runtime.activationRequestedWorker = waiting;
+                            waiting.postMessage({type: "SKIP_WAITING"});
+                        }
+                    });
+                });
+            };
+            runtime.reloadIntoWorker = function (target) {
+                if (document.hidden || runtime.followReloading) return;
+                var current = document.querySelector("[data-driver-shell]");
+                if (current && typeof isDriverOperationalRefreshUnsafe === "function" && isDriverOperationalRefreshUnsafe(current)) {
+                    var reason = String(window.driverRefreshBusyReason || "");
+                    // Жёсткие причины — водитель вводит показания: ждём, не теряя ввод.
+                    if (/^focus:|^opening_form$|^close_form$/.test(reason)) {
+                        window.setTimeout(runtime.checkFollow, 5000);
+                        return;
+                    }
+                }
+                var key = "driver-shell-follow-reload:" + target;
+                var record = {count: 0, at: 0};
+                try { record = JSON.parse(window.sessionStorage.getItem(key) || "null") || record; } catch (error) {}
+                if (record.count >= 3 && Date.now() - Number(record.at || 0) < 10 * 60 * 1000) return;
+                try {
+                    window.sessionStorage.setItem(key, JSON.stringify({count: Number(record.count || 0) + 1, at: Date.now()}));
+                } catch (error) {}
+                runtime.followReloading = true;
+                window.location.reload();
+            };
             window.addEventListener("app-pwa-contract-state", function (event) {
                 var detail = event && event.detail ? event.detail : {};
                 if (releaseVerifiedPageFromStaleWorkerLock(detail)) {
                     return;
+                }
+                var workerVersion = detail.serviceWorker && detail.serviceWorker.shellVersion;
+                if (workerVersion && versionNumber(workerVersion) > versionNumber(runtime.currentShellVersion)) {
+                    runtime.followShellVersion(workerVersion);
                 }
                 var serverVersion = detail.server && detail.server.shellVersion;
                 if (
@@ -3047,6 +3207,7 @@ window.bindDriverMobileShell = function () {
                     && versionNumber(serverVersion) > versionNumber(runtime.currentShellVersion)
                 ) {
                     if (runtime.renderUpdate) runtime.renderUpdate(serverVersion);
+                    runtime.followShellVersion(serverVersion);
                 } else if (detail.ready && runtime.clearUpdate) {
                     runtime.clearUpdate();
                     runtime.scheduleControllerRecovery(runtime.currentShellVersion, 150);

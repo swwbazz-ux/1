@@ -87,10 +87,14 @@
        окончательно, теперь записывает её по факту (PR #128). Отклонённую старым
        сервером отметку и её цепочку отправляем заново при старте — иначе три
        рейса владельца так и остались бы «на сверке» (бой 29.09.2026). */
+    /* Выбор свободного ковша, сделанный после рейсов без связи: старый сервер
+       сравнивал время нажатия со временем получения тех рейсов и отвечал
+       free_bucket_request_stale (матрица без сети, 30.09.2026; сервер
+       исправлен в v373) — при старте отправляем его и цепочку заново. */
     function recoverableServerRefusedConflict(event) {
-        return !!event && event.state === "conflict"
-            && event.event_type === "driver.trip.loaded"
-            && errorCode(event) === "free_bucket_not_available";
+        if (!event || event.state !== "conflict") return false;
+        return (event.event_type === "driver.trip.loaded" && errorCode(event) === "free_bucket_not_available")
+            || (event.event_type === "driver.free_bucket.selected" && errorCode(event) === "free_bucket_request_stale");
     }
     function recoverableDependencyConflict(event) {
         return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
@@ -398,7 +402,7 @@
     function createDriverFreeBucketCancelledEvent(options) {
         options = options || {};
         var acceptanceId = number(options.acceptanceId);
-        var localAcceptanceId = String(options.localAcceptanceId || options.pendingSelectionId || "");
+        var localAcceptanceId = String(options.localAcceptanceId || options.acceptanceLocalId || options.pendingSelectionId || "");
         if (!acceptanceId && !localAcceptanceId) throw new Error("offline_free_bucket_acceptance_required");
         return {
             event_id: String(options.eventId || randomId("driver-free-bucket-cancel")),

@@ -642,7 +642,10 @@ function bindDriverShiftOpeningForm(shell) {
     function syncOpenShiftFormState(options) {
         options = options || {};
         var wasDirty = openShiftForm.dataset.driverShiftOpeningDirty === "true";
-        var isDirty = openReadings.some(function (input, index) {
+        /* Скрытая форма не «в наборе»: поздний input клавиатуры Android после
+           местного открытия смены (форма уже скрыта) ставил признак набора
+           навсегда — busy=opening_form, экран не обновлялся (Infinix, v372). */
+        var isDirty = !openShiftForm.hidden && openReadings.some(function (input, index) {
             return input.value !== initialReadings[index];
         });
         openShiftForm.dataset.driverShiftOpeningDirty = isDirty ? "true" : "false";
@@ -663,6 +666,16 @@ function bindDriverShiftOpeningForm(shell) {
     openReadings.forEach(function (input) {
         input.addEventListener("input", syncOpenShiftFormState);
     });
+    /* Смена на телефоне сама подставляет показания в форму (закрыта — конец
+       прошлой смены, открыта — форма уходит в скрытые): подставленное
+       становится новой точкой отсчёта «водитель ничего не менял»
+       (driver-local-shift-v1.js, resetOpeningForm / clearOpeningBusy). */
+    openShiftForm.__driverShiftOpeningRebase = function () {
+        initialReadings = openReadings.map(function (input) {
+            return input.value;
+        });
+        syncOpenShiftFormState();
+    };
     openShiftForm.addEventListener("reset", function () {
         openShiftForm.dataset.driverShiftOpeningPending = "false";
         openShiftButton.classList.remove("is-pending");

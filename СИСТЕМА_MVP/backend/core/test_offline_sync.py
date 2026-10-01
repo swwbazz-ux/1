@@ -423,6 +423,48 @@ class OfflineEventSyncTests(TestCase):
             client_action_id=manual['event_id'],
         ).exists())
 
+    def test_driver_manual_loads_over_an_excavator_trip_the_phone_never_saw_are_accepted(self):
+        # Пересменка без сети (стенд координатора, 30.09.2026): на сервере висел
+        # рейс, погруженный машинистом раньше, а водитель новой смены без связи
+        # сделал две ручные погрузки. Обе отклонялись open_trip_changed. Раз
+        # самосвал грузится снова, прежний рейс уже не везётся: он снимается с
+        # контроля, погрузки принимаются.
+        self._open_shift_context_earlier(timedelta(minutes=30))
+        loaded_at = timezone.now() - timedelta(minutes=20)
+        excavator_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            status=TripStatus.LOADED_WAITING_UNLOAD,
+            loaded_at=loaded_at,
+            load_time_source='excavator_device',
+        )
+        TripClientAction.objects.create(
+            action_type='truck_loaded', client_action_id='excavator-old-shift-load',
+            trip=excavator_trip, actor=self.operator,
+        )
+        first = self.driver_manual_event('handover-manual-1', 1, occurred_at=loaded_at + timedelta(minutes=5))
+        second = self.driver_manual_event('handover-manual-2', 2, occurred_at=loaded_at + timedelta(minutes=12))
+        second['depends_on'] = [first['event_id']]
+        results = self.sync(
+            [first, second],
+            client=self.driver_client(),
+            role_code='driver',
+            device_id='driver-handover-device',
+        ).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        excavator_trip.refresh_from_db()
+        self.assertEqual(excavator_trip.status, TripStatus.UNCONTROLLED)
+        self.assertEqual(excavator_trip.operationally_closed_at, loaded_at + timedelta(minutes=5))
+        first_trip = Trip.objects.get(pk=results[0]['server_ids']['trip_id'])
+        second_trip = Trip.objects.get(pk=results[1]['server_ids']['trip_id'])
+        self.assertNotEqual(first_trip.id, excavator_trip.id)
+        self.assertEqual(first_trip.status, TripStatus.COMPLETED)
+        self.assertEqual(second_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+
     def test_excavator_first_merge_requires_same_assignment_identity(self):
         automatic = self.load_event('excavator-assignment-a', 1)
         automatic_at = timezone.datetime.fromisoformat(automatic['occurred_at'])
@@ -459,12 +501,18 @@ class OfflineEventSyncTests(TestCase):
             device_id='driver-assignment-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'open_trip_changed')
-        self.assertEqual(Trip.objects.count(), 1)
-        self.assertFalse(TripClientAction.objects.filter(
+        # Слияния нет (другое назначение), но и отказа больше нет (телефон —
+        # истина, 30.09.2026): рейс машиниста снимается с контроля, погрузка
+        # водителя — отдельный новый рейс.
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.count(), 2)
+        excavator_trip = Trip.objects.get(pk=automatic_result['server_ids']['trip_id'])
+        self.assertEqual(excavator_trip.status, TripStatus.UNCONTROLLED)
+        self.assertNotEqual(result['server_ids']['trip_id'], excavator_trip.id)
+        self.assertTrue(TripClientAction.objects.filter(
             action_type='driver_manual_loaded',
             client_action_id=manual['event_id'],
+            trip_id=result['server_ids']['trip_id'],
         ).exists())
 
     def test_late_excavator_load_inside_own_trip_window_is_a_no_op(self):

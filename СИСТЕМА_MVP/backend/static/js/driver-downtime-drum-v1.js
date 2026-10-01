@@ -716,7 +716,8 @@
     function quickMin() { var d = drum(); return Math.max(1, Number(d && d.dataset.driverQuickMin) || 3); }
     function quickStorageKey() { var shell = q("[data-driver-shell]"); return "driver-quick-reasons:" + (shell ? shell.dataset.driverAccessId : "x"); }
     function readLocalQuick() { try { var raw = root.localStorage.getItem(quickStorageKey()); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
-    function writeLocalQuick(ids, updatedAt) { try { root.localStorage.setItem(quickStorageKey(), JSON.stringify({ ids: ids, updated_at: updatedAt })); } catch (e) {} }
+    // unsent: набор изменён на телефоне и ещё не принят сервером — досылается при возврате сети.
+    function writeLocalQuick(ids, updatedAt, unsent) { try { root.localStorage.setItem(quickStorageKey(), JSON.stringify({ ids: ids, updated_at: updatedAt, unsent: !!unsent })); } catch (e) {} }
     function reasonOrder() { return allCards().map(function (c) { return String(c.dataset.driverDrumReasonId); }); }
     function currentQuickIds() { return allCards().filter(function (c) { return c.dataset.driverDrumQuick === "1"; }).map(function (c) { return String(c.dataset.driverDrumReasonId); }); }
 
@@ -794,9 +795,19 @@
         var stamp = new Date().toISOString();
         haptic(22); click(0.8);
         applyQuick(ids, true);
-        writeLocalQuick(ids, stamp);
+        writeLocalQuick(ids, stamp, true);
         saveQuick(ids, stamp);
     }, true);
+
+    /* Набор, изменённый без сети, раньше уходил только со следующей загрузкой
+       страницы. Связь вернулась — досылаем сразу (матрица без сети C2). */
+    function resendUnsentQuick() {
+        var local = readLocalQuick();
+        if (local && local.unsent && Array.isArray(local.ids) && local.updated_at) {
+            saveQuick(local.ids.map(String), local.updated_at);
+        }
+    }
+    root.addEventListener("online", resendUnsentQuick);
 
     function reconcileQuick() {
         var d = drum();
@@ -806,6 +817,7 @@
         if (local && Array.isArray(local.ids) && local.updated_at && (!serverStamp || local.updated_at > serverStamp)) {
             // В телефоне набор новее (меняли без сети) — применяем его и досылаем на сервер.
             applyQuick(local.ids.map(String), true);
+            writeLocalQuick(local.ids.map(String), local.updated_at, true);
             saveQuick(local.ids.map(String), local.updated_at);
         } else {
             writeLocalQuick(currentQuickIds(), serverStamp);

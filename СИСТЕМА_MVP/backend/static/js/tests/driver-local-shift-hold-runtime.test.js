@@ -55,7 +55,38 @@ class ClassList {
     contains(name) { return this.values.has(name); }
 }
 
-function setup() {
+function closeFormFixture(getShell) {
+    const inputs = ["end_fuel", "end_mileage", "end_engine_hours"].map((name) => ({
+        name,
+        value: "",
+        tagName: "INPUT",
+        addEventListener() {},
+        checkValidity() { return this.value.trim() !== ""; },
+    }));
+    const label = {textContent: "Закрыть смену"};
+    const button = {
+        disabled: false,
+        classList: new ClassList(),
+        querySelector(selector) { return selector === "[data-mobile-shift-label]" ? label : null; },
+    };
+    const shiftInput = {value: ""};
+    const form = {
+        dataset: {driverLocalShiftForm: "close"},
+        hidden: true,
+        classList: new ClassList(),
+        querySelector(selector) {
+            if (selector === "[data-driver-shift-close-button]") return button;
+            if (selector === 'input[name="shift_id"]') return shiftInput;
+            return inputs.find((input) => selector === `[name="${input.name}"]`) || null;
+        },
+        querySelectorAll() { return []; },
+        closest(selector) { return selector === "[data-driver-shell]" ? getShell() : null; },
+        contains(node) { return inputs.includes(node); },
+    };
+    return {form, inputs, button};
+}
+
+function setup(options = {}) {
     const inputs = ["start_fuel", "start_mileage", "start_engine_hours"].map((name) => {
         const listeners = {};
         return {
@@ -80,6 +111,8 @@ function setup() {
     };
     const submitListeners = [];
     let shell;
+    // Обе формы смены на одной странице — как в шаблоне: вторая скрыта.
+    const close = options.withCloseForm ? closeFormFixture(() => shell) : null;
     const form = {
         dataset: {driverLocalShiftForm: "open"},
         hidden: false,
@@ -109,6 +142,8 @@ function setup() {
         querySelector(selector) {
             if (selector === ".driver-shift-opening-form") return form;
             if (selector === '[data-driver-local-shift-form="open"]') return form;
+            if (close && selector === '[data-driver-local-shift-form="close"]') return close.form;
+            if (close && selector === "[data-driver-shift-close-form]") return close.form;
             if (selector === "[data-driver-shift-open-button]") return button;
             if (selector.includes(".is-pending") && button.classList.contains("is-pending")) return button;
             return null;
@@ -136,6 +171,7 @@ function setup() {
             removeItem: (key) => storage.delete(key),
         },
         driverOfflineOutbox: {
+            pending() { return Promise.resolve([]); },
             enqueue(spec) {
                 queued.push(spec);
                 return Promise.resolve(Object.assign({occurred_at: "2026-09-30T08:00:00.000Z"}, spec));
@@ -170,8 +206,9 @@ function setup() {
     });
     context.bindDriverShiftOpeningForm(shell);
     return {
-        form, button, label, inputs, shell, queued, context,
+        form, button, label, inputs, shell, queued, context, close,
         completeHold: () => holdOptions.onComplete(),
+        closeShift: () => windowObject.DriverLocalShift.close(close.form),
     };
 }
 
@@ -202,4 +239,63 @@ test("a real hold-and-open leaves no busy marks on the opening form, so server r
     assert.equal(run.label.textContent, "Начать смену");
     assert.equal(run.context.driverIsTypingIntoForm(run.shell), false);
     assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), false);
+});
+
+/* Бой v372, Infinix (30.09.2026): цикл без сети «открыть → рейс → закрыть →
+   открыть новую → сеть» — очередь ушла, а экран снова каждую секунду
+   откладывал обновление с busy=opening_form. На стенде не повторялось: там
+   показания вводили до удержания. На телефоне клавиатура Android после
+   удержания присылает поздний input уже в скрытую форму открытия, и сверка
+   со старыми серверными показаниями ставила «в наборе» навсегда. Полный цикл
+   на одной странице, обе формы смены — как в шаблоне. */
+test("open → close → open on one page: a late keyboard input into the hidden opening form never holds the screen", async () => {
+    const run = setup({withCloseForm: true});
+    const type = (values) => run.inputs.forEach((input, index) => {
+        input.value = values[index];
+        input.dispatch("input");
+    });
+
+    type(["410", "12000", "3000"]);
+    run.completeHold();
+    await run.form.lastOpen;
+    assert.equal(run.form.hidden, true);
+    assert.equal(run.close.form.hidden, false);
+    // Поздний input клавиатуры в уже скрытую форму открытия.
+    run.inputs[0].value = "411";
+    run.inputs[0].dispatch("input");
+    assert.equal(run.form.dataset.driverShiftOpeningDirty, "false");
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), false);
+
+    run.close.inputs.forEach((input, index) => { input.value = ["380", "12090", "3008"][index]; });
+    await run.closeShift();
+    assert.equal(run.form.hidden, false);
+    assert.equal(run.close.form.hidden, true);
+    assert.deepEqual(run.inputs.map((input) => input.value), ["380", "12090", "3008"]);
+    // Показания подставил телефон, водитель их не менял: форма не «в наборе».
+    run.inputs[1].dispatch("input");
+    assert.equal(run.form.dataset.driverShiftOpeningDirty, "false");
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), false);
+
+    run.completeHold();
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), true);
+    await run.form.lastOpen;
+    assert.equal(run.queued.map((event) => event.event_type).join(","), "driver.shift.opened,driver.shift.closed,driver.shift.opened");
+    assert.equal(run.form.hidden, true);
+    run.inputs[2].value = "3009";
+    run.inputs[2].dispatch("input");
+    assert.equal(run.form.dataset.driverShiftOpeningDirty, "false");
+    assert.equal(run.form.dataset.driverShiftOpeningPending, "false");
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), false);
+    assert.equal(run.context.driverIsTypingIntoForm(run.shell), false);
+});
+
+test("a hidden opening form still carrying stale busy marks does not hold the screen", () => {
+    const run = setup({withCloseForm: true});
+    run.form.hidden = true;
+    run.form.dataset.driverShiftOpeningDirty = "true";
+    run.form.dataset.driverShiftOpeningPending = "true";
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), false);
+    assert.equal(run.context.driverIsTypingIntoForm(run.shell), false);
+    run.form.hidden = false;
+    assert.equal(run.context.isDriverOperationalRefreshUnsafe(run.shell), true);
 });
