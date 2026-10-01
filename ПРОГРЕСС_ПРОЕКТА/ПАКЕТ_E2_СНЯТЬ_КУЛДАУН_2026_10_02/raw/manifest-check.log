@@ -1,0 +1,10 @@
+ENTRIES=131
+DUPLICATES=0
+1	СИСТЕМА_MVP/backend/config/settings.py
+1	СИСТЕМА_MVP/backend/core/offline_sync.py
+1	СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+1	СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+1	СИСТЕМА_MVP/backend/trips/qa_simulator.py
+1	СИСТЕМА_MVP/backend/trips/views.py
+1	СИСТЕМА_MVP/backend/users/role_apps.py
+MIGRATIONS=0

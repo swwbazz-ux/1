@@ -1,0 +1,53 @@
+﻿✔ durable event survives a failed send and a new outbox instance (20.8351ms)
+✔ a client shell update and offline reopen preserve a nonempty queue (0.3822ms)
+✔ missing legacy sequence cannot move a restarted IndexedDB queue backwards (3.6461ms)
+✔ same event id is idempotent only for an identical immutable wire event (2.2766ms)
+✔ sequential loads retain order and dependency in one batch (1.0577ms)
+✔ offline downtime start and close share the exact local reference before sync (1.1544ms)
+✔ a quick close after accepted start uses the confirmed server downtime id (1.0611ms)
+✔ partial acknowledgement removes only exactly confirmed events (0.6562ms)
+✔ accepted load without server trip id remains queued (0.5117ms)
+✔ accepted free-bucket load without server trip id remains queued (0.4354ms)
+✔ confirmed free-bucket acceptance survives restart with identity and server mapping (0.8421ms)
+✔ IndexedDB confirmation writes receipt and removes pending event in one restart-safe state (1.7144ms)
+✔ conflict and authorization outcomes remain for review and are not retried (0.6504ms)
+✔ a pending event depending on a terminal conflict becomes attention instead of hanging (0.8885ms)
+✔ restart retries a legacy device clock conflict and its dependency chain (1.42ms)
+✔ restart retries a legacy post-unload cooldown refusal with the immutable event (1.2196ms)
+✔ restart does not retry an unrelated terminal conflict (0.6769ms)
+✔ concurrent flush calls share one network request (9.0045ms)
+✔ failed durable write rejects the action before UI success (0.3608ms)
+✔ an unsent action can be discarded only while it has no dependants (0.295ms)
+✔ flush drains a queue in bounded batches (0.7244ms)
+✔ retry backoff after repeated failures on a live connection never exceeds ten seconds (1.17ms)
+✔ a backoff on an earlier event is not bypassed by later events (0.5727ms)
+✔ offline restart retains auth review until a fresh authenticated page resumes it (1.0873ms)
+✔ confirmation callback observes the already updated queue count (0.2988ms)
+✔ an event that left at once is marked so the server can use its own receipt (0.1904ms)
+✔ an event that waited in the queue or survived a reload is not marked live (0.3714ms)
+✔ bucket entry stays beside the existing hourly report ring (1.479ms)
+✔ selector modal is external, keypad driven and Android Back aware (0.4812ms)
+✔ catalog and accepted cards survive offline shell lifecycle (0.4498ms)
+✔ accept cancel and load use the durable field outbox (0.4661ms)
+✔ cancel and failed load do not restore an actionable stale card (0.3079ms)
+✔ a rejected repeat acceptance is removed instead of becoming a dead card (0.1914ms)
+✔ dispatcher removes the used marker at its server deadline without polling (0.7198ms)
+✔ one successful free-bucket swipe removes the upper card and keeps a separate five-minute badge (0.3317ms)
+✔ all free bucket assets share the current shell marker (0.1573ms)
+✔ temporary card adds semantics without replacing production status (0.4224ms)
+✔ accept and cancel invalidate an older operational fragment first (0.234ms)
+✔ an upward swipe cancels only an unused free bucket card through the durable outbox (0.3982ms)
+✔ Excavator FCM token is registered once for the authenticated shell (7.0116ms)
+✔ Excavator token rotation is registered without duplicate listeners (2.1753ms)
+✔ ordinary browser skips native registration and no token is persisted or logged (1.808ms)
+✔ Excavator haptics prefer the native media bridge and preserve gesture timing (1.5163ms)
+✔ Excavator shell wires native capabilities and routes existing feedback through them (0.6126ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 165.9845
+EXIT_CODE=0

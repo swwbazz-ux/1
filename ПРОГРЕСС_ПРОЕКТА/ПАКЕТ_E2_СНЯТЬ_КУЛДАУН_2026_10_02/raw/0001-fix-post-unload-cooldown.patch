@@ -1,0 +1,867 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Fri, 2 Oct 2026 09:10:31 +1000
+Subject: [PATCH] =?UTF-8?q?fix:=20=D1=81=D0=BD=D1=8F=D1=82=D1=8C=20post-un?=
+ =?UTF-8?q?load=20cooldown=20=D0=B4=D0=BB=D1=8F=20=D1=81=D0=B0=D0=BC=D0=BE?=
+ =?UTF-8?q?=D1=81=D0=B2=D0=B0=D0=BB=D0=BE=D0=B2?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+
+diff --git a/.github/deploy/production-files.txt b/.github/deploy/production-files.txt
+index ebe32edc..79de14ec 100644
+--- a/.github/deploy/production-files.txt
++++ b/.github/deploy/production-files.txt
+@@ -90,6 +90,7 @@
+ СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py
+ СИСТЕМА_MVP/backend/trips/dispatcher_topology_commands.py
+ СИСТЕМА_MVP/backend/trips/urls.py
++СИСТЕМА_MVP/backend/trips/qa_simulator.py
+ СИСТЕМА_MVP/backend/trips/views.py
+ СИСТЕМА_MVP/backend/users/active_role.py
+ СИСТЕМА_MVP/backend/users/application_connection.py
+diff --git a/СИСТЕМА_MVP/backend/config/settings.py b/СИСТЕМА_MVP/backend/config/settings.py
+index 942c9fdb..46c9a654 100644
+--- a/СИСТЕМА_MVP/backend/config/settings.py
++++ b/СИСТЕМА_MVP/backend/config/settings.py
+@@ -300,10 +300,6 @@ EXCAVATOR_QA_TRANSIT_SECONDS = _env_positive_int('EXCAVATOR_QA_TRANSIT_SECONDS',
+ EXCAVATOR_QA_TRUCK_COUNT = _env_positive_int('EXCAVATOR_QA_TRUCK_COUNT', 4)
+ EXCAVATOR_QA_PLAN_TRIPS = _env_positive_int('EXCAVATOR_QA_PLAN_TRIPS', 20)
+ DRIVER_QA_LOADING_SECONDS = _env_positive_int('DRIVER_QA_LOADING_SECONDS', 8)
+-TRUCK_POST_UNLOAD_COOLDOWN_SECONDS = _env_positive_int(
+-    'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS',
+-    600,
+-)
+ 
+ PORTAL_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
+ ROTATIONS_PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media' / 'rotations'
+diff --git a/СИСТЕМА_MVP/backend/core/offline_sync.py b/СИСТЕМА_MVP/backend/core/offline_sync.py
+index 686d5edd..90081bf7 100644
+--- a/СИСТЕМА_MVP/backend/core/offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/offline_sync.py
+@@ -3442,14 +3442,23 @@ def process_one_offline_event(access, normalized):
+                         )
+                     )
+                 )
+-                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_clock_conflict:
++                recoverable_removed_refusal = bool(
++                    existing.status == OfflineFieldEventStatus.CONFLICT
++                    and normalized['role_code'] == 'excavator_operator'
++                    and existing.event_type == 'excavator.trip.loaded'
++                    and existing.error_code == 'post_unload_cooldown'
++                )
++                recoverable_existing_conflict = bool(
++                    recoverable_clock_conflict or recoverable_removed_refusal
++                )
++                if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_existing_conflict:
+                     return _stored_result(existing, deduplicated=True)
+-                if recoverable_clock_conflict:
++                if recoverable_existing_conflict:
+                     # Reprocess the same immutable event at its original server
+                     # receipt time. The id, sequence, dependencies and raw
+                     # device timestamp stay unchanged, so no duplicate action
+                     # can be created and the dependent queue keeps its order.
+-                    clock_adjusted = (
++                    clock_adjusted = False if recoverable_removed_refusal else (
+                         device_clock_was_invalid
+                         if normalized['role_code'] == 'driver'
+                         else True
+diff --git a/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py b/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
+index 380b55c4..7484806a 100644
+--- a/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
++++ b/СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py
+@@ -24,7 +24,7 @@ from references.models import DumpPoint, Equipment
+ from shifts.models import EmployeeShift
+ from trips import tests as trip_fixtures
+ from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripStatus
+-from users.models import AdminConflict, EmployeeAccess
++from users.models import ActiveApplicationSession, AdminConflict, EmployeeAccess
+ 
+ 
+ @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
+@@ -2039,6 +2039,48 @@ class FreeBucketServerIntegrationTests(TestCase):
+         self.assertEqual(trip.completed_at, occurred_at)
+         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+ 
++        ActiveApplicationSession.objects.create(
++            session_key='e2-active-driver-after-free-bucket',
++            access=self.driver_access,
++            role_code='driver',
++            app_code='driver',
++            path='/driver/',
++            last_seen_at=timezone.now(),
++            foreground_seen_at=timezone.now(),
++        )
++
++        screen = self.client.get(reverse('excavator_work'))
++        card = next(
++            item for item in screen.context['truck_cards']
++            if item['assignment'].truck_id == self.truck.id
++        )
++        self.assertEqual(card['load_block_reason_code'], '')
++        self.assertEqual(card['equipment_state_code'], 'assigned')
++        self.assertTrue(card['can_drag'])
++        self.assertTrue(card['can_load'])
++
++        immediate_reload = self.client.post(
++            reverse('excavator_truck_loaded'),
++            data=json.dumps({
++                'client_action_id': 'ordinary-load-after-free-bucket-unload',
++                'truck_id': self.truck.id,
++                'excavator_id': self.excavator.id,
++                'dump_point_id': self.dump_point.id,
++                'rock_type': self.rock.id,
++                'loading_horizon': '125',
++                'loading_block': '4',
++            }),
++            content_type='application/json',
++        )
++        self.assertEqual(immediate_reload.status_code, 200, immediate_reload.content)
++        next_trip = Trip.objects.get(pk=immediate_reload.json()['trip_id'])
++        self.assertNotEqual(next_trip.pk, trip.pk)
++        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
++        trip.refresh_from_db()
++        acceptance.refresh_from_db()
++        self.assertEqual(trip.status, TripStatus.COMPLETED)
++        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
++
+     def test_accept_then_cancel_releases_without_creating_trip(self):
+         accepted = self.accept_event()
+         cancelled = self.event(
+diff --git a/СИСТЕМА_MVP/backend/core/test_offline_sync.py b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+index 7a0b3455..5e8e19d5 100644
+--- a/СИСТЕМА_MVP/backend/core/test_offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+@@ -2,7 +2,7 @@ import json
+ from datetime import timedelta
+ from concurrent.futures import ThreadPoolExecutor
+ 
+-from django.db import close_old_connections, connection
++from django.db import close_old_connections, connection, transaction
+ from django.core.management.color import no_style
+ from django.apps import apps
+ from django.test import Client, TestCase, TransactionTestCase, override_settings
+@@ -368,6 +368,87 @@ class OfflineEventSyncTests(TestCase):
+             {'driver_manual_loaded', 'truck_loaded'},
+         )
+ 
++    @override_settings(TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600)
++    def test_offline_excavator_load_after_completed_trip_is_accepted_at_all_old_boundaries(self):
++        for elapsed_seconds in (0, 1, 599, 600):
++            with self.subTest(elapsed_seconds=elapsed_seconds):
++                savepoint = transaction.savepoint()
++                try:
++                    occurred_at = timezone.now()
++                    previous_trip = Trip.objects.create(
++                        excavator=self.excavator,
++                        truck=self.truck,
++                        excavator_operator=self.operator,
++                        driver=self.driver,
++                        unloading_shift=self.truck_shift,
++                        rock_type=self.rock,
++                        dump_point=self.dump_point,
++                        assigned_dump_point=self.dump_point,
++                        actual_dump_point=self.dump_point,
++                        status=TripStatus.COMPLETED,
++                        loaded_at=occurred_at - timedelta(minutes=5),
++                        completed_at=occurred_at - timedelta(seconds=elapsed_seconds),
++                    )
++                    event = self.load_event(
++                        event_id=f'e2-offline-{elapsed_seconds}',
++                        occurred_at=occurred_at,
++                    )
++
++                    result = self.sync([event]).json()['results'][0]
++
++                    self.assertEqual(result['status'], 'accepted', result)
++                    next_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
++                    self.assertNotEqual(next_trip.pk, previous_trip.pk)
++                    self.assertEqual(next_trip.loaded_at, occurred_at)
++                    previous_trip.refresh_from_db()
++                    self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
++                    repeated = self.sync([event]).json()['results'][0]
++                    self.assertEqual(repeated['status'], 'deduplicated', repeated)
++                    self.assertEqual(Trip.objects.count(), 2)
++                finally:
++                    transaction.savepoint_rollback(savepoint)
++
++    def test_legacy_post_unload_cooldown_conflict_replays_original_event_once(self):
++        occurred_at = timezone.now()
++        previous_trip = Trip.objects.create(
++            excavator=self.excavator,
++            truck=self.truck,
++            excavator_operator=self.operator,
++            driver=self.driver,
++            unloading_shift=self.truck_shift,
++            rock_type=self.rock,
++            dump_point=self.dump_point,
++            assigned_dump_point=self.dump_point,
++            actual_dump_point=self.dump_point,
++            status=TripStatus.COMPLETED,
++            loaded_at=occurred_at - timedelta(minutes=5),
++            completed_at=occurred_at,
++        )
++        event = self.load_event(
++            event_id='legacy-post-unload-cooldown',
++            occurred_at=occurred_at + timedelta(seconds=1),
++        )
++        receipt = self._store_legacy_conflicted_event(
++            event,
++            received_at=occurred_at + timedelta(seconds=2),
++            error_code='post_unload_cooldown',
++            error_message='Возвращается к экскаватору · 10 мин.',
++        )
++
++        result = self.sync([event]).json()['results'][0]
++
++        self.assertEqual(result['status'], 'accepted', result)
++        receipt.refresh_from_db()
++        self.assertEqual(receipt.status, 'accepted')
++        self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
++        next_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
++        self.assertEqual(next_trip.loaded_at, timezone.datetime.fromisoformat(event['occurred_at']))
++        previous_trip.refresh_from_db()
++        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
++        repeated = self.sync([event]).json()['results'][0]
++        self.assertEqual(repeated['status'], 'deduplicated', repeated)
++        self.assertEqual(Trip.objects.count(), 2)
++
+     def test_late_driver_manual_load_links_completed_excavator_trip(self):
+         occurred_at = timezone.now() - timedelta(minutes=5)
+         type(self.shift).objects.filter(
+diff --git a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+index 9dbe739b..34c91379 100644
+--- a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
++++ b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+@@ -94,6 +94,12 @@
+             || /предыдущее (событие|связанное действие).*требует сверки/i.test(String(event.last_error || ""));
+     }
+ 
++    function recoverableRemovedRefusal(event) {
++        if (!event || event.sync_state !== "conflict") return false;
++        return event.event_type === "excavator.trip.loaded"
++            && event.last_error_code === "post_unload_cooldown";
++    }
++
+     function createLocalStorageAdapter(storage, queueKey) {
+         var key = LEGACY_PREFIX + queueKey;
+         var sequenceKey = key + ":sequence";
+@@ -610,7 +616,9 @@
+             return list().then(function (events) {
+                 var recoverable = Object.create(null);
+                 events.forEach(function (event) {
+-                    if (recoverableDeviceClockConflict(event)) recoverable[event.event_id] = true;
++                    if (recoverableDeviceClockConflict(event) || recoverableRemovedRefusal(event)) {
++                        recoverable[event.event_id] = true;
++                    }
+                 });
+                 var changed = true;
+                 while (changed) {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+index 684b8626..77eff5b9 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+@@ -520,6 +520,58 @@ test('restart retries a legacy device clock conflict and its dependency chain',
+     assert.deepEqual(await afterUpdate.pending(), []);
+ });
+ 
++test('restart retries a legacy post-unload cooldown refusal with the immutable event', async () => {
++    const local = storage();
++    const original = loadEvent('legacy-post-unload-cooldown', 17);
++    original.occurred_at = '2026-10-02T01:02:03.000Z';
++    const beforeUpdate = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2',
++        send: async events => ({
++            ok: true,
++            results: events.map(event => ({
++                event_id: event.event_id,
++                status: 'conflict',
++                code: 'post_unload_cooldown',
++                message: 'Возвращается к экскаватору · 10 мин.',
++            })),
++        }),
++    });
++    await beforeUpdate.queue(original);
++    await beforeUpdate.flush();
++    assert.deepEqual((await beforeUpdate.pending()).map(event => [event.event_id, event.sync_state]), [
++        [original.event_id, 'conflict'],
++    ]);
++
++    let replayed = [];
++    const afterUpdate = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2',
++        send: async events => {
++            replayed = events.map(event => ({
++                event_id: event.event_id,
++                sequence: event.sequence,
++                occurred_at: event.occurred_at,
++                payload: event.payload,
++            }));
++            return {ok: true, results: events.map(accepted)};
++        },
++    });
++
++    const restored = await afterUpdate.ready();
++    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
++        [original.event_id, 'pending'],
++    ]);
++    await afterUpdate.flush();
++    assert.deepEqual(replayed, [{
++        event_id: original.event_id,
++        sequence: original.sequence,
++        occurred_at: original.occurred_at,
++        payload: original.payload,
++    }]);
++    assert.deepEqual(await afterUpdate.pending(), []);
++});
++
+ test('restart does not retry an unrelated terminal conflict', async () => {
+     const local = storage();
+     const before = createOutbox({
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+index a7836729..5b05a054 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js
+@@ -121,8 +121,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
+ });
+ 
+ test('all free bucket assets share the current shell marker', () => {
+-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v262/);
+-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v262/);
++    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v264/);
++    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v264/);
+ });
+ 
+ test('temporary card adds semantics without replacing production status', () => {
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+index 603328c1..bcf743af 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js
+@@ -95,8 +95,8 @@ test("Excavator haptics prefer the native media bridge and preserve gesture timi
+ });
+ 
+ test("Excavator shell wires native capabilities and routes existing feedback through them", () => {
+-    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v262/);
+-    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v262/);
++    assert.match(TEMPLATE, /excavator-haptics-v1\.js[^\n]+excavator-mobile-shell-v264/);
++    assert.match(TEMPLATE, /excavator-native-push-v1\.js[^\n]+excavator-mobile-shell-v264/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(\[180, 90, 180\], 255\)/);
+     assert.match(TEMPLATE, /window\.excavatorHaptic\(70, 220\)/);
+     assert.doesNotMatch(TEMPLATE, /navigator\.vibrate/);
+diff --git a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+index 68c3fee4..f51e5149 100644
+--- a/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
++++ b/СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+@@ -6,28 +6,28 @@
+ {% block viewport_extra %}, viewport-fit=cover{% endblock %}
+ {% block extra_head %}
+ <link rel="manifest" href="{% url 'excavator_manifest' %}">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v262">
+-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v262">
+-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v262" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v264">
++<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v264">
++<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v264" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
++<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+ <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
+ <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
+ <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
+-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v262">
+-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v262" defer></script>
+-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v262"></script>
+-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v262"></script>
++<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v264">
++<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
++<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v264"></script>
++<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v264"></script>
+ <meta name="theme-color" content="#D58B14">
+ <meta name="apple-mobile-web-app-capable" content="yes">
+ <meta name="apple-mobile-web-app-title" content="Погрузка">
+@@ -397,7 +397,7 @@
+ 
+ <script>
+ (function () {
+-var excavatorShellVersion = "excavator-mobile-shell-v262";
++var excavatorShellVersion = "excavator-mobile-shell-v264";
+ var staticPrefix = "{{ static_prefix|escapejs }}";
+ var viewportSyncFrame = null;
+ var excavatorStableViewportHeight = 0;
+diff --git a/СИСТЕМА_MVP/backend/trips/qa_simulator.py b/СИСТЕМА_MVP/backend/trips/qa_simulator.py
+index cbbb9112..735bb277 100644
+--- a/СИСТЕМА_MVP/backend/trips/qa_simulator.py
++++ b/СИСТЕМА_MVP/backend/trips/qa_simulator.py
+@@ -665,7 +665,6 @@ def _load_human_driver_truck(
+         excavator_truck_load_block,
+         notify_driver_truck_loaded,
+         reconcile_excavator_waiting_for_trucks,
+-        truck_post_unload_cooldown,
+     )
+ 
+     trip = None
+@@ -721,15 +720,10 @@ def _load_human_driver_truck(
+         if active_trip:
+             return active_trip, 'loaded_waiting_unload'
+ 
+-        cooldown = truck_post_unload_cooldown(
+-            scenario.human_driver_truck,
+-            now=now,
+-        )
+         load_block = excavator_truck_load_block(
+             locked_assignment,
+             current_excavator=scenario.driver_bot_excavator,
+             active_trip=False,
+-            post_unload_cooldown=cooldown or False,
+             has_open_truck_shift=True,
+             has_driver_assignment=True,
+         )
+diff --git a/СИСТЕМА_MVP/backend/trips/test_excavator_qa_simulator.py b/СИСТЕМА_MVP/backend/trips/test_excavator_qa_simulator.py
+index 650c37f7..a9bbb42d 100644
+--- a/СИСТЕМА_MVP/backend/trips/test_excavator_qa_simulator.py
++++ b/СИСТЕМА_MVP/backend/trips/test_excavator_qa_simulator.py
+@@ -225,6 +225,13 @@ class ExcavatorQASimulatorTests(TestCase):
+                 driver=scenario.human_driver,
+                 unloading_shift=driver_shift,
+             )
++            reloaded_tick = run_excavator_qa_tick(
++                now=now + timedelta(seconds=7),
++            )
++            next_trip = Trip.objects.exclude(pk=trip.pk).get(
++                truck=scenario.human_driver_truck,
++                excavator=scenario.driver_bot_excavator,
++            )
+ 
+         self.assertTrue(created)
+         self.assertEqual(driver_shift.plan_group.code, 'rustore-qa-driver')
+@@ -247,6 +254,10 @@ class ExcavatorQASimulatorTests(TestCase):
+         self.assertEqual(trip.status, TripStatus.COMPLETED)
+         self.assertEqual(trip.driver, scenario.human_driver)
+         self.assertEqual(trip.unloading_shift, driver_shift)
++        self.assertEqual(reloaded_tick['driver_state'], 'loaded_waiting_unload')
++        self.assertEqual(reloaded_tick['driver_loaded'], 1)
++        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
++        self.assertGreaterEqual(next_trip.loaded_at, trip.completed_at)
+ 
+     def test_prepared_driver_completes_the_real_http_workflow(self):
+         with self.qa_settings():
+diff --git a/СИСТЕМА_MVP/backend/trips/tests.py b/СИСТЕМА_MVP/backend/trips/tests.py
+index a9b772a9..ad6df797 100644
+--- a/СИСТЕМА_MVP/backend/trips/tests.py
++++ b/СИСТЕМА_MVP/backend/trips/tests.py
+@@ -6047,7 +6047,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+         self.assertEqual(waiting.employee, self.operator)
+         self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
+ 
+-    def test_trip_unloaded_keeps_excavator_waiting_during_return_cooldown(self):
++    def test_trip_unloaded_closes_excavator_waiting_when_truck_is_immediately_loadable(self):
+         load_response = self.post_truck_loaded(client_action_id='waiting-unload')
+         trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
+         waiting = DowntimeEvent.objects.get(
+@@ -6058,15 +6058,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+ 
+         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=self.truck_shift)
+ 
+-        waiting.refresh_from_db()
+-        self.assertIsNone(waiting.ended_at)
+-
+-        trip.refresh_from_db()
+-        trip.completed_at = timezone.now() - timedelta(minutes=11)
+-        trip.save(update_fields=['completed_at'])
+-        self.client.get(reverse('excavator_work'))
+         waiting.refresh_from_db()
+         self.assertIsNotNone(waiting.ended_at)
++        self.assertGreaterEqual(waiting.ended_at, trip.completed_at)
++        self.assertLess(waiting.ended_at - trip.completed_at, timedelta(seconds=1))
+ 
+     def test_truck_loaded_reuses_same_client_action_id(self):
+         first_response = self.post_truck_loaded(client_action_id='same-action')
+@@ -6230,7 +6225,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+         self.assertEqual(event.payload['assigned_dump_point_id'], self.dump_point.id)
+         self.assertEqual(event.payload['dump_point_name'], self.dump_point.name)
+ 
+-    def test_dispatcher_assigned_truck_load_unload_cycle_waits_ten_minutes_before_reuse(self):
++    def test_dispatcher_assigned_truck_load_unload_cycle_allows_immediate_reuse(self):
+         kkd = DumpPoint.objects.create(name='ККД')
+         assignment = HaulAssignment.objects.get(truck=self.truck, excavator=self.excavator)
+         start_response = self.client.get(reverse('excavator_work'))
+@@ -6275,24 +6270,115 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
+ 
+         finish_response = self.client.get(reverse('excavator_work'))
+         finish_cards_by_number = {card['number']: card for card in finish_response.context['truck_cards']}
+-        cooldown_card = finish_cards_by_number['21']
+-        self.assertEqual(cooldown_card['equipment_state_code'], 'waiting')
+-        self.assertEqual(cooldown_card['load_block_reason_code'], 'post_unload_cooldown')
+-        self.assertIn('Возвращается к экскаватору', cooldown_card['status_label'])
+-        self.assertFalse(cooldown_card['can_drag'])
+-        self.assertFalse(cooldown_card['can_load'])
+-
+-        blocked_reload = self.post_truck_loaded(client_action_id='cycle-too-early')
+-        self.assertEqual(blocked_reload.status_code, 409)
+-        self.assertEqual(blocked_reload.json()['load_block_reason_code'], 'post_unload_cooldown')
+-
+-        trip.completed_at = timezone.now() - timedelta(minutes=11)
+-        trip.save(update_fields=['completed_at'])
+-        returned_response = self.client.get(reverse('excavator_work'))
+-        returned_cards = {card['number']: card for card in returned_response.context['truck_cards']}
+-        self.assertEqual(returned_cards['21']['equipment_state_code'], 'assigned')
+-        self.assertTrue(returned_cards['21']['can_drag'])
+-        self.assertTrue(returned_cards['21']['can_load'])
++        returned_card = finish_cards_by_number['21']
++        self.assertEqual(returned_card['equipment_state_code'], 'assigned')
++        self.assertEqual(returned_card['load_block_reason_code'], '')
++        self.assertEqual(returned_card['status_label'], 'Назначена')
++        self.assertTrue(returned_card['can_drag'])
++        self.assertTrue(returned_card['can_load'])
++
++        immediate_reload = self.post_truck_loaded(client_action_id='cycle-immediate-reload')
++        self.assertEqual(immediate_reload.status_code, 200, immediate_reload.content)
++        next_trip = Trip.objects.get(pk=immediate_reload.json()['trip_id'])
++        self.assertNotEqual(next_trip.pk, trip.pk)
++        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
++        trip.refresh_from_db()
++        self.assertEqual(trip.status, TripStatus.COMPLETED)
++
++        lost_response_retry = self.post_truck_loaded(client_action_id='cycle-immediate-reload')
++        self.assertEqual(lost_response_retry.status_code, 200, lost_response_retry.content)
++        self.assertEqual(lost_response_retry.json()['trip_id'], next_trip.pk)
++        self.assertEqual(Trip.objects.count(), 2)
++
++    @override_settings(TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600)
++    def test_completed_trip_age_and_garage_number_never_restore_post_unload_cooldown(self):
++        """Old environment value and the former TEST-1 exception cannot revive E2."""
++        for garage_number in ('21', 'ТЕСТ-1'):
++            self.truck.garage_number = garage_number
++            self.truck.save(update_fields=['garage_number'])
++            for elapsed_seconds in (0, 1, 599, 600):
++                with self.subTest(garage_number=garage_number, elapsed_seconds=elapsed_seconds):
++                    savepoint = transaction.savepoint()
++                    try:
++                        completed_at = timezone.now() - timedelta(seconds=elapsed_seconds)
++                        previous_trip = Trip.objects.create(
++                            excavator=self.excavator,
++                            truck=self.truck,
++                            excavator_operator=self.operator,
++                            driver=self.driver,
++                            unloading_shift=self.truck_shift,
++                            rock_type=self.rock,
++                            dump_point=self.dump_point,
++                            assigned_dump_point=self.dump_point,
++                            actual_dump_point=self.dump_point,
++                            status=TripStatus.COMPLETED,
++                            loaded_at=completed_at - timedelta(minutes=5),
++                            completed_at=completed_at,
++                        )
++
++                        screen = self.client.get(reverse('excavator_work'))
++                        card = next(
++                            item for item in screen.context['truck_cards']
++                            if item['assignment'].truck_id == self.truck.id
++                        )
++                        self.assertEqual(card['load_block_reason_code'], '')
++                        self.assertEqual(card['equipment_state_code'], 'assigned')
++                        self.assertTrue(card['can_drag'])
++                        self.assertTrue(card['can_load'])
++
++                        loaded = self.post_truck_loaded(
++                            client_action_id=f'e2-{garage_number}-{elapsed_seconds}',
++                        )
++                        self.assertEqual(loaded.status_code, 200, loaded.content)
++                        next_trip = Trip.objects.get(pk=loaded.json()['trip_id'])
++                        self.assertNotEqual(next_trip.pk, previous_trip.pk)
++                        previous_trip.refresh_from_db()
++                        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
++                        self.assertEqual(previous_trip.completed_at, completed_at)
++                    finally:
++                        transaction.savepoint_rollback(savepoint)
++
++    @override_settings(
++        EXCAVATOR_MANUAL_LOADING_ENABLED=True,
++        TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600,
++    )
++    def test_passive_driver_manual_load_remains_available_immediately_after_unload(self):
++        completed_at = timezone.now()
++        previous_trip = Trip.objects.create(
++            excavator=self.excavator,
++            truck=self.truck,
++            excavator_operator=self.operator,
++            driver=self.driver,
++            unloading_shift=self.truck_shift,
++            rock_type=self.rock,
++            dump_point=self.dump_point,
++            assigned_dump_point=self.dump_point,
++            actual_dump_point=self.dump_point,
++            status=TripStatus.COMPLETED,
++            loaded_at=completed_at - timedelta(minutes=5),
++            completed_at=completed_at,
++        )
++
++        screen = self.client.get(reverse('excavator_work'))
++        card = next(
++            item for item in screen.context['truck_cards']
++            if item['assignment'].truck_id == self.truck.id
++        )
++        self.assertEqual(card['load_block_reason_code'], 'driver_offline')
++        self.assertTrue(card['manual_available'])
++        self.assertNotIn('Возвращается к экскаватору', card['status_label'])
++
++        loaded = self.post_truck_loaded(
++            client_action_id='e2-passive-manual-immediate',
++            manual_control=True,
++        )
++        self.assertEqual(loaded.status_code, 200, loaded.content)
++        next_trip = Trip.objects.get(pk=loaded.json()['trip_id'])
++        self.assertNotEqual(next_trip.pk, previous_trip.pk)
++        self.assertTrue(next_trip.driver_participation_recorded)
++        self.assertIsNone(next_trip.driver_control_shift_id)
++        previous_trip.refresh_from_db()
++        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
+ 
+     def test_waiting_for_unloading_uses_hold_and_closes_with_trip(self):
+         driver_client = self.client_class()
+diff --git a/СИСТЕМА_MVP/backend/trips/views.py b/СИСТЕМА_MVP/backend/trips/views.py
+index 94dfecf0..968e32d8 100644
+--- a/СИСТЕМА_MVP/backend/trips/views.py
++++ b/СИСТЕМА_MVP/backend/trips/views.py
+@@ -204,51 +204,11 @@ from .trip_creation import (
+ logger = logging.getLogger(__name__)
+ 
+ 
+-TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
+-    seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
+-)
+-TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS = frozenset({'ТЕСТ-1'})
+-
+-
+ def truck_waiting_loading_downtime(event):
+     reason = getattr(event, 'reason', None)
+     return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
+ 
+ 
+-def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
+-    if not truck:
+-        return None
+-    garage_number = str(getattr(truck, 'garage_number', '') or '').strip().upper()
+-    if garage_number in TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS:
+-        return None
+-    if completed_at is None:
+-        completed_at = (
+-            Trip.objects
+-            .filter(
+-                truck=truck,
+-                status=TripStatus.COMPLETED,
+-                completed_at__isnull=False,
+-            )
+-            .order_by('-completed_at')
+-            .values_list('completed_at', flat=True)
+-            .first()
+-        )
+-    if not completed_at:
+-        return None
+-    now = now or timezone.now()
+-    remaining_seconds = int(
+-        (completed_at + TRUCK_POST_UNLOAD_COOLDOWN - now).total_seconds()
+-    )
+-    if remaining_seconds <= 0:
+-        return None
+-    remaining_minutes = max(1, math.ceil(remaining_seconds / 60))
+-    return {
+-        'code': 'post_unload_cooldown',
+-        'label': f'Возвращается к экскаватору · {remaining_minutes} мин.',
+-        'remaining_seconds': remaining_seconds,
+-    }
+-
+-
+ DISPATCHER_PLAN_TOTAL_TONS = Decimal('420000')
+ DISPATCHER_PLAN_NOT_ASSIGNED = 'plan_not_assigned'
+ 
+@@ -626,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
+ const APP_CONTRACT_VERSION = "pwa-contract-v1";
+ const ROLE_CODE = "excavator_operator";
+ const CACHE_PREFIX = "excavator-mobile-shell-";
+-const CACHE_NAME = "excavator-mobile-shell-v262";
++const CACHE_NAME = "excavator-mobile-shell-v264";
+ const APP_SHELL_URL = "/excavator/work/";
+ const MANIFEST_URL = "/excavator.webmanifest";
+ const PRIVACY_POLICY_PATH = "/company/privacy/";
+@@ -640,26 +600,26 @@ const CORE_ASSETS = [
+   "/static/js/role-readonly.js",
+   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
+   "/static/css/excavator-manual-loading-v1.css?v=4",
+-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
++  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+   "/static/css/mobile-role-login-v1.css",
+-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
+-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
++  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
++  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
++  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
+   "/static/css/excavator-offline-v1.css?v=1",
+   "/static/css/native-app-update-v1.css",
+   "/static/favicon.ico",
+@@ -3643,7 +3603,6 @@ def excavator_truck_load_block(
+     current_excavator=None,
+     active_trip=None,
+     active_downtime=None,
+-    post_unload_cooldown=None,
+     has_open_truck_shift=None,
+     has_driver_assignment=None,
+     manual_control=False,
+@@ -3679,10 +3638,6 @@ def excavator_truck_load_block(
+         )
+     if active_downtime and not truck_waiting_loading_downtime(active_downtime):
+         return excavator_truck_load_block_payload('active_downtime')
+-    if post_unload_cooldown is None:
+-        post_unload_cooldown = truck_post_unload_cooldown(truck)
+-    if post_unload_cooldown and not manual_control and not replace_trip:
+-        return post_unload_cooldown
+     if has_open_truck_shift is None:
+         has_open_truck_shift = EmployeeShift.objects.filter(
+             equipment=truck,
+@@ -3705,7 +3660,6 @@ def excavator_truck_load_block_reason(
+     current_excavator=None,
+     active_trip=None,
+     active_downtime=None,
+-    post_unload_cooldown=None,
+     has_open_truck_shift=None,
+     has_driver_assignment=None,
+ ):
+@@ -3714,7 +3668,6 @@ def excavator_truck_load_block_reason(
+         current_excavator=current_excavator,
+         active_trip=active_trip,
+         active_downtime=active_downtime,
+-        post_unload_cooldown=post_unload_cooldown,
+         has_open_truck_shift=has_open_truck_shift,
+         has_driver_assignment=has_driver_assignment,
+     )
+@@ -5626,28 +5579,6 @@ def excavator_work_view(request):
+         )
+     active_truck_ids = {trip.truck_id for trip in blocking_trips}
+     active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
+-    post_unload_cooldown_by_truck_id = {}
+-    if assignment_truck_ids:
+-        cooldown_cutoff = timezone.now() - TRUCK_POST_UNLOAD_COOLDOWN
+-        for completed_trip in (
+-            Trip.objects
+-            .filter(
+-                truck_id__in=assignment_truck_ids,
+-                status=TripStatus.COMPLETED,
+-                completed_at__gt=cooldown_cutoff,
+-            )
+-            .select_related('truck')
+-            .only('truck_id', 'truck__garage_number', 'completed_at')
+-            .order_by('truck_id', '-completed_at')
+-        ):
+-            post_unload_cooldown_by_truck_id.setdefault(
+-                completed_trip.truck_id,
+-                truck_post_unload_cooldown(
+-                    completed_trip.truck,
+-                    completed_at=completed_trip.completed_at,
+-                ),
+-            )
+-
+     def equipment_number(equipment):
+         return str(getattr(equipment, 'garage_number', '') or equipment or '-')
+ 
+@@ -5720,7 +5651,6 @@ def excavator_work_view(request):
+             manual_control=manual_control,
+             active_trip=known_active_trip,
+             active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
+-            post_unload_cooldown=post_unload_cooldown_by_truck_id.get(assignment.truck_id) or False,
+             has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
+             has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
+         )
+@@ -5777,8 +5707,6 @@ def excavator_work_view(request):
+             return downtime_equipment_state_code(downtime)
+         if active_trip:
+             return 'loaded_waiting_unload'
+-        if post_unload_cooldown_by_truck_id.get(assignment.truck_id):
+-            return 'waiting'
+         if assignment.truck_id not in open_truck_shift_equipment_ids:
+             if assignment.truck_id in driver_assignment_truck_ids:
+                 return 'waiting_for_shift'
+@@ -5872,13 +5800,9 @@ def excavator_work_view(request):
+                 else active_truck_downtime.reason.button_label
+                 if active_truck_downtime
+                 else (
+-                    block_reason
+-                    if load_block_reason_code == 'post_unload_cooldown'
+-                    else (
+-                        'Завершить погрузку'
+-                        if getattr(assignment, 'is_handoff_completion', False)
+-                        else state_ui['label']
+-                    )
++                    'Завершить погрузку'
++                    if getattr(assignment, 'is_handoff_completion', False)
++                    else state_ui['label']
+                 )
+             ),
+             'target_label': target_label,
+diff --git a/СИСТЕМА_MVP/backend/users/role_apps.py b/СИСТЕМА_MVP/backend/users/role_apps.py
+index d69b3e1b..d482a53b 100644
+--- a/СИСТЕМА_MVP/backend/users/role_apps.py
++++ b/СИСТЕМА_MVP/backend/users/role_apps.py
+@@ -254,7 +254,7 @@ ROLE_APPS = (
+         icon_slug='excavator',
+         manifest_url='/excavator.webmanifest',
+         service_worker_url='/excavator-sw.js',
+-        shell_version='excavator-mobile-shell-v262',
++        shell_version='excavator-mobile-shell-v264',
+     ),
+     RoleApp(
+         role_code='mining_master',

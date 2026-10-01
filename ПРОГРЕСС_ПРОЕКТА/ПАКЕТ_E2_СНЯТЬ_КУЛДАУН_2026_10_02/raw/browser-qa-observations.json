@@ -1,0 +1,86 @@
+{
+  "candidate_sha": "efb39c9a7d41df10564ce0fb4f803c9d129117b4",
+  "database": "isolated SQLite QA database",
+  "shell": "excavator-mobile-shell-v264",
+  "gesture_transport": "synthetic PointerEvent via CDP Runtime.evaluate in the real candidate page",
+  "limitations": [
+    "not a physical Android gesture",
+    "not APK/Xiaomi acceptance",
+    "not PostgreSQL",
+    "not production"
+  ],
+  "online": {
+    "truck": "QA-T-01",
+    "ordinary_not_test_1": true,
+    "card_before_load": {
+      "label": "QA-T-01 Назначена",
+      "data_eo_can_load": "1",
+      "draggable": true,
+      "returning_copy_present": false
+    },
+    "trip_x": {
+      "id": 1,
+      "completed_at": "2026-10-01T22:56:11.066705Z"
+    },
+    "trip_y": {
+      "id": 2,
+      "loaded_at": "2026-10-01T22:59:36.071932Z",
+      "count_created": 1
+    },
+    "result": "PASS"
+  },
+  "server_off_then_reconnect": {
+    "truck": "QA-T-01",
+    "trip_x": {
+      "id": 2,
+      "completed_at": "2026-10-01T23:00:00.704796Z"
+    },
+    "while_server_stopped": {
+      "ui": "Ожидает отправки 1",
+      "database_trip_count": 2,
+      "database_open_trip_count": 0
+    },
+    "after_reconnect": {
+      "event_id": "excavator-load-c7c4419a-2c6e-4093-ac3d-e27ae5d1c324",
+      "event_occurred_at": "2026-10-01T23:00:40.837Z",
+      "trip_y_id": 3,
+      "trip_y_loaded_at": "2026-10-01T23:00:40.837Z",
+      "ui": "Все действия отправлены 0",
+      "count_created": 1
+    },
+    "result": "PASS"
+  },
+  "weak_signal": {
+    "emulation": {
+      "latency_ms": 1800,
+      "download_bytes_per_second": 32768,
+      "upload_bytes_per_second": 16384
+    },
+    "truck": "QA-T-02",
+    "trip_x_completed_at": "2026-10-01T23:02:13.467988Z",
+    "intermediate_ui": [
+      "Сохранено на телефоне",
+      "Отправляем накопленное 1"
+    ],
+    "after_delivery": {
+      "event_id": "excavator-load-77cd1b2a-d7a1-4707-8d36-5ee921ab2478",
+      "event_occurred_at": "2026-10-01T23:02:44.392Z",
+      "trip_y_id": 5,
+      "trip_y_loaded_at": "2026-10-01T23:02:44.484669Z",
+      "ui": "Все действия отправлены 0",
+      "count_created": 1
+    },
+    "result": "PASS"
+  },
+  "mobile_dom": {
+    "viewport": "390x844",
+    "truck": "QA-T-03",
+    "data_eo_can_load": "1",
+    "draggable": true,
+    "returning_copy_present": false,
+    "blocked_cards": 0,
+    "document_scroll_width": 390,
+    "console_errors_or_warnings": 0,
+    "result": "PASS"
+  }
+}
