@@ -1342,3 +1342,32 @@ test("an event sent right away is marked so the server can use its own receipt t
     assert.equal(wire.created_session, undefined, "служебные поля очереди на сервер не уходят");
     assert.equal(wire.created_mono, undefined);
 });
+
+
+test("every server acceptance bumps the counter the screen refresh checks (matrix C1b)", async () => {
+    globalThis.driverOutboxAcceptedCount = 0;
+    const box = runtime({
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id,
+                status: event.event_id === "c1b-refused" ? "conflict" : "accepted",
+                code: event.event_id === "c1b-refused" ? "equipment_context_changed" : undefined,
+            })),
+        }),
+    });
+    await box.enqueue({
+        event_id: "c1b-accepted",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T08:48:28.237Z",
+        payload: {reason_id: 9},
+    });
+    await box.enqueue({
+        event_id: "c1b-refused",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T08:48:30.000Z",
+        payload: {reason_id: 9},
+    });
+    await box.flush();
+    assert.equal(globalThis.driverOutboxAcceptedCount, 1);
+    delete globalThis.driverOutboxAcceptedCount;
+});

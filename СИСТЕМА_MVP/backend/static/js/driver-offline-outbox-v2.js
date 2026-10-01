@@ -880,6 +880,9 @@
                 }
                 var status = String(result.status || "invalid");
                 if (status === "accepted" || status === "deduplicated") {
+                    /* Счётчик подтверждений: экран сервера, запрошенный до этого
+                       ответа, может не знать о событии (driver-shift-refresh-v1.js). */
+                    root.driverOutboxAcceptedCount = (Number(root.driverOutboxAcceptedCount) || 0) + 1;
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));

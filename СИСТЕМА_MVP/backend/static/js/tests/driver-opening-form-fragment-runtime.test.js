@@ -240,6 +240,7 @@ function createRuntime(options = {}) {
         AppOperationalFragment: {
             request(screen, version) {
                 counters.fragmentRequests += 1;
+                if (typeof options.duringRequest === "function") options.duringRequest(runtimeWindow);
                 assert.equal(screen, "driver");
                 assert.equal(version, 83519);
                 return Promise.resolve({
@@ -309,6 +310,7 @@ function createRuntime(options = {}) {
         shell,
         fakeDocument,
         counters,
+        runtimeWindow,
     };
 }
 
@@ -379,4 +381,30 @@ test("driver opening form errors and pending submit both block fragment replacem
     assert.equal((await pendingRuntime.refresh({version: 83519})).deferred, true);
     assert.equal(pendingRuntime.counters.fragmentRequests, 0);
     assert.equal(pendingRuntime.counters.rootReplacements, 0);
+});
+
+
+test("a fragment requested before the server accepted queued events is not applied (matrix C1b)", async () => {
+    // Сеть вернулась: экран запрошен в тот же миг, что ушла очередь. Пока шёл
+    // ответ, сервер подтвердил разгрузку — экран собран до неё и показал бы
+    // гружёный рейс и «Ожидание разгрузки». Его не применяем, просим свежий.
+    const runtime = createRuntime({
+        duringRequest(win) { win.driverOutboxAcceptedCount = (win.driverOutboxAcceptedCount || 0) + 1; },
+    });
+    runtime.bind(runtime.shell);
+
+    const result = await runtime.refresh({version: 83519});
+
+    assert.equal(result.deferred, true);
+    assert.equal(result.reason, "driver_outbox_accepted_during_fragment");
+    assert.equal(runtime.counters.fragmentRequests, 1);
+    assert.equal(runtime.counters.rootReplacements, 0);
+
+    // Следующий запрос, после которого подтверждений не было, применяется.
+    const quiet = createRuntime();
+    quiet.bind(quiet.shell);
+    quiet.runtimeWindow.driverOutboxAcceptedCount = 7;
+    const applied = await quiet.refresh({version: 83519});
+    assert.equal(applied.applied, true);
+    assert.equal(quiet.counters.rootReplacements, 1);
 });
