@@ -225,6 +225,13 @@ class ExcavatorQASimulatorTests(TestCase):
                 driver=scenario.human_driver,
                 unloading_shift=driver_shift,
             )
+            reloaded_tick = run_excavator_qa_tick(
+                now=now + timedelta(seconds=7),
+            )
+            next_trip = Trip.objects.exclude(pk=trip.pk).get(
+                truck=scenario.human_driver_truck,
+                excavator=scenario.driver_bot_excavator,
+            )
 
         self.assertTrue(created)
         self.assertEqual(driver_shift.plan_group.code, 'rustore-qa-driver')
@@ -247,6 +254,10 @@ class ExcavatorQASimulatorTests(TestCase):
         self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(trip.driver, scenario.human_driver)
         self.assertEqual(trip.unloading_shift, driver_shift)
+        self.assertEqual(reloaded_tick['driver_state'], 'loaded_waiting_unload')
+        self.assertEqual(reloaded_tick['driver_loaded'], 1)
+        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertGreaterEqual(next_trip.loaded_at, trip.completed_at)
 
     def test_prepared_driver_completes_the_real_http_workflow(self):
         with self.qa_settings():

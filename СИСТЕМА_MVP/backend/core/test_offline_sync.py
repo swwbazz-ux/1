@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.core.management.color import no_style
 from django.apps import apps
 from django.test import Client, TestCase, TransactionTestCase, override_settings
@@ -367,6 +367,87 @@ class OfflineEventSyncTests(TestCase):
             set(TripClientAction.objects.filter(trip=trip).values_list('action_type', flat=True)),
             {'driver_manual_loaded', 'truck_loaded'},
         )
+
+    @override_settings(TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600)
+    def test_offline_excavator_load_after_completed_trip_is_accepted_at_all_old_boundaries(self):
+        for elapsed_seconds in (0, 1, 599, 600):
+            with self.subTest(elapsed_seconds=elapsed_seconds):
+                savepoint = transaction.savepoint()
+                try:
+                    occurred_at = timezone.now()
+                    previous_trip = Trip.objects.create(
+                        excavator=self.excavator,
+                        truck=self.truck,
+                        excavator_operator=self.operator,
+                        driver=self.driver,
+                        unloading_shift=self.truck_shift,
+                        rock_type=self.rock,
+                        dump_point=self.dump_point,
+                        assigned_dump_point=self.dump_point,
+                        actual_dump_point=self.dump_point,
+                        status=TripStatus.COMPLETED,
+                        loaded_at=occurred_at - timedelta(minutes=5),
+                        completed_at=occurred_at - timedelta(seconds=elapsed_seconds),
+                    )
+                    event = self.load_event(
+                        event_id=f'e2-offline-{elapsed_seconds}',
+                        occurred_at=occurred_at,
+                    )
+
+                    result = self.sync([event]).json()['results'][0]
+
+                    self.assertEqual(result['status'], 'accepted', result)
+                    next_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+                    self.assertNotEqual(next_trip.pk, previous_trip.pk)
+                    self.assertEqual(next_trip.loaded_at, occurred_at)
+                    previous_trip.refresh_from_db()
+                    self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
+                    repeated = self.sync([event]).json()['results'][0]
+                    self.assertEqual(repeated['status'], 'deduplicated', repeated)
+                    self.assertEqual(Trip.objects.count(), 2)
+                finally:
+                    transaction.savepoint_rollback(savepoint)
+
+    def test_legacy_post_unload_cooldown_conflict_replays_original_event_once(self):
+        occurred_at = timezone.now()
+        previous_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            unloading_shift=self.truck_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.COMPLETED,
+            loaded_at=occurred_at - timedelta(minutes=5),
+            completed_at=occurred_at,
+        )
+        event = self.load_event(
+            event_id='legacy-post-unload-cooldown',
+            occurred_at=occurred_at + timedelta(seconds=1),
+        )
+        receipt = self._store_legacy_conflicted_event(
+            event,
+            received_at=occurred_at + timedelta(seconds=2),
+            error_code='post_unload_cooldown',
+            error_message='Возвращается к экскаватору · 10 мин.',
+        )
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.status, 'accepted')
+        self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
+        next_trip = Trip.objects.get(pk=result['server_ids']['trip_id'])
+        self.assertEqual(next_trip.loaded_at, timezone.datetime.fromisoformat(event['occurred_at']))
+        previous_trip.refresh_from_db()
+        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
+        repeated = self.sync([event]).json()['results'][0]
+        self.assertEqual(repeated['status'], 'deduplicated', repeated)
+        self.assertEqual(Trip.objects.count(), 2)
 
     def test_late_driver_manual_load_links_completed_excavator_trip(self):
         occurred_at = timezone.now() - timedelta(minutes=5)
