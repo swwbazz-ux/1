@@ -6047,7 +6047,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(waiting.employee, self.operator)
         self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
 
-    def test_trip_unloaded_keeps_excavator_waiting_during_return_cooldown(self):
+    def test_trip_unloaded_closes_excavator_waiting_when_truck_is_immediately_loadable(self):
         load_response = self.post_truck_loaded(client_action_id='waiting-unload')
         trip = Trip.objects.get(id=json.loads(load_response.content.decode('utf-8'))['trip_id'])
         waiting = DowntimeEvent.objects.get(
@@ -6059,14 +6059,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         finalize_trip_unloaded(trip, driver=self.driver, unloading_shift=self.truck_shift)
 
         waiting.refresh_from_db()
-        self.assertIsNone(waiting.ended_at)
-
-        trip.refresh_from_db()
-        trip.completed_at = timezone.now() - timedelta(minutes=11)
-        trip.save(update_fields=['completed_at'])
-        self.client.get(reverse('excavator_work'))
-        waiting.refresh_from_db()
         self.assertIsNotNone(waiting.ended_at)
+        self.assertGreaterEqual(waiting.ended_at, trip.completed_at)
+        self.assertLess(waiting.ended_at - trip.completed_at, timedelta(seconds=1))
 
     def test_truck_loaded_reuses_same_client_action_id(self):
         first_response = self.post_truck_loaded(client_action_id='same-action')
@@ -6230,7 +6225,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(event.payload['assigned_dump_point_id'], self.dump_point.id)
         self.assertEqual(event.payload['dump_point_name'], self.dump_point.name)
 
-    def test_dispatcher_assigned_truck_load_unload_cycle_waits_ten_minutes_before_reuse(self):
+    def test_dispatcher_assigned_truck_load_unload_cycle_allows_immediate_reuse(self):
         kkd = DumpPoint.objects.create(name='ККД')
         assignment = HaulAssignment.objects.get(truck=self.truck, excavator=self.excavator)
         start_response = self.client.get(reverse('excavator_work'))
@@ -6275,24 +6270,115 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         finish_response = self.client.get(reverse('excavator_work'))
         finish_cards_by_number = {card['number']: card for card in finish_response.context['truck_cards']}
-        cooldown_card = finish_cards_by_number['21']
-        self.assertEqual(cooldown_card['equipment_state_code'], 'waiting')
-        self.assertEqual(cooldown_card['load_block_reason_code'], 'post_unload_cooldown')
-        self.assertIn('Возвращается к экскаватору', cooldown_card['status_label'])
-        self.assertFalse(cooldown_card['can_drag'])
-        self.assertFalse(cooldown_card['can_load'])
+        returned_card = finish_cards_by_number['21']
+        self.assertEqual(returned_card['equipment_state_code'], 'assigned')
+        self.assertEqual(returned_card['load_block_reason_code'], '')
+        self.assertEqual(returned_card['status_label'], 'Назначена')
+        self.assertTrue(returned_card['can_drag'])
+        self.assertTrue(returned_card['can_load'])
 
-        blocked_reload = self.post_truck_loaded(client_action_id='cycle-too-early')
-        self.assertEqual(blocked_reload.status_code, 409)
-        self.assertEqual(blocked_reload.json()['load_block_reason_code'], 'post_unload_cooldown')
+        immediate_reload = self.post_truck_loaded(client_action_id='cycle-immediate-reload')
+        self.assertEqual(immediate_reload.status_code, 200, immediate_reload.content)
+        next_trip = Trip.objects.get(pk=immediate_reload.json()['trip_id'])
+        self.assertNotEqual(next_trip.pk, trip.pk)
+        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
 
-        trip.completed_at = timezone.now() - timedelta(minutes=11)
-        trip.save(update_fields=['completed_at'])
-        returned_response = self.client.get(reverse('excavator_work'))
-        returned_cards = {card['number']: card for card in returned_response.context['truck_cards']}
-        self.assertEqual(returned_cards['21']['equipment_state_code'], 'assigned')
-        self.assertTrue(returned_cards['21']['can_drag'])
-        self.assertTrue(returned_cards['21']['can_load'])
+        lost_response_retry = self.post_truck_loaded(client_action_id='cycle-immediate-reload')
+        self.assertEqual(lost_response_retry.status_code, 200, lost_response_retry.content)
+        self.assertEqual(lost_response_retry.json()['trip_id'], next_trip.pk)
+        self.assertEqual(Trip.objects.count(), 2)
+
+    @override_settings(TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600)
+    def test_completed_trip_age_and_garage_number_never_restore_post_unload_cooldown(self):
+        """Old environment value and the former TEST-1 exception cannot revive E2."""
+        for garage_number in ('21', 'ТЕСТ-1'):
+            self.truck.garage_number = garage_number
+            self.truck.save(update_fields=['garage_number'])
+            for elapsed_seconds in (0, 1, 599, 600):
+                with self.subTest(garage_number=garage_number, elapsed_seconds=elapsed_seconds):
+                    savepoint = transaction.savepoint()
+                    try:
+                        completed_at = timezone.now() - timedelta(seconds=elapsed_seconds)
+                        previous_trip = Trip.objects.create(
+                            excavator=self.excavator,
+                            truck=self.truck,
+                            excavator_operator=self.operator,
+                            driver=self.driver,
+                            unloading_shift=self.truck_shift,
+                            rock_type=self.rock,
+                            dump_point=self.dump_point,
+                            assigned_dump_point=self.dump_point,
+                            actual_dump_point=self.dump_point,
+                            status=TripStatus.COMPLETED,
+                            loaded_at=completed_at - timedelta(minutes=5),
+                            completed_at=completed_at,
+                        )
+
+                        screen = self.client.get(reverse('excavator_work'))
+                        card = next(
+                            item for item in screen.context['truck_cards']
+                            if item['assignment'].truck_id == self.truck.id
+                        )
+                        self.assertEqual(card['load_block_reason_code'], '')
+                        self.assertEqual(card['equipment_state_code'], 'assigned')
+                        self.assertTrue(card['can_drag'])
+                        self.assertTrue(card['can_load'])
+
+                        loaded = self.post_truck_loaded(
+                            client_action_id=f'e2-{garage_number}-{elapsed_seconds}',
+                        )
+                        self.assertEqual(loaded.status_code, 200, loaded.content)
+                        next_trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+                        self.assertNotEqual(next_trip.pk, previous_trip.pk)
+                        previous_trip.refresh_from_db()
+                        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
+                        self.assertEqual(previous_trip.completed_at, completed_at)
+                    finally:
+                        transaction.savepoint_rollback(savepoint)
+
+    @override_settings(
+        EXCAVATOR_MANUAL_LOADING_ENABLED=True,
+        TRUCK_POST_UNLOAD_COOLDOWN_SECONDS=600,
+    )
+    def test_passive_driver_manual_load_remains_available_immediately_after_unload(self):
+        completed_at = timezone.now()
+        previous_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            unloading_shift=self.truck_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.COMPLETED,
+            loaded_at=completed_at - timedelta(minutes=5),
+            completed_at=completed_at,
+        )
+
+        screen = self.client.get(reverse('excavator_work'))
+        card = next(
+            item for item in screen.context['truck_cards']
+            if item['assignment'].truck_id == self.truck.id
+        )
+        self.assertEqual(card['load_block_reason_code'], 'driver_offline')
+        self.assertTrue(card['manual_available'])
+        self.assertNotIn('Возвращается к экскаватору', card['status_label'])
+
+        loaded = self.post_truck_loaded(
+            client_action_id='e2-passive-manual-immediate',
+            manual_control=True,
+        )
+        self.assertEqual(loaded.status_code, 200, loaded.content)
+        next_trip = Trip.objects.get(pk=loaded.json()['trip_id'])
+        self.assertNotEqual(next_trip.pk, previous_trip.pk)
+        self.assertTrue(next_trip.driver_participation_recorded)
+        self.assertIsNone(next_trip.driver_control_shift_id)
+        previous_trip.refresh_from_db()
+        self.assertEqual(previous_trip.status, TripStatus.COMPLETED)
 
     def test_waiting_for_unloading_uses_hold_and_closes_with_trip(self):
         driver_client = self.client_class()
