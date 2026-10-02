@@ -993,14 +993,129 @@ class OfflineEventSyncTests(TestCase):
         later.refresh_from_db()
         self.assertIsNone(later.ended_at)
 
+    def _pending_assignment(self, *, effective_in):
+        from assignments.services import schedule_haul_assignment
+
+        pending, _ = schedule_haul_assignment(truck=self.truck, excavator=self.other_excavator)
+        HaulAssignment.objects.filter(pk=pending.pk).update(effective_at=timezone.now() + effective_in)
+        pending.refresh_from_db()
+        return pending
+
+    def _assignment_accept_event(self, assignment, event_id, sequence=1, occurred_at=None):
+        return {
+            'event_id': event_id,
+            'event_type': 'driver.assignment.accepted',
+            'format_version': 1,
+            'occurred_at': (occurred_at or timezone.now()).isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'assignment_id': assignment.id},
+        }
+
+    def test_driver_accept_moves_the_truck_at_once_at_the_tap_time(self):
+        # Решение 136 и владелец 02.10.2026: «ПРИНЯТЬ» = «Перейти сейчас».
+        # Перевод применяется временем нажатия, а не через 5 минут.
+        old = self.assignment
+        pending = self._pending_assignment(effective_in=timedelta(minutes=4))
+        tapped_at = timezone.now()
+        result = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-now', occurred_at=tapped_at)],
+            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['assignment_status'], 'applied')
+        pending.refresh_from_db()
+        old.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(pending.accepted_at, tapped_at)
+        self.assertEqual(pending.effective_at, tapped_at)
+        self.assertEqual(old.ended_at, tapped_at)
+
+    def test_accept_already_applied_by_the_deadline_is_not_a_conflict(self):
+        pending = self._pending_assignment(effective_in=-timedelta(seconds=5))
+        from assignments.services import reconcile_due_haul_assignments
+        reconcile_due_haul_assignments(truck_id=self.truck.id)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        result = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-late')],
+            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['assignment_status'], 'already_final')
+
+    def test_offline_accept_then_load_under_the_new_excavator_in_one_batch(self):
+        # Без сети: «ПРИНЯТЬ», затем ручная погрузка под новый экскаватор. Очередь
+        # идёт по sequence — перевод встаёт раньше погрузки, и она не падает на
+        # «самосвал не назначен этому экскаватору».
+        tapped_at = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk__in=[self.shift.id, self.truck_shift.id]).update(
+            opened_at=tapped_at - timedelta(minutes=10),
+        )
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(assigned_at=tapped_at - timedelta(minutes=10))
+        pending = self._pending_assignment(effective_in=timedelta(minutes=4))
+        HaulAssignment.objects.filter(pk=pending.pk).update(assigned_at=tapped_at - timedelta(minutes=1))
+        accept = self._assignment_accept_event(pending, 'batch-accept', sequence=1, occurred_at=tapped_at)
+        load = self.driver_manual_event('batch-load-new', 2, occurred_at=tapped_at + timedelta(seconds=40))
+        placement, _ = ExcavatorPlacement.objects.update_or_create(
+            excavator=self.other_excavator,
+            defaults={
+                'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'work_rock_type': self.rock,
+                'work_dump_point': self.dump_point,
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'transport_distance_km': '4.20',
+                'work_context_updated_at': tapped_at - timedelta(minutes=30),
+                'changed_by': self.operator,
+            },
+        )
+        ExcavatorDumpPointSetting.objects.update_or_create(
+            placement=placement, dump_point=self.dump_point,
+            defaults={'position': 1, 'transport_distance_km': '4.20', 'changed_by': self.operator},
+        )
+        for container in (load['payload'], load['context_snapshot']):
+            container['excavator_id'] = self.other_excavator.id
+            container['assignment_id'] = pending.id
+            container['placement_id'] = placement.id
+
+        results = self.sync(
+            [accept, load], client=self.driver_client(), role_code='driver', device_id='driver-batch-device',
+        ).json()['results']
+
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(by_id['batch-accept']['assignment_status'], 'applied', by_id)
+        self.assertEqual(by_id['batch-load-new']['status'], 'accepted', by_id)
+        trip = Trip.objects.get(pk=by_id['batch-load-new']['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        pending.refresh_from_db()
+        self.assertEqual(pending.effective_at, tapped_at)
+
+    def test_manual_load_to_a_point_switched_off_in_the_catalog_is_recorded_on_it(self):
+        # Координатор 02.10.2026: водитель ехал по устаревшему списку на точку,
+        # которую уже выключили в справочнике. Телефон — истина: рейс на эту точку,
+        # расхождение в техлог, не отказ manual_dump_point_not_allowed.
+        retired = DumpPoint.objects.create(name='Закрытая точка v377', is_active=False)
+        event = self.driver_manual_event('manual-retired-point')
+        event['payload']['dump_point_id'] = retired.id
+        event['context_snapshot']['selected_dump_point_id'] = retired.id
+        with self.assertLogs('core.offline_sync', level='WARNING') as logs:
+            result = self.sync(
+                [event], client=self.driver_client(), role_code='driver', device_id='driver-retired-device',
+            ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().dump_point_id, retired.id)
+        self.assertTrue(any('выключена в справочнике' in line for line in logs.output))
+
     def test_rejected_trip_does_not_bury_the_next_trip_in_the_chain(self):
         # Бой 02.10.2026 (ТЕСТ-1, 5157→5159→5161): отказ первой погрузки тянул
         # её завершение, а оно — следующую погрузку. Своё завершение по-прежнему
         # ждёт свою погрузку, но новый рейс записывается.
-        retired = DumpPoint.objects.create(name='Закрытая точка v376', is_active=False)
         first = self.driver_manual_event('chain-first-load', 1)
-        first['payload']['dump_point_id'] = retired.id
-        first['context_snapshot']['selected_dump_point_id'] = retired.id
+        # Настоящий отказ первой погрузки: назначения, по которому она сделана, нет.
+        first['payload']['assignment_id'] = 999999
         completed = self.driver_manual_complete_event(first, event_id='chain-first-complete', sequence=2)
         second = self.driver_manual_event(
             'chain-second-load', 3,

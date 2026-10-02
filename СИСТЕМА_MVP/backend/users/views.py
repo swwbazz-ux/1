@@ -35,7 +35,7 @@ from assignments.models import (
 )
 from assignments.services import (
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
-    apply_pending_haul_assignment,
+    accept_haul_assignment_now,
     clear_active_equipment_assignment,
     get_active_equipment_assignment,
     reconcile_due_haul_assignments,
@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v376'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v377'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -5464,11 +5464,18 @@ def driver_shift_view(request):
     driver_assignment_action_label = ''
     driver_assignment_effective_at = ''
     driver_assignment_countdown = '05:00'
+    # Короткая цель для подписи круга и угла «ПРИНЯТЬ» (v377): строка-плашка
+    # во всю ширину ложилась на барабан простоев и её нельзя было нажать.
+    driver_assignment_target_label = ''
+    # Водитель уже нажал «ПРИНЯТЬ»: угол гаснет, подпись круга тикает до срока.
+    driver_assignment_accepted = bool(pending_assignment_action and pending_assignment_action.accepted_at)
     if pending_assignment_action:
         if pending_assignment_action.action == HaulAssignmentAction.RELEASE:
             action_label = 'НАЗНАЧЕНИЕ СНЯТО'
+            driver_assignment_target_label = 'СНЯТО'
         else:
-            action_label = f'ВЫ НАЗНАЧЕНЫ НА {driver_excavator_short_label(pending_assignment_action.excavator)}'
+            driver_assignment_target_label = driver_excavator_short_label(pending_assignment_action.excavator)
+            action_label = f'ВЫ НАЗНАЧЕНЫ НА {driver_assignment_target_label}'
         driver_assignment_action_label = action_label
         driver_assignment_countdown = driver_assignment_countdown_label(pending_assignment_action)
         driver_new_assignment_label = (
@@ -5737,6 +5744,8 @@ def driver_shift_view(request):
             'driver_dial_note': driver_dial_note,
             'driver_new_assignment_label': driver_new_assignment_label,
             'driver_assignment_action_label': driver_assignment_action_label,
+            'driver_assignment_target_label': driver_assignment_target_label,
+            'driver_assignment_accepted': driver_assignment_accepted,
             'driver_assignment_effective_at': driver_assignment_effective_at,
             'driver_assignment_countdown': driver_assignment_countdown,
             'pending_assignment_action': pending_assignment_action,
@@ -5800,34 +5809,21 @@ def driver_accept_assignment_view(request, assignment_id):
     # экскаваторщика: production -> truck -> haul assignments. Раньше здесь
     # сначала блокировалось назначение, из-за чего параллельное принятие и DnD
     # могли упереться друг в друга.
-    lock_production_state()
-    Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
-    assignment = get_object_or_404(
-        HaulAssignment.objects.select_for_update(),
-        id=assignment_id,
-        truck_id=open_shift.equipment_id,
-        status=AssignmentStatus.PENDING,
-        ended_at__isnull=True,
+    # «ПРИНЯТЬ» = «Перейти сейчас» (решение 136; решение владельца 02.10.2026):
+    # водитель уже под новым экскаватором — перевод применяется временем нажатия.
+    # Срок в 5 минут остаётся только для молчания. Уже применённое по сроку или
+    # отменённое диспетчером назначение — не ошибка: экран просто обновится.
+    get_object_or_404(HaulAssignment, id=assignment_id, truck_id=open_shift.equipment_id)
+    assignment, applied_now = accept_haul_assignment_now(
+        assignment_id, truck_id=open_shift.equipment_id, at=timezone.now(),
     )
-    kept_pending = bool(
-        assignment.effective_at
-        and assignment.effective_at > timezone.now()
-    )
-    if kept_pending:
-        # Подтверждение водителя не является подтверждением физического прибытия
-        # и не сокращает единый серверный срок перевода.
-        if assignment.accepted_at is None:
-            assignment.accepted_at = timezone.now()
-            assignment.save(update_fields=['accepted_at'])
-        applied = assignment
-    else:
-        applied = apply_pending_haul_assignment(assignment.id)
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({
-            'ok': bool(applied),
+            'ok': True,
             'action': assignment.action,
-            'transfer_pending': kept_pending,
-            'transition_pending': kept_pending,
+            'applied': applied_now,
+            'transfer_pending': False,
+            'transition_pending': False,
         })
     return redirect('driver_work')
 
