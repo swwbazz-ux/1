@@ -24,6 +24,8 @@ on:
           - verify_sse_qa
           - prepare_sse_qa_host_key
           - install_sse_qa
+          - inspect_sse_qa_https
+          - prepare_sse_qa_https
           - enable_sse_qa
           - smoke_sse_qa
           - disable_sse_qa
@@ -53,6 +55,10 @@ on:
         type: string
       rollback_id:
         description: "Exact github-... rollback directory for rollback mode"
+        required: false
+        type: string
+      sse_qa_allow_cidr:
+        description: "One approved canonical IPv4 /32 for prepare_sse_qa_https only"
         required: false
         type: string
       diagnostic_operation:
@@ -116,6 +122,7 @@ jobs:
           APK_PROFILE: ${{ inputs.apk_profile }}
           DATA_OPERATION: ${{ inputs.data_operation }}
           ROLLBACK_ID: ${{ inputs.rollback_id }}
+          SSE_QA_ALLOW_CIDR: ${{ inputs.sse_qa_allow_cidr }}
         run: |
           set -euo pipefail
           umask 077
@@ -139,6 +146,8 @@ jobs:
             verify_sse_qa) expected=VERIFY_SSE_QA ;;
             prepare_sse_qa_host_key) expected=PREPARE_SSE_QA_HOST_KEY ;;
             install_sse_qa) expected=INSTALL_SSE_QA ;;
+            inspect_sse_qa_https) expected=INSPECT_SSE_QA_HTTPS ;;
+            prepare_sse_qa_https) expected=PREPARE_SSE_QA_HTTPS ;;
             enable_sse_qa) expected=ENABLE_SSE_QA ;;
             smoke_sse_qa) expected=SMOKE_SSE_QA ;;
             disable_sse_qa) expected=DISABLE_SSE_QA ;;
@@ -157,6 +166,18 @@ jobs:
           if [[ "$MODE" == "rollback" ]]; then
             [[ "$ROLLBACK_ID" =~ ^github-[A-Za-z0-9._-]+$ ]]
           fi
+          if [[ "$MODE" == "prepare_sse_qa_https" ]]; then
+            python - "$SSE_QA_ALLOW_CIDR" <<'PY'
+          import ipaddress
+          import sys
+          value = sys.argv[1]
+          network = ipaddress.ip_network(value, strict=True)
+          if network.version != 4 or network.prefixlen != 32 or str(network) != value:
+              raise SystemExit("prepare_sse_qa_https requires one canonical IPv4 /32")
+          PY
+          else
+            test -z "$SSE_QA_ALLOW_CIDR"
+          fi
           if [[ "$MODE" == "prepare_sse_qa_host_key" ]]; then
             test "$APK_PROFILE" = "none"
             test -z "$DATA_OPERATION"
@@ -171,6 +192,7 @@ jobs:
               "diagnostic_from_utc": "",
               "diagnostic_to_utc": "",
               "diagnostic_max_rows": "500",
+              "sse_qa_allow_cidr": "",
           }
           if any(str(inputs.get(name, "")) != value for name, value in expected.items()):
               raise SystemExit("prepare_sse_qa_host_key rejects unrelated inputs")
@@ -310,10 +332,14 @@ jobs:
           SSE_QA_CANDIDATE_SHA: 9d336723f3dc2fc574937a57602a27b54c54fd77
           SSE_QA_CONTROLLER_SHA256: 3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44
           SSE_QA_RUNTIME_SHA256: 8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e
+          SSE_QA_HTTPS_CONTROLLER_SHA256: 5f203610c8d5a0c2360968925cc8ed53eae4bdbf4ac9add64495c997213143c5
+          SSE_QA_ALLOW_CIDR: ${{ inputs.sse_qa_allow_cidr }}
         run: |
           set -euo pipefail
           umask 077
           python .github/deploy/test_release_protocol.py
+          python .github/deploy/test_sse_qa_https_control.py
+          python .github/deploy/test_sse_qa_https_release_protocol.py
           args=(
             --root .
             --files .github/deploy/production-files.txt
@@ -346,12 +372,27 @@ jobs:
               tar -xf - -C "$qa_candidate_root"
             qa_source="$qa_candidate_root/deployment/sse-qa-install"
             test -d "$qa_source"
-            controller_source="deployment/server/sse_qa_ctl.py"
+            base_controller_source="deployment/server/sse_qa_ctl.py"
+            base_controller_actual="$(sha256sum "$base_controller_source" | cut -d' ' -f1)"
+            test "$base_controller_actual" = "$SSE_QA_CONTROLLER_SHA256"
+            https_controller_source="deployment/server/sse_qa_https_ctl.py"
+            https_controller_actual="$(sha256sum "$https_controller_source" | cut -d' ' -f1)"
+            test "$https_controller_actual" = "$SSE_QA_HTTPS_CONTROLLER_SHA256"
+            controller_source="$base_controller_source"
+            controller_expected="$SSE_QA_CONTROLLER_SHA256"
+            controller_name="sse_qa_ctl.py"
+            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" ]]; then
+              controller_source="$https_controller_source"
+              controller_expected="$SSE_QA_HTTPS_CONTROLLER_SHA256"
+              controller_name="sse_qa_https_ctl.py"
+            fi
             controller_actual="$(sha256sum "$controller_source" | cut -d' ' -f1)"
             runtime_actual="$(sha256sum "$qa_source/generated/runtime.tar.gz" | cut -d' ' -f1)"
-            test "$controller_actual" = "$SSE_QA_CONTROLLER_SHA256"
+            test "$controller_actual" = "$controller_expected"
             test "$runtime_actual" = "$SSE_QA_RUNTIME_SHA256"
-            cp "$controller_source" "$qa_source/scripts/sse_qa_ctl.py"
+            if [[ "$controller_name" == "sse_qa_ctl.py" ]]; then
+              cp "$controller_source" "$qa_source/scripts/sse_qa_ctl.py"
+            fi
             printf 'SSE_QA_SOURCE control_sha=%s candidate_sha=%s controller_sha256=%s runtime_sha256=%s\n' \
               "${{ github.sha }}" "$candidate_resolved" "$controller_actual" "$runtime_actual"
             qa_build="$RUNNER_TEMP/sse-qa-payload"
@@ -374,15 +415,21 @@ jobs:
               (cd "$qa_build" && zip -q -r -X "$RUNNER_TEMP/sse-qa-install.zip" .)
             else
               mkdir -p "$qa_build/scripts"
-              cp "$qa_source/scripts/sse_qa_ctl.py" "$qa_build/scripts/sse_qa_ctl.py"
-              (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" scripts/sse_qa_ctl.py)
+              cp "$controller_source" "$qa_build/scripts/$controller_name"
+              (cd "$qa_build" && zip -q -X "$RUNNER_TEMP/sse-qa-install.zip" "scripts/$controller_name")
             fi
             args+=(
               --sse-qa-package "$RUNNER_TEMP/sse-qa-install.zip"
               --sse-qa-candidate-commit "$candidate_resolved"
-              --sse-qa-controller-sha256 "$controller_actual"
+              --sse-qa-controller-sha256 "$base_controller_actual"
               --sse-qa-runtime-sha256 "$runtime_actual"
             )
+            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" ]]; then
+              args+=(--sse-qa-https-controller-sha256 "$https_controller_actual")
+            fi
+            if [[ "$MODE" == "prepare_sse_qa_https" ]]; then
+              args+=(--sse-qa-allow-cidr "$SSE_QA_ALLOW_CIDR")
+            fi
             if [[ "$MODE" == "install_sse_qa" ]]; then
               test -n "$SSE_QA_SECRETS_JSON_B64"
               args+=(--sse-qa-secrets-stdin)
