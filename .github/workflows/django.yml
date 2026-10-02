@@ -91,6 +91,13 @@ jobs:
       - name: Run standalone tools contract tests
         run: python -m unittest discover -s tools -p 'test*.py'
 
+      - name: Run protected SSE-QA HTTPS controller contracts
+        working-directory: ${{ github.workspace }}
+        run: |
+          python .github/deploy/test_release_protocol.py
+          python .github/deploy/test_sse_qa_https_control.py
+          python .github/deploy/test_sse_qa_https_release_protocol.py
+
       - name: Run all backend JavaScript contracts
         shell: bash
         run: |
