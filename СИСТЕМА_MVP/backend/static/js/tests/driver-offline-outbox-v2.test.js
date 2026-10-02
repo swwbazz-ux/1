@@ -1371,3 +1371,126 @@ test("every server acceptance bumps the counter the screen refresh checks (matri
     assert.equal(globalThis.driverOutboxAcceptedCount, 1);
     delete globalThis.driverOutboxAcceptedCount;
 });
+
+test("after a network drop the queue leaves strictly by sequence (battle 02.10, seq 232)", async () => {
+    // Отмена ковша ждала бэкоффа после обрыва, а свежие события ушли раньше
+    // неё. Теперь всё, что ждёт только из-за сети, едет в той же пачке по порядку.
+    const local = storage();
+    let online = false;
+    const batches = [];
+    const box = runtime({
+        local,
+        send: async batch => {
+            if (!online) throw new TypeError("Failed to fetch");
+            batches.push(batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await box.enqueue({
+        event_id: "v376-cancel-first",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T23:35:39.000Z",
+        payload: {reason_id: 9},
+    });
+    await box.flush();
+    const waiting = (await box.pending()).find(event => event.event_id === "v376-cancel-first");
+    assert.equal(waiting.last_error.code, "network");
+    assert.ok(Number(waiting.next_retry_at) > Date.now());
+
+    online = true;
+    await box.enqueue({
+        event_id: "v376-later",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T23:36:51.000Z",
+        payload: {reason_id: 10},
+    });
+    await box.flush();
+
+    assert.deepEqual(batches, [["v376-cancel-first", "v376-later"]]);
+    assert.equal((await box.pending()).length, 0);
+});
+
+test("a server-assigned wait does not hold the rest of the queue", async () => {
+    const local = storage();
+    const batches = [];
+    let first = true;
+    const box = runtime({
+        local,
+        send: async batch => {
+            batches.push(batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => (
+                first && event.event_id === "v376-server-wait"
+                    ? {event_id: event.event_id, status: "retry", code: "dependency_pending", message: "Ждём."}
+                    : {event_id: event.event_id, status: "accepted"}
+            ))};
+        },
+    });
+    await box.enqueue({
+        event_id: "v376-server-wait",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T23:40:00.000Z",
+        payload: {reason_id: 9},
+    });
+    await box.flush();
+    first = false;
+    await box.enqueue({
+        event_id: "v376-after-server-wait",
+        event_type: "driver.downtime.started",
+        occurred_at: "2026-10-01T23:41:00.000Z",
+        payload: {reason_id: 10},
+    });
+    await box.flush();
+    assert.deepEqual(batches, [["v376-server-wait"], ["v376-after-server-wait"]]);
+});
+
+test("restart resends v376 refusals: load during downtime, changed face, cancel of a cancelled bucket, buried next trip", async () => {
+    const local = storage();
+    const codes = {
+        "v376-load-downtime": "equipment_downtime_active",
+        "v376-load-face": "manual_work_context_changed",
+        "v376-cancel": "free_bucket_not_cancellable",
+        "v376-next-load": "dependency_rejected",
+    };
+    const rejected = runtime({
+        local,
+        send: async batch => ({
+            results: batch.events.map(event => ({
+                event_id: event.event_id, status: "conflict", code: codes[event.event_id], message: "Отклонено.",
+            })),
+        }),
+    });
+    const manualPayload = {
+        manual_control: true, truck_id: 58, excavator_id: 9, dump_point_id: 3, rock_type_id: 2,
+        assignment_id: 7, free_bucket_acceptance_id: null, free_bucket_acceptance_local_id: null,
+    };
+    await rejected.enqueue({
+        event_id: "v376-load-downtime", event_type: "driver.trip.loaded",
+        occurred_at: "2026-10-01T23:36:56.000Z", local_trip_id: "v376-load-downtime", payload: manualPayload,
+    });
+    await rejected.enqueue({
+        event_id: "v376-load-face", event_type: "driver.trip.loaded",
+        occurred_at: "2026-10-01T23:37:56.000Z", local_trip_id: "v376-load-face", payload: manualPayload,
+    });
+    await rejected.enqueue({
+        event_id: "v376-cancel", event_type: "driver.free_bucket.cancelled",
+        occurred_at: "2026-10-01T23:38:00.000Z", payload: {free_bucket_acceptance_id: 631},
+    });
+    await rejected.enqueue({
+        event_id: "v376-next-load", event_type: "driver.trip.loaded",
+        occurred_at: "2026-10-01T23:39:04.000Z", local_trip_id: "v376-next-load", payload: manualPayload,
+    });
+    await rejected.flush();
+    assert.deepEqual((await rejected.pending()).map(event => event.state), ["conflict", "conflict", "conflict", "conflict"]);
+
+    const delivered = [];
+    const restarted = runtime({
+        local,
+        send: async batch => {
+            delivered.push(...batch.events.map(event => event.event_id));
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        },
+    });
+    await restarted.initialize();
+    assert.deepEqual(delivered, ["v376-load-downtime", "v376-load-face", "v376-cancel", "v376-next-load"]);
+    assert.equal((await restarted.pending()).length, 0);
+});

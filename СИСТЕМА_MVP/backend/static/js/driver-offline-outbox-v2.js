@@ -97,10 +97,17 @@
            и второй выбор ковша сервер теперь принимает — прежние отказы
            отправляются заново с теми же ID. */
         var code = errorCode(event);
+        /* v376 (приёмка v375 и бой 02.10.2026): погрузку при открытом простое,
+           ручной рейс при сменившемся забое и отмену уже отменённого ковша
+           сервер теперь записывает — их прежние отказы тоже уходят заново. */
         return (event.event_type === "driver.trip.loaded"
-                && (code === "free_bucket_not_available" || code === "free_bucket_work_context_changed"))
+                && [
+                    "free_bucket_not_available", "free_bucket_work_context_changed",
+                    "equipment_downtime_active", "manual_work_context_changed"
+                ].indexOf(code) >= 0)
             || (event.event_type === "driver.free_bucket.selected"
-                && (code === "free_bucket_request_stale" || code === "free_bucket_target_changed"));
+                && (code === "free_bucket_request_stale" || code === "free_bucket_target_changed"))
+            || (event.event_type === "driver.free_bucket.cancelled" && code === "free_bucket_not_cancellable");
     }
     function recoverableDependencyConflict(event) {
         return !!event && event.state === "conflict" && errorCode(event) === "dependency_rejected";
@@ -997,6 +1004,22 @@
                 var allDue = items.filter(function (item) {
                     return item.state === "pending" && Number(item.next_retry_at || 0) <= Date.now();
                 });
+                /* Бой 02.10.2026 (ТЕСТ-1): отмена ковша (seq 232) ждала бэкоффа
+                   после обрыва связи, а свежие события 233–239 ушли раньше неё —
+                   сервер увидел выбор следующего ковша до отмены прежнего. Если
+                   пачка уходит, сеть есть: всё, что ждёт только из-за сети, едет
+                   в той же пачке, строго по порядку. Ожидание, которое назначил
+                   сам сервер («повтори позже»), остаётся своим — иначе одно такое
+                   событие вешало бы всю очередь. */
+                if (allDue.length) {
+                    items.forEach(function (item) {
+                        var waitingForNetwork = item.state === "pending"
+                            && Number(item.next_retry_at || 0) > Date.now()
+                            && ["network", "missing_ack"].indexOf(errorCode(item)) >= 0;
+                        if (waitingForNetwork && allDue.indexOf(item) < 0) allDue.push(item);
+                    });
+                    allDue.sort(function (a, b) { return Number(a.sequence || 0) - Number(b.sequence || 0); });
+                }
                 var batchDeviceId = allDue.length ? String(allDue[0].device_id || "") : "";
                 var dueById = new Map(allDue.filter(function (item) {
                     return String(item.device_id || "") === batchDeviceId;
@@ -1150,9 +1173,15 @@
                     if (
                         recoverableDependencyConflict(event)
                         && !recoverable[event.event_id]
-                        && (event.depends_on || []).some(function (dependency) {
-                            return recoverable[String(dependency)];
-                        })
+                        && (
+                            (event.depends_on || []).some(function (dependency) {
+                                return recoverable[String(dependency)];
+                            })
+                            /* Новая погрузка от судьбы прошлого рейса не зависит:
+                               сервер v376 её записывает, даже если тот рейс
+                               остался отклонённым (бой 02.10.2026, 5161). */
+                            || event.event_type === "driver.trip.loaded"
+                        )
                     ) {
                         recoverable[event.event_id] = true;
                         changed = true;
