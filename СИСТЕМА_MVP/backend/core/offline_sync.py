@@ -3559,6 +3559,63 @@ def _removed_refusal_result_roots(event):
     return set()
 
 
+def _removed_refusal_retry_provenance(event):
+    """Return server-proven removed-refusal provenance saved on a RETRY.
+
+    Client fields never open this path.  The marker is written only after the
+    server has proved either the exact removed cooldown root or its complete
+    dependency lineage.  Its shape is checked again before every replay.
+    """
+    if event.status != OfflineFieldEventStatus.RETRY:
+        return '', set()
+    marker = (event.result_payload or {}).get('retry_recovery')
+    if not isinstance(marker, dict):
+        return '', set()
+    reason = marker.get('reason')
+    if (
+        reason not in {'removed_refusal', 'removed_refusal_chain'}
+        or marker.get('original_code') != 'post_unload_cooldown'
+    ):
+        return '', set()
+    raw_roots = marker.get('root_event_ids')
+    if not isinstance(raw_roots, list) or not raw_roots:
+        return '', set()
+    roots = {
+        root_id for root_id in raw_roots
+        if isinstance(root_id, str) and root_id
+    }
+    if len(roots) != len(raw_roots):
+        return '', set()
+    if reason == 'removed_refusal':
+        if (
+            event.role_code != 'excavator_operator'
+            or event.event_type != 'excavator.trip.loaded'
+            or roots != {event.event_id}
+        ):
+            return '', set()
+    elif event.role_code != 'excavator_operator' or not event.depends_on:
+        return '', set()
+    return reason, roots
+
+
+def _removed_refusal_retry_payload(receipt, payload, *, direct, dependency_roots):
+    result = dict(payload or {})
+    if direct:
+        reason = 'removed_refusal'
+        roots = [receipt.event_id]
+    elif dependency_roots:
+        reason = 'removed_refusal_chain'
+        roots = sorted(dependency_roots)
+    else:
+        return result
+    result['retry_recovery'] = {
+        'reason': reason,
+        'original_code': 'post_unload_cooldown',
+        'root_event_ids': roots,
+    }
+    return result
+
+
 def _removed_refusal_lineage(
     event,
     access,
@@ -3632,11 +3689,15 @@ def _removed_refusal_lineage(
 
 
 def _removed_refusal_dependency_roots(existing, access, normalized):
-    if not (
+    retry_reason, retry_roots = _removed_refusal_retry_provenance(existing)
+    saved_dependency_conflict = bool(
         existing.status == OfflineFieldEventStatus.CONFLICT
         and existing.error_code == 'dependency_rejected'
-        and existing.depends_on
-        and normalized['role_code'] == 'excavator_operator'
+    )
+    if (
+        not existing.depends_on
+        or normalized['role_code'] != 'excavator_operator'
+        or not (saved_dependency_conflict or retry_reason == 'removed_refusal_chain')
     ):
         return set()
     if len(existing.depends_on) > MAX_DEPENDENCIES:
@@ -3665,6 +3726,8 @@ def _removed_refusal_dependency_roots(existing, access, normalized):
         if not valid:
             return set()
         roots.update(branch_roots)
+    if retry_reason == 'removed_refusal_chain' and roots != retry_roots:
+        return set()
     return roots
 
 
@@ -3767,11 +3830,17 @@ def process_one_offline_event(access, normalized):
                         )
                     )
                 )
+                retry_recovery_reason, _ = (
+                    _removed_refusal_retry_provenance(existing)
+                )
                 recoverable_removed_refusal = bool(
-                    existing.status == OfflineFieldEventStatus.CONFLICT
-                    and normalized['role_code'] == 'excavator_operator'
-                    and existing.event_type == 'excavator.trip.loaded'
-                    and existing.error_code == 'post_unload_cooldown'
+                    (
+                        existing.status == OfflineFieldEventStatus.CONFLICT
+                        and normalized['role_code'] == 'excavator_operator'
+                        and existing.event_type == 'excavator.trip.loaded'
+                        and existing.error_code == 'post_unload_cooldown'
+                    )
+                    or retry_recovery_reason == 'removed_refusal'
                 )
                 removed_refusal_dependency_roots = _removed_refusal_dependency_roots(
                     existing, access, normalized,
@@ -3860,10 +3929,18 @@ def process_one_offline_event(access, normalized):
                 receipt.retryable = problem.retryable
                 receipt.error_code = problem.code
                 receipt.error_message = problem.message
-                receipt.result_payload = {
+                problem_payload = {
                     'server_received_at': receipt.received_at.isoformat(),
                     **problem.details,
                 }
+                if problem.status == OfflineFieldEventStatus.RETRY:
+                    problem_payload = _removed_refusal_retry_payload(
+                        receipt,
+                        problem_payload,
+                        direct=recoverable_removed_refusal,
+                        dependency_roots=removed_refusal_dependency_roots,
+                    )
+                receipt.result_payload = problem_payload
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',
@@ -3877,7 +3954,12 @@ def process_one_offline_event(access, normalized):
                 receipt.retryable = True
                 receipt.error_code = 'concurrent_state_retry'
                 receipt.error_message = 'Состояние изменилось одновременно. Событие будет повторено.'
-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.result_payload = _removed_refusal_retry_payload(
+                    receipt,
+                    {'server_received_at': receipt.received_at.isoformat()},
+                    direct=recoverable_removed_refusal,
+                    dependency_roots=removed_refusal_dependency_roots,
+                )
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',
@@ -3898,7 +3980,12 @@ def process_one_offline_event(access, normalized):
                 receipt.error_message = 'Временная ошибка сервера ({}: {}). Событие сохранено и будет повторено.'.format(
                     type(error).__name__, str(error)[:120].replace(chr(10), ' '),
                 )
-                receipt.result_payload = {'server_received_at': receipt.received_at.isoformat()}
+                receipt.result_payload = _removed_refusal_retry_payload(
+                    receipt,
+                    {'server_received_at': receipt.received_at.isoformat()},
+                    direct=recoverable_removed_refusal,
+                    dependency_roots=removed_refusal_dependency_roots,
+                )
                 receipt.save(update_fields=[
                     'status', 'retryable', 'error_code', 'error_message',
                     'result_payload', 'updated_at',

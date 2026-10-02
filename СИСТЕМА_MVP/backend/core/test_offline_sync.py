@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 from django.db import close_old_connections, connection, transaction
 from django.core.management.color import no_style
@@ -470,6 +471,51 @@ class OfflineEventSyncTests(TestCase):
             },
         }
 
+    def _removed_cooldown_chain_fixture(self, prefix, *, first_sequence):
+        occurred_at = timezone.now()
+        root = self.load_event(
+            event_id=f'{prefix}-root', sequence=first_sequence,
+            occurred_at=occurred_at,
+        )
+        child = self._removed_cooldown_cancel_event(
+            root,
+            event_id=f'{prefix}-child',
+            sequence=first_sequence + 1,
+            occurred_at=occurred_at + timedelta(seconds=1),
+        )
+        grandchild = self.load_event(
+            event_id=f'{prefix}-grandchild', sequence=first_sequence + 2,
+            occurred_at=occurred_at + timedelta(seconds=2),
+            depends_on=[child['event_id']],
+            local_trip_id=f'local-{prefix}-grandchild',
+        )
+        received_times = {
+            root['event_id']: occurred_at + timedelta(seconds=3),
+            child['event_id']: occurred_at + timedelta(seconds=4),
+            grandchild['event_id']: occurred_at + timedelta(seconds=5),
+        }
+        receipts = {
+            root['event_id']: self._store_legacy_conflicted_event(
+                root,
+                received_at=received_times[root['event_id']],
+                error_code='post_unload_cooldown',
+                error_message='Возвращается к экскаватору · 10 мин.',
+            ),
+            child['event_id']: self._store_legacy_conflicted_event(
+                child,
+                received_at=received_times[child['event_id']],
+                error_code='dependency_rejected',
+                error_message='Предыдущее событие требует сверки или отклонено.',
+            ),
+            grandchild['event_id']: self._store_legacy_conflicted_event(
+                grandchild,
+                received_at=received_times[grandchild['event_id']],
+                error_code='dependency_rejected',
+                error_message='Предыдущее событие требует сверки или отклонено.',
+            ),
+        }
+        return root, child, grandchild, receipts, received_times
+
     def test_removed_cooldown_replays_saved_dependency_chain_with_original_envelopes(self):
         occurred_at = timezone.now()
         previous_trip = Trip.objects.create(
@@ -661,6 +707,159 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(child_receipt.status, 'conflict')
         self.assertEqual(child_receipt.error_code, 'dependency_rejected')
         self.assertEqual(Trip.objects.count(), 1)
+
+    def test_removed_cooldown_root_provenance_survives_concurrent_retry(self):
+        root, child, grandchild, receipts, received_times = self._removed_cooldown_chain_fixture(
+            'removed-cooldown-root-retry', first_sequence=61,
+        )
+
+        retry_results = []
+        for _attempt in range(2):
+            with mock.patch(
+                'trips.trip_creation.create_loaded_waiting_unload_trip',
+                side_effect=TimeoutError('temporary root lock'),
+            ):
+                retry_results.append(self.sync([root]).json()['results'][0])
+
+        expected_retry_recovery = {
+            'reason': 'removed_refusal',
+            'original_code': 'post_unload_cooldown',
+            'root_event_ids': [root['event_id']],
+        }
+        for retry_result in retry_results:
+            self.assertEqual(
+                (retry_result['status'], retry_result['code']),
+                ('retry', 'concurrent_state_retry'),
+                retry_result,
+            )
+            self.assertEqual(retry_result['retry_recovery'], expected_retry_recovery)
+        root_retry = receipts[root['event_id']]
+        root_retry.refresh_from_db()
+        self.assertEqual(root_retry.result_payload['retry_recovery'], expected_retry_recovery)
+        self.assertEqual(root_retry.occurred_at, timezone.datetime.fromisoformat(root['occurred_at']))
+        self.assertEqual(root_retry.received_at, received_times[root['event_id']])
+
+        tampered = json.loads(json.dumps(root))
+        tampered['payload']['truck_id'] = self.truck.id + 1000
+        rejected_tamper = self.sync([tampered]).json()['results'][0]
+        rejected_foreign = self.sync([root], device_id='foreign-retry-device').json()['results'][0]
+        self.assertEqual((rejected_tamper['status'], rejected_tamper['code']), ('conflict', 'event_id_reused'))
+        self.assertEqual((rejected_foreign['status'], rejected_foreign['code']), ('conflict', 'event_id_reused'))
+        root_retry.refresh_from_db()
+        self.assertEqual(root_retry.status, 'retry')
+        self.assertEqual(root_retry.result_payload['retry_recovery'], expected_retry_recovery)
+
+        root_result = self.sync([root]).json()['results'][0]
+        child_result = self.sync([child]).json()['results'][0]
+        grandchild_result = self.sync([grandchild]).json()['results'][0]
+
+        self.assertEqual(root_result['status'], 'accepted', root_result)
+        self.assertEqual(root_result['conflict_recovery']['root_event_ids'], [root['event_id']])
+        self.assertNotIn('retry_recovery', root_result)
+        self.assertEqual(child_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+        self.assertEqual(grandchild_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+
+        repeated = self.sync([root, child, grandchild]).json()['results']
+        self.assertEqual([item['status'] for item in repeated], ['deduplicated'] * 3, repeated)
+        self.assertEqual(repeated[0]['conflict_recovery']['root_event_ids'], [root['event_id']])
+        for event in (root, child, grandchild):
+            receipt = receipts[event['event_id']]
+            receipt.refresh_from_db()
+            self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
+            self.assertEqual(receipt.received_at, received_times[event['event_id']])
+            self.assertEqual(receipt.sequence, event['sequence'])
+            self.assertEqual(receipt.depends_on, event['depends_on'])
+            self.assertEqual(receipt.payload, event['payload'])
+            self.assertEqual(OfflineFieldEvent.objects.filter(event_id=event['event_id']).count(), 1)
+            self.assertEqual(TripClientAction.objects.filter(client_action_id=event['event_id']).count(), 1)
+
+    def test_removed_cooldown_child_provenance_survives_temporary_server_error(self):
+        root, child, grandchild, receipts, received_times = self._removed_cooldown_chain_fixture(
+            'removed-cooldown-child-retry', first_sequence=71,
+        )
+        root_result = self.sync([root]).json()['results'][0]
+        self.assertEqual(root_result['status'], 'accepted', root_result)
+
+        with mock.patch(
+            'trips.free_bucket.close_free_bucket_acceptance_for_trip',
+            side_effect=RuntimeError('temporary child service failure'),
+        ):
+            retry_result = self.sync([child]).json()['results'][0]
+
+        self.assertEqual(
+            (retry_result['status'], retry_result['code']),
+            ('retry', 'temporary_server_error'),
+            retry_result,
+        )
+        self.assertEqual(
+            retry_result['retry_recovery'],
+            {
+                'reason': 'removed_refusal_chain',
+                'original_code': 'post_unload_cooldown',
+                'root_event_ids': [root['event_id']],
+            },
+        )
+        child_retry = receipts[child['event_id']]
+        child_retry.refresh_from_db()
+        self.assertEqual(child_retry.result_payload['retry_recovery'], retry_result['retry_recovery'])
+        self.assertEqual(child_retry.received_at, received_times[child['event_id']])
+
+        child_result = self.sync([child]).json()['results'][0]
+        grandchild_result = self.sync([grandchild]).json()['results'][0]
+        self.assertEqual(child_result['status'], 'accepted', child_result)
+        self.assertEqual(child_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+        self.assertNotIn('retry_recovery', child_result)
+        self.assertEqual(grandchild_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+
+        repeated = self.sync([child, grandchild]).json()['results']
+        self.assertEqual([item['status'] for item in repeated], ['deduplicated', 'deduplicated'])
+        self.assertEqual(repeated[0]['dependency_recovery']['root_event_ids'], [root['event_id']])
+        for event in (root, child, grandchild):
+            self.assertEqual(OfflineFieldEvent.objects.filter(event_id=event['event_id']).count(), 1)
+            self.assertEqual(TripClientAction.objects.filter(client_action_id=event['event_id']).count(), 1)
+
+    def test_removed_cooldown_child_provenance_survives_trip_reference_pending(self):
+        root, child, grandchild, receipts, received_times = self._removed_cooldown_chain_fixture(
+            'removed-cooldown-reference-retry', first_sequence=81,
+        )
+        root_result = self.sync([root]).json()['results'][0]
+        self.assertEqual(root_result['status'], 'accepted', root_result)
+        root_receipt = receipts[root['event_id']]
+        root_receipt.refresh_from_db()
+        root_trip = root_receipt.trip
+        self.assertIsNotNone(root_trip)
+        OfflineFieldEvent.objects.filter(pk=root_receipt.pk).update(trip=None)
+
+        retry_results = [
+            self.sync([child]).json()['results'][0],
+            self.sync([child]).json()['results'][0],
+        ]
+        expected_retry_recovery = {
+            'reason': 'removed_refusal_chain',
+            'original_code': 'post_unload_cooldown',
+            'root_event_ids': [root['event_id']],
+        }
+        for retry_result in retry_results:
+            self.assertEqual(
+                (retry_result['status'], retry_result['code']),
+                ('retry', 'trip_reference_pending'),
+                retry_result,
+            )
+            self.assertEqual(retry_result['retry_recovery'], expected_retry_recovery)
+        child_retry = receipts[child['event_id']]
+        child_retry.refresh_from_db()
+        self.assertEqual(child_retry.received_at, received_times[child['event_id']])
+        self.assertEqual(child_retry.result_payload['retry_recovery'], expected_retry_recovery)
+
+        OfflineFieldEvent.objects.filter(pk=root_receipt.pk).update(trip=root_trip)
+        child_result = self.sync([child]).json()['results'][0]
+        grandchild_result = self.sync([grandchild]).json()['results'][0]
+        self.assertEqual(child_result['status'], 'accepted', child_result)
+        self.assertEqual(child_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+        self.assertEqual(grandchild_result['status'], 'accepted', grandchild_result)
+        self.assertEqual(grandchild_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+        self.assertEqual(TripClientAction.objects.filter(client_action_id=child['event_id']).count(), 1)
+        self.assertEqual(TripClientAction.objects.filter(client_action_id=grandchild['event_id']).count(), 1)
 
     def test_late_driver_manual_load_links_completed_excavator_trip(self):
         occurred_at = timezone.now() - timedelta(minutes=5)
