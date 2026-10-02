@@ -2123,7 +2123,8 @@ window.bindDriverMobileShell = function () {
     function postDriverDowntimeAction(payload) {
         payload = payload || {};
         var isClose = payload.action === "close";
-        var occurredAt = new Date().toISOString();
+        // Простой, который закрывает погрузка/разгрузка, — временем самого рейса.
+        var occurredAt = payload.occurred_at ? String(payload.occurred_at) : new Date().toISOString();
         snapshotDriverDowntimeTimer(Date.parse(occurredAt));
         var projectionSnapshot = driverDowntimeProjectionSnapshot();
         if (!isClose) {
@@ -2227,13 +2228,46 @@ window.bindDriverMobileShell = function () {
         });
     }
 
+    /* Простой гаснет рейсом сам — на телефоне, без сервера (бой 02.10.2026,
+       Infinix без сети): «ожидание погрузки» шло после ручной погрузки и даже
+       после разгрузки, снять можно было только рукой; с сетью его гасил сервер.
+       Погрузка закрывает любой открытый простой (задание v376, п. 4), разгрузка —
+       только ожидание разгрузки. Закрытие ставится в очередь РАНЬШЕ события
+       рейса и тем же временем, так что серверу закрывать уже нечего. */
+    window.driverCloseDowntimeForTrip = function (kind, occurredAt) {
+        var activeId = String(downtimeCard && downtimeCard.dataset.driverActiveDowntimeId || "");
+        var flow = String(downtimeCard && downtimeCard.dataset.driverActiveDowntimeFlow || "");
+        if (!activeId) return Promise.resolve(null);
+        if (kind === "unload" && flow !== "waiting_unload") return Promise.resolve(null);
+        var startedAt = Date.parse(downtimeCard.dataset.driverActiveStartedAt || "");
+        var at = String(occurredAt || new Date().toISOString());
+        // Простой, начатый уже после этой отметки, рейс не закрывает.
+        if (Number.isFinite(startedAt) && startedAt > Date.parse(at)) return Promise.resolve(null);
+        return postDriverDowntimeAction({
+            action: "close",
+            client_action_id: generateClientActionId("driver-downtime-close"),
+            occurred_at: at
+        }).then(function (payload) {
+            clearDriverActiveDowntime(payload);
+            return payload;
+        }).catch(function () {
+            // Рейс важнее: не записали закрытие — погрузку это не держит.
+            return null;
+        });
+    };
+
     function registerDriverDowntimeAction(button, onComplete) {
         if (!button || typeof onComplete !== "function") return;
         var pending = false;
         button.addEventListener("click", function (event) {
             event.preventDefault();
-            if (button.getAttribute("aria-disabled") === "true") {
-                showDriverToast(button.dataset.driverUnavailableMessage || "Действие недоступно");
+            // Правила «гружёный/пустой/точка» решает телефон по своему рейсу
+            // (driver-downtime-drum-v1.js); серверная разметка — только без них.
+            var localRefusal = typeof window.driverDowntimeLocalRefusal === "function"
+                ? window.driverDowntimeLocalRefusal(button)
+                : null;
+            if (localRefusal !== null ? localRefusal : button.getAttribute("aria-disabled") === "true") {
+                showDriverToast(localRefusal || button.dataset.driverUnavailableMessage || "Действие недоступно");
                 return;
             }
             if (
@@ -2429,7 +2463,14 @@ window.bindDriverMobileShell = function () {
                 showDriverToast("Нет подтверждённого загруженного рейса для разгрузки.");
                 return false;
             }
-            driverOfflineOutbox.pending().then(function (events) {
+            // Ожидание разгрузки гасит сама разгрузка — тем же временем и раньше в очереди.
+            var unloadAt = new Date().toISOString();
+            var closeWait = typeof window.driverCloseDowntimeForTrip === "function"
+                ? window.driverCloseDowntimeForTrip("unload", unloadAt)
+                : Promise.resolve(null);
+            closeWait.then(function () {
+                return driverOfflineOutbox.pending();
+            }).then(function (events) {
                 var pendingPoint = events.slice().reverse().find(function (event) {
                     return event.event_type === "driver.trip.dump_point_changed"
                         && String(event.trip_id || "") === unloadTripId;
@@ -2437,6 +2478,7 @@ window.bindDriverMobileShell = function () {
                 return driverOfflineOutbox.enqueue({
                     event_id: actionId,
                     event_type: "driver.trip.unloaded",
+                    occurred_at: unloadAt,
                     trip_id: unloadTripId,
                     depends_on: pendingPoint ? [pendingPoint.event_id] : [],
                     payload: {trip_id: Number(unloadTripId)}
