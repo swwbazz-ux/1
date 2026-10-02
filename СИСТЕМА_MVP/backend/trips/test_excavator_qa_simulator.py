@@ -303,7 +303,7 @@ class ExcavatorQASimulatorTests(TestCase):
 
         self.assertEqual(open_response.status_code, 302)
         self.assertEqual(assignment_tick['driver_state'], 'assignment_pending')
-        self.assertContains(pending_page, 'ПРИНЯТЬ')
+        self.assertContains(pending_page, 'mobile-dial-action--spare is-assignment')
         self.assertEqual(accept_response.status_code, 302)
         self.assertEqual(pending_after_accept, AssignmentStatus.PENDING)
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
