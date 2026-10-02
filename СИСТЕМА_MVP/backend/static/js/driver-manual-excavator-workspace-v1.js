@@ -54,7 +54,17 @@
         return Number.isInteger(value) && value > 0 ? value : null;
     }
 
+    /* Перевод на новый экскаватор, который водитель принял на телефоне, а сервер
+       ещё не показал (v377, «ПРИНЯТЬ» = «Перейти сейчас»; driver-shift-v1.js). */
     function readWorkspaceContext() {
+        var base = readServerWorkspaceContext();
+        var override = typeof root.driverAssignmentContextOverride === "function"
+            ? root.driverAssignmentContextOverride(base)
+            : null;
+        return override || base;
+    }
+
+    function readServerWorkspaceContext() {
         var workspace = currentWorkspace || (
             root.document && root.document.querySelector("[data-driver-manual-workspace]")
         );

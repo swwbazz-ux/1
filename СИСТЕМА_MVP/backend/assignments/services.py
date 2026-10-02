@@ -1854,6 +1854,33 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
     return pending
 
 
+def accept_haul_assignment_now(assignment_id, *, truck_id, at=None):
+    """«ПРИНЯТЬ» у водителя = «Перейти сейчас» (решение 136, решение владельца 02.10.2026).
+
+    Водитель уже стоит под новым экскаватором — перевод применяется временем его
+    нажатия, а не через 5 минут; срок остаётся только для молчания (решения 137/138).
+    Время нажатия не может быть раньше самого назначения. Возвращает
+    (назначение, применено ли сейчас); уже применённое по сроку, отменённое или
+    заменённое назначение возвращается как есть — это не ошибка.
+    """
+    at = at or timezone.now()
+    with transaction.atomic():
+        lock_production_state()
+        Equipment.objects.select_for_update().get(pk=truck_id)
+        assignment = (
+            HaulAssignment.objects.select_for_update()
+            .filter(id=assignment_id, truck_id=truck_id)
+            .first()
+        )
+        if not assignment or assignment.status != AssignmentStatus.PENDING or assignment.ended_at:
+            return assignment, False
+        at = max(at, assignment.assigned_at)
+        assignment.effective_at = at
+        assignment.save(update_fields=['effective_at'])
+        applied = apply_pending_haul_assignment(assignment.id, now=at)
+    return (applied or assignment), bool(applied)
+
+
 def reconcile_due_haul_assignments(*, truck_id=None, now=None):
     now = now or timezone.now()
     due = HaulAssignment.objects.filter(

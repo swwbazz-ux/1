@@ -60,11 +60,17 @@
             <path class="mobile-dial-action__icon-line" d="M38 17v14m-7-7h14" />
         </svg>
     </button>
-    {% comment %} Четвёртый угол пока без функции: пустой слот держит симметрию четырёх углов вокруг круга. {% endcomment %}
-    <span class="mobile-dial-action mobile-dial-action--spare" aria-hidden="true">
+    {% comment %} Четвёртый угол: без назначения — пустой слот (держит симметрию четырёх углов),
+       при ожидающем назначении — «ПРИНЯТЬ» (v377). Структура одна в обоих состояниях: экран
+       обновляется послойно, без полной пересборки. {% endcomment %}
+    <button class="mobile-dial-action mobile-dial-action--spare{% if driver_new_assignment_label and not driver_assignment_accepted %} is-assignment{% endif %}" type="submit" form="driver-assignment-action" data-mobile-dial-action="assignment" data-driver-assignment-accept{% if driver_new_assignment_label and not driver_assignment_accepted %} aria-label="Принять: {{ driver_assignment_action_label }}" title="Принять назначение"{% else %} disabled aria-hidden="true" tabindex="-1"{% endif %}>
         <svg class="mobile-dial-action__shape" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
             <path class="mobile-dial-action__rim" d="M9.00 0.00H91.00Q100.00 0.00 100.00 9.00V16.60A188.89 188.89 0 0 0 16.60 100.00H9.00Q0.00 100.00 0.00 91.00V9.00Q0.00 0.00 9.00 0.00Z" />
             <path class="mobile-dial-action__face" d="M9.70 3.20H90.30Q96.80 3.20 96.80 9.70V14.64A192.09 192.09 0 0 0 14.64 96.80H9.70Q3.20 96.80 3.20 90.30V9.70Q3.20 3.20 9.70 3.20Z" />
         </svg>
-    </span>
+        <span class="mobile-dial-action__assignment" aria-hidden="true">
+            <span class="mobile-dial-action__assignment-row"><b class="mobile-dial-action__assignment-icon">↻</b><span data-driver-assignment-target-label>{{ driver_assignment_target_label }}</span></span>
+            <b class="mobile-dial-action__assignment-time" data-driver-assignment-countdown>{{ driver_assignment_countdown }}</b>
+        </span>
+    </button>
 </nav>

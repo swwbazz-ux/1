@@ -62,6 +62,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.trip.manual_completed': 'driver',
     'driver.free_bucket.selected': 'driver',
     'driver.free_bucket.cancelled': 'driver',
+    'driver.assignment.accepted': 'driver',
     'driver.downtime.started': 'driver',
     'driver.downtime.ended': 'driver',
     'driver.shift.closed': 'driver',
@@ -540,6 +541,41 @@ def _process_free_bucket_cancelled(access, normalized):
         'server_ids': {'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
         'version': state.version,
     }, {'free_bucket_acceptance': acceptance, 'shift': shift, 'equipment': acceptance.truck}
+
+
+def _process_driver_assignment_accepted(access, normalized):
+    """«ПРИНЯТЬ» у водителя = «Перейти сейчас» — в том числе из очереди без сети (v377).
+
+    Решение 136 и решение владельца 02.10.2026: перевод применяется временем
+    нажатия на телефоне (не раньше самого назначения), а не по сроку в 5 минут.
+    Очередь идёт по sequence, поэтому перевод встаёт раньше погрузок под новый
+    экскаватор, сделанных после нажатия. Уже применённое по сроку, отменённое или
+    заменённое назначение — не конфликт: записано, в техлог.
+    """
+    from assignments.services import accept_haul_assignment_now
+
+    shift = _locked_shift(access, normalized, role_code='driver')
+    assignment_id = _positive_int(normalized['payload'].get('assignment_id'), field='assignment_id')
+    assignment, applied_now = accept_haul_assignment_now(
+        assignment_id, truck_id=shift.equipment_id, at=normalized['occurred_at'],
+    )
+    if applied_now:
+        status = 'applied'
+    else:
+        status = 'missing' if assignment is None else 'already_final'
+        _log_discrepancy(
+            access=access, code='assignment_accept_after_final', process='Принятие назначения',
+            description=(
+                f'Назначение #{assignment_id} принято водителем на {normalized["occurred_at"]}, '
+                f'а на сервере оно {"не найдено" if assignment is None else assignment.status}. '
+                'Ничего не меняется.'
+            ),
+        )
+    return {
+        'server_ids': {'assignment_id': assignment_id, 'shift_id': shift.id},
+        'assignment_status': status,
+        'version': _current_operational_version(),
+    }, {'shift': shift, 'equipment': shift.equipment}
 
 
 def _process_driver_free_bucket_cancelled(access, normalized):
@@ -1401,38 +1437,40 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
         )
     selected = authoritative_by_id.get(dump_id)
     if not selected:
-        client_selected = client_by_id.get(dump_id)
-        one_off_point = DumpPoint.objects.select_for_update().filter(
-            pk=_positive_int(dump_id, field='dump_point_id'),
-            is_active=True,
-        ).first()
-        if one_off_point:
-            if not selected_one_off:
-                discrepancy(f'Точка {one_off_point} не входит в настройки {excavator}.')
-            selected = {
-                'id': one_off_point.id,
-                'name': str(one_off_point),
-                'transport_distance_km': (client_selected or {}).get('transport_distance_km'),
-            }
-    if not selected:
-        _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
+        selected = _driver_manual_selected_point(
+            authoritative, payload, discrepancy,
+            client_point=client_by_id.get(dump_id), quiet=selected_one_off,
+        )
     return authoritative, selected
 
 
-def _driver_manual_selected_point(authoritative, payload, discrepancy):
-    """Точка ручного рейса при сменившемся забое: точка водителя, если она жива."""
+def _driver_manual_selected_point(authoritative, payload, discrepancy, *, client_point=None, quiet=False):
+    """Точка ручного рейса — та, куда водитель ехал (телефон — истина).
+
+    Точка вне настроек забоя или уже выключенная в справочнике (водитель ехал
+    по устаревшему списку) — рейс записывается на неё, расхождение в техлог
+    (координатор, 02.10.2026). Только если такой точки в справочнике нет вовсе,
+    рейс ложится на первую точку забоя; отказ — лишь когда записать не на что.
+    """
     from references.models import DumpPoint
 
     dump_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
     for item in authoritative['dump_points']:
         if str(item['id']) == str(dump_id):
             return item
-    point = DumpPoint.objects.select_for_update().filter(pk=dump_id, is_active=True).first()
+    point = DumpPoint.objects.select_for_update().filter(pk=dump_id).first()
     if point:
-        discrepancy(f'Точка {point} не входит в новые настройки забоя.')
-        return {'id': point.id, 'name': str(point), 'transport_distance_km': None}
+        if not point.is_active:
+            discrepancy(f'Точка {point} выключена в справочнике.')
+        elif not quiet:
+            discrepancy(f'Точка {point} не входит в настройки забоя.')
+        return {
+            'id': point.id,
+            'name': str(point),
+            'transport_distance_km': (client_point or {}).get('transport_distance_km'),
+        }
     if authoritative['dump_points']:
-        discrepancy(f'Точки #{dump_id} больше нет, рейс записан на первую точку забоя.')
+        discrepancy(f'Точки #{dump_id} нет в справочнике, рейс записан на первую точку забоя.')
         return authoritative['dump_points'][0]
     _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
 
@@ -3378,6 +3416,7 @@ PROCESSORS = {
     'driver.trip.manual_completed': _process_driver_manual_completed,
     'driver.free_bucket.selected': _process_driver_free_bucket_selected,
     'driver.free_bucket.cancelled': _process_driver_free_bucket_cancelled,
+    'driver.assignment.accepted': _process_driver_assignment_accepted,
     'excavator.downtime.started': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=False),
     'excavator.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=True),
     'driver.downtime.started': lambda access, event: _process_downtime(access, event, role_code='driver', close=False),

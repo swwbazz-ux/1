@@ -398,44 +398,271 @@ window.bindDriverMobileShell = function () {
         });
     }
     syncDriverDialProgress();
+    /* Назначение (v377): отсчёт тикает в подписи круга и в углу «ПРИНЯТЬ», срок —
+       на скрытой форме назначения. В срок назначение вступает само (сервер,
+       reconcile_due_haul_assignments): угол гаснет, подпись круга обычная, круг —
+       на новом экскаваторе сразу, без сети тоже; экран не перезагружается
+       целиком — приходит обычное обновление фрагмента. */
     function bindAssignmentCountdown() {
-        var button = shell.querySelector("[data-driver-assignment-deadline]");
-        var output = button ? button.querySelector("[data-driver-assignment-countdown]") : null;
-        if (!button || !output) {
+        var form = shell.querySelector("#driver-assignment-action[data-driver-assignment-deadline]");
+        if (!form) {
             return;
         }
-        var deadline = Date.parse(button.dataset.driverAssignmentDeadline || "");
+        var deadline = Date.parse(form.dataset.driverAssignmentDeadline || "");
         if (!Number.isFinite(deadline)) {
             return;
         }
         function renderCountdown() {
-            if (!button.isConnected) {
+            if (!form.isConnected) {
                 window.clearInterval(timerId);
+                return;
+            }
+            // Назначение уже принято на телефоне — отсчитывать больше нечего.
+            if (driverAssignmentTapped(form)) {
+                window.clearInterval(timerId);
+                hideDriverAssignmentNotice();
                 return;
             }
             var remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
             var minutes = Math.floor(remaining / 60);
             var seconds = remaining % 60;
-            output.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
-            if (remaining > 0 || button.dataset.driverDeadlineReached === "true") {
+            var text = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+            shell.querySelectorAll("[data-driver-assignment-countdown]").forEach(function (output) {
+                if (output.textContent !== text) output.textContent = text;
+            });
+            if (remaining > 0 || form.dataset.driverDeadlineReached === "true") {
                 return;
             }
-            button.dataset.driverDeadlineReached = "true";
-            button.disabled = true;
+            form.dataset.driverDeadlineReached = "true";
             window.clearInterval(timerId);
+            applyDriverAssignmentDue(form);
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("assignment-deadline");
-            } else {
-                window.setTimeout(function () {
-                    if (button.isConnected) {
-                        window.location.reload();
-                    }
-                }, 1200);
+            } else if (typeof window.applyOperationalStateRefresh === "function") {
+                window.applyOperationalStateRefresh({
+                    version: Number(document.body.dataset.operationalStateVersion || 0),
+                    reason: "assignment-deadline"
+                });
             }
         }
         var timerId = window.setInterval(renderCountdown, 1000);
         renderCountdown();
+        window.syncDriverAssignmentCorner();
     }
+
+    /* «ПРИНЯТЬ» = «Перейти сейчас» (решение 136; владелец 02.10.2026, v377).
+       Тап в углу у круга — и самосвал сразу у нового экскаватора: круг, барабан
+       точек и контекст ручного рейса — его, угол и подпись назначения гаснут.
+       Событие driver.assignment.accepted уходит в очередь (без сети тоже); сервер
+       применяет перевод временем нажатия раньше следующих погрузок (порядок
+       очереди). Срок в 5 минут без тапа — то же переключение, только по времени.
+       Переопределение контекста живёт на window (экран может быть заменён целиком)
+       и в самом событии очереди (переживает перезапуск), пока сервер не ответил
+       и не пришёл свежий экран. */
+    function driverAssignmentOverrideFromForm(form) {
+        var excavatorId = Number(form && form.dataset.driverAssignmentExcavatorId || 0);
+        var assignmentId = Number(form && form.dataset.driverAssignmentId || 0);
+        if (!form || form.dataset.driverAssignmentKind !== "assign" || !excavatorId || !assignmentId) return null;
+        var catalog = window.DriverFreeBucket && typeof window.DriverFreeBucket.currentCatalog === "function"
+            ? window.DriverFreeBucket.currentCatalog()
+            : null;
+        var item = catalog && Array.isArray(catalog.excavators)
+            ? catalog.excavators.find(function (entry) { return Number(entry && entry.id) === excavatorId; })
+            : null;
+        return {
+            assignment_id: assignmentId,
+            excavator_id: excavatorId,
+            excavator_label: String(form.dataset.driverAssignmentTarget || item && item.label || ""),
+            complex_label: String(item && item.complex_label || ""),
+            rock_type_id: Number(item && item.rock_type_id || 0) || null,
+            rock_type_name: String(item && item.rock_type || ""),
+            loading_horizon: String(item && item.loading_horizon || ""),
+            loading_block: String(item && item.loading_block || ""),
+            dump_points: (item && Array.isArray(item.dump_points) ? item.dump_points : []).map(function (point) {
+                return {
+                    id: Number(point.id), name: String(point.name || ""),
+                    transport_distance_km: String(point.transport_distance_km || ""),
+                    completed_count: 0, is_last_sent: false, one_off: false
+                };
+            })
+        };
+    }
+
+    /* Контекст ручного рейса с учётом перевода, который сервер ещё не показал
+       (driver-manual-excavator-workspace-v1.js, readWorkspaceContext). */
+    window.driverAssignmentContextOverride = function (base) {
+        var override = window.__driverAssignmentOverride;
+        if (!override || !base) return null;
+        if (Number(base.excavator_id) === override.excavator_id && Number(base.assignment_id) === override.assignment_id) {
+            return null;
+        }
+        return Object.assign({}, base, {
+            authority_type: "assignment",
+            excavator_id: override.excavator_id,
+            excavator_label: override.excavator_label,
+            complex_label: override.complex_label,
+            assignment_id: override.assignment_id,
+            free_bucket_acceptance_id: null,
+            free_bucket_acceptance_local_id: "",
+            placement_id: null,
+            placement_updated_at: "",
+            rock_type_id: override.rock_type_id || base.rock_type_id,
+            rock_type_name: override.rock_type_name || base.rock_type_name,
+            loading_horizon: override.loading_horizon,
+            loading_block: override.loading_block,
+            dump_points: override.dump_points.map(function (point) { return Object.assign({}, point); })
+        });
+    };
+
+    /* Тап по этому назначению уже был (в памяти или в очереди телефона). */
+    function driverAssignmentTapped(form) {
+        var id = Number(form && form.dataset.driverAssignmentId || 0);
+        if (!id) return false;
+        if (form.dataset.driverAssignmentTapped === "true") return true;
+        var override = window.__driverAssignmentOverride;
+        if (override && override.assignment_id === id) return true;
+        return (window.driverOfflineEvents || []).some(function (event) {
+            return event && event.event_type === "driver.assignment.accepted"
+                && Number(event.payload && event.payload.assignment_id) === id
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) < 0;
+        });
+    }
+
+    /* Угол и подпись-отсчёт гаснут вместе: и у перевода, и у снятия назначения. */
+    function hideDriverAssignmentNotice() {
+        hideDriverAssignmentCorner();
+        var note = document.querySelector("[data-driver-assignment-note]");
+        if (note && !note.hidden) note.hidden = true;
+    }
+
+    function hideDriverAssignmentCorner() {
+        var corner = document.querySelector("[data-driver-assignment-accept]");
+        if (!corner || !corner.classList.contains("is-assignment")) return;
+        corner.classList.remove("is-assignment");
+        corner.disabled = true;
+        corner.setAttribute("aria-hidden", "true");
+        corner.setAttribute("tabindex", "-1");
+    }
+
+    /* Экран — на новом экскаваторе: угол и подпись назначения гаснут, пустой круг
+       называет новый экскаватор, барабан точек берёт его точки. Повторяется после
+       каждой подмены экрана, пока сервер не показал перевод сам. */
+    window.applyDriverAssignmentOverride = function () {
+        var override = window.__driverAssignmentOverride;
+        if (!override) return;
+        hideDriverAssignmentCorner();
+        var note = document.querySelector("[data-driver-assignment-note]");
+        if (note) note.hidden = true;
+        var workspace = document.querySelector("[data-driver-manual-workspace]");
+        if (workspace) {
+            if (workspace.dataset.driverManualPrimaryExcavatorLabel !== override.excavator_label) {
+                workspace.dataset.driverManualPrimaryExcavatorLabel = override.excavator_label;
+            }
+            if (workspace.dataset.driverManualAuthorityType !== "free_bucket"
+                && workspace.dataset.driverManualExcavatorLabel !== override.excavator_label) {
+                workspace.dataset.driverManualExcavatorLabel = override.excavator_label;
+            }
+        }
+        var label = document.querySelector("[data-driver-dial-label]");
+        var hold = document.querySelector("[data-driver-hold-button]");
+        var card = document.querySelector("[data-driver-active-downtime-id]");
+        var bucket = window.DriverFreeBucket && typeof window.DriverFreeBucket.currentState === "function"
+            ? window.DriverFreeBucket.currentState()
+            : null;
+        // Круг называет экскаватор только пустым, без простоя и без ковша.
+        var dialShowsExcavator = !!(
+            label && hold && hold.classList.contains("is-empty")
+            && hold.dataset.driverManualDial !== "true"
+            && !(card && card.dataset.driverActiveDowntimeId)
+            && !(bucket && bucket.active)
+        );
+        if (dialShowsExcavator && String(label.dataset.driverDialRaw || label.textContent).trim() !== override.excavator_label) {
+            label.textContent = override.excavator_label;
+            label.dataset.driverDialRaw = override.excavator_label;
+            delete label.dataset.driverDialFitKey;
+            if (typeof window.fitDriverDialLabelNow === "function") window.fitDriverDialLabelNow(label);
+        }
+        window.dispatchEvent(new CustomEvent("driver-assignment-context-changed", {detail: override}));
+    };
+
+    function pendingAssignmentAccept(events, assignmentId) {
+        return (events || window.driverOfflineEvents || []).filter(function (event) {
+            return event && event.event_type === "driver.assignment.accepted"
+                && (!assignmentId || Number(event.payload && event.payload.assignment_id) === assignmentId)
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) < 0;
+        }).pop() || null;
+    }
+
+    /* Сверка с очередью: тап, ещё не дошедший до сервера, держит экран на новом
+       экскаваторе и после перезапуска (переопределение — в самом событии). */
+    window.syncDriverAssignmentCorner = function (events) {
+        var pending = pendingAssignmentAccept(events, 0);
+        if (pending && !window.__driverAssignmentOverride && pending.context_snapshot
+            && pending.context_snapshot.assignment_override) {
+            window.__driverAssignmentOverride = pending.context_snapshot.assignment_override;
+        }
+        if (window.__driverAssignmentOverride) window.applyDriverAssignmentOverride();
+        var form = document.querySelector("#driver-assignment-action");
+        if (form && driverAssignmentTapped(form)) hideDriverAssignmentNotice();
+    };
+
+    window.driverAcceptAssignmentLocally = function (form) {
+        var override = driverAssignmentOverrideFromForm(form);
+        var assignmentId = Number(form && form.dataset.driverAssignmentId || 0);
+        if (!assignmentId || !driverOfflineOutbox) return Promise.resolve(false);
+        form.dataset.driverAssignmentTapped = "true";
+        if (override) {
+            window.__driverAssignmentOverride = override;
+            window.applyDriverAssignmentOverride();
+        }
+        hideDriverAssignmentNotice();
+        return driverOfflineOutbox.enqueue({
+            event_id: generateClientActionId("driver-assignment-accept"),
+            event_type: "driver.assignment.accepted",
+            occurred_at: new Date().toISOString(),
+            context_snapshot: {assignment_override: override},
+            payload: {assignment_id: assignmentId}
+        }).then(function () {
+            if (typeof playDriverSound === "function") playDriverSound("action_ok");
+            driverOfflineOutbox.flush().catch(function () {});
+            return true;
+        });
+    };
+
+    /* Срок назначения вышел — то же переключение, что и тап, без события. */
+    function applyDriverAssignmentDue(form) {
+        var override = driverAssignmentOverrideFromForm(form);
+        if (override) {
+            window.__driverAssignmentOverride = override;
+            window.applyDriverAssignmentOverride();
+            return;
+        }
+        hideDriverAssignmentCorner();
+        var note = document.querySelector("[data-driver-assignment-note]");
+        if (note) note.hidden = true;
+    }
+
+    /* Свежий экран сервера после ответа на тап (или после срока) — правда:
+       переопределение снимается, если тапа больше нет в очереди. */
+    if (!window.__driverAssignmentRefreshBound) {
+        window.__driverAssignmentRefreshBound = true;
+        window.addEventListener("operational-state-refresh-applied", function () {
+            var override = window.__driverAssignmentOverride;
+            if (!override) return;
+            var queued = (window.driverOfflineEvents || []).some(function (event) {
+                return event && event.event_type === "driver.assignment.accepted"
+                    && Number(event.payload && event.payload.assignment_id) === override.assignment_id
+                    && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) < 0;
+            });
+            if (queued) {
+                window.applyDriverAssignmentOverride();
+                return;
+            }
+            window.__driverAssignmentOverride = null;
+            window.dispatchEvent(new CustomEvent("driver-assignment-context-changed", {detail: null}));
+        });
+    }
+
     bindAssignmentCountdown();
     function bindDriverShiftControls() {
         var form = shell.querySelector("[data-driver-shift-close-form]");
@@ -1078,6 +1305,7 @@ window.bindDriverMobileShell = function () {
         if (!current) return;
         driverOfflineEvents = Array.isArray(state.events) ? state.events : [];
         window.driverOfflineEvents = driverOfflineEvents;
+        if (typeof window.syncDriverAssignmentCorner === "function") window.syncDriverAssignmentCorner(driverOfflineEvents);
         var label = current.querySelector("[data-driver-sync-label]");
         var pending = Number(state.pending || 0);
         var review = Number(state.review || 0);
@@ -2816,7 +3044,9 @@ window.bindDriverMobileShell = function () {
                 })
                 : shiftKind === "shift-close"
                     ? window.DriverShiftCloseOutbox.submit(form)
-                    : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
+                    : shiftKind === "assignment"
+                        ? window.driverAcceptAssignmentLocally(form)
+                        : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
             Promise.resolve(submitPromise).then(function (applied) {
                 if (!applied && form.isConnected) {
                     form.dataset.driverInPlacePending = "false";

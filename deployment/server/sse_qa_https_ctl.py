@@ -90,6 +90,143 @@ HOOK_DEPLOY_COMMAND = f"/usr/bin/python3 {HOOK_CONTROLLER} renew-deploy"
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 _ACME_TOKEN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
+# Exact accepted installer template from immutable C2 commit
+# 9d336723f3dc2fc574937a57602a27b54c54fd77, Git blob
+# 70baadc6873ec8180dad38329076be9fe0cb5e8c.  The HTTPS controller is
+# delivered without the installer bundle, so it carries the complete pinned
+# contract and substitutes only the already validated allow CIDR.
+C2_NGINX_TEMPLATE = """limit_conn_zone $server_name zone=sse_qa_total:32k;
+limit_conn_zone $binary_remote_addr zone=sse_qa_per_ip:64k;
+
+upstream sse_qa_wsgi {
+    server 127.0.0.1:18080;
+}
+
+upstream sse_qa_asgi {
+    server 127.0.0.1:18082;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name sse-qa.driverform.ru;
+    access_log /srv/sse-qa/log/nginx-access.log combined buffer=16k flush=5s;
+    error_log /srv/sse-qa/log/nginx-error.log warn;
+
+    ssl_certificate /etc/letsencrypt/live/sse-qa.driverform.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sse-qa.driverform.ru/privkey.pem;
+
+    auth_basic "SSE QA";
+    auth_basic_user_file /run/sse-qa-nginx/htpasswd;
+    satisfy all;
+    allow @@ALLOW_CIDR@@;
+    deny all;
+
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+    limit_conn sse_qa_per_ip 8;
+    client_max_body_size 2m;
+
+    location = /realtime/stream/ {
+        limit_conn sse_qa_total 2;
+        proxy_pass http://sse_qa_asgi;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering no always;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+    }
+
+    location /static/ {
+        alias /srv/sse-qa/current/backend/staticfiles/;
+        access_log off;
+        expires 5m;
+    }
+
+    location /media/ {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://sse_qa_wsgi;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}
+"""
+C2_NGINX_TEMPLATE_SHA256 = (
+    "a9d33543398df5188734e152d056e04e3e27770e09bcf57ce73eba42f9e710c9"
+)
+
+_C2_NGINX_CONTRACT_FRAGMENTS = (
+    ("nginx_c2_hostname_v1", "    server_name sse-qa.driverform.ru;\n"),
+    (
+        "nginx_c2_tls_paths_v1",
+        "    ssl_certificate /etc/letsencrypt/live/sse-qa.driverform.ru/fullchain.pem;\n"
+        "    ssl_certificate_key /etc/letsencrypt/live/sse-qa.driverform.ru/privkey.pem;\n",
+    ),
+    (
+        "nginx_c2_access_control_v1",
+        "    auth_basic \"SSE QA\";\n"
+        "    auth_basic_user_file /run/sse-qa-nginx/htpasswd;\n"
+        "    satisfy all;\n"
+        "    allow @@ALLOW_CIDR@@;\n"
+        "    deny all;\n",
+    ),
+    (
+        "nginx_c2_upstream_wsgi_v1",
+        "upstream sse_qa_wsgi {\n"
+        "    server 127.0.0.1:18080;\n"
+        "}\n",
+    ),
+    (
+        "nginx_c2_upstream_asgi_v1",
+        "upstream sse_qa_asgi {\n"
+        "    server 127.0.0.1:18082;\n"
+        "}\n",
+    ),
+    (
+        "nginx_c2_route_realtime_v1",
+        "    location = /realtime/stream/ {\n"
+        "        limit_conn sse_qa_total 2;\n"
+        "        proxy_pass http://sse_qa_asgi;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Connection \"\";\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_buffering off;\n"
+        "        proxy_cache off;\n"
+        "        gzip off;\n"
+        "        add_header X-Accel-Buffering no always;\n"
+        "        proxy_read_timeout 35s;\n"
+        "        proxy_send_timeout 35s;\n"
+        "    }\n",
+    ),
+    (
+        "nginx_c2_route_application_v1",
+        "    location / {\n"
+        "        proxy_pass http://sse_qa_wsgi;\n"
+        "        proxy_http_version 1.1;\n"
+        "        proxy_set_header Host $host;\n"
+        "        proxy_set_header X-Forwarded-Proto https;\n"
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "        proxy_connect_timeout 3s;\n"
+        "        proxy_read_timeout 30s;\n"
+        "        proxy_send_timeout 30s;\n"
+        "    }\n",
+    ),
+)
+
 
 class QaHttpsError(RuntimeError):
     pass
@@ -268,6 +405,53 @@ def save_ownership(root: Path, state: dict[str, object]) -> None:
     )
 
 
+def _render_c2_nginx(allow_cidr: str) -> str:
+    if digest_bytes(C2_NGINX_TEMPLATE.encode("utf-8")) != C2_NGINX_TEMPLATE_SHA256:
+        raise QaHttpsError("pinned C2 nginx template digest mismatch")
+    rendered = C2_NGINX_TEMPLATE.replace("@@ALLOW_CIDR@@", allow_cidr)
+    if "@@" in rendered:
+        raise QaHttpsError("pinned C2 nginx template marker mismatch")
+    return rendered
+
+
+def _nginx_contract_id(actual: str, expected: str, allow_cidr: str) -> str:
+    """Classify an exact-template mismatch without exposing file content.
+
+    These fragment checks are diagnostics only.  Acceptance is decided solely
+    by full equality with the pinned rendered C2 template.
+    """
+    for contract_id, template_fragment in _C2_NGINX_CONTRACT_FRAGMENTS:
+        fragment = template_fragment.replace("@@ALLOW_CIDR@@", allow_cidr)
+        if actual.count(fragment) != expected.count(fragment):
+            return contract_id
+    return "nginx_c2_exact_template_v1"
+
+
+def _validate_installed_nginx(nginx_text: str) -> str:
+    allow_values = re.findall(
+        r"(?m)^[ \t]*allow[ \t]+([^;\r\n]+);[ \t]*$", nginx_text,
+    )
+    if len(allow_values) != 1:
+        raise QaHttpsError(
+            "installed QA nginx template mismatch "
+            "contract_id=nginx_c2_allow_cidr_v1"
+        )
+    try:
+        allow_cidr = validate_allow_cidr(allow_values[0])
+    except QaHttpsError as exc:
+        raise QaHttpsError(
+            "installed QA nginx template mismatch "
+            "contract_id=nginx_c2_allow_cidr_v1"
+        ) from exc
+    expected = _render_c2_nginx(allow_cidr)
+    if nginx_text != expected:
+        contract_id = _nginx_contract_id(nginx_text, expected, allow_cidr)
+        raise QaHttpsError(
+            f"installed QA nginx template mismatch contract_id={contract_id}"
+        )
+    return allow_cidr
+
+
 def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     marker = rooted(root, INSTALLATION_MARKER)
     if not marker.is_file() or marker.is_symlink():
@@ -309,19 +493,7 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     if site.exists() or site.is_symlink():
         raise QaHttpsError("QA nginx site must remain disabled")
     nginx_text = rooted(root, QA_NGINX_CONFIG).read_text(encoding="utf-8")
-    for required in (
-        f"server_name {QA_HOSTNAME};",
-        f"ssl_certificate {CERT_LIVE}/fullchain.pem;",
-        f"ssl_certificate_key {CERT_LIVE}/privkey.pem;",
-        "proxy_pass http://127.0.0.1:18080;",
-        "proxy_pass http://127.0.0.1:18082;",
-        "deny all;",
-    ):
-        if nginx_text.count(required) != 1:
-            raise QaHttpsError("installed QA nginx template mismatch")
-    allow = re.findall(r"(?m)^\s*allow\s+([0-9.]+/32);\s*$", nginx_text)
-    if len(allow) != 1:
-        raise QaHttpsError("installed QA nginx allow directive mismatch")
+    allow_cidr = _validate_installed_nginx(nginx_text)
     if root == REAL_ROOT:
         active = [
             unit for unit in QA_SERVICES
@@ -329,7 +501,7 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
         ]
         if active:
             raise QaHttpsError("QA services must remain inactive")
-    return state, allow[0]
+    return state, allow_cidr
 
 
 def validate_allow_cidr(value: str) -> str:
@@ -365,7 +537,7 @@ def certbot_ready(root: Path) -> None:
     if not accounts.is_dir() or accounts.is_symlink():
         raise QaHttpsError("existing Certbot account store is unavailable")
     registrations = [
-        item for item in accounts.rglob("registration.json")
+        item for item in accounts.rglob("regr.json")
         if item.is_file() and not item.is_symlink()
     ]
     if not registrations:

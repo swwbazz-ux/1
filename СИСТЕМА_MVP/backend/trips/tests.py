@@ -4948,7 +4948,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
         return previous, pending
 
-    def test_driver_accept_does_not_finish_timed_transfer(self):
+    def test_driver_accept_finishes_the_transfer_at_the_tap(self):
+        # Решение 233 (02.10.2026) по решению 136: «ПРИНЯТЬ» = «Перейти сейчас».
         previous = HaulAssignment.objects.get(
             truck=self.truck,
             excavator=self.excavator,
@@ -4971,11 +4972,14 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         self.assertEqual(accepted.status_code, 200)
         self.assertTrue(accepted.json()['ok'])
-        self.assertTrue(accepted.json()['transfer_pending'])
+        self.assertFalse(accepted.json()['transfer_pending'])
+        self.assertTrue(accepted.json()['applied'])
         pending.refresh_from_db()
-        self.assertEqual(pending.status, AssignmentStatus.PENDING)
-        self.assertIsNotNone(pending.accepted_at)
-        self.assertTrue(
+        previous.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertEqual(pending.effective_at, pending.accepted_at)
+        self.assertEqual(previous.ended_at, pending.accepted_at)
+        self.assertFalse(
             HaulAssignmentHandoff.objects.filter(
                 truck=self.truck,
                 source_assignment=previous,
@@ -4984,7 +4988,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
-    def test_driver_accept_keeps_from_free_assignment_pending_until_deadline(self):
+    def test_driver_accept_applies_from_free_assignment_at_the_tap(self):
         free_truck = Equipment.objects.create(
             equipment_type=self.truck_type,
             garage_number='79',
@@ -5012,13 +5016,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
         self.assertEqual(accepted.status_code, 200)
-        self.assertTrue(accepted.json()['transition_pending'])
+        self.assertFalse(accepted.json()['transition_pending'])
         pending.refresh_from_db()
-        self.assertEqual(pending.status, AssignmentStatus.PENDING)
-        self.assertEqual(pending.effective_at, deadline)
-        self.assertIsNotNone(pending.accepted_at)
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        self.assertLess(pending.effective_at, deadline)
+        self.assertEqual(pending.effective_at, pending.accepted_at)
 
-    def test_driver_accept_keeps_release_pending_until_deadline(self):
+    def test_driver_accept_applies_release_at_the_tap(self):
         pending, created = schedule_haul_release(
             truck=self.truck,
             assigned_by=self.operator,
@@ -5036,11 +5040,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
 
         self.assertEqual(accepted.status_code, 200)
-        self.assertTrue(accepted.json()['transition_pending'])
+        self.assertFalse(accepted.json()['transition_pending'])
         pending.refresh_from_db()
-        self.assertEqual(pending.status, AssignmentStatus.PENDING)
-        self.assertEqual(pending.effective_at, deadline)
-        self.assertIsNotNone(pending.accepted_at)
+        # Снятие применяется сразу: самосвал освобождён временем нажатия.
+        self.assertIsNotNone(pending.ended_at)
+        self.assertLess(pending.effective_at, deadline)
 
     def test_timer_applies_reassignment_and_expires_transfer(self):
         previous = HaulAssignment.objects.get(

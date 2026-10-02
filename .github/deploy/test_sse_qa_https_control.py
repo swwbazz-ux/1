@@ -16,10 +16,16 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "deployment/server/sse_qa_https_ctl.py"
+INSTALLER_SOURCE = ROOT / "deployment/server/sse_qa_ctl.py"
+PINNED_C2_NGINX = ROOT / ".github/deploy/fixtures/sse_qa_c2_nginx.conf.template"
 SPEC = importlib.util.spec_from_file_location("sse_qa_https_ctl", SOURCE)
 assert SPEC and SPEC.loader
 ctl = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ctl)
+INSTALLER_SPEC = importlib.util.spec_from_file_location("sse_qa_ctl", INSTALLER_SOURCE)
+assert INSTALLER_SPEC and INSTALLER_SPEC.loader
+installer_ctl = importlib.util.module_from_spec(INSTALLER_SPEC)
+INSTALLER_SPEC.loader.exec_module(installer_ctl)
 
 
 def result(command: list[str], stdout: str = "", returncode: int = 0):
@@ -30,26 +36,20 @@ class HttpsControlTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.nginx_text = (
-            "server {\n"
-            f"    server_name {ctl.QA_HOSTNAME};\n"
-            f"    ssl_certificate {ctl.CERT_LIVE}/fullchain.pem;\n"
-            f"    ssl_certificate_key {ctl.CERT_LIVE}/privkey.pem;\n"
-            "    allow 77.41.146.126/32;\n"
-            "    deny all;\n"
-            "    location / { proxy_pass http://127.0.0.1:18080; }\n"
-            "    location /realtime/stream/ { proxy_pass http://127.0.0.1:18082; }\n"
-            "}\n"
+        self.nginx_text = installer_ctl.render(
+            PINNED_C2_NGINX.read_text(encoding="utf-8"),
+            {"ALLOW_CIDR": "198.51.100.42/32"},
         )
         self._write(ctl.INSTALLATION_MARKER, (ctl.MARKER + "\n").encode())
         self._write(ctl.APP_ENV, b"SSE_PILOT_ENABLED=false\n")
         self._write(ctl.QA_NGINX_CONFIG, self.nginx_text.encode())
         certbot = self._write(ctl.CERTBOT, b"#!/bin/sh\nexit 0\n")
         certbot.chmod(0o755)
-        self._write(
-            ctl.CERTBOT_ACCOUNTS / "acme-v02.api.letsencrypt.org/directory/account/registration.json",
-            b"{}\n",
+        self.account_registration = (
+            ctl.CERTBOT_ACCOUNTS
+            / "acme-v02.api.letsencrypt.org/directory/account/regr.json"
         )
+        self._write(self.account_registration, b"{}\n")
         state = {
             "schema": ctl.OWNERSHIP_SCHEMA,
             "complete": True,
@@ -79,6 +79,16 @@ class HttpsControlTests(unittest.TestCase):
 
     def _digest(self, logical: Path) -> str:
         return hashlib.sha256(self._path(logical).read_bytes()).hexdigest()
+
+    def _replace_nginx_and_refresh_ownership(self, nginx_text: str) -> None:
+        self._path(ctl.QA_NGINX_CONFIG).write_text(nginx_text, encoding="utf-8")
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["files"][ctl.QA_NGINX_CONFIG.as_posix()] = self._digest(
+            ctl.QA_NGINX_CONFIG
+        )
+        self._path(ctl.OWNERSHIP_PATH).write_text(
+            json.dumps(state, sort_keys=True) + "\n", encoding="utf-8",
+        )
 
     def _seed_https_runtime(self) -> None:
         hook = self._write(ctl.HOOK_CONTROLLER, ctl.hook_controller_bytes())
@@ -145,6 +155,110 @@ class HttpsControlTests(unittest.TestCase):
             if path.is_file()
         }
 
+    def test_pinned_c2_nginx_fixture_matches_immutable_source(self) -> None:
+        payload = PINNED_C2_NGINX.read_bytes().replace(b"\r\n", b"\n")
+        git_blob = subprocess.run(
+            ["git", "hash-object", "--stdin"],
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout.decode("ascii").strip()
+        self.assertEqual(len(payload), 1908)
+        self.assertEqual(
+            git_blob, "70baadc6873ec8180dad38329076be9fe0cb5e8c",
+        )
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), ctl.C2_NGINX_TEMPLATE_SHA256)
+        self.assertEqual(payload.decode("utf-8"), ctl.C2_NGINX_TEMPLATE)
+
+    def test_load_disabled_installation_accepts_real_c2_render(self) -> None:
+        state, allow_cidr = ctl.load_disabled_installation(self.root)
+        self.assertEqual(state["phase"], "complete_disabled")
+        self.assertEqual(allow_cidr, "198.51.100.42/32")
+
+    def test_load_disabled_installation_rejects_c2_contract_mutations(self) -> None:
+        base = self.nginx_text
+        swapped_endpoints = base.replace("127.0.0.1:18080", "SWAP_ENDPOINT")
+        swapped_endpoints = swapped_endpoints.replace(
+            "127.0.0.1:18082", "127.0.0.1:18080",
+        ).replace("SWAP_ENDPOINT", "127.0.0.1:18082")
+        swapped_routes = base.replace("http://sse_qa_asgi", "http://SWAP_ROUTE")
+        swapped_routes = swapped_routes.replace(
+            "http://sse_qa_wsgi", "http://sse_qa_asgi",
+        ).replace("http://SWAP_ROUTE", "http://sse_qa_wsgi")
+        cases = (
+            (
+                "hostname",
+                base.replace(ctl.QA_HOSTNAME, "wrong.invalid", 1),
+                "nginx_c2_hostname_v1",
+            ),
+            (
+                "tls-path",
+                base.replace("/fullchain.pem", "/wrong-fullchain.pem", 1),
+                "nginx_c2_tls_paths_v1",
+            ),
+            (
+                "basic-auth",
+                base.replace('auth_basic "SSE QA";', 'auth_basic "Wrong";', 1),
+                "nginx_c2_access_control_v1",
+            ),
+            (
+                "allow-cidr",
+                base.replace("198.51.100.42/32", "198.51.100.0/24", 1),
+                "nginx_c2_allow_cidr_v1",
+            ),
+            (
+                "deny-all",
+                base.replace("    deny all;", "    deny 198.51.100.0/24;", 1),
+                "nginx_c2_access_control_v1",
+            ),
+            (
+                "wsgi-endpoint",
+                base.replace("127.0.0.1:18080", "127.0.0.1:18081", 1),
+                "nginx_c2_upstream_wsgi_v1",
+            ),
+            (
+                "asgi-endpoint",
+                base.replace("127.0.0.1:18082", "127.0.0.1:18083", 1),
+                "nginx_c2_upstream_asgi_v1",
+            ),
+            (
+                "swapped-endpoints",
+                swapped_endpoints,
+                "nginx_c2_upstream_wsgi_v1",
+            ),
+            (
+                "realtime-route",
+                base.replace("proxy_pass http://sse_qa_asgi;", "proxy_pass http://sse_qa_wsgi;", 1),
+                "nginx_c2_route_realtime_v1",
+            ),
+            (
+                "application-route",
+                base.replace("proxy_pass http://sse_qa_wsgi;", "proxy_pass http://sse_qa_asgi;", 1),
+                "nginx_c2_route_application_v1",
+            ),
+            (
+                "swapped-routes",
+                swapped_routes,
+                "nginx_c2_route_realtime_v1",
+            ),
+            (
+                "extra-directive",
+                base.replace("    client_max_body_size 2m;\n", "    client_max_body_size 2m;\n    client_body_timeout 5s;\n", 1),
+                "nginx_c2_exact_template_v1",
+            ),
+        )
+        for label, mutated, contract_id in cases:
+            with self.subTest(label=label):
+                self._replace_nginx_and_refresh_ownership(mutated)
+                with self.assertRaises(ctl.QaHttpsError) as caught:
+                    ctl.load_disabled_installation(self.root)
+                self.assertEqual(
+                    str(caught.exception),
+                    "installed QA nginx template mismatch "
+                    f"contract_id={contract_id}",
+                )
+
     def test_inspect_is_read_only_and_reports_missing_certificate(self) -> None:
         before = self._snapshot()
         with mock.patch.object(ctl.socket, "getaddrinfo", return_value=self._dns()), mock.patch.object(
@@ -170,6 +284,41 @@ class HttpsControlTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ctl.QaHttpsError, "ACME"):
                 ctl.inspect(self.root)
+
+    def test_certbot_ready_accepts_standard_regr_file(self) -> None:
+        ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_missing_regr_file(self) -> None:
+        self._path(self.account_registration).unlink()
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_legacy_registration_filename(self) -> None:
+        self._path(self.account_registration).unlink()
+        self._write(self.account_registration.with_name("registration.json"), b"{}\n")
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_regr_symlink(self) -> None:
+        registration = self._path(self.account_registration)
+        registration.unlink()
+        target = self._write(Path("/tmp/sse-qa-synthetic-certbot-regr.json"), b"{}\n")
+        if os.name == "nt":
+            try:
+                registration.symlink_to(target)
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+        else:
+            registration.symlink_to(target)
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_regr_directory(self) -> None:
+        registration = self._path(self.account_registration)
+        registration.unlink()
+        registration.mkdir()
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
 
     def test_nginx_conflict_recognizes_quotes_multiline_and_ignores_comments(self) -> None:
         positives = (
@@ -197,7 +346,7 @@ class HttpsControlTests(unittest.TestCase):
                     ctl.nginx_conflict()
 
     def test_prepare_rejects_non_ipv4_32_before_commands(self) -> None:
-        for value in ("77.41.146.0/24", "2001:db8::1/128", "77.41.146.126", " 77.41.146.126/32"):
+        for value in ("198.51.100.0/24", "2001:db8::1/128", "198.51.100.42", " 198.51.100.42/32"):
             with self.subTest(value=value), mock.patch.object(ctl, "run") as called:
                 with self.assertRaisesRegex(ctl.QaHttpsError, "IPv4 /32"):
                     ctl.prepare(self.root, value)
