@@ -102,6 +102,66 @@ body.driver-mobile-screen .mobile-dial-action--spare .mobile-dial-action__face {
     stroke-opacity: .35;
 }
 
+/* Угол «ПРИНЯТЬ» при ожидающем назначении (v377): жёлтый, как всё про назначение.
+   Без назначения угол остаётся пустым слотом (правило выше). */
+body.driver-mobile-screen .mobile-dial-action--spare .mobile-dial-action__assignment {
+    display: none;
+}
+
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment {
+    --mobile-dial-accent: var(--driver-yellow, #ffd12a);
+    --mobile-dial-accent-rgb: 255, 209, 42;
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+    container-type: size;
+}
+
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment .mobile-dial-action__face {
+    stroke-opacity: .9;
+}
+
+/* Надписи живут во внешнем углу слота: дуга у круга срезает середину. Слот
+   перевёрнут по вертикали (flip-y), поэтому надписи переворачиваются обратно. */
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment .mobile-dial-action__assignment {
+    position: absolute;
+    top: 10%;
+    left: 10%;
+    width: 64%;
+    display: grid;
+    justify-items: start;
+    gap: 3cqh;
+    color: var(--mobile-dial-accent);
+    font-weight: 900;
+    line-height: 1;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+    transform: scale(var(--mobile-dial-flip-x), var(--mobile-dial-flip-y));
+    transform-origin: center;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .6);
+    pointer-events: none;
+}
+
+/* Длинная строка «↻ ЭКС-2» — нижняя, у внешнего края слота: там дуга дальше всего. */
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment .mobile-dial-action__assignment-row {
+    order: 2;
+    display: flex;
+    align-items: center;
+    gap: 3cqw;
+    font-size: 16cqw;
+    white-space: nowrap;
+}
+
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment .mobile-dial-action__assignment-icon {
+    font-size: 19cqw;
+}
+
+body.driver-mobile-screen .mobile-dial-action--spare.is-assignment .mobile-dial-action__assignment-time {
+    order: 1;
+    font-size: 14cqw;
+    color: rgba(255, 238, 164, .95);
+}
+
 body.driver-mobile-screen .mobile-dial-action__shape {
     display: block;
     width: 100%;

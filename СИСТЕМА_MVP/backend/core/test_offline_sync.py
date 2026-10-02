@@ -993,6 +993,61 @@ class OfflineEventSyncTests(TestCase):
         later.refresh_from_db()
         self.assertIsNone(later.ended_at)
 
+    def _pending_assignment(self, *, effective_in):
+        from assignments.services import schedule_haul_assignment
+
+        pending, _ = schedule_haul_assignment(truck=self.truck, excavator=self.other_excavator)
+        HaulAssignment.objects.filter(pk=pending.pk).update(effective_at=timezone.now() + effective_in)
+        pending.refresh_from_db()
+        return pending
+
+    def _assignment_accept_event(self, assignment, event_id, sequence=1, occurred_at=None):
+        return {
+            'event_id': event_id,
+            'event_type': 'driver.assignment.accepted',
+            'format_version': 1,
+            'occurred_at': (occurred_at or timezone.now()).isoformat(),
+            'sequence': sequence,
+            'depends_on': [],
+            'shift_id': self.truck_shift.id,
+            'equipment_id': self.truck.id,
+            'payload': {'assignment_id': assignment.id},
+        }
+
+    def test_driver_accepts_a_pending_assignment_from_the_queue_before_its_deadline(self):
+        # v377: «ПРИНЯТЬ» в углу у круга работает и без сети — событием очереди.
+        # До срока это квитанция водителя: назначение вступит в силу в свой срок.
+        pending = self._pending_assignment(effective_in=timedelta(minutes=4))
+        tapped_at = timezone.now()
+        result = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-early', occurred_at=tapped_at)],
+            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['assignment_status'], 'accepted')
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        self.assertEqual(pending.accepted_at, tapped_at)
+
+    def test_driver_accept_after_the_deadline_applies_or_is_already_recorded(self):
+        pending = self._pending_assignment(effective_in=-timedelta(seconds=5))
+        first = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-due')],
+            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(first['status'], 'accepted', first)
+        self.assertEqual(first['assignment_status'], 'applied')
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
+        # Назначение уже применено (сроком или первым нажатием) — второе нажатие
+        # с другого раза не конфликт.
+        second = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-again', sequence=2)],
+            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
+        ).json()['results'][0]
+        self.assertEqual(second['status'], 'accepted', second)
+        self.assertEqual(second['assignment_status'], 'already_final')
+
     def test_manual_load_to_a_point_switched_off_in_the_catalog_is_recorded_on_it(self):
         # Координатор 02.10.2026: водитель ехал по устаревшему списку на точку,
         # которую уже выключили в справочнике. Телефон — истина: рейс на эту точку,

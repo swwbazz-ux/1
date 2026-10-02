@@ -62,6 +62,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.trip.manual_completed': 'driver',
     'driver.free_bucket.selected': 'driver',
     'driver.free_bucket.cancelled': 'driver',
+    'driver.assignment.accepted': 'driver',
     'driver.downtime.started': 'driver',
     'driver.downtime.ended': 'driver',
     'driver.shift.closed': 'driver',
@@ -540,6 +541,53 @@ def _process_free_bucket_cancelled(access, normalized):
         'server_ids': {'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
         'version': state.version,
     }, {'free_bucket_acceptance': acceptance, 'shift': shift, 'equipment': acceptance.truck}
+
+
+def _process_driver_assignment_accepted(access, normalized):
+    """«ПРИНЯТЬ» назначение — с телефона, в том числе без сети (v377).
+
+    Назначение вступает в силу само по сроку (reconcile_due_haul_assignments),
+    «ПРИНЯТЬ» — квитанция водителя: до срока ставит accepted_at, как и прежний
+    обработчик формы (users.views.driver_accept_assignment_view); если срок уже
+    вышел, а назначение ещё ждёт — применяет его. Уже применённое по сроку,
+    отменённое или заменённое назначение — не конфликт: записано, ничего не меняем.
+    """
+    from assignments.models import AssignmentStatus, HaulAssignment
+    from assignments.services import apply_pending_haul_assignment
+
+    shift = _locked_shift(access, normalized, role_code='driver')
+    lock_production_state()
+    assignment_id = _positive_int(normalized['payload'].get('assignment_id'), field='assignment_id')
+    assignment = (
+        HaulAssignment.objects.select_for_update()
+        .filter(pk=assignment_id, truck_id=shift.equipment_id)
+        .first()
+    )
+    status = 'missing'
+    if assignment and assignment.status == AssignmentStatus.PENDING and assignment.ended_at is None:
+        if assignment.effective_at and assignment.effective_at > timezone.now():
+            if assignment.accepted_at is None:
+                assignment.accepted_at = normalized['occurred_at']
+                assignment.save(update_fields=['accepted_at'])
+            status = 'accepted'
+        else:
+            status = 'applied' if apply_pending_haul_assignment(assignment.id) else 'pending'
+    elif assignment:
+        status = 'already_final'
+    if status in {'missing', 'already_final'}:
+        _log_discrepancy(
+            access=access, code='assignment_accept_after_final', process='Принятие назначения',
+            description=(
+                f'Назначение #{assignment_id} принято водителем на {normalized["occurred_at"]}, '
+                f'а на сервере оно {"не найдено" if status == "missing" else assignment.status}. '
+                'Ничего не меняется.'
+            ),
+        )
+    return {
+        'server_ids': {'assignment_id': assignment_id, 'shift_id': shift.id},
+        'assignment_status': status,
+        'version': _current_operational_version(),
+    }, {'shift': shift, 'equipment': shift.equipment}
 
 
 def _process_driver_free_bucket_cancelled(access, normalized):
@@ -3380,6 +3428,7 @@ PROCESSORS = {
     'driver.trip.manual_completed': _process_driver_manual_completed,
     'driver.free_bucket.selected': _process_driver_free_bucket_selected,
     'driver.free_bucket.cancelled': _process_driver_free_bucket_cancelled,
+    'driver.assignment.accepted': _process_driver_assignment_accepted,
     'excavator.downtime.started': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=False),
     'excavator.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='excavator_operator', close=True),
     'driver.downtime.started': lambda access, event: _process_downtime(access, event, role_code='driver', close=False),

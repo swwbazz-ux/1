@@ -14,6 +14,7 @@
         "driver.trip.manual_completed",
         "driver.free_bucket.selected",
         "driver.free_bucket.cancelled",
+        "driver.assignment.accepted",
         "driver.downtime.started",
         "driver.downtime.ended",
         "driver.shift.closed",

@@ -5464,11 +5464,18 @@ def driver_shift_view(request):
     driver_assignment_action_label = ''
     driver_assignment_effective_at = ''
     driver_assignment_countdown = '05:00'
+    # Короткая цель для подписи круга и угла «ПРИНЯТЬ» (v377): строка-плашка
+    # во всю ширину ложилась на барабан простоев и её нельзя было нажать.
+    driver_assignment_target_label = ''
+    # Водитель уже нажал «ПРИНЯТЬ»: угол гаснет, подпись круга тикает до срока.
+    driver_assignment_accepted = bool(pending_assignment_action and pending_assignment_action.accepted_at)
     if pending_assignment_action:
         if pending_assignment_action.action == HaulAssignmentAction.RELEASE:
             action_label = 'НАЗНАЧЕНИЕ СНЯТО'
+            driver_assignment_target_label = 'СНЯТО'
         else:
-            action_label = f'ВЫ НАЗНАЧЕНЫ НА {driver_excavator_short_label(pending_assignment_action.excavator)}'
+            driver_assignment_target_label = driver_excavator_short_label(pending_assignment_action.excavator)
+            action_label = f'ВЫ НАЗНАЧЕНЫ НА {driver_assignment_target_label}'
         driver_assignment_action_label = action_label
         driver_assignment_countdown = driver_assignment_countdown_label(pending_assignment_action)
         driver_new_assignment_label = (
@@ -5737,6 +5744,8 @@ def driver_shift_view(request):
             'driver_dial_note': driver_dial_note,
             'driver_new_assignment_label': driver_new_assignment_label,
             'driver_assignment_action_label': driver_assignment_action_label,
+            'driver_assignment_target_label': driver_assignment_target_label,
+            'driver_assignment_accepted': driver_assignment_accepted,
             'driver_assignment_effective_at': driver_assignment_effective_at,
             'driver_assignment_countdown': driver_assignment_countdown,
             'pending_assignment_action': pending_assignment_action,

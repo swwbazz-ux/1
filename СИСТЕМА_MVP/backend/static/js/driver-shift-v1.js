@@ -398,43 +398,118 @@ window.bindDriverMobileShell = function () {
         });
     }
     syncDriverDialProgress();
+    /* Назначение (v377): отсчёт тикает в подписи круга и в углу «ПРИНЯТЬ», срок —
+       на скрытой форме назначения. В срок назначение вступает само (сервер,
+       reconcile_due_haul_assignments): угол гаснет, подпись круга обычная, круг —
+       на новом экскаваторе сразу, без сети тоже; экран не перезагружается
+       целиком — приходит обычное обновление фрагмента. */
     function bindAssignmentCountdown() {
-        var button = shell.querySelector("[data-driver-assignment-deadline]");
-        var output = button ? button.querySelector("[data-driver-assignment-countdown]") : null;
-        if (!button || !output) {
+        var form = shell.querySelector("#driver-assignment-action[data-driver-assignment-deadline]");
+        if (!form) {
             return;
         }
-        var deadline = Date.parse(button.dataset.driverAssignmentDeadline || "");
+        var deadline = Date.parse(form.dataset.driverAssignmentDeadline || "");
         if (!Number.isFinite(deadline)) {
             return;
         }
         function renderCountdown() {
-            if (!button.isConnected) {
+            if (!form.isConnected) {
                 window.clearInterval(timerId);
                 return;
             }
             var remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
             var minutes = Math.floor(remaining / 60);
             var seconds = remaining % 60;
-            output.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
-            if (remaining > 0 || button.dataset.driverDeadlineReached === "true") {
+            var text = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+            shell.querySelectorAll("[data-driver-assignment-countdown]").forEach(function (output) {
+                if (output.textContent !== text) output.textContent = text;
+            });
+            if (remaining > 0 || form.dataset.driverDeadlineReached === "true") {
                 return;
             }
-            button.dataset.driverDeadlineReached = "true";
-            button.disabled = true;
+            form.dataset.driverDeadlineReached = "true";
             window.clearInterval(timerId);
+            applyDriverAssignmentDue(form);
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 window.AppRealtime.wake("assignment-deadline");
-            } else {
-                window.setTimeout(function () {
-                    if (button.isConnected) {
-                        window.location.reload();
-                    }
-                }, 1200);
+            } else if (typeof window.applyOperationalStateRefresh === "function") {
+                window.applyOperationalStateRefresh({
+                    version: Number(document.body.dataset.operationalStateVersion || 0),
+                    reason: "assignment-deadline"
+                });
             }
         }
         var timerId = window.setInterval(renderCountdown, 1000);
         renderCountdown();
+        window.syncDriverAssignmentCorner();
+    }
+
+    /* «ПРИНЯТЬ» в углу у круга (v377): событие очереди, без ожидания сервера —
+       и без сети тоже. Угол гаснет сразу; пока событие не дошло, экран сервера
+       может снова нарисовать угол — его гасит сверка с очередью ниже. */
+    function hideDriverAssignmentCorner() {
+        var corner = shell.querySelector("[data-driver-assignment-accept]");
+        if (!corner || !corner.classList.contains("is-assignment")) return;
+        corner.classList.remove("is-assignment");
+        corner.disabled = true;
+        corner.setAttribute("aria-hidden", "true");
+        corner.setAttribute("tabindex", "-1");
+    }
+
+    window.syncDriverAssignmentCorner = function (events) {
+        var form = shell.querySelector("#driver-assignment-action");
+        if (!form) return;
+        var id = String(form.dataset.driverAssignmentId || "");
+        var accepted = (events || window.driverOfflineEvents || []).some(function (event) {
+            return event && event.event_type === "driver.assignment.accepted"
+                && String(event.payload && event.payload.assignment_id || "") === id
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) < 0;
+        });
+        if (accepted) hideDriverAssignmentCorner();
+    };
+
+    window.driverAcceptAssignmentLocally = function (form) {
+        var assignmentId = Number(form && form.dataset.driverAssignmentId || 0);
+        if (!assignmentId || !driverOfflineOutbox) return Promise.resolve(false);
+        hideDriverAssignmentCorner();
+        return driverOfflineOutbox.enqueue({
+            event_id: generateClientActionId("driver-assignment-accept"),
+            event_type: "driver.assignment.accepted",
+            occurred_at: new Date().toISOString(),
+            payload: {assignment_id: assignmentId}
+        }).then(function () {
+            if (typeof playDriverSound === "function") playDriverSound("action_ok");
+            driverOfflineOutbox.flush().catch(function () {});
+            return true;
+        });
+    };
+
+    /* Срок назначения вышел — на телефоне сразу, не дожидаясь сервера. */
+    function applyDriverAssignmentDue(form) {
+        var corner = shell.querySelector("[data-driver-assignment-accept]");
+        if (corner) {
+            corner.classList.remove("is-assignment");
+            corner.disabled = true;
+            corner.setAttribute("aria-hidden", "true");
+            corner.setAttribute("tabindex", "-1");
+        }
+        var note = shell.querySelector("[data-driver-assignment-note]");
+        if (note) note.hidden = true;
+        var target = String(form.dataset.driverAssignmentTarget || "");
+        var label = shell.querySelector("[data-driver-dial-label]");
+        var hold = shell.querySelector("[data-driver-hold-button]");
+        // Круг называет экскаватор только пустым и без простоя: иначе на нём рейс/причина.
+        var dialShowsExcavator = !!(
+            label && hold && hold.classList.contains("is-empty")
+            && hold.dataset.driverManualDial !== "true"
+            && !(downtimeCard && downtimeCard.dataset.driverActiveDowntimeId)
+        );
+        if (form.dataset.driverAssignmentKind === "assign" && target && dialShowsExcavator) {
+            label.textContent = target;
+            label.dataset.driverDialRaw = target;
+            delete label.dataset.driverDialFitKey;
+            if (typeof window.fitDriverDialLabelNow === "function") window.fitDriverDialLabelNow(label);
+        }
     }
     bindAssignmentCountdown();
     function bindDriverShiftControls() {
@@ -1078,6 +1153,7 @@ window.bindDriverMobileShell = function () {
         if (!current) return;
         driverOfflineEvents = Array.isArray(state.events) ? state.events : [];
         window.driverOfflineEvents = driverOfflineEvents;
+        if (typeof window.syncDriverAssignmentCorner === "function") window.syncDriverAssignmentCorner(driverOfflineEvents);
         var label = current.querySelector("[data-driver-sync-label]");
         var pending = Number(state.pending || 0);
         var review = Number(state.review || 0);
@@ -2816,7 +2892,9 @@ window.bindDriverMobileShell = function () {
                 })
                 : shiftKind === "shift-close"
                     ? window.DriverShiftCloseOutbox.submit(form)
-                    : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
+                    : shiftKind === "assignment"
+                        ? window.driverAcceptAssignmentLocally(form)
+                        : window.submitDriverFormInPlace(form, {fallbackToNavigation: false});
             Promise.resolve(submitPromise).then(function (applied) {
                 if (!applied && form.isConnected) {
                     form.dataset.driverInPlacePending = "false";
