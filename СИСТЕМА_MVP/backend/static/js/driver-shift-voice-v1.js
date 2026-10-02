@@ -326,9 +326,19 @@ function reportDriverAudioDiagnostic(stage, details, extra) {
 /* Отдельной отметки о произнесённом здесь больше нет: она обновлялась только
    после возврата из моста и от синхронного двойного вызова не защищала.
    Владелец решения — DriverVoiceGuard, заявка по ключу рейса. */
+/* Самосвал этого экрана. Бой 03.10.2026 (самосвал 22): сервер присылает водителю
+   события и экскаватора его назначения — в том числе погрузки ЧУЖИХ самосвалов
+   этим экскаватором. Голос объявлял точку чужой машины («едем на ККД», когда своя
+   шла на СКДР). Событие с номером другого самосвала не озвучивается; событие без
+   номера (резервный путь по разметке своего экрана) — как раньше. */
 function latestDriverDumpPointEvent(context) {
     var selected = null;
     var events = context && Array.isArray(context.events) ? context.events : [];
+    var ownTruckId = 0;
+    try {
+        var ownShell = document.querySelector("[data-driver-shell]");
+        ownTruckId = Number(ownShell && ownShell.dataset.driverCurrentTruckId || 0);
+    } catch (error) {}
     events.forEach(function (event) {
         var payload = event && event.payload ? event.payload : null;
         var version = Number(event && event.version || 0);
@@ -341,6 +351,8 @@ function latestDriverDumpPointEvent(context) {
         ) {
             return;
         }
+        var eventTruckId = Number(payload.truck_id || 0);
+        if (ownTruckId && eventTruckId && eventTruckId !== ownTruckId) return;
         var tripId = Number(payload.trip_id || 0);
         var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
         var dumpPointName = String(payload.dump_point_name || "").trim();
