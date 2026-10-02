@@ -696,6 +696,76 @@ test('confirmed removed-cooldown root recovers saved children after root left th
     assert.deepEqual(await restarted.pending(), []);
 });
 
+test('confirmed removed-cooldown child after retry recovers its saved descendant on restart', async () => {
+    const local = storage();
+    const queueKey = 'access-e2-r2-confirmed-child';
+    const storageKey = 'excavator-field-outbox-v1:' + queueKey;
+    const confirmedKey = storageKey + ':confirmed';
+    const root = loadEvent('confirmed-retry-root', 44);
+    const child = loadEvent('confirmed-retry-child', 45);
+    child.depends_on = [root.event_id];
+    const grandchild = loadEvent('confirmed-retry-grandchild', 46);
+    grandchild.depends_on = [child.event_id];
+    const oldShell = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => ({ok: true, results: events.map(event => ({
+            event_id: event.event_id,
+            status: 'conflict',
+            code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
+            message: 'legacy conflict',
+        }))}),
+    });
+    for (const event of [root, child, grandchild]) await oldShell.queue(event);
+    await oldShell.flush();
+
+    const queue = JSON.parse(local.getItem(storageKey));
+    local.setItem(storageKey, JSON.stringify(queue.filter(event => (
+        event.event_id !== root.event_id && event.event_id !== child.event_id
+    ))));
+    local.setItem(confirmedKey, JSON.stringify([{
+        event: child,
+        result: {
+            event_id: child.event_id,
+            status: 'accepted',
+            server_ids: {trip_id: 145},
+            dependency_recovery: {
+                reason: 'removed_refusal_chain',
+                root_event_ids: [root.event_id],
+            },
+        },
+    }]));
+
+    const replayed = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => {
+            replayed.push(...events);
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await restarted.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [grandchild.event_id, 'pending'],
+    ]);
+    await restarted.flush();
+    assert.deepEqual(replayed.map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+    })), [{
+        event_id: grandchild.event_id,
+        occurred_at: grandchild.occurred_at,
+        sequence: grandchild.sequence,
+        depends_on: grandchild.depends_on,
+        payload: grandchild.payload,
+    }]);
+    assert.deepEqual(await restarted.pending(), []);
+});
+
 test('lost root response and restart resend the same removed-cooldown chain', async () => {
     const local = storage();
     const root = loadEvent('lost-response-root', 51);
