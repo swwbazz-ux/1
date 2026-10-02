@@ -100,6 +100,17 @@
             && event.last_error_code === "post_unload_cooldown";
     }
 
+    function confirmedRemovedRefusalRecovery(confirmation) {
+        var result = confirmation && confirmation.result;
+        if (!result || (result.status !== "accepted" && result.status !== "deduplicated")) return false;
+        var direct = result.conflict_recovery;
+        var dependent = result.dependency_recovery;
+        return Boolean(
+            direct && direct.reason === "removed_refusal"
+            || dependent && dependent.reason === "removed_refusal_chain"
+        );
+    }
+
     function createLocalStorageAdapter(storage, queueKey) {
         var key = LEGACY_PREFIX + queueKey;
         var sequenceKey = key + ":sequence";
@@ -613,8 +624,19 @@
 
         function restore(restoreOptions) {
             restoreOptions = restoreOptions || {};
-            return list().then(function (events) {
+            return Promise.all([list(), confirmations()]).then(function (stored) {
+                var events = stored[0];
+                var confirmed = stored[1];
                 var recoverable = Object.create(null);
+                confirmed.forEach(function (confirmation) {
+                    if (
+                        confirmedRemovedRefusalRecovery(confirmation)
+                        && confirmation.event
+                        && confirmation.event.event_id
+                    ) {
+                        recoverable[confirmation.event.event_id] = true;
+                    }
+                });
                 events.forEach(function (event) {
                     if (recoverableDeviceClockConflict(event) || recoverableRemovedRefusal(event)) {
                         recoverable[event.event_id] = true;
