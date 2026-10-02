@@ -19,6 +19,6 @@ test("the active-downtime mark is removed from drum cards hidden after the downt
         syncActive,
         /allCards\(\)\.forEach\(function \(card\) \{\s*if \(card\.hidden\) card\.classList\.remove\("is-active-downtime"\);\s*\}\);\s*cards\(\)\.forEach/
     );
-    // Погрузку держит любая грань с пометкой, в том числе спрятанная.
-    assert.match(POINT_DRUM, /\[data-driver-downtime-drum\] \.driver-drum-card\.is-active-downtime/);
+    // С v376 простой погрузку вообще не держит — погрузка закрывает его сама.
+    assert.doesNotMatch(POINT_DRUM, /toast\("Сначала завершите простой"\)/);
 });

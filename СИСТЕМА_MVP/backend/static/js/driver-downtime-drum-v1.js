@@ -427,6 +427,12 @@
     function truckIsLoaded() {
         var shell = q("[data-driver-shell]");
         var hold = q("[data-driver-hold-button]");
+        // Ручной рейс в очереди телефона — гружёный; ручной рейс, завершённый или
+        // отменённый на телефоне, — пустой, хотя экран сервера ещё прежний.
+        var api = root.DriverManualExcavatorWorkspace;
+        if (api && typeof api.activeManualPointId === "function" && api.activeManualPointId()) return true;
+        var state = api && typeof api.projectionState === "function" ? api.projectionState() : "";
+        if (["completing", "cancelling", "cancelled", "unloading"].indexOf(state) >= 0) return false;
         return !!(
             (shell && shell.dataset.driverHasOpenTrip === "true")
             || (hold && hold.dataset.driverManualDial === "true")
@@ -452,6 +458,41 @@
         }
         return "";
     }
+
+    /* Доступность причин «только гружёный / только пустой / точка рейса» считает
+       телефон из своего рейса (бой 02.10.2026, Infinix без сети: после ручной
+       погрузки «Ожидание разгрузки» оставалось серым — недоступность рисовал
+       сервер и обновлял только фрагмент). Кнопкам вкладки «Простои» ставим
+       настоящие атрибуты (их снова перезапишет фрагмент — тогда пересчитаем),
+       граням барабана — только свои классы: состав барабана сверяется с сервером
+       по is-unavailable, и правка его дала бы полную пересборку на каждом опросе. */
+    function syncAvailability() {
+        all("[data-driver-downtime-reason-button][data-driver-downtime-requires]").forEach(function (button) {
+            if (!button.dataset.driverDowntimeRequires) return;
+            var refusal = localRefusal(button);
+            var label = button.dataset.driverReasonLabel || "";
+            if (refusal) {
+                if (button.getAttribute("aria-disabled") !== "true") button.setAttribute("aria-disabled", "true");
+                if (button.dataset.driverUnavailableMessage !== refusal) button.dataset.driverUnavailableMessage = refusal;
+                if (!button.classList.contains("is-unavailable")) button.classList.add("is-unavailable");
+                var aria = label + ". " + refusal;
+                if (button.getAttribute("aria-label") !== aria) button.setAttribute("aria-label", aria);
+            } else {
+                if (button.hasAttribute("aria-disabled")) button.removeAttribute("aria-disabled");
+                if (button.hasAttribute("data-driver-unavailable-message")) delete button.dataset.driverUnavailableMessage;
+                if (button.classList.contains("is-unavailable")) button.classList.remove("is-unavailable");
+                var startAria = "Начать простой: " + label;
+                if (label && button.getAttribute("aria-label") !== startAria) button.setAttribute("aria-label", startAria);
+            }
+            all('[data-driver-drum-card][data-driver-drum-reason-id="' + button.dataset.driverDowntimeReasonId + '"]').forEach(function (card) {
+                if (card.classList.contains("is-local-unavailable") !== !!refusal) card.classList.toggle("is-local-unavailable", !!refusal);
+                if (card.classList.contains("is-local-available") !== !refusal) card.classList.toggle("is-local-available", !refusal);
+            });
+        });
+    }
+    root.driverDowntimeLocalRefusal = function (button) {
+        return button && button.dataset && button.dataset.driverDowntimeRequires ? localRefusal(button) : null;
+    };
 
     function startDowntime(card) {
         var id = card.dataset.driverDrumReasonId;
@@ -1055,8 +1096,9 @@
         // Любая правка экрана может сдвинуть круг и грани без изменения их размера
         // (ширина колонки, полоса прокрутки): контур сверяется кадром позже.
         scheduleLink();
+        syncAvailability();
         if (!relevant) return;
-        if (build()) { syncTotals(); syncActive(); }
+        if (build()) { syncTotals(); syncActive(); syncAvailability(); }
     });
 
     function init() {
@@ -1065,13 +1107,16 @@
         syncTotals();
         reconcileQuick();
         syncActive();
-        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id"] });
+        syncAvailability();
+        observer.observe(doc.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-driver-active-reason-id", "data-driver-active-downtime-id", "hidden", "data-driver-shift-id", "data-driver-has-open-trip", "data-driver-manual-dial"] });
+        root.addEventListener("driver-manual-trip-changed", syncAvailability);
+        root.addEventListener("operational-state-refresh-applied", syncAvailability);
         // Смена размера окна/ориентации — с задержкой: серия resize-событий при
         // повороте экрана иначе даёт серию полных пересборок подряд.
         var resizeTimer = 0;
         root.addEventListener("resize", function () {
             root.clearTimeout(resizeTimer);
-            resizeTimer = root.setTimeout(function () { geo.built = null; build(); render(false); }, 150);
+            resizeTimer = root.setTimeout(function () { geo.built = null; build(); render(false); syncAvailability(); }, 150);
         });
         if (root.ResizeObserver) {
             var w = dial();

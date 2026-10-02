@@ -155,6 +155,16 @@ body.driver-mobile-screen .driver-drum-card.is-unavailable {
     --drum-unavailable: .55;
 }
 
+/* Доступность по рейсу на телефоне (driver-downtime-drum-v1.js, syncAvailability)
+   главнее серверной разметки: местная погрузка/разгрузка ещё не дошла до сервера. */
+body.driver-mobile-screen .driver-drum-card.is-local-available {
+    --drum-unavailable: 1;
+}
+
+body.driver-mobile-screen .driver-drum-card.is-local-unavailable {
+    --drum-unavailable: .55;
+}
+
 body.driver-mobile-screen .driver-drum-card.is-settling {
     transition: transform .24s cubic-bezier(.2, .8, .3, 1), color .18s ease;
 }

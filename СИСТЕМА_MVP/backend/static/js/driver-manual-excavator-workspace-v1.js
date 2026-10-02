@@ -1489,7 +1489,7 @@
         return context;
     }
 
-    function buildManualLoadEvent(workspace, target, events) {
+    function buildManualLoadEvent(workspace, target, events, occurredAt) {
         if (typeof root.createDriverManualLoadEvent !== "function") {
             throw new Error("offline_runtime_unavailable");
         }
@@ -1553,8 +1553,17 @@
             acceptanceId: positive(context.free_bucket_acceptance_id),
             acceptanceLocalId: context.free_bucket_acceptance_local_id,
             dependsOn: dependsOn,
-            contextSnapshot: context
+            contextSnapshot: context,
+            occurredAt: occurredAt
         });
+    }
+
+    /* Открытый простой гасит сама погрузка, на телефоне и тем же временем —
+       закрытие встаёт в очередь раньше погрузки (driver-shift-v1.js,
+       driverCloseDowntimeForTrip; бой 02.10.2026, задание v376). */
+    function closeDowntimeForTrip(kind, occurredAt) {
+        if (typeof root.driverCloseDowntimeForTrip !== "function") return Promise.resolve(null);
+        return Promise.resolve(root.driverCloseDowntimeForTrip(kind, occurredAt)).catch(function () { return null; });
     }
 
     /* Экскаватор для отмены/завершения — тот, у которого рейс ПОГРУЖЕН, а не базовый
@@ -1597,7 +1606,7 @@
         });
     }
 
-    function buildManualCompletedEvent(workspace, target, events) {
+    function buildManualCompletedEvent(workspace, target, events, occurredAt) {
         if (!currentTripProjection || typeof root.createDriverManualCompletedEvent !== "function") {
             throw new Error("offline_runtime_unavailable");
         }
@@ -1613,6 +1622,7 @@
             dumpPointId: positive(target && target.dataset.eoDumpTarget)
                 || positive(projection.payload && projection.payload.dump_point_id),
             events: events,
+            occurredAt: occurredAt,
             contextSnapshot: {
                 source: "driver_manual",
                 action: "manual_completed",
@@ -1635,8 +1645,11 @@
         setSavingLocal(true);
         target.classList.add("is-complete-pending");
         setSourceLocked(workspace, true);
-        return outbox.pending().then(function (events) {
-            return buildManualCompletedEvent(workspace, target, events);
+        var completedAt = new Date().toISOString();
+        return closeDowntimeForTrip("unload", completedAt).then(function () {
+            return outbox.pending();
+        }).then(function (events) {
+            return buildManualCompletedEvent(workspace, target, events, completedAt);
         }).then(function (event) {
             return outbox.enqueue(event);
         }).then(function (saved) {
@@ -1676,8 +1689,11 @@
         setSavingLocal(true);
         setSourceLocked(workspace, true);
         setResult(workspace, "saving", null, true);
-        return outbox.pending().then(function (events) {
-            return buildManualLoadEvent(workspace, target, events);
+        var loadAt = new Date().toISOString();
+        return closeDowntimeForTrip("load", loadAt).then(function () {
+            return outbox.pending();
+        }).then(function (events) {
+            return buildManualLoadEvent(workspace, target, events, loadAt);
         }).then(function (event) {
             return outbox.enqueue(event);
         }).then(function (saved) {

@@ -355,13 +355,6 @@
     }
 
     // --- действия ручного рейса: их выполняет движок ручного режима ---
-    function blockingDowntime() {
-        var active = q("[data-driver-downtime-drum] .driver-drum-card.is-active-downtime");
-        if (!active) return false;
-        var reason = q('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + active.dataset.driverDrumReasonId + '"]');
-        return !(reason && reason.dataset.driverDowntimeFlow === "waiting_loading");
-    }
-
     function sendToPoint(card) {
         var api = engine();
         var pointId = card.dataset.driverPointId;
@@ -369,13 +362,9 @@
             toast("Ручной режим недоступен: обновите экран");
             return;
         }
-        // «Ожидание погрузки» погрузку не держит — сервер закроет его вместе с погрузкой.
-        // Любой другой простой (обед, ремонт) погрузку не пускает.
-        if (blockingDowntime()) {
-            haptic([45, 60, 45]);
-            toast("Сначала завершите простой");
-            return;
-        }
+        // Простой погрузку не держит (задание v376, 01.10.2026): погрузка была —
+        // открытый простой закрывается её временем на телефоне
+        // (driverCloseDowntimeForTrip), а не отказом «Сначала завершите простой».
         haptic([35, 45, 70]); click(1.6);
         // Имя точки — для путёвки и событий: точки ковша может не быть в сетке
         // ручного режима, и тогда погрузка уходила без названия («—»).
