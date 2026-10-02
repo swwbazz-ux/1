@@ -432,6 +432,54 @@ class FreeBucketServerIntegrationTests(TestCase):
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CANCELLED)
         self.assertEqual(Trip.objects.count(), 0)
 
+    def test_cancel_of_a_request_the_next_pick_already_cancelled_is_accepted(self):
+        # Бой 02.10.2026 (ТЕСТ-1, 5137/5158): отмена ковша дошла после выбора
+        # следующего — сервер уже погасил прежний запрос сам. «Ковша нет» уже
+        # записано: не конфликт.
+        self.backdate_truck_shift()
+        first = self.select_event(
+            event_id='driver-free-select-before-repick', occurred_at=timezone.now() - timedelta(minutes=3),
+        )
+        self.assertEqual(self.sync_driver([first]).json()['results'][0]['status'], 'accepted')
+        acceptance = FreeBucketAcceptance.objects.get()
+        acceptance.status = FreeBucketAcceptanceStatus.CANCELLED
+        acceptance.cancelled_at = timezone.now() - timedelta(minutes=2)
+        acceptance.save(update_fields=['status', 'cancelled_at'])
+        cancelled = self.driver_event(
+            'driver-free-cancel-after-repick',
+            'driver.free_bucket.cancelled',
+            2,
+            occurred_at=timezone.now() - timedelta(minutes=1),
+            depends_on=[first['event_id']],
+            payload={'free_bucket_acceptance_local_id': first['event_id']},
+        )
+        result = self.sync_driver([cancelled]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['free_bucket_status'], FreeBucketAcceptanceStatus.CANCELLED)
+
+    def test_manual_load_under_bucket_during_open_truck_downtime_closes_it(self):
+        # Приёмка v375: «ОФР» открыт, два рейса под ковш без сети — отказ
+        # equipment_downtime_active. Теперь рейс записан, простой закрыт погрузкой.
+        self.backdate_truck_shift()
+        select = self.select_event(
+            event_id='driver-free-select-during-downtime', occurred_at=timezone.now() - timedelta(minutes=9),
+        )
+        self.assertEqual(self.sync_driver([select]).json()['results'][0]['status'], 'accepted')
+        reason = DowntimeReason.objects.create(name='ОФР ковш v376', equipment_type=self.truck.equipment_type)
+        loaded_at = timezone.datetime.fromisoformat(select['occurred_at']) + timedelta(minutes=1)
+        downtime = DowntimeEvent.objects.create(
+            equipment=self.truck, employee=self.driver, reason=reason,
+            started_at=loaded_at - timedelta(seconds=30),
+        )
+        self.other_excavator_identity()
+        loaded = self.driver_manual_load_under_bucket(
+            select, event_id='driver-manual-load-during-downtime', sequence=2, occurred_at=loaded_at,
+        )
+        result = self.sync_driver([loaded]).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        downtime.refresh_from_db()
+        self.assertEqual(downtime.ended_at, loaded_at)
+
     def test_excavator_cancel_before_acceptance_time_is_terminal_conflict(self):
         accepted = self.accept_event(event_id='free-accept-before-stale-cancel')
         accepted_result = self.sync([accepted]).json()['results'][0]

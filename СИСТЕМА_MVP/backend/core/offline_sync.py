@@ -514,6 +514,13 @@ def _process_free_bucket_cancelled(access, normalized):
         or acceptance.loading_shift_id != shift.id
     ):
         _conflict('free_bucket_owner_changed', 'Временный приём принадлежит другой смене машиниста.')
+    if acceptance.status == FreeBucketAcceptanceStatus.CANCELLED:
+        # Повторная/запоздалая отмена уже отменённого приёма — уже записано, не конфликт
+        # (бой 02.10.2026, тот же класс, что у отмены водителя).
+        return {
+            'server_ids': {'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
+            'version': _current_operational_version(),
+        }, {'free_bucket_acceptance': acceptance, 'shift': shift, 'equipment': acceptance.truck}
     if acceptance.status != FreeBucketAcceptanceStatus.ACCEPTED:
         _conflict('free_bucket_not_cancellable', 'Временный приём уже использован или отменён.')
     if normalized['occurred_at'] < (acceptance.accepted_at or acceptance.occurred_at):
@@ -551,7 +558,22 @@ def _process_driver_free_bucket_cancelled(access, normalized):
         FreeBucketAcceptanceStatus.REQUESTED,
         FreeBucketAcceptanceStatus.ACCEPTED,
     ):
-        _conflict('free_bucket_not_cancellable', 'Запрос уже использован или отменён.')
+        # Бой 02.10.2026 (ТЕСТ-1, события 5137 и 5158): отмена ковша дошла после
+        # выбора следующего, а выбор сервер уже погасил старый запрос сам. Цель
+        # водителя — «ковша нет» — достигнута: это не конфликт, а уже записанное.
+        if acceptance.status != FreeBucketAcceptanceStatus.CANCELLED:
+            _log_discrepancy(
+                access=access, code='free_bucket_cancel_after_final', process='Отмена свободного ковша',
+                description=(
+                    f'Отмена ковша #{acceptance.id} на {normalized["occurred_at"]} пришла, когда он уже '
+                    f'«{acceptance.get_status_display()}». Состояние не меняется.'
+                ),
+            )
+        return {
+            'server_ids': {'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
+            'free_bucket_status': acceptance.status,
+            'version': _current_operational_version(),
+        }, {'free_bucket_acceptance': acceptance, 'shift': shift, 'equipment': acceptance.truck}
     current_at = acceptance.accepted_at or acceptance.occurred_at
     if normalized['occurred_at'] < current_at:
         _conflict('free_bucket_cancel_stale', 'Запоздалая отмена не может изменить более новое состояние.')
@@ -569,6 +591,50 @@ def _process_driver_free_bucket_cancelled(access, normalized):
         'free_bucket_status': acceptance.status,
         'version': state.version,
     }, {'free_bucket_acceptance': acceptance, 'shift': shift, 'equipment': acceptance.truck}
+
+
+def _close_downtimes_for_load(access, *, truck, excavator, occurred_at, process):
+    """Погрузка состоялась — простой её не отменяет (владелец, 01.10.2026).
+
+    Приёмка v375: у водителя открыт «ОФР», без сети он сделал ручной рейс и два
+    под ковш — сервер ответил «открыт блокирующий простой», рейсы, которые водитель
+    видел в путёвке, на сервере не появились. Теперь открытый простой самосвала,
+    начатый не позже погрузки, закрывается временем погрузки (аудит Codex 27.09,
+    п. 1). «Ожидание погрузки» по-прежнему закрывает вызывающий. Критический простой
+    экскаватора не трогаем — машинист закроет его сам; только запись в техлог.
+    """
+    from downtimes.models import DowntimeEvent
+    from trips.views import truck_waiting_loading_downtime
+
+    truck_downtimes = (
+        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
+        .filter(equipment=truck, ended_at__isnull=True, started_at__lte=occurred_at).order_by('id')
+    )
+    for item in truck_downtimes:
+        if truck_waiting_loading_downtime(item):
+            continue
+        item.ended_at = occurred_at
+        item.save(update_fields=['ended_at'])
+        _log_discrepancy(
+            access=access, code='downtime_closed_by_load', process=process,
+            description=(
+                f'Простой #{item.id} «{item.reason}» самосвала {truck} был открыт в момент погрузки '
+                f'{occurred_at}; закрыт временем погрузки.'
+            ),
+        )
+    excavator_downtimes = (
+        DowntimeEvent.objects.select_related('reason')
+        .filter(equipment=excavator, ended_at__isnull=True, started_at__lte=occurred_at).order_by('id')
+    )
+    for item in excavator_downtimes:
+        if item.reason.is_critical:
+            _log_discrepancy(
+                access=access, code='excavator_downtime_active_at_load', process=process,
+                description=(
+                    f'У экскаватора {excavator} открыт критический простой #{item.id} «{item.reason}» '
+                    f'в момент погрузки {occurred_at}. Рейс принят.'
+                ),
+            )
 
 
 def _process_free_bucket_loaded(access, normalized):
@@ -630,22 +696,10 @@ def _process_free_bucket_loaded(access, normalized):
         _release_open_trips_unknown_to_worker(
             access, truck, occurred_at=normalized['occurred_at'], process='Погрузка под свободный ковш',
         )
-    truck_downtime = (
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=truck, ended_at__isnull=True).order_by('-started_at', '-id').first()
+    _close_downtimes_for_load(
+        access, truck=truck, excavator=excavator, occurred_at=normalized['occurred_at'],
+        process='Погрузка под свободный ковш',
     )
-    excavator_downtimes = list(
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=excavator, ended_at__isnull=True).order_by('id')
-    )
-    if (
-        (truck_downtime and truck_downtime.started_at <= normalized['occurred_at'])
-        or any(
-            item.reason.is_critical and item.started_at <= normalized['occurred_at']
-            for item in excavator_downtimes
-        )
-    ):
-        _conflict('equipment_downtime_active', 'Погрузка невозможна: на технике открыт блокирующий простой.')
     try:
         load_context = resolve_free_bucket_load_context(acceptance, payload)
     except ValidationError as error:
@@ -1259,20 +1313,35 @@ def _claim_trip_for_driver_manual_event(trip, *, access, shift, event_id):
     )
 
 
-def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effective_occurred_at):
+def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effective_occurred_at, access=None):
+    """Контекст ручного рейса водителя: забой, порода, точка.
+
+    Бой 02.10.2026 (ТЕСТ-1, событие 5157): погрузка без сети пришла после смены
+    забоя на сервере — «Настройки забоя изменились», рейс отклонён, а за ним
+    цепочкой ещё два. Погрузка состоялась — телефон истина (как ковш в v375):
+    расхождение уходит в техлог, рейс записывается с серверным контекстом.
+    """
     from assignments.models import ExcavatorPlacement
     from references.models import DumpPoint, RockType
     from trips.free_bucket import canonical_free_bucket_work_context_snapshot
+
+    def discrepancy(description):
+        if access is not None:
+            _log_discrepancy(
+                access=access, code='manual_work_context_changed', process='Ручной рейс водителя',
+                description=f'{description} Рейс принят с контекстом сервера.',
+            )
 
     try:
         authoritative = canonical_free_bucket_work_context_snapshot(excavator)
     except ValidationError as error:
         _conflict('manual_work_context_unavailable', '; '.join(error.messages))
     if str(authoritative.get('placement_id') or '') != str(payload.get('placement_id') or ''):
-        _conflict(
-            'manual_work_context_changed',
-            'Настройки забоя изменились после сохранения отметки на телефоне.',
+        discrepancy(
+            f'Забой экскаватора {excavator} сменился: на телефоне {payload.get("placement_id")}, '
+            f'на сервере {authoritative.get("placement_id")}.'
         )
+        return authoritative, _driver_manual_selected_point(authoritative, payload, discrepancy)
     # placement_updated_at сознательно не сравнивается напрямую: эта метка
     # сдвигается ЛЮБЫМ пересохранением формы забоя, даже без единого
     # изменившегося значения (save_excavator_work_context ставит её всегда).
@@ -1297,24 +1366,22 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
             pk=authoritative.get('placement_id'),
         ).first()
         changed_at = placement.work_context_updated_at if placement else None
-        if changed_at is None or effective_occurred_at >= changed_at:
-            _conflict(
-                'manual_work_context_changed',
-                'Настройки забоя изменились после сохранения отметки на телефоне.',
+        rock_type = None
+        if changed_at is not None and effective_occurred_at < changed_at:
+            rock_type_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
+            rock_type = RockType.objects.filter(pk=rock_type_id, is_active=True).first()
+        if rock_type:
+            authoritative = {
+                **authoritative,
+                'rock_type_id': rock_type.id,
+                'loading_horizon': str(payload.get('loading_horizon') or '')[:64],
+                'loading_block': str(payload.get('loading_block') or '')[:64],
+            }
+        else:
+            discrepancy(
+                f'Порода/горизонт/блок забоя {excavator} на телефоне отличаются от сервера '
+                f'(изменены {changed_at}, отметка {effective_occurred_at}).'
             )
-        rock_type_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
-        rock_type = RockType.objects.filter(pk=rock_type_id, is_active=True).first()
-        if not rock_type:
-            _conflict(
-                'manual_work_context_changed',
-                'Порода из отметки на телефоне больше не существует или неактивна.',
-            )
-        authoritative = {
-            **authoritative,
-            'rock_type_id': rock_type.id,
-            'loading_horizon': str(payload.get('loading_horizon') or '')[:64],
-            'loading_block': str(payload.get('loading_block') or '')[:64],
-        }
     client_points = context_snapshot.get('dump_points')
     if not isinstance(client_points, list):
         _invalid('manual_dump_points_required', 'Не сохранён список точек ручного рейса.')
@@ -1328,26 +1395,46 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
     if selected_one_off:
         allowed_client_ids.discard(dump_id)
     if set(authoritative_by_id) != allowed_client_ids:
-        _conflict(
-            'manual_work_context_changed',
-            'Список точек разгрузки изменился после сохранения отметки на телефоне.',
+        discrepancy(
+            f'Список точек {excavator} на телефоне {sorted(allowed_client_ids)}, '
+            f'на сервере {sorted(authoritative_by_id)}.'
         )
     selected = authoritative_by_id.get(dump_id)
-    if not selected and selected_one_off:
+    if not selected:
         client_selected = client_by_id.get(dump_id)
         one_off_point = DumpPoint.objects.select_for_update().filter(
             pk=_positive_int(dump_id, field='dump_point_id'),
             is_active=True,
         ).first()
-        if client_selected and one_off_point:
+        if one_off_point:
+            if not selected_one_off:
+                discrepancy(f'Точка {one_off_point} не входит в настройки {excavator}.')
             selected = {
                 'id': one_off_point.id,
                 'name': str(one_off_point),
-                'transport_distance_km': client_selected.get('transport_distance_km'),
+                'transport_distance_km': (client_selected or {}).get('transport_distance_km'),
             }
     if not selected:
         _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
     return authoritative, selected
+
+
+def _driver_manual_selected_point(authoritative, payload, discrepancy):
+    """Точка ручного рейса при сменившемся забое: точка водителя, если она жива."""
+    from references.models import DumpPoint
+
+    dump_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
+    for item in authoritative['dump_points']:
+        if str(item['id']) == str(dump_id):
+            return item
+    point = DumpPoint.objects.select_for_update().filter(pk=dump_id, is_active=True).first()
+    if point:
+        discrepancy(f'Точка {point} не входит в новые настройки забоя.')
+        return {'id': point.id, 'name': str(point), 'transport_distance_km': None}
+    if authoritative['dump_points']:
+        discrepancy(f'Точки #{dump_id} больше нет, рейс записан на первую точку забоя.')
+        return authoritative['dump_points'][0]
+    _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
 
 
 def _revive_cancelled_free_bucket_by_driver_load(acceptance, *, access, truck, occurred_at):
@@ -1513,6 +1600,7 @@ def _process_driver_loaded(access, normalized):
             payload=payload,
             context_snapshot=context_snapshot,
             effective_occurred_at=normalized['occurred_at'],
+            access=access,
         )
         rock_type = RockType.objects.filter(pk=authoritative['rock_type_id']).first()
         dump_point = DumpPoint.objects.select_for_update().filter(pk=selected['id']).first()
@@ -1576,21 +1664,13 @@ def _process_driver_loaded(access, normalized):
     if not rock_type or not dump_point:
         _conflict('reference_data_changed', 'Справочные данные ручного рейса больше недоступны.')
 
-    truck_downtime = (
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=truck, ended_at__isnull=True).order_by('-started_at', '-id').first()
-    )
-    excavator_downtimes = list(
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=excavator, ended_at__isnull=True).order_by('id')
-    )
     # «Ожидание погрузки» — не препятствие, а ровно то, что погрузка завершает: ручная
-    # отправка его закрывает (ниже), как и погрузка экскаваторщиком.
-    if (
-        (truck_downtime and not truck_waiting_loading_downtime(truck_downtime))
-        or any(item.reason.is_critical for item in excavator_downtimes)
-    ):
-        _conflict('equipment_downtime_active', 'Ручная отправка невозможна: открыт блокирующий простой.')
+    # отправка его закрывает (ниже), как и погрузка экскаваторщиком. Любой другой
+    # простой погрузку тоже не отменяет — закрывается её временем.
+    _close_downtimes_for_load(
+        access, truck=truck, excavator=excavator, occurred_at=normalized['occurred_at'],
+        process='Ручная отправка водителя',
+    )
 
     released_trip_ids = []
     open_trip = (
@@ -1949,22 +2029,10 @@ def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, exca
     payload = normalized['payload']
     if Trip.objects.select_for_update().filter(truck=truck, status__in=OPEN_TRIP_STATUSES).exists():
         _conflict('open_trip_exists', 'Самосвал уже находится в незавершённом рейсе.')
-    truck_downtime = (
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=truck, ended_at__isnull=True).order_by('-started_at', '-id').first()
+    _close_downtimes_for_load(
+        access, truck=truck, excavator=excavator, occurred_at=normalized['occurred_at'],
+        process='Погрузка машинистом через свободный ковш',
     )
-    excavator_downtimes = list(
-        DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
-        .filter(equipment=excavator, ended_at__isnull=True).order_by('id')
-    )
-    if (
-        (truck_downtime and truck_downtime.started_at <= normalized['occurred_at'])
-        or any(
-            item.reason.is_critical and item.started_at <= normalized['occurred_at']
-            for item in excavator_downtimes
-        )
-    ):
-        _conflict('equipment_downtime_active', 'Погрузка невозможна: на технике открыт блокирующий простой.')
     acceptance = FreeBucketAcceptance.objects.create(
         client_acceptance_id=normalized['event_id'],
         truck=truck,
@@ -3398,7 +3466,54 @@ def _dependency_state(access, normalized):
         if dependency.status != OfflineFieldEventStatus.ACCEPTED:
             if dependency.status == OfflineFieldEventStatus.RETRY:
                 _retry('dependency_pending', 'Предыдущее событие ещё не принято.')
+            if _rejected_dependency_is_other_trip(normalized, dependency):
+                normalized.setdefault('ignored_rejected_dependencies', []).append(dependency_id)
+                _log_discrepancy(
+                    access=access, code='dependency_of_other_trip_rejected', process='Цепочка событий водителя',
+                    description=(
+                        f'Погрузка {normalized["event_id"]} шла после события {dependency_id} '
+                        f'({dependency.event_type}, {dependency.error_code}) другого рейса; '
+                        'его отказ новый рейс не отменяет.'
+                    ),
+                )
+                continue
             _conflict('dependency_rejected', 'Предыдущее событие требует сверки или отклонено.')
+
+
+DRIVER_REPROCESSABLE_CONFLICT_CODES = frozenset({
+    'equipment_downtime_active',
+    'manual_work_context_changed',
+    'free_bucket_work_context_changed',
+    'free_bucket_target_changed',
+    'free_bucket_not_cancellable',
+})
+
+
+# Зависимость новой погрузки от событий прошлого рейса — только порядок очереди:
+# сам рейс от их судьбы не зависит.
+_OTHER_TRIP_DEPENDENCY_TYPES = frozenset({
+    'driver.trip.loaded',
+    'driver.trip.manual_completed',
+    'driver.trip.unloaded',
+    'driver.trip.loaded.cancelled',
+    'driver.trip.dump_point_changed',
+})
+
+
+def _rejected_dependency_is_other_trip(normalized, dependency):
+    """Отказ события прошлого рейса не хоронит следующий (бой 02.10.2026).
+
+    ТЕСТ-1, события 5157→5159→5161: отклонённая ручная погрузка тянула за собой
+    своё завершение, а оно — следующую погрузку, хотя второй рейс по смыслу от
+    первого не зависит: водитель его сделал. Своё завершение рейса (тот же
+    local_trip_id) по-прежнему ждёт свою погрузку.
+    """
+    return bool(
+        normalized['role_code'] == 'driver'
+        and normalized['event_type'] == 'driver.trip.loaded'
+        and dependency.event_type in _OTHER_TRIP_DEPENDENCY_TYPES
+        and str(dependency.local_trip_id or '') != str(normalized.get('local_trip_id') or '')
+    )
 
 
 def _clock_skewed_dependency_exists(existing):
@@ -3473,7 +3588,13 @@ def process_one_offline_event(access, normalized):
                             and dependency.role_code == normalized['role_code']
                             and dependency.device_id == normalized['device_id']
                             and dependency.sequence < existing.sequence
-                            and dependency.status == OfflineFieldEventStatus.ACCEPTED
+                            and (
+                                dependency.status == OfflineFieldEventStatus.ACCEPTED
+                                or (
+                                    dependency.status != OfflineFieldEventStatus.RETRY
+                                    and _rejected_dependency_is_other_trip(normalized, dependency)
+                                )
+                            )
                             for dependency in dependency_receipts
                         )
                     )
@@ -3497,6 +3618,11 @@ def process_one_offline_event(access, normalized):
                                     existing.event_type == 'driver.trip.loaded'
                                     and existing.error_code == 'free_bucket_not_available'
                                 )
+                                # Отказы, которые сервер больше не выносит (v375–v376):
+                                # погрузка при простое, сменившийся забой/контекст ковша,
+                                # повторный выбор ковша, отмена уже отменённого ковша.
+                                # Тот же event_id обрабатывается заново и записывается.
+                                or existing.error_code in DRIVER_REPROCESSABLE_CONFLICT_CODES
                             )
                         )
                         or (
@@ -3642,6 +3768,11 @@ def process_one_offline_event(access, normalized):
                 result_payload['dependency_recovery'] = {
                     'reason': 'exact_terminal_reference',
                     'ignored': list(normalized['ignored_missing_dependencies']),
+                }
+            if normalized.get('ignored_rejected_dependencies'):
+                result_payload['dependency_recovery'] = {
+                    'reason': 'other_trip_rejected',
+                    'ignored': list(normalized['ignored_rejected_dependencies']),
                 }
             result_payload.setdefault('server_received_at', receipt.received_at.isoformat())
             if normalized.get('clock_adjusted'):

@@ -16,7 +16,7 @@ from assignments.models import (
     HaulAssignment,
     HaulAssignmentAction,
 )
-from core.models import OfflineFieldEvent, OfflineFieldEventConflict
+from core.models import OfflineFieldEvent, OfflineFieldEventConflict, OfflineFieldEventStatus
 from core.offline_sync import normalize_offline_event
 from downtimes.models import DowntimeEvent, DowntimeReason
 from trips import tests as trip_fixtures
@@ -811,15 +811,30 @@ class OfflineEventSyncTests(TestCase):
         self.assertIsNone(acceptance.requesting_shift_id)
         self.assertEqual(Trip.objects.count(), 0)
 
-    def test_driver_manual_load_rejects_changed_context_without_creating_trip(self):
+    def test_driver_manual_load_with_changed_context_is_accepted_with_server_context(self):
+        # Бой 02.10.2026 (ТЕСТ-1, 5157): отказ «Настройки забоя изменились» терял
+        # рейс водителя. Погрузка была — рейс записывается с контекстом сервера,
+        # расхождение уходит в техлог.
         event = self.driver_manual_event()
         event['payload']['loading_block'] = '99'
+        with self.assertLogs('core.offline_sync', level='WARNING') as logs:
+            result = self.sync(
+                [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
+            ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().loading_block, '4')
+        self.assertTrue(any('manual_work_context_changed' in line for line in logs.output))
+
+    def test_driver_manual_load_with_another_placement_is_accepted_with_server_context(self):
+        event = self.driver_manual_event()
+        event['payload']['placement_id'] = 999999
         result = self.sync(
             [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
         ).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'manual_work_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_block, '4')
+        self.assertEqual(trip.dump_point_id, event['payload']['dump_point_id'])
 
     def test_driver_manual_load_accepts_old_context_marked_before_placement_change(self):
         # Боевой случай 25.09: водитель 43 отметил погрузку у ЭКС-4 с
@@ -855,12 +870,11 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.loading_horizon, '125')
         self.assertEqual(trip.rock_type_id, self.rock.id)
 
-    def test_driver_manual_load_rejects_stale_context_marked_after_placement_change(self):
+    def test_driver_manual_load_marked_after_placement_change_takes_server_context(self):
         # Симметричный случай: настройки забоя уже поменялись, а отметка
-        # сделана ПОСЛЕ этого момента — телефон прислал устаревшие значения,
-        # а не «те, что действовали на месте погрузки». Это настоящее
-        # устаревание, а не отметка, обогнавшая изменение, и остаётся
-        # конфликтом.
+        # сделана ПОСЛЕ этого момента — телефон прислал устаревшие значения.
+        # Раньше это был конфликт и рейс терялся; с 02.10.2026 рейс
+        # записывается с действующими на сервере настройками.
         occurred_at = timezone.now()
         type(self.shift).objects.filter(
             pk__in=[self.shift.id, self.truck_shift.id],
@@ -882,9 +896,8 @@ class OfflineEventSyncTests(TestCase):
             [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'manual_work_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().loading_block, '99')
 
     def test_driver_manual_load_accepts_context_resaved_with_same_values_before_mark(self):
         # Пересохранение формы забоя сдвигает placement_updated_at даже без
@@ -905,10 +918,10 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(trip.loading_block, '4')
         self.assertEqual(trip.rock_type_id, self.rock.id)
 
-    def test_driver_manual_load_rejects_old_context_with_now_invalid_rock_type(self):
+    def test_driver_manual_load_with_now_invalid_rock_type_takes_server_rock(self):
         # Отметка сделана до изменения настроек, но порода, которая тогда
-        # действовала, с тех пор деактивирована — принимать её нельзя, даже
-        # если по времени отметка «успевала».
+        # действовала, с тех пор деактивирована — её записать нельзя, а рейс
+        # всё равно был: записывается с действующей породой забоя.
         from references.models import RockType
 
         occurred_at = timezone.now() - timedelta(hours=1)
@@ -926,7 +939,9 @@ class OfflineEventSyncTests(TestCase):
         retired_rock_id = self.rock.id
         RockType.objects.filter(pk=retired_rock_id).update(is_active=False)
         placement = ExcavatorPlacement.objects.get(excavator=self.excavator)
-        new_rock = RockType.objects.create(name='Новая порода 25.09')
+        new_rock = RockType.objects.create(name='Новая порода 25.09', density=self.rock.density)
+        from references.models import TruckCapacityRule
+        TruckCapacityRule.objects.create(equipment_model=self.truck.model, rock_type=new_rock, volume_m3='40.00')
         placement.work_rock_type = new_rock
         placement.work_context_updated_at = timezone.now() - timedelta(minutes=1)
         placement.save(update_fields=['work_rock_type', 'work_context_updated_at'])
@@ -935,9 +950,102 @@ class OfflineEventSyncTests(TestCase):
             [event], client=self.driver_client(), role_code='driver', device_id='driver-device',
         ).json()['results'][0]
 
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'manual_work_context_changed')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().rock_type_id, new_rock.id)
+
+    def _open_truck_downtime(self, name='ОФР v376', *, started_at):
+        reason = DowntimeReason.objects.create(name=name, equipment_type=self.truck.equipment_type)
+        return DowntimeEvent.objects.create(
+            equipment=self.truck, employee=self.driver, reason=reason, started_at=started_at,
+        )
+
+    def test_manual_load_during_open_truck_downtime_closes_it_by_load_time(self):
+        # Приёмка v375 (01.10.2026): «ОФР» открыт, ручной рейс без сети — сервер
+        # отвечал equipment_downtime_active, рейс пропадал. Погрузка — факт:
+        # простой закрывается её временем, рейс записывается.
+        loaded_at = timezone.now()
+        downtime = self._open_truck_downtime(started_at=loaded_at - timedelta(minutes=5))
+        event = self.driver_manual_event('manual-during-downtime', occurred_at=loaded_at)
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-downtime-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.count(), 1)
+        downtime.refresh_from_db()
+        self.assertEqual(downtime.ended_at, loaded_at)
+
+    def test_downtime_started_after_the_load_stays_open(self):
+        loaded_at = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(
+            pk__in=[self.shift.id, self.truck_shift.id],
+        ).update(opened_at=loaded_at - timedelta(minutes=5))
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(assigned_at=loaded_at - timedelta(minutes=5))
+        later = self._open_truck_downtime(started_at=loaded_at + timedelta(minutes=1))
+        event = self.driver_manual_event('manual-before-downtime', occurred_at=loaded_at)
+
+        result = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-downtime-device',
+        ).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        later.refresh_from_db()
+        self.assertIsNone(later.ended_at)
+
+    def test_rejected_trip_does_not_bury_the_next_trip_in_the_chain(self):
+        # Бой 02.10.2026 (ТЕСТ-1, 5157→5159→5161): отказ первой погрузки тянул
+        # её завершение, а оно — следующую погрузку. Своё завершение по-прежнему
+        # ждёт свою погрузку, но новый рейс записывается.
+        retired = DumpPoint.objects.create(name='Закрытая точка v376', is_active=False)
+        first = self.driver_manual_event('chain-first-load', 1)
+        first['payload']['dump_point_id'] = retired.id
+        first['context_snapshot']['selected_dump_point_id'] = retired.id
+        completed = self.driver_manual_complete_event(first, event_id='chain-first-complete', sequence=2)
+        second = self.driver_manual_event(
+            'chain-second-load', 3,
+            occurred_at=timezone.datetime.fromisoformat(completed['occurred_at']) + timedelta(seconds=30),
+        )
+        second['depends_on'] = [completed['event_id']]
+
+        results = self.sync(
+            [first, completed, second], client=self.driver_client(), role_code='driver',
+            device_id='driver-chain-device',
+        ).json()['results']
+
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(by_id['chain-first-load']['status'], 'conflict', by_id)
+        self.assertEqual(by_id['chain-first-complete']['code'], 'dependency_rejected')
+        self.assertEqual(by_id['chain-second-load']['status'], 'accepted', by_id)
+        self.assertEqual(
+            by_id['chain-second-load']['dependency_recovery'],
+            {'reason': 'other_trip_rejected', 'ignored': ['chain-first-complete']},
+        )
+
+    def test_stored_downtime_refusal_is_reprocessed_with_the_same_event_id(self):
+        # Телефон после v376 повторяет старые отказы с теми же ID: сервер их
+        # обрабатывает заново, а не отдаёт сохранённый конфликт.
+        # Настоящий отказ v375 воспроизводим через точку, которой на миг нет,
+        # и записываем в квитанцию код тех дней.
+        DumpPoint.objects.filter(pk=self.dump_point.id).update(is_active=False)
+        event = self.driver_manual_event('manual-stored-refusal')
+        ExcavatorDumpPointSetting.objects.filter(dump_point=self.dump_point).delete()
+        first = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-replay-device',
+        ).json()['results'][0]
+        self.assertEqual(first['status'], 'conflict', first)
+        OfflineFieldEvent.objects.filter(event_id='manual-stored-refusal').update(
+            error_code='equipment_downtime_active',
+        )
+        DumpPoint.objects.filter(pk=self.dump_point.id).update(is_active=True)
+        self.driver_manual_event('manual-stored-refusal')  # вернуть точку в настройки забоя
+
+        replay = self.sync(
+            [event], client=self.driver_client(), role_code='driver', device_id='driver-replay-device',
+        ).json()['results'][0]
+
+        self.assertEqual(replay['status'], 'accepted', replay)
+        self.assertEqual(Trip.objects.count(), 1)
 
     def test_manual_load_rejects_separate_unload_after_point_change(self):
         changed_point = DumpPoint.objects.create(name='ККД ручного рейса')
