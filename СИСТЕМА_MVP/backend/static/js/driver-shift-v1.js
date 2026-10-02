@@ -417,6 +417,12 @@ window.bindDriverMobileShell = function () {
                 window.clearInterval(timerId);
                 return;
             }
+            // Назначение уже принято на телефоне — отсчитывать больше нечего.
+            if (driverAssignmentTapped(form)) {
+                window.clearInterval(timerId);
+                hideDriverAssignmentNotice();
+                return;
+            }
             var remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
             var minutes = Math.floor(remaining / 60);
             var seconds = remaining % 60;
@@ -508,6 +514,27 @@ window.bindDriverMobileShell = function () {
         });
     };
 
+    /* Тап по этому назначению уже был (в памяти или в очереди телефона). */
+    function driverAssignmentTapped(form) {
+        var id = Number(form && form.dataset.driverAssignmentId || 0);
+        if (!id) return false;
+        if (form.dataset.driverAssignmentTapped === "true") return true;
+        var override = window.__driverAssignmentOverride;
+        if (override && override.assignment_id === id) return true;
+        return (window.driverOfflineEvents || []).some(function (event) {
+            return event && event.event_type === "driver.assignment.accepted"
+                && Number(event.payload && event.payload.assignment_id) === id
+                && ["conflict", "auth_required", "invalid"].indexOf(String(event.state || "pending")) < 0;
+        });
+    }
+
+    /* Угол и подпись-отсчёт гаснут вместе: и у перевода, и у снятия назначения. */
+    function hideDriverAssignmentNotice() {
+        hideDriverAssignmentCorner();
+        var note = document.querySelector("[data-driver-assignment-note]");
+        if (note && !note.hidden) note.hidden = true;
+    }
+
     function hideDriverAssignmentCorner() {
         var corner = document.querySelector("[data-driver-assignment-accept]");
         if (!corner || !corner.classList.contains("is-assignment")) return;
@@ -575,18 +602,20 @@ window.bindDriverMobileShell = function () {
             window.__driverAssignmentOverride = pending.context_snapshot.assignment_override;
         }
         if (window.__driverAssignmentOverride) window.applyDriverAssignmentOverride();
+        var form = document.querySelector("#driver-assignment-action");
+        if (form && driverAssignmentTapped(form)) hideDriverAssignmentNotice();
     };
 
     window.driverAcceptAssignmentLocally = function (form) {
         var override = driverAssignmentOverrideFromForm(form);
         var assignmentId = Number(form && form.dataset.driverAssignmentId || 0);
         if (!assignmentId || !driverOfflineOutbox) return Promise.resolve(false);
+        form.dataset.driverAssignmentTapped = "true";
         if (override) {
             window.__driverAssignmentOverride = override;
             window.applyDriverAssignmentOverride();
-        } else {
-            hideDriverAssignmentCorner();
         }
+        hideDriverAssignmentNotice();
         return driverOfflineOutbox.enqueue({
             event_id: generateClientActionId("driver-assignment-accept"),
             event_type: "driver.assignment.accepted",

@@ -211,3 +211,27 @@ test("manual trips and the point drum follow the excavator the driver accepted o
     assert.match(drum, /root\.addEventListener\("driver-assignment-context-changed", function \(\) \{ refresh\(\); \}\);/);
     assert.match(SHIFT_TEMPLATE, /data-driver-assignment-excavator-id=/);
 });
+
+test("after the tap the countdown stops and the note goes out, for a release too", async () => {
+    // Координатор 02.10.2026: подпись «→ ЭКС-2 · 02:32» тикала рядом с уже
+    // переключённым кругом; у снятия назначения она и вовсе оставалась на виду.
+    const r = runtime();
+    r.form.dataset.driverAssignmentKind = "release";
+    r.form.dataset.driverAssignmentExcavatorId = "";
+    await r.win.driverAcceptAssignmentLocally(r.form);
+    assert.equal(r.corner.classList.contains("is-assignment"), false);
+    assert.equal(r.note.hidden, true);
+    assert.equal(r.label.textContent, "ЭКС-1", "снятие не придумывает новый экскаватор");
+    assert.equal(vm.runInContext("driverAssignmentTapped(form)", Object.assign(r.context, { form: r.form })), true);
+
+    // После перезапуска тап виден только в очереди — подпись гаснет так же.
+    const restarted = runtime({
+        queued: [{ event_type: "driver.assignment.accepted", state: "pending", payload: { assignment_id: 5 } }],
+    });
+    restarted.win.syncDriverAssignmentCorner(restarted.win.driverOfflineEvents);
+    assert.equal(restarted.note.hidden, true);
+    assert.equal(restarted.corner.classList.contains("is-assignment"), false);
+
+    const countdown = block(SHIFT, "    function bindAssignmentCountdown(");
+    assert.match(countdown, /if \(driverAssignmentTapped\(form\)\) \{\s*window\.clearInterval\(timerId\);\s*hideDriverAssignmentNotice\(\);/);
+});
