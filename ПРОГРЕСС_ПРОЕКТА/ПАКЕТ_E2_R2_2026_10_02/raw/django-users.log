@@ -1,0 +1,85 @@
+﻿Creating test database for alias 'default'...
+System.Management.Automation.RemoteException
+.......................................................................s....................................................................................................................................................................................................................................................Forbidden (CSRF token missing.): /
+Forbidden (CSRF token missing.): /
+......................................................................................................................................................................................................................................Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "C:\codex-tmp\e2-r2-retry-provenance-20261002\�������_MVP\backend\users\start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\swwba\\AppData\\Local\\Temp\\tmpmk6tu9kp\\apk\\driver-update.json'
+.Android update manifest is invalid for driver
+.Android update manifest is invalid for excavator_operator
+....Universal start result cache write failed
+Traceback (most recent call last):
+  File "C:\codex-tmp\e2-r2-retry-provenance-20261002\�������_MVP\backend\users\start_views.py", line 95, in _issue_start_result
+    if cache.add(
+       ^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: cache down
+......Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "C:\codex-tmp\e2-r2-retry-provenance-20261002\�������_MVP\backend\users\start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\swwba\\AppData\\Local\\Temp\\tmpe6rw0caw\\apk\\driver-update.json'
+Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "C:\codex-tmp\e2-r2-retry-provenance-20261002\�������_MVP\backend\users\start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\swwba\\AppData\\Local\\Temp\\tmpe6rw0caw\\apk\\driver-update.json'
+.......Forbidden (Origin checking failed - null does not match any trusted origins.): /start/
+........ss...................................
+----------------------------------------------------------------------
+Ran 610 tests in 238.833s
+System.Management.Automation.RemoteException
+OK (skipped=3)
+Destroying test database for alias 'default'...
+System.Management.Automation.RemoteException
+Found 610 test(s).
+System check identified no issues (0 silenced).
+{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+{"category_preserved": 0, "created": 1, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 0}
+{"created": 1, "eligible": 1, "mode": "commit", "skipped_existing": 0, "would_create": 0}
+{"created": 0, "eligible": 1, "mode": "dry-run", "skipped_existing": 0, "would_create": 1}
+{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+���� �������/���������: 13
+����-������� �������: 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000, 910000, 920000
+������.
+����-�������� MVP �����������.
+���� �������: 100000 �����, 200000 ��������, 300000 ��������, 400000 ������ ������, 500000 ���������, 600000 �����������, 700000 �������.
+�������� ����: �������� 10 -> ��� ���� (��������� ���������� ����)
+���� �������/���������: 13
+����-������� �������: 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000, 910000, 920000
+������.
+����-�������� MVP �����������.
+���� �������: 100000 �����, 200000 ��������, 300000 ��������, 400000 ������ ������, 500000 ���������, 600000 �����������, 700000 �������.
+�������� ����: �������� 10 -> ��� ���� (��������� ���������� ����)

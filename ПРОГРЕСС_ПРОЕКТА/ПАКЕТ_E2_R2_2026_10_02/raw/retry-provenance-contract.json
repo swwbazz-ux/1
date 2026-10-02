@@ -1,0 +1,37 @@
+{
+  "server_owned_marker": "result_payload.retry_recovery",
+  "allowed_original_code": "post_unload_cooldown",
+  "direct_root": {
+    "reason": "removed_refusal",
+    "event_type": "excavator.trip.loaded",
+    "required_role": "operator",
+    "root_ids": "exactly the receipt event_id"
+  },
+  "dependent_event": {
+    "reason": "removed_refusal_chain",
+    "required_role": "operator",
+    "requirements": [
+      "non-empty depends_on",
+      "all dependencies are present and immutable",
+      "actual dependency walk reproduces the stored root_ids",
+      "same actor, access, role, device and sequence contract"
+    ]
+  },
+  "preserved_retry_codes": [
+    "concurrent_state_retry",
+    "temporary_server_error",
+    "trip_reference_pending"
+  ],
+  "final_success": {
+    "direct_root_marker": "conflict_recovery.reason=removed_refusal",
+    "dependent_marker": "dependency_recovery.reason=removed_refusal_chain",
+    "internal_retry_marker_removed": true
+  },
+  "fail_closed": [
+    "client payload or depends_on without server marker",
+    "foreign actor, access, role or device",
+    "changed immutable envelope or fingerprint",
+    "missing, retrying or unrelated conflicting dependency",
+    "stored root_ids not equal to the freshly computed lineage"
+  ]
+}

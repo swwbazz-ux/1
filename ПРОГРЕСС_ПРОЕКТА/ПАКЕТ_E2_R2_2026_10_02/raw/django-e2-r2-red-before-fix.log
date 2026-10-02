@@ -1,0 +1,32 @@
+Command:
+python manage.py test \
+  core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_root_provenance_survives_concurrent_retry \
+  core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_child_provenance_survives_temporary_server_error \
+  core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_child_provenance_survives_trip_reference_pending \
+  --verbosity 1
+
+Found 3 test(s).
+System check identified no issues (0 silenced).
+Creating test database for alias 'default'...
+EUnexpected offline event processing failure: removed-cooldown-child-retry-child
+RuntimeError: temporary child service failure
+EE
+
+ERROR: test_removed_cooldown_root_provenance_survives_concurrent_retry
+  retry_result['retry_recovery']
+KeyError: 'retry_recovery'
+
+ERROR: test_removed_cooldown_child_provenance_survives_temporary_server_error
+  retry_result['retry_recovery']
+KeyError: 'retry_recovery'
+
+ERROR: test_removed_cooldown_child_provenance_survives_trip_reference_pending
+  retry_result['retry_recovery']
+KeyError: 'retry_recovery'
+
+Ran 3 tests in 0.408s
+FAILED (errors=3)
+
+This is the preserved command/output excerpt from the pre-fix run. The injected
+RuntimeError is intentional; all three failures are the missing server-owned
+retry_recovery provenance required by E2-R2.
