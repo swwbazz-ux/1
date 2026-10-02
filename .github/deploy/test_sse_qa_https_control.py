@@ -45,10 +45,11 @@ class HttpsControlTests(unittest.TestCase):
         self._write(ctl.QA_NGINX_CONFIG, self.nginx_text.encode())
         certbot = self._write(ctl.CERTBOT, b"#!/bin/sh\nexit 0\n")
         certbot.chmod(0o755)
-        self._write(
-            ctl.CERTBOT_ACCOUNTS / "acme-v02.api.letsencrypt.org/directory/account/registration.json",
-            b"{}\n",
+        self.account_registration = (
+            ctl.CERTBOT_ACCOUNTS
+            / "acme-v02.api.letsencrypt.org/directory/account/regr.json"
         )
+        self._write(self.account_registration, b"{}\n")
         state = {
             "schema": ctl.OWNERSHIP_SCHEMA,
             "complete": True,
@@ -283,6 +284,41 @@ class HttpsControlTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ctl.QaHttpsError, "ACME"):
                 ctl.inspect(self.root)
+
+    def test_certbot_ready_accepts_standard_regr_file(self) -> None:
+        ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_missing_regr_file(self) -> None:
+        self._path(self.account_registration).unlink()
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_legacy_registration_filename(self) -> None:
+        self._path(self.account_registration).unlink()
+        self._write(self.account_registration.with_name("registration.json"), b"{}\n")
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_regr_symlink(self) -> None:
+        registration = self._path(self.account_registration)
+        registration.unlink()
+        target = self._write(Path("/tmp/sse-qa-synthetic-certbot-regr.json"), b"{}\n")
+        if os.name == "nt":
+            try:
+                registration.symlink_to(target)
+            except OSError as exc:
+                self.skipTest(f"symlink creation is unavailable: {exc}")
+        else:
+            registration.symlink_to(target)
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
+
+    def test_certbot_ready_rejects_regr_directory(self) -> None:
+        registration = self._path(self.account_registration)
+        registration.unlink()
+        registration.mkdir()
+        with self.assertRaisesRegex(ctl.QaHttpsError, "existing Certbot account"):
+            ctl.certbot_ready(self.root)
 
     def test_nginx_conflict_recognizes_quotes_multiline_and_ignores_comments(self) -> None:
         positives = (

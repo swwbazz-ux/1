@@ -537,7 +537,7 @@ def certbot_ready(root: Path) -> None:
     if not accounts.is_dir() or accounts.is_symlink():
         raise QaHttpsError("existing Certbot account store is unavailable")
     registrations = [
-        item for item in accounts.rglob("registration.json")
+        item for item in accounts.rglob("regr.json")
         if item.is_file() and not item.is_symlink()
     ]
     if not registrations:
