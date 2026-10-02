@@ -1,0 +1,1 @@
+{"captured_at":"2026-10-02T07:46:33.179Z","connection":"ok","version":"116","card":{"openTripId":"4","state":"loaded_waiting_unload","canLoad":"0","block":"active_trip","draggable":false},"pending":[],"confirmed":[],"outboxKeys":["allocateSequence","confirmed","discardUnsent","flush","getServerMapping","pending","queue","ready","retryNow","storageKind"]}

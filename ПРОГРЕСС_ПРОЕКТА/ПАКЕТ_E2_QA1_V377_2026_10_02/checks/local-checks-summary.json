@@ -1,0 +1,31 @@
+{
+  "candidate_sha": "b5781132a7885546c32cb4e45735d78001b4f674",
+  "release_sha": "1a9683c91502562e101f562a861c1a8d4f934acc",
+  "manage_py_check": "PASS",
+  "makemigrations_check_dry_run": "PASS: No changes detected",
+  "django": {"passed": 304, "failed": 0},
+  "node_targeted": {"passed": 80, "failed": 0},
+  "capacitor": {"passed": 44, "failed": 0},
+  "postgresql_e2_pg1": {
+    "vendor": "PostgreSQL 16.15",
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "test_database": "test_accounting_mvp_e2_qa1_b5781132"
+  },
+  "github": {
+    "pull_request": 149,
+    "draft": true,
+    "auto_merge": false,
+    "check_runs_success": 23,
+    "check_runs_total": 23,
+    "django_run": 36980619442,
+    "required_quality_gate_job": 110758820220,
+    "codeql_run": 36980614178
+  },
+  "runtime_changed_during_qa": false,
+  "off_c1_included": false,
+  "merge_to_release": false,
+  "verify": false,
+  "deploy": false
+}

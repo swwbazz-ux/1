@@ -1,0 +1,39 @@
+{
+    "candidate_sha":  "b5781132a7885546c32cb4e45735d78001b4f674",
+    "candidate_tree":  "dc303c94f46f2866e173e35bf80b3e084ab90b80",
+    "release_sha":  "1a9683c91502562e101f562a861c1a8d4f934acc",
+    "pr":  149,
+    "pr_draft":  true,
+    "postgresql":  "PostgreSQL 16.15",
+    "database":  "accounting_mvp_e2_qa1_b5781132",
+    "database_host":  "127.0.0.1",
+    "database_port":  55442,
+    "device_model":  "Infinix X6833B",
+    "android_release":  "14",
+    "device_serial":  "\u003cREDACTED\u003e",
+    "driver":  {
+                   "package":  "ru.copperresources.driver.e2qa.v377",
+                   "version_code":  1,
+                   "version_name":  "1.0.0-e2qa-v377",
+                   "shell":  "driver-mobile-shell-v377",
+                   "build_sha256":  "591C003D49EFED16CA9CB77F8A8E87AAB372C6B9241F08788A082666F4E792B8",
+                   "installed_sha256":  "591C003D49EFED16CA9CB77F8A8E87AAB372C6B9241F08788A082666F4E792B8",
+                   "signature_v2":  true,
+                   "signer_certificate_sha256":  "adb09a1f594130d5818658c2e7dab206c578fb4710289087c853663e9f0373a8"
+               },
+    "excavator":  {
+                      "package":  "ru.copperresources.excavator.e2qa.v377",
+                      "version_code":  1,
+                      "version_name":  "1.0.0-e2qa-v377",
+                      "shell":  "excavator-mobile-shell-v264",
+                      "build_sha256":  "7C23788970AFAD1AEAF6BA7F4640D90639CCB1ADE10AF0E8FA52D42D8AD3AF6B",
+                      "installed_sha256":  "7C23788970AFAD1AEAF6BA7F4640D90639CCB1ADE10AF0E8FA52D42D8AD3AF6B",
+                      "signature_v2":  true,
+                      "signer_certificate_sha256":  "adb09a1f594130d5818658c2e7dab206c578fb4710289087c853663e9f0373a8"
+                  },
+    "off_c1_included":  false,
+    "production_touched":  false,
+    "merge_performed":  false,
+    "verify_performed":  false,
+    "deploy_performed":  false
+}

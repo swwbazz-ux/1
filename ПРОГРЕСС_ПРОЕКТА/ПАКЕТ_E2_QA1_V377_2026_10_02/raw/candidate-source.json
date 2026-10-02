@@ -1,0 +1,33 @@
+{
+    "candidate_sha":  "b5781132a7885546c32cb4e45735d78001b4f674",
+    "tree":  "dc303c94f46f2866e173e35bf80b3e084ab90b80",
+    "parents":  [
+                    "4609f17aadc0a51b4f7a89b7f933883ed2cee0ab",
+                    "1a9683c91502562e101f562a861c1a8d4f934acc"
+                ],
+    "release_sha":  "1a9683c91502562e101f562a861c1a8d4f934acc",
+    "release_is_ancestor":  true,
+    "worktree_clean":  true,
+    "changed_files":  [
+                          ".github/deploy/production-files.txt",
+                          "СИСТЕМА_MVP/backend/config/settings.py",
+                          "СИСТЕМА_MVP/backend/core/offline_sync.py",
+                          "СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py",
+                          "СИСТЕМА_MVP/backend/core/test_offline_sync.py",
+                          "СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js",
+                          "СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js",
+                          "СИСТЕМА_MVP/backend/static/js/tests/excavator-free-bucket-contract.test.js",
+                          "СИСТЕМА_MVP/backend/static/js/tests/excavator-native-capabilities-runtime.test.js",
+                          "СИСТЕМА_MVP/backend/templates/trips/excavator_work.html",
+                          "СИСТЕМА_MVP/backend/trips/qa_simulator.py",
+                          "СИСТЕМА_MVP/backend/trips/test_excavator_qa_simulator.py",
+                          "СИСТЕМА_MVP/backend/trips/tests.py",
+                          "СИСТЕМА_MVP/backend/trips/views.py",
+                          "СИСТЕМА_MVP/backend/users/role_apps.py"
+                      ],
+    "changed_file_count":  15,
+    "migration_file_count":  0,
+    "off_c1_included":  false,
+    "driver_shell":  "v377",
+    "excavator_shell":  "v264"
+}

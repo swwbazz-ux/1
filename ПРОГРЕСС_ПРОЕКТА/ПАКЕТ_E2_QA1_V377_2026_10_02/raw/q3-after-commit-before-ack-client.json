@@ -1,0 +1,1 @@
+{"captured_at":"2026-10-02T07:45:15.115Z","connection":"recovering","version":"112","card":{"openTripId":"","state":"loaded_waiting_unload","canLoad":"0","block":"","draggable":false},"pending":[{"event_id":"excavator-load-8de21ccb-4481-4fcc-bc28-206d7476afd5","event_type":"excavator.trip.loaded","occurred_at":"2026-10-02T07:45:06.173Z","sequence":4,"truck_id":"6"}]}
