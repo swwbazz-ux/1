@@ -449,6 +449,219 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(repeated['status'], 'deduplicated', repeated)
         self.assertEqual(Trip.objects.count(), 2)
 
+    def _removed_cooldown_cancel_event(self, loaded, *, event_id, sequence, occurred_at, depends_on=None):
+        return {
+            'event_id': event_id,
+            'event_type': 'excavator.trip.loaded.cancelled',
+            'format_version': 1,
+            'actor_id': self.operator.id,
+            'access_id': self.access.id,
+            'role_code': 'excavator_operator',
+            'occurred_at': occurred_at.isoformat(),
+            'sequence': sequence,
+            'depends_on': list(depends_on if depends_on is not None else [loaded['event_id']]),
+            'shift_id': self.shift.id,
+            'equipment_id': self.excavator.id,
+            'local_trip_id': loaded['local_trip_id'],
+            'context_snapshot': dict(loaded.get('context_snapshot') or {}),
+            'payload': {
+                'local_trip_id': loaded['local_trip_id'],
+                'truck_id': loaded['payload']['truck_id'],
+            },
+        }
+
+    def test_removed_cooldown_replays_saved_dependency_chain_with_original_envelopes(self):
+        occurred_at = timezone.now()
+        previous_trip = Trip.objects.create(
+            excavator=self.excavator,
+            truck=self.truck,
+            excavator_operator=self.operator,
+            driver=self.driver,
+            unloading_shift=self.truck_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            assigned_dump_point=self.dump_point,
+            actual_dump_point=self.dump_point,
+            status=TripStatus.COMPLETED,
+            loaded_at=occurred_at - timedelta(minutes=5),
+            completed_at=occurred_at,
+        )
+        root = self.load_event(
+            event_id='removed-cooldown-root', sequence=31,
+            occurred_at=occurred_at + timedelta(seconds=1),
+        )
+        child = self._removed_cooldown_cancel_event(
+            root,
+            event_id='removed-cooldown-child',
+            sequence=32,
+            occurred_at=occurred_at + timedelta(seconds=2),
+        )
+        grandchild = self.load_event(
+            event_id='removed-cooldown-grandchild', sequence=33,
+            occurred_at=occurred_at + timedelta(seconds=3),
+            depends_on=[child['event_id']],
+            local_trip_id='local-removed-cooldown-grandchild',
+        )
+        received_times = {
+            root['event_id']: occurred_at + timedelta(seconds=4),
+            child['event_id']: occurred_at + timedelta(seconds=5),
+            grandchild['event_id']: occurred_at + timedelta(seconds=6),
+        }
+        receipts = {
+            root['event_id']: self._store_legacy_conflicted_event(
+                root,
+                received_at=received_times[root['event_id']],
+                error_code='post_unload_cooldown',
+                error_message='Возвращается к экскаватору · 10 мин.',
+            ),
+            child['event_id']: self._store_legacy_conflicted_event(
+                child,
+                received_at=received_times[child['event_id']],
+                error_code='dependency_rejected',
+                error_message='Предыдущее событие требует сверки или отклонено.',
+            ),
+            grandchild['event_id']: self._store_legacy_conflicted_event(
+                grandchild,
+                received_at=received_times[grandchild['event_id']],
+                error_code='dependency_rejected',
+                error_message='Предыдущее событие требует сверки или отклонено.',
+            ),
+        }
+
+        results = self.sync([root, child, grandchild]).json()['results']
+
+        self.assertEqual([item['status'] for item in results], ['accepted'] * 3, results)
+        self.assertEqual(
+            results[0]['conflict_recovery'],
+            {
+                'reason': 'removed_refusal',
+                'original_code': 'post_unload_cooldown',
+                'root_event_ids': [root['event_id']],
+            },
+        )
+        for result in results[1:]:
+            self.assertEqual(
+                result['dependency_recovery'],
+                {
+                    'reason': 'removed_refusal_chain',
+                    'root_event_ids': [root['event_id']],
+                },
+            )
+        for event in (root, child, grandchild):
+            receipt = receipts[event['event_id']]
+            receipt.refresh_from_db()
+            self.assertEqual(receipt.status, 'accepted')
+            self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
+            self.assertEqual(receipt.received_at, received_times[event['event_id']])
+            self.assertEqual(receipt.sequence, event['sequence'])
+            self.assertEqual(receipt.depends_on, event['depends_on'])
+            self.assertEqual(receipt.payload, event['payload'])
+        trips = list(Trip.objects.exclude(pk=previous_trip.pk).order_by('loaded_at', 'id'))
+        self.assertEqual(len(trips), 2)
+        self.assertEqual(trips[0].status, TripStatus.CANCELLED)
+        self.assertEqual(trips[1].status, TripStatus.LOADED_WAITING_UNLOAD)
+        self.assertEqual(trips[0].loaded_at, timezone.datetime.fromisoformat(root['occurred_at']))
+        self.assertEqual(trips[0].cancelled_at, timezone.datetime.fromisoformat(child['occurred_at']))
+        self.assertEqual(trips[1].loaded_at, timezone.datetime.fromisoformat(grandchild['occurred_at']))
+
+        repeated = self.sync([root, child, grandchild]).json()['results']
+        self.assertEqual([item['status'] for item in repeated], ['deduplicated'] * 3, repeated)
+        self.assertEqual(Trip.objects.count(), 3)
+
+    def test_removed_cooldown_child_stays_replayable_until_root_is_accepted(self):
+        occurred_at = timezone.now()
+        root = self.load_event(
+            event_id='removed-cooldown-late-root', sequence=41, occurred_at=occurred_at,
+        )
+        child = self._removed_cooldown_cancel_event(
+            root,
+            event_id='removed-cooldown-early-child',
+            sequence=42,
+            occurred_at=occurred_at + timedelta(seconds=1),
+        )
+        root_receipt = self._store_legacy_conflicted_event(
+            root,
+            received_at=occurred_at + timedelta(seconds=2),
+            error_code='post_unload_cooldown',
+            error_message='Возвращается к экскаватору · 10 мин.',
+        )
+        child_receipt = self._store_legacy_conflicted_event(
+            child,
+            received_at=occurred_at + timedelta(seconds=3),
+            error_code='dependency_rejected',
+            error_message='Предыдущее событие требует сверки или отклонено.',
+        )
+
+        before_root = self.sync([child]).json()['results'][0]
+        self.assertEqual(before_root['status'], 'conflict', before_root)
+        self.assertEqual(before_root['code'], 'dependency_rejected')
+        child_receipt.refresh_from_db()
+        self.assertEqual(child_receipt.occurred_at, timezone.datetime.fromisoformat(child['occurred_at']))
+        self.assertEqual(child_receipt.received_at, occurred_at + timedelta(seconds=3))
+
+        root_result = self.sync([root]).json()['results'][0]
+        child_result = self.sync([child]).json()['results'][0]
+
+        self.assertEqual(root_result['status'], 'accepted', root_result)
+        self.assertEqual(child_result['status'], 'accepted', child_result)
+        self.assertEqual(child_result['dependency_recovery']['root_event_ids'], [root['event_id']])
+        root_receipt.refresh_from_db()
+        child_receipt.refresh_from_db()
+        self.assertEqual(root_receipt.status, 'accepted')
+        self.assertEqual(child_receipt.status, 'accepted')
+        self.assertEqual(Trip.objects.get().status, TripStatus.CANCELLED)
+
+    def test_removed_cooldown_chain_rejects_unrelated_dependency_and_envelope_change(self):
+        occurred_at = timezone.now()
+        root = self.load_event(
+            event_id='removed-cooldown-negative-root', sequence=51, occurred_at=occurred_at,
+        )
+        unrelated = self.load_event(
+            event_id='unrelated-conflict', sequence=52,
+            occurred_at=occurred_at + timedelta(seconds=1),
+        )
+        child = self._removed_cooldown_cancel_event(
+            root,
+            event_id='removed-cooldown-negative-child',
+            sequence=53,
+            occurred_at=occurred_at + timedelta(seconds=2),
+            depends_on=[root['event_id'], unrelated['event_id']],
+        )
+        self._store_legacy_conflicted_event(
+            root,
+            received_at=occurred_at + timedelta(seconds=3),
+            error_code='post_unload_cooldown',
+            error_message='Возвращается к экскаватору · 10 мин.',
+        )
+        self._store_legacy_conflicted_event(
+            unrelated,
+            received_at=occurred_at + timedelta(seconds=4),
+            error_code='assignment_context_changed',
+            error_message='Назначение изменилось.',
+        )
+        child_receipt = self._store_legacy_conflicted_event(
+            child,
+            received_at=occurred_at + timedelta(seconds=5),
+            error_code='dependency_rejected',
+            error_message='Предыдущее событие требует сверки или отклонено.',
+        )
+
+        root_result = self.sync([root]).json()['results'][0]
+        blocked = self.sync([child]).json()['results'][0]
+        tampered = json.loads(json.dumps(child))
+        tampered['payload']['truck_id'] = self.truck.id + 1000
+        rejected_tamper = self.sync([tampered]).json()['results'][0]
+        rejected_foreign = self.sync([child], device_id='foreign-device').json()['results'][0]
+
+        self.assertEqual(root_result['status'], 'accepted', root_result)
+        self.assertEqual((blocked['status'], blocked['code']), ('conflict', 'dependency_rejected'))
+        self.assertEqual((rejected_tamper['status'], rejected_tamper['code']), ('conflict', 'event_id_reused'))
+        self.assertEqual((rejected_foreign['status'], rejected_foreign['code']), ('conflict', 'event_id_reused'))
+        child_receipt.refresh_from_db()
+        self.assertEqual(child_receipt.status, 'conflict')
+        self.assertEqual(child_receipt.error_code, 'dependency_rejected')
+        self.assertEqual(Trip.objects.count(), 1)
+
     def test_late_driver_manual_load_links_completed_excavator_trip(self):
         occurred_at = timezone.now() - timedelta(minutes=5)
         type(self.shift).objects.filter(
