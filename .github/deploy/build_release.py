@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
+import ipaddress
 import io
 import json
 import os
@@ -31,6 +32,8 @@ MODES = {
     "verify_sse_qa",
     "prepare_sse_qa_host_key",
     "install_sse_qa",
+    "inspect_sse_qa_https",
+    "prepare_sse_qa_https",
     "enable_sse_qa",
     "smoke_sse_qa",
     "disable_sse_qa",
@@ -69,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sse-qa-candidate-commit")
     parser.add_argument("--sse-qa-controller-sha256")
     parser.add_argument("--sse-qa-runtime-sha256")
+    parser.add_argument("--sse-qa-https-controller-sha256")
+    parser.add_argument("--sse-qa-allow-cidr")
     return parser.parse_args()
 
 
@@ -301,6 +306,7 @@ def main() -> None:
         ]
     elif args.mode in {
         "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
+        "inspect_sse_qa_https", "prepare_sse_qa_https",
         "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
     }:
         if args.mode == "prepare_sse_qa_host_key" and any((
@@ -326,6 +332,23 @@ def main() -> None:
                 inline_payload.append((PurePosixPath("deploy/sse-qa/secrets.json"), raw_secrets))
         elif args.sse_qa_secrets or args.sse_qa_secrets_stdin:
             raise SystemExit("SSE QA secrets are accepted only by install_sse_qa")
+        if args.mode == "prepare_sse_qa_https":
+            try:
+                allow_network = ipaddress.ip_network(args.sse_qa_allow_cidr or "", strict=True)
+            except ValueError as exc:
+                raise SystemExit("prepare_sse_qa_https requires one canonical IPv4 /32") from exc
+            if (
+                allow_network.version != 4
+                or allow_network.prefixlen != 32
+                or str(allow_network) != args.sse_qa_allow_cidr
+            ):
+                raise SystemExit("prepare_sse_qa_https requires one canonical IPv4 /32")
+            inline_payload.append((
+                PurePosixPath("deploy/sse-qa/allow-cidr.txt"),
+                args.sse_qa_allow_cidr.encode("ascii"),
+            ))
+        elif args.sse_qa_allow_cidr:
+            raise SystemExit("SSE QA allow_cidr is accepted only by prepare_sse_qa_https")
         provenance = {
             "candidate_commit": args.sse_qa_candidate_commit,
             "controller_sha256": args.sse_qa_controller_sha256,
@@ -337,6 +360,15 @@ def main() -> None:
             if not re.fullmatch(r"[0-9a-f]{64}", provenance[field] or ""):
                 raise SystemExit(f"SSE QA {field} must be a lowercase SHA-256")
         metadata.update({"qa_schema": 2, **provenance})
+        if args.mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}:
+            if not re.fullmatch(
+                r"[0-9a-f]{64}", args.sse_qa_https_controller_sha256 or ""
+            ):
+                raise SystemExit("SSE QA HTTPS controller must be a lowercase SHA-256")
+            metadata.update({
+                "qa_https_schema": 1,
+                "https_controller_sha256": args.sse_qa_https_controller_sha256,
+            })
     else:
         paths = load_paths(
             root,

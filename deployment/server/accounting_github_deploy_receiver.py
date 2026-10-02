@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import math
 import os
@@ -43,6 +44,7 @@ FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
 SSE_QA_MODES = {
     "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
+    "inspect_sse_qa_https", "prepare_sse_qa_https",
     "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
 }
 ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
@@ -53,6 +55,7 @@ FCM_PAYLOAD = "deploy/secrets/firebase-service-account.json"
 FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
 SSE_QA_PACKAGE_PAYLOAD = "deploy/sse-qa/package.zip"
 SSE_QA_SECRETS_PAYLOAD = "deploy/sse-qa/secrets.json"
+SSE_QA_ALLOW_CIDR_PAYLOAD = "deploy/sse-qa/allow-cidr.txt"
 SSE_QA_MAX_PACKAGE_BYTES = 140 * 1024 * 1024
 SSE_QA_MAX_MEMBERS = 2500
 SSE_QA_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
@@ -63,11 +66,17 @@ SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
+SSE_QA_HTTPS_CONTROLLER_SHA256 = "5f203610c8d5a0c2360968925cc8ed53eae4bdbf4ac9add64495c997213143c5"
 SSE_QA_METADATA = {
     "qa_schema": 2,
     "candidate_commit": SSE_QA_CANDIDATE_COMMIT,
     "controller_sha256": SSE_QA_CONTROLLER_SHA256,
     "runtime_sha256": SSE_QA_RUNTIME_SHA256,
+}
+SSE_QA_HTTPS_METADATA = {
+    **SSE_QA_METADATA,
+    "qa_https_schema": 1,
+    "https_controller_sha256": SSE_QA_HTTPS_CONTROLLER_SHA256,
 }
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
@@ -1692,6 +1701,8 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         allowed = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
             allowed.add(SSE_QA_SECRETS_PAYLOAD)
+        if mode == "prepare_sse_qa_https":
+            allowed.add(SSE_QA_ALLOW_CIDR_PAYLOAD)
         if path.as_posix() not in allowed:
             raise ReleaseError(f"SSE QA target is not allowed: {value}")
         return path
@@ -1822,7 +1833,14 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
         expected = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
             expected.add(SSE_QA_SECRETS_PAYLOAD)
-        if set(payload) != expected or metadata != SSE_QA_METADATA:
+        if mode == "prepare_sse_qa_https":
+            expected.add(SSE_QA_ALLOW_CIDR_PAYLOAD)
+        expected_metadata = (
+            SSE_QA_HTTPS_METADATA
+            if mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}
+            else SSE_QA_METADATA
+        )
+        if set(payload) != expected or metadata != expected_metadata:
             raise ReleaseError("invalid SSE QA package contract")
         if len(payload[SSE_QA_PACKAGE_PAYLOAD]) > SSE_QA_MAX_PACKAGE_BYTES:
             raise ReleaseError("SSE QA package is too large")
@@ -1833,6 +1851,18 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
                 raise ReleaseError("invalid SSE QA secrets envelope") from exc
             if not isinstance(secrets, dict) or secrets.get("schema") != 1:
                 raise ReleaseError("invalid SSE QA secrets schema")
+        if mode == "prepare_sse_qa_https":
+            try:
+                allow_cidr = payload[SSE_QA_ALLOW_CIDR_PAYLOAD].decode("ascii")
+                network = ipaddress.ip_network(allow_cidr, strict=True)
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise ReleaseError("invalid SSE QA HTTPS allow_cidr") from exc
+            if (
+                network.version != 4
+                or network.prefixlen != 32
+                or str(network) != allow_cidr
+            ):
+                raise ReleaseError("invalid SSE QA HTTPS allow_cidr")
     elif mode in DIAGNOSTIC_MODES:
         if payload:
             raise ReleaseError("diagnostic package cannot contain payload files")
@@ -2427,6 +2457,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
         "verify_sse_qa": "preflight",
         "prepare_sse_qa_host_key": "prepare-host-key",
         "install_sse_qa": "install",
+        "inspect_sse_qa_https": "inspect",
+        "prepare_sse_qa_https": "prepare",
         "enable_sse_qa": "enable",
         "smoke_sse_qa": "smoke",
         "disable_sse_qa": "disable",
@@ -2463,22 +2495,28 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                 if total_uncompressed > SSE_QA_MAX_UNCOMPRESSED_BYTES:
                     raise ReleaseError("SSE QA archive expands beyond its limit")
             archive.extractall(root / "bundle")
-        controller = root / "bundle" / "scripts" / "sse_qa_ctl.py"
+        https_mode = mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}
+        controller_name = "sse_qa_https_ctl.py" if https_mode else "sse_qa_ctl.py"
+        controller = root / "bundle" / "scripts" / controller_name
         checker = root / "bundle" / "scripts" / "package_self_check.py"
         control_only = mode in {
             "prepare_sse_qa_host_key", "enable_sse_qa", "smoke_sse_qa",
             "disable_sse_qa", "remove_sse_qa",
+            "inspect_sse_qa_https", "prepare_sse_qa_https",
         }
         if not controller.is_file():
             raise ReleaseError("SSE QA controller is missing")
-        if digest(controller.read_bytes()) != SSE_QA_CONTROLLER_SHA256:
+        expected_controller_sha256 = (
+            SSE_QA_HTTPS_CONTROLLER_SHA256 if https_mode else SSE_QA_CONTROLLER_SHA256
+        )
+        if digest(controller.read_bytes()) != expected_controller_sha256:
             raise ReleaseError("SSE QA controller does not match accepted candidate")
         if control_only:
             extracted_files = {
                 path.relative_to(root / "bundle").as_posix()
                 for path in (root / "bundle").rglob("*") if path.is_file()
             }
-            if extracted_files != {"scripts/sse_qa_ctl.py"}:
+            if extracted_files != {f"scripts/{controller_name}"}:
                 raise ReleaseError("SSE QA control package contains unexpected files")
         else:
             runtime = root / "bundle" / "generated" / "runtime.tar.gz"
@@ -2493,17 +2531,22 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             )
             if checked.returncode != 0 or "PACKAGE_SELF_CHECK_OK" not in checked.stdout:
                 raise ReleaseError("SSE QA package self-check failed")
-        command = [
-            "/usr/bin/python3", str(controller), operation,
-            "--bundle-root", str(root / "bundle"),
-        ]
-        secret_input: str | None = None
+        command = ["/usr/bin/python3", str(controller), operation]
+        if not https_mode:
+            command.extend(("--bundle-root", str(root / "bundle")))
+        operation_input: str | None = None
         if mode == "install_sse_qa":
             try:
-                secret_input = payload[SSE_QA_SECRETS_PAYLOAD].decode("utf-8")
+                operation_input = payload[SSE_QA_SECRETS_PAYLOAD].decode("utf-8")
             except UnicodeError as exc:
                 raise ReleaseError("SSE QA secrets payload is not UTF-8") from exc
             command.append("--secrets-stdin")
+        elif mode == "prepare_sse_qa_https":
+            try:
+                operation_input = payload[SSE_QA_ALLOW_CIDR_PAYLOAD].decode("ascii")
+            except UnicodeError as exc:
+                raise ReleaseError("SSE QA allow_cidr payload is not ASCII") from exc
+            command.append("--allow-cidr-stdin")
         scoped_unit: str | None = None
         if mode == "install_sse_qa":
             scoped_unit = "sse-qa-install.service"
@@ -2511,6 +2554,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             scoped_unit = "sse-qa-enable.service"
         elif mode == "smoke_sse_qa":
             scoped_unit = "sse-qa-smoke.service"
+        elif mode == "prepare_sse_qa_https":
+            scoped_unit = "sse-qa-https.service"
         runtime_slice_digest = (
             _stage_sse_qa_runtime_slice(root / "bundle")
             if mode == "install_sse_qa" else None
@@ -2534,10 +2579,13 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                     "--service-type=exec", f"--unit={scoped_unit}",
                     f"--slice={SSE_QA_SLICE_UNIT}", *properties,
                     "/usr/bin/python3.12", str(controller), operation,
-                    "--bundle-root", str(root / "bundle"),
                 ]
+                if not https_mode:
+                    command.extend(("--bundle-root", str(root / "bundle")))
                 if mode == "install_sse_qa":
                     command.append("--secrets-stdin")
+                elif mode == "prepare_sse_qa_https":
+                    command.append("--allow-cidr-stdin")
         except BaseException:
             if runtime_slice_digest is not None:
                 _cleanup_sse_qa_runtime_slice(runtime_slice_digest, keep_installed=False)
@@ -2546,14 +2594,14 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
         try:
             process = subprocess.Popen(
                 command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                stdin=(subprocess.PIPE if secret_input is not None else subprocess.DEVNULL),
+                stdin=(subprocess.PIPE if operation_input is not None else subprocess.DEVNULL),
                 start_new_session=True,
             )
             try:
-                if secret_input is None:
+                if operation_input is None:
                     output, _ = process.communicate(timeout=900)
                 else:
-                    output, _ = process.communicate(input=secret_input, timeout=900)
+                    output, _ = process.communicate(input=operation_input, timeout=900)
             except subprocess.TimeoutExpired as exc:
                 output = _terminate_sse_qa_process(process, mode, scoped_unit)
                 raise ReleaseError("SSE QA operation timed out; termination confirmed") from exc
