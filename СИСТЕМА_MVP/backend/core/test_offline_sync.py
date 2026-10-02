@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest import mock
 
 from django.db import close_old_connections, connection, transaction
@@ -3729,6 +3730,10 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
     create_registered_driver_shift = (
         trip_fixtures.ExcavatorWorkServerIntegrationTests.create_registered_driver_shift
     )
+    load_event = OfflineEventSyncTests.load_event
+    _removed_cooldown_cancel_event = OfflineEventSyncTests._removed_cooldown_cancel_event
+    _removed_cooldown_chain_fixture = OfflineEventSyncTests._removed_cooldown_chain_fixture
+    _store_legacy_conflicted_event = OfflineEventSyncTests._store_legacy_conflicted_event
 
     def setUp(self):
         if connection.vendor != 'postgresql':
@@ -3818,6 +3823,120 @@ class OfflineEventPostgreSQLConcurrencyTests(TransactionTestCase):
         )
         close_old_connections()
         return response.status_code, response.json()['results'][0]
+
+    def parallel_posts(self, requests):
+        """Start every request on its own Django connection at one barrier."""
+        barrier = Barrier(len(requests))
+
+        def submit(request):
+            close_old_connections()
+            barrier.wait(timeout=10)
+            return self.post_from_thread(*request)
+
+        with ThreadPoolExecutor(max_workers=len(requests)) as pool:
+            return list(pool.map(submit, requests))
+
+    def test_removed_cooldown_root_parallel_retries_create_one_effect(self):
+        root, _child, _grandchild, receipts, received_times = (
+            self._removed_cooldown_chain_fixture(
+                'pg-removed-cooldown-root', first_sequence=501,
+            )
+        )
+
+        parallel = self.parallel_posts([
+            (root, 'device-test-001'),
+            (root, 'device-test-001'),
+        ])
+        self.assertEqual([status for status, _result in parallel], [200, 200], parallel)
+        self.assertTrue(
+            all(
+                result['status'] in {'accepted', 'deduplicated', 'retry'}
+                for _, result in parallel
+            ),
+            parallel,
+        )
+
+        final = self.post_from_thread(root, 'device-test-001')[1]
+        self.assertIn(final['status'], {'accepted', 'deduplicated'}, final)
+        receipt = receipts[root['event_id']]
+        receipt.refresh_from_db()
+        expected_occurred_at = timezone.datetime.fromisoformat(root['occurred_at'])
+        self.assertEqual(receipt.status, 'accepted')
+        self.assertEqual(receipt.occurred_at, expected_occurred_at)
+        self.assertEqual(receipt.received_at, received_times[root['event_id']])
+        self.assertEqual(
+            receipt.result_payload['conflict_recovery'],
+            {
+                'reason': 'removed_refusal',
+                'original_code': 'post_unload_cooldown',
+                'root_event_ids': [root['event_id']],
+            },
+        )
+        self.assertEqual(OfflineFieldEvent.objects.filter(event_id=root['event_id']).count(), 1)
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loaded_at, expected_occurred_at)
+        self.assertEqual(
+            TripClientAction.objects.filter(client_action_id=root['event_id']).count(),
+            1,
+        )
+
+    def test_removed_cooldown_root_and_child_overlap_then_converge(self):
+        root, child, _grandchild, receipts, received_times = (
+            self._removed_cooldown_chain_fixture(
+                'pg-removed-cooldown-chain', first_sequence=511,
+            )
+        )
+
+        parallel = self.parallel_posts([
+            (root, 'device-test-001'),
+            (child, 'device-test-001'),
+        ])
+        self.assertEqual([status for status, _result in parallel], [200, 200], parallel)
+        self.assertTrue(
+            all(
+                result['status'] in {'accepted', 'deduplicated', 'conflict', 'retry'}
+                for _, result in parallel
+            ),
+            parallel,
+        )
+
+        root_final = self.post_from_thread(root, 'device-test-001')[1]
+        child_final = self.post_from_thread(child, 'device-test-001')[1]
+        self.assertIn(root_final['status'], {'accepted', 'deduplicated'}, root_final)
+        self.assertIn(child_final['status'], {'accepted', 'deduplicated'}, child_final)
+
+        expected_root_recovery = {
+            'reason': 'removed_refusal',
+            'original_code': 'post_unload_cooldown',
+            'root_event_ids': [root['event_id']],
+        }
+        expected_child_recovery = {
+            'reason': 'removed_refusal_chain',
+            'root_event_ids': [root['event_id']],
+        }
+        root_receipt = receipts[root['event_id']]
+        child_receipt = receipts[child['event_id']]
+        root_receipt.refresh_from_db()
+        child_receipt.refresh_from_db()
+        self.assertEqual(root_receipt.status, 'accepted')
+        self.assertEqual(child_receipt.status, 'accepted')
+        self.assertEqual(root_receipt.result_payload['conflict_recovery'], expected_root_recovery)
+        self.assertEqual(child_receipt.result_payload['dependency_recovery'], expected_child_recovery)
+        for event, receipt in ((root, root_receipt), (child, child_receipt)):
+            self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
+            self.assertEqual(receipt.received_at, received_times[event['event_id']])
+            self.assertEqual(receipt.sequence, event['sequence'])
+            self.assertEqual(receipt.depends_on, event['depends_on'])
+            self.assertEqual(receipt.payload, event['payload'])
+            self.assertEqual(OfflineFieldEvent.objects.filter(event_id=event['event_id']).count(), 1)
+            self.assertEqual(TripClientAction.objects.filter(client_action_id=event['event_id']).count(), 1)
+
+        self.assertEqual(Trip.objects.count(), 1)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loaded_at, root_receipt.occurred_at)
+        self.assertEqual(trip.cancelled_at, child_receipt.occurred_at)
+        self.assertEqual(trip.status, TripStatus.CANCELLED)
 
     def test_same_event_parallel_requests_create_one_trip(self):
         event = self.event('parallel-same-event', 1)
