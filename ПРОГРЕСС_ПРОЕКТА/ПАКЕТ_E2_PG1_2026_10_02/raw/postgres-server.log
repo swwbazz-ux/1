@@ -1,0 +1,13 @@
+2026-10-02 12:24:37.128 +10 [828] LOG:  starting PostgreSQL 16.15, compiled by Visual C++ build 1944, 64-bit
+2026-10-02 12:24:37.128 +10 [828] LOG:  listening on IPv4 address "127.0.0.1", port 55439
+2026-10-02 12:24:37.174 +10 [19356] LOG:  database system was shut down at 2026-10-02 12:24:32 +10
+2026-10-02 12:24:37.203 +10 [828] LOG:  database system is ready to accept connections
+2026-10-02 12:24:50.085 +10 [23764] FATAL:  role "swwba" does not exist
+2026-10-02 12:26:58.065 +10 [18824] LOG:  checkpoint starting: immediate force wait
+2026-10-02 12:26:58.276 +10 [18824] LOG:  checkpoint complete: wrote 1008 buffers (6.2%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.201 s, sync=0.001 s, total=0.212 s; sync files=0, longest=0.000 s, average=0.000 s; distance=16152 kB, estimate=16152 kB; lsn=0/253D9D8, redo lsn=0/253D9A0
+2026-10-02 12:27:45.945 +10 [18824] LOG:  checkpoint starting: immediate force wait
+2026-10-02 12:27:45.961 +10 [18824] LOG:  checkpoint complete: wrote 38 buffers (0.2%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.008 s, sync=0.001 s, total=0.017 s; sync files=0, longest=0.000 s, average=0.000 s; distance=13863 kB, estimate=15923 kB; lsn=0/32C7620, redo lsn=0/32C75E8
+2026-10-02 12:29:25.687 +10 [18824] LOG:  checkpoint starting: immediate force wait
+2026-10-02 12:29:25.699 +10 [18824] LOG:  checkpoint complete: wrote 7 buffers (0.0%); 0 WAL file(s) added, 0 removed, 1 recycled; write=0.007 s, sync=0.001 s, total=0.013 s; sync files=0, longest=0.000 s, average=0.000 s; distance=14387 kB, estimate=15770 kB; lsn=0/40D42C0, redo lsn=0/40D4288
+2026-10-02 12:30:51.606 +10 [18824] LOG:  checkpoint starting: immediate force wait
+2026-10-02 12:30:51.612 +10 [18824] LOG:  checkpoint complete: wrote 8 buffers (0.0%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.004 s, sync=0.001 s, total=0.006 s; sync files=0, longest=0.000 s, average=0.000 s; distance=14444 kB, estimate=15637 kB; lsn=0/4EEF480, redo lsn=0/4EEF448

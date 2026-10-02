@@ -1,0 +1,33 @@
+Creating test database for alias 'default' ('test_accounting_e2_pg1')...
+test_offline_excavator_load_after_completed_trip_is_accepted_at_all_old_boundaries (core.test_offline_sync.OfflineEventSyncTests.test_offline_excavator_load_after_completed_trip_is_accepted_at_all_old_boundaries) ... ok
+test_legacy_post_unload_cooldown_conflict_replays_original_event_once (core.test_offline_sync.OfflineEventSyncTests.test_legacy_post_unload_cooldown_conflict_replays_original_event_once) ... ok
+test_removed_cooldown_replays_saved_dependency_chain_with_original_envelopes (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_replays_saved_dependency_chain_with_original_envelopes) ... ok
+test_removed_cooldown_child_stays_replayable_until_root_is_accepted (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_child_stays_replayable_until_root_is_accepted) ... ok
+test_removed_cooldown_chain_rejects_unrelated_dependency_and_envelope_change (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_chain_rejects_unrelated_dependency_and_envelope_change) ... ok
+test_removed_cooldown_root_provenance_survives_concurrent_retry (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_root_provenance_survives_concurrent_retry) ... ok
+test_removed_cooldown_child_provenance_survives_temporary_server_error (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_child_provenance_survives_temporary_server_error) ... Unexpected offline event processing failure: removed-cooldown-child-retry-child
+Traceback (most recent call last):
+  File "C:\codex-tmp\e2-pg1-postgresql-20261002\—»—“≈Ã¿_MVP\backend\core\offline_sync.py", line 3800, in process_one_offline_event
+    result_payload, links = PROCESSORS[normalized['event_type']](access, normalized)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\codex-tmp\e2-pg1-postgresql-20261002\—»—“≈Ã¿_MVP\backend\core\offline_sync.py", line 2430, in _process_excavator_loaded_cancelled
+    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\swwba\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+RuntimeError: temporary child service failure
+ok
+test_removed_cooldown_child_provenance_survives_trip_reference_pending (core.test_offline_sync.OfflineEventSyncTests.test_removed_cooldown_child_provenance_survives_trip_reference_pending) ... ok
+test_removed_cooldown_root_parallel_retries_create_one_effect (core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests.test_removed_cooldown_root_parallel_retries_create_one_effect) ... ok
+test_removed_cooldown_root_and_child_overlap_then_converge (core.test_offline_sync.OfflineEventPostgreSQLConcurrencyTests.test_removed_cooldown_root_and_child_overlap_then_converge) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 6.323s
+
+OK
+Destroying test database for alias 'default' ('test_accounting_e2_pg1')...
