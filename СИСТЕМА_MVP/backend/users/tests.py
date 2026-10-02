@@ -511,19 +511,19 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, reverse('driver_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/driver-sw.js')
-        self.assertContains(response, 'driver-mobile-shell-v376')
+        self.assertContains(response, 'driver-mobile-shell-v377')
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(
             response,
-            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v376',
+            '/static/js/driver-offline-outbox-v2.js?v=driver-mobile-shell-v377',
         )
         self.assertContains(
             response,
-            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v376',
+            '/static/css/mobile-shift-unified-v1.css?v=driver-mobile-shell-v377',
         )
         self.assertContains(
             response,
-            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v376',
+            '/static/js/mobile-shift-unified-v1.js?v=driver-mobile-shell-v377',
         )
         self.assertContains(response, 'data-mobile-sound-profile="driver"')
         self.assertIn('playDriverSound("truck_assigned")', driver_script())
@@ -569,7 +569,7 @@ class AccessLoginTests(TestCase):
         self.assertIn('"drum"', driver_stylesheet())
         self.assertIn('"assign"', driver_script())
         # Над кругом барабан точек, под ним барабан простоев: остаток высоты делят поровну.
-        self.assertIn('grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr) auto', driver_stylesheet())
+        self.assertIn('grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);', driver_stylesheet())
         self.assertIn('gap: var(--driver-work-gap)', driver_stylesheet())
         self.assertNotContains(response, 'class="driver-work-context-card"')
         self.assertContains(response, 'data-driver-point-drum')
@@ -638,7 +638,7 @@ class AccessLoginTests(TestCase):
         self.assertNotIn('.driver-work-dial-button.is-pending .driver-work-label', driver_stylesheet())
         self.assertNotIn('.driver-work-dial-button.is-pending .driver-work-percent', driver_stylesheet())
         self.assertNotContains(response, 'data-driver-pending-label')
-        self.assertIn('body.driver-mobile-screen .driver-work-assignment', driver_stylesheet())
+        self.assertIn('body.driver-mobile-screen .driver-work-assignment-note {', driver_stylesheet())
         self.assertIn('width: min(var(--driver-dial-size), 100%)', driver_stylesheet())
         self.assertIn('max-width: 520px', driver_stylesheet())
         self.assertIn('--driver-dial-size: clamp(320px, min(42vw, 58dvh), 520px)', driver_stylesheet())
@@ -748,7 +748,7 @@ class AccessLoginTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Service-Worker-Allowed'], '/driver/')
-        self.assertIn('driver-mobile-shell-v376', script)
+        self.assertIn('driver-mobile-shell-v377', script)
         self.assertIn(
             'const PRIVACY_POLICY_URL = "/company/privacy/?from=role-login";',
             script,
@@ -3138,7 +3138,7 @@ class AccessLoginTests(TestCase):
         shift_response = self.client.get('/driver/shift/', HTTP_HOST='localhost')
         self.assertContains(shift_response, 'data-driver-point-drum')
         self.assertContains(shift_response, 'ВЫ НАЗНАЧЕНЫ НА ЭКС-1')
-        self.assertContains(shift_response, 'ПРИНЯТЬ')
+        self.assertContains(shift_response, 'mobile-dial-action--spare is-assignment')
         self.assertContains(shift_response, 'НА ЗАГРУЗКУ')
         self.assertContains(shift_response, '1')
         self.assertContains(shift_response, 'driver-work-dial-button is-empty')
@@ -3279,12 +3279,12 @@ class AccessLoginTests(TestCase):
         self.assertContains(response, 'Бл. 55')
         self.assertContains(response, 'data-driver-manual-result')
         self.assertNotContains(response, 'рейс не создан')
-        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v376')
-        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v376')
-        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v376')
-        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v376')
-        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v376')
-        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v376')
+        self.assertContains(response, '/static/js/excavator-dashboard-drag-v1.js?v=driver-mobile-shell-v377')
+        self.assertContains(response, '/static/js/excavator-dump-return-swipe-v1.js?v=driver-mobile-shell-v377')
+        self.assertContains(response, '/static/js/driver-manual-excavator-workspace-v1.js?v=driver-mobile-shell-v377')
+        self.assertContains(response, '/static/css/excavator-work-v55-shift.css?v=driver-mobile-shell-v377')
+        self.assertContains(response, '/static/css/excavator-manual-loading-v1.css?v=driver-mobile-shell-v377')
+        self.assertContains(response, '/static/css/excavator-free-bucket-v1.css?v=driver-mobile-shell-v377')
 
         active_trip = Trip.objects.create(
             truck=truck,
@@ -3429,7 +3429,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(initial_driver_response, 'Самосвал 54 · Петров П.П.')
         self.assertContains(initial_driver_response, 'ВЫ НАЗНАЧЕНЫ НА ЭКС-1')
         self.assertContains(initial_driver_response, 'НА ЗАГРУЗКУ')
-        self.assertContains(initial_driver_response, 'ПРИНЯТЬ')
+        self.assertContains(initial_driver_response, 'mobile-dial-action--spare is-assignment')
 
         accept_response = self.client.post(
             reverse('driver_accept_assignment', args=[assignment.id]),
@@ -3600,7 +3600,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(shift_response, 'К-1')
         self.assertContains(shift_response, 'ЭКС-1')
         self.assertContains(shift_response, 'ВЫ НАЗНАЧЕНЫ НА ЭКС-2')
-        self.assertContains(shift_response, 'ПРИНЯТЬ')
+        self.assertContains(shift_response, 'mobile-dial-action--spare is-assignment')
         self.assertNotContains(shift_response, '668:')
 
     def test_excavator_creates_trip_and_driver_completes_it(self):
@@ -3917,7 +3917,7 @@ class AccessLoginTests(TestCase):
         self.assertContains(driver_shift_response, 'ККД')
         self.assertContains(driver_shift_response, 'window.applyOperationalStateRefresh')
         self.assertContains(driver_shift_response, 'data-realtime-mode="custom"')
-        self.assertContains(driver_shift_response, 'driver-mobile-shell-v376')
+        self.assertContains(driver_shift_response, 'driver-mobile-shell-v377')
 
     def test_driver_quick_reasons_render_stars_and_drum_subset(self):
         self.create_registered_driver_shift()
