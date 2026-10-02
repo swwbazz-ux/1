@@ -56,27 +56,59 @@ function element(dataset, classes) {
     };
 }
 
-function runtime({ dialEmpty = true, downtime = "" } = {}) {
+const BLOCK = (() => {
+    const start = SHIFT.indexOf("    function driverAssignmentOverrideFromForm(");
+    const end = SHIFT.indexOf("    bindAssignmentCountdown();\n    function bindDriverShiftControls()");
+    assert.ok(start > 0 && end > start, "override block");
+    return SHIFT.slice(start, end);
+})();
+
+function runtime({ dialEmpty = true, downtime = "", queued = [] } = {}) {
     const corner = element({}, ["mobile-dial-action", "mobile-dial-action--spare", "is-assignment"]);
-    const form = element({ driverAssignmentId: "5", driverAssignmentKind: "assign", driverAssignmentTarget: "ЭКС-5" });
+    const form = element({
+        driverAssignmentId: "5", driverAssignmentKind: "assign", driverAssignmentTarget: "ЭКС-5",
+        driverAssignmentExcavatorId: "57",
+    });
     const note = element({});
     const label = element({ driverDialRaw: "ЭКС-1", driverDialFitKey: "k" });
     label.textContent = "ЭКС-1";
     const hold = element({}, [dialEmpty ? "is-empty" : "is-loaded"]);
+    const workspace = element({ driverManualPrimaryExcavatorLabel: "ЭКС-1", driverManualExcavatorLabel: "ЭКС-1", driverManualAuthorityType: "assignment" });
+    const card = element({ driverActiveDowntimeId: downtime });
     const nodes = {
         "[data-driver-assignment-accept]": corner,
         "#driver-assignment-action": form,
         "[data-driver-assignment-note]": note,
         "[data-driver-dial-label]": label,
         "[data-driver-hold-button]": hold,
+        "[data-driver-manual-workspace]": workspace,
+        "[data-driver-active-downtime-id]": card,
     };
     const enqueued = [];
     const sounds = [];
+    const dispatched = [];
+    const listeners = {};
+    const win = {
+        driverOfflineEvents: queued,
+        DriverFreeBucket: {
+            currentState: () => ({ active: false }),
+            currentCatalog: () => ({
+                excavators: [{
+                    id: 57, label: "ЭКС-5", complex_label: "К-5", rock_type_id: 4, rock_type: "Руда",
+                    loading_horizon: "75", loading_block: "52",
+                    dump_points: [{ id: 1, name: "ККД", transport_distance_km: "3.5" }, { id: 2, name: "СКДР" }],
+                }],
+            }),
+        },
+        dispatchEvent: (event) => dispatched.push(event),
+        addEventListener: (type, fn) => { listeners[type] = fn; },
+    };
     const context = vm.createContext({
-        Promise, Date, Number, String,
-        window: { driverOfflineEvents: [] },
+        Promise, Date, Number, String, Array, Object,
+        window: win,
+        document: { querySelector: (sel) => nodes[sel] || null },
+        CustomEvent: function (type, init) { this.type = type; this.detail = init && init.detail; },
         shell: { querySelector: (sel) => nodes[sel] || null },
-        downtimeCard: { dataset: { driverActiveDowntimeId: downtime } },
         driverOfflineOutbox: {
             enqueue: (event) => { enqueued.push(event); return Promise.resolve(event); },
             flush: () => Promise.resolve(),
@@ -84,49 +116,76 @@ function runtime({ dialEmpty = true, downtime = "" } = {}) {
         generateClientActionId: (prefix) => prefix + "-1",
         playDriverSound: (name) => sounds.push(name),
     });
-    vm.runInContext([
-        block(SHIFT, "    function hideDriverAssignmentCorner("),
-        block(SHIFT, "    window.syncDriverAssignmentCorner = function") + ";",
-        block(SHIFT, "    window.driverAcceptAssignmentLocally = function") + ";",
-        block(SHIFT, "    function applyDriverAssignmentDue("),
-    ].join("\n"), context);
-    return { context, corner, form, note, label, enqueued, sounds };
+    vm.runInContext(BLOCK, context);
+    return { context, win, corner, form, note, label, workspace, enqueued, sounds, dispatched, listeners };
 }
 
-test("a tap on «ПРИНЯТЬ» queues the acceptance and puts the corner out at once, without the server", async () => {
+const BASE = {
+    source: "driver_manual", authority_type: "assignment", truck_id: 10, excavator_id: 54,
+    excavator_label: "ЭКС-1", assignment_id: 3, placement_id: 1, rock_type_id: 4,
+    dump_points: [{ id: 1, name: "ККД" }, { id: 3, name: "Отвал" }],
+};
+
+function plain(value) { return JSON.parse(JSON.stringify(value)); }
+
+test("a tap on «ПРИНЯТЬ» moves the phone to the new excavator at once and queues the acceptance", async () => {
     const r = runtime();
-    const saved = await r.context.window.driverAcceptAssignmentLocally(r.form);
+    const saved = await r.win.driverAcceptAssignmentLocally(r.form);
     assert.equal(saved, true);
     assert.equal(r.corner.classList.contains("is-assignment"), false);
-    assert.equal(r.corner.disabled, true);
+    assert.equal(r.note.hidden, true);
+    assert.equal(r.label.textContent, "ЭКС-5");
+    assert.equal(r.workspace.dataset.driverManualPrimaryExcavatorLabel, "ЭКС-5");
     assert.equal(r.enqueued.length, 1);
     assert.equal(r.enqueued[0].event_type, "driver.assignment.accepted");
     assert.equal(r.enqueued[0].payload.assignment_id, 5);
+    assert.equal(r.enqueued[0].context_snapshot.assignment_override.excavator_id, 57);
     assert.deepEqual(r.sounds, ["action_ok"]);
+    assert.ok(r.dispatched.some((event) => event.type === "driver-assignment-context-changed"));
+
+    // Ручной рейс и барабан точек — нового экскаватора.
+    const context = plain(r.win.driverAssignmentContextOverride(BASE));
+    assert.equal(context.excavator_id, 57);
+    assert.equal(context.assignment_id, 5);
+    assert.equal(context.placement_id, null);
+    assert.deepEqual(context.dump_points.map((point) => point.name), ["ККД", "СКДР"]);
+    // Сервер уже показал перевод — переопределять нечего.
+    assert.equal(r.win.driverAssignmentContextOverride(Object.assign({}, BASE, { excavator_id: 57, assignment_id: 5 })), null);
 });
 
-test("a server screen drawn before the acceptance reached it does not bring the corner back", () => {
-    const r = runtime();
-    r.context.window.syncDriverAssignmentCorner([
-        { event_type: "driver.assignment.accepted", state: "pending", payload: { assignment_id: 5 } },
-    ]);
+test("after a restart the queued tap keeps the phone on the new excavator", () => {
+    const fresh = runtime();
+    const override = plain(fresh.context.driverAssignmentOverrideFromForm(fresh.form));
+    const r = runtime({
+        queued: [{
+            event_type: "driver.assignment.accepted", state: "pending", payload: { assignment_id: 5 },
+            context_snapshot: { assignment_override: override },
+        }],
+    });
+    r.win.syncDriverAssignmentCorner(r.win.driverOfflineEvents);
     assert.equal(r.corner.classList.contains("is-assignment"), false);
-
-    const other = runtime();
-    other.context.window.syncDriverAssignmentCorner([
-        { event_type: "driver.assignment.accepted", state: "pending", payload: { assignment_id: 4 } },
-    ]);
-    assert.equal(other.corner.classList.contains("is-assignment"), true, "чужое назначение угол не гасит");
+    assert.equal(r.label.textContent, "ЭКС-5");
+    assert.equal(r.win.driverAssignmentContextOverride(BASE).excavator_id, 57);
 });
 
-test("at the deadline the corner goes out and the empty dial names the new excavator at once", () => {
+test("a fresh server screen after the answer drops the phone override; a queued tap keeps it", async () => {
+    const r = runtime();
+    await r.win.driverAcceptAssignmentLocally(r.form);
+    r.win.driverOfflineEvents = [{ event_type: "driver.assignment.accepted", state: "pending", payload: { assignment_id: 5 } }];
+    r.listeners["operational-state-refresh-applied"]();
+    assert.ok(r.win.__driverAssignmentOverride, "событие ещё в очереди — держим");
+    r.win.driverOfflineEvents = [];
+    r.listeners["operational-state-refresh-applied"]();
+    assert.equal(r.win.__driverAssignmentOverride, null, "сервер ответил — правда его экран");
+});
+
+test("at the deadline the phone switches the same way, without an event", () => {
     const r = runtime();
     vm.runInContext("applyDriverAssignmentDue(form)", Object.assign(r.context, { form: r.form }));
     assert.equal(r.corner.classList.contains("is-assignment"), false);
     assert.equal(r.note.hidden, true);
     assert.equal(r.label.textContent, "ЭКС-5");
-    assert.equal(r.label.dataset.driverDialRaw, "ЭКС-5");
-    assert.equal(r.label.dataset.driverDialFitKey, undefined);
+    assert.equal(r.enqueued.length, 0);
 
     const loaded = runtime({ dialEmpty: false });
     vm.runInContext("applyDriverAssignmentDue(form)", Object.assign(loaded.context, { form: loaded.form }));
@@ -141,4 +200,14 @@ test("the deadline no longer reloads the whole screen", () => {
     const countdown = block(SHIFT, "    function bindAssignmentCountdown(");
     assert.doesNotMatch(countdown, /location\.reload/);
     assert.match(countdown, /applyDriverAssignmentDue\(form\)/);
+});
+
+test("manual trips and the point drum follow the excavator the driver accepted on the phone", () => {
+    const workspace = fs.readFileSync(path.resolve(__dirname, "../driver-manual-excavator-workspace-v1.js"), "utf8").replace(/\r\n/g, "\n");
+    const drum = fs.readFileSync(path.resolve(__dirname, "../driver-point-drum-v1.js"), "utf8");
+    const read = block(workspace, "    function readWorkspaceContext(");
+    assert.match(read, /var base = readServerWorkspaceContext\(\);/);
+    assert.match(read, /root\.driverAssignmentContextOverride\(base\)/);
+    assert.match(drum, /root\.addEventListener\("driver-assignment-context-changed", function \(\) \{ refresh\(\); \}\);/);
+    assert.match(SHIFT_TEMPLATE, /data-driver-assignment-excavator-id=/);
 });

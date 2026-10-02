@@ -544,42 +544,30 @@ def _process_free_bucket_cancelled(access, normalized):
 
 
 def _process_driver_assignment_accepted(access, normalized):
-    """«ПРИНЯТЬ» назначение — с телефона, в том числе без сети (v377).
+    """«ПРИНЯТЬ» у водителя = «Перейти сейчас» — в том числе из очереди без сети (v377).
 
-    Назначение вступает в силу само по сроку (reconcile_due_haul_assignments),
-    «ПРИНЯТЬ» — квитанция водителя: до срока ставит accepted_at, как и прежний
-    обработчик формы (users.views.driver_accept_assignment_view); если срок уже
-    вышел, а назначение ещё ждёт — применяет его. Уже применённое по сроку,
-    отменённое или заменённое назначение — не конфликт: записано, ничего не меняем.
+    Решение 136 и решение владельца 02.10.2026: перевод применяется временем
+    нажатия на телефоне (не раньше самого назначения), а не по сроку в 5 минут.
+    Очередь идёт по sequence, поэтому перевод встаёт раньше погрузок под новый
+    экскаватор, сделанных после нажатия. Уже применённое по сроку, отменённое или
+    заменённое назначение — не конфликт: записано, в техлог.
     """
-    from assignments.models import AssignmentStatus, HaulAssignment
-    from assignments.services import apply_pending_haul_assignment
+    from assignments.services import accept_haul_assignment_now
 
     shift = _locked_shift(access, normalized, role_code='driver')
-    lock_production_state()
     assignment_id = _positive_int(normalized['payload'].get('assignment_id'), field='assignment_id')
-    assignment = (
-        HaulAssignment.objects.select_for_update()
-        .filter(pk=assignment_id, truck_id=shift.equipment_id)
-        .first()
+    assignment, applied_now = accept_haul_assignment_now(
+        assignment_id, truck_id=shift.equipment_id, at=normalized['occurred_at'],
     )
-    status = 'missing'
-    if assignment and assignment.status == AssignmentStatus.PENDING and assignment.ended_at is None:
-        if assignment.effective_at and assignment.effective_at > timezone.now():
-            if assignment.accepted_at is None:
-                assignment.accepted_at = normalized['occurred_at']
-                assignment.save(update_fields=['accepted_at'])
-            status = 'accepted'
-        else:
-            status = 'applied' if apply_pending_haul_assignment(assignment.id) else 'pending'
-    elif assignment:
-        status = 'already_final'
-    if status in {'missing', 'already_final'}:
+    if applied_now:
+        status = 'applied'
+    else:
+        status = 'missing' if assignment is None else 'already_final'
         _log_discrepancy(
             access=access, code='assignment_accept_after_final', process='Принятие назначения',
             description=(
                 f'Назначение #{assignment_id} принято водителем на {normalized["occurred_at"]}, '
-                f'а на сервере оно {"не найдено" if status == "missing" else assignment.status}. '
+                f'а на сервере оно {"не найдено" if assignment is None else assignment.status}. '
                 'Ничего не меняется.'
             ),
         )

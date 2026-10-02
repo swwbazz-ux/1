@@ -825,6 +825,8 @@
         // Движок ручного рейса сообщает о каждой погрузке, отмене и завершении.
         // Выбор, отмена и погашение ковша меняют набор точек барабана.
         root.addEventListener("driver-free-bucket-state-changed", function () { refresh(); });
+        // «ПРИНЯТЬ» / срок назначения: точки — нового экскаватора сразу (v377).
+        root.addEventListener("driver-assignment-context-changed", function () { refresh(); });
         root.addEventListener("driver-manual-trip-changed", function (event) {
             if (event.detail && event.detail.pointId && !isManual()) setManual(true);
             refresh();

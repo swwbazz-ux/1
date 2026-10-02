@@ -20,7 +20,6 @@ from openpyxl import load_workbook
 from PIL import Image
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorDumpPointSetting, ExcavatorPlacement, HaulAssignment, WorkShiftType
-from assignments.services import apply_pending_haul_assignment
 from core.models import OperationalStateEvent
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
@@ -3437,15 +3436,11 @@ class AccessLoginTests(TestCase):
         )
         assignment.refresh_from_db()
         self.assertEqual(accept_response.status_code, 302)
-        self.assertEqual(assignment.status, AssignmentStatus.PENDING)
-        self.assertIsNotNone(assignment.accepted_at)
-
-        assignment.effective_at = timezone.now() - timedelta(seconds=1)
-        assignment.save(update_fields=['effective_at'])
-        applied_assignment = apply_pending_haul_assignment(assignment.id)
-        assignment.refresh_from_db()
-        self.assertEqual(applied_assignment.id, assignment.id)
+        # «ПРИНЯТЬ» = «Перейти сейчас» (решение 136, владелец 02.10.2026): перевод
+        # применён временем нажатия, а не через 5 минут.
         self.assertEqual(assignment.status, AssignmentStatus.ACCEPTED)
+        self.assertIsNotNone(assignment.accepted_at)
+        self.assertEqual(assignment.effective_at, assignment.accepted_at)
 
         excavator_role = Role.objects.create(code='excavator_operator', name='Машинист экскаватора')
         excavator_operator = Employee.objects.create(

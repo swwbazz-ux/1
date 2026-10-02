@@ -1014,39 +1014,84 @@ class OfflineEventSyncTests(TestCase):
             'payload': {'assignment_id': assignment.id},
         }
 
-    def test_driver_accepts_a_pending_assignment_from_the_queue_before_its_deadline(self):
-        # v377: «ПРИНЯТЬ» в углу у круга работает и без сети — событием очереди.
-        # До срока это квитанция водителя: назначение вступит в силу в свой срок.
+    def test_driver_accept_moves_the_truck_at_once_at_the_tap_time(self):
+        # Решение 136 и владелец 02.10.2026: «ПРИНЯТЬ» = «Перейти сейчас».
+        # Перевод применяется временем нажатия, а не через 5 минут.
+        old = self.assignment
         pending = self._pending_assignment(effective_in=timedelta(minutes=4))
         tapped_at = timezone.now()
         result = self.sync(
-            [self._assignment_accept_event(pending, 'assignment-accept-early', occurred_at=tapped_at)],
+            [self._assignment_accept_event(pending, 'assignment-accept-now', occurred_at=tapped_at)],
             client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
         ).json()['results'][0]
         self.assertEqual(result['status'], 'accepted', result)
-        self.assertEqual(result['assignment_status'], 'accepted')
+        self.assertEqual(result['assignment_status'], 'applied')
         pending.refresh_from_db()
-        self.assertEqual(pending.status, AssignmentStatus.PENDING)
+        old.refresh_from_db()
+        self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
         self.assertEqual(pending.accepted_at, tapped_at)
+        self.assertEqual(pending.effective_at, tapped_at)
+        self.assertEqual(old.ended_at, tapped_at)
 
-    def test_driver_accept_after_the_deadline_applies_or_is_already_recorded(self):
+    def test_accept_already_applied_by_the_deadline_is_not_a_conflict(self):
         pending = self._pending_assignment(effective_in=-timedelta(seconds=5))
-        first = self.sync(
-            [self._assignment_accept_event(pending, 'assignment-accept-due')],
-            client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
-        ).json()['results'][0]
-        self.assertEqual(first['status'], 'accepted', first)
-        self.assertEqual(first['assignment_status'], 'applied')
+        from assignments.services import reconcile_due_haul_assignments
+        reconcile_due_haul_assignments(truck_id=self.truck.id)
         pending.refresh_from_db()
         self.assertEqual(pending.status, AssignmentStatus.ACCEPTED)
-        # Назначение уже применено (сроком или первым нажатием) — второе нажатие
-        # с другого раза не конфликт.
-        second = self.sync(
-            [self._assignment_accept_event(pending, 'assignment-accept-again', sequence=2)],
+        result = self.sync(
+            [self._assignment_accept_event(pending, 'assignment-accept-late')],
             client=self.driver_client(), role_code='driver', device_id='driver-assignment-device',
         ).json()['results'][0]
-        self.assertEqual(second['status'], 'accepted', second)
-        self.assertEqual(second['assignment_status'], 'already_final')
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(result['assignment_status'], 'already_final')
+
+    def test_offline_accept_then_load_under_the_new_excavator_in_one_batch(self):
+        # Без сети: «ПРИНЯТЬ», затем ручная погрузка под новый экскаватор. Очередь
+        # идёт по sequence — перевод встаёт раньше погрузки, и она не падает на
+        # «самосвал не назначен этому экскаватору».
+        tapped_at = timezone.now() - timedelta(minutes=2)
+        type(self.shift).objects.filter(pk__in=[self.shift.id, self.truck_shift.id]).update(
+            opened_at=tapped_at - timedelta(minutes=10),
+        )
+        HaulAssignment.objects.filter(pk=self.assignment.id).update(assigned_at=tapped_at - timedelta(minutes=10))
+        pending = self._pending_assignment(effective_in=timedelta(minutes=4))
+        HaulAssignment.objects.filter(pk=pending.pk).update(assigned_at=tapped_at - timedelta(minutes=1))
+        accept = self._assignment_accept_event(pending, 'batch-accept', sequence=1, occurred_at=tapped_at)
+        load = self.driver_manual_event('batch-load-new', 2, occurred_at=tapped_at + timedelta(seconds=40))
+        placement, _ = ExcavatorPlacement.objects.update_or_create(
+            excavator=self.other_excavator,
+            defaults={
+                'zone': ExcavatorPlacement.Zone.ACTIVE,
+                'work_rock_type': self.rock,
+                'work_dump_point': self.dump_point,
+                'loading_horizon': '125',
+                'loading_block': '4',
+                'transport_distance_km': '4.20',
+                'work_context_updated_at': tapped_at - timedelta(minutes=30),
+                'changed_by': self.operator,
+            },
+        )
+        ExcavatorDumpPointSetting.objects.update_or_create(
+            placement=placement, dump_point=self.dump_point,
+            defaults={'position': 1, 'transport_distance_km': '4.20', 'changed_by': self.operator},
+        )
+        for container in (load['payload'], load['context_snapshot']):
+            container['excavator_id'] = self.other_excavator.id
+            container['assignment_id'] = pending.id
+            container['placement_id'] = placement.id
+
+        results = self.sync(
+            [accept, load], client=self.driver_client(), role_code='driver', device_id='driver-batch-device',
+        ).json()['results']
+
+        by_id = {item['event_id']: item for item in results}
+        self.assertEqual(by_id['batch-accept']['assignment_status'], 'applied', by_id)
+        self.assertEqual(by_id['batch-load-new']['status'], 'accepted', by_id)
+        trip = Trip.objects.get(pk=by_id['batch-load-new']['server_ids']['trip_id'])
+        self.assertEqual(trip.excavator_id, self.other_excavator.id)
+        pending.refresh_from_db()
+        self.assertEqual(pending.effective_at, tapped_at)
 
     def test_manual_load_to_a_point_switched_off_in_the_catalog_is_recorded_on_it(self):
         # Координатор 02.10.2026: водитель ехал по устаревшему списку на точку,

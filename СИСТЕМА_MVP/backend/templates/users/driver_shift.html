@@ -125,7 +125,7 @@
                экрана у него больше нет (v377): строка-плашка ложилась на барабан простоев, и её
                нельзя было нажать. Подпись — в круге, «ПРИНЯТЬ» — в свободном нижнем левом углу
                (includes/mobile_dial_actions.html); эта скрытая форма — общая для них. {% endcomment %}
-            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" data-driver-assignment-id="{{ pending_assignment_action.id }}" data-driver-assignment-kind="{{ pending_assignment_action.action }}" data-driver-excavator-number="{% if pending_assignment_action.excavator_id %}{{ pending_assignment_action.excavator.garage_number }}{% endif %}" data-driver-assignment-target="{{ driver_assignment_target_label }}" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}" hidden>
+            <form id="driver-assignment-action" method="post" action="{% url 'driver_accept_assignment' pending_assignment_action.id %}" data-driver-in-place="assignment" data-driver-assignment-id="{{ pending_assignment_action.id }}" data-driver-assignment-kind="{{ pending_assignment_action.action }}" data-driver-excavator-number="{% if pending_assignment_action.excavator_id %}{{ pending_assignment_action.excavator.garage_number }}{% endif %}" data-driver-assignment-target="{{ driver_assignment_target_label }}" data-driver-assignment-excavator-id="{{ pending_assignment_action.excavator_id|default:'' }}" data-driver-assignment-deadline="{{ driver_assignment_effective_at }}" hidden>
                 {% csrf_token %}
             </form>
         {% endif %}
