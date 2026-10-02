@@ -1,0 +1,27 @@
+APK_SHA256=3805726059c2a8ae61550a7acd943bd74208abc11e86b42ebb1c1dee8f8398fa
+APK_SIZE_BYTES=10350550
+
+[aapt badging selected]
+package: name='ru.copperresources.excavator.e2qa' versionCode='1' versionName='1.0.0-e2qa' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+sdkVersion:'24'
+targetSdkVersion:'36'
+uses-permission: name='android.permission.INTERNET'
+uses-permission: name='android.permission.ACCESS_NETWORK_STATE'
+uses-permission: name='android.permission.FOREGROUND_SERVICE'
+uses-permission: name='android.permission.FOREGROUND_SERVICE_SPECIAL_USE'
+uses-permission: name='android.permission.POST_NOTIFICATIONS'
+uses-permission: name='android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'
+uses-permission: name='android.permission.WAKE_LOCK'
+uses-permission: name='android.permission.VIBRATE'
+uses-permission: name='com.google.android.c2dm.permission.RECEIVE'
+uses-permission: name='ru.copperresources.excavator.e2qa.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION'
+application-label:'Экскаваторщик E2 QA'
+
+[apksigner verify selected]
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Signer #1 certificate DN: C=US, O=Android, CN=Android Debug
+Signer #1 certificate SHA-256 digest: adb09a1f594130d5818658c2e7dab206c578fb4710289087c853663e9f0373a8

@@ -1,0 +1,45 @@
+{
+  "task": "E2-QA1",
+  "captured_on": "2026-10-02",
+  "task_docs_commit": "45ec5720fcdb2e136b333605f7b0698a25407436",
+  "release_base": "f88d6f58d1c776fd6b4eaf65e7bf460e451ff501",
+  "candidate_commit": "4609f17aadc0a51b4f7a89b7f933883ed2cee0ab",
+  "candidate_branch": "codex/e2-integration-release-20261002",
+  "candidate_worktree_clean": true,
+  "draft_pr": 149,
+  "database": {
+    "vendor": "postgresql",
+    "version": "16.15",
+    "name": "accounting_mvp_e2_qa1_4609f17a",
+    "isolated": true
+  },
+  "android": {
+    "device_model": "Infinix X6833B",
+    "android_version": "14",
+    "serial_published": false,
+    "package": "ru.copperresources.excavator.e2qa",
+    "version_name": "1.0.0-e2qa",
+    "version_code": 1,
+    "built_apk_artifact_sha256": "3805726059c2a8ae61550a7acd943bd74208abc11e86b42ebb1c1dee8f8398fa",
+    "installed_apk_pull_hash_captured": false,
+    "apk_in_git": false
+  },
+  "web": {
+    "origin": "https://e2qa.localhost.direct:18462/",
+    "start_path": "/excavator/work/",
+    "service_worker_path": "/excavator-sw.js",
+    "service_worker_sha256": "2d465912ce0af41049979f0039f47f604b542984036c3be79a8328281f145bc1",
+    "cache_name": "excavator-mobile-shell-v264",
+    "storage_kind": "indexedDB"
+  },
+  "transport": {
+    "phone_to_host": "adb reverse tcp:18462 tcp:18462",
+    "tls_validation_bypassed": false,
+    "fault_proxy": "test-only one-shot upstream-commit/proxy-to-tls-bridge-response-loss",
+    "phone_transport_result": "TLS bridge returned 502; accepted response was not delivered"
+  },
+  "production_touched": false,
+  "merge_performed": false,
+  "verify_performed": false,
+  "deploy_performed": false
+}

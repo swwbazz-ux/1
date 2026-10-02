@@ -1,0 +1,11 @@
+candidate_commit=4609f17aadc0a51b4f7a89b7f933883ed2cee0ab
+candidate_worktree_clean=True
+candidate_upstream=4609f17aadc0a51b4f7a89b7f933883ed2cee0ab
+database_vendor=postgresql
+database_version=16.15
+database_name=accounting_mvp_e2_qa1_4609f17a
+device_model=Infinix X6833B
+android_version=14
+versionCode=1 minSdk=24 targetSdk=36
+versionName=1.0.0-e2qa
+webview={"href":"https://e2qa.localhost.direct:18462/excavator/work/","controller":"https://e2qa.localhost.direct:18462/excavator-sw.js","cacheNames":["excavator-mobile-shell-v264"],"storageKind":"indexedDB","pendingCount":0}

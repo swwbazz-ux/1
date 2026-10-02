@@ -1,0 +1,22 @@
+diff --git a/mobile/capacitor-shell/android/app/build.gradle b/mobile/capacitor-shell/android/app/build.gradle
+index 4b007197..c028d761 100644
+--- a/mobile/capacitor-shell/android/app/build.gradle
++++ b/mobile/capacitor-shell/android/app/build.gradle
+@@ -24,13 +24,16 @@ def parseProfileHttpsUri = { String propertyName, String rawValue, File profileD
+         throw new GradleException("Invalid ${propertyName} in ${profileDir}/app.properties", exception)
+     }
+     String rawPath = uri.rawPath ?: '/'
++    boolean isolatedE2QaPort = profileDir.name == 'excavator_e2_qa'
++            && 'e2qa.localhost.direct'.equalsIgnoreCase(uri.host)
++            && uri.port == 18462
+     if (!uri.absolute
+             || !'https'.equalsIgnoreCase(uri.scheme)
+             || !uri.host
+             || uri.rawUserInfo != null
+             || uri.rawQuery != null
+             || uri.rawFragment != null
+-            || !(uri.port in [-1, 443])
++            || (!(uri.port in [-1, 443]) && !isolatedE2QaPort)
+             || uri.normalize().rawPath != rawPath) {
+         throw new GradleException(
+                 "${propertyName} must be a normalized HTTPS URL without credentials, query, or fragment " +

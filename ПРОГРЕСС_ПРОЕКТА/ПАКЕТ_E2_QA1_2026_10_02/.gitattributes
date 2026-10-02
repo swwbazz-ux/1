@@ -1,0 +1,8 @@
+.gitattributes -text -whitespace
+*.md -text -whitespace
+*.json -text -whitespace
+*.txt -text -whitespace
+diagnostic-profile/** -text -whitespace
+raw/** -text -whitespace
+tools/** -text -whitespace
+visual/** -text -whitespace
