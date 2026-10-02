@@ -1401,38 +1401,40 @@ def _driver_manual_primary_context(*, excavator, payload, context_snapshot, effe
         )
     selected = authoritative_by_id.get(dump_id)
     if not selected:
-        client_selected = client_by_id.get(dump_id)
-        one_off_point = DumpPoint.objects.select_for_update().filter(
-            pk=_positive_int(dump_id, field='dump_point_id'),
-            is_active=True,
-        ).first()
-        if one_off_point:
-            if not selected_one_off:
-                discrepancy(f'Точка {one_off_point} не входит в настройки {excavator}.')
-            selected = {
-                'id': one_off_point.id,
-                'name': str(one_off_point),
-                'transport_distance_km': (client_selected or {}).get('transport_distance_km'),
-            }
-    if not selected:
-        _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
+        selected = _driver_manual_selected_point(
+            authoritative, payload, discrepancy,
+            client_point=client_by_id.get(dump_id), quiet=selected_one_off,
+        )
     return authoritative, selected
 
 
-def _driver_manual_selected_point(authoritative, payload, discrepancy):
-    """Точка ручного рейса при сменившемся забое: точка водителя, если она жива."""
+def _driver_manual_selected_point(authoritative, payload, discrepancy, *, client_point=None, quiet=False):
+    """Точка ручного рейса — та, куда водитель ехал (телефон — истина).
+
+    Точка вне настроек забоя или уже выключенная в справочнике (водитель ехал
+    по устаревшему списку) — рейс записывается на неё, расхождение в техлог
+    (координатор, 02.10.2026). Только если такой точки в справочнике нет вовсе,
+    рейс ложится на первую точку забоя; отказ — лишь когда записать не на что.
+    """
     from references.models import DumpPoint
 
     dump_id = _positive_int(payload.get('dump_point_id'), field='dump_point_id')
     for item in authoritative['dump_points']:
         if str(item['id']) == str(dump_id):
             return item
-    point = DumpPoint.objects.select_for_update().filter(pk=dump_id, is_active=True).first()
+    point = DumpPoint.objects.select_for_update().filter(pk=dump_id).first()
     if point:
-        discrepancy(f'Точка {point} не входит в новые настройки забоя.')
-        return {'id': point.id, 'name': str(point), 'transport_distance_km': None}
+        if not point.is_active:
+            discrepancy(f'Точка {point} выключена в справочнике.')
+        elif not quiet:
+            discrepancy(f'Точка {point} не входит в настройки забоя.')
+        return {
+            'id': point.id,
+            'name': str(point),
+            'transport_distance_km': (client_point or {}).get('transport_distance_km'),
+        }
     if authoritative['dump_points']:
-        discrepancy(f'Точки #{dump_id} больше нет, рейс записан на первую точку забоя.')
+        discrepancy(f'Точки #{dump_id} нет в справочнике, рейс записан на первую точку забоя.')
         return authoritative['dump_points'][0]
     _conflict('manual_dump_point_not_allowed', 'Точка не входит в настройки выбранного экскаватора.')
 

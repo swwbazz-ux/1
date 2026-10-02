@@ -993,14 +993,29 @@ class OfflineEventSyncTests(TestCase):
         later.refresh_from_db()
         self.assertIsNone(later.ended_at)
 
+    def test_manual_load_to_a_point_switched_off_in_the_catalog_is_recorded_on_it(self):
+        # Координатор 02.10.2026: водитель ехал по устаревшему списку на точку,
+        # которую уже выключили в справочнике. Телефон — истина: рейс на эту точку,
+        # расхождение в техлог, не отказ manual_dump_point_not_allowed.
+        retired = DumpPoint.objects.create(name='Закрытая точка v377', is_active=False)
+        event = self.driver_manual_event('manual-retired-point')
+        event['payload']['dump_point_id'] = retired.id
+        event['context_snapshot']['selected_dump_point_id'] = retired.id
+        with self.assertLogs('core.offline_sync', level='WARNING') as logs:
+            result = self.sync(
+                [event], client=self.driver_client(), role_code='driver', device_id='driver-retired-device',
+            ).json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(Trip.objects.get().dump_point_id, retired.id)
+        self.assertTrue(any('выключена в справочнике' in line for line in logs.output))
+
     def test_rejected_trip_does_not_bury_the_next_trip_in_the_chain(self):
         # Бой 02.10.2026 (ТЕСТ-1, 5157→5159→5161): отказ первой погрузки тянул
         # её завершение, а оно — следующую погрузку. Своё завершение по-прежнему
         # ждёт свою погрузку, но новый рейс записывается.
-        retired = DumpPoint.objects.create(name='Закрытая точка v376', is_active=False)
         first = self.driver_manual_event('chain-first-load', 1)
-        first['payload']['dump_point_id'] = retired.id
-        first['context_snapshot']['selected_dump_point_id'] = retired.id
+        # Настоящий отказ первой погрузки: назначения, по которому она сделана, нет.
+        first['payload']['assignment_id'] = 999999
         completed = self.driver_manual_complete_event(first, event_id='chain-first-complete', sequence=2)
         second = self.driver_manual_event(
             'chain-second-load', 3,
