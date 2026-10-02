@@ -1,0 +1,29 @@
+{
+  "repository": "https://github.com/swwbazz-ux/1",
+  "canonical_release_branch": "codex/github-production-deploy-20260916",
+  "release_base": "3ae7a5690aef92bc53160bcdb8b056bee891d6bb",
+  "original_e2_base": "f1b144e8b40b5c4fca9182a416a2de48abbac1e0",
+  "original_e2_head": "efb39c9a7d41df10564ce0fb4f803c9d129117b4",
+  "original_e2_replayed_commit": "38473e4b9a675d64ce1368032e8c66a4c31c14d9",
+  "e2_r1_head": "f7936b9f83db0160dcc9070c1b2565d82fb6bc57",
+  "e2_r1_branch": "codex/e2-r1-dependency-recovery-20261002",
+  "task_docs_commit": "ddc15b0e5d50ba03aaf67d455d0eab882435ef7a",
+  "runtime_version": {
+    "excavator": 264,
+    "driver": 375,
+    "r1_reserved_new_version": false
+  },
+  "environment": {
+    "os": "Windows",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "python": "3.12.10",
+    "django": "6.0.6",
+    "database_for_browser_qa": "isolated SQLite",
+    "postgresql": "NOT_RUN"
+  },
+  "production_used": false,
+  "merge_performed": false,
+  "verify_performed": false,
+  "deploy_performed": false
+}

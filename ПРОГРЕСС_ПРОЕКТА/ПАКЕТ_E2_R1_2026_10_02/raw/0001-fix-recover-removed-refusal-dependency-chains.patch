@@ -1,0 +1,657 @@
+﻿From f7936b9f83db0160dcc9070c1b2565d82fb6bc57 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Fri, 2 Oct 2026 10:35:23 +1000
+Subject: [PATCH] fix: recover removed-refusal dependency chains
+
+---
+ СИСТЕМА_MVP/backend/core/offline_sync.py      | 151 ++++++++++++-
+ СИСТЕМА_MVP/backend/core/test_offline_sync.py | 213 ++++++++++++++++++
+ .../static/js/excavator-field-outbox-v1.js    |  24 +-
+ .../js/tests/excavator-field-outbox.test.js   | 173 ++++++++++++++
+ 4 files changed, 558 insertions(+), 3 deletions(-)
+
+diff --git a/СИСТЕМА_MVP/backend/core/offline_sync.py b/СИСТЕМА_MVP/backend/core/offline_sync.py
+index c9766dc4..8b925592 100644
+--- a/СИСТЕМА_MVP/backend/core/offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/offline_sync.py
+@@ -3426,6 +3426,133 @@ def _clock_skewed_dependency_exists(existing):
+     )
+ 
+ 
++def _removed_refusal_result_roots(event):
++    payload = event.result_payload or {}
++    for key, reason in (
++        ('conflict_recovery', 'removed_refusal'),
++        ('dependency_recovery', 'removed_refusal_chain'),
++    ):
++        marker = payload.get(key)
++        if not isinstance(marker, dict) or marker.get('reason') != reason:
++            continue
++        roots = marker.get('root_event_ids')
++        if isinstance(roots, list):
++            return {
++                root_id for root_id in roots
++                if isinstance(root_id, str) and root_id
++            }
++    return set()
++
++
++def _removed_refusal_lineage(
++    event,
++    access,
++    *,
++    role_code,
++    device_id,
++    child_sequence,
++    seen,
++):
++    """Return ``(valid, roots)`` for one immutable dependency branch.
++
++    The special replay is deliberately narrower than ordinary dependency
++    recovery.  Every receipt in the branch must belong to the same worker,
++    access and device, preserve sequence order, and be either accepted or the
++    exact legacy cooldown refusal (possibly behind saved
++    ``dependency_rejected`` receipts).  A missing/retry/unrelated conflict
++    invalidates the whole branch.
++    """
++    if event.event_id in seen:
++        return False, set()
++    if (
++        event.actor_id != access.employee_id
++        or event.access_id != access.id
++        or event.role_code != role_code
++        or event.device_id != device_id
++        or event.sequence >= child_sequence
++    ):
++        return False, set()
++
++    seen = set(seen)
++    seen.add(event.event_id)
++    if event.status == OfflineFieldEventStatus.ACCEPTED:
++        return True, _removed_refusal_result_roots(event)
++    if event.status != OfflineFieldEventStatus.CONFLICT:
++        return False, set()
++    if (
++        event.event_type == 'excavator.trip.loaded'
++        and event.error_code == 'post_unload_cooldown'
++    ):
++        return True, {event.event_id}
++    if event.error_code != 'dependency_rejected' or not event.depends_on:
++        return False, set()
++
++    if len(event.depends_on) > MAX_DEPENDENCIES:
++        return False, set()
++    dependency_ids = list(dict.fromkeys(event.depends_on))
++    if len(dependency_ids) != len(event.depends_on):
++        return False, set()
++    dependencies = {
++        dependency.event_id: dependency
++        for dependency in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
++            event_id__in=dependency_ids,
++        )
++    }
++    if len(dependencies) != len(dependency_ids):
++        return False, set()
++    roots = set()
++    for dependency_id in dependency_ids:
++        valid, branch_roots = _removed_refusal_lineage(
++            dependencies[dependency_id],
++            access,
++            role_code=role_code,
++            device_id=device_id,
++            child_sequence=event.sequence,
++            seen=seen,
++        )
++        if not valid:
++            return False, set()
++        roots.update(branch_roots)
++    return True, roots
++
++
++def _removed_refusal_dependency_roots(existing, access, normalized):
++    if not (
++        existing.status == OfflineFieldEventStatus.CONFLICT
++        and existing.error_code == 'dependency_rejected'
++        and existing.depends_on
++        and normalized['role_code'] == 'excavator_operator'
++    ):
++        return set()
++    if len(existing.depends_on) > MAX_DEPENDENCIES:
++        return set()
++    dependency_ids = list(dict.fromkeys(existing.depends_on))
++    if len(dependency_ids) != len(existing.depends_on):
++        return set()
++    dependencies = {
++        dependency.event_id: dependency
++        for dependency in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
++            event_id__in=dependency_ids,
++        )
++    }
++    if len(dependencies) != len(dependency_ids):
++        return set()
++    roots = set()
++    for dependency_id in dependency_ids:
++        valid, branch_roots = _removed_refusal_lineage(
++            dependencies[dependency_id],
++            access,
++            role_code=normalized['role_code'],
++            device_id=normalized['device_id'],
++            child_sequence=existing.sequence,
++            seen={existing.event_id},
++        )
++        if not valid:
++            return set()
++        roots.update(branch_roots)
++    return roots
++
++
+ def process_one_offline_event(access, normalized):
+     try:
+         with transaction.atomic():
+@@ -3433,6 +3560,8 @@ def process_one_offline_event(access, normalized):
+             existing = OfflineFieldEvent.objects.select_for_update().filter(
+                 event_id=normalized['event_id']
+             ).first()
++            recoverable_removed_refusal = False
++            removed_refusal_dependency_roots = set()
+             if existing:
+                 same_identity = (
+                     existing.actor_id == access.employee_id
+@@ -3518,8 +3647,13 @@ def process_one_offline_event(access, normalized):
+                     and existing.event_type == 'excavator.trip.loaded'
+                     and existing.error_code == 'post_unload_cooldown'
+                 )
++                removed_refusal_dependency_roots = _removed_refusal_dependency_roots(
++                    existing, access, normalized,
++                )
+                 recoverable_existing_conflict = bool(
+-                    recoverable_clock_conflict or recoverable_removed_refusal
++                    recoverable_clock_conflict
++                    or recoverable_removed_refusal
++                    or removed_refusal_dependency_roots
+                 )
+                 if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_existing_conflict:
+                     return _stored_result(existing, deduplicated=True)
+@@ -3528,7 +3662,9 @@ def process_one_offline_event(access, normalized):
+                     # receipt time. The id, sequence, dependencies and raw
+                     # device timestamp stay unchanged, so no duplicate action
+                     # can be created and the dependent queue keeps its order.
+-                    clock_adjusted = False if recoverable_removed_refusal else (
++                    clock_adjusted = False if (
++                        recoverable_removed_refusal or removed_refusal_dependency_roots
++                    ) else (
+                         device_clock_was_invalid
+                         if normalized['role_code'] == 'driver'
+                         else True
+@@ -3647,6 +3783,17 @@ def process_one_offline_event(access, normalized):
+             receipt.error_code = ''
+             receipt.error_message = ''
+             result_payload = dict(result_payload or {})
++            if recoverable_removed_refusal:
++                result_payload['conflict_recovery'] = {
++                    'reason': 'removed_refusal',
++                    'original_code': 'post_unload_cooldown',
++                    'root_event_ids': [receipt.event_id],
++                }
++            elif removed_refusal_dependency_roots:
++                result_payload['dependency_recovery'] = {
++                    'reason': 'removed_refusal_chain',
++                    'root_event_ids': sorted(removed_refusal_dependency_roots),
++                }
+             if normalized.get('ignored_missing_dependencies'):
+                 result_payload['dependency_recovery'] = {
+                     'reason': 'exact_terminal_reference',
+diff --git a/СИСТЕМА_MVP/backend/core/test_offline_sync.py b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+index 5e8e19d5..e9431018 100644
+--- a/СИСТЕМА_MVP/backend/core/test_offline_sync.py
++++ b/СИСТЕМА_MVP/backend/core/test_offline_sync.py
+@@ -449,6 +449,219 @@ class OfflineEventSyncTests(TestCase):
+         self.assertEqual(repeated['status'], 'deduplicated', repeated)
+         self.assertEqual(Trip.objects.count(), 2)
+ 
++    def _removed_cooldown_cancel_event(self, loaded, *, event_id, sequence, occurred_at, depends_on=None):
++        return {
++            'event_id': event_id,
++            'event_type': 'excavator.trip.loaded.cancelled',
++            'format_version': 1,
++            'actor_id': self.operator.id,
++            'access_id': self.access.id,
++            'role_code': 'excavator_operator',
++            'occurred_at': occurred_at.isoformat(),
++            'sequence': sequence,
++            'depends_on': list(depends_on if depends_on is not None else [loaded['event_id']]),
++            'shift_id': self.shift.id,
++            'equipment_id': self.excavator.id,
++            'local_trip_id': loaded['local_trip_id'],
++            'context_snapshot': dict(loaded.get('context_snapshot') or {}),
++            'payload': {
++                'local_trip_id': loaded['local_trip_id'],
++                'truck_id': loaded['payload']['truck_id'],
++            },
++        }
++
++    def test_removed_cooldown_replays_saved_dependency_chain_with_original_envelopes(self):
++        occurred_at = timezone.now()
++        previous_trip = Trip.objects.create(
++            excavator=self.excavator,
++            truck=self.truck,
++            excavator_operator=self.operator,
++            driver=self.driver,
++            unloading_shift=self.truck_shift,
++            rock_type=self.rock,
++            dump_point=self.dump_point,
++            assigned_dump_point=self.dump_point,
++            actual_dump_point=self.dump_point,
++            status=TripStatus.COMPLETED,
++            loaded_at=occurred_at - timedelta(minutes=5),
++            completed_at=occurred_at,
++        )
++        root = self.load_event(
++            event_id='removed-cooldown-root', sequence=31,
++            occurred_at=occurred_at + timedelta(seconds=1),
++        )
++        child = self._removed_cooldown_cancel_event(
++            root,
++            event_id='removed-cooldown-child',
++            sequence=32,
++            occurred_at=occurred_at + timedelta(seconds=2),
++        )
++        grandchild = self.load_event(
++            event_id='removed-cooldown-grandchild', sequence=33,
++            occurred_at=occurred_at + timedelta(seconds=3),
++            depends_on=[child['event_id']],
++            local_trip_id='local-removed-cooldown-grandchild',
++        )
++        received_times = {
++            root['event_id']: occurred_at + timedelta(seconds=4),
++            child['event_id']: occurred_at + timedelta(seconds=5),
++            grandchild['event_id']: occurred_at + timedelta(seconds=6),
++        }
++        receipts = {
++            root['event_id']: self._store_legacy_conflicted_event(
++                root,
++                received_at=received_times[root['event_id']],
++                error_code='post_unload_cooldown',
++                error_message='Возвращается к экскаватору · 10 мин.',
++            ),
++            child['event_id']: self._store_legacy_conflicted_event(
++                child,
++                received_at=received_times[child['event_id']],
++                error_code='dependency_rejected',
++                error_message='Предыдущее событие требует сверки или отклонено.',
++            ),
++            grandchild['event_id']: self._store_legacy_conflicted_event(
++                grandchild,
++                received_at=received_times[grandchild['event_id']],
++                error_code='dependency_rejected',
++                error_message='Предыдущее событие требует сверки или отклонено.',
++            ),
++        }
++
++        results = self.sync([root, child, grandchild]).json()['results']
++
++        self.assertEqual([item['status'] for item in results], ['accepted'] * 3, results)
++        self.assertEqual(
++            results[0]['conflict_recovery'],
++            {
++                'reason': 'removed_refusal',
++                'original_code': 'post_unload_cooldown',
++                'root_event_ids': [root['event_id']],
++            },
++        )
++        for result in results[1:]:
++            self.assertEqual(
++                result['dependency_recovery'],
++                {
++                    'reason': 'removed_refusal_chain',
++                    'root_event_ids': [root['event_id']],
++                },
++            )
++        for event in (root, child, grandchild):
++            receipt = receipts[event['event_id']]
++            receipt.refresh_from_db()
++            self.assertEqual(receipt.status, 'accepted')
++            self.assertEqual(receipt.occurred_at, timezone.datetime.fromisoformat(event['occurred_at']))
++            self.assertEqual(receipt.received_at, received_times[event['event_id']])
++            self.assertEqual(receipt.sequence, event['sequence'])
++            self.assertEqual(receipt.depends_on, event['depends_on'])
++            self.assertEqual(receipt.payload, event['payload'])
++        trips = list(Trip.objects.exclude(pk=previous_trip.pk).order_by('loaded_at', 'id'))
++        self.assertEqual(len(trips), 2)
++        self.assertEqual(trips[0].status, TripStatus.CANCELLED)
++        self.assertEqual(trips[1].status, TripStatus.LOADED_WAITING_UNLOAD)
++        self.assertEqual(trips[0].loaded_at, timezone.datetime.fromisoformat(root['occurred_at']))
++        self.assertEqual(trips[0].cancelled_at, timezone.datetime.fromisoformat(child['occurred_at']))
++        self.assertEqual(trips[1].loaded_at, timezone.datetime.fromisoformat(grandchild['occurred_at']))
++
++        repeated = self.sync([root, child, grandchild]).json()['results']
++        self.assertEqual([item['status'] for item in repeated], ['deduplicated'] * 3, repeated)
++        self.assertEqual(Trip.objects.count(), 3)
++
++    def test_removed_cooldown_child_stays_replayable_until_root_is_accepted(self):
++        occurred_at = timezone.now()
++        root = self.load_event(
++            event_id='removed-cooldown-late-root', sequence=41, occurred_at=occurred_at,
++        )
++        child = self._removed_cooldown_cancel_event(
++            root,
++            event_id='removed-cooldown-early-child',
++            sequence=42,
++            occurred_at=occurred_at + timedelta(seconds=1),
++        )
++        root_receipt = self._store_legacy_conflicted_event(
++            root,
++            received_at=occurred_at + timedelta(seconds=2),
++            error_code='post_unload_cooldown',
++            error_message='Возвращается к экскаватору · 10 мин.',
++        )
++        child_receipt = self._store_legacy_conflicted_event(
++            child,
++            received_at=occurred_at + timedelta(seconds=3),
++            error_code='dependency_rejected',
++            error_message='Предыдущее событие требует сверки или отклонено.',
++        )
++
++        before_root = self.sync([child]).json()['results'][0]
++        self.assertEqual(before_root['status'], 'conflict', before_root)
++        self.assertEqual(before_root['code'], 'dependency_rejected')
++        child_receipt.refresh_from_db()
++        self.assertEqual(child_receipt.occurred_at, timezone.datetime.fromisoformat(child['occurred_at']))
++        self.assertEqual(child_receipt.received_at, occurred_at + timedelta(seconds=3))
++
++        root_result = self.sync([root]).json()['results'][0]
++        child_result = self.sync([child]).json()['results'][0]
++
++        self.assertEqual(root_result['status'], 'accepted', root_result)
++        self.assertEqual(child_result['status'], 'accepted', child_result)
++        self.assertEqual(child_result['dependency_recovery']['root_event_ids'], [root['event_id']])
++        root_receipt.refresh_from_db()
++        child_receipt.refresh_from_db()
++        self.assertEqual(root_receipt.status, 'accepted')
++        self.assertEqual(child_receipt.status, 'accepted')
++        self.assertEqual(Trip.objects.get().status, TripStatus.CANCELLED)
++
++    def test_removed_cooldown_chain_rejects_unrelated_dependency_and_envelope_change(self):
++        occurred_at = timezone.now()
++        root = self.load_event(
++            event_id='removed-cooldown-negative-root', sequence=51, occurred_at=occurred_at,
++        )
++        unrelated = self.load_event(
++            event_id='unrelated-conflict', sequence=52,
++            occurred_at=occurred_at + timedelta(seconds=1),
++        )
++        child = self._removed_cooldown_cancel_event(
++            root,
++            event_id='removed-cooldown-negative-child',
++            sequence=53,
++            occurred_at=occurred_at + timedelta(seconds=2),
++            depends_on=[root['event_id'], unrelated['event_id']],
++        )
++        self._store_legacy_conflicted_event(
++            root,
++            received_at=occurred_at + timedelta(seconds=3),
++            error_code='post_unload_cooldown',
++            error_message='Возвращается к экскаватору · 10 мин.',
++        )
++        self._store_legacy_conflicted_event(
++            unrelated,
++            received_at=occurred_at + timedelta(seconds=4),
++            error_code='assignment_context_changed',
++            error_message='Назначение изменилось.',
++        )
++        child_receipt = self._store_legacy_conflicted_event(
++            child,
++            received_at=occurred_at + timedelta(seconds=5),
++            error_code='dependency_rejected',
++            error_message='Предыдущее событие требует сверки или отклонено.',
++        )
++
++        root_result = self.sync([root]).json()['results'][0]
++        blocked = self.sync([child]).json()['results'][0]
++        tampered = json.loads(json.dumps(child))
++        tampered['payload']['truck_id'] = self.truck.id + 1000
++        rejected_tamper = self.sync([tampered]).json()['results'][0]
++        rejected_foreign = self.sync([child], device_id='foreign-device').json()['results'][0]
++
++        self.assertEqual(root_result['status'], 'accepted', root_result)
++        self.assertEqual((blocked['status'], blocked['code']), ('conflict', 'dependency_rejected'))
++        self.assertEqual((rejected_tamper['status'], rejected_tamper['code']), ('conflict', 'event_id_reused'))
++        self.assertEqual((rejected_foreign['status'], rejected_foreign['code']), ('conflict', 'event_id_reused'))
++        child_receipt.refresh_from_db()
++        self.assertEqual(child_receipt.status, 'conflict')
++        self.assertEqual(child_receipt.error_code, 'dependency_rejected')
++        self.assertEqual(Trip.objects.count(), 1)
++
+     def test_late_driver_manual_load_links_completed_excavator_trip(self):
+         occurred_at = timezone.now() - timedelta(minutes=5)
+         type(self.shift).objects.filter(
+diff --git a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+index 34c91379..0e590e91 100644
+--- a/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
++++ b/СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+@@ -100,6 +100,17 @@
+             && event.last_error_code === "post_unload_cooldown";
+     }
+ 
++    function confirmedRemovedRefusalRecovery(confirmation) {
++        var result = confirmation && confirmation.result;
++        if (!result || (result.status !== "accepted" && result.status !== "deduplicated")) return false;
++        var direct = result.conflict_recovery;
++        var dependent = result.dependency_recovery;
++        return Boolean(
++            direct && direct.reason === "removed_refusal"
++            || dependent && dependent.reason === "removed_refusal_chain"
++        );
++    }
++
+     function createLocalStorageAdapter(storage, queueKey) {
+         var key = LEGACY_PREFIX + queueKey;
+         var sequenceKey = key + ":sequence";
+@@ -613,8 +624,19 @@
+ 
+         function restore(restoreOptions) {
+             restoreOptions = restoreOptions || {};
+-            return list().then(function (events) {
++            return Promise.all([list(), confirmations()]).then(function (stored) {
++                var events = stored[0];
++                var confirmed = stored[1];
+                 var recoverable = Object.create(null);
++                confirmed.forEach(function (confirmation) {
++                    if (
++                        confirmedRemovedRefusalRecovery(confirmation)
++                        && confirmation.event
++                        && confirmation.event.event_id
++                    ) {
++                        recoverable[confirmation.event.event_id] = true;
++                    }
++                });
+                 events.forEach(function (event) {
+                     if (recoverableDeviceClockConflict(event) || recoverableRemovedRefusal(event)) {
+                         recoverable[event.event_id] = true;
+diff --git a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+index 77eff5b9..7d993156 100644
+--- a/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
++++ b/СИСТЕМА_MVP/backend/static/js/tests/excavator-field-outbox.test.js
+@@ -572,6 +572,179 @@ test('restart retries a legacy post-unload cooldown refusal with the immutable e
+     assert.deepEqual(await afterUpdate.pending(), []);
+ });
+ 
++test('restart restores the full removed-cooldown chain with immutable envelopes', async () => {
++    const local = storage();
++    const root = loadEvent('removed-cooldown-root', 31);
++    root.occurred_at = '2026-10-02T02:00:01.000Z';
++    const child = loadEvent('removed-cooldown-child', 32);
++    child.event_type = 'excavator.trip.loaded.cancelled';
++    child.occurred_at = '2026-10-02T02:00:02.000Z';
++    child.depends_on = [root.event_id];
++    child.local_trip_id = root.local_trip_id;
++    child.payload = {local_trip_id: root.local_trip_id, truck_id: root.payload.truck_id};
++    const grandchild = loadEvent('removed-cooldown-grandchild', 33);
++    grandchild.occurred_at = '2026-10-02T02:00:03.000Z';
++    grandchild.depends_on = [child.event_id];
++    const beforeUpdate = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2-r1-chain',
++        send: async events => ({
++            ok: true,
++            results: events.map(event => ({
++                event_id: event.event_id,
++                status: 'conflict',
++                code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
++                message: 'legacy conflict',
++            })),
++        }),
++    });
++    for (const event of [root, child, grandchild]) await beforeUpdate.queue(event);
++    await beforeUpdate.flush();
++    assert.deepEqual((await beforeUpdate.pending()).map(event => event.sync_state), [
++        'conflict', 'conflict', 'conflict',
++    ]);
++
++    const sent = [];
++    const afterUpdate = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2-r1-chain',
++        send: async events => {
++            sent.push(...events);
++            return {ok: true, results: events.map(accepted)};
++        },
++    });
++    const restored = await afterUpdate.ready();
++    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
++        [root.event_id, 'pending'],
++        [child.event_id, 'pending'],
++        [grandchild.event_id, 'pending'],
++    ]);
++    await afterUpdate.flush();
++    assert.deepEqual(sent.map(event => ({
++        event_id: event.event_id,
++        occurred_at: event.occurred_at,
++        sequence: event.sequence,
++        depends_on: event.depends_on,
++        payload: event.payload,
++        local_recovery_marker: event.removed_refusal_root_ids,
++    })), [root, child, grandchild].map(event => ({
++        event_id: event.event_id,
++        occurred_at: event.occurred_at,
++        sequence: event.sequence,
++        depends_on: event.depends_on,
++        payload: event.payload,
++        local_recovery_marker: undefined,
++    })));
++    assert.deepEqual(await afterUpdate.pending(), []);
++});
++
++test('confirmed removed-cooldown root recovers saved children after root left the queue', async () => {
++    const local = storage();
++    const queueKey = 'access-e2-r1-confirmed-root';
++    const storageKey = 'excavator-field-outbox-v1:' + queueKey;
++    const confirmedKey = storageKey + ':confirmed';
++    const root = loadEvent('confirmed-removed-cooldown-root', 41);
++    const child = loadEvent('confirmed-removed-cooldown-child', 42);
++    child.depends_on = [root.event_id];
++    const grandchild = loadEvent('confirmed-removed-cooldown-grandchild', 43);
++    grandchild.depends_on = [child.event_id];
++    const oldShell = createOutbox({
++        localStorage: local,
++        queueKey,
++        send: async events => ({ok: true, results: events.map(event => ({
++            event_id: event.event_id,
++            status: 'conflict',
++            code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
++            message: 'legacy conflict',
++        }))}),
++    });
++    for (const event of [root, child, grandchild]) await oldShell.queue(event);
++    await oldShell.flush();
++
++    const queue = JSON.parse(local.getItem(storageKey));
++    local.setItem(storageKey, JSON.stringify(queue.filter(event => event.event_id !== root.event_id)));
++    local.setItem(confirmedKey, JSON.stringify([{
++        event: root,
++        result: {
++            event_id: root.event_id,
++            status: 'accepted',
++            server_ids: {trip_id: 141},
++            conflict_recovery: {
++                reason: 'removed_refusal',
++                original_code: 'post_unload_cooldown',
++                root_event_ids: [root.event_id],
++            },
++        },
++    }]));
++
++    const replayed = [];
++    const restarted = createOutbox({
++        localStorage: local,
++        queueKey,
++        send: async events => {
++            replayed.push(...events.map(event => event.event_id));
++            return {ok: true, results: events.map(accepted)};
++        },
++    });
++    const restored = await restarted.ready();
++    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
++        [child.event_id, 'pending'],
++        [grandchild.event_id, 'pending'],
++    ]);
++    await restarted.flush();
++    assert.deepEqual(replayed, [child.event_id, grandchild.event_id]);
++    assert.deepEqual(await restarted.pending(), []);
++});
++
++test('lost root response and restart resend the same removed-cooldown chain', async () => {
++    const local = storage();
++    const root = loadEvent('lost-response-root', 51);
++    const child = loadEvent('lost-response-child', 52);
++    child.depends_on = [root.event_id];
++    const beforeRestart = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2-r1-lost-response',
++        send: async () => { throw new Error('response lost after server commit'); },
++    });
++    await beforeRestart.queue(root);
++    await beforeRestart.queue(child);
++    await beforeRestart.flush();
++    const before = await beforeRestart.pending();
++    assert.deepEqual(before.map(event => [event.event_id, event.sync_state]), [
++        [root.event_id, 'pending'],
++        [child.event_id, 'pending'],
++    ]);
++
++    const replayed = [];
++    const restarted = createOutbox({
++        localStorage: local,
++        queueKey: 'access-e2-r1-lost-response',
++        send: async events => {
++            replayed.push(...events);
++            return {ok: true, results: events.map(event => ({
++                ...accepted(event),
++                status: event.event_id === root.event_id ? 'deduplicated' : 'accepted',
++            }))};
++        },
++    });
++    await restarted.ready();
++    await restarted.retryNow();
++    assert.deepEqual(replayed.map(event => ({
++        event_id: event.event_id,
++        occurred_at: event.occurred_at,
++        sequence: event.sequence,
++        depends_on: event.depends_on,
++        payload: event.payload,
++    })), [root, child].map(event => ({
++        event_id: event.event_id,
++        occurred_at: event.occurred_at,
++        sequence: event.sequence,
++        depends_on: event.depends_on,
++        payload: event.payload,
++    })));
++    assert.deepEqual(await restarted.pending(), []);
++});
++
+ test('restart does not retry an unrelated terminal conflict', async () => {
+     const local = storage();
+     const before = createOutbox({
+-- 
+2.54.0.windows.1
+

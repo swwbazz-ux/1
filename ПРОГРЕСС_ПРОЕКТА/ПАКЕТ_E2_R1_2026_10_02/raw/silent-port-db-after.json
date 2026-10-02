@@ -1,0 +1,32 @@
+{
+  "action_count": 1,
+  "receipt_count": 1,
+  "receipt": {
+    "event_id": "excavator-load-333430d9-59c2-4b2a-ad90-d6a58a6469a8",
+    "event_type": "excavator.trip.loaded",
+    "status": "accepted",
+    "error_code": "",
+    "sequence": 2,
+    "depends_on": [],
+    "occurred_at": "2026-10-02T00:17:05.756Z",
+    "received_at": "2026-10-02T00:18:45.600Z",
+    "result_payload": {
+      "server_ids": {
+        "event_receipt_id": 2,
+        "shift_id": 6,
+        "trip_id": 2
+      },
+      "server_received_at": "2026-10-02T00:18:45.600628+00:00",
+      "version": 283
+    }
+  },
+  "trip": {
+    "id": 2,
+    "truck_id": 2,
+    "excavator_id": 1,
+    "dump_point_id": 1,
+    "status": "loaded_waiting_unload",
+    "loaded_at": "2026-10-02T00:17:05.756Z",
+    "completed_at": null
+  }
+}

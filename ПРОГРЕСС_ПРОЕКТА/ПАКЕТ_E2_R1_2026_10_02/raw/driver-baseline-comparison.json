@@ -1,0 +1,27 @@
+{
+  "command": "node --test static/js/tests/driver-drum-readability-contract.test.js",
+  "environment": {
+    "node": "v24.16.0",
+    "os": "Windows"
+  },
+  "base": {
+    "sha": "f1b144e8b40b5c4fca9182a416a2de48abbac1e0",
+    "tests": 16,
+    "pass": 15,
+    "fail": 1,
+    "raw": "driver-drum-base-f1b144e8.log"
+  },
+  "original_e2_candidate": {
+    "sha": "efb39c9a7d41df10564ce0fb4f803c9d129117b4",
+    "tests": 16,
+    "pass": 15,
+    "fail": 1,
+    "raw": "driver-drum-candidate-efb39c9a.log"
+  },
+  "same_failure": {
+    "test": "the swipe arrow is a fixed slot outside the card, sized from the real gap to the dial",
+    "error": "TypeError: Cannot read properties of null (reading '0')",
+    "source": "static/js/tests/driver-drum-readability-contract.test.js:282:87"
+  },
+  "classification": "baseline failure; Driver UI is outside E2-R1 and was not changed"
+}

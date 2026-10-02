@@ -1,0 +1,83 @@
+{
+  "scenario": "accepting silent TCP port -> real page gesture -> durable local queue -> tab restart -> network recovery",
+  "candidate": "f7936b9f83db0160dcc9070c1b2565d82fb6bc57",
+  "server_url": "http://127.0.0.1:8765/excavator/work/",
+  "database": "isolated SQLite",
+  "silent_port": {
+    "bind": "127.0.0.1:8765",
+    "started_at": "2026-10-02T00:16:47.3838323Z",
+    "behavior": "accept TCP connections and never read or write HTTP",
+    "accepted_connections": 10,
+    "rate_limit_or_latency_emulation": false,
+    "raw_log": "silent-port.log"
+  },
+  "control_trip_x": {
+    "trip_id": 1,
+    "truck": "QA-T-01",
+    "loaded_at": "2026-10-02T00:14:42.990054Z",
+    "completed_at": "2026-10-02T00:15:31.733838Z",
+    "status_before_y": "completed"
+  },
+  "gesture_y": {
+    "input": "Chrome extension CUA drag through page pointer handlers",
+    "started_at": "2026-10-02T00:17:02.370Z",
+    "cua_duration_ms": 3359,
+    "event_id": "excavator-load-333430d9-59c2-4b2a-ad90-d6a58a6469a8",
+    "local_trip_id": "local-trip-9cf00719-ddee-4d59-b670-9cd57dd413ec",
+    "occurred_at": "2026-10-02T00:17:05.756Z",
+    "sequence": 2,
+    "device_id": "77d744f6-a4d0-4ea7-8851-26a2a1a50ed5",
+    "payload": {
+      "assignment_id": "1",
+      "truck_id": "2",
+      "excavator_id": "1",
+      "dump_point_id": "1",
+      "rock_type_id": "1",
+      "loading_horizon": "240",
+      "loading_block": "1",
+      "manual_control": false
+    },
+    "network_request": {
+      "url": "http://127.0.0.1:8765/offline-events/sync/",
+      "method": "POST",
+      "cdp_sequence": 87,
+      "has_user_gesture": true,
+      "request_wall_time": 1790900225.865245
+    }
+  },
+  "before_restart": {
+    "server_receipt_count": 0,
+    "qa_t01_trip_count": 1,
+    "ui_queue_count": 1,
+    "ui_card_state": "Сохранено на телефоне · на телефоне",
+    "ui_connection_state": "Нет связи с сервером"
+  },
+  "restart": {
+    "method": "close controlled Chrome tab; open a new tab at the same PWA URL while Django is still absent",
+    "navigation_transport_result": "Page.navigate timed out because the silent listener held the request; after the listener was stopped, the already-created tab displayed the service-worker shell",
+    "ui_queue_count": 1,
+    "ui_queue_state": "Ожидает отправки",
+    "ui_card_state": "Сохранено на телефоне · на телефоне",
+    "ui_connection_state": "Нет связи с сервером"
+  },
+  "after_network_recovery": {
+    "ui_queue_count": 0,
+    "ui_card_state": "На разгрузку",
+    "ui_connection_state": "Связь есть",
+    "console_errors": 0,
+    "receipt_count": 1,
+    "trip_client_action_count": 1,
+    "server_receipt_id": 2,
+    "server_trip_id": 2,
+    "status": "accepted",
+    "received_at": "2026-10-02T00:18:45.600Z",
+    "trip_loaded_at": "2026-10-02T00:17:05.756Z",
+    "trip_status": "loaded_waiting_unload",
+    "operational_version": 283
+  },
+  "limits": {
+    "physical_apk_restart": "NOT_RUN",
+    "real_device": "NOT_RUN",
+    "postgresql": "NOT_RUN"
+  }
+}
