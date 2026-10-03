@@ -38,8 +38,57 @@ MODES = {
     "smoke_sse_qa",
     "disable_sse_qa",
     "remove_sse_qa",
+    "repair_sse_qa_seed",
     "diagnose",
     "rollback",
+}
+
+SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
+SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
+SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
+SSE_QA_SEED_FIX_VERSION = "C2 + seed-fix"
+SSE_QA_SEED_FIX_CONTROLLER_SHA256 = "020de450039049cfa1649f5bf8d59c871bd78e8272276bb9accec16cb99c0e18"
+SSE_QA_SEED_FIX_DB_HELPER_SHA256 = "2e25eabe333c99178caab70141711ba580abf0d6569c4693bc0afaa4c16f86da"
+SSE_QA_SEED_COMMAND_SHA256 = "0bf8580308073684e1e1ae4cce024620e36179f75c920feb18e5d6e16e98326c"
+SSE_QA_SEED_TEST_SHA256 = "26288fad768c1ea00383d9cfed686d1f4ab6aa9ef1eaebaff99404a955531236"
+SSE_QA_SEED_FIX_SOURCES = (
+    (
+        PurePosixPath("deploy/sse-qa-seed-fix/scripts/sse_qa_ctl.py"),
+        PurePosixPath("deployment/server/sse_qa_ctl.py"),
+        SSE_QA_CONTROLLER_SHA256,
+    ),
+    (
+        PurePosixPath("deploy/sse-qa-seed-fix/scripts/sse_qa_seed_fix_ctl.py"),
+        PurePosixPath("deployment/server/sse_qa_seed_fix_ctl.py"),
+        SSE_QA_SEED_FIX_CONTROLLER_SHA256,
+    ),
+    (
+        PurePosixPath("deploy/sse-qa-seed-fix/scripts/sse_qa_seed_fix_db.py"),
+        PurePosixPath("deployment/server/sse_qa_seed_fix_db.py"),
+        SSE_QA_SEED_FIX_DB_HELPER_SHA256,
+    ),
+    (
+        PurePosixPath("deploy/sse-qa-seed-fix/payload/seed_sse_qa.py"),
+        PurePosixPath("deployment/sse-qa-seed-fix/payload/seed_sse_qa.py"),
+        SSE_QA_SEED_COMMAND_SHA256,
+    ),
+    (
+        PurePosixPath("deploy/sse-qa-seed-fix/payload/test_sse_qa_seed.py"),
+        PurePosixPath("deployment/sse-qa-seed-fix/payload/test_sse_qa_seed.py"),
+        SSE_QA_SEED_TEST_SHA256,
+    ),
+)
+SSE_QA_SEED_FIX_METADATA = {
+    "qa_schema": 2,
+    "candidate_commit": SSE_QA_CANDIDATE_COMMIT,
+    "controller_sha256": SSE_QA_CONTROLLER_SHA256,
+    "runtime_sha256": SSE_QA_RUNTIME_SHA256,
+    "seed_fix_schema": 1,
+    "seed_fix_version": SSE_QA_SEED_FIX_VERSION,
+    "seed_fix_controller_sha256": SSE_QA_SEED_FIX_CONTROLLER_SHA256,
+    "seed_fix_db_helper_sha256": SSE_QA_SEED_FIX_DB_HELPER_SHA256,
+    "seed_command_sha256": SSE_QA_SEED_COMMAND_SHA256,
+    "seed_test_sha256": SSE_QA_SEED_TEST_SHA256,
 }
 
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
@@ -304,6 +353,26 @@ def main() -> None:
                 source,
             )
         ]
+    elif args.mode == "repair_sse_qa_seed":
+        if any((
+            args.apk_dist, args.apk_profile, args.operation, args.receiver_source,
+            args.fcm_service_account, args.rollback_id, args.event_file,
+            args.sse_qa_package, args.sse_qa_secrets,
+            args.sse_qa_secrets_stdin, args.sse_qa_candidate_commit,
+            args.sse_qa_controller_sha256, args.sse_qa_runtime_sha256,
+            args.sse_qa_https_controller_sha256, args.sse_qa_allow_cidr,
+        )):
+            raise SystemExit("repair_sse_qa_seed accepts no additional inputs")
+        paths = []
+        for target, repository_path, expected_sha256 in SSE_QA_SEED_FIX_SOURCES:
+            source = root.joinpath(*repository_path.parts)
+            if not source.is_file():
+                raise SystemExit(f"SSE QA seed-fix source is missing: {repository_path}")
+            source_bytes = source.read_bytes().replace(b"\r\n", b"\n")
+            if sha256(source_bytes) != expected_sha256:
+                raise SystemExit(f"SSE QA seed-fix source hash mismatch: {repository_path}")
+            inline_payload.append((target, source_bytes))
+        metadata.update(SSE_QA_SEED_FIX_METADATA)
     elif args.mode in {
         "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
         "inspect_sse_qa_https", "prepare_sse_qa_https",

@@ -42,11 +42,12 @@ DATA_MODES = {"verify_data", "apply_data"}
 RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
+SSE_QA_SEED_FIX_MODES = {"repair_sse_qa_seed"}
 SSE_QA_MODES = {
     "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
     "inspect_sse_qa_https", "prepare_sse_qa_https",
     "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
-}
+} | SSE_QA_SEED_FIX_MODES
 ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
 VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
@@ -56,6 +57,18 @@ FCM_CONFIG_PATH = Path("/etc/accounting-mvp/firebase-service-account.json")
 SSE_QA_PACKAGE_PAYLOAD = "deploy/sse-qa/package.zip"
 SSE_QA_SECRETS_PAYLOAD = "deploy/sse-qa/secrets.json"
 SSE_QA_ALLOW_CIDR_PAYLOAD = "deploy/sse-qa/allow-cidr.txt"
+SSE_QA_SEED_FIX_BASE_CONTROLLER_PAYLOAD = "deploy/sse-qa-seed-fix/scripts/sse_qa_ctl.py"
+SSE_QA_SEED_FIX_CONTROLLER_PAYLOAD = "deploy/sse-qa-seed-fix/scripts/sse_qa_seed_fix_ctl.py"
+SSE_QA_SEED_FIX_DB_HELPER_PAYLOAD = "deploy/sse-qa-seed-fix/scripts/sse_qa_seed_fix_db.py"
+SSE_QA_SEED_COMMAND_PAYLOAD = "deploy/sse-qa-seed-fix/payload/seed_sse_qa.py"
+SSE_QA_SEED_TEST_PAYLOAD = "deploy/sse-qa-seed-fix/payload/test_sse_qa_seed.py"
+SSE_QA_SEED_FIX_PAYLOADS = {
+    SSE_QA_SEED_FIX_BASE_CONTROLLER_PAYLOAD,
+    SSE_QA_SEED_FIX_CONTROLLER_PAYLOAD,
+    SSE_QA_SEED_FIX_DB_HELPER_PAYLOAD,
+    SSE_QA_SEED_COMMAND_PAYLOAD,
+    SSE_QA_SEED_TEST_PAYLOAD,
+}
 SSE_QA_MAX_PACKAGE_BYTES = 140 * 1024 * 1024
 SSE_QA_MAX_MEMBERS = 2500
 SSE_QA_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
@@ -67,6 +80,18 @@ SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
 SSE_QA_HTTPS_CONTROLLER_SHA256 = "a70916ea7e39d234cbd2fd232eccdeb79c632f69f6cc01fef4fcb2978746a722"
+SSE_QA_SEED_FIX_VERSION = "C2 + seed-fix"
+SSE_QA_SEED_FIX_CONTROLLER_SHA256 = "020de450039049cfa1649f5bf8d59c871bd78e8272276bb9accec16cb99c0e18"
+SSE_QA_SEED_FIX_DB_HELPER_SHA256 = "2e25eabe333c99178caab70141711ba580abf0d6569c4693bc0afaa4c16f86da"
+SSE_QA_SEED_COMMAND_SHA256 = "0bf8580308073684e1e1ae4cce024620e36179f75c920feb18e5d6e16e98326c"
+SSE_QA_SEED_TEST_SHA256 = "26288fad768c1ea00383d9cfed686d1f4ab6aa9ef1eaebaff99404a955531236"
+SSE_QA_SEED_FIX_PAYLOAD_SHA256 = {
+    SSE_QA_SEED_FIX_BASE_CONTROLLER_PAYLOAD: SSE_QA_CONTROLLER_SHA256,
+    SSE_QA_SEED_FIX_CONTROLLER_PAYLOAD: SSE_QA_SEED_FIX_CONTROLLER_SHA256,
+    SSE_QA_SEED_FIX_DB_HELPER_PAYLOAD: SSE_QA_SEED_FIX_DB_HELPER_SHA256,
+    SSE_QA_SEED_COMMAND_PAYLOAD: SSE_QA_SEED_COMMAND_SHA256,
+    SSE_QA_SEED_TEST_PAYLOAD: SSE_QA_SEED_TEST_SHA256,
+}
 SSE_QA_METADATA = {
     "qa_schema": 2,
     "candidate_commit": SSE_QA_CANDIDATE_COMMIT,
@@ -78,6 +103,38 @@ SSE_QA_HTTPS_METADATA = {
     "qa_https_schema": 1,
     "https_controller_sha256": SSE_QA_HTTPS_CONTROLLER_SHA256,
 }
+SSE_QA_SEED_FIX_METADATA = {
+    **SSE_QA_METADATA,
+    "seed_fix_schema": 1,
+    "seed_fix_version": SSE_QA_SEED_FIX_VERSION,
+    "seed_fix_controller_sha256": SSE_QA_SEED_FIX_CONTROLLER_SHA256,
+    "seed_fix_db_helper_sha256": SSE_QA_SEED_FIX_DB_HELPER_SHA256,
+    "seed_command_sha256": SSE_QA_SEED_COMMAND_SHA256,
+    "seed_test_sha256": SSE_QA_SEED_TEST_SHA256,
+}
+SSE_QA_SEED_FIX_OVERLAY = {
+    "schema": "SSE_QA_SEED_FIX_V1",
+    "version": SSE_QA_SEED_FIX_VERSION,
+    "controller_sha256": SSE_QA_SEED_FIX_CONTROLLER_SHA256,
+    "db_helper_sha256": SSE_QA_SEED_FIX_DB_HELPER_SHA256,
+    "seed_sha256": SSE_QA_SEED_COMMAND_SHA256,
+    "test_sha256": SSE_QA_SEED_TEST_SHA256,
+}
+SSE_QA_OWNERSHIP_PATH = Path("/var/lib/sse-qa/OWNERSHIP.json")
+SSE_QA_INSTALLED_SEED_PATH = Path(
+    "/srv/sse-qa/releases/r3/backend/users/management/commands/seed_sse_qa.py"
+)
+SSE_QA_INSTALLED_SEED_TEST_PATH = Path(
+    "/srv/sse-qa/releases/r3/backend/users/test_sse_qa_seed.py"
+)
+SSE_QA_INSTALLED_SEED_LOGICAL = "/srv/sse-qa/releases/r3/backend/users/management/commands/seed_sse_qa.py"
+SSE_QA_INSTALLED_SEED_TEST_LOGICAL = "/srv/sse-qa/releases/r3/backend/users/test_sse_qa_seed.py"
+SSE_QA_SEED_FIX_SUMMARY = re.compile(
+    r"^SSE_QA_SEED_FIX_OK version=C2\+seed-fix "
+    r"action=(applied|already_applied) "
+    r"source=(updated|already_fixed) database=(updated|already_fixed) "
+    r"history=preserved access=preserved qa=disabled$"
+)
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
 TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
@@ -1697,6 +1754,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         if path.as_posix() != FCM_PAYLOAD:
             raise ReleaseError(f"FCM configuration target is not allowed: {value}")
         return path
+    if mode in SSE_QA_SEED_FIX_MODES:
+        if path.as_posix() not in SSE_QA_SEED_FIX_PAYLOADS:
+            raise ReleaseError(f"SSE QA seed-fix target is not allowed: {value}")
+        return path
     if mode in SSE_QA_MODES:
         allowed = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
@@ -1829,6 +1890,25 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             raise ReleaseError("receiver source is not valid Python") from exc
     elif mode in FCM_MODES:
         validate_fcm_payload(manifest, payload)
+    elif mode in SSE_QA_SEED_FIX_MODES:
+        if set(payload) != SSE_QA_SEED_FIX_PAYLOADS:
+            raise ReleaseError("invalid SSE QA seed-fix payload set")
+        if metadata != SSE_QA_SEED_FIX_METADATA:
+            raise ReleaseError("invalid SSE QA seed-fix metadata")
+        for path, expected_sha256 in SSE_QA_SEED_FIX_PAYLOAD_SHA256.items():
+            if digest(payload[path]) != expected_sha256:
+                raise ReleaseError(f"SSE QA seed-fix payload hash mismatch: {path}")
+        for path in (
+            SSE_QA_SEED_FIX_BASE_CONTROLLER_PAYLOAD,
+            SSE_QA_SEED_FIX_CONTROLLER_PAYLOAD,
+            SSE_QA_SEED_FIX_DB_HELPER_PAYLOAD,
+            SSE_QA_SEED_COMMAND_PAYLOAD,
+            SSE_QA_SEED_TEST_PAYLOAD,
+        ):
+            try:
+                compile(payload[path], path, "exec")
+            except SyntaxError as exc:
+                raise ReleaseError(f"SSE QA seed-fix Python is invalid: {path}") from exc
     elif mode in SSE_QA_MODES:
         expected = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
@@ -2451,8 +2531,100 @@ def _terminate_sse_qa_process(
     return output
 
 
+def _verify_sse_qa_seed_fix_overlay() -> None:
+    """Fail closed before enabling a QA install that lacks the accepted seed fix."""
+    if SSE_QA_OWNERSHIP_PATH.is_symlink() or not SSE_QA_OWNERSHIP_PATH.is_file():
+        raise ReleaseError("SSE QA seed-fix ownership overlay is missing")
+    try:
+        ownership = json.loads(SSE_QA_OWNERSHIP_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("SSE QA seed-fix ownership overlay is invalid") from exc
+    if (
+        not isinstance(ownership, dict)
+        or ownership.get("schema") != "SSE_QA_OWNERSHIP_V2"
+        or ownership.get("complete") is not True
+        or ownership.get("seed_fix") != SSE_QA_SEED_FIX_OVERLAY
+    ):
+        raise ReleaseError("SSE QA seed-fix ownership overlay mismatch")
+    files = ownership.get("files")
+    if not isinstance(files, dict) or (
+        files.get(SSE_QA_INSTALLED_SEED_LOGICAL) != SSE_QA_SEED_COMMAND_SHA256
+        or files.get(SSE_QA_INSTALLED_SEED_TEST_LOGICAL) != SSE_QA_SEED_TEST_SHA256
+    ):
+        raise ReleaseError("SSE QA seed-fix ownership file hashes mismatch")
+    installed = (
+        (SSE_QA_INSTALLED_SEED_PATH, SSE_QA_SEED_COMMAND_SHA256),
+        (SSE_QA_INSTALLED_SEED_TEST_PATH, SSE_QA_SEED_TEST_SHA256),
+    )
+    for path, expected_sha256 in installed:
+        if path.is_symlink() or not path.is_file():
+            raise ReleaseError(f"SSE QA seed-fix installed file is missing: {path}")
+        try:
+            actual_sha256 = digest(path.read_bytes())
+        except OSError as exc:
+            raise ReleaseError(f"SSE QA seed-fix installed file cannot be read: {path}") from exc
+        if actual_sha256 != expected_sha256:
+            raise ReleaseError(f"SSE QA seed-fix installed file hash mismatch: {path}")
+
+
+def run_sse_qa_seed_fix(payload: dict[str, bytes]) -> str:
+    """Run the one fixed, hash-pinned in-place repair for the isolated QA seed."""
+    bundle_members = {
+        SSE_QA_SEED_FIX_BASE_CONTROLLER_PAYLOAD: PurePosixPath("scripts/sse_qa_ctl.py"),
+        SSE_QA_SEED_FIX_CONTROLLER_PAYLOAD: PurePosixPath("scripts/sse_qa_seed_fix_ctl.py"),
+        SSE_QA_SEED_FIX_DB_HELPER_PAYLOAD: PurePosixPath("scripts/sse_qa_seed_fix_db.py"),
+        SSE_QA_SEED_COMMAND_PAYLOAD: PurePosixPath("payload/seed_sse_qa.py"),
+        SSE_QA_SEED_TEST_PAYLOAD: PurePosixPath("payload/test_sse_qa_seed.py"),
+    }
+    if set(payload) != set(bundle_members):
+        raise ReleaseError("invalid SSE QA seed-fix payload set")
+    with tempfile.TemporaryDirectory(prefix="accounting-sse-qa-seed-fix-") as raw:
+        bundle = Path(raw) / "bundle"
+        for source_name, member in bundle_members.items():
+            target = bundle.joinpath(*member.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload[source_name])
+            target.chmod(0o600)
+        controller = bundle / "scripts" / "sse_qa_seed_fix_ctl.py"
+        receiver_cgroup = _receiver_unified_cgroup()
+        qa_slice_cgroup = _sse_qa_slice_cgroup()
+        if _cgroup_is_at_or_below(receiver_cgroup, qa_slice_cgroup):
+            raise ReleaseError("production receiver must remain outside SSE QA slice")
+        scoped_unit = "sse-qa-seed-fix.service"
+        command = [
+            "/usr/bin/systemd-run", "--system", "--quiet", "--wait", "--pipe", "--collect",
+            "--service-type=exec", f"--unit={scoped_unit}",
+            f"--slice={SSE_QA_SLICE_UNIT}",
+            "--property=CPUQuota=100%", "--property=MemoryMax=1G",
+            "--property=MemorySwapMax=0", "--property=TasksMax=128",
+            "--property=IOWeight=10", "--property=TimeoutStopSec=90s",
+            "/usr/bin/python3.12", str(controller), "repair",
+            "--bundle-root", str(bundle),
+        ]
+        process = subprocess.Popen(
+            command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+        try:
+            output, _ = process.communicate(timeout=900)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_sse_qa_process(process, "repair_sse_qa_seed", scoped_unit)
+            raise ReleaseError("SSE QA seed-fix operation timed out; termination confirmed") from exc
+        if process.returncode != 0:
+            raise ReleaseError("SSE QA seed-fix operation failed: " + output[-2000:])
+        lines = output.strip().splitlines()
+        summary = lines[-1] if lines else ""
+        if SSE_QA_SEED_FIX_SUMMARY.fullmatch(summary) is None:
+            raise ReleaseError("SSE QA seed-fix operation returned no fixed summary")
+        if _receiver_unified_cgroup() != receiver_cgroup:
+            raise ReleaseError("production receiver cgroup changed during SSE QA seed-fix")
+        return summary
+
+
 def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
+    if mode in {"enable_sse_qa", "smoke_sse_qa"}:
+        _verify_sse_qa_seed_fix_overlay()
     operation = {
         "verify_sse_qa": "preflight",
         "prepare_sse_qa_host_key": "prepare-host-key",
@@ -2668,6 +2840,8 @@ def main() -> int:
                 backup = configure_fcm(manifest, payload)
             elif mode == "rollback":
                 backup = rollback(manifest)
+            elif mode in SSE_QA_SEED_FIX_MODES:
+                backup = run_sse_qa_seed_fix(payload)
             elif mode in SSE_QA_MODES:
                 backup = run_sse_qa(mode, payload)
             else:
