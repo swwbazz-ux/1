@@ -30,6 +30,7 @@ on:
           - smoke_sse_qa
           - disable_sse_qa
           - remove_sse_qa
+          - repair_sse_qa_seed
           - diagnose
           - rollback
       expected_commit:
@@ -152,6 +153,7 @@ jobs:
             smoke_sse_qa) expected=SMOKE_SSE_QA ;;
             disable_sse_qa) expected=DISABLE_SSE_QA ;;
             remove_sse_qa) expected=REMOVE_SSE_QA ;;
+            repair_sse_qa_seed) expected=REPAIR_SSE_QA_SEED ;;
             diagnose) expected=DIAGNOSE ;;
             rollback) expected=ROLLBACK ;;
             *) exit 2 ;;
@@ -196,6 +198,26 @@ jobs:
           }
           if any(str(inputs.get(name, "")) != value for name, value in expected.items()):
               raise SystemExit("prepare_sse_qa_host_key rejects unrelated inputs")
+          PY
+          fi
+          if [[ "$MODE" == "repair_sse_qa_seed" ]]; then
+            test "$APK_PROFILE" = "none"
+            test -z "$DATA_OPERATION"
+            test -z "$ROLLBACK_ID"
+            python - "$GITHUB_EVENT_PATH" <<'PY'
+          import json
+          import sys
+          inputs = json.load(open(sys.argv[1], encoding="utf-8")).get("inputs") or {}
+          expected = {
+              "diagnostic_operation": "none",
+              "diagnostic_equipment": "",
+              "diagnostic_from_utc": "",
+              "diagnostic_to_utc": "",
+              "diagnostic_max_rows": "500",
+              "sse_qa_allow_cidr": "",
+          }
+          if any(str(inputs.get(name, "")) != value for name, value in expected.items()):
+              raise SystemExit("repair_sse_qa_seed rejects unrelated inputs")
           PY
           fi
 
@@ -340,6 +362,9 @@ jobs:
           python .github/deploy/test_release_protocol.py
           python .github/deploy/test_sse_qa_https_control.py
           python .github/deploy/test_sse_qa_https_release_protocol.py
+          python .github/deploy/test_sse_qa_seed_fix_db.py
+          python .github/deploy/test_sse_qa_seed_fix_control.py
+          python .github/deploy/test_sse_qa_seed_fix_protocol.py
           args=(
             --root .
             --files .github/deploy/production-files.txt
@@ -362,6 +387,8 @@ jobs:
             args+=(--operation "$DATA_OPERATION")
           elif [[ "$MODE" == "diagnose" ]]; then
             args+=(--event-file "$GITHUB_EVENT_PATH")
+          elif [[ "$MODE" == "repair_sse_qa_seed" ]]; then
+            :
           elif [[ "$MODE" == *sse_qa* ]]; then
             qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
             mkdir -p "$qa_candidate_root"

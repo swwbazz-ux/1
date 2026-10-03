@@ -97,6 +97,9 @@ jobs:
           python .github/deploy/test_release_protocol.py
           python .github/deploy/test_sse_qa_https_control.py
           python .github/deploy/test_sse_qa_https_release_protocol.py
+          python .github/deploy/test_sse_qa_seed_fix_db.py
+          python .github/deploy/test_sse_qa_seed_fix_control.py
+          python .github/deploy/test_sse_qa_seed_fix_protocol.py
 
       - name: Run all backend JavaScript contracts
         shell: bash
