@@ -109,7 +109,43 @@ class SeedFixControlTests(unittest.TestCase):
         with self.assertRaisesRegex(ctl.SeedFixError, "inconsistent"):
             ctl.source_state(self.root, self.ownership)
 
+    def test_source_state_accepts_real_c2_runtime_journal_shape_only_when_complete(self) -> None:
+        """C2 extracts runtime members without journaling them individually."""
+
+        files = self.ownership["files"]
+        del files[ctl.SEED_LOGICAL]
+        del files[ctl.TEST_LOGICAL]
+        self.assertEqual(ctl.source_state(self.root, self.ownership), "old")
+
+        files[ctl.SEED_LOGICAL] = self._hash(self.old_seed)
+        with self.assertRaisesRegex(ctl.SeedFixError, "inconsistent") as caught:
+            ctl.source_state(self.root, self.ownership)
+        self.assertEqual(caught.exception.reason, "legacy_source_journal_mismatch")
+
+        files[ctl.SEED_LOGICAL] = []
+        with self.assertRaisesRegex(ctl.SeedFixError, "inconsistent") as caught:
+            ctl.source_state(self.root, self.ownership)
+        self.assertEqual(caught.exception.reason, "legacy_source_journal_mismatch")
+
+        files[ctl.SEED_LOGICAL] = None
+        files[ctl.TEST_LOGICAL] = None
+        with self.assertRaisesRegex(ctl.SeedFixError, "inconsistent") as caught:
+            ctl.source_state(self.root, self.ownership)
+        self.assertEqual(caught.exception.reason, "legacy_source_journal_mismatch")
+
+        del files[ctl.SEED_LOGICAL]
+        del files[ctl.TEST_LOGICAL]
+        self.ownership["seed_fix"] = ctl.expected_overlay()
+        with self.assertRaisesRegex(ctl.SeedFixError, "inconsistent") as caught:
+            ctl.source_state(self.root, self.ownership)
+        self.assertEqual(caught.exception.reason, "legacy_source_journal_mismatch")
+
     def test_source_update_and_restore_preserve_bytes_mode_and_journal(self) -> None:
+        # Match the real C2 installer: runtime archive members exist on disk
+        # but are absent from the per-file ownership map before repair.
+        del self.ownership["files"][ctl.SEED_LOGICAL]
+        del self.ownership["files"][ctl.TEST_LOGICAL]
+        self._write_ownership()
         os.chmod(self.seed, 0o640)
         os.chmod(self.test, 0o600)
         ownership_raw = self.ownership_path.read_bytes()
@@ -172,8 +208,27 @@ class SeedFixControlTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             ["helper", "apply"], 1, "secret diagnostics", "",
         )
-        with self.assertRaisesRegex(ctl.SeedFixError, "failed"):
+        with self.assertRaisesRegex(ctl.SeedFixError, "failed") as caught:
             ctl.parse_db_result(completed, {"applied"})
+        self.assertEqual(caught.exception.reason, "db_helper_failed")
+        helper_failure = {
+            "schema": ctl.DB_RESULT_SCHEMA,
+            "action": "error",
+            "error": "legacy_rock_missing",
+        }
+        completed = subprocess.CompletedProcess(
+            ["helper", "apply"], 65, json.dumps(helper_failure) + "\n", "",
+        )
+        with self.assertRaisesRegex(ctl.SeedFixError, "failed") as caught:
+            ctl.parse_db_result(completed, {"applied"})
+        self.assertEqual(caught.exception.reason, "db_legacy_rock_missing")
+        helper_failure["error"] = "secret/path/value"
+        completed = subprocess.CompletedProcess(
+            ["helper", "apply"], 65, json.dumps(helper_failure) + "\n", "",
+        )
+        with self.assertRaisesRegex(ctl.SeedFixError, "failed") as caught:
+            ctl.parse_db_result(completed, {"applied"})
+        self.assertEqual(caught.exception.reason, "db_helper_failed")
         old = {
             "schema": ctl.DB_RESULT_SCHEMA,
             "action": "old",
@@ -383,6 +438,24 @@ class SeedFixControlTests(unittest.TestCase):
         self.assertEqual(
             stderr.getvalue(),
             "SSE_QA_SEED_FIX_FAIL reason=internal_error\n",
+        )
+
+    def test_expected_controller_error_exposes_only_fixed_reason_code(self) -> None:
+        stderr = io.StringIO()
+        with mock.patch.object(
+            ctl,
+            "repair",
+            side_effect=ctl.SeedFixError(
+                "sensitive path command credential value",
+                reason="legacy_source_journal_mismatch",
+            ),
+        ), redirect_stderr(stderr):
+            result = ctl.main(["repair", "--bundle-root", str(self.root)])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stderr.getvalue(),
+            "SSE_QA_SEED_FIX_FAIL reason=legacy_source_journal_mismatch\n",
         )
 
     def test_verifier_postcheck_failure_stops_both_dependencies(self) -> None:

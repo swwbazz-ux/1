@@ -71,12 +71,70 @@ EXPECTED_BUNDLE_FILES = {
 }
 
 
+# The database helper is allowed to return only these fixed rejection codes.
+# They are deliberately path-, command-, credential-, and row-value-free, so a
+# controller failure can remain actionable without relaying arbitrary helper
+# output to the receiver or GitHub log.
+DB_HELPER_ERROR_CODES = frozenset({
+    "apply_verification_failed",
+    "canonical_create_failed",
+    "canonical_create_mismatch",
+    "canonical_delete_failed",
+    "canonical_rock_has_unexpected_relation",
+    "canonical_rock_in_use",
+    "canonical_rock_mismatch",
+    "canonical_rock_missing",
+    "canonical_rock_placement_mismatch",
+    "canonical_rock_placement_relation_missing",
+    "concurrent_seed_state_change",
+    "internal_error",
+    "invalid_action",
+    "invalid_backend_runtime",
+    "invalid_database_host",
+    "invalid_database_name",
+    "invalid_database_port",
+    "invalid_database_vendor",
+    "legacy_rock_mismatch",
+    "legacy_rock_missing",
+    "missing_database_marker",
+    "mixed_seed_state",
+    "placement_concurrent_change",
+    "protected_model_set_empty",
+    "protected_state_changed",
+    "qa_excavator_mismatch",
+    "qa_excavator_missing",
+    "qa_excavator_not_unique",
+    "qa_placement_missing",
+    "qa_placement_not_unique",
+    "qa_rock_not_unique",
+    "required_model_missing",
+    "rollback_requires_fixed_state",
+    "rollback_verification_failed",
+    "unsupported_protected_value",
+})
+PUBLIC_REASONS = frozenset({
+    "db_helper_failed",
+    "fixed_source_journal_mismatch",
+    "installed_seed_source_state_unsupported",
+    "installed_seed_sources_unsafe",
+    "legacy_source_journal_mismatch",
+    "operation_cancelled",
+    "ownership_file_map_invalid",
+    "seed_fix_rejected",
+}) | frozenset(f"db_{code}" for code in DB_HELPER_ERROR_CODES)
+
+
 class SeedFixError(RuntimeError):
-    pass
+    """Expected rejection carrying one fixed, non-sensitive public reason."""
+
+    def __init__(self, message: str, *, reason: str = "seed_fix_rejected"):
+        super().__init__(message)
+        self.reason = reason if reason in PUBLIC_REASONS else "seed_fix_rejected"
 
 
 class SeedFixCancelled(SeedFixError):
-    pass
+    def __init__(self, message: str):
+        super().__init__(message, reason="operation_cancelled")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -180,23 +238,47 @@ def expected_overlay() -> dict[str, str]:
 def source_state(root: Path, ownership: dict[str, Any]) -> str:
     files = ownership.get("files")
     if not isinstance(files, dict):
-        raise SeedFixError("QA ownership file map is invalid")
+        raise SeedFixError(
+            "QA ownership file map is invalid",
+            reason="ownership_file_map_invalid",
+        )
     seed = rooted(root, SEED_TARGET)
     test = rooted(root, TEST_TARGET)
     if seed.is_symlink() or test.is_symlink() or not seed.is_file() or not test.is_file():
-        raise SeedFixError("installed seed sources are missing or unsafe")
+        raise SeedFixError(
+            "installed seed sources are missing or unsafe",
+            reason="installed_seed_sources_unsafe",
+        )
     actual_pair = (sha256_file(seed), sha256_file(test))
     journal_pair = (files.get(SEED_LOGICAL), files.get(TEST_LOGICAL))
+    journal_membership = (SEED_LOGICAL in files, TEST_LOGICAL in files)
     overlay = ownership.get("seed_fix")
     if actual_pair == (OLD_SEED_SHA256, OLD_TEST_SHA256):
-        if journal_pair != actual_pair or overlay is not None:
-            raise SeedFixError("legacy seed ownership state is inconsistent")
+        # The accepted C2 installer extracts the pinned runtime tarball as one
+        # unit and therefore does not journal its individual seed/test members.
+        # A locally reconstructed fixture may contain their exact old hashes;
+        # accept both complete legacy shapes, but never a partial/mismatched
+        # pair or an already-present overlay.
+        legacy_journal_valid = journal_membership == (False, False) or (
+            journal_membership == (True, True) and journal_pair == actual_pair
+        )
+        if not legacy_journal_valid or overlay is not None:
+            raise SeedFixError(
+                "legacy seed ownership state is inconsistent",
+                reason="legacy_source_journal_mismatch",
+            )
         return "old"
     if actual_pair == (NEW_SEED_SHA256, NEW_TEST_SHA256):
         if journal_pair != actual_pair or overlay != expected_overlay():
-            raise SeedFixError("fixed seed ownership state is inconsistent")
+            raise SeedFixError(
+                "fixed seed ownership state is inconsistent",
+                reason="fixed_source_journal_mismatch",
+            )
         return "fixed"
-    raise SeedFixError("installed seed sources have an unsupported or mixed state")
+    raise SeedFixError(
+        "installed seed sources have an unsupported or mixed state",
+        reason="installed_seed_source_state_unsupported",
+    )
 
 
 def validate_disabled_installation(root: Path, base: Any) -> tuple[dict[str, Any], bytes, os.stat_result, str]:
@@ -358,7 +440,25 @@ def restore_sources_and_journal(
 
 def parse_db_result(completed: subprocess.CompletedProcess[str], allowed: set[str]) -> dict[str, Any]:
     if completed.returncode != 0:
-        raise SeedFixError("seed-fix database helper failed")
+        reason = "db_helper_failed"
+        # The helper's failure envelope is fixed and contains no values from
+        # the database.  Recognize only the exact schema and an allowlisted
+        # code; arbitrary stdout remains fully redacted.
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
+        if len(lines) == 1:
+            try:
+                failure = json.loads(lines[0])
+            except json.JSONDecodeError:
+                failure = None
+            if (
+                isinstance(failure, dict)
+                and set(failure) == {"schema", "action", "error"}
+                and failure.get("schema") == DB_RESULT_SCHEMA
+                and failure.get("action") == "error"
+                and failure.get("error") in DB_HELPER_ERROR_CODES
+            ):
+                reason = f"db_{failure['error']}"
+        raise SeedFixError("seed-fix database helper failed", reason=reason)
     lines = [line for line in completed.stdout.splitlines() if line.strip()]
     if len(lines) != 1:
         raise SeedFixError("seed-fix database helper returned an invalid response")
@@ -599,7 +699,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         repair(args.bundle_root)
-    except (SeedFixError, subprocess.SubprocessError, OSError, ValueError) as exc:
+    except SeedFixError as exc:
+        print(f"SSE_QA_SEED_FIX_FAIL reason={exc.reason}", file=sys.stderr)
+        return 1
+    except (subprocess.SubprocessError, OSError, ValueError) as exc:
         print(f"SSE_QA_SEED_FIX_FAIL reason={type(exc).__name__}", file=sys.stderr)
         return 1
     except Exception:
