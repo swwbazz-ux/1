@@ -1,5 +1,6 @@
 """Команды расстановки техники на Диспетчерском пульте."""
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -318,20 +319,26 @@ def execute_dispatcher_assign_truck(
         equipment_type__name__icontains='Экскаватор',
         is_active=True,
     )
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
-    if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
-        placement.zone = ExcavatorPlacement.Zone.ACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
     try:
-        assignment, created = schedule_haul_assignment(
-            truck=truck,
-            excavator=excavator,
-            assigned_by=access.employee,
-            now=now,
-            expected_state_id=expected_state_id,
-        )
+        # The public view owns the outer transaction, but a stale-state error is
+        # converted to HTTP 409 below.  Keep placement activation and the
+        # assignment command in an inner savepoint so that crossing this block
+        # rolls back every signal-driven version/event write before the error is
+        # converted to a normal response.
+        with transaction.atomic():
+            placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
+            if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
+                placement.zone = ExcavatorPlacement.Zone.ACTIVE
+                placement.changed_by = access.employee
+                placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
+
+            assignment, created = schedule_haul_assignment(
+                truck=truck,
+                excavator=excavator,
+                assigned_by=access.employee,
+                now=now,
+                expected_state_id=expected_state_id,
+            )
     except HaulAssignmentStateConflict as error:
         return dispatcher_client_action_error(payload, error, code='state_conflict')
     action_logger(
