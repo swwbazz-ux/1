@@ -53,6 +53,20 @@ function isDriverOperationalRefreshUnsafe(shell) {
        может — признак старше 5 с обновление не держит. */
     var dialHoldStartedAt = typeof window !== "undefined" ? Number(window.driverDialHoldStartedAt || 0) : 0;
     if (dialHoldStartedAt > 0 && Date.now() - dialHoldStartedAt < 5000) return busy("dial_hold");
+    /* То же для пальца на барабане точек или простоев: подмена посреди
+       протяжки снимает барабан под пальцем, и отправка точки в круг или
+       подъём причины не засчитываются. Начало жеста отдают сами барабаны
+       (driver-point-drum-v1.js, driver-downtime-drum-v1.js), 0 — пальца нет.
+       Вращение бывает дольше удержания, поэтому срок 10 с. */
+    function drumGestureStartedAt(name) {
+        var get = typeof window !== "undefined" ? window[name] : null;
+        return typeof get === "function" ? Number(get() || 0) : 0;
+    }
+    var drumGestureAt = Math.max(
+        drumGestureStartedAt("driverPointDrumGestureStartedAt"),
+        drumGestureStartedAt("driverDowntimeDrumGestureStartedAt")
+    );
+    if (drumGestureAt > 0 && Date.now() - drumGestureAt < 10000) return busy("drum_gesture");
     /* Всё, что выше, — жёсткие причины: прервать их значит потерять то, что
        водитель уже ввёл руками. Ниже — мягкие: залипший признак начатого
        жеста, открытая шторка, неотправленное действие. Любой из них может

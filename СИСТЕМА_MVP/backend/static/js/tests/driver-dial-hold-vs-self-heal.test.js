@@ -119,6 +119,57 @@ test("the three-minute reload waits for the finger to leave the dial", () => {
     assert.equal(app.calls.reloads, 1);
 });
 
+for (const [drum, getter] of [
+    ["point", "driverPointDrumGestureStartedAt"],
+    ["downtime", "driverDowntimeDrumGestureStartedAt"],
+]) {
+    test(`self-heal bypass does not swap the screen under a finger on the ${drum} drum`, () => {
+        const app = screen();
+        behindForAMinute(app);
+        const startedAt = app.now();
+        app.window[getter] = () => startedAt;
+        app.advance(3000);
+        assert.equal(app.isUnsafe(), true, "протяжка идёт — подмена сняла бы барабан под пальцем");
+        assert.equal(app.window.driverRefreshBusyReason, "drum_gesture");
+    });
+
+    test(`a ${drum} drum without a finger or with a stale gesture does not hold the screen`, () => {
+        const app = screen();
+        behindForAMinute(app);
+        app.window[getter] = () => 0;
+        assert.equal(app.isUnsafe(), false);
+        const startedAt = app.now();
+        app.window[getter] = () => startedAt;
+        app.advance(10000);
+        assert.equal(app.isUnsafe(), false, "признак старше 10 с не держит");
+    });
+
+    test(`the three-minute reload waits for the finger to leave the ${drum} drum`, () => {
+        const app = screen();
+        app.tick();
+        app.advance(3 * MINUTE + 1000);
+        const startedAt = app.now();
+        app.window[getter] = () => startedAt;
+        app.tick();
+        assert.equal(app.calls.reloads, 0);
+        app.window[getter] = () => 0;
+        app.advance(5000);
+        app.tick();
+        assert.equal(app.calls.reloads, 1);
+    });
+}
+
+test("both drums report the start of the finger gesture and 0 without one", () => {
+    for (const [file, getter] of [
+        ["../driver-point-drum-v1.js", "driverPointDrumGestureStartedAt"],
+        ["../driver-downtime-drum-v1.js", "driverDowntimeDrumGestureStartedAt"],
+    ]) {
+        const source = fs.readFileSync(path.resolve(__dirname, file), "utf8").replace(/\r\n/g, "\n");
+        assert.match(source, /drag = \{[^}]*startedAt: Date\.now\(\)\s*\};/, file);
+        assert.match(source, new RegExp(`root\\.${getter} = function \\(\\) \\{ return drag \\? drag\\.startedAt : 0; \\};`), file);
+    }
+});
+
 test("the unload hold marks the finger on start and clears it on reset and on completion", () => {
     const start = SHIFT_SOURCE.indexOf("unloadHoldGuard = window.createDriverRoleHoldGuard({");
     assert.notEqual(start, -1);

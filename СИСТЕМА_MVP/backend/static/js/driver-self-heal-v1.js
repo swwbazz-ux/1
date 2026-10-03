@@ -98,12 +98,17 @@
         active.blur();
     }
 
-    /* Палец держит круг прямо сейчас: перезагрузка посреди удержания так же
-       молча съедает разгрузку, как и подмена экрана (см.
-       isDriverOperationalRefreshUnsafe). Тик через 5 с перезагрузит. */
-    function dialHoldInProgress() {
-        var startedAt = Number(window.driverDialHoldStartedAt || 0);
-        return startedAt > 0 && Date.now() - startedAt < 5000;
+    /* Палец держит круг или тянет барабан прямо сейчас: перезагрузка посреди
+       жеста так же молча съедает действие, как и подмена экрана (см.
+       isDriverOperationalRefreshUnsafe, те же сроки). Следующий тик перезагрузит. */
+    function fingerGestureInProgress() {
+        var now = Date.now();
+        var holdAt = Number(window.driverDialHoldStartedAt || 0);
+        if (holdAt > 0 && now - holdAt < 5000) return true;
+        return ["driverPointDrumGestureStartedAt", "driverDowntimeDrumGestureStartedAt"].some(function (name) {
+            var at = typeof window[name] === "function" ? Number(window[name]() || 0) : 0;
+            return at > 0 && now - at < 10000;
+        });
     }
 
     function recentlyReloaded() {
@@ -165,7 +170,7 @@
             return;
         }
         var behindFor = now - behindSince;
-        if (behindFor >= RELOAD_AFTER_MS && !driverIsTypingIntoForm(shell) && !sheetOrModalIsOpen(shell) && !dialHoldInProgress()) {
+        if (behindFor >= RELOAD_AFTER_MS && !driverIsTypingIntoForm(shell) && !sheetOrModalIsOpen(shell) && !fingerGestureInProgress()) {
             reloadScreen();
             return;
         }
