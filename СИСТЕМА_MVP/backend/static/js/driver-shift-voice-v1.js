@@ -44,6 +44,29 @@ function isDriverOperationalRefreshUnsafe(shell) {
     )) {
         return busy("close_form");
     }
+    /* Палец прямо сейчас держит круг — кольцо разгрузки набирается (момент
+       начала ставит unloadHoldGuard в driver-shift-v1.js). Подмена экрана
+       посреди удержания снимает кнопку вместе с удержанием, и разгрузка молча
+       не засчитывается (бой 03.10.2026, самосвал 22: связь «recovering»,
+       самовосстановление открыло обход, удержания уходили впустую). Удержание
+       длится полсекунды, поэтому это жёсткая причина; навсегда залипнуть не
+       может — признак старше 5 с обновление не держит. */
+    var dialHoldStartedAt = typeof window !== "undefined" ? Number(window.driverDialHoldStartedAt || 0) : 0;
+    if (dialHoldStartedAt > 0 && Date.now() - dialHoldStartedAt < 5000) return busy("dial_hold");
+    /* То же для пальца на барабане точек или простоев: подмена посреди
+       протяжки снимает барабан под пальцем, и отправка точки в круг или
+       подъём причины не засчитываются. Начало жеста отдают сами барабаны
+       (driver-point-drum-v1.js, driver-downtime-drum-v1.js), 0 — пальца нет.
+       Вращение бывает дольше удержания, поэтому срок 10 с. */
+    function drumGestureStartedAt(name) {
+        var get = typeof window !== "undefined" ? window[name] : null;
+        return typeof get === "function" ? Number(get() || 0) : 0;
+    }
+    var drumGestureAt = Math.max(
+        drumGestureStartedAt("driverPointDrumGestureStartedAt"),
+        drumGestureStartedAt("driverDowntimeDrumGestureStartedAt")
+    );
+    if (drumGestureAt > 0 && Date.now() - drumGestureAt < 10000) return busy("drum_gesture");
     /* Всё, что выше, — жёсткие причины: прервать их значит потерять то, что
        водитель уже ввёл руками. Ниже — мягкие: залипший признак начатого
        жеста, открытая шторка, неотправленное действие. Любой из них может
@@ -326,9 +349,19 @@ function reportDriverAudioDiagnostic(stage, details, extra) {
 /* Отдельной отметки о произнесённом здесь больше нет: она обновлялась только
    после возврата из моста и от синхронного двойного вызова не защищала.
    Владелец решения — DriverVoiceGuard, заявка по ключу рейса. */
+/* Самосвал этого экрана. Бой 03.10.2026 (самосвал 22): сервер присылает водителю
+   события и экскаватора его назначения — в том числе погрузки ЧУЖИХ самосвалов
+   этим экскаватором. Голос объявлял точку чужой машины («едем на ККД», когда своя
+   шла на СКДР). Событие с номером другого самосвала не озвучивается; событие без
+   номера (резервный путь по разметке своего экрана) — как раньше. */
 function latestDriverDumpPointEvent(context) {
     var selected = null;
     var events = context && Array.isArray(context.events) ? context.events : [];
+    var ownTruckId = 0;
+    try {
+        var ownShell = document.querySelector("[data-driver-shell]");
+        ownTruckId = Number(ownShell && ownShell.dataset.driverCurrentTruckId || 0);
+    } catch (error) {}
     events.forEach(function (event) {
         var payload = event && event.payload ? event.payload : null;
         var version = Number(event && event.version || 0);
@@ -341,6 +374,8 @@ function latestDriverDumpPointEvent(context) {
         ) {
             return;
         }
+        var eventTruckId = Number(payload.truck_id || 0);
+        if (ownTruckId && eventTruckId && eventTruckId !== ownTruckId) return;
         var tripId = Number(payload.trip_id || 0);
         var dumpPointId = Number(payload.assigned_dump_point_id || payload.dump_point_id || 0);
         var dumpPointName = String(payload.dump_point_name || "").trim();
