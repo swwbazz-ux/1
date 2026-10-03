@@ -1,0 +1,92 @@
+{
+  "domain": "trips_and_free_bucket",
+  "baseline": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "source_blobs_verified": 6,
+  "passports": 11,
+  "new_executable_cases": 3,
+  "production_or_full_postgresql_tests": "NOT_RUN",
+  "previous_6480_raw": "UNAVAILABLE_AFTER_WORKSPACE_CLEANUP; not included as a new PASS",
+  "findings": [
+    {
+      "id": "TRIP-R01",
+      "mechanics": ["M-TRIP-3", "M-TRIP-8", "M-FB-1", "M-FB-3"],
+      "severity": "HIGH",
+      "evidence": "COUNTEREXAMPLE_REPRODUCED_EXACT_AST_WITH_DOUBLES",
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "functions": ["_release_open_trips_unknown_to_worker", "_process_driver_free_bucket_selected"],
+      "finding": "Поздний выбор ковша X закрывает более поздний открытый Y в helper; предварительной верхней временной границы нет. В вызывающей функции stale-проверка выполняется после release и исключает затронутые ID.",
+      "repair": "Привязать последствия к историческому циклу и запретить изменение более позднего рейса; не считать выбор ковша доказательством новой физической погрузки.",
+      "qualification": "Полный запрос/транзакция/PG не исполнены; создание Y заменено fixture."
+    },
+    {
+      "id": "TRIP-R02",
+      "mechanics": ["M-TRIP-1"],
+      "severity": "HIGH",
+      "evidence": "STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/trips/views.py",
+      "functions": ["excavator_truck_load_block"],
+      "finding": "Обычный путь сохраняет active_trip и active_downtime; ряд фактических погрузок может быть заблокирован текущим серверным состоянием.",
+      "repair": "Унифицировать приём факта и историческую раскладку; отдельно решить судьбу простоев, не трактовать исправление учёта как факт завершения ремонта."
+    },
+    {
+      "id": "TRIP-R03",
+      "mechanics": ["M-TRIP-4"],
+      "severity": "HIGH",
+      "evidence": "STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "functions": ["_late_excavator_load_slot"],
+      "finding": "Классификация same_load использует окно времени и историю статусов без полной проверки фактического контекста погрузки.",
+      "repair": "Связывать физические дубли по достаточным причинным и контекстным свидетельствам; не поглощать отличающийся факт одним временным окном."
+    },
+    {
+      "id": "TRIP-R04",
+      "mechanics": ["M-TRIP-6"],
+      "severity": "HIGH",
+      "evidence": "STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/trips/views.py",
+      "functions": ["finalize_trip_unloaded"],
+      "finding": "late_confirmation пропускает закрытие ожидания самосвала, но не закрытие связанного free-bucket и не reconcile экскаватора.",
+      "repair": "Проверить и ограничить все побочные эффекты по конкретному рейсу и причинному интервалу.",
+      "qualification": "Не заявлен исполненный контрпример для полного reconcile."
+    },
+    {
+      "id": "TRIP-R05",
+      "mechanics": ["M-TRIP-6", "M-TRIP-7"],
+      "severity": "HIGH",
+      "evidence": "STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "functions": ["_process_driver_unloaded", "_process_driver_dump_point_changed"],
+      "finding": "Проверка прежнего driver_control_shift не является полным контрактом действий сменщика на переходящем рейсе.",
+      "repair": "Разделить автора погрузки, право продолжения и фактического разгрузившего; проверить carryover без нового начисления."
+    },
+    {
+      "id": "TRIP-R06",
+      "mechanics": ["M-TRIP-1"],
+      "severity": "HIGH",
+      "evidence": "STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/trips/trip_creation.py",
+      "functions": ["resolve_required_trip_measurements", "create_loaded_waiting_unload_trip"],
+      "finding": "Неразрешённые плотность/кубатура вызывают ValidationError до создания рейса.",
+      "repair": "Сохранять физический факт устойчиво; расчётный пробел разрешать отдельно, не выдумывая объём."
+    },
+    {
+      "id": "TRIP-R07",
+      "mechanics": ["M-TRIP-2", "M-TRIP-5", "M-TRIP-8"],
+      "severity": "DECISION_BOUNDARY",
+      "evidence": "PRIMARY_NORMATIVE",
+      "path": "ПРОГРЕСС_ПРОЕКТА/ПАСПОРТ_МЕХАНИК.md",
+      "finding": "R-12, R-13, R-04 не закрыты; кодовые ограничения/таймеры и рекомендации не являются новым решением владельца.",
+      "repair": "Зафиксировать варианты отдельными границами приёмки, сохранять исходные факты; не объявлять весь контракт утверждённым."
+    },
+    {
+      "id": "TRIP-R08",
+      "mechanics": ["M-TRIP-7"],
+      "severity": "HIGH",
+      "evidence": "PRIMARY_NORMATIVE_AND_STATIC_SOURCE",
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "functions": ["_process_driver_dump_point_changed"],
+      "finding": "Нынешний водительский обработчик не реализует полный P28-контракт направлений машиниста/сменщика и утверждённых причинных правил.",
+      "repair": "Отдельный журнал маршрута с исходным назначением, текущим направлением и фактической разгрузкой; P28-В1/В2/В3 и повторяемые уведомления."
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "release": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "files": [
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+      "git_blob_sha": "56fcfac9677d5f1ca9623140c3236c1b487df43d",
+      "local": "source/driver-offline-outbox-v2.js",
+      "bytes": 75574,
+      "sha256": "9e08b4813cd4712741b860fb5cfcb9c26340051ec44dbea4ed438af5e45726cf",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "local": "source/offline_sync.py",
+      "bytes": 218043,
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js",
+      "git_blob_sha": "c06274ae7506af7e4e93e7ea965cd339fcb03df1",
+      "local": "source/connection-indicators-v1.js",
+      "bytes": 1598,
+      "sha256": "2e6c68678192799cfb979cd689cb6e3d4ee52679a671845c911954f73ba816b8",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/native-background-connection-v1.js",
+      "git_blob_sha": "46af706bb91abd16f7cbdc835c0c074dade139c6",
+      "local": "source/native-background-connection-v1.js",
+      "bytes": 7177,
+      "sha256": "8b62d6d9cade2922e586cdf20bc4aebbb893ec471a68d6a5e63b88f518e8a3fd",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js",
+      "git_blob_sha": "1ff77218a5b07272ccdea0d0ce4e65bfee3f5b4f",
+      "local": "source/application-session-heartbeat.js",
+      "bytes": 10847,
+      "sha256": "5976eaf7a2d8c9030e4940d6f59b621406292983af3873b91565febf6a8e5783",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/users/session_device.py",
+      "git_blob_sha": "c3b3c9c57a0421b398c0a0fa996e97a6208852a0",
+      "local": "source/session_device.py",
+      "bytes": 1581,
+      "sha256": "67696f83dd428335d63996d6aa9312b564b025b590c226b3e46903508eb2eed2",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js",
+      "git_blob_sha": "0e590e91d5417432dae195fa64638e15e494d3a1",
+      "local": "source/excavator-field-outbox-v1.js",
+      "bytes": 36182,
+      "sha256": "4fb356b61702b6d87d7a196ed758eb879e3e9a72c97f09223b4977e1d1d54313",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-shift-refresh-v1.js",
+      "git_blob_sha": "73c3fcc769f3266fb50faa69e91fc5072dbc5a23",
+      "local": "source/driver-shift-refresh-v1.js",
+      "bytes": 26661,
+      "sha256": "bf4f29a06e7191427a164f130a418af5d4626444bed0fbb55155eb0dc545f4b5",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js",
+      "git_blob_sha": "c23a071d09ddad06e74ff103fc471abe11024647",
+      "local": "source/driver-local-shift-v1.js",
+      "bytes": 26283,
+      "sha256": "ebcf7caa2e0001cfc597557b3327810025ff47fdd9d392cab34d832de186bff9",
+      "verified": true
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js",
+      "git_blob_sha": "b212422aa535678fba9c93a5128bebcae9b5c133",
+      "local": "source/driver-manifest-local-v1.js",
+      "bytes": 55708,
+      "sha256": "1731316a095681f51b030c3eb26a0c004a0d032f4007ab1f8f700934a6dd2486",
+      "verified": true
+    }
+  ]
+}

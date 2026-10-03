@@ -1,0 +1,90 @@
+{
+  "probe_status": "COUNTEREXAMPLE_REPRODUCED",
+  "product_status": "KNOWN_GAP",
+  "scope": "Exact AST function; ORM and close-reservation function doubled; new trip insertion is a fixture, not real load handler.",
+  "not_run": [
+    "Django HTTP endpoint",
+    "PostgreSQL transactions and concurrency",
+    "physical phones",
+    "field shift",
+    "production mutation"
+  ],
+  "source": {
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+    "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+    "function_lines": [
+      176,
+      208
+    ]
+  },
+  "cases": [
+    {
+      "id": "TRIP-PROBE-01",
+      "assertion": "Changing delivery order closes later Y in the reverse order",
+      "status": "COUNTEREXAMPLE_REPRODUCED",
+      "forward": {
+        "delivery": [
+          "X_free_bucket_at_10",
+          "Y_load_at_20"
+        ],
+        "rows": [
+          {
+            "trip_id": 20,
+            "status": "LOADED_WAITING_UNLOAD",
+            "loaded_at": "2026-10-03T01:20:00+00:00",
+            "operationally_closed_at": null,
+            "saves": 0
+          }
+        ],
+        "reservation_close_calls": [],
+        "log_codes": []
+      },
+      "reverse": {
+        "delivery": [
+          "Y_load_at_20",
+          "X_free_bucket_at_10"
+        ],
+        "rows": [
+          {
+            "trip_id": 20,
+            "status": "UNCONTROLLED",
+            "loaded_at": "2026-10-03T01:20:00+00:00",
+            "operationally_closed_at": "2026-10-03T01:20:00+00:00",
+            "saves": 1
+          }
+        ],
+        "reservation_close_calls": [
+          {
+            "trip_id": 20,
+            "closed_at": "2026-10-03T01:20:00+00:00"
+          }
+        ],
+        "log_codes": [
+          "open_trip_exists"
+        ]
+      }
+    },
+    {
+      "id": "TRIP-PROBE-02",
+      "assertion": "Already-closed row does not repeat the helper side effect",
+      "status": "PASS_ISOLATED_FUNCTION"
+    },
+    {
+      "id": "TRIP-PROBE-03",
+      "assertion": "Other truck is not touched",
+      "status": "PASS_ISOLATED_FUNCTION"
+    }
+  ],
+  "static_call_site": {
+    "release_call_lines": [
+      278
+    ],
+    "stale_guard_call_lines": [
+      281
+    ],
+    "qualification": "Guard follows release and excludes the returned trip IDs; full request outcome not executed."
+  },
+  "old_raw": "Previous 6480-case package unavailable after workspace cleanup; this run does not recreate or validate it."
+}

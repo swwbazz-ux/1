@@ -1,0 +1,131 @@
+{
+  "run_kind": "NEW_RECOVERY_RUN",
+  "source_commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "scope": "Actual extracted function bodies; in-memory query and transaction doubles. No Django, PostgreSQL, device, HTTP, side-effect integration or production execution.",
+  "old_raw_reused": false,
+  "source_blob_verification": [
+    {
+      "path": "СИСТЕМА_MVP/backend/shifts/services.py",
+      "local_path": "source/services.py",
+      "git_blob_sha": "251ef129e0eb1cf9951a81af1889de3069dc4993",
+      "sha256": "4bd24d94875064c08ccefe2ac749ffed4ff1ad080e68ff326b0d2b8f0b6a2df2",
+      "bytes": 99243
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "local_path": "source/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "bytes": 218043
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py",
+      "local_path": "source/driver_shift_timeline.py",
+      "git_blob_sha": "a1dffa82546214a94c8c00ef66b6b63eb05d33ca",
+      "sha256": "3aa15bc6973f4d3ec0a0e007ababc7ffd1eef9cd54199e8a2485b731f1777b34",
+      "bytes": 63892
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js",
+      "local_path": "source/driver-local-shift-v1.js",
+      "git_blob_sha": "c23a071d09ddad06e74ff103fc471abe11024647",
+      "sha256": "ebcf7caa2e0001cfc597557b3327810025ff47fdd9d392cab34d832de186bff9",
+      "bytes": 26283
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py",
+      "local_path": "source/dispatcher_shift_commands.py",
+      "git_blob_sha": "d3199e16fcc0688920473d9204a1d1f41a0d655f",
+      "sha256": "8270cecd3096524f8825dcc7262a854ef8b0428c0347f7928c96d8650fc658d2",
+      "bytes": 16857
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py",
+      "local_path": "source/excavator_hourly_report.py",
+      "git_blob_sha": "772ffc809a4436e9fdeac1dd009161238bdba4d9",
+      "sha256": "8be3dd8cfdce42ebdb79a8d1a6c829931b5465575939423840729b8028b3740b",
+      "bytes": 4640
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js",
+      "local_path": "source/excavator-hourly-report-v1.js",
+      "git_blob_sha": "5952584add3f9d9c6005508a82d49e72b70f2fcc",
+      "sha256": "01201f35fa70213b0e0511795c2ae71f38e73b0418166f69fd10ff2fb3ce4be6",
+      "bytes": 17082
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_guards.py",
+      "local_path": "source/dispatcher_guards.py",
+      "git_blob_sha": "14e12b7362d90629a1244b25903f5b01677495b7",
+      "sha256": "5036eb1c5105b7249949787d98518883a5e8cb2e86a22dae03af58dd2711058f",
+      "bytes": 5573
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/manual_loading.py",
+      "local_path": "source/manual_loading.py",
+      "git_blob_sha": "d93492e78bd43a1f21365a2e1d82d66acd5888d5",
+      "sha256": "089b53c810743a68b1219c23e7d4faf7e01f520f6dbf6f04a7ff9af73a26cf5f",
+      "bytes": 13547
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js",
+      "local_path": "source/dispatcher-board-v1.js",
+      "git_blob_sha": "2ffa927b097076eb324ff163f3c04c61b466601e",
+      "sha256": "d071316fbe4f68a7187d625e6b40a254b26d95a22c875461a0f90726c7f4e7af",
+      "bytes": 8421
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_header.py",
+      "local_path": "source/dispatcher_header.py",
+      "git_blob_sha": "b0c9b1b6dc0517d8cdca4760218e334cbbaf0ed4",
+      "sha256": "19ef423800001ffe37a66c81d44b72f8669775dabb87b29bc174f9326bf19f87",
+      "bytes": 8739
+    }
+  ],
+  "cases": [
+    {
+      "id": "SHIFT-OPEN-DELIVERY-ORDER",
+      "status": "COUNTEREXAMPLE_REPRODUCED",
+      "forward": {
+        "A": {
+          "opened_at": "2026-10-03T10:00:00+00:00",
+          "closed_at": "2026-10-03T11:00:00+00:00"
+        },
+        "B": {
+          "opened_at": "2026-10-03T11:00:00+00:00",
+          "closed_at": null
+        }
+      },
+      "reverse": {
+        "B": {
+          "opened_at": "2026-10-03T11:00:00+00:00",
+          "closed_at": "2026-10-03T11:00:00+00:00"
+        },
+        "A": {
+          "opened_at": "2026-10-03T10:00:00+00:00",
+          "closed_at": null
+        }
+      },
+      "observation": "Late A closes newer B at B own start, leaving historical A current. Same known chronological inputs give different current shifts."
+    },
+    {
+      "id": "SHIFT-R21-OWN-EARLIER-CLOSE",
+      "status": "COUNTEREXAMPLE_REPRODUCED",
+      "own_close": "2026-10-03T10:30:00+00:00",
+      "service_close_after_processing": "2026-10-03T11:00:00+00:00",
+      "readings_applied": false,
+      "response": {
+        "server_ids": {
+          "shift_id": 42
+        },
+        "already_closed": true,
+        "version": 123
+      },
+      "diagnostics": [
+        "driver_shift_close_already_closed"
+      ],
+      "precondition": "Fixture assumes trusted earlier own close for exact same shift, the approved R-21 case; clock/rights verification is outside this isolated test."
+    }
+  ],
+  "product_acceptance": "NOT_RUN"
+}
