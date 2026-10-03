@@ -520,6 +520,301 @@ test('restart retries a legacy device clock conflict and its dependency chain', 
     assert.deepEqual(await afterUpdate.pending(), []);
 });
 
+test('restart retries a legacy post-unload cooldown refusal with the immutable event', async () => {
+    const local = storage();
+    const original = loadEvent('legacy-post-unload-cooldown', 17);
+    original.occurred_at = '2026-10-02T01:02:03.000Z';
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2',
+        send: async events => ({
+            ok: true,
+            results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'conflict',
+                code: 'post_unload_cooldown',
+                message: 'Возвращается к экскаватору · 10 мин.',
+            })),
+        }),
+    });
+    await beforeUpdate.queue(original);
+    await beforeUpdate.flush();
+    assert.deepEqual((await beforeUpdate.pending()).map(event => [event.event_id, event.sync_state]), [
+        [original.event_id, 'conflict'],
+    ]);
+
+    let replayed = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2',
+        send: async events => {
+            replayed = events.map(event => ({
+                event_id: event.event_id,
+                sequence: event.sequence,
+                occurred_at: event.occurred_at,
+                payload: event.payload,
+            }));
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+
+    const restored = await afterUpdate.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [original.event_id, 'pending'],
+    ]);
+    await afterUpdate.flush();
+    assert.deepEqual(replayed, [{
+        event_id: original.event_id,
+        sequence: original.sequence,
+        occurred_at: original.occurred_at,
+        payload: original.payload,
+    }]);
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
+test('restart restores the full removed-cooldown chain with immutable envelopes', async () => {
+    const local = storage();
+    const root = loadEvent('removed-cooldown-root', 31);
+    root.occurred_at = '2026-10-02T02:00:01.000Z';
+    const child = loadEvent('removed-cooldown-child', 32);
+    child.event_type = 'excavator.trip.loaded.cancelled';
+    child.occurred_at = '2026-10-02T02:00:02.000Z';
+    child.depends_on = [root.event_id];
+    child.local_trip_id = root.local_trip_id;
+    child.payload = {local_trip_id: root.local_trip_id, truck_id: root.payload.truck_id};
+    const grandchild = loadEvent('removed-cooldown-grandchild', 33);
+    grandchild.occurred_at = '2026-10-02T02:00:03.000Z';
+    grandchild.depends_on = [child.event_id];
+    const beforeUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2-r1-chain',
+        send: async events => ({
+            ok: true,
+            results: events.map(event => ({
+                event_id: event.event_id,
+                status: 'conflict',
+                code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
+                message: 'legacy conflict',
+            })),
+        }),
+    });
+    for (const event of [root, child, grandchild]) await beforeUpdate.queue(event);
+    await beforeUpdate.flush();
+    assert.deepEqual((await beforeUpdate.pending()).map(event => event.sync_state), [
+        'conflict', 'conflict', 'conflict',
+    ]);
+
+    const sent = [];
+    const afterUpdate = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2-r1-chain',
+        send: async events => {
+            sent.push(...events);
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await afterUpdate.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [root.event_id, 'pending'],
+        [child.event_id, 'pending'],
+        [grandchild.event_id, 'pending'],
+    ]);
+    await afterUpdate.flush();
+    assert.deepEqual(sent.map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+        local_recovery_marker: event.removed_refusal_root_ids,
+    })), [root, child, grandchild].map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+        local_recovery_marker: undefined,
+    })));
+    assert.deepEqual(await afterUpdate.pending(), []);
+});
+
+test('confirmed removed-cooldown root recovers saved children after root left the queue', async () => {
+    const local = storage();
+    const queueKey = 'access-e2-r1-confirmed-root';
+    const storageKey = 'excavator-field-outbox-v1:' + queueKey;
+    const confirmedKey = storageKey + ':confirmed';
+    const root = loadEvent('confirmed-removed-cooldown-root', 41);
+    const child = loadEvent('confirmed-removed-cooldown-child', 42);
+    child.depends_on = [root.event_id];
+    const grandchild = loadEvent('confirmed-removed-cooldown-grandchild', 43);
+    grandchild.depends_on = [child.event_id];
+    const oldShell = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => ({ok: true, results: events.map(event => ({
+            event_id: event.event_id,
+            status: 'conflict',
+            code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
+            message: 'legacy conflict',
+        }))}),
+    });
+    for (const event of [root, child, grandchild]) await oldShell.queue(event);
+    await oldShell.flush();
+
+    const queue = JSON.parse(local.getItem(storageKey));
+    local.setItem(storageKey, JSON.stringify(queue.filter(event => event.event_id !== root.event_id)));
+    local.setItem(confirmedKey, JSON.stringify([{
+        event: root,
+        result: {
+            event_id: root.event_id,
+            status: 'accepted',
+            server_ids: {trip_id: 141},
+            conflict_recovery: {
+                reason: 'removed_refusal',
+                original_code: 'post_unload_cooldown',
+                root_event_ids: [root.event_id],
+            },
+        },
+    }]));
+
+    const replayed = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => {
+            replayed.push(...events.map(event => event.event_id));
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await restarted.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [child.event_id, 'pending'],
+        [grandchild.event_id, 'pending'],
+    ]);
+    await restarted.flush();
+    assert.deepEqual(replayed, [child.event_id, grandchild.event_id]);
+    assert.deepEqual(await restarted.pending(), []);
+});
+
+test('confirmed removed-cooldown child after retry recovers its saved descendant on restart', async () => {
+    const local = storage();
+    const queueKey = 'access-e2-r2-confirmed-child';
+    const storageKey = 'excavator-field-outbox-v1:' + queueKey;
+    const confirmedKey = storageKey + ':confirmed';
+    const root = loadEvent('confirmed-retry-root', 44);
+    const child = loadEvent('confirmed-retry-child', 45);
+    child.depends_on = [root.event_id];
+    const grandchild = loadEvent('confirmed-retry-grandchild', 46);
+    grandchild.depends_on = [child.event_id];
+    const oldShell = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => ({ok: true, results: events.map(event => ({
+            event_id: event.event_id,
+            status: 'conflict',
+            code: event.event_id === root.event_id ? 'post_unload_cooldown' : 'dependency_rejected',
+            message: 'legacy conflict',
+        }))}),
+    });
+    for (const event of [root, child, grandchild]) await oldShell.queue(event);
+    await oldShell.flush();
+
+    const queue = JSON.parse(local.getItem(storageKey));
+    local.setItem(storageKey, JSON.stringify(queue.filter(event => (
+        event.event_id !== root.event_id && event.event_id !== child.event_id
+    ))));
+    local.setItem(confirmedKey, JSON.stringify([{
+        event: child,
+        result: {
+            event_id: child.event_id,
+            status: 'accepted',
+            server_ids: {trip_id: 145},
+            dependency_recovery: {
+                reason: 'removed_refusal_chain',
+                root_event_ids: [root.event_id],
+            },
+        },
+    }]));
+
+    const replayed = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey,
+        send: async events => {
+            replayed.push(...events);
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    const restored = await restarted.ready();
+    assert.deepEqual(restored.map(event => [event.event_id, event.sync_state]), [
+        [grandchild.event_id, 'pending'],
+    ]);
+    await restarted.flush();
+    assert.deepEqual(replayed.map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+    })), [{
+        event_id: grandchild.event_id,
+        occurred_at: grandchild.occurred_at,
+        sequence: grandchild.sequence,
+        depends_on: grandchild.depends_on,
+        payload: grandchild.payload,
+    }]);
+    assert.deepEqual(await restarted.pending(), []);
+});
+
+test('lost root response and restart resend the same removed-cooldown chain', async () => {
+    const local = storage();
+    const root = loadEvent('lost-response-root', 51);
+    const child = loadEvent('lost-response-child', 52);
+    child.depends_on = [root.event_id];
+    const beforeRestart = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2-r1-lost-response',
+        send: async () => { throw new Error('response lost after server commit'); },
+    });
+    await beforeRestart.queue(root);
+    await beforeRestart.queue(child);
+    await beforeRestart.flush();
+    const before = await beforeRestart.pending();
+    assert.deepEqual(before.map(event => [event.event_id, event.sync_state]), [
+        [root.event_id, 'pending'],
+        [child.event_id, 'pending'],
+    ]);
+
+    const replayed = [];
+    const restarted = createOutbox({
+        localStorage: local,
+        queueKey: 'access-e2-r1-lost-response',
+        send: async events => {
+            replayed.push(...events);
+            return {ok: true, results: events.map(event => ({
+                ...accepted(event),
+                status: event.event_id === root.event_id ? 'deduplicated' : 'accepted',
+            }))};
+        },
+    });
+    await restarted.ready();
+    await restarted.retryNow();
+    assert.deepEqual(replayed.map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+    })), [root, child].map(event => ({
+        event_id: event.event_id,
+        occurred_at: event.occurred_at,
+        sequence: event.sequence,
+        depends_on: event.depends_on,
+        payload: event.payload,
+    })));
+    assert.deepEqual(await restarted.pending(), []);
+});
+
 test('restart does not retry an unrelated terminal conflict', async () => {
     const local = storage();
     const before = createOutbox({

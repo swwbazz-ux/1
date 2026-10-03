@@ -24,7 +24,7 @@ from references.models import DumpPoint, Equipment
 from shifts.models import EmployeeShift
 from trips import tests as trip_fixtures
 from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus, Trip, TripStatus
-from users.models import AdminConflict, EmployeeAccess
+from users.models import ActiveApplicationSession, AdminConflict, EmployeeAccess
 
 
 @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=True)
@@ -2141,6 +2141,48 @@ class FreeBucketServerIntegrationTests(TestCase):
         acceptance = FreeBucketAcceptance.objects.get()
         self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(trip.completed_at, occurred_at)
+        self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
+
+        ActiveApplicationSession.objects.create(
+            session_key='e2-active-driver-after-free-bucket',
+            access=self.driver_access,
+            role_code='driver',
+            app_code='driver',
+            path='/driver/',
+            last_seen_at=timezone.now(),
+            foreground_seen_at=timezone.now(),
+        )
+
+        screen = self.client.get(reverse('excavator_work'))
+        card = next(
+            item for item in screen.context['truck_cards']
+            if item['assignment'].truck_id == self.truck.id
+        )
+        self.assertEqual(card['load_block_reason_code'], '')
+        self.assertEqual(card['equipment_state_code'], 'assigned')
+        self.assertTrue(card['can_drag'])
+        self.assertTrue(card['can_load'])
+
+        immediate_reload = self.client.post(
+            reverse('excavator_truck_loaded'),
+            data=json.dumps({
+                'client_action_id': 'ordinary-load-after-free-bucket-unload',
+                'truck_id': self.truck.id,
+                'excavator_id': self.excavator.id,
+                'dump_point_id': self.dump_point.id,
+                'rock_type': self.rock.id,
+                'loading_horizon': '125',
+                'loading_block': '4',
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(immediate_reload.status_code, 200, immediate_reload.content)
+        next_trip = Trip.objects.get(pk=immediate_reload.json()['trip_id'])
+        self.assertNotEqual(next_trip.pk, trip.pk)
+        self.assertEqual(next_trip.status, TripStatus.LOADED_WAITING_UNLOAD)
+        trip.refresh_from_db()
+        acceptance.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.COMPLETED)
         self.assertEqual(acceptance.status, FreeBucketAcceptanceStatus.CLOSED)
 
     def test_accept_then_cancel_releases_without_creating_trip(self):

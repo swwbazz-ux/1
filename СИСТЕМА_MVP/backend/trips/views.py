@@ -204,49 +204,9 @@ from .trip_creation import (
 logger = logging.getLogger(__name__)
 
 
-TRUCK_POST_UNLOAD_COOLDOWN = timedelta(
-    seconds=getattr(settings, 'TRUCK_POST_UNLOAD_COOLDOWN_SECONDS', 600)
-)
-TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS = frozenset({'ТЕСТ-1'})
-
-
 def truck_waiting_loading_downtime(event):
     reason = getattr(event, 'reason', None)
     return driver_downtime_flow(reason) == DRIVER_DOWNTIME_FLOW_WAITING_LOADING
-
-
-def truck_post_unload_cooldown(truck, *, completed_at=None, now=None):
-    if not truck:
-        return None
-    garage_number = str(getattr(truck, 'garage_number', '') or '').strip().upper()
-    if garage_number in TRUCK_POST_UNLOAD_ZERO_COOLDOWN_GARAGE_NUMBERS:
-        return None
-    if completed_at is None:
-        completed_at = (
-            Trip.objects
-            .filter(
-                truck=truck,
-                status=TripStatus.COMPLETED,
-                completed_at__isnull=False,
-            )
-            .order_by('-completed_at')
-            .values_list('completed_at', flat=True)
-            .first()
-        )
-    if not completed_at:
-        return None
-    now = now or timezone.now()
-    remaining_seconds = int(
-        (completed_at + TRUCK_POST_UNLOAD_COOLDOWN - now).total_seconds()
-    )
-    if remaining_seconds <= 0:
-        return None
-    remaining_minutes = max(1, math.ceil(remaining_seconds / 60))
-    return {
-        'code': 'post_unload_cooldown',
-        'label': f'Возвращается к экскаватору · {remaining_minutes} мин.',
-        'remaining_seconds': remaining_seconds,
-    }
 
 
 DISPATCHER_PLAN_TOTAL_TONS = Decimal('420000')
@@ -626,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v262";
+const CACHE_NAME = "excavator-mobile-shell-v264";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -640,26 +600,26 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v262",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v262",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v262",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v262",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -3643,7 +3603,6 @@ def excavator_truck_load_block(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
-    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
     manual_control=False,
@@ -3679,10 +3638,6 @@ def excavator_truck_load_block(
         )
     if active_downtime and not truck_waiting_loading_downtime(active_downtime):
         return excavator_truck_load_block_payload('active_downtime')
-    if post_unload_cooldown is None:
-        post_unload_cooldown = truck_post_unload_cooldown(truck)
-    if post_unload_cooldown and not manual_control and not replace_trip:
-        return post_unload_cooldown
     if has_open_truck_shift is None:
         has_open_truck_shift = EmployeeShift.objects.filter(
             equipment=truck,
@@ -3705,7 +3660,6 @@ def excavator_truck_load_block_reason(
     current_excavator=None,
     active_trip=None,
     active_downtime=None,
-    post_unload_cooldown=None,
     has_open_truck_shift=None,
     has_driver_assignment=None,
 ):
@@ -3714,7 +3668,6 @@ def excavator_truck_load_block_reason(
         current_excavator=current_excavator,
         active_trip=active_trip,
         active_downtime=active_downtime,
-        post_unload_cooldown=post_unload_cooldown,
         has_open_truck_shift=has_open_truck_shift,
         has_driver_assignment=has_driver_assignment,
     )
@@ -5626,28 +5579,6 @@ def excavator_work_view(request):
         )
     active_truck_ids = {trip.truck_id for trip in blocking_trips}
     active_trip_by_truck_id = {trip.truck_id: trip for trip in blocking_trips}
-    post_unload_cooldown_by_truck_id = {}
-    if assignment_truck_ids:
-        cooldown_cutoff = timezone.now() - TRUCK_POST_UNLOAD_COOLDOWN
-        for completed_trip in (
-            Trip.objects
-            .filter(
-                truck_id__in=assignment_truck_ids,
-                status=TripStatus.COMPLETED,
-                completed_at__gt=cooldown_cutoff,
-            )
-            .select_related('truck')
-            .only('truck_id', 'truck__garage_number', 'completed_at')
-            .order_by('truck_id', '-completed_at')
-        ):
-            post_unload_cooldown_by_truck_id.setdefault(
-                completed_trip.truck_id,
-                truck_post_unload_cooldown(
-                    completed_trip.truck,
-                    completed_at=completed_trip.completed_at,
-                ),
-            )
-
     def equipment_number(equipment):
         return str(getattr(equipment, 'garage_number', '') or equipment or '-')
 
@@ -5720,7 +5651,6 @@ def excavator_work_view(request):
             manual_control=manual_control,
             active_trip=known_active_trip,
             active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
-            post_unload_cooldown=post_unload_cooldown_by_truck_id.get(assignment.truck_id) or False,
             has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
             has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
         )
@@ -5777,8 +5707,6 @@ def excavator_work_view(request):
             return downtime_equipment_state_code(downtime)
         if active_trip:
             return 'loaded_waiting_unload'
-        if post_unload_cooldown_by_truck_id.get(assignment.truck_id):
-            return 'waiting'
         if assignment.truck_id not in open_truck_shift_equipment_ids:
             if assignment.truck_id in driver_assignment_truck_ids:
                 return 'waiting_for_shift'
@@ -5872,13 +5800,9 @@ def excavator_work_view(request):
                 else active_truck_downtime.reason.button_label
                 if active_truck_downtime
                 else (
-                    block_reason
-                    if load_block_reason_code == 'post_unload_cooldown'
-                    else (
-                        'Завершить погрузку'
-                        if getattr(assignment, 'is_handoff_completion', False)
-                        else state_ui['label']
-                    )
+                    'Завершить погрузку'
+                    if getattr(assignment, 'is_handoff_completion', False)
+                    else state_ui['label']
                 )
             ),
             'target_label': target_label,

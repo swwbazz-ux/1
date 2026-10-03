@@ -665,7 +665,6 @@ def _load_human_driver_truck(
         excavator_truck_load_block,
         notify_driver_truck_loaded,
         reconcile_excavator_waiting_for_trucks,
-        truck_post_unload_cooldown,
     )
 
     trip = None
@@ -721,15 +720,10 @@ def _load_human_driver_truck(
         if active_trip:
             return active_trip, 'loaded_waiting_unload'
 
-        cooldown = truck_post_unload_cooldown(
-            scenario.human_driver_truck,
-            now=now,
-        )
         load_block = excavator_truck_load_block(
             locked_assignment,
             current_excavator=scenario.driver_bot_excavator,
             active_trip=False,
-            post_unload_cooldown=cooldown or False,
             has_open_truck_shift=True,
             has_driver_assignment=True,
         )
