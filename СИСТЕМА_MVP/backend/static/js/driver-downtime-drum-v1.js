@@ -622,9 +622,13 @@
         drag = {
             pointerId: event.pointerId, target: d, x0: event.clientX, y0: event.clientY,
             lastX: event.clientX, lastT: event.timeStamp, vx: 0, dy: 0,
-            mode: "", card: card, captured: false, theta0: geo.theta
+            mode: "", card: card, captured: false, theta0: geo.theta,
+            startedAt: Date.now()
         };
     }, true);
+    /* Палец на барабане: экран не подменяется посреди протяжки
+       (isDriverOperationalRefreshUnsafe, причина drum_gesture). */
+    root.driverDowntimeDrumGestureStartedAt = function () { return drag ? drag.startedAt : 0; };
 
     doc.addEventListener("pointermove", function (event) {
         if (!drag || event.pointerId !== drag.pointerId) return;

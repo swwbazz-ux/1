@@ -2872,12 +2872,16 @@ window.bindDriverMobileShell = function () {
             onStart: function () {
                 unloadHoldCompleted = false;
                 unloadHoldSubmitted = false;
+                /* Палец на круге: пока кольцо набирается, экран не подменяется
+                   даже самовосстановлением (isDriverOperationalRefreshUnsafe). */
+                window.driverDialHoldStartedAt = Date.now();
                 holdButton.classList.add("is-holding");
                 startHoldSegmentFeedback(500);
             },
             onReset: function () {
                 stopHoldSegmentFeedback();
                 if (!unloadHoldCompleted) driverVibrate(0);
+                window.driverDialHoldStartedAt = 0;
                 delete holdForm.dataset.holdComplete;
                 holdButton.classList.remove("is-holding", "is-pending");
                 // Ручной рейс мог завершиться до отпускания пальца — пустой круг не «загружаем».
@@ -2891,6 +2895,7 @@ window.bindDriverMobileShell = function () {
                 }
             },
             onComplete: function () {
+                window.driverDialHoldStartedAt = 0;
                 stopHoldSegmentFeedback();
                 unloadHoldCompleted = true;
                 driverVibrate(160);   // кольцо заполнено
