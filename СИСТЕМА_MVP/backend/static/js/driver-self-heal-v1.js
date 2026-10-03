@@ -98,6 +98,14 @@
         active.blur();
     }
 
+    /* Палец держит круг прямо сейчас: перезагрузка посреди удержания так же
+       молча съедает разгрузку, как и подмена экрана (см.
+       isDriverOperationalRefreshUnsafe). Тик через 5 с перезагрузит. */
+    function dialHoldInProgress() {
+        var startedAt = Number(window.driverDialHoldStartedAt || 0);
+        return startedAt > 0 && Date.now() - startedAt < 5000;
+    }
+
     function recentlyReloaded() {
         try {
             var at = Number(window.sessionStorage.getItem(STORAGE_KEY) || 0);
@@ -157,7 +165,7 @@
             return;
         }
         var behindFor = now - behindSince;
-        if (behindFor >= RELOAD_AFTER_MS && !driverIsTypingIntoForm(shell) && !sheetOrModalIsOpen(shell)) {
+        if (behindFor >= RELOAD_AFTER_MS && !driverIsTypingIntoForm(shell) && !sheetOrModalIsOpen(shell) && !dialHoldInProgress()) {
             reloadScreen();
             return;
         }
