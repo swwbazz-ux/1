@@ -6,6 +6,7 @@ import importlib.util
 import inspect
 import io
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -557,7 +558,7 @@ class ReleaseProtocolTests(unittest.TestCase):
             'request="GET /driver/ HTTP/2.0" class=ordinary_http'
         )
         source = {
-            "status": "ok", "bytes_examined": 100,
+            "status": "ok", "reason": "ok_regular", "bytes_examined": 100,
             "lines_examined": 1, "tail_truncated": False,
         }
         return {
@@ -574,7 +575,7 @@ class ReleaseProtocolTests(unittest.TestCase):
                 "nginx_access": dict(source),
                 "nginx_site": dict(source),
                 "wsgi_journal": {
-                    "status": "not_required", "queried": False,
+                    "status": "not_required", "reason": "not_queried", "queried": False,
                     "bytes_examined": 0, "lines_examined": 0, "tail_truncated": False,
                 },
             },
@@ -584,6 +585,11 @@ class ReleaseProtocolTests(unittest.TestCase):
                 "ordinary_http_per_ip_limit": 8, "static_per_ip_limit": 8,
                 "realtime_per_ip_limit": None, "realtime_total_limit": 2,
                 "static_access_logged": False,
+            },
+            "time_basis": {
+                "access_offsets_minutes": [600],
+                "nginx_error_offset_minutes": 600,
+                "nginx_error_timezone_source": "single_access_log_offset",
             },
             "observed_access_counts": {
                 "ordinary_http": 1, "static": 0, "realtime_stream": 0,
@@ -932,13 +938,13 @@ class ReleaseProtocolTests(unittest.TestCase):
             access_log = root / "nginx-access.log"
             site = root / "sse-qa.conf"
             error_log.write_text(
-                '2026/10/04 07:09:52 [error] 7#7: *41 limiting connections by zone "sse_qa_per_ip", '
+                '2026/10/04 17:09:52 [error] 7#7: *41 limiting connections by zone "sse_qa_per_ip", '
                 'client: 203.0.113.9, server: qa.invalid, request: "GET /driver/?private=1 HTTP/2.0", '
                 'host: "qa.invalid"\n',
                 encoding="utf-8",
             )
             access_log.write_text(
-                '203.0.113.9 - basic-user [04/Oct/2026:07:09:52 +0000] '
+                '203.0.113.9 - basic-user [04/Oct/2026:17:09:52 +1000] '
                 '"GET /driver/?private=1 HTTP/2.0" 503 190 "https://secret.invalid/" "SensitiveBrowser"\n',
                 encoding="utf-8",
             )
@@ -969,6 +975,11 @@ class ReleaseProtocolTests(unittest.TestCase):
             self.assertIsNone(report["configuration"]["realtime_per_ip_limit"])
             self.assertEqual(report["configuration"]["realtime_total_limit"], 2)
             self.assertFalse(report["configuration"]["static_access_logged"])
+            self.assertEqual(report["time_basis"], {
+                "access_offsets_minutes": [600],
+                "nginx_error_offset_minutes": 600,
+                "nginx_error_timezone_source": "single_access_log_offset",
+            })
             serialized = json.dumps(report, ensure_ascii=False)
             for forbidden in (
                 "203.0.113.9", "basic-user", "private=1", "secret.invalid", "SensitiveBrowser",
@@ -1043,7 +1054,27 @@ class ReleaseProtocolTests(unittest.TestCase):
                 self.sse_qa_http_503_metadata(),
             )
 
+    @unittest.skipIf(os.name == "nt", "Windows test host cannot create symlinks")
+    def test_sse_qa_http_503_rejects_symlink_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            allowed = root / "sites-available" / "sse-qa.conf"
+            allowed.parent.mkdir()
+            allowed.write_text("server { }\n", encoding="utf-8")
+            link = root / "sites-enabled" / "sse-qa.conf"
+            link.parent.mkdir()
+            link.symlink_to(allowed)
+            source, lines = receiver._sse_qa_http_503_read_tail(
+                link, 4096,
+            )
+            self.assertEqual(source["status"], "unavailable")
+            self.assertEqual(source["reason"], "symlink_target_rejected")
+            self.assertEqual(lines, [])
+
     def test_sse_qa_http_503_run_diagnostic_has_no_free_form_subprocess(self):
+        self.assertEqual(receiver.SSE_QA_HTTP_503_ERROR_LOG, Path("/srv/sse-qa/log/nginx-error.log"))
+        self.assertEqual(receiver.SSE_QA_HTTP_503_ACCESS_LOG, Path("/srv/sse-qa/log/nginx-access.log"))
+        self.assertEqual(receiver.SSE_QA_HTTP_503_NGINX_SITE, Path("/etc/sse-qa/nginx.conf"))
         expected = {
             "schema": 1,
             "operation": "sse_qa_http_503_v1",
@@ -1085,6 +1116,17 @@ class ReleaseProtocolTests(unittest.TestCase):
             "static_per_ip_limit": 8,
             "realtime_per_ip_limit": None,
             "realtime_total_limit": 2,
+            "nginx_error_source": "ok:ok_regular",
+            "nginx_error_lines": 1,
+            "nginx_access_source": "ok:ok_regular",
+            "nginx_access_lines": 1,
+            "nginx_site_source": "ok:ok_regular",
+            "nginx_site_lines": report["sources"]["nginx_site"]["lines_examined"],
+            "wsgi_source": "not_required:not_queried",
+            "wsgi_lines": 0,
+            "nginx_error_offset_minutes": 600,
+            "target_access_seen": True,
+            "limit_event_count": 1,
         })
         public = json.dumps(envelope["public_evidence"], ensure_ascii=False)
         for forbidden in ("client:", "user-agent", "cookie", "authorization", "?", "https://"):
