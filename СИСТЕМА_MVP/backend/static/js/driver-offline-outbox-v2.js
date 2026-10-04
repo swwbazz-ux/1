@@ -6,6 +6,7 @@
     var META_STORE = "meta";
     var FORMAT_VERSION = 1;
     var TERMINAL_STATES = new Set(["conflict", "auth_required", "invalid"]);
+    var ARCHIVED_STATES = new Set(["confirmed", "cancelled_locally"]);
     var SUPPORTED_TYPES = new Set([
         "driver.trip.unloaded",
         "driver.trip.dump_point_changed",
@@ -55,6 +56,34 @@
         return (prefix || "event") + ":" + uuid;
     }
     function clone(value) { return JSON.parse(JSON.stringify(value)); }
+    /* Срок включает тело и разбор ответа: send обязан вернуть разобранный
+       результат. Одного abort недостаточно для зависшего WebView/transport. */
+    function sendWithDeadline(send, payload, timeoutMs) {
+        var duration = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : 12000;
+        var controller = root.AbortController ? new root.AbortController() : null;
+        var deadline = Date.now() + duration;
+        var started = monotonicNow();
+        return new Promise(function (resolve, reject) {
+            var settled = false;
+            function finish(error, result) {
+                if (settled) return;
+                settled = true;
+                root.clearTimeout(timeout);
+                if (error) reject(error); else resolve(result);
+            }
+            function expire() {
+                if (controller) controller.abort();
+                finish(new Error("offline_request_timeout"));
+            }
+            var timeout = root.setTimeout(expire, duration);
+            Promise.resolve().then(function () {
+                return send(payload, {signal: controller ? controller.signal : undefined, deadlineAt: deadline});
+            }).then(function (result) {
+                var elapsed = Number.isFinite(started) ? monotonicNow() - started : duration - (deadline - Date.now());
+                if (elapsed >= duration) expire(); else finish(null, result);
+            }, function (error) { finish(error); });
+        });
+    }
     function canonical(value) {
         if (Array.isArray(value)) return value.map(canonical);
         if (value && typeof value === "object") {
@@ -511,6 +540,11 @@
             if (!Array.isArray(value)) throw new Error("offline_store_corrupt");
             return value;
         }
+        function readMeta() {
+            var value = JSON.parse(storage.getItem(metaKey) || "{}");
+            if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("offline_meta_store_corrupt");
+            return value;
+        }
         return {
             kind: "localStorage",
             list: async function () { return clone(read()); },
@@ -529,13 +563,23 @@
                 storage.setItem(key, JSON.stringify(read().filter(function (item) { return item.event_id !== eventId; })));
             },
             getMeta: async function (name) {
-                var meta = JSON.parse(storage.getItem(metaKey) || "{}");
-                return meta[name];
+                return readMeta()[name];
             },
             setMeta: async function (name, value) {
-                var meta = JSON.parse(storage.getItem(metaKey) || "{}");
+                var meta = readMeta();
                 meta[name] = value;
                 storage.setItem(metaKey, JSON.stringify(meta));
+            },
+            exportMeta: async function () { return clone(readMeta()); },
+            clearEvents: async function (imported) {
+                // Перенос в IndexedDB асинхронный: за это время старый runtime
+                // мог дописать событие или ACK. Удаляем только точные копии
+                // успешно перенесённого снимка, оставляя новые записи на месте.
+                storage.setItem(key, JSON.stringify(read().filter(function (event) {
+                    return !imported.some(function (source) {
+                        return JSON.stringify(canonical(source)) === JSON.stringify(canonical(event));
+                    });
+                })));
             }
         };
     }
@@ -588,11 +632,59 @@
             try {
                 var primary = indexedRepository(options.indexedDB);
                 await primary.getMeta("probe");
+                if (options.localStorage) await importLocalRepository(primary, options);
                 return primary;
             } catch (error) {}
         }
         if (!options.localStorage) throw new Error("durable_storage_unavailable");
         return localRepository(options.localStorage, options.accessId);
+    }
+
+    async function importLocalRepository(primary, options) {
+        var fallback = localRepository(options.localStorage, options.accessId);
+        // Ошибка импорта не переключает приложение с уже рабочей IndexedDB
+        // на fallback: иначе собственная очередь IndexedDB стала бы невидимой.
+        // Raw fallback очищается лишь после всех успешных записей.
+        try {
+            var legacy = await fallback.list();
+            var metadata = await fallback.exportMeta();
+            var transfers = [];
+            for (var event of legacy) {
+                var current = await primary.get(event.event_id);
+                var known = await primary.getMeta("event-identity:" + event.event_id);
+                if ((current && !sameIdentity(current, event)) || (known && !sameIdentity(known, event))) {
+                    throw new Error("offline_migration_identity_conflict");
+                }
+                if (!current || (ARCHIVED_STATES.has(event.state) && !ARCHIVED_STATES.has(current.state))) transfers.push(event);
+                var seqKey = "sequence:driver:" + String(event.actor_id || "") + ":" + String(event.device_id || "");
+                metadata[seqKey] = Math.max(Number(metadata[seqKey]) || 0, Number(event.sequence) || 0);
+                var legacySeqKey = "sequence:" + options.accessId;
+                metadata[legacySeqKey] = Math.max(Number(metadata[legacySeqKey]) || 0, Number(event.sequence) || 0);
+            }
+            var metaTransfers = [];
+            for (var name of Object.keys(metadata)) {
+                var value = metadata[name];
+                var stored = await primary.getMeta(name);
+                if (name.indexOf("event-identity:") === 0) {
+                    var source = await primary.get(name.slice("event-identity:".length));
+                    if ((stored && !sameIdentity(stored, value)) || (source && !sameIdentity(source, value))) {
+                        throw new Error("offline_migration_identity_conflict");
+                    }
+                }
+                if (name.indexOf("sequence:") === 0) value = Math.max(Number(value) || 0, Number(stored) || 0);
+                // null — сохранённое снятие проекции, а не отсутствие ключа.
+                // Старый fallback не должен воскресить уже завершённый рейс.
+                else if (stored !== undefined) continue;
+                if (JSON.stringify(stored) !== JSON.stringify(value)) metaTransfers.push([name, value]);
+            }
+            // Проверка всех идентичностей предшествует переносу: чужой конверт
+            // с тем же ID не перезаписывает ни факты, ни серверную карту.
+            for (var transfer of transfers) await primary.put(transfer);
+            for (var entry of metaTransfers) await primary.setMeta(entry[0], entry[1]);
+            if (legacy.length) await fallback.clearEvents(legacy);
+        } catch (error) {
+            primary.migrationError = String(error && error.message || error);
+        }
     }
 
     function backoff(attempt) {
@@ -613,7 +705,9 @@
         var running = null;
         var timer = null;
         var enqueueChain = Promise.resolve();
+        var updateChain = Promise.resolve();
         var drainRequested = false;
+        var storageFailureCount = 0;
         var callbacks = {
             onState: options.onState,
             onConfirmed: options.onConfirmed,
@@ -646,11 +740,8 @@
             }
             return current;
         }
-        /* Записи «на сверке» (conflict / invalid / auth_required) — конечные: сервер
-           их уже отклонил и сообщил об этом всплывающим сообщением. Раньше они
-           лежали в хранилище вечно: на боевом телефоне 20.09.2026 нашлись восемь
-           отклонённых стартов простоя трёхдневной давности, из-за которых подпись
-           связи навсегда показывала «Не подтверждено». Старше суток — убираем. */
+        /* Возраст скрывает старый отказ из индикатора доставки, но не удаляет
+           исходный факт из журнала. ACK также не доказывает покрытие снимком. */
         var reviewRetentionMs = Number(options.reviewRetentionMs) > 0 ? Number(options.reviewRetentionMs) : 24 * 60 * 60 * 1000;
         /* События, которые прямо сейчас в отправке: их нельзя убирать из очереди —
            ответ сервера записал бы их обратно (update), а принятая погрузка без
@@ -673,9 +764,20 @@
            как только новая погрузка подтверждалась и уходила из очереди, «последней»
            становилась зомби-погрузка, её отмена «выигрывала», и круг пустел, хотя
            сервер держал рейс открытым (стенд 28.09.2026, телефон: 336 повторов).
-           Обе записи снимаются локально, без отправки, с отметкой в журнале. */
+           Обе записи снимаются только с доставки; полные исходники остаются
+           в журнале. Сначала сохраняется связь пары: restart между двумя
+           записями не должен отправить оставшуюся половину. */
         async function annihilateManualLoadCancelPairs(repo, items) {
             var removed = new Set();
+            for (var archived of items) {
+                if (archived.state !== "cancelled_locally" || !archived.local_cancellation_event_id) continue;
+                removed.add(String(archived.event_id));
+                removed.add(String(archived.local_cancellation_event_id));
+                var tail = items.find(function (item) { return item.event_id === archived.local_cancellation_event_id; });
+                if (tail && tail.state !== "cancelled_locally") {
+                    try { await update(tail, {state: "cancelled_locally"}); } catch (error) {}
+                }
+            }
             for (var cancel of items) {
                 if (cancel.event_type !== "driver.trip.loaded.cancelled" || cancel.state !== "pending") continue;
                 var localId = String(cancel.local_trip_id || "");
@@ -696,7 +798,7 @@
                 var pairIds = [String(load.event_id), String(cancel.event_id)];
                 var loadLocalId = String(load.local_trip_id || "");
                 var otherDependent = items.some(function (item) {
-                    if (pairIds.indexOf(String(item.event_id)) >= 0 || TERMINAL_STATES.has(item.state)) return false;
+                    if (pairIds.indexOf(String(item.event_id)) >= 0 || TERMINAL_STATES.has(item.state) || ARCHIVED_STATES.has(item.state)) return false;
                     var deps = Array.isArray(item.depends_on) ? item.depends_on.map(String) : [];
                     return deps.indexOf(pairIds[0]) >= 0
                         || deps.indexOf(pairIds[1]) >= 0
@@ -704,13 +806,13 @@
                 });
                 if (otherDependent) continue;
                 try {
-                    await repo.remove(cancel.event_id);
-                    await repo.remove(load.event_id);
+                    await update(load, {state: "cancelled_locally", local_cancellation_event_id: cancel.event_id});
                 } catch (error) {
                     continue;
                 }
                 removed.add(pairIds[0]);
                 removed.add(pairIds[1]);
+                try { await update(cancel, {state: "cancelled_locally"}); } catch (error) {}
                 var record = {
                     load_event_id: pairIds[0],
                     cancel_event_id: pairIds[1],
@@ -738,24 +840,27 @@
             var repo = await repoPromise;
             var items = await repo.list();
             var mine = items.filter(function (item) { return String(item.access_id) === accessId; });
+            var annihilated = await annihilateManualLoadCancelPairs(repo, mine);
             var now = Date.now();
             var kept = [];
             for (var item of mine) {
+                if (ARCHIVED_STATES.has(item.state) || annihilated.has(String(item.event_id))) continue;
                 var stamp = Date.parse(item.updated_at || item.occurred_at || "") || 0;
                 if (TERMINAL_STATES.has(item.state) && stamp && now - stamp > reviewRetentionMs) {
-                    try { await repo.remove(item.event_id); } catch (error) {}
                     continue;
                 }
                 kept.push(item);
             }
-            var annihilated = await annihilateManualLoadCancelPairs(repo, kept);
-            if (annihilated.size) {
-                kept = kept.filter(function (item) { return !annihilated.has(String(item.event_id)); });
-            }
             return kept.sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
+        }
+        async function journal() {
+            var repo = await repoPromise;
+            return (await repo.list()).filter(function (item) { return String(item.access_id) === accessId; })
+                .sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         }
         async function publish() {
             var items = await listAll();
+            var journalEvents = await journal();
             if (typeof callbacks.onState === "function") {
                 try {
                     callbacks.onState({
@@ -763,7 +868,9 @@
                         review: items.filter(function (item) { return TERMINAL_STATES.has(item.state); }).length,
                         sending: !!running,
                         storage: (await repoPromise).kind,
-                        events: clone(items)
+                        migration_error: (await repoPromise).migrationError || "",
+                        events: clone(items),
+                        journalEvents: clone(journalEvents)
                     });
                 } catch (error) {
                     // The event is already durable. A rendering error must not be reported as a storage failure.
@@ -861,9 +968,16 @@
                 return event;
             });
         }
-        async function update(event, patch) {
-            var repo = await repoPromise;
-            await repo.put(Object.assign({}, event, patch, {updated_at: nowIso()}));
+        function update(event, patch) {
+            var operation = updateChain.then(async function () {
+                var repo = await repoPromise;
+                var current = typeof repo.get === "function" ? await repo.get(event.event_id) : null;
+                // Фоновый retry, начатый до ACK, не возвращает архив в доставку.
+                if (current && ARCHIVED_STATES.has(current.state)) return;
+                await repo.put(Object.assign({}, current || event, patch, {updated_at: nowIso()}));
+            });
+            updateChain = operation.catch(function () {});
+            return operation;
         }
         function schedule(delay) {
             if (timer || typeof root.setTimeout !== "function") return;
@@ -890,14 +1004,13 @@
                 if (status === "accepted" || status === "deduplicated") {
                     /* Счётчик подтверждений: экран сервера, запрошенный до этого
                        ответа, может не знать о событии (driver-shift-refresh-v1.js). */
-                    root.driverOutboxAcceptedCount = (Number(root.driverOutboxAcceptedCount) || 0) + 1;
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));
                         var confirmedDowntimeId = result.server_ids.downtime_event_id || result.server_ids.downtime_id;
                         if (event.event_type === "driver.downtime.started" && confirmedDowntimeId) {
                             /* Синхронно, в момент подтверждения — событие тут же
-                               удаляется из очереди (см. repo.remove ниже), и
+                               уходит из очереди в архив, и
                                driver-shift-v1.js больше не сможет узнать связь
                                "local:<uuid>" ↔ серверный числовой ID из самой
                                очереди. Без этого алиаса опознавание того же
@@ -980,7 +1093,10 @@
                             )
                         ) await repo.setMeta(manualReceiptKey, null);
                     }
-                    await repo.remove(event.event_id);
+                    // Одна долговечная запись переводит доставку в архив. Даже
+                    // смерть процесса до UI callback оставляет полный факт/ACK.
+                    await update(event, {state: "confirmed", server_result: clone(result), next_retry_at: 0});
+                    root.driverOutboxAcceptedCount = (Number(root.driverOutboxAcceptedCount) || 0) + 1;
                     confirmed.push([clone(event), clone(result)]);
                 } else if (TERMINAL_STATES.has(status)) {
                     await update(event, {
@@ -1061,7 +1177,7 @@
                 var callbackBatch = {confirmed: [], review: []};
                 var response;
                 try {
-                    response = await options.send({
+                    response = await sendWithDeadline(options.send, {
                         protocol_version: FORMAT_VERSION,
                         format_version: FORMAT_VERSION,
                         role_code: "driver",
@@ -1084,7 +1200,7 @@
                             if (sentLive) copy.sent_live = true;
                             return copy;
                         })
-                    });
+                    }, options.requestTimeoutMs);
                 } catch (error) {
                     try {
                         for (var event of due) {
@@ -1099,6 +1215,16 @@
                 }
                 try {
                     callbackBatch = await applyResults(due, response || {});
+                    storageFailureCount = 0;
+                } catch (error) {
+                    // ACK мог дойти, а durable archive — упереться в quota.
+                    // Повтор с тем же ID безопасен, но не должен крутиться
+                    // каждую секунду вместе с тяжёлой записью полного журнала.
+                    storageFailureCount += 1;
+                    drainRequested = false;
+                    if (timer) { root.clearTimeout(timer); timer = null; }
+                    schedule(backoff(storageFailureCount));
+                    throw error;
                 } finally {
                     inFlightIds.clear();
                 }
@@ -1263,6 +1389,7 @@
             flush: flush,
             retryNow: retryNow,
             pending: listAll,
+            journal: journal,
             publish: publish,
             setBindings: setBindings,
             resumeAuthRequired: resumeAuthRequired,

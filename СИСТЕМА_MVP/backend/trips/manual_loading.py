@@ -10,7 +10,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.files import locks
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from shifts.models import EmployeeShift
@@ -103,6 +103,7 @@ def reconcile_expired_manual_trips(*, now=None):
     expired_by_closed_shift = Q(
         driver_control_shift__closed_at__isnull=False,
         driver_control_shift__closed_at__lte=cutoff,
+        is_carryover=False,
     )
 
     with transaction.atomic():
@@ -312,8 +313,21 @@ def truck_driver_participation(truck_ids):
 
 
 def trip_driver_control_filter(shift):
-    # Старые рейсы сохраняют прежний контракт; новые привязаны к смене при отправке.
-    return Q(driver_participation_recorded=False) | Q(driver_control_shift=shift)
+    # Автор погрузки не меняется. Сменщик получает право на тот же груз
+    # только после закрытой предшествующей смены на том же самосвале.
+    base = Q(driver_participation_recorded=False) | Q(driver_control_shift=shift)
+    if shift is None:
+        return base
+    carryover = Q(
+        is_carryover=True,
+        truck_id=shift.equipment_id,
+        driver_control_shift__equipment_id=shift.equipment_id,
+        driver_control_shift__closed_at__isnull=False,
+        driver_control_shift__closed_at__lte=shift.opened_at,
+        loaded_at__gte=F('driver_control_shift__opened_at'),
+        loaded_at__lte=F('driver_control_shift__closed_at'),
+    )
+    return base | carryover
 
 
 def may_replace_open_trip(trip, participation):

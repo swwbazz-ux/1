@@ -31,8 +31,13 @@ function createRuntime(options = {}) {
             append(key, value) { this.values.push([key, value]); }
         },
         localStorage: {
+            get length() { return storage.size; },
+            key(index) { return Array.from(storage.keys())[index] || null; },
             getItem(key) { return storage.has(key) ? storage.get(key) : null; },
-            setItem(key, value) { storage.set(key, String(value)); },
+            setItem(key, value) {
+                if (options.storageFails && options.storageFails(key, value)) throw new Error("QuotaExceededError");
+                storage.set(key, String(value));
+            },
             removeItem(key) { storage.delete(key); },
         },
         setTimeout(callback, delay) {
@@ -59,7 +64,7 @@ function createRuntime(options = {}) {
     return {context, storage, timers, fetchCalls};
 }
 
-test("сохраняет production-ключ очереди и удаляет только устаревшие v1/v2", () => {
+test("сохраняет production-ключ и исходные legacy v1/v2 без опасного автоповтора", () => {
     const queued = [{id: "existing", createdAt: 10, attempts: 0}];
     const runtime = createRuntime({
         storage: {
@@ -71,8 +76,8 @@ test("сохраняет production-ключ очереди и удаляет т
     const transport = runtime.context.createDispatcherTransport({});
 
     assert.equal(transport.queueKey, QUEUE_KEY);
-    assert.equal(runtime.storage.has("mining-master-mobile-sync-queue-v1"), false);
-    assert.equal(runtime.storage.has("mining-master-mobile-sync-queue-v2"), false);
+    assert.equal(runtime.storage.has("mining-master-mobile-sync-queue-v1"), true);
+    assert.equal(runtime.storage.has("mining-master-mobile-sync-queue-v2"), true);
     assert.deepEqual(JSON.parse(runtime.storage.get(QUEUE_KEY)), queued);
     assert.equal(transport.getQueueState().length, 1);
 });
@@ -93,11 +98,11 @@ test("сетевой сбой ставит JSON-команду в совмест
     assert.equal(queue[0].kind, "json");
     assert.equal(queue[0].url, "/dispatcher/assign/");
     assert.match(queue[0].data.client_action_id, /^mm-/);
-    assert.equal(queue[0].attempts, 0);
+    assert.equal(queue[0].attempts, 1);
     assert.equal(runtime.timers.size > 0, true);
 });
 
-test("запрещённая offline-очередь возвращает сетевую ошибку без записи", async () => {
+test("legacy-запрет автоповтора хранит исходник, возвращает ошибку и не исполняет откатившийся UI позже", async () => {
     const runtime = createRuntime({
         fetch: () => Promise.reject(new Error("offline")),
     });
@@ -107,10 +112,15 @@ test("запрещённая offline-очередь возвращает сет�
         transport.post("/dispatcher/move/", {}, {queueOnNetworkFailure: false}),
         /offline/
     );
-    assert.equal(runtime.storage.has(QUEUE_KEY), false);
+    assert.equal(transport.readQueue().length, 0);
+    const records = Array.from(runtime.storage.entries()).filter(([key]) => key.startsWith(transport.journalPrefix));
+    assert.equal(records.length, 1);
+    assert.equal(JSON.parse(records[0][1]).delivery.state, "held");
+    await transport.flush();
+    assert.equal(runtime.fetchCalls.length, 1);
 });
 
-test("серверная ошибка не маскируется offline-очередью", async () => {
+test("серверная ошибка не маскируется успехом и сохраняет команду для восстановления", async () => {
     const runtime = createRuntime({
         fetch: () => Promise.resolve({
             ok: false,
@@ -124,7 +134,7 @@ test("серверная ошибка не маскируется offline-оче
         transport.post("/dispatcher/assign/", {}),
         (error) => error.code === "state_conflict" && error.status === 409 && error.conflict === true
     );
-    assert.equal(runtime.storage.has(QUEUE_KEY), false);
+    assert.equal(transport.readQueue().length, 1);
 });
 
 test("flush отправляет старую запись с CSRF и удаляет её только после успеха", async () => {
@@ -182,4 +192,233 @@ test("диагностика связи остаётся частью transport 
     const connected = transport.getDebugState();
     assert.equal(connected.realtimeConnected, true);
     assert.equal(connected.realtimeLastSuccessAt, 12345);
+});
+
+const drain = () => new Promise((resolve) => setImmediate(resolve));
+const command = (id, extra = {}) => Object.assign({
+    id, kind: "json", url: "/dispatcher/assign/", coalesceKey: "truck-7",
+    data: {client_action_id: id, truck_id: 7, excavator_id: 9, expected_assignment_state_id: 11},
+}, extra);
+
+test("первая отправка происходит после надёжной записи; ACK оставляет исходную команду в журнале", async () => {
+    let transport;
+    const r = createRuntime({fetch: async () => {
+        assert.equal(transport.readQueue().length, 1);
+        return {ok: true, json: async () => ({ok: true, assignment_state_id: 12})};
+    }});
+    transport = r.context.createDispatcherTransport({});
+    await transport.post("/dispatcher/assign/", {client_action_id: "durable-first", truck_id: 7});
+    assert.equal(transport.readQueue().length, 0);
+    const records = Array.from(r.storage.entries()).filter(([key]) => key.startsWith(transport.journalPrefix));
+    assert.equal(records.length, 1);
+    const record = JSON.parse(records[0][1]);
+    assert.equal(record.request.data.client_action_id, "durable-first");
+    assert.equal(record.delivery.state, "acknowledged");
+    assert.equal(record.delivery.receipt.assignment_state_id, 12);
+});
+
+test("quota не подтверждает несохранённую команду и не отправляет её в сеть", async () => {
+    const r = createRuntime({storageFails: () => true});
+    const transport = r.context.createDispatcherTransport({});
+    assert.equal(transport.enqueue(command("quota")), false);
+    await assert.rejects(transport.post("/dispatcher/assign/", {}), (error) => error.code === "storage_unavailable");
+    assert.equal(r.fetchCalls.length, 0);
+    assert.equal(transport.readQueue().length, 0);
+});
+
+for (const status of [409, 503]) {
+    test("HTTP " + status + " сохраняет исходник и освобождает отправителя", async () => {
+        const r = createRuntime({fetch: async () => ({ok: false, status, json: async () => ({error: "fixture"})})});
+        const transport = r.context.createDispatcherTransport({});
+        transport.enqueue(command("keep-" + status));
+        await transport.flush();
+        await drain();
+        assert.equal(transport.readQueue().length, 1);
+        assert.equal(transport.readQueue()[0].data.client_action_id, "keep-" + status);
+        assert.equal(transport.getQueueState().isFlushing, false);
+    });
+}
+
+test("разные команды одного самосвала не объединяются, payload изолирован от дальнейших UI-правок", () => {
+    const r = createRuntime();
+    const transport = r.context.createDispatcherTransport({});
+    const first = command("first");
+    transport.enqueue(first);
+    first.data.excavator_id = 666;
+    transport.enqueue(command("second"));
+    const queue = transport.readQueue();
+    assert.equal(queue.length, 2);
+    assert.deepEqual(Array.from(queue, (item) => item.data.client_action_id), ["first", "second"]);
+    assert.equal(queue[0].data.excavator_id, 9);
+});
+
+test("повтор с тем же ID и другим содержимым не переписывает исходник", () => {
+    const r = createRuntime();
+    const transport = r.context.createDispatcherTransport({});
+    assert.equal(transport.enqueue(command("same")), true);
+    assert.equal(transport.enqueue(command("same", {data: {client_action_id: "same", truck_id: 8}})), false);
+    assert.equal(transport.readQueue()[0].data.truck_id, 7);
+});
+
+test("сбой mirror очереди не теряет уже записанный журнал при перезапуске", () => {
+    const r = createRuntime({storageFails: (key) => key === QUEUE_KEY});
+    const transport = r.context.createDispatcherTransport({});
+    assert.equal(transport.enqueue(command("journal-only")), true);
+    const restarted = r.context.createDispatcherTransport({});
+    assert.equal(restarted.readQueue().length, 1);
+    assert.equal(restarted.readQueue()[0].data.client_action_id, "journal-only");
+});
+
+test("неверный JSON ответа 2xx не удаляет команду", async () => {
+    const r = createRuntime({fetch: async () => ({ok: true, json: async () => { throw new Error("login HTML"); }})});
+    const transport = r.context.createDispatcherTransport({});
+    transport.enqueue(command("invalid-ack"));
+    await transport.flush();
+    await drain();
+    assert.equal(transport.readQueue().length, 1);
+});
+
+test("deadline тела без AbortController освобождает очередь; поздний ACK не завершает другую попытку", async () => {
+    let finishBody;
+    const r = createRuntime({fetch: async () => ({ok: true, json: () => new Promise((resolve) => { finishBody = resolve; })})});
+    const transport = r.context.createDispatcherTransport({});
+    transport.enqueue(command("hung-body"));
+    const flush = transport.flush();
+    await drain();
+    const deadline = Array.from(r.timers.values()).find((timer) => timer.delay === 12000);
+    assert.ok(deadline, "deadline survives headers even without AbortController");
+    deadline.callback();
+    await flush;
+    await drain();
+    assert.equal(transport.getQueueState().isFlushing, false);
+    assert.equal(transport.readQueue().length, 1);
+    finishBody({ok: true});
+    await drain();
+    assert.equal(transport.readQueue().length, 1);
+});
+
+test("команда сохраняет автора; новый пользователь и legacy без автора не присваивают её", async () => {
+    let access = "A";
+    const r = createRuntime();
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => ({access_id: access, role: "dispatcher", shift_id: "10"})});
+    transport.enqueue(command("author-A"));
+    access = "B";
+    transport.enqueue(command("author-B"));
+    await transport.flush();
+    await drain();
+    assert.equal(r.fetchCalls.length, 1);
+    assert.equal(JSON.parse(r.fetchCalls[0].options.body).client_action_id, "author-B");
+    assert.equal(transport.readQueue()[0].author.access_id, "A");
+    assert.equal(transport.readOwnQueue().length, 0, "чужая очередь не удерживает обновление экрана сменщика");
+    const old = createRuntime({storage: {[QUEUE_KEY]: JSON.stringify([command("unknown-author")])}});
+    const oldTransport = old.context.createDispatcherTransport({getCommandContext: () => ({access_id: "B"})});
+    await oldTransport.flush();
+    assert.equal(old.fetchCalls.length, 0);
+    assert.equal(oldTransport.readQueue().length, 1);
+});
+
+test("409 первой команды не удерживает независимую вторую команду в готовой очереди", async () => {
+    const r = createRuntime({fetch: async (url, init) => {
+        const id = JSON.parse(init.body).client_action_id;
+        return id === "conflict" ? {ok: false, status: 409, json: async () => ({code: "conflict"})}
+            : {ok: true, status: 200, json: async () => ({ok: true})};
+    }});
+    const transport = r.context.createDispatcherTransport({});
+    transport.enqueue(command("conflict"));
+    transport.enqueue(command("independent", {data: {client_action_id: "independent", truck_id: 8}}));
+    await transport.flush();
+    await transport.flush();
+    assert.equal(r.fetchCalls.length, 2);
+    assert.equal(transport.readQueue().length, 1);
+    assert.equal(transport.readQueue()[0].data.client_action_id, "conflict");
+});
+
+test("перезапуск после потери ответа сохраняет ID, время и автора при повторном POST", async () => {
+    let offline = true;
+    const r = createRuntime({fetch: async () => {
+        if (offline) throw new Error("response lost");
+        return {ok: true, status: 200, json: async () => ({ok: true, deduplicated: true})};
+    }});
+    const transport = r.context.createDispatcherTransport({});
+    const payload = {client_action_id: "lost-response", truck_id: 7};
+    await transport.post("/assign/", payload);
+    const before = JSON.parse(JSON.stringify(transport.readQueue()[0]));
+    offline = false;
+    const restarted = r.context.createDispatcherTransport({});
+    await restarted.post("/assign/", payload);
+    const record = JSON.parse(r.storage.get(restarted.journalPrefix + encodeURIComponent(before.id)));
+    assert.equal(record.request.occurredAt, before.occurredAt);
+    assert.equal(record.request.createdAt, before.createdAt);
+    assert.equal(record.request.data.client_action_id, "lost-response");
+    assert.equal(restarted.readQueue().length, 0);
+});
+
+test("quota записи ACK оставляет сохранённый исходник на повтор", async () => {
+    const r = createRuntime({storageFails: (key, value) => key.includes(":command:") && JSON.parse(value).delivery.state === "acknowledged"});
+    const transport = r.context.createDispatcherTransport({});
+    transport.enqueue(command("ack-quota"));
+    await transport.flush();
+    assert.equal(transport.readQueue().length, 1);
+    assert.equal(transport.readQueue()[0].data.client_action_id, "ack-quota");
+});
+
+test("повреждённая старая очередь не перезаписывается пустым массивом", async () => {
+    const r = createRuntime({storage: {[QUEUE_KEY]: "{broken-original"}});
+    const transport = r.context.createDispatcherTransport({});
+    assert.equal(transport.enqueue(command("new")), false);
+    await assert.rejects(transport.post("/assign/", {}), (error) => error.code === "storage_unavailable");
+    assert.equal(r.storage.get(QUEUE_KEY), "{broken-original");
+    assert.equal(r.fetchCalls.length, 0);
+});
+
+test("refresh deadline действует после заголовков до окончания тела", async () => {
+    const r = createRuntime({fetch: async () => ({ok: true, text: () => new Promise(() => {})})});
+    const transport = r.context.createDispatcherTransport({});
+    const refreshed = transport.fetchWithTimeout("/board/", {}, 12000);
+    await drain();
+    const deadline = Array.from(r.timers.values()).find((timer) => timer.delay === 12000);
+    assert.ok(deadline);
+    deadline.callback();
+    await assert.rejects(refreshed, (error) => error.code === "request_timeout");
+});
+
+test("доказанный invalid 400 сохраняется как отказ без бесконечного автоповтора", async () => {
+    const r = createRuntime({fetch: async () => ({ok: false, status: 400,
+        json: async () => ({ok: false, error: "Некорректное действие с самосвалом."})})});
+    const transport = r.context.createDispatcherTransport({});
+    transport.enqueue(command("invalid-command"));
+    await transport.flush();
+    await transport.flush();
+    assert.equal(r.fetchCalls.length, 1);
+    assert.equal(transport.readQueue().length, 0);
+    const record = JSON.parse(r.storage.get(transport.journalPrefix + "invalid-command"));
+    assert.equal(record.request.data.client_action_id, "invalid-command");
+    assert.equal(record.delivery.state, "rejected");
+    assert.equal(record.delivery.receipt.ok, false);
+});
+
+test("quota после сетевого сбоя не снимает запрет автоповтора structural-команды при restart", async () => {
+    const r = createRuntime({
+        fetch: async () => { throw new Error("offline"); },
+        storageFails: (key, value) => key.includes(":command:") && JSON.parse(value).delivery.state === "held",
+    });
+    const transport = r.context.createDispatcherTransport({});
+    await assert.rejects(transport.post("/move/", {client_action_id: "manual-only"}, {queueOnNetworkFailure: false}), /offline/);
+    const record = JSON.parse(r.storage.get(transport.journalPrefix + "sync-manual-only"));
+    assert.equal(record.request.autoRetry, false);
+    assert.equal(record.delivery.state, "pending", "fixture reproduces failed held persistence");
+    const restarted = r.context.createDispatcherTransport({});
+    await restarted.flush();
+    assert.equal(r.fetchCalls.length, 1);
+    assert.equal(restarted.readQueue().length, 0);
+});
+
+test("quota служебного счётчика не отменяет уже записанное намерение", async () => {
+    const r = createRuntime({storageFails: (key, value) => key.includes(":command:") && JSON.parse(value).delivery.attempts > 0});
+    const transport = r.context.createDispatcherTransport({});
+    const result = await transport.post("/assign/", {client_action_id: "metadata-quota"});
+    assert.equal(result.queued, true, "ACK also cannot be persisted: original waits for confirmation");
+    assert.equal(r.fetchCalls.length, 1);
+    assert.equal(transport.readQueue().length, 1);
+    assert.equal(transport.readQueue()[0].data.client_action_id, "metadata-quota");
 });

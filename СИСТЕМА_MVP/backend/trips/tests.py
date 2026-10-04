@@ -397,7 +397,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v166')
+        self.assertContains(response, 'dispatcher-desktop-shell-v167')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -408,36 +408,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v166',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v167',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
@@ -2795,7 +2795,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
-    def test_excavator_work_settings_horizon_or_block_change_starts_transfer(self):
+    def test_excavator_work_settings_horizon_or_block_change_does_not_start_transfer(self):
         placement = ExcavatorPlacement.objects.create(
             excavator=self.excavator,
             work_rock_type=self.rock,
@@ -2828,10 +2828,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 payload = response.json()
                 self.assertTrue(payload['work_context_changed'])
                 self.assertTrue(payload['face_position_changed'])
-                self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
-                transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-                self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
-                self.assertEqual(transfer.employee, self.operator)
+                self.assertEqual(payload['active_downtime_reason'], '')
+                self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
                 placement.refresh_from_db()
 
     def test_excavator_work_settings_uses_persisted_position_not_stale_session(self):
@@ -2870,7 +2868,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         payload = response.json()
         self.assertTrue(payload['work_context_changed'])
         self.assertTrue(payload['face_position_changed'])
-        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+        self.assertEqual(payload['active_downtime_reason'], '')
 
     def test_excavator_work_settings_does_not_infer_move_from_blank_or_leading_zero(self):
         placement = ExcavatorPlacement.objects.create(

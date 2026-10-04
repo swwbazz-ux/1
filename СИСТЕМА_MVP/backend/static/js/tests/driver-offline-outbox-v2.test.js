@@ -509,7 +509,7 @@ function storage() {
     };
 }
 
-function runtime({send, local = storage(), accessId = 7, context, batchSize, onState, onConfirmed, onReview, indexedDB} = {}) {
+function runtime({send, local = storage(), accessId = 7, context, batchSize, onState, onConfirmed, onReview, indexedDB, requestTimeoutMs} = {}) {
     return createDriverOfflineOutbox({
         repository: indexedDB ? undefined : localRepository(local, accessId),
         indexedDB,
@@ -523,6 +523,7 @@ function runtime({send, local = storage(), accessId = 7, context, batchSize, onS
             deviceId: "install-uuid-1",
         },
         batchSize,
+        requestTimeoutMs,
         onState,
         onConfirmed,
         onReview,
@@ -552,7 +553,7 @@ test("a projection callback failure does not turn a durable enqueue into a stora
     assert.equal(stateCalls, 1);
 });
 
-function fakeIndexedDB() {
+function fakeIndexedDB({failPut} = {}) {
     const stores = new Map();
     function storeApi(name, transaction) {
         if (!stores.has(name)) stores.set(name, new Map());
@@ -578,6 +579,7 @@ function fakeIndexedDB() {
             get(key) { return request(() => values.has(key) ? structuredClone(values.get(key)) : undefined); },
             put(value, key) {
                 return request(() => {
+                    if (failPut) failPut(name, value, key);
                     const resolved = key === undefined ? value.event_id : key;
                     values.set(resolved, structuredClone(value));
                     return resolved;
@@ -609,6 +611,161 @@ function fakeIndexedDB() {
         },
     };
 }
+
+test("recovered Driver IndexedDB merges fallback facts with its own queue and preserves order", async () => {
+    const local = storage();
+    const indexedDB = fakeIndexedDB();
+    const primary = runtime({local, indexedDB});
+    const before = await primary.enqueue({event_id: "primary-kept", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+    const fallback = runtime({local});
+    const offline = await fallback.enqueue({event_id: "fallback-kept", event_type: "driver.trip.unloaded", trip_id: 2, payload: {trip_id: 2}});
+    assert.ok(offline.sequence > before.sequence);
+    const recovered = runtime({local, indexedDB});
+    const events = await recovered.pending();
+    assert.deepEqual(events.map(event => event.event_id), ["primary-kept", "fallback-kept"]);
+    assert.deepEqual(events[1], offline);
+    assert.deepEqual(JSON.parse(local.getItem("driver-offline-events-v2:7")), []);
+    const next = await recovered.enqueue({event_id: "after-recovery", event_type: "driver.trip.unloaded", trip_id: 3, payload: {trip_id: 3}});
+    assert.ok(next.sequence > offline.sequence);
+});
+
+test("Driver fallback ACK archive and metadata survive recovery with an empty delivery queue", async () => {
+    const local = storage();
+    const fallback = runtime({local, send: async batch => ({results: batch.events.map(event => ({
+        event_id: event.event_id, status: "accepted", server_ids: {trip_id: 501},
+    }))})});
+    const original = await fallback.enqueue(manualLoad());
+    await fallback.flush();
+    const meta = JSON.parse(local.getItem("driver-offline-events-v2:7:meta"));
+    meta["sequence:driver:11:install-uuid-1"] = 205;
+    meta["sequence:7"] = 205;
+    local.setItem("driver-offline-events-v2:7:meta", JSON.stringify(meta));
+    const recovered = runtime({local, indexedDB: fakeIndexedDB()});
+    assert.deepEqual(await recovered.pending(), []);
+    const [source] = await recovered.journal();
+    assert.equal(source.event_id, original.event_id);
+    assert.equal(source.state, "confirmed");
+    assert.equal(source.server_result.server_ids.trip_id, 501);
+    assert.deepEqual(await recovered.getServerMapping(original.event_id), {trip_id: 501});
+    assert.equal((await recovered.getManualTripProjectionReceipt(23, 58)).event_id, original.event_id);
+    const next = await recovered.enqueue({event_id: "next-after-ack", event_type: "driver.trip.unloaded", trip_id: 501, payload: {trip_id: 501}});
+    assert.equal(next.sequence, 206);
+    assert.equal(next.device_id, original.device_id);
+});
+
+test("Driver migration keeps the primary cleared-trip tombstone instead of reviving an older fallback load", async () => {
+    const indexedDB = fakeIndexedDB();
+    const send = async batch => ({results: batch.events.map(event => ({
+        event_id: event.event_id, status: "accepted", server_ids: {trip_id: 501},
+    }))});
+    const primary = runtime({local: storage(), indexedDB, send});
+    await primary.enqueue(manualLoad());
+    await primary.flush();
+    await primary.enqueue({event_id: "primary-unloaded", event_type: "driver.trip.unloaded", trip_id: 501, payload: {trip_id: 501}});
+    await primary.flush();
+    assert.equal(await primary.getManualTripProjectionReceipt(23, 58), null);
+    const local = storage();
+    const fallback = runtime({local, send});
+    await fallback.enqueue(manualLoad());
+    await fallback.flush();
+    assert.equal((await fallback.getManualTripProjectionReceipt(23, 58)).event_type, "driver.trip.loaded");
+    const recovered = runtime({local, indexedDB, send});
+    assert.equal(await recovered.getManualTripProjectionReceipt(23, 58), null);
+    assert.equal((await recovered.journal()).length, 2);
+    assert.deepEqual(await recovered.pending(), []);
+});
+
+test("Driver migration quota leaves raw fallback recoverable and never switches away from primary facts", async () => {
+    const local = storage();
+    let quota = false;
+    const indexedDB = fakeIndexedDB({failPut: (store, event) => {
+        if (quota && store === "events" && event.event_id === "fallback-quota") throw new Error("migration quota");
+    }});
+    const primary = runtime({local, indexedDB});
+    await primary.enqueue({event_id: "primary-visible", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+    const fallback = runtime({local});
+    await fallback.enqueue({event_id: "fallback-quota", event_type: "driver.trip.unloaded", trip_id: 2, payload: {trip_id: 2}});
+    const raw = local.getItem("driver-offline-events-v2:7");
+    quota = true;
+    let state;
+    const failed = runtime({local, indexedDB, onState: value => { state = value; }});
+    await failed.publish();
+    assert.equal(state.storage, "indexedDB");
+    assert.equal(state.migration_error, "migration quota");
+    assert.deepEqual(state.events.map(event => event.event_id), ["primary-visible"]);
+    assert.equal(local.getItem("driver-offline-events-v2:7"), raw);
+    quota = false;
+    const restarted = runtime({local, indexedDB});
+    assert.deepEqual((await restarted.pending()).map(event => event.event_id), ["primary-visible", "fallback-quota"]);
+});
+
+test("Driver migration never overwrites a different immutable event with the same ID", async () => {
+    const local = storage();
+    const indexedDB = fakeIndexedDB();
+    const primary = runtime({local, indexedDB});
+    await primary.enqueue({event_id: "id-collision", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+    const fallback = runtime({local});
+    await fallback.enqueue({event_id: "id-collision", event_type: "driver.trip.unloaded", trip_id: 2, payload: {trip_id: 2}});
+    const raw = local.getItem("driver-offline-events-v2:7");
+    let state;
+    const recovered = runtime({local, indexedDB, onState: value => { state = value; }});
+    await recovered.publish();
+    assert.equal(state.events[0].trip_id, 1);
+    assert.equal(state.migration_error, "offline_migration_identity_conflict");
+    assert.equal(local.getItem("driver-offline-events-v2:7"), raw);
+});
+
+test("corrupt Driver fallback queue or metadata stays raw while the recovered primary remains usable", async () => {
+    for (const suffix of ["", ":meta"]) {
+        const indexedDB = fakeIndexedDB();
+        const primary = runtime({local: storage(), indexedDB});
+        await primary.enqueue({event_id: "primary-valid", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+        const local = storage();
+        const key = "driver-offline-events-v2:7" + suffix;
+        local.setItem(key, "{legacy raw");
+        let state;
+        const recovered = runtime({local, indexedDB, onState: value => { state = value; }});
+        await recovered.publish();
+        assert.equal(state.storage, "indexedDB");
+        assert.equal(state.events[0].event_id, "primary-valid");
+        assert.ok(state.migration_error);
+        assert.equal(local.getItem(key), "{legacy raw");
+    }
+});
+
+test("Driver migration cleanup preserves a new fallback fact appended while IndexedDB was writing", async () => {
+    const local = storage();
+    const key = "driver-offline-events-v2:7";
+    const fallback = runtime({local});
+    const original = await fallback.enqueue({event_id: "importing", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+    const concurrent = {...original, event_id: "appended-during-import", trip_id: 2, payload: {trip_id: 2}, sequence: original.sequence + 1};
+    let appended = false;
+    const indexedDB = fakeIndexedDB({failPut: (store, event) => {
+        if (!appended && store === "events" && event.event_id === original.event_id) {
+            appended = true;
+            local.setItem(key, JSON.stringify([...JSON.parse(local.getItem(key)), concurrent]));
+        }
+    }});
+    const recovered = runtime({local, indexedDB});
+    assert.equal((await recovered.pending())[0].event_id, original.event_id);
+    assert.deepEqual(JSON.parse(local.getItem(key)), [concurrent]);
+    const next = runtime({local, indexedDB});
+    assert.deepEqual((await next.pending()).map(event => event.event_id), [original.event_id, concurrent.event_id]);
+});
+
+test("Driver legacy identity receipts without pending records keep immutable duplicate protection after migration", async () => {
+    const local = storage();
+    const old = runtime({local});
+    const spec = {event_id: "old-accepted", event_type: "driver.trip.unloaded", trip_id: 9, occurred_at: "2026-10-01T10:00:00Z", payload: {trip_id: 9}};
+    await old.enqueue(spec);
+    await old.flush();
+    // Старый клиент до долговечного журнала удалял принятый исходник из events.
+    local.setItem("driver-offline-events-v2:7", "[]");
+    const recovered = runtime({local, indexedDB: fakeIndexedDB()});
+    assert.equal((await recovered.enqueue(spec)).state, "confirmed");
+    await assert.rejects(recovered.enqueue({...spec, trip_id: 10, payload: {trip_id: 10}}), /offline_event_id_reused/);
+    assert.deepEqual(await recovered.pending(), []);
+});
 
 test("event is durably written with full driver context before send", async () => {
     const calls = [];
@@ -1300,7 +1457,7 @@ test("auth classifier recognizes status redirect to root and login HTML", () => 
     assert.equal(isDriverSyncAuthResponse({status: 200, redirected: false, url: "https://driverform.ru/offline-events/sync/", headers: headers("application/json")}, '{"ok":true}', "https://driverform.ru/driver/"), false);
 });
 
-test("terminal review records older than the retention window are purged, fresh ones stay", async () => {
+test("old terminal records leave the delivery indicator but remain in the durable journal", async () => {
     /* 20.09.2026: на боевом телефоне лежали восемь отклонённых стартов простоя
        трёхдневной давности — подпись связи вечно показывала «Не подтверждено». */
     const local = storage();
@@ -1319,6 +1476,176 @@ test("terminal review records older than the retention window are purged, fresh 
     await box.enqueue({event_id: "fresh-conflict", event_type: "driver.downtime.started", payload: {reason_id: 2}});
     await box.flush();
     assert.deepEqual((await box.pending()).map(event => event.event_id), ["fresh-conflict"], "старая запись убрана, свежая осталась");
+    const restarted = runtime({local});
+    assert.deepEqual((await restarted.journal()).map(event => event.event_id), ["old-conflict", "fresh-conflict"]);
+    assert.equal((await restarted.journal())[0].payload.reason_id, 1);
+});
+
+test("accepted source and full ACK survive restart before a manifest callback or server snapshot", async () => {
+    for (const indexedDB of [undefined, fakeIndexedDB()]) {
+        const local = storage();
+        const result = {status: "accepted", server_ids: {trip_id: 802}, server_received_at: "2026-10-04T10:00:00Z"};
+        const first = runtime({local, indexedDB, send: async batch => ({results: batch.events.map(event => ({event_id: event.event_id, ...result}))})});
+        const source = await first.enqueue(manualLoad());
+        await first.flush();
+        assert.deepEqual(await first.pending(), []);
+        const restarted = runtime({local, indexedDB});
+        const [archived] = await restarted.journal();
+        assert.equal(archived.state, "confirmed");
+        for (const field of ["event_id", "actor_id", "access_id", "occurred_at", "payload", "depends_on", "context_snapshot"]) {
+            assert.deepEqual(archived[field], source[field], field);
+        }
+        assert.equal(archived.server_result.server_ids.trip_id, 802);
+        let published;
+        await restarted.setBindings({onState: state => { published = state; }});
+        assert.equal(published.pending, 0);
+        assert.equal(published.journalEvents[0].event_id, source.event_id);
+    }
+});
+
+test("archive quota failure leaves the exact accepted source queued and suppresses the success callback", async () => {
+    const local = storage();
+    const setItem = local.setItem;
+    let quota = false;
+    local.setItem = (key, value) => {
+        if (quota && key === "driver-offline-events-v2:7" && JSON.parse(value).some(event => event.state === "confirmed")) throw new Error("quota");
+        setItem(key, value);
+    };
+    let confirmed = 0;
+    const box = runtime({local, onConfirmed: () => { confirmed += 1; }});
+    const source = await box.enqueue(manualLoad());
+    quota = true;
+    await assert.rejects(box.flush(), /quota/);
+    assert.equal(confirmed, 0);
+    assert.equal((await box.pending())[0].state, "pending");
+    assert.deepEqual((await box.journal())[0].payload, source.payload);
+    quota = false;
+    await box.flush();
+    assert.equal((await box.journal())[0].state, "confirmed");
+    assert.equal(confirmed, 1);
+});
+
+test("persistent ACK quota uses the bounded retry timer instead of a hot send loop", async () => {
+    const oldSetTimeout = globalThis.setTimeout;
+    const oldClearTimeout = globalThis.clearTimeout;
+    const timers = new Map();
+    let time = 0;
+    let token = 0;
+    globalThis.setTimeout = (callback, delay) => {
+        const handle = {id: ++token, unref() {}};
+        timers.set(handle, {callback, at: time + delay});
+        return handle;
+    };
+    globalThis.clearTimeout = handle => timers.delete(handle);
+    const advance = async milliseconds => {
+        time += milliseconds;
+        for (const [handle, timer] of [...timers]) {
+            if (timer.at <= time) { timers.delete(handle); timer.callback(); }
+        }
+        await new Promise(resolve => setImmediate(resolve));
+    };
+    try {
+        const local = storage();
+        const setItem = local.setItem;
+        let quota = false;
+        local.setItem = (key, value) => {
+            if (quota && key === "driver-offline-events-v2:7" && JSON.parse(value).some(event => event.state === "confirmed")) throw new Error("quota");
+            return setItem(key, value);
+        };
+        let sends = 0;
+        const oldAccepted = Number(globalThis.driverOutboxAcceptedCount) || 0;
+        const box = runtime({local, send: async batch => {
+            sends += 1;
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        }});
+        await box.enqueue(manualLoad());
+        quota = true;
+        await assert.rejects(box.flush(), /quota/);
+        await advance(4999);
+        assert.equal(sends, 1);
+        assert.equal(Number(globalThis.driverOutboxAcceptedCount) || 0, oldAccepted);
+        await advance(1);
+        assert.equal(sends, 2);
+        await advance(7999);
+        assert.equal(sends, 2);
+        quota = false;
+        await advance(1);
+        assert.equal(sends, 3);
+        assert.equal((await box.journal())[0].state, "confirmed");
+        assert.equal(globalThis.driverOutboxAcceptedCount, oldAccepted + 1);
+    } finally {
+        globalThis.setTimeout = oldSetTimeout;
+        globalThis.clearTimeout = oldClearTimeout;
+    }
+});
+
+test("locally cancelled unsent pair keeps both sources and cannot send its surviving half after restart", async () => {
+    const local = storage();
+    const repository = localRepository(local, 7);
+    const put = repository.put;
+    repository.put = async event => {
+        if (event.event_id === "cancel-durable-pair" && event.state === "cancelled_locally") throw new Error("quota while archiving second half");
+        return put(event);
+    };
+    const first = createDriverOfflineOutbox({repository, accessId: 7,
+        context: {actorId: 11, accessId: 7, shiftId: 23, equipmentId: 58, deviceId: "install-uuid-1"},
+        send: async () => { throw new Error("must not send"); }});
+    const load = await first.enqueue(manualLoad());
+    await first.enqueue(createDriverManualLoadCancelledEvent({eventId: "cancel-durable-pair", localTripId: load.event_id,
+        loadEventId: load.event_id, truckId: 58, excavatorId: 9, dumpPointId: 4}));
+    assert.deepEqual(await first.pending(), []);
+    assert.equal((await first.journal()).length, 2);
+    let sends = 0;
+    const restarted = runtime({local, send: async () => { sends += 1; return {}; }});
+    await restarted.initialize();
+    assert.equal(sends, 0);
+    assert.deepEqual((await restarted.journal()).map(event => event.state), ["cancelled_locally", "cancelled_locally"]);
+});
+
+test("response headers with a stalled body time out, release flush and ignore a late ACK", async () => {
+    let finishBody;
+    let firstSignal;
+    let count = 0;
+    const box = runtime({requestTimeoutMs: 15, send: (batch, request) => {
+        count += 1;
+        if (count > 1) return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        firstSignal = request.signal;
+        return Promise.resolve({text: () => new Promise(resolve => { finishBody = resolve; })})
+            .then(response => response.text()).then(JSON.parse);
+    }});
+    await box.enqueue(manualLoad());
+    await box.flush();
+    assert.equal(firstSignal.aborted, true);
+    assert.equal((await box.pending())[0].last_error.code, "network");
+    finishBody(JSON.stringify({results: [{event_id: "manual-load-1", status: "conflict", code: "stale response"}]}));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await box.pending())[0].state, "pending");
+    await box.retryNow();
+    assert.equal(count, 2);
+    assert.deepEqual(await box.pending(), []);
+    assert.equal((await box.journal())[0].state, "confirmed");
+});
+
+test("request timeout without AbortController still allows a new local gesture and a later flush", async () => {
+    const oldAbortController = globalThis.AbortController;
+    globalThis.AbortController = undefined;
+    try {
+        let calls = 0;
+        let started;
+        const start = new Promise(resolve => { started = resolve; });
+        const box = runtime({requestTimeoutMs: 15, send: batch => {
+            calls += 1;
+            if (calls === 1) { started(); return new Promise(() => {}); }
+            return {results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))};
+        }});
+        await box.enqueue({event_id: "deadline-a", event_type: "driver.trip.unloaded", trip_id: 1, payload: {trip_id: 1}});
+        const flush = box.flush();
+        await start;
+        await box.enqueue({event_id: "deadline-b", event_type: "driver.trip.unloaded", trip_id: 2, payload: {trip_id: 2}});
+        await flush;
+        assert.deepEqual(await box.pending(), []);
+        assert.equal((await box.journal()).length, 2);
+    } finally { globalThis.AbortController = oldAbortController; }
 });
 
 /* Часы водителя 24.09.2026: телефон с вручную отведёнными назад часами писал в

@@ -1,0 +1,65 @@
+Creating test database for alias 'default'...
+........offline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 17:03:47.514323+00:00, работник закрывает на 2026-10-04 16:43:47.514323+00:00. Итоговая граница 2026-10-04 17:03:47.514323+00:00.
+......offline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 17:03:47.929253+00:00, работник закрывает на 2026-10-04 22:03:47.929253+00:00. Итоговая граница 2026-10-04 17:03:47.929253+00:00.
+.....offline_sync: event history-own-close occurred_at=2026-10-04 23:03:48.253622+00:00 after shift 1 closed_at=2026-10-04 18:03:48.247186+00:00; accepted into shift history anyway
+offline_sync: accepted despite discrepancy (driver.shift.closed/driver_shift_close_already_closed) employee=2 role=7 — смена #1 уже закрыта 2026-10-04T18:03:48.247186+00:00
+.......offline_sync: accepted despite discrepancy (Принятие назначения/assignment_accept_after_final) employee=2 role=7 — Назначение #3 принято водителем на 2026-10-04 23:03:48.746972+00:00, а на сервере оно accepted. Ничего не меняется.
+......................offline_sync: accepted despite discrepancy (Ручной рейс водителя/manual_work_context_changed) employee=2 role=7 — Порода/горизонт/блок забоя Экскаватор 12 на телефоне отличаются от сервера (изменены 2026-10-04 22:53:50.486313+00:00, отметка 2026-10-04 23:03:50.486313+00:00). Рейс принят с контекстом сервера.
+.offline_sync: accepted despite discrepancy (Ручной рейс водителя/manual_work_context_changed) employee=2 role=7 — Забой экскаватора Экскаватор 12 сменился: на телефоне 999999, на сервере 1. Рейс принят с контекстом сервера.
+..offline_sync: accepted despite discrepancy (Ручной рейс водителя/manual_work_context_changed) employee=2 role=7 — Порода/горизонт/блок забоя Экскаватор 12 на телефоне отличаются от сервера (изменены 2026-10-04 23:02:50.691353+00:00, отметка 2026-10-04 22:03:50.685585+00:00). Рейс принят с контекстом сервера.
+.offline_sync: accepted despite discrepancy (Ручная погрузка водителя/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 22:48:50.759405+00:00, действие принято.
+...offline_sync: accepted despite discrepancy (Начало простоя водителя/loaded_trip_required) employee=2 role=7 — Этот простой доступен только после погрузки самосвала. Простой принят по решению водителя.
+...........offline_sync: accepted despite discrepancy (Отмена погрузки/cancel_before_load) employee=1 role=6 — Отмена рейса #1 на 2026-10-04 23:03:46.930072+00:00 раньше времени погрузки (2026-10-04 23:03:51.930072+00:00). Принято по времени нажатия.
+......offline_sync: accepted despite discrepancy (Ручная погрузка водителя/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 23:03:54.476898+00:00, действие принято.
+.....offline_sync: accepted despite discrepancy (Погрузка экскаватором/assignment_context_changed) employee=1 role=6 — Самосвал Самосвал 21 на момент погрузки (2026-10-04 23:03:55.980786+00:00) открыто числился за другим экскаватором. Погрузка машиниста принята через свободный ковш (приём #1, сразу использован), основное назначение самосвала на пульте не тронуто.
+...offline_sync: event excavator-after-shift occurred_at=2026-10-04 22:08:53.310742+00:00 after shift 2 closed_at=2026-10-04 22:03:53.310742+00:00; accepted into shift history anyway
+.offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Опоздавшее событие погрузки самосвала Самосвал 21 на 2026-10-04 22:35:53.379123+00:00 попало в промежуток перед рейсом #2 — создан исторический рейс #3, сразу закрытый как непроконтролированный на момент начала #2. Действующий рейс #2 не тронут.
+.offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Опоздавшее событие погрузки самосвала Самосвал 21 на 2026-10-04 22:58:54.542080+00:00 попадает в окно уже известного рейса #1 — та же погрузка, повторно отмеченная. Новый рейс не создан, действующий рейс #2 не тронут.
+...........offline_sync: accepted despite discrepancy (Погрузка экскаватором/assignment_context_changed) employee=1 role=6 — Для пары самосвал 1/экскаватор 3 на момент погрузки (2026-10-04 23:03:54.466061+00:00) не нашлось вообще никакого назначения. Погрузка машиниста принята, заведено назначение #3 по факту этой погрузки.
+.offline_sync: accepted despite discrepancy (Погрузка экскаватором/assignment_context_changed) employee=1 role=6 — Самосвал Самосвал 21 на момент погрузки (2026-10-04 23:03:54.549070+00:00) открыто числился за другим экскаватором. Погрузка машиниста принята через свободный ковш (приём #1, сразу использован), основное назначение самосвала на пульте не тронуто.
+...offline_sync: accepted despite discrepancy (Ручная отправка водителя/downtime_closed_by_load) employee=2 role=7 — Простой #1 «ОФР v376» самосвала Самосвал 21 был открыт в момент погрузки 2026-10-04 23:03:54.797322+00:00; закрыт временем погрузки.
+....offline_sync: accepted despite discrepancy (Погрузка экскаватором/open_trip_changed) employee=1 role=6 — Машинист грузит самосвал Самосвал 21, но открытый рейс #1 на сервере не совпал с ожидаемым (#—). Погрузка принята, старый рейс закрыт как непроконтролированный (uncontrolled), засчитан тому, кто грузил.
+.........offline_sync: accepted despite discrepancy (Цепочка событий водителя/dependency_of_other_trip_rejected) employee=2 role=7 — Погрузка chain-second-load шла после события chain-first-complete (driver.trip.manual_completed, dependency_rejected) другого рейса; его отказ новый рейс не отменяет.
+..Unexpected offline event processing failure: removed-cooldown-child-retry-child
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/core/offline_sync.py", line 4055, in process_one_offline_event
+    result_payload, links = PROCESSORS[normalized['event_type']](access, normalized)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/core/offline_sync.py", line 2573, in _process_excavator_loaded_cancelled
+    close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: temporary child service failure
+...........offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-10-04T22:33:57.766792+00:00; погрузка водителя 2026-10-04T22:24:57.766792+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:24:57.766792+00:00; машинист на смене: нет
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:55:57.911254+00:00; машинист на смене: нет
+offline_sync: accepted despite discrepancy (driver.trip.manual_completed/manual_complete_excavator_mismatch) employee=2 role=7 — рейс #1 экскаватора #4, в отметке завершения экскаватор #3
+.............offline_sync: accepted despite discrepancy (Выбор свободного ковша/free_bucket_target_changed) employee=2 role=7 — Право свободного ковша #1 (экскаватор 4) заменено выбором экскаватора 5 на 2026-10-04 23:03:49.632196+00:00.
+..offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:55:59.860977+00:00; машинист на смене: нет
+offline_sync: accepted despite discrepancy (Погрузка под свободный ковш/free_bucket_work_context_changed) employee=2 role=7 — Право #1: Точка разгрузки не входила в сохранённый контекст свободного ковша. Принято по отметке водителя — точка 2, порода 1.
+...offline_sync: accepted despite discrepancy (Выбор свободного ковша/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 23:04:00.337258+00:00, действие принято.
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T23:03:00.447558+00:00; машинист на смене: нет
+.........offline_sync: accepted despite discrepancy (Погрузка под свободный ковш/open_trip_exists) employee=3 role=6 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 23:04:02.702093+00:00, действие принято.
+.......offline_sync: accepted despite discrepancy (Выбор свободного ковша/free_bucket_target_changed) employee=2 role=7 — Право свободного ковша #1 (экскаватор 3) заменено выбором экскаватора 4 на 2026-10-04 23:04:02.459280+00:00.
+..offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-10-04T22:34:02.595257+00:00; погрузка водителя 2026-10-04T22:25:02.595257+00:00 записана по факту
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:25:02.595257+00:00; машинист на смене: нет
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:56:02.702363+00:00; машинист на смене: есть
+offline_sync: accepted despite discrepancy (Ручная отправка водителя/downtime_closed_by_load) employee=2 role=7 — Простой #1 «ОФР ковш v376» самосвала Самосвал 21 был открыт в момент погрузки 2026-10-04 22:56:02.702363+00:00; закрыт временем погрузки.
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:56:02.811252+00:00; машинист на смене: есть
+.offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:56:03.060626+00:00; машинист на смене: нет
+..offline_sync: accepted despite discrepancy (Выбор свободного ковша/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 22:58:03.322732+00:00, действие принято.
+offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #2 принят отметкой водителя 2026-10-04T22:59:03.322732+00:00; машинист на смене: есть
+......................................................................................ssssssssss
+----------------------------------------------------------------------
+Ran 262 tests in 22.796s
+
+OK (skipped=10)
+Destroying test database for alias 'default'...
+Found 262 test(s).
+System check identified no issues (0 silenced).

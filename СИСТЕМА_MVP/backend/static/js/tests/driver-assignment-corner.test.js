@@ -63,7 +63,7 @@ const BLOCK = (() => {
     return SHIFT.slice(start, end);
 })();
 
-function runtime({ dialEmpty = true, downtime = "", queued = [] } = {}) {
+function runtime({ dialEmpty = true, downtime = "", queued = [], enqueue } = {}) {
     const corner = element({}, ["mobile-dial-action", "mobile-dial-action--spare", "is-assignment"]);
     const form = element({
         driverAssignmentId: "5", driverAssignmentKind: "assign", driverAssignmentTarget: "ЭКС-5",
@@ -110,7 +110,7 @@ function runtime({ dialEmpty = true, downtime = "", queued = [] } = {}) {
         CustomEvent: function (type, init) { this.type = type; this.detail = init && init.detail; },
         shell: { querySelector: (sel) => nodes[sel] || null },
         driverOfflineOutbox: {
-            enqueue: (event) => { enqueued.push(event); return Promise.resolve(event); },
+            enqueue: (event) => { enqueued.push(event); return enqueue ? enqueue(event) : Promise.resolve(event); },
             flush: () => Promise.resolve(),
         },
         generateClientActionId: (prefix) => prefix + "-1",
@@ -166,6 +166,44 @@ test("after a restart the queued tap keeps the phone on the new excavator", () =
     assert.equal(r.corner.classList.contains("is-assignment"), false);
     assert.equal(r.label.textContent, "ЭКС-5");
     assert.equal(r.win.driverAssignmentContextOverride(BASE).excavator_id, 57);
+});
+
+test("assignment confirmation waits for durable enqueue; repeated tap shares the same event", async () => {
+    let finish;
+    const r = runtime({enqueue: (event) => new Promise((resolve) => { finish = () => resolve(event); })});
+    const first = r.win.driverAcceptAssignmentLocally(r.form);
+    const second = r.win.driverAcceptAssignmentLocally(r.form);
+    await Promise.resolve();
+    assert.equal(first, second);
+    assert.equal(r.enqueued.length, 1);
+    assert.equal(r.form.dataset.driverAssignmentTapped, undefined);
+    assert.equal(r.corner.classList.contains("is-assignment"), true);
+    assert.equal(r.note.hidden, false);
+    assert.equal(r.label.textContent, "ЭКС-1");
+    assert.equal(r.win.__driverAssignmentOverride, undefined);
+    assert.deepEqual(r.sounds, []);
+    finish();
+    assert.equal(await first, true);
+    assert.equal(r.label.textContent, "ЭКС-5");
+    assert.deepEqual(r.sounds, ["action_ok"]);
+    assert.equal(await r.win.driverAcceptAssignmentLocally(r.form), true);
+    assert.equal(r.enqueued.length, 1);
+});
+
+test("quota leaves assignment and manual-trip context unchanged and permits a later retry", async () => {
+    let fail = true;
+    const r = runtime({enqueue: (event) => fail ? Promise.reject(new Error("quota")) : Promise.resolve(event)});
+    await assert.rejects(r.win.driverAcceptAssignmentLocally(r.form), /quota/);
+    assert.equal(r.form.dataset.driverAssignmentTapped, undefined);
+    assert.equal(r.corner.classList.contains("is-assignment"), true);
+    assert.equal(r.note.hidden, false);
+    assert.equal(r.label.textContent, "ЭКС-1");
+    assert.equal(r.win.__driverAssignmentOverride, undefined);
+    assert.equal(r.win.driverAssignmentContextOverride(BASE), null);
+    assert.deepEqual(r.sounds, []);
+    fail = false;
+    assert.equal(await r.win.driverAcceptAssignmentLocally(r.form), true);
+    assert.equal(r.label.textContent, "ЭКС-5");
 });
 
 test("a fresh server screen after the answer drops the phone override; a queued tap keeps it", async () => {

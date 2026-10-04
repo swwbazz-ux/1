@@ -251,6 +251,22 @@ def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
     )
 
 
+def mark_shift_carryover_trips(shift, *, closed_at):
+    """Переходящий груз только из истории закрываемой смены."""
+    from trips.models import OPEN_TRIP_STATUSES
+
+    trips = Trip.objects.filter(status__in=OPEN_TRIP_STATUSES).filter(
+        Q(loaded_at__lte=closed_at) | Q(loaded_at__isnull=True, created_at__lte=closed_at),
+    )
+    if equipment_is_truck(shift.equipment):
+        trips = trips.filter(truck_id=shift.equipment_id).filter(
+            Q(driver_control_shift=shift) | Q(driver_participation_recorded=False),
+        )
+    else:
+        trips = trips.filter(loading_shift=shift)
+    return trips.update(is_carryover=True)
+
+
 def handover_other_role_shift(shift, *, closed_by, closed_at=None):
     """Служебно закрыть смену в другой роли по подтверждению самого сотрудника.
 
@@ -273,7 +289,7 @@ def handover_other_role_shift(shift, *, closed_by, closed_at=None):
     from trips.models import OPEN_TRIP_STATUSES
     if shift.equipment_id:
         if equipment_is_truck(shift.equipment):
-            Trip.objects.filter(truck=shift.equipment, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+            mark_shift_carryover_trips(shift, closed_at=now)
             from reports.driver_shift_passport_snapshots import enqueue_driver_shift_passport_capture
             from reports.models import DriverShiftPassportTrigger
 
@@ -283,7 +299,7 @@ def handover_other_role_shift(shift, *, closed_by, closed_at=None):
                 captured_by=closed_by,
             )
         else:
-            Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+            mark_shift_carryover_trips(shift, closed_at=now)
     from core.models import bump_operational_state
 
     bump_operational_state(
@@ -812,15 +828,12 @@ def open_driver_shift_from_device(
             EmployeeShift.objects
             .select_for_update(of=('self',))
             .select_related('equipment', 'equipment__equipment_type')
-            .filter(closed_at__isnull=True)
+            .filter(closed_at__isnull=True, opened_at__lte=opened_at)
             .filter(Q(employee=employee) | Q(equipment=equipment))
             .order_by('opened_at', 'id')
         )
         for previous in displaced:
-            # Открытие не может закрыть смену раньше её собственного начала:
-            # если прежняя открыта позже (отметка долго лежала без связи),
-            # она закрывается своим же началом — интервалы не пересекаются.
-            closed_at = max(opened_at, previous.opened_at)
+            closed_at = opened_at
             handover_other_role_shift(previous, closed_by=employee, closed_at=closed_at)
             notes.append(
                 f'служебно закрыта смена #{previous.pk} ({previous.workplace_code or "без роли"}, '
@@ -834,8 +847,48 @@ def open_driver_shift_from_device(
             validate_driver_fuel_reading(equipment, readings.get('start_fuel'))
         except ValidationError as error:
             notes.append('топливо: ' + '; '.join(error.messages))
+        next_shift = (EmployeeShift.objects.select_for_update(of=('self',))
+                      .filter(Q(employee=employee) | Q(equipment=equipment))
+                      .filter(opened_at__gt=opened_at).order_by('opened_at', 'id').first())
+        reconciled_previous = []
+        if next_shift:
+            next_opening = ShiftClientAction.objects.filter(
+                shift=next_shift, action_type='driver_shift_opened',
+            ).first()
+            # Сокращаем лишь те границы, которые это конкретное открытие B
+            # само вывело для C. Обычное собственное/административное закрытие
+            # без доказанного происхождения этим правилом не переписывается.
+            displaced_ids = (next_opening.response_payload or {}).get('closed_previous_shift_ids', []) if next_opening else []
+            inferred = (EmployeeShift.objects.select_for_update(of=('self',))
+                        .filter(pk__in=displaced_ids, opened_at__lt=opened_at,
+                                closed_at=next_shift.opened_at, is_service_closed=True,
+                                service_close_kind=''))
+            from downtimes.driver_workflow import is_workflow_downtime_reason
+            from downtimes.models import DowntimeEvent
+            from trips.models import FreeBucketAcceptance, FreeBucketAcceptanceStatus
+            for previous in inferred:
+                if ShiftClientAction.objects.filter(
+                    shift=previous, action_type__in=['driver_shift_closed', 'excavator_shift_closed'],
+                ).exists():
+                    continue
+                reconciled_previous.append({'shift_id': previous.pk, 'closed_at': previous.closed_at.isoformat()})
+                previous.closed_at = opened_at
+                previous.closed_by = employee
+                previous.save(update_fields=['closed_at', 'closed_by'])
+                for event in (DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
+                              .filter(equipment_id=previous.equipment_id, employee_id=previous.employee_id,
+                                      started_at__gte=previous.opened_at, started_at__lte=opened_at,
+                                      ended_at=next_shift.opened_at)):
+                    if is_workflow_downtime_reason(event.reason):
+                        event.ended_at = opened_at
+                        event.save(update_fields=['ended_at'])
+                FreeBucketAcceptance.objects.filter(
+                    Q(requesting_shift=previous) | Q(loading_shift=previous),
+                    status=FreeBucketAcceptanceStatus.CANCELLED,
+                    cancelled_at=next_shift.opened_at, occurred_at__lte=opened_at,
+                ).filter(Q(accepted_at__isnull=True) | Q(accepted_at__lte=opened_at)).update(cancelled_at=opened_at)
         previous_shift = EmployeeShift.objects.filter(
-            equipment=equipment, closed_at__isnull=False,
+            equipment=equipment, closed_at__isnull=False, closed_at__lte=opened_at,
         ).order_by('-closed_at').first()
         watch_period = resolve_published_watch_period_for_shift(
             employee=employee,
@@ -852,6 +905,11 @@ def open_driver_shift_from_device(
             watch_period=watch_period,
             equipment=equipment,
             opened_at=opened_at,
+            # Поздно доставленная A записывается перед B. Открытая B и её
+            # рейсы/простои не меняются и не получают побочные handover.
+            closed_at=next_shift.opened_at if next_shift else None,
+            closed_by=next_shift.opened_by if next_shift else None,
+            is_service_closed=bool(next_shift),
             **readings,
         )
         assign_shift_plan_snapshot(shift)
@@ -871,7 +929,16 @@ def open_driver_shift_from_device(
                         employee=employee,
                     ))
             ShiftReadingCorrection.objects.bulk_create(corrections)
-        response = {'ok': True, 'shift_id': shift.pk, 'truck_id': equipment.pk, 'driver_id': employee.pk}
+        response = {
+            'ok': True, 'shift_id': shift.pk, 'truck_id': equipment.pk, 'driver_id': employee.pk,
+            # Следующая поздняя вставка должна увидеть ту же доказанную
+            # причинную цепь, даже если predecessor уже был пересогласован.
+            'closed_previous_shift_ids': sorted({
+                *(item.pk for item in displaced),
+                *(item['shift_id'] for item in reconciled_previous),
+            }),
+            'reconciled_previous_shifts': reconciled_previous,
+        }
         ShiftClientAction.objects.create(
             action_type='driver_shift_opened',
             client_action_id=client_action_id,
@@ -891,6 +958,93 @@ def open_driver_shift_from_device(
             payload=response,
         )
         return shift, True, notes
+
+
+def reconcile_earlier_own_shift_close(
+    *, shift, employee, closed_at, readings, client_action_id,
+    role_code='driver', actor_access_id=None, submitted_fuel_percent=None,
+):
+    """R-21: одно собственное окончание до служебной границы той же смены.
+
+    Это не универсальная корректировка и не min между собственными стопами.
+    Исходное служебное закрытие остаётся в неизменяемом результате действия.
+    Вызывающий проверяет достоверность времени и сохраняет исходный receipt.
+    """
+    from core.models import bump_operational_state
+    from downtimes.driver_workflow import is_workflow_downtime_reason
+    from downtimes.models import DowntimeEvent
+
+    action_type = 'driver_shift_closed' if role_code == 'driver' else 'excavator_shift_closed'
+    with transaction.atomic():
+        shift = EmployeeShift.objects.select_for_update(of=('self',)).get(pk=shift.pk)
+        if shift.employee_id != employee.pk:
+            raise ValidationError('Смена не принадлежит этому водителю.')
+        if (not shift.is_service_closed or not shift.closed_at
+                or not shift.opened_at <= closed_at < shift.closed_at):
+            return None
+        if ShiftClientAction.objects.filter(shift=shift, action_type=action_type).exists():
+            return None
+        previous = {
+            'closed_at': shift.closed_at.isoformat(),
+            'closed_by_id': shift.closed_by_id,
+            'is_service_closed': shift.is_service_closed,
+            'service_close_kind': shift.service_close_kind,
+            'service_close_note': shift.service_close_note,
+            'readings': {field: str(getattr(shift, field)) if getattr(shift, field) is not None else None
+                         for field in readings},
+        }
+        service_boundary = shift.closed_at
+        shift.closed_at = closed_at
+        shift.closed_by = employee
+        shift.is_service_closed = False
+        shift.service_close_kind = ''
+        shift.service_close_note = ''
+        for field, value in readings.items():
+            setattr(shift, field, value)
+        shift.save(update_fields=[*readings, 'closed_at', 'closed_by', 'is_service_closed',
+                                  'service_close_kind', 'service_close_note'])
+        # Корректируем только ожидания данного работника, усечённые той самой
+        # служебной границей. Новый интервал и физический ремонт не трогаем.
+        for event in (DowntimeEvent.objects.select_for_update(of=('self',)).select_related('reason')
+                      .filter(equipment_id=shift.equipment_id, employee=employee,
+                              started_at__gte=shift.opened_at, started_at__lte=closed_at,
+                              ended_at=service_boundary)):
+            if is_workflow_downtime_reason(event.reason):
+                event.ended_at = closed_at
+                event.save(update_fields=['ended_at'])
+        response = {
+            'ok': True, 'shift_id': shift.pk,
+            'server_ids': {'shift_id': shift.pk},
+            'earlier_own_close_applied': True,
+            'previous_service_close': previous,
+            'effective_occurred_at': closed_at.isoformat(),
+            'time_source': 'driver_device' if role_code == 'driver' else 'excavator_device',
+        }
+        request_signature = (
+            driver_close_request_signature(
+                shift_id=shift.pk, employee_id=employee.pk, readings=readings,
+                occurred_at=closed_at, actor_access_id=actor_access_id,
+            ) if role_code == 'driver' else excavator_close_request_signature(
+                fuel=readings.get('end_fuel'), engine_hours=readings.get('end_engine_hours'),
+                submitted_fuel_percent=submitted_fuel_percent,
+            )
+        )
+        ShiftClientAction.objects.create(
+            action_type=action_type, client_action_id=client_action_id,
+            employee=employee, shift=shift, response_payload=response,
+            request_signature=request_signature,
+        )
+        bump_operational_state('EmployeeShift:earlier_own_close', event_type=action_type,
+                               object_type='EmployeeShift', object_id=shift.pk,
+                               payload={'shift_id': shift.pk, 'employee_id': employee.pk,
+                                        'equipment_id': shift.equipment_id})
+        from reports.driver_shift_passport_snapshots import enqueue_driver_shift_passport_capture
+        from reports.models import DriverShiftPassportTrigger
+        if role_code == 'driver':
+            enqueue_driver_shift_passport_capture(
+                shift=shift, trigger=DriverShiftPassportTrigger.DRIVER_CLOSE, captured_by=employee,
+            )
+        return response
 
 
 def close_driver_shift(
@@ -980,10 +1134,7 @@ def close_driver_shift(
         cancel_free_bucket_acceptances_for_shift(locked_shift, cancelled_at=closed_at)
         from downtimes.driver_workflow import close_workflow_downtimes
         close_workflow_downtimes(locked_shift.equipment, ended_at=locked_shift.closed_at)
-        Trip.objects.filter(
-            truck=locked_shift.equipment,
-            status__in=OPEN_TRIP_STATUSES,
-        ).update(is_carryover=True)
+        mark_shift_carryover_trips(locked_shift, closed_at=locked_shift.closed_at)
         from reports.driver_shift_passport_snapshots import (
             enqueue_driver_shift_passport_capture,
         )
@@ -2346,7 +2497,7 @@ def close_excavator_shift(
     # экскаватора. После закрытия оно не должно всплыть в следующей смене.
     from assignments.services import expire_haul_handoffs_for_shift
     expire_haul_handoffs_for_shift(shift, now=shift.closed_at)
-    Trip.objects.filter(loading_shift=shift, status__in=OPEN_TRIP_STATUSES).update(is_carryover=True)
+    mark_shift_carryover_trips(shift, closed_at=shift.closed_at)
 
     response = {
         'ok': True,

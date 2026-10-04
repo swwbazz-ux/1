@@ -1,0 +1,95 @@
+Creating test database for alias 'default'...
+........offline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 17:10:07.902466+00:00, работник закрывает на 2026-10-04 16:50:07.902466+00:00. Итоговая граница 2026-10-04 17:10:07.902466+00:00.
+.......offline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 17:10:08.421448+00:00, работник закрывает на 2026-10-04 22:10:08.421448+00:00. Итоговая граница 2026-10-04 17:10:08.421448+00:00.
+.....offline_sync: event history-own-close occurred_at=2026-10-04 23:10:08.755260+00:00 after shift 1 closed_at=2026-10-04 18:10:08.750250+00:00; accepted into shift history anyway
+offline_sync: accepted despite discrepancy (driver.shift.closed/driver_shift_close_already_closed) employee=2 role=7 — смена #1 уже закрыта 2026-10-04T18:10:08.750250+00:00
+......................................................................Internal Server Error: /excavator/shift/
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-test-venv/lib/python3.12/site-packages/django/core/handlers/exception.py", line 55, in inner
+    response = get_response(request)
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-test-venv/lib/python3.12/site-packages/django/core/handlers/base.py", line 198, in _get_response
+    response = wrapped_callback(request, *callback_args, **callback_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-test-venv/lib/python3.12/site-packages/django/views/decorators/http.py", line 64, in inner
+    return func(request, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/trips/views.py", line 5032, in excavator_shift_action_view
+    response_payload = open_excavator_shift(
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/shifts/services.py", line 2282, in open_excavator_shift
+    return _open_excavator_shift_atomic(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/shifts/services.py", line 2249, in _open_excavator_shift_atomic
+    client_action = ShiftClientAction.objects.create(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+django.db.utils.IntegrityError: simulated unrelated database failure
+.......................................................................................................................................................................................................................................................................................Service Unavailable: /reports/rating/tv/qa-live/data/
+.Service Unavailable: /reports/rating/tv/qa-live/data/
+.....Service Unavailable: /reports/rating/tv/qa-live/state/
+.Service Unavailable: /reports/rating/tv/qa-live/state/
+.Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+Service Unavailable: /reports/rating/tv/qa-live/state/
+...............................................s.sss...............................Не удалось обновить снимок рейтинга группы rating-assignment-group-tests/16/36/1/day.
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/reports/driver_rating_materialization.py", line 1117, in refresh_driver_rating_assignment_group
+    raise DriverRatingMaterializationError(
+reports.driver_rating_materialization.DriverRatingMaterializationError: Исторический состав опубликованного снимка не прошёл проверку целостности.
+..........................................Не удалось обновить общий снимок рейтинга rating-materialization-tests/23/23/day.
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/reports/driver_rating_materialization.py", line 851, in refresh_driver_rating_group
+    rating = build_driver_rating_period(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: synthetic changed scope failure
+.Не удалось обновить общий снимок рейтинга rating-materialization-tests/24/24/day.
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history/СИСТЕМА_MVP/backend/reports/driver_rating_materialization.py", line 851, in refresh_driver_rating_group
+    rating = build_driver_rating_period(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: synthetic refresh failure
+...............sss.................................Service Unavailable: /reports/rating/driver-period-ranking/
+....................ssssss.......................
+----------------------------------------------------------------------
+Ran 603 tests in 81.061s
+
+OK (skipped=13)
+Destroying test database for alias 'default'...
+Found 603 test(s).
+System check identified no issues (0 silenced).
+На текущую производственную дату активный период рейтинга не задан.

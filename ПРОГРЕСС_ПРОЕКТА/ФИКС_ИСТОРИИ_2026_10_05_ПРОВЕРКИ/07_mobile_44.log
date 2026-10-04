@@ -1,0 +1,57 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> copper-resources-capacitor-shell@0.1.0 test
+> node --test tests/*.test.mjs
+
+✔ Driver build wires Firebase Messaging without tracking its private config (1.217714ms)
+✔ Driver and Excavator expose native push and haptics to the WebView (0.36546ms)
+✔ release workflow injects the matching Firebase config for each field APK (0.360403ms)
+✔ FCM wakes the existing reconciliation path without duplicating domain actions (0.268925ms)
+✔ Native push keeps a durable token and reports only the field-app identity envelope (0.272521ms)
+✔ FCM presence challenge is acknowledged only through the authenticated heartbeat (0.410207ms)
+✔ Native haptics are bounded and use the media vibration channel (0.209967ms)
+✔ Driver release keeps recorded voice calls wired to operational actions (2.233043ms)
+✔ excavator build profile contains every role-specific parameter (2.122747ms)
+✔ driver build profile contains every role-specific parameter (0.369386ms)
+✔ driver_qa build profile contains every role-specific parameter (0.221835ms)
+✔ driver_rustore build profile contains every role-specific parameter (0.233933ms)
+✔ driver_rustore_qa build profile contains every role-specific parameter (0.235294ms)
+✔ excavator_qa build profile contains every role-specific parameter (0.321444ms)
+✔ excavator_rustore build profile contains every role-specific parameter (1.446319ms)
+✔ excavator_rustore_qa build profile contains every role-specific parameter (0.186601ms)
+✔ profiles remain isolated by URL and application id (0.540544ms)
+✔ every field profile pins native WebView text zoom to the workstation scale (1.421902ms)
+✔ QA and RuStore variants keep role identity but disable sideload updates (0.935268ms)
+✔ driver QA and store variants use isolated notification channels and QA credentials (0.635196ms)
+✔ package scripts cover every driver QA and RuStore build (0.21272ms)
+✔ driver and excavator builds embed the same complete loud sound pack (11.165109ms)
+✔ operational cues stay dynamic when Android shows a heads-up notification (5.234083ms)
+✔ semantic operational-cue files match their reviewed manifest (4.463993ms)
+✔ native builds expose an explicit keyboard close bridge (0.294724ms)
+✔ rejected native phone handoff remains disabled (0.31223ms)
+✔ in-app updater mutates only dedicated version badges (0.15938ms)
+✔ only the driver profile enables recorded dump-point voice alerts (0.154582ms)
+✔ driver profile packages every approved recorded dump-point phrase (0.323758ms)
+✔ background service announces only a fresh driver truck_loaded event (0.479242ms)
+✔ both production profiles package every approved operational voice phrase (1.132356ms)
+✔ recorded equipment numbers are packaged and routed through native sequences (7.577482ms)
+✔ foreground driver screen uses the same deduplicated recorded voice bridge (2.20487ms)
+✔ WebView cookies are accepted and flushed at every persistence boundary (0.234373ms)
+✔ Android backup cannot export persisted WebView sessions (0.09939ms)
+✔ Android shell declares vibration permission for WebView pickup feedback (0.113071ms)
+✔ native heartbeat follows the active-shift lifecycle and reports the exact APK version (0.801077ms)
+✔ native implementation reads role data only from BuildConfig (0.491931ms)
+✔ startup splash is profile-driven and waits for stable rendered layout (1.705458ms)
+✔ release signing uses only an external credentials file (0.224658ms)
+✔ native updater is profile-driven, deferrable and verifies the APK (0.437609ms)
+✔ profiles without the sideload updater remove package-installer permission (0.293062ms)
+✔ shift signals are deterministic, original PCM assets with reviewed fingerprints (189.885031ms)
+✔ shift sound provenance documentation records the reviewed fingerprints (0.599603ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 316.371422

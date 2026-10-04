@@ -1,0 +1,32 @@
+PASS Driver import preserves ACK identity/server map/device and sequence 205 to 206
+PASS intentional primary null projection survives stale fallback metadata
+PASS backup quota preserves corrupt raw while showing reconstructable facts, then recovers
+PASS recovery preserves an older backup and never invents a server snapshot
+{
+  "source_snapshot": {
+    "base_commit": "213a44aab872feb8f4749489cb1aa0f6f2331f9e",
+    "source_sha256": {
+      "excavator-field-outbox-v1.js": "c46bfac0ca18ce9a80b567d65eac4034e0240c103a84e3b6bd11a6d0e154d285",
+      "driver-offline-outbox-v2.js": "42b1d64d95ab7722efdd66af4704ae3ea78c99435b17b9946e6dee30ce80ad58",
+      "driver-manifest-local-v1.js": "ed855983aa394a754bf3ac4cfb88e25d2096b31210f1563f8e8ed4ba095632f6"
+    }
+  },
+  "results": [
+    {
+      "name": "Driver import preserves ACK identity/server map/device and sequence 205 to 206",
+      "passed": true
+    },
+    {
+      "name": "intentional primary null projection survives stale fallback metadata",
+      "passed": true
+    },
+    {
+      "name": "backup quota preserves corrupt raw while showing reconstructable facts, then recovers",
+      "passed": true
+    },
+    {
+      "name": "recovery preserves an older backup and never invents a server snapshot",
+      "passed": true
+    }
+  ]
+}

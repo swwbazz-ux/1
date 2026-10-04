@@ -17,6 +17,35 @@
         return JSON.parse(JSON.stringify(value));
     }
 
+    // send возвращает уже разобранное тело. Таймер живёт до его завершения,
+    // даже если fetch получил заголовки или транспорт игнорирует abort.
+    function sendWithDeadline(send, payload, timeoutMs) {
+        var duration = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : 12000;
+        var controller = root.AbortController ? new root.AbortController() : null;
+        var deadline = Date.now() + duration;
+        var started = monotonicNow();
+        return new Promise(function (resolve, reject) {
+            var settled = false;
+            function finish(error, result) {
+                if (settled) return;
+                settled = true;
+                root.clearTimeout(timeout);
+                if (error) reject(error); else resolve(result);
+            }
+            function expire() {
+                if (controller) controller.abort();
+                finish(new Error("offline_request_timeout"));
+            }
+            var timeout = root.setTimeout(expire, duration);
+            Promise.resolve().then(function () {
+                return send(payload, {signal: controller ? controller.signal : undefined, deadlineAt: deadline});
+            }).then(function (result) {
+                var elapsed = Number.isFinite(started) ? monotonicNow() - started : duration - (deadline - Date.now());
+                if (elapsed >= duration) expire(); else finish(null, result);
+            }, function (error) { finish(error); });
+        });
+    }
+
     function compareEvents(left, right) {
         return Number(left.sequence || 0) - Number(right.sequence || 0)
             || String(left.event_id || "").localeCompare(String(right.event_id || ""));
@@ -157,7 +186,7 @@
                 records.push({event: clone(event), result: clone(result || {}), confirmed_at: new Date().toISOString()});
                 storage.setItem(confirmedKey, JSON.stringify(records.sort(function (left, right) {
                     return compareEvents(left.event || {}, right.event || {});
-                }).slice(-200)));
+                })));
                 storage.setItem(key, JSON.stringify(read().filter(function (item) {
                     return item.event_id !== event.event_id;
                 })));
@@ -336,13 +365,43 @@
 
         if (options.indexedDB) {
             var indexed = createIndexedDbAdapter(options.indexedDB, queueKey);
-            adapterPromise = indexed.list().then(function () {
-                return fallback.list().then(function (legacy) {
-                    if (!legacy.length) return indexed;
-                    return indexed.replace(legacy).then(function () {
-                        return fallback.replace([]).then(function () { return indexed; });
-                    });
-                });
+            adapterPromise = indexed.list().then(async function (primary) {
+                var stored;
+                try {
+                    stored = [primary, await fallback.list(), await fallback.confirmed()];
+                } catch (error) {
+                    // Повреждённый старый JSON нельзя перезаписать пустой
+                    // очередью; исправная IndexedDB при этом остаётся рабочей.
+                    storageError = error;
+                    return indexed;
+                }
+                // IndexedDB может уже содержать действия прошлой сессии.
+                // Миграция fallback дополняет её, а не заменяет очередью целиком.
+                try {
+                    var existing = new Map(stored[0].map(function (event) { return [event.event_id, event]; }));
+                    for (var legacy of stored[1]) {
+                        var current = existing.get(legacy.event_id);
+                        var acknowledged = await indexed.getConfirmed(legacy.event_id);
+                        if (current && !sameWireEvent(current, legacy)) throw new Error("offline_migration_identity_conflict");
+                        if (acknowledged && !sameWireEvent(acknowledged.event, legacy)) throw new Error("offline_migration_identity_conflict");
+                        if (!current && !acknowledged) await indexed.put(legacy);
+                    }
+                    for (var record of stored[2]) {
+                        var receipt = await indexed.getConfirmed(record.event.event_id);
+                        var queued = existing.get(record.event.event_id);
+                        if (receipt && !sameWireEvent(receipt.event, record.event)) throw new Error("offline_migration_identity_conflict");
+                        if (queued && !sameWireEvent(queued, record.event)) throw new Error("offline_migration_identity_conflict");
+                        if (!receipt) await indexed.confirm(record.event, record.result);
+                    }
+                    if (stored[1].length) await fallback.replace([]);
+                    return indexed;
+                } catch (error) {
+                    // Рабочий primary уже доказан чтением: сбой переноса или
+                    // очистки legacy не должен скрыть его собственные факты.
+                    // Legacy остаётся на месте для следующей попытки импорта.
+                    storageError = error;
+                    return indexed;
+                }
             }).catch(function () { return fallback; });
         }
 
@@ -356,7 +415,7 @@
                 storage_failed: !!storageError,
                 storage_error: storageError ? String(storageError.message || storageError) : ""
             };
-            options.onChange(summary, events.map(clone), extra || {});
+            try { options.onChange(summary, events.map(clone), extra || {}); } catch (error) {}
         }
 
         function list() {
@@ -364,9 +423,11 @@
         }
 
         function allocateSequence(minimum) {
-            return list().then(function (events) {
-                var durableMaximum = events.reduce(function (maximum, event) {
-                    return Math.max(maximum, Number(event.sequence || 0));
+            return journal().then(function (records) {
+                // После перехода fallback → IndexedDB очередь может быть
+                // пустой, а журнал — содержать уже принятые высокие sequence.
+                var durableMaximum = records.reduce(function (maximum, record) {
+                    return Math.max(maximum, Number(record.event.sequence || 0));
                 }, Number(minimum || 0));
                 return adapterPromise.then(function (adapter) {
                     return adapter.nextSequence(durableMaximum);
@@ -384,12 +445,19 @@
             });
         }
 
-        function remove(eventId) {
-            return adapterPromise.then(function (adapter) { return adapter.remove(eventId); });
+        function confirmations() {
+            return adapterPromise.then(function (adapter) { return adapter.confirmed(); }).then(function (records) {
+                return records.filter(function (record) { return !record.result || record.result.status !== "cancelled_locally"; });
+            });
         }
 
-        function confirmations() {
-            return adapterPromise.then(function (adapter) { return adapter.confirmed(); });
+        function journal() {
+            return adapterPromise.then(function (adapter) { return Promise.all([adapter.list(), adapter.confirmed()]); })
+                .then(function (stored) {
+                    var byId = new Map(stored[0].map(function (event) { return [event.event_id, {event: event, result: null}]; }));
+                    stored[1].forEach(function (record) { byId.set(record.event.event_id, record); });
+                    return Array.from(byId.values()).sort(function (a, b) { return compareEvents(a.event, b.event); });
+                });
         }
 
         function getConfirmed(eventId) {
@@ -415,7 +483,7 @@
                             throw new Error("Идентификатор события уже занят другим действием.");
                         }
                         return Object.assign(clone(acknowledged.event), {
-                            sync_state: "confirmed",
+                            sync_state: acknowledged.result && acknowledged.result.status === "cancelled_locally" ? "cancelled_locally" : "confirmed",
                             server_result: clone(acknowledged.result || {})
                         });
                     }
@@ -560,7 +628,9 @@
                         }
                         return confirm(event, result).then(list).then(function (remaining) {
                             notify(remaining, {reason: "confirmed", event: clone(event)});
-                            if (typeof options.onConfirmed === "function") return options.onConfirmed(clone(event), clone(result));
+                            if (typeof options.onConfirmed === "function") {
+                                Promise.resolve().then(function () { return options.onConfirmed(clone(event), clone(result)); }).catch(function () {});
+                            }
                         });
                     }
                     if (status === "conflict" || status === "invalid" || status === "auth_required") {
@@ -582,6 +652,12 @@
         function flush() {
             if (running) return running;
             running = list().then(function (events) {
+                // Предыдущая попытка могла закончиться ошибкой хранения ACK.
+                // Отдельного живого запроса сейчас нет; syncing безопасно
+                // повторяется с тем же ID, а сервер устраняет дубли.
+                return Promise.all(events.filter(function (event) { return event.sync_state === "syncing"; })
+                    .map(function (event) { return updateEvent(event.event_id, {sync_state: "pending", next_retry_at: 0}); })).then(list);
+            }).then(function (events) {
                 notify(events, {reason: "flush_start"});
                 function drain() {
                     return list().then(markTerminalDependencyConflicts).then(function (current) {
@@ -593,13 +669,7 @@
                             return list();
                         }).then(function (sending) {
                             notify(sending, {reason: "sending"});
-                            var request;
-                            try {
-                                request = options.send(batch.map(outgoingEvent));
-                            } catch (error) {
-                                request = Promise.reject(error);
-                            }
-                            return Promise.resolve(request).then(function (payload) {
+                            return sendWithDeadline(options.send, batch.map(outgoingEvent), options.requestTimeoutMs).then(function (payload) {
                                 return applyResults(batch, payload);
                             }, function (error) {
                                 var chain = Promise.resolve();
@@ -618,6 +688,13 @@
                         return remaining;
                     });
                 });
+            }).catch(function (error) {
+                storageError = error;
+                if (!retryTimer && !documentHidden()) {
+                    retryTimer = root.setTimeout(function () { retryTimer = null; flush().catch(function () {}); }, RETRY_BASE_MS);
+                    if (retryTimer && typeof retryTimer.unref === "function") retryTimer.unref();
+                }
+                throw error;
             }).finally(function () { running = null; });
             return running;
         }
@@ -679,7 +756,7 @@
                 var target = events.find(function (event) { return event.event_id === eventId; });
                 if (!target || Number(target.attempt_count || 0) > 0 || target.sync_state !== "pending") return false;
                 if (events.some(function (event) { return (event.depends_on || []).indexOf(eventId) >= 0; })) return false;
-                return remove(eventId).then(function () { return list(); }).then(function (remaining) {
+                return confirm(target, {event_id: eventId, status: "cancelled_locally"}).then(function () { return list(); }).then(function (remaining) {
                     notify(remaining, {reason: "discarded"}); return true;
                 });
             });
@@ -704,6 +781,7 @@
             flush: flush,
             pending: list,
             confirmed: confirmations,
+            journal: journal,
             getServerMapping: function (eventId) {
                 return getConfirmed(String(eventId || "")).then(function (record) {
                     return record && record.result ? clone(record.result.server_ids || null) : null;

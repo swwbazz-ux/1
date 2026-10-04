@@ -586,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v264";
+const CACHE_NAME = "excavator-mobile-shell-v265";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,26 +600,26 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v265",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v265",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v265",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v265",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v265",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v265",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v265",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v265",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v265",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v265",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -3705,7 +3705,7 @@ def excavator_auto_downtime_reason(excavator, reason_name):
     )
 
 
-def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False):
+def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False, occurred_at=None):
     reason = excavator_auto_downtime_reason(excavator, reason_name)
     if not reason:
         return None
@@ -3726,7 +3726,9 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
                 return event
         if active_events and not replace_active:
             return None
-        now = timezone.now()
+        now = occurred_at or timezone.now()
+        if any(event.started_at > now for event in active_events):
+            return None
         for event in active_events:
             event.ended_at = now
             event.save(update_fields=['ended_at'])
@@ -3739,10 +3741,10 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
         )
 
 
-def close_excavator_auto_downtime(excavator, reason_name):
+def close_excavator_auto_downtime(excavator, reason_name, *, occurred_at=None):
     if not excavator:
         return 0
-    now = timezone.now()
+    now = occurred_at or timezone.now()
     closed = 0
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
@@ -3753,6 +3755,7 @@ def close_excavator_auto_downtime(excavator, reason_name):
                 equipment=excavator,
                 reason__name=reason_name,
                 ended_at__isnull=True,
+                started_at__lte=now,
                 comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
             )
         )
@@ -3816,32 +3819,46 @@ def excavator_assigned_truck_counts(excavator):
     return len(assignments), loadable, has_inactive_assigned_truck
 
 
-def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
+def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False, occurred_at=None):
     if not excavator:
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
+        if occurred_at is not None:
+            # Текущая расстановка не является снимком прежнего цикла. Старый
+            # факт не должен менять ожидание после более нового действия.
+            if (Trip.objects.filter(excavator=excavator).filter(
+                    Q(loaded_at__gt=occurred_at) | Q(completed_at__gt=occurred_at)
+                    | Q(cancelled_at__gt=occurred_at) | Q(operationally_closed_at__gt=occurred_at)
+                ).exists()
+                or EmployeeShift.objects.filter(equipment=excavator, opened_at__gt=occurred_at).exists()
+                or DowntimeEvent.objects.filter(equipment=excavator, started_at__gt=occurred_at).exists()
+                or HaulAssignment.objects.filter(excavator=excavator).filter(
+                    Q(assigned_at__gt=occurred_at) | Q(ended_at__gt=occurred_at)
+                ).exists()):
+                return None
         assigned_total, loadable, has_inactive_assigned_truck = excavator_assigned_truck_counts(excavator)
         if loadable:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         # Ждать самосвалы можно только тогда, когда они назначены и все уже
         # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
         # ему нечего — это не простой по ожиданию, и открывать его нельзя.
         if assigned_total == 0:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         # Автоматическое «Ожидание самосвалов» отражает только ситуацию,
         # когда весь назначенный парк включён, но уже находится в рейсах.
         # Выключенный самосвал не должен сам запускать этот простой.
         if has_inactive_assigned_truck:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         if start_when_empty:
             return start_excavator_auto_downtime(
                 excavator,
                 employee,
                 EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
             )
         return None
 
@@ -4226,7 +4243,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
     # мог перейти сменщику гружёным (см. is_carryover). Перезаписываем только
     # если водителя загрузки почему-то не было зафиксировано вовсе.
     if trip.driver_id is None:
-        trip.driver = driver
+        trip.driver = trip.driver_control_shift.employee if trip.driver_control_shift_id else driver
     trip.unload_received_at = timezone.now()
     trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
     trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
@@ -4263,7 +4280,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
             trip.truck,
             ended_at=trip.completed_at,
         )
-    reconcile_excavator_waiting_for_trucks(trip.excavator)
+    reconcile_excavator_waiting_for_trucks(trip.excavator, occurred_at=trip.completed_at)
     return True
 
 
@@ -4838,13 +4855,8 @@ def excavator_work_settings_view(request):
             destination_settings=destinations,
         )
         active_downtime = None
-        if face_position_changed:
-            active_downtime = start_excavator_auto_downtime(
-                current_excavator,
-                access.employee,
-                EXCAVATOR_AUTO_DOWNTIME_TRANSFER,
-                replace_active=True,
-            )
+        # R-19: настройка забоя не является началом движения. Перегон
+        # создаётся существующим явным действием начала простоя машиниста.
 
     state = bump_operational_state(
         'ExcavatorWorkSettings:update',
@@ -6953,8 +6965,22 @@ def driver_complete_trip_view(request, trip_id):
         if not role_session_state(request, access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect('driver_shift')
-        reference = Trip.objects.filter(pk=trip_id).first()
-        if reference and reference.driver_participation_recorded:
+        reference = Trip.objects.select_related('driver_control_shift').filter(pk=trip_id).first()
+        raw_time = str(request.POST.get('occurred_at') or '').strip()
+        try:
+            submitted_time = parse_datetime(raw_time) if raw_time else None
+        except ValueError:
+            submitted_time = None
+        original_shift = reference.driver_control_shift if reference else None
+        historical_original_driver = bool(
+            original_shift and original_shift.employee_id == access.employee_id
+            and submitted_time and not timezone.is_naive(submitted_time)
+            and original_shift.closed_at
+            and original_shift.opened_at <= submitted_time <= original_shift.closed_at
+        )
+        if reference and reference.driver_participation_recorded and (
+            not reference.is_carryover or historical_original_driver
+        ):
             shift_query = Q(pk=reference.driver_control_shift_id, employee=access.employee)
         else:
             shift_query = Q(employee=access.employee, closed_at__isnull=True)

@@ -12,6 +12,7 @@ from shifts.models import EmployeeShift
 from shifts.services import (
     ExcavatorShiftError,
     equipment_is_truck,
+    mark_shift_carryover_trips,
     other_role_shift_flag,
     validate_driver_close_readings,
     validate_excavator_shift_readings,
@@ -220,10 +221,7 @@ def finish_service_closed_shift(
 
     close_workflow_downtimes(shift.equipment, ended_at=shift.closed_at)
     if equipment_is_truck(shift.equipment):
-        Trip.objects.filter(
-            truck=shift.equipment,
-            status__in=OPEN_TRIP_STATUSES,
-        ).update(is_carryover=True)
+        mark_shift_carryover_trips(shift, closed_at=shift.closed_at)
         from reports.driver_shift_passport_snapshots import (
             enqueue_driver_shift_passport_capture,
         )
@@ -235,10 +233,7 @@ def finish_service_closed_shift(
             captured_by=closed_by,
         )
     else:
-        Trip.objects.filter(
-            loading_shift=shift,
-            status__in=OPEN_TRIP_STATUSES,
-        ).update(is_carryover=True)
+        mark_shift_carryover_trips(shift, closed_at=shift.closed_at)
 
 
 def execute_dispatcher_service_close_shift(

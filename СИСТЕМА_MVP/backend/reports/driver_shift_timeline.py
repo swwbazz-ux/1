@@ -297,6 +297,34 @@ def _merge_adjacent(intervals):
     return tuple(merged)
 
 
+def _carryover_loading_driver_shift(trip):
+    """Исходное начисление только при доказанной последовательности D1 → D2."""
+    source = trip.driver_control_shift
+    unloading = trip.unloading_shift
+    if (
+        trip.is_carryover
+        and source is not None
+        and unloading is not None
+        and source.id != unloading.id
+        and source.employee_id == trip.driver_id
+        and source.equipment_id == trip.truck_id == unloading.equipment_id
+        and source.closed_at is not None
+        and source.closed_at <= unloading.opened_at
+        and trip.loaded_at is not None
+        and source.opened_at <= trip.loaded_at <= source.closed_at
+    ):
+        return source
+    return None
+
+
+def _trip_loading_time(trip):
+    # Поздняя доставка переходящего груза не переносит погрузку в смену D2.
+    # Старые записи без доказанного источника сохраняют прежнюю трактовку.
+    if _carryover_loading_driver_shift(trip) is not None:
+        return trip.loaded_at
+    return trip.created_at
+
+
 def _trip_spans(trips, window_start, window_end):
     spans = []
     for trip in trips:
@@ -311,7 +339,7 @@ def _trip_spans(trips, window_start, window_end):
         else:
             trip_end = trip.completed_at or window_end
         clipped = _clip_span(
-            trip.created_at,
+            _trip_loading_time(trip),
             trip_end,
             window_start,
             window_end,
@@ -377,12 +405,14 @@ def _assignment_spans(assignments, window_start, window_end):
 def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
     records = []
     for trip in trips:
+        loading_time = _trip_loading_time(trip)
+        loading_driver_shift = _carryover_loading_driver_shift(trip)
         effective_end = (
-            (trip.cancelled_at or trip.created_at)
+            (trip.cancelled_at or loading_time)
             if trip.status == TripStatus.CANCELLED
             else trip.completed_at
         )
-        loaded_during_shift = window_start <= trip.created_at < window_end
+        loaded_during_shift = window_start <= loading_time < window_end
         unloaded_during_shift = trip.unloading_shift_id == shift.id
         completed_during_legacy_shift = bool(
             trip.unloading_shift_id is None
@@ -390,7 +420,7 @@ def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
             and window_start <= trip.completed_at < window_end
         )
         temporal_overlap = (
-            trip.created_at < window_end
+            loading_time < window_end
             and (
                 effective_end is None
                 or effective_end > window_start
@@ -398,9 +428,9 @@ def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
         )
         reverse_interval_overlap = (
             trip.completed_at is not None
-            and trip.completed_at <= trip.created_at
+            and trip.completed_at <= loading_time
             and trip.completed_at < window_end
-            and trip.created_at > window_start
+            and loading_time > window_start
         )
         carryover_overlap = trip.is_carryover and temporal_overlap
         legacy_driver_match = (
@@ -415,14 +445,24 @@ def _driver_trip_records_for_shift(trips, shift, window_start, window_end):
             or reverse_interval_overlap
             or carryover_overlap
             or legacy_driver_match
+            or (loading_driver_shift is not None and loading_driver_shift.id == shift.id)
         ):
             records.append(trip)
     return tuple(records)
 
 
-def _trip_output_credit_status(trip, shift, window_start, window_end):
+def _trip_output_credit_status(trip, shift, window_start, window_end, *, as_of=None):
     if trip.status != TripStatus.COMPLETED:
         return None
+    loading_driver_shift = _carryover_loading_driver_shift(trip)
+    if loading_driver_shift is not None:
+        if loading_driver_shift.id != shift.id:
+            return None
+        if trip.completed_at is not None and trip.completed_at > (as_of or window_end):
+            return None
+        if trip.completed_at is None or (_trip_quality_flags(trip) & TRIP_SPAN_BLOCKING_FLAGS):
+            return 'ambiguous'
+        return 'driver_control_shift'
     if trip.unloading_shift_id is not None:
         if trip.unloading_shift_id != shift.id:
             return None
@@ -452,7 +492,7 @@ def _trip_output_credit_status(trip, shift, window_start, window_end):
 
 
 def _trip_is_open_at(trip, moment):
-    if trip.created_at >= moment:
+    if _trip_loading_time(trip) >= moment:
         return False
     if (trip.status == TripStatus.UNCONTROLLED and trip.operationally_closed_at
             and trip.operationally_closed_at <= moment):
@@ -809,6 +849,7 @@ def _build_shift_passport(
     quality_flags,
     source_counts,
     quality_metrics,
+    as_of=None,
 ):
     credit_statuses = {
         trip.id: _trip_output_credit_status(
@@ -816,6 +857,7 @@ def _build_shift_passport(
             shift,
             window_start,
             window_end,
+            as_of=as_of,
         )
         for trip in trip_records
     }
@@ -837,6 +879,7 @@ def _build_shift_passport(
         if credit_statuses[trip.id] in {
             'unloading_shift',
             'legacy_driver',
+            'driver_control_shift',
         }
     )
     ambiguous_output_trip_count = sum(
@@ -907,7 +950,7 @@ def _build_shift_passport(
     )
 
     loaded_trip_count = sum(
-        window_start <= trip.created_at < window_end
+        window_start <= _trip_loading_time(trip) < window_end
         for trip in trip_records
     )
     cancelled_trip_count = sum(
@@ -985,6 +1028,10 @@ def _build_shift_passport(
                 ),
                 'legacy_driver_trip_count': sum(
                     status == 'legacy_driver'
+                    for status in credit_statuses.values()
+                ),
+                'driver_control_shift_trip_count': sum(
+                    status == 'driver_control_shift'
                     for status in credit_statuses.values()
                 ),
                 'ambiguous_trip_count': ambiguous_output_trip_count,
@@ -1207,7 +1254,7 @@ def _trip_quality_flags(trip):
         flags.add('open_status_trip_with_completed_at')
     if (
         trip.completed_at is not None
-        and trip.completed_at <= trip.created_at
+        and trip.completed_at <= _trip_loading_time(trip)
     ):
         flags.add('invalid_trip_window')
     if (
@@ -1217,7 +1264,7 @@ def _trip_quality_flags(trip):
         flags.add('cancelled_trip_without_cancelled_at')
     if (
         trip.cancelled_at is not None
-        and trip.cancelled_at < trip.created_at
+        and trip.cancelled_at < _trip_loading_time(trip)
     ):
         flags.add('invalid_trip_cancellation_window')
     if (
@@ -1235,10 +1282,10 @@ def _trip_quality_flags(trip):
         elif trip.excavator_operator_id != loading_shift.employee_id:
             flags.add('trip_operator_loading_shift_mismatch')
         if (
-            trip.created_at < loading_shift.opened_at
+            _trip_loading_time(trip) < loading_shift.opened_at
             or (
                 loading_shift.closed_at is not None
-                and trip.created_at > loading_shift.closed_at
+                and _trip_loading_time(trip) > loading_shift.closed_at
             )
         ):
             flags.add('trip_loading_shift_time_mismatch')
@@ -1248,7 +1295,8 @@ def _trip_quality_flags(trip):
         return flags
     if unloading_shift.equipment_id != trip.truck_id:
         flags.add('trip_unloading_shift_equipment_mismatch')
-    if trip.driver_id != unloading_shift.employee_id:
+    proven_carryover = _carryover_loading_driver_shift(trip) is not None
+    if trip.driver_id != unloading_shift.employee_id and not proven_carryover:
         flags.add('trip_driver_unloading_shift_mismatch')
     if trip.completed_at is not None and (
         trip.completed_at < unloading_shift.opened_at
@@ -1308,10 +1356,10 @@ def _assignments_at_trip_loading(trip, assignments):
         assignment
         for assignment in assignments
         if not _assignment_quality_flags(assignment)
-        and assignment.accepted_at <= trip.created_at
+        and assignment.accepted_at <= _trip_loading_time(trip)
         and (
             assignment.ended_at is None
-            or trip.created_at < assignment.ended_at
+            or _trip_loading_time(trip) < assignment.ended_at
         )
     )
 
@@ -1485,7 +1533,7 @@ def _build_timeline(
         quality_flags.append('open_trip_on_closed_shift')
     if any(
         trip.completed_at
-        and trip.completed_at - trip.created_at > MAX_PLAUSIBLE_SHIFT_DURATION
+        and trip.completed_at - _trip_loading_time(trip) > MAX_PLAUSIBLE_SHIFT_DURATION
         for trip in trip_records
         if trip.status != TripStatus.CANCELLED
     ):
@@ -1496,6 +1544,7 @@ def _build_timeline(
             shift,
             window_start,
             window_end,
+            as_of=now,
         ) == 'ambiguous'
         for trip in trip_records
     ):
@@ -1572,6 +1621,7 @@ def _build_timeline(
     }
     passport = _build_shift_passport(
         shift,
+        as_of=now,
         window_start=window_start,
         window_end=window_end,
         trip_records=trip_records,
@@ -1837,6 +1887,7 @@ def build_driver_shift_timelines(
         .filter(
             Q(truck_id__in=equipment_ids)
             | Q(unloading_shift_id__in=valid_shift_ids)
+            | Q(is_carryover=True, driver_control_shift_id__in=valid_shift_ids)
         )
         .filter(
             Q(
@@ -1852,6 +1903,7 @@ def build_driver_shift_timelines(
                 cancelled_at__lte=window_end,
             )
             | Q(unloading_shift_id__in=valid_shift_ids)
+            | Q(is_carryover=True, driver_control_shift_id__in=valid_shift_ids)
             | Q(
                 created_at__lt=window_end,
                 completed_at__isnull=True,
@@ -1886,6 +1938,7 @@ def build_driver_shift_timelines(
             'rock_type',
             'loading_shift',
             'unloading_shift',
+            'driver_control_shift',
         )
         .order_by('created_at', 'id')
     )
@@ -1901,7 +1954,7 @@ def build_driver_shift_timelines(
         for equipment_id in related_equipment_ids:
             trips_by_equipment[equipment_id].append(trip)
     assignment_trip_load_times = [
-        trip.created_at
+        _trip_loading_time(trip)
         for trip in trips
         if (
             (

@@ -83,7 +83,7 @@
             if (syncState.isFlushing || syncState.pendingCount > 0) {
                 return true;
             }
-            var queue = transport.readQueue();
+            var queue = transport.readOwnQueue ? transport.readOwnQueue() : transport.readQueue();
             if (!queue.length) {
                 return false;
             }

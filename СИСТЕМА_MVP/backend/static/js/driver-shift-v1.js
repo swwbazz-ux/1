@@ -610,23 +610,35 @@ window.bindDriverMobileShell = function () {
         var override = driverAssignmentOverrideFromForm(form);
         var assignmentId = Number(form && form.dataset.driverAssignmentId || 0);
         if (!assignmentId || !driverOfflineOutbox) return Promise.resolve(false);
-        form.dataset.driverAssignmentTapped = "true";
-        if (override) {
-            window.__driverAssignmentOverride = override;
-            window.applyDriverAssignmentOverride();
-        }
-        hideDriverAssignmentNotice();
-        return driverOfflineOutbox.enqueue({
+        // Подтверждение и новый контекст появляются только после записи.
+        // Повторное нажатие во время записи разделяет тот же исходный факт.
+        if (form.__driverAssignmentSavePromise) return form.__driverAssignmentSavePromise;
+        if (driverAssignmentTapped(form)) return Promise.resolve(true);
+        var acceptance = {
             event_id: generateClientActionId("driver-assignment-accept"),
             event_type: "driver.assignment.accepted",
             occurred_at: new Date().toISOString(),
             context_snapshot: {assignment_override: override},
             payload: {assignment_id: assignmentId}
-        }).then(function () {
+        };
+        var saved = Promise.resolve().then(function () {
+            return driverOfflineOutbox.enqueue(acceptance);
+        }).then(function (event) {
+            if (!event) throw new Error("Не удалось сохранить принятие назначения.");
+            form.dataset.driverAssignmentTapped = "true";
+            if (override) {
+                window.__driverAssignmentOverride = override;
+                window.applyDriverAssignmentOverride();
+            }
+            hideDriverAssignmentNotice();
             if (typeof playDriverSound === "function") playDriverSound("action_ok");
             driverOfflineOutbox.flush().catch(function () {});
             return true;
+        }).finally(function () {
+            if (form.__driverAssignmentSavePromise === saved) form.__driverAssignmentSavePromise = null;
         });
+        form.__driverAssignmentSavePromise = saved;
+        return saved;
     };
 
     /* Срок назначения вышел — то же переключение, что и тап, без события. */
@@ -1696,7 +1708,7 @@ window.bindDriverMobileShell = function () {
                 renderDriverOfflineState(state);
                 /* Путёвка ведёт свой журнал смены из тех же событий очереди. */
                 if (window.DriverManifestLocal && typeof window.DriverManifestLocal.observe === "function") {
-                    try { window.DriverManifestLocal.observe(state && state.events); } catch (error) {}
+                    try { window.DriverManifestLocal.observe(state && (state.journalEvents || state.events)); } catch (error) {}
                 }
             },
             onConfirmed: function () {
@@ -1790,7 +1802,7 @@ window.bindDriverMobileShell = function () {
             indexedDB: window.indexedDB,
             localStorage: window.localStorage,
             context: driverOfflineContext,
-            send: function (batch) {
+            send: function (batch, request) {
                 return fetch("/offline-events/sync/", {
                     method: "POST",
                     credentials: "same-origin",
@@ -1801,7 +1813,8 @@ window.bindDriverMobileShell = function () {
                         "X-CSRFToken": csrf ? csrf.content : "",
                         "X-Requested-With": "XMLHttpRequest"
                     },
-                    body: JSON.stringify(batch)
+                    body: JSON.stringify(batch),
+                    signal: request && request.signal
                 }).then(function (response) {
                     return response.text().then(function (body) {
                         var payload = {};

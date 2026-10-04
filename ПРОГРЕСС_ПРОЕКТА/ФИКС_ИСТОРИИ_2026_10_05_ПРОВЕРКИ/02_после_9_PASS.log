@@ -1,0 +1,10 @@
+Creating test database for alias 'default'...
+....offline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 16:52:10.341431+00:00, работник закрывает на 2026-10-04 21:52:10.341431+00:00. Итоговая граница 2026-10-04 16:52:10.341431+00:00.
+.....
+----------------------------------------------------------------------
+Ran 9 tests in 0.581s
+
+OK
+Destroying test database for alias 'default'...
+Found 9 test(s).
+System check identified no issues (0 silenced).

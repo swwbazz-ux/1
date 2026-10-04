@@ -1,0 +1,33 @@
+{
+  "name": "users",
+  "returncode": 0,
+  "duration_seconds": 262.91,
+  "command": [
+    "/workspace/scratch/d31f8c8018c5/mechanics-test-venv/bin/python",
+    "-u",
+    "manage.py",
+    "test",
+    "users",
+    "--noinput"
+  ],
+  "cwd": "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend",
+  "complete": true,
+  "summary": [
+    "  File \"/usr/lib/python3.12/pathlib.py\", line 1029, in read_text",
+    "    with self.open(mode='r', encoding=encoding, errors=errors) as f:",
+    "         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+    "  File \"/usr/lib/python3.12/pathlib.py\", line 1015, in open",
+    "    return io.open(self, mode, buffering, encoding, errors, newline)",
+    "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+    "FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpc0dt7jr4/apk/driver-update.json'",
+    ".......Forbidden (Origin checking failed - null does not match any trusted origins.): /start/",
+    "........ss...................................",
+    "----------------------------------------------------------------------",
+    "Ran 610 tests in 233.379s",
+    "",
+    "OK (skipped=3)",
+    "Destroying test database for alias 'default'..."
+  ],
+  "tests": 610,
+  "skipped": 3
+}

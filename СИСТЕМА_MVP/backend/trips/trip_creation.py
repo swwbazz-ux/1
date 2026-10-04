@@ -165,7 +165,7 @@ def create_loaded_waiting_unload_trip(
         excavator_id=excavator_id,
         truck=locked_truck,
         excavator_operator=excavator_operator,
-        driver=driver,
+        driver=driver or (control_shift.employee if control_shift else None),
         loading_shift=loading_shift,
         rock_type=rock_type,
         dump_point=dump_point,
@@ -173,6 +173,10 @@ def create_loaded_waiting_unload_trip(
         actual_dump_point=None if manual_loading_enabled() else dump_point,
         driver_participation_recorded=participation_recorded,
         driver_control_shift=control_shift,
+        is_carryover=bool(
+            control_shift and control_shift.closed_at
+            and load_occurred_at <= control_shift.closed_at <= received_at
+        ),
         planned_volume_m3=planned_volume_m3,
         volume_m3=volume_m3,
         tonnage=tonnage,

@@ -265,7 +265,7 @@ test("an excavator trip unloaded offline is counted once, before and after the s
     assert.equal(timelineRows(online).length, 1);
 });
 
-test("the journal of a shift closed more than 7 days ago is dropped", () => {
+test("a closed shift older than 7 days keeps its source events until snapshot coverage is proven", () => {
     const storage = memoryStorage();
     sequence = 0;
     const load = manualLoad(5, 1, "ККД");
@@ -276,8 +276,92 @@ test("the journal of a shift closed more than 7 days ago is dropped", () => {
     const later = controller(storage, 60 + 8 * 24 * 60);
     later.observe([event("driver.downtime.started", 60 + 8 * 24 * 60, {local_shift_id: "driver-shift-open:new", payload: {reason_id: 12}})]);
     const shifts = later.journal(ACCESS).shifts;
-    assert.equal(shifts.length, 1);
-    assert.ok(shifts[0].aliases.includes("l:driver-shift-open:new"));
+    assert.equal(shifts.length, 2);
+    assert.ok(shifts.some(shift => shift.aliases.includes("l:driver-shift-open:new")));
+    assert.equal(shifts.find(shift => shift.aliases.includes("l:" + LOCAL_SHIFT)).log.length, 2);
+});
+
+test("confirmed archive reconstructs a complete manifest after restart without any server snapshot", () => {
+    const storage = memoryStorage();
+    const s = offlineScenario();
+    const archived = s.all.map((source, index) => ({...source, state: "confirmed", server_result: {
+        status: "accepted", server_ids: {shift_id: 31, trip_id: index === 1 || index === 2 ? 501 : index === 3 || index === 4 ? 502 : undefined},
+    }}));
+    const restored = controller(storage, 70);
+    restored.observe(archived);
+    const view = shellFor({shiftId: "31"});
+    restored.render(view.shell);
+    assert.equal(view.panel.dataset.driverReportTripTotal, "2");
+    assert.deepEqual(timelineIds(view, "trip"), [501, 502]);
+    assert.equal(restored.journal(ACCESS).shifts.length, 1);
+    assert.equal(restored.journal(ACCESS).shifts[0].log.length, s.all.length);
+    assert.ok(restored.journal(ACCESS).shifts[0].log.every(entry => entry.status === "confirmed"));
+});
+
+test("quota never evicts an older unconfirmed shift and the full projection can be rebuilt from the durable journal", () => {
+    const storage = memoryStorage();
+    const source = manualLoad(5, 1, "ККД");
+    const c = controller(storage, 10);
+    c.observe([source]);
+    const original = storage.getItem("driver-manifest-local-v1:" + ACCESS);
+    const setItem = storage.setItem;
+    storage.setItem = () => { throw new Error("quota"); };
+    const newer = event("driver.trip.unloaded", 20, {trip_id: 99, local_shift_id: "driver-shift-open:new"});
+    assert.equal(c.observe([newer]), false);
+    assert.equal(c.storageFailed(ACCESS), true);
+    assert.equal(storage.getItem("driver-manifest-local-v1:" + ACCESS), original);
+    assert.equal(c.journal(ACCESS).shifts.length, 2);
+    storage.setItem = setItem;
+    const restarted = controller(storage, 25);
+    restarted.observe([source, newer]);
+    assert.equal(restarted.journal(ACCESS).shifts.length, 2);
+});
+
+test("a corrupted projection is backed up exactly and rebuilt from durable facts without inventing a server snapshot", () => {
+    const storage = memoryStorage();
+    const key = "driver-manifest-local-v1:" + ACCESS;
+    storage.setItem(key, "{broken source");
+    const c = controller(storage, 10);
+    const source = manualLoad(5, 1, "ККД");
+    assert.equal(c.observe([source]), true);
+    assert.equal(storage.getItem(key + ":corrupt-backup"), "{broken source");
+    const restored = controller(storage, 15);
+    assert.equal(restored.journal(ACCESS).shifts[0].log[0].event_id, source.event_id);
+    assert.equal(restored.journal(ACCESS).shifts[0].server, null);
+    assert.equal(restored.journal(ACCESS).recovery.source, "available_local_events");
+});
+
+test("failed corruption backup preserves raw data and events until storage recovers", () => {
+    const storage = memoryStorage();
+    const key = "driver-manifest-local-v1:" + ACCESS;
+    storage.setItem(key, "{broken source");
+    const setItem = storage.setItem;
+    storage.setItem = (name, value) => {
+        if (name.indexOf(":corrupt-backup") >= 0) throw new Error("quota backup");
+        return setItem(name, value);
+    };
+    const source = manualLoad(5, 1, "ККД");
+    const c = controller(storage, 10);
+    assert.equal(c.observe([source]), false);
+    assert.equal(storage.getItem(key), "{broken source");
+    assert.equal(c.journal(ACCESS).shifts[0].log[0].event_id, source.event_id);
+    assert.equal(c.storageFailed(ACCESS), true);
+    storage.setItem = setItem;
+    assert.equal(c.observe([source]), true);
+    assert.equal(storage.getItem(key + ":corrupt-backup"), "{broken source");
+    assert.equal(c.storageFailed(ACCESS), false);
+    assert.equal(controller(storage, 15).journal(ACCESS).shifts[0].log[0].event_id, source.event_id);
+});
+
+test("recovery never overwrites an earlier corrupt backup", () => {
+    const storage = memoryStorage();
+    const key = "driver-manifest-local-v1:" + ACCESS;
+    storage.setItem(key, "{latest broken");
+    storage.setItem(key + ":corrupt-backup", "{older broken");
+    const c = controller(storage, 10);
+    c.observe([manualLoad(5, 1, "ККД")]);
+    assert.equal(storage.getItem(key + ":corrupt-backup"), "{older broken");
+    assert.equal(storage.getItem(key + ":corrupt-backup:1"), "{latest broken");
 });
 
 test("a carryover trip loaded in the previous shift and unloaded in this one keeps its labels", () => {

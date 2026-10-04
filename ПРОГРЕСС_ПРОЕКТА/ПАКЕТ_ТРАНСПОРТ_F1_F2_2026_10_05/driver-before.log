@@ -1,0 +1,65 @@
+✔ the assignment has no screen row of its own: no banner, no grid row (1.516734ms)
+✔ a tap on «ПРИНЯТЬ» moves the phone to the new excavator at once and queues the acceptance (4.161496ms)
+✔ after a restart the queued tap keeps the phone on the new excavator (1.852229ms)
+✖ assignment confirmation waits for durable enqueue; repeated tap shares the same event (2.737592ms)
+✖ quota leaves assignment and manual-trip context unchanged and permits a later retry (1.824407ms)
+✔ a fresh server screen after the answer drops the phone override; a queued tap keeps it (2.168235ms)
+✔ at the deadline the phone switches the same way, without an event (2.475357ms)
+✔ the deadline no longer reloads the whole screen (0.582627ms)
+✔ manual trips and the point drum follow the excavator the driver accepted on the phone (1.441661ms)
+✔ after the tap the countdown stops and the note goes out, for a release too (2.144979ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 8
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.830038
+
+✖ failing tests:
+
+test at static/js/tests/driver-assignment-corner.test.js:171:1
+✖ assignment confirmation waits for durable enqueue; repeated tap shares the same event (2.737592ms)
+  AssertionError [ERR_ASSERTION]: Expected "actual" to be reference-equal to "expected":
+  + actual - expected
+  
+    Promise {
+      <pending>,
+  +   Symbol(async_id_symbol): 159,
+  +   Symbol(trigger_async_id_symbol): 158
+  -   Symbol(async_id_symbol): 161,
+  -   Symbol(trigger_async_id_symbol): 160
+    }
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/driver-assignment-corner.test.js:177:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Promise],
+    expected: [Promise],
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/driver-assignment-corner.test.js:193:1
+✖ quota leaves assignment and manual-trip context unchanged and permits a later retry (1.824407ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'true'
+  - undefined
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/driver-assignment-corner.test.js:197:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'true',
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

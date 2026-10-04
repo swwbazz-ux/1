@@ -1208,7 +1208,7 @@ class DriverShiftTimelineTests(TestCase):
         self.assertFalse(timeline.usable_for_formula_review)
         self.assertIn('unexplained_time', timeline.quality_flags)
 
-    def test_passport_credits_carryover_output_only_to_unloading_shift(self):
+    def test_legacy_carryover_without_loading_driver_context_keeps_existing_credit(self):
         replacement_driver = Employee.objects.create(
             full_name='Сменный водитель паспорта',
             work_category=Employee.WorkCategory.DRIVER,
@@ -1264,6 +1264,62 @@ class DriverShiftTimelineTests(TestCase):
         )
         self.assertEqual(first.productive_seconds, 30 * 60)
         self.assertEqual(second.productive_seconds, 30 * 60)
+
+    def _assert_proven_carryover_credits_loading_driver(self, *, late_receipt):
+        replacement_driver = Employee.objects.create(
+            full_name='Сменщик доказанного переходящего груза',
+            work_category=Employee.WorkCategory.DRIVER,
+        )
+        replacement_shift = EmployeeShift.objects.create(
+            employee=replacement_driver, shift_type=ShiftType.NIGHT,
+            workplace_code='driver', equipment=self.truck,
+            opened_at=self.end, closed_at=self.end + timedelta(hours=12),
+        )
+        loaded_at = self.end - timedelta(minutes=30)
+        completed_at = self.end + timedelta(minutes=30)
+        trip = Trip.objects.create(
+            excavator=self.excavator, truck=self.truck,
+            excavator_operator=self.excavator_operator,
+            driver=self.driver, driver_participation_recorded=True,
+            driver_control_shift=self.shift, loading_shift=self.loading_shift,
+            unloading_shift=replacement_shift, rock_type=self.rock,
+            dump_point=self.dump_point, volume_m3=Decimal('55.50'),
+            tonnage=Decimal('120.25'), transport_distance_km=Decimal('2.00'),
+            status=TripStatus.COMPLETED, is_carryover=True,
+            loaded_at=loaded_at, completed_at=completed_at,
+        )
+        Trip.objects.filter(pk=trip.pk).update(
+            created_at=(completed_at + timedelta(hours=2)) if late_receipt else loaded_at,
+        )
+        first, second = build_driver_shift_timelines(
+            (self.shift, replacement_shift), as_of=replacement_shift.closed_at,
+        )
+        first_only = build_driver_shift_timeline(self.shift, as_of=replacement_shift.closed_at)
+        second_only = build_driver_shift_timeline(replacement_shift, as_of=replacement_shift.closed_at)
+        for original in (first, first_only):
+            production = original.passport['production']
+            self.assertEqual(production['completed_trip_count'], 1)
+            self.assertEqual(production['volume_m3']['value'], Decimal('55.50'))
+            self.assertEqual(production['tonnage_t']['value'], Decimal('120.25'))
+            self.assertEqual(production['m3_km']['value'], Decimal('111.00'))
+            self.assertEqual(production['t_km']['value'], Decimal('240.50'))
+            self.assertEqual(production['output_attribution']['driver_control_shift_trip_count'], 1)
+            self.assertEqual(original.productive_seconds, 30 * 60)
+        for successor in (second, second_only):
+            production = successor.passport['production']
+            self.assertEqual(production['completed_trip_count'], 0)
+            self.assertEqual(production['volume_m3']['known_value'], Decimal('0'))
+            self.assertEqual(production['tonnage_t']['known_value'], Decimal('0'))
+            self.assertEqual(successor.productive_seconds, 30 * 60)
+        before_unload = build_driver_shift_timeline(self.shift, as_of=self.end)
+        self.assertEqual(before_unload.passport['production']['completed_trip_count'], 0)
+        self.assertEqual(Trip.objects.count(), 1)
+
+    def test_proven_carryover_output_stays_with_loading_driver_once(self):
+        self._assert_proven_carryover_credits_loading_driver(late_receipt=False)
+
+    def test_late_received_carryover_is_credited_in_original_shift_alone(self):
+        self._assert_proven_carryover_credits_loading_driver(late_receipt=True)
 
     def test_legacy_output_at_shared_boundary_is_credited_once(self):
         next_shift = EmployeeShift.objects.create(

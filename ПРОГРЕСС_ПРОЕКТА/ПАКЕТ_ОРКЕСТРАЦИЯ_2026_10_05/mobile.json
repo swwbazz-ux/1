@@ -1,0 +1,33 @@
+{
+  "name": "mobile",
+  "returncode": 0,
+  "duration_seconds": 0.8,
+  "command": [
+    "npm",
+    "test"
+  ],
+  "cwd": "/workspace/scratch/d31f8c8018c5/mechanics-integration/mobile/capacitor-shell",
+  "complete": true,
+  "summary": [
+    "✔ startup splash is profile-driven and waits for stable rendered layout (6.823252ms)",
+    "✔ release signing uses only an external credentials file (0.357138ms)",
+    "✔ native updater is profile-driven, deferrable and verifies the APK (0.748517ms)",
+    "✔ profiles without the sideload updater remove package-installer permission (0.429867ms)",
+    "✔ shift signals are deterministic, original PCM assets with reviewed fingerprints (309.075572ms)",
+    "✔ shift sound provenance documentation records the reviewed fingerprints (0.402286ms)",
+    "ℹ tests 44",
+    "ℹ suites 0",
+    "ℹ pass 44",
+    "ℹ fail 0",
+    "ℹ cancelled 0",
+    "ℹ skipped 0",
+    "ℹ todo 0",
+    "ℹ duration_ms 475.993298"
+  ],
+  "node": {
+    "tests": 44,
+    "pass": 44,
+    "fail": 0,
+    "skipped": 0
+  }
+}
