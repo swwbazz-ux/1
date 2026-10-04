@@ -938,13 +938,13 @@ class ReleaseProtocolTests(unittest.TestCase):
             access_log = root / "nginx-access.log"
             site = root / "sse-qa.conf"
             error_log.write_text(
-                '2026/10/04 17:09:52 [error] 7#7: *41 limiting connections by zone "sse_qa_per_ip", '
+                '2026/10/04 17:09:31 [error] 7#7: *41 limiting connections by zone "sse_qa_per_ip", '
                 'client: 203.0.113.9, server: qa.invalid, request: "GET /driver/?private=1 HTTP/2.0", '
                 'host: "qa.invalid"\n',
                 encoding="utf-8",
             )
             access_log.write_text(
-                '203.0.113.9 - basic-user [04/Oct/2026:17:09:52 +1000] '
+                '203.0.113.9 - basic-user [04/Oct/2026:17:09:31 +1000] '
                 '"GET /driver/?private=1 HTTP/2.0" 503 190 "https://secret.invalid/" "SensitiveBrowser"\n',
                 encoding="utf-8",
             )
@@ -987,7 +987,7 @@ class ReleaseProtocolTests(unittest.TestCase):
                 self.assertNotIn(forbidden, serialized)
             self.assertEqual(
                 report["limit_events"][0]["sanitized_log_line"],
-                '2026-10-04T07:09:52Z limiting connections by zone "sse_qa_per_ip" '
+                '2026-10-04T07:09:31Z limiting connections by zone "sse_qa_per_ip" '
                 'request="GET /driver/ HTTP/2.0" class=ordinary_http',
             )
             receiver.validate_diagnostic_report(
@@ -1127,6 +1127,10 @@ class ReleaseProtocolTests(unittest.TestCase):
             "nginx_error_offset_minutes": 600,
             "target_access_seen": True,
             "limit_event_count": 1,
+            "limit_ordinary_count": 1,
+            "limit_static_count": 0,
+            "limit_realtime_count": 0,
+            "driver_limit_count": 1,
         })
         public = json.dumps(envelope["public_evidence"], ensure_ascii=False)
         for forbidden in ("client:", "user-agent", "cookie", "authorization", "?", "https://"):
