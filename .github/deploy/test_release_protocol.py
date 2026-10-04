@@ -544,6 +544,76 @@ class ReleaseProtocolTests(unittest.TestCase):
     def infra_metadata(self):
         return {"operation": "infra_capacity_v1"}
 
+    def sse_qa_http_503_metadata(self):
+        return {"operation": "sse_qa_http_503_v1"}
+
+    def sse_qa_http_503_report(self):
+        access_line = (
+            "2026-10-04T07:09:52Z GET /driver/ HTTP/2.0 "
+            "status=503 bytes=190 class=ordinary_http"
+        )
+        limit_line = (
+            '2026-10-04T07:09:52Z limiting connections by zone "sse_qa_per_ip" '
+            'request="GET /driver/ HTTP/2.0" class=ordinary_http'
+        )
+        source = {
+            "status": "ok", "bytes_examined": 100,
+            "lines_examined": 1, "tail_truncated": False,
+        }
+        return {
+            "schema": 1,
+            "operation": "sse_qa_http_503_v1",
+            "request": {
+                "from_utc": receiver.SSE_QA_HTTP_503_WINDOW_FROM,
+                "to_utc": receiver.SSE_QA_HTTP_503_WINDOW_TO,
+                "target_around_utc": receiver.SSE_QA_HTTP_503_TARGET_AROUND,
+                "method": "GET", "route": "/driver/", "status": 503,
+            },
+            "sources": {
+                "nginx_error": dict(source),
+                "nginx_access": dict(source),
+                "nginx_site": dict(source),
+                "wsgi_journal": {
+                    "status": "not_required", "queried": False,
+                    "bytes_examined": 0, "lines_examined": 0, "tail_truncated": False,
+                },
+            },
+            "configuration": {
+                "status": "confirmed", "per_ip_zone": "sse_qa_per_ip",
+                "per_ip_limit": 8, "per_ip_placement": "server",
+                "ordinary_http_per_ip_limit": 8, "static_per_ip_limit": 8,
+                "realtime_per_ip_limit": None, "realtime_total_limit": 2,
+                "static_access_logged": False,
+            },
+            "observed_access_counts": {
+                "ordinary_http": 1, "static": 0, "realtime_stream": 0,
+            },
+            "observed_status_counts": {"503": 1},
+            "target_access": [{
+                "timestamp_utc": "2026-10-04T07:09:52Z", "method": "GET",
+                "route": "/driver/", "protocol": "HTTP/2.0", "status": 503,
+                "response_bytes": 190, "classification": "ordinary_http",
+                "sanitized_log_line": access_line,
+            }],
+            "limit_events": [{
+                "timestamp_utc": "2026-10-04T07:09:52Z", "method": "GET",
+                "route": "/driver/", "protocol": "HTTP/2.0",
+                "zone": "sse_qa_per_ip", "classification": "ordinary_http",
+                "sanitized_log_line": limit_line,
+            }],
+            "upstream_events": [],
+            "wsgi_events": [],
+            "finding": {
+                "cause": "limit_conn_sse_qa_per_ip",
+                "target_limit_correlated": True,
+                "target_access_seen": True,
+                "zone": "sse_qa_per_ip",
+                "wsgi_journal_queried": False,
+            },
+            "summary": {"row_count": 2, "truncated": False},
+            "limitations": receiver.SSE_QA_HTTP_503_LIMITATIONS,
+        }
+
     def infra_report(self):
         service = {
             "load_state": "loaded",
@@ -815,6 +885,210 @@ class ReleaseProtocolTests(unittest.TestCase):
                         builder.load_diagnostic_metadata(event_path)
             with self.assertRaises(receiver.ReleaseError):
                 receiver.validate_diagnostic_metadata({"operation": "infra_capacity_v1", "command": "id"})
+
+    def test_sse_qa_http_503_metadata_has_no_free_form_parameters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            inputs = {
+                "diagnostic_operation": "sse_qa_http_503_v1",
+                "diagnostic_equipment": "",
+                "diagnostic_from_utc": "",
+                "diagnostic_to_utc": "",
+                "diagnostic_max_rows": "500",
+            }
+            event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+            metadata = self.sse_qa_http_503_metadata()
+            self.assertEqual(builder.load_diagnostic_metadata(event_path), metadata)
+            self.assertEqual(receiver.validate_diagnostic_metadata(metadata), metadata)
+            receiver.validate_mode_contract({
+                "schema": 2,
+                "mode": "diagnose",
+                "commit": "a" * 40,
+                "files": [],
+                "metadata": metadata,
+            }, {})
+            for field, value in (
+                ("diagnostic_equipment", "driver"),
+                ("diagnostic_from_utc", "2026-10-04T07:09:30Z"),
+                ("diagnostic_to_utc", "2026-10-04T07:10:05Z"),
+                ("diagnostic_max_rows", "100"),
+            ):
+                with self.subTest(field=field):
+                    candidate = dict(inputs)
+                    candidate[field] = value
+                    event_path.write_text(json.dumps({"inputs": candidate}), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        builder.load_diagnostic_metadata(event_path)
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_metadata({
+                    "operation": "sse_qa_http_503_v1",
+                    "file": "/srv/sse-qa/log/nginx-error.log",
+                })
+
+    def test_sse_qa_http_503_collects_correlated_limit_without_raw_client_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            error_log = root / "nginx-error.log"
+            access_log = root / "nginx-access.log"
+            site = root / "sse-qa.conf"
+            error_log.write_text(
+                '2026/10/04 07:09:52 [error] 7#7: *41 limiting connections by zone "sse_qa_per_ip", '
+                'client: 203.0.113.9, server: qa.invalid, request: "GET /driver/?private=1 HTTP/2.0", '
+                'host: "qa.invalid"\n',
+                encoding="utf-8",
+            )
+            access_log.write_text(
+                '203.0.113.9 - basic-user [04/Oct/2026:07:09:52 +0000] '
+                '"GET /driver/?private=1 HTTP/2.0" 503 190 "https://secret.invalid/" "SensitiveBrowser"\n',
+                encoding="utf-8",
+            )
+            site.write_text(
+                (ROOT / ".github" / "deploy" / "fixtures" / "sse_qa_c2_nginx.conf.template").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ERROR_LOG", error_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ACCESS_LOG", access_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_NGINX_SITE", site),
+                mock.patch.object(receiver, "_sse_qa_http_503_journal") as journal,
+            ):
+                report = receiver.collect_sse_qa_http_503_report()
+            journal.assert_not_called()
+            self.assertEqual(report["finding"], {
+                "cause": "limit_conn_sse_qa_per_ip",
+                "target_limit_correlated": True,
+                "target_access_seen": True,
+                "zone": "sse_qa_per_ip",
+                "wsgi_journal_queried": False,
+            })
+            self.assertEqual(report["configuration"]["status"], "confirmed")
+            self.assertEqual(report["configuration"]["ordinary_http_per_ip_limit"], 8)
+            self.assertEqual(report["configuration"]["static_per_ip_limit"], 8)
+            self.assertIsNone(report["configuration"]["realtime_per_ip_limit"])
+            self.assertEqual(report["configuration"]["realtime_total_limit"], 2)
+            self.assertFalse(report["configuration"]["static_access_logged"])
+            serialized = json.dumps(report, ensure_ascii=False)
+            for forbidden in (
+                "203.0.113.9", "basic-user", "private=1", "secret.invalid", "SensitiveBrowser",
+            ):
+                self.assertNotIn(forbidden, serialized)
+            self.assertEqual(
+                report["limit_events"][0]["sanitized_log_line"],
+                '2026-10-04T07:09:52Z limiting connections by zone "sse_qa_per_ip" '
+                'request="GET /driver/ HTTP/2.0" class=ordinary_http',
+            )
+            receiver.validate_diagnostic_report(
+                json.dumps(report, ensure_ascii=False).encode("utf-8"),
+                self.sse_qa_http_503_metadata(),
+            )
+
+    def test_sse_qa_http_503_uses_only_fixed_wsgi_journal_when_limit_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            error_log = root / "nginx-error.log"
+            access_log = root / "nginx-access.log"
+            site = root / "sse-qa.conf"
+            error_log.write_text(
+                '2026/10/04 07:09:52 [error] 7#7: *41 upstream timed out while reading response header, '
+                'client: 203.0.113.9, server: qa.invalid, request: "GET /driver/ HTTP/2.0", '
+                'upstream: "http://127.0.0.1:18080/driver/"\n',
+                encoding="utf-8",
+            )
+            access_log.write_text(
+                '203.0.113.9 - basic-user [04/Oct/2026:07:09:52 +0000] '
+                '"GET /driver/ HTTP/2.0" 503 190 "-" "SensitiveBrowser"\n',
+                encoding="utf-8",
+            )
+            site.write_text(
+                (ROOT / ".github" / "deploy" / "fixtures" / "sse_qa_c2_nginx.conf.template").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.CompletedProcess(
+                args=[], returncode=0,
+                stdout=(
+                    b"2026-10-04T07:09:52.100000+00:00 host gunicorn[7]: ERROR "
+                    b"https://private.invalid/?token=secret\n"
+                ),
+                stderr=b"",
+            )
+            with (
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ERROR_LOG", error_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ACCESS_LOG", access_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_NGINX_SITE", site),
+                mock.patch.object(receiver.subprocess, "run", return_value=completed) as execute,
+            ):
+                report = receiver.collect_sse_qa_http_503_report()
+            command = execute.call_args.args[0]
+            self.assertEqual(command, [
+                "/usr/bin/journalctl", "--unit", "sse-qa-wsgi.service",
+                "--since", "2026-10-04 07:09:30 UTC",
+                "--until", "2026-10-04 07:10:05 UTC",
+                "--output=short-iso-precise", "--no-pager", "--lines=200",
+            ])
+            self.assertNotIn("shell", execute.call_args.kwargs)
+            self.assertEqual(execute.call_args.kwargs["stdin"], subprocess.DEVNULL)
+            self.assertTrue(execute.call_args.kwargs["start_new_session"])
+            self.assertEqual(report["finding"]["cause"], "upstream_or_application")
+            self.assertTrue(report["finding"]["wsgi_journal_queried"])
+            self.assertEqual(report["wsgi_events"][0]["classification"], "error")
+            serialized = json.dumps(report, ensure_ascii=False)
+            self.assertNotIn("private.invalid", serialized)
+            self.assertNotIn("secret", serialized)
+            receiver.validate_diagnostic_report(
+                json.dumps(report, ensure_ascii=False).encode("utf-8"),
+                self.sse_qa_http_503_metadata(),
+            )
+
+    def test_sse_qa_http_503_run_diagnostic_has_no_free_form_subprocess(self):
+        expected = {
+            "schema": 1,
+            "operation": "sse_qa_http_503_v1",
+            "summary": {"row_count": 0, "truncated": False},
+        }
+        with (
+            mock.patch.object(receiver, "collect_sse_qa_http_503_report", return_value=expected) as collect,
+            mock.patch.object(receiver.subprocess, "run") as execute,
+        ):
+            result = receiver.run_diagnostic({"metadata": self.sse_qa_http_503_metadata()})
+        self.assertIs(result, expected)
+        collect.assert_called_once_with()
+        execute.assert_not_called()
+
+    def test_sse_qa_http_503_envelope_exposes_only_strict_sanitized_evidence(self):
+        report = self.sse_qa_http_503_report()
+        receiver.validate_diagnostic_report(
+            json.dumps(report).encode("utf-8"), self.sse_qa_http_503_metadata(),
+        )
+        ciphertext = b"\x30\x82server-encrypted-sse-qa-http-503"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=ciphertext, stderr=b"")
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            openssl = runtime / "openssl"
+            openssl.write_bytes(b"test executable placeholder")
+            with (
+                mock.patch.object(receiver, "DIAGNOSTIC_OPENSSL", openssl),
+                mock.patch.object(receiver, "DIAGNOSTIC_CERT_TEMP_DIR", runtime),
+                mock.patch.object(receiver.subprocess, "run", return_value=completed),
+            ):
+                envelope = receiver.encrypt_diagnostic_report(report)
+        self.assertEqual(envelope["public_evidence"], {
+            "cause": "limit_conn_sse_qa_per_ip",
+            "zone": "sse_qa_per_ip",
+            "target_access": report["target_access"][0]["sanitized_log_line"],
+            "limit_event": report["limit_events"][0]["sanitized_log_line"],
+            "configuration_status": "confirmed",
+            "ordinary_http_per_ip_limit": 8,
+            "static_per_ip_limit": 8,
+            "realtime_per_ip_limit": None,
+            "realtime_total_limit": 2,
+        })
+        public = json.dumps(envelope["public_evidence"], ensure_ascii=False)
+        for forbidden in ("client:", "user-agent", "cookie", "authorization", "?", "https://"):
+            self.assertNotIn(forbidden, public.casefold())
 
     def test_infra_capacity_package_contains_only_the_fixed_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1250,7 +1524,15 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn("production-diagnostic-envelope.json", workflow)
         self.assertIn("production_diagnostic_ciphertext", workflow)
         self.assertIn("- infra_capacity_v1", workflow)
-        self.assertIn('{"trip_accounting_incident_v1", "infra_capacity_v1"}', workflow)
+        self.assertIn("- sse_qa_http_503_v1", workflow)
+        self.assertIn(
+            '{"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1"}',
+            workflow,
+        )
+        self.assertIn('expected_keys.add("public_evidence")', workflow)
+        self.assertIn("SSE_QA_HTTP_503_FINDING", workflow)
+        self.assertIn("SSE_QA_HTTP_503_ACCESS", workflow)
+        self.assertIn("SSE_QA_HTTP_503_LIMIT", workflow)
         self.assertNotIn("openssl cms -encrypt", workflow)
         self.assertIn("production-diagnostic-${{ github.run_id }}.cms", workflow)
         certificate = (ROOT / ".github" / "deploy" / "diagnostic-recipient-cert.pem").read_text(encoding="ascii")

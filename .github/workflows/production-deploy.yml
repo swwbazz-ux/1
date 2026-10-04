@@ -71,6 +71,7 @@ on:
           - none
           - trip_accounting_incident_v1
           - infra_capacity_v1
+          - sse_qa_http_503_v1
       diagnostic_equipment:
         description: "Exact or canonical garage number for diagnose mode"
         required: false
@@ -540,13 +541,15 @@ jobs:
               "schema", "kind", "operation", "summary", "ciphertext_format",
               "recipient_fingerprint", "ciphertext_sha256", "ciphertext_base64",
           }
+          operation = report.get("operation")
+          if operation == "sse_qa_http_503_v1":
+              expected_keys.add("public_evidence")
           if set(report) != expected_keys or report.get("schema") != 1:
               raise SystemExit("invalid diagnostic envelope contract")
           if report.get("kind") != "production_diagnostic_ciphertext":
               raise SystemExit("invalid diagnostic envelope kind")
-          operation = report.get("operation")
           summary = report.get("summary") or {}
-          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1"}:
+          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1"}:
               raise SystemExit("unexpected diagnostic operation")
           if report.get("ciphertext_format") != "CMS-DER":
               raise SystemExit("unexpected diagnostic ciphertext format")
@@ -565,10 +568,82 @@ jobs:
           actual_sha = hashlib.sha256(ciphertext).hexdigest()
           if not ciphertext or len(ciphertext) > 589824 or actual_sha != report.get("ciphertext_sha256"):
               raise SystemExit("invalid diagnostic ciphertext")
+          if operation == "sse_qa_http_503_v1":
+              import re
+              evidence = report.get("public_evidence")
+              evidence_keys = {
+                  "cause", "zone", "target_access", "limit_event", "configuration_status",
+                  "ordinary_http_per_ip_limit", "static_per_ip_limit",
+                  "realtime_per_ip_limit", "realtime_total_limit",
+              }
+              if not isinstance(evidence, dict) or set(evidence) != evidence_keys:
+                  raise SystemExit("invalid SSE QA HTTP 503 public evidence")
+              if evidence["cause"] not in {
+                  "limit_conn_sse_qa_per_ip", "upstream_or_application",
+                  "other_nginx_or_access_layer", "not_established",
+              }:
+                  raise SystemExit("invalid SSE QA HTTP 503 public cause")
+              if evidence["zone"] not in {None, "sse_qa_per_ip"}:
+                  raise SystemExit("invalid SSE QA HTTP 503 public zone")
+              if evidence["configuration_status"] not in {"confirmed", "mismatch", "unavailable"}:
+                  raise SystemExit("invalid SSE QA HTTP 503 public configuration")
+              target_pattern = re.compile(
+                  r"2026-10-04T07:09:(?:4[7-9]|5[0-7])Z GET /driver/ HTTP/[0-9.]{3,8} "
+                  r"status=503 bytes=(?:unknown|[0-9]+) class=ordinary_http\Z"
+              )
+              limit_pattern = re.compile(
+                  r'2026-10-04T07:09:(?:4[7-9]|5[0-7])Z limiting connections by zone '
+                  r'"sse_qa_per_ip" request="GET /driver/ HTTP/[0-9.]{3,8}" class=ordinary_http\Z'
+              )
+              if evidence["target_access"] is not None and (
+                  not isinstance(evidence["target_access"], str)
+                  or not target_pattern.fullmatch(evidence["target_access"])
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 503 public access line")
+              if evidence["limit_event"] is not None and (
+                  not isinstance(evidence["limit_event"], str)
+                  or not limit_pattern.fullmatch(evidence["limit_event"])
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 503 public limit line")
+              for field in (
+                  "ordinary_http_per_ip_limit", "static_per_ip_limit",
+                  "realtime_per_ip_limit", "realtime_total_limit",
+              ):
+                  value = evidence[field]
+                  if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4096):
+                      raise SystemExit("invalid SSE QA HTTP 503 public limit")
+              if evidence["cause"] == "limit_conn_sse_qa_per_ip" and (
+                  evidence["zone"] != "sse_qa_per_ip" or evidence["limit_event"] is None
+              ):
+                  raise SystemExit("inconsistent SSE QA HTTP 503 public finding")
+              if evidence["configuration_status"] == "confirmed" and (
+                  evidence["ordinary_http_per_ip_limit"] != 8
+                  or evidence["static_per_ip_limit"] != 8
+                  or evidence["realtime_per_ip_limit"] is not None
+                  or evidence["realtime_total_limit"] != 2
+              ):
+                  raise SystemExit("inconsistent SSE QA HTTP 503 public scope")
           with open(sys.argv[2], "wb") as output:
               output.write(ciphertext)
           print(f"DIAGNOSTIC_CAPTURED operation={operation} rows={rows} truncated={str(truncated).lower()}")
           print(f"DIAGNOSTIC_CIPHERTEXT_SHA256={actual_sha}")
+          if operation == "sse_qa_http_503_v1":
+              print(
+                  "SSE_QA_HTTP_503_FINDING "
+                  f"cause={evidence['cause']} zone={evidence['zone'] or 'none'}"
+              )
+              print(
+                  "SSE_QA_HTTP_503_SCOPE "
+                  f"status={evidence['configuration_status']} "
+                  f"ordinary={evidence['ordinary_http_per_ip_limit']} "
+                  f"static={evidence['static_per_ip_limit']} "
+                  f"realtime_per_ip={evidence['realtime_per_ip_limit']} "
+                  f"realtime_total={evidence['realtime_total_limit']}"
+              )
+              if evidence["target_access"] is not None:
+                  print(f"SSE_QA_HTTP_503_ACCESS {evidence['target_access']}")
+              if evidence["limit_event"] is not None:
+                  print(f"SSE_QA_HTTP_503_LIMIT {evidence['limit_event']}")
           PY
             report_code=$?
             set -e
