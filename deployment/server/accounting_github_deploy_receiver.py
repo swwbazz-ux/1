@@ -161,7 +161,7 @@ SSE_QA_HTTP_503_WINDOW_TO = "2026-10-04T07:10:05Z"
 SSE_QA_HTTP_503_TARGET_AROUND = "2026-10-04T07:09:52Z"
 SSE_QA_HTTP_503_ERROR_LOG = Path("/srv/sse-qa/log/nginx-error.log")
 SSE_QA_HTTP_503_ACCESS_LOG = Path("/srv/sse-qa/log/nginx-access.log")
-SSE_QA_HTTP_503_NGINX_SITE = Path("/etc/nginx/sites-enabled/sse-qa.conf")
+SSE_QA_HTTP_503_NGINX_SITE = Path("/etc/sse-qa/nginx.conf")
 SSE_QA_HTTP_503_WSGI_UNIT = "sse-qa-wsgi.service"
 SSE_QA_HTTP_503_MAX_LOG_BYTES = 16 * 1024 * 1024
 SSE_QA_HTTP_503_MAX_CONFIG_BYTES = 128 * 1024
@@ -1687,7 +1687,7 @@ def validate_infra_capacity_report(raw: bytes, metadata: dict[str, object]) -> d
 SSE_QA_HTTP_503_LIMITATIONS = [
     "fixed_historical_window_only",
     "bounded_log_tail_may_omit_rotated_records",
-    "nginx_error_timestamps_interpreted_as_utc",
+    "nginx_error_timezone_derived_from_single_access_log_offset",
     "static_access_log_disabled",
     "no_raw_client_addresses_credentials_cookies_or_user_agents",
     "wsgi_journal_queried_only_when_target_limit_not_confirmed",
@@ -1732,7 +1732,7 @@ def _sse_qa_http_503_iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _sse_qa_http_503_access_time(value: str) -> datetime | None:
+def _sse_qa_http_503_access_parts(value: str) -> tuple[datetime, int] | None:
     match = re.fullmatch(
         r"([0-9]{2})/([A-Z][a-z]{2})/([0-9]{4}):([0-9]{2}):([0-9]{2}):([0-9]{2}) ([+-])([0-9]{2})([0-9]{2})",
         value,
@@ -1741,7 +1741,7 @@ def _sse_qa_http_503_access_time(value: str) -> datetime | None:
         return None
     offset_minutes = (int(match.group(8)) * 60 + int(match.group(9))) * (-1 if match.group(7) == "-" else 1)
     try:
-        return datetime(
+        moment = datetime(
             int(match.group(3)),
             SSE_QA_HTTP_503_MONTHS[match.group(2)],
             int(match.group(1)),
@@ -1750,13 +1750,23 @@ def _sse_qa_http_503_access_time(value: str) -> datetime | None:
             int(match.group(6)),
             tzinfo=timezone(timedelta(minutes=offset_minutes)),
         ).astimezone(timezone.utc)
+        return moment, offset_minutes
     except ValueError:
         return None
 
 
-def _sse_qa_http_503_error_time(value: str) -> datetime | None:
+def _sse_qa_http_503_access_time(value: str) -> datetime | None:
+    parts = _sse_qa_http_503_access_parts(value)
+    return parts[0] if parts else None
+
+
+def _sse_qa_http_503_error_time(value: str, offset_minutes: int | None) -> datetime | None:
+    if offset_minutes is None:
+        return None
     try:
-        return datetime.strptime(value, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return datetime.strptime(value, "%Y/%m/%d %H:%M:%S").replace(
+            tzinfo=timezone(timedelta(minutes=offset_minutes))
+        ).astimezone(timezone.utc)
     except ValueError:
         return None
 
@@ -1776,17 +1786,28 @@ def _sse_qa_http_503_classification(route: str) -> str:
     return "ordinary_http"
 
 
-def _sse_qa_http_503_read_tail(path: Path, maximum: int) -> tuple[dict[str, object], list[str]]:
+def _sse_qa_http_503_read_tail(
+    path: Path,
+    maximum: int,
+) -> tuple[dict[str, object], list[str]]:
     base = {
         "status": "unavailable",
+        "reason": "read_error",
         "bytes_examined": 0,
         "lines_examined": 0,
         "tail_truncated": False,
     }
     try:
         metadata = path.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-            return base, []
+    except FileNotFoundError:
+        return {**base, "reason": "missing"}, []
+    except OSError:
+        return base, []
+    if stat.S_ISLNK(metadata.st_mode):
+        return {**base, "reason": "symlink_target_rejected"}, []
+    if not stat.S_ISREG(metadata.st_mode):
+        return {**base, "reason": "type_rejected"}, []
+    try:
         size = metadata.st_size
         offset = max(0, size - maximum)
         with path.open("rb") as handle:
@@ -1802,6 +1823,7 @@ def _sse_qa_http_503_read_tail(path: Path, maximum: int) -> tuple[dict[str, obje
     lines = data.decode("utf-8", errors="ignore").splitlines()
     return {
         "status": "ok",
+        "reason": "ok_regular",
         "bytes_examined": len(data),
         "lines_examined": len(lines),
         "tail_truncated": bool(offset),
@@ -1900,6 +1922,7 @@ def _sse_qa_http_503_journal() -> tuple[dict[str, object], list[dict[str, object
     ]
     base = {
         "status": "unavailable",
+        "reason": "command_error",
         "queried": True,
         "bytes_examined": 0,
         "lines_examined": 0,
@@ -1926,6 +1949,7 @@ def _sse_qa_http_503_journal() -> tuple[dict[str, object], list[dict[str, object
     lines = raw.decode("utf-8", errors="ignore").splitlines()
     source = {
         "status": "ok" if result.returncode == 0 else "error",
+        "reason": "ok_command" if result.returncode == 0 else "command_error",
         "queried": True,
         "bytes_examined": len(raw),
         "lines_examined": len(lines),
@@ -1976,7 +2000,8 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
         SSE_QA_HTTP_503_ACCESS_LOG, SSE_QA_HTTP_503_MAX_LOG_BYTES,
     )
     config_source, config_lines = _sse_qa_http_503_read_tail(
-        SSE_QA_HTTP_503_NGINX_SITE, SSE_QA_HTTP_503_MAX_CONFIG_BYTES,
+        SSE_QA_HTTP_503_NGINX_SITE,
+        SSE_QA_HTTP_503_MAX_CONFIG_BYTES,
     )
     configuration = _sse_qa_http_503_config_scope(config_lines, config_source)
     target_access: list[dict[str, object]] = []
@@ -1984,6 +2009,7 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
     upstream_events: list[dict[str, object]] = []
     observed_counts = {"ordinary_http": 0, "static": 0, "realtime_stream": 0}
     status_counts: dict[str, int] = {}
+    access_offsets: set[int] = set()
     truncated = any(
         bool(source["tail_truncated"])
         for source in (error_source, access_source, config_source)
@@ -1997,6 +2023,9 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
         route = _sse_qa_http_503_route(match.group("target"))
         if moment is None or route is None or not window_from <= moment <= window_to:
             continue
+        access_parts = _sse_qa_http_503_access_parts(match.group("time"))
+        if access_parts is not None:
+            access_offsets.add(access_parts[1])
         classification = _sse_qa_http_503_classification(route)
         observed_counts[classification] += 1
         status = int(match.group("status"))
@@ -2027,6 +2056,14 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
                 truncated = True
                 break
 
+    error_offset_minutes = next(iter(access_offsets)) if len(access_offsets) == 1 else None
+    time_basis = {
+        "access_offsets_minutes": sorted(access_offsets),
+        "nginx_error_offset_minutes": error_offset_minutes,
+        "nginx_error_timezone_source": (
+            "single_access_log_offset" if error_offset_minutes is not None else "unavailable"
+        ),
+    }
     upstream_markers = (
         ("upstream timed out", "upstream_timeout"),
         ("upstream prematurely closed", "upstream_closed"),
@@ -2037,7 +2074,7 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
         time_match = SSE_QA_HTTP_503_ERROR_TIME_RE.match(line)
         if not time_match:
             continue
-        moment = _sse_qa_http_503_error_time(time_match.group("time"))
+        moment = _sse_qa_http_503_error_time(time_match.group("time"), error_offset_minutes)
         if moment is None or not window_from <= moment <= window_to:
             continue
         request_match = SSE_QA_HTTP_503_ERROR_REQUEST_RE.search(line)
@@ -2093,6 +2130,7 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
     else:
         journal_source = {
             "status": "not_required",
+            "reason": "not_queried",
             "queried": False,
             "bytes_examined": 0,
             "lines_examined": 0,
@@ -2132,6 +2170,7 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
             "wsgi_journal": journal_source,
         },
         "configuration": configuration,
+        "time_basis": time_basis,
         "observed_access_counts": observed_counts,
         "observed_status_counts": status_counts,
         "target_access": target_access,
@@ -2164,7 +2203,7 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ReleaseError("diagnostic report is not valid JSON") from exc
     expected_top = {
-        "schema", "operation", "request", "sources", "configuration",
+        "schema", "operation", "request", "sources", "configuration", "time_basis",
         "observed_access_counts", "observed_status_counts", "target_access",
         "limit_events", "upstream_events", "wsgi_events", "finding", "summary",
         "limitations",
@@ -2189,7 +2228,7 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
         "nginx_error", "nginx_access", "nginx_site", "wsgi_journal",
     }:
         raise ReleaseError("SSE QA HTTP 503 sources contract mismatch")
-    source_keys = {"status", "bytes_examined", "lines_examined", "tail_truncated"}
+    source_keys = {"status", "reason", "bytes_examined", "lines_examined", "tail_truncated"}
     for name, source in sources.items():
         expected = source_keys | ({"queried"} if name == "wsgi_journal" else set())
         if not isinstance(source, dict) or set(source) != expected:
@@ -2199,6 +2238,22 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
         }
         if source["status"] not in allowed_status:
             raise ReleaseError("SSE QA HTTP 503 source status is invalid")
+        if name == "wsgi_journal":
+            expected_reason = {
+                "ok": "ok_command",
+                "error": "command_error",
+                "unavailable": "command_error",
+                "not_required": "not_queried",
+            }[source["status"]]
+            if source["reason"] != expected_reason:
+                raise ReleaseError("SSE QA HTTP 503 journal reason is invalid")
+        elif source["status"] == "ok":
+            if source["reason"] != "ok_regular":
+                raise ReleaseError("SSE QA HTTP 503 readable source reason is invalid")
+        elif source["reason"] not in {
+            "missing", "type_rejected", "symlink_target_rejected", "read_error",
+        }:
+            raise ReleaseError("SSE QA HTTP 503 unavailable source reason is invalid")
         for field in ("bytes_examined", "lines_examined"):
             if type(source[field]) is not int or source[field] < 0:
                 raise ReleaseError("SSE QA HTTP 503 source count is invalid")
@@ -2219,6 +2274,7 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
     if journal_source["status"] == "not_required":
         if journal_source != {
             "status": "not_required",
+            "reason": "not_queried",
             "queried": False,
             "bytes_examined": 0,
             "lines_examined": 0,
@@ -2266,6 +2322,27 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
         "static_access_logged": False,
     }:
         raise ReleaseError("SSE QA HTTP 503 confirmed configuration is inconsistent")
+
+    time_basis = report.get("time_basis")
+    if not isinstance(time_basis, dict) or set(time_basis) != {
+        "access_offsets_minutes", "nginx_error_offset_minutes", "nginx_error_timezone_source",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 time basis contract mismatch")
+    offsets = time_basis["access_offsets_minutes"]
+    if (
+        not isinstance(offsets, list)
+        or len(offsets) > 4
+        or any(type(value) is not int or not -840 <= value <= 840 for value in offsets)
+        or offsets != sorted(set(offsets))
+    ):
+        raise ReleaseError("SSE QA HTTP 503 access offsets are invalid")
+    error_offset = time_basis["nginx_error_offset_minutes"]
+    source = time_basis["nginx_error_timezone_source"]
+    if len(offsets) == 1:
+        if error_offset != offsets[0] or source != "single_access_log_offset":
+            raise ReleaseError("SSE QA HTTP 503 error timezone is inconsistent")
+    elif error_offset is not None or source != "unavailable":
+        raise ReleaseError("SSE QA HTTP 503 unavailable error timezone is inconsistent")
 
     observed = report.get("observed_access_counts")
     if not isinstance(observed, dict) or set(observed) != {
@@ -2525,6 +2602,7 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
             None,
         )
         configuration = report["configuration"]
+        sources = report["sources"]
         envelope["public_evidence"] = {
             "cause": report["finding"]["cause"],
             "zone": report["finding"]["zone"],
@@ -2535,6 +2613,25 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
             "static_per_ip_limit": configuration["static_per_ip_limit"],
             "realtime_per_ip_limit": configuration["realtime_per_ip_limit"],
             "realtime_total_limit": configuration["realtime_total_limit"],
+            "nginx_error_source": (
+                f'{sources["nginx_error"]["status"]}:{sources["nginx_error"]["reason"]}'
+            ),
+            "nginx_error_lines": sources["nginx_error"]["lines_examined"],
+            "nginx_access_source": (
+                f'{sources["nginx_access"]["status"]}:{sources["nginx_access"]["reason"]}'
+            ),
+            "nginx_access_lines": sources["nginx_access"]["lines_examined"],
+            "nginx_site_source": (
+                f'{sources["nginx_site"]["status"]}:{sources["nginx_site"]["reason"]}'
+            ),
+            "nginx_site_lines": sources["nginx_site"]["lines_examined"],
+            "wsgi_source": (
+                f'{sources["wsgi_journal"]["status"]}:{sources["wsgi_journal"]["reason"]}'
+            ),
+            "wsgi_lines": sources["wsgi_journal"]["lines_examined"],
+            "nginx_error_offset_minutes": report["time_basis"]["nginx_error_offset_minutes"],
+            "target_access_seen": report["finding"]["target_access_seen"],
+            "limit_event_count": len(report["limit_events"]),
         }
     return envelope
 

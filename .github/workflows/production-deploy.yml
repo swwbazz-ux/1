@@ -575,6 +575,11 @@ jobs:
                   "cause", "zone", "target_access", "limit_event", "configuration_status",
                   "ordinary_http_per_ip_limit", "static_per_ip_limit",
                   "realtime_per_ip_limit", "realtime_total_limit",
+                  "nginx_error_source", "nginx_error_lines",
+                  "nginx_access_source", "nginx_access_lines",
+                  "nginx_site_source", "nginx_site_lines",
+                  "wsgi_source", "wsgi_lines", "nginx_error_offset_minutes",
+                  "target_access_seen", "limit_event_count",
               }
               if not isinstance(evidence, dict) or set(evidence) != evidence_keys:
                   raise SystemExit("invalid SSE QA HTTP 503 public evidence")
@@ -612,6 +617,39 @@ jobs:
                   value = evidence[field]
                   if value is not None and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4096):
                       raise SystemExit("invalid SSE QA HTTP 503 public limit")
+              file_source_pattern = re.compile(
+                  r"(?:ok:ok_regular|"
+                  r"unavailable:(?:missing|type_rejected|symlink_target_rejected|read_error))\Z"
+              )
+              for field in ("nginx_error_source", "nginx_access_source", "nginx_site_source"):
+                  if not isinstance(evidence[field], str) or not file_source_pattern.fullmatch(evidence[field]):
+                      raise SystemExit("invalid SSE QA HTTP 503 public file source")
+              wsgi_source_pattern = re.compile(
+                  r"(?:ok:ok_command|error:command_error|unavailable:command_error|not_required:not_queried)\Z"
+              )
+              if not isinstance(evidence["wsgi_source"], str) or not wsgi_source_pattern.fullmatch(
+                  evidence["wsgi_source"]
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 503 public WSGI source")
+              count_limits = {
+                  "nginx_error_lines": 16 * 1024 * 1024,
+                  "nginx_access_lines": 16 * 1024 * 1024,
+                  "nginx_site_lines": 128 * 1024,
+                  "wsgi_lines": 256 * 1024,
+                  "limit_event_count": 240,
+              }
+              for field, maximum in count_limits.items():
+                  value = evidence[field]
+                  if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+                      raise SystemExit("invalid SSE QA HTTP 503 public count")
+              if evidence["nginx_error_offset_minutes"] is not None and (
+                  isinstance(evidence["nginx_error_offset_minutes"], bool)
+                  or not isinstance(evidence["nginx_error_offset_minutes"], int)
+                  or not -840 <= evidence["nginx_error_offset_minutes"] <= 840
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 503 public timezone")
+              if not isinstance(evidence["target_access_seen"], bool):
+                  raise SystemExit("invalid SSE QA HTTP 503 public target flag")
               if evidence["cause"] == "limit_conn_sse_qa_per_ip" and (
                   evidence["zone"] != "sse_qa_per_ip" or evidence["limit_event"] is None
               ):
@@ -639,6 +677,19 @@ jobs:
                   f"static={evidence['static_per_ip_limit']} "
                   f"realtime_per_ip={evidence['realtime_per_ip_limit']} "
                   f"realtime_total={evidence['realtime_total_limit']}"
+              )
+              print(
+                  "SSE_QA_HTTP_503_SOURCES "
+                  f"error={evidence['nginx_error_source']}:{evidence['nginx_error_lines']} "
+                  f"access={evidence['nginx_access_source']}:{evidence['nginx_access_lines']} "
+                  f"site={evidence['nginx_site_source']}:{evidence['nginx_site_lines']} "
+                  f"wsgi={evidence['wsgi_source']}:{evidence['wsgi_lines']}"
+              )
+              print(
+                  "SSE_QA_HTTP_503_CORRELATION "
+                  f"error_offset_minutes={evidence['nginx_error_offset_minutes']} "
+                  f"target_access_seen={str(evidence['target_access_seen']).lower()} "
+                  f"limit_events={evidence['limit_event_count']}"
               )
               if evidence["target_access"] is not None:
                   print(f"SSE_QA_HTTP_503_ACCESS {evidence['target_access']}")
