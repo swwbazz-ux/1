@@ -18,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "deployment/server/sse_qa_https_ctl.py"
 INSTALLER_SOURCE = ROOT / "deployment/server/sse_qa_ctl.py"
 PINNED_C2_NGINX = ROOT / ".github/deploy/fixtures/sse_qa_c2_nginx.conf.template"
+PINNED_C2_NGINX_LIMIT_FIX = (
+    ROOT / ".github/deploy/fixtures/sse_qa_c2_nginx_limit_fix.conf.template"
+)
 SPEC = importlib.util.spec_from_file_location("sse_qa_https_ctl", SOURCE)
 assert SPEC and SPEC.loader
 ctl = importlib.util.module_from_spec(SPEC)
@@ -80,15 +83,18 @@ class HttpsControlTests(unittest.TestCase):
     def _digest(self, logical: Path) -> str:
         return hashlib.sha256(self._path(logical).read_bytes()).hexdigest()
 
+    def _write_ownership_state(self, state: dict) -> None:
+        self._path(ctl.OWNERSHIP_PATH).write_bytes(
+            (json.dumps(state, sort_keys=True) + "\n").encode("utf-8")
+        )
+
     def _replace_nginx_and_refresh_ownership(self, nginx_text: str) -> None:
         self._path(ctl.QA_NGINX_CONFIG).write_text(nginx_text, encoding="utf-8")
         state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
         state["files"][ctl.QA_NGINX_CONFIG.as_posix()] = self._digest(
             ctl.QA_NGINX_CONFIG
         )
-        self._path(ctl.OWNERSHIP_PATH).write_text(
-            json.dumps(state, sort_keys=True) + "\n", encoding="utf-8",
-        )
+        self._write_ownership_state(state)
 
     def _seed_https_runtime(self) -> None:
         hook = self._write(ctl.HOOK_CONTROLLER, ctl.hook_controller_bytes())
@@ -101,7 +107,21 @@ class HttpsControlTests(unittest.TestCase):
             "webroot": ctl.ACME_WEBROOT.as_posix(),
             "webroot_marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
         }
-        self._path(ctl.OWNERSHIP_PATH).write_text(json.dumps(state, sort_keys=True) + "\n")
+        self._write_ownership_state(state)
+
+    def _mark_seeded_hook_as_legacy(self) -> mock._patch:
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["https_preparation"]["hook_sha256"] = ctl.LEGACY_RENEWAL_HOOK_SHA256
+        self._write_ownership_state(state)
+        real_digest_path = ctl.digest_path
+        hook = self._path(ctl.HOOK_CONTROLLER)
+
+        def fixed_digest(path: Path) -> str:
+            if path == hook:
+                return ctl.LEGACY_RENEWAL_HOOK_SHA256
+            return real_digest_path(path)
+
+        return mock.patch.object(ctl, "digest_path", side_effect=fixed_digest)
 
     def _renewal_text(
         self, *, hook_key: str = "renew_hook", hook_value: str | None = None,
@@ -170,6 +190,23 @@ class HttpsControlTests(unittest.TestCase):
         )
         self.assertEqual(hashlib.sha256(payload).hexdigest(), ctl.C2_NGINX_TEMPLATE_SHA256)
         self.assertEqual(payload.decode("utf-8"), ctl.C2_NGINX_TEMPLATE)
+
+    def test_pinned_nginx_limit_fix_fixture_matches_exact_accepted_template(self) -> None:
+        payload = PINNED_C2_NGINX_LIMIT_FIX.read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(len(payload), 1912)
+        self.assertEqual(
+            hashlib.sha256(payload).hexdigest(),
+            ctl.C2_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+        )
+        self.assertEqual(payload.decode("utf-8"), ctl.C2_NGINX_LIMIT_FIX_TEMPLATE)
+        self.assertNotIn(
+            "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+            ctl.C2_NGINX_LIMIT_FIX_TEMPLATE,
+        )
+        self.assertIn(
+            "    location / {\n        limit_conn sse_qa_per_ip 8;\n",
+            ctl.C2_NGINX_LIMIT_FIX_TEMPLATE,
+        )
 
     def test_load_disabled_installation_accepts_real_c2_render(self) -> None:
         state, allow_cidr = ctl.load_disabled_installation(self.root)
@@ -395,6 +432,38 @@ class HttpsControlTests(unittest.TestCase):
             summary = ctl.inspect(self.root)
         self.assertIn("certificate=valid", summary)
         self.assertIn("renewal_hook=valid", summary)
+
+    def test_legacy_renewal_hook_requires_matching_exact_ownership_hash(self) -> None:
+        self._seed_https_runtime()
+        legacy_patch = self._mark_seeded_hook_as_legacy()
+        with legacy_patch:
+            self.assertEqual(ctl.renewal_hook_state(self.root), "valid")
+
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["https_preparation"]["hook_sha256"] = "0" * 64
+        self._write_ownership_state(state)
+        legacy_patch = mock.patch.object(
+            ctl,
+            "digest_path",
+            side_effect=lambda path: (
+                ctl.LEGACY_RENEWAL_HOOK_SHA256
+                if path == self._path(ctl.HOOK_CONTROLLER)
+                else hashlib.sha256(path.read_bytes()).hexdigest()
+            ),
+        )
+        with legacy_patch, self.assertRaisesRegex(ctl.QaHttpsError, "accepted controller"):
+            ctl.renewal_hook_state(self.root)
+
+    def test_arbitrary_renewal_hook_is_rejected_even_when_ownership_matches(self) -> None:
+        self._seed_https_runtime()
+        hook = self._path(ctl.HOOK_CONTROLLER)
+        hook.write_bytes(b"#!/bin/sh\nexit 0\n")
+        arbitrary = hashlib.sha256(hook.read_bytes()).hexdigest()
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["https_preparation"]["hook_sha256"] = arbitrary
+        self._write_ownership_state(state)
+        with self.assertRaisesRegex(ctl.QaHttpsError, "accepted controller"):
+            ctl.renewal_hook_state(self.root)
 
     def test_certificate_state_accepts_certbot_renew_hook_format(self) -> None:
         self._seed_certificate_fixture(self._renewal_text(hook_key="renew_hook"))
@@ -908,11 +977,298 @@ class HttpsControlTests(unittest.TestCase):
         app.write_text("SSE_PILOT_ENABLED=true\n")
         state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text())
         state["files"][ctl.APP_ENV.as_posix()] = hashlib.sha256(app.read_bytes()).hexdigest()
-        self._path(ctl.OWNERSHIP_PATH).write_text(json.dumps(state) + "\n")
+        self._write_ownership_state(state)
         with mock.patch.object(ctl, "run") as called:
             with self.assertRaisesRegex(ctl.QaHttpsError, "kill switch"):
                 ctl.prepare(self.root, "92.50.235.178/32")
             called.assert_not_called()
+
+    def _limit_fix_ready(self):
+        self._seed_https_runtime()
+        self._seed_certificate_fixture(self._renewal_text())
+        legacy_patch = self._mark_seeded_hook_as_legacy()
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["seed_fix"] = {
+            "schema": "SSE_QA_SEED_FIX_V1",
+            "version": "C2 + seed-fix",
+        }
+        self._write_ownership_state(state)
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        nginx.chmod(0o640)
+        ownership.chmod(0o600)
+        return legacy_patch
+
+    def _unrelated_snapshot(self) -> dict[str, tuple[str, int]]:
+        excluded = {
+            self._path(ctl.QA_NGINX_CONFIG),
+            self._path(ctl.OWNERSHIP_PATH),
+        }
+        return {
+            path.relative_to(self.root).as_posix(): (
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+                path.stat(follow_symlinks=False).st_mtime_ns,
+            )
+            for path in self.root.rglob("*")
+            if path.is_file() and path not in excluded
+        }
+
+    def test_nginx_limit_fix_apply_reapply_and_rollback_are_exact(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        hook = self._path(ctl.HOOK_CONTROLLER)
+        nginx_before = nginx.read_bytes()
+        ownership_before = ownership.read_bytes()
+        nginx_identity = ctl._managed_file_identity(nginx)
+        ownership_identity = ctl._managed_file_identity(ownership)
+        state_before = json.loads(ownership_before)
+        https_before = json.loads(json.dumps(state_before["https_preparation"]))
+        hook_before = (hook.read_bytes(), hook.stat().st_mtime_ns)
+        unrelated_before = self._unrelated_snapshot()
+
+        with legacy_patch, mock.patch.object(ctl, "certificate_state", return_value="valid"):
+            applied = ctl.change_nginx_limit_fix(self.root, "apply")
+            nginx_applied = nginx.read_bytes()
+            ownership_applied = ownership.read_bytes()
+            reapplied = ctl.change_nginx_limit_fix(self.root, "apply")
+            self.assertEqual(nginx.read_bytes(), nginx_applied)
+            self.assertEqual(ownership.read_bytes(), ownership_applied)
+            rolled_back = ctl.change_nginx_limit_fix(self.root, "rollback")
+            rollback_noop = ctl.change_nginx_limit_fix(self.root, "rollback")
+
+        self.assertIn("action=apply result=changed", applied)
+        self.assertIn("action=apply result=unchanged", reapplied)
+        self.assertIn("action=rollback result=changed", rolled_back)
+        self.assertIn("action=rollback result=unchanged", rollback_noop)
+        expected_fixed = ctl._render_c2_nginx_limit_fix("198.51.100.42/32").encode()
+        self.assertEqual(nginx_applied, expected_fixed)
+        applied_state = json.loads(ownership_applied)
+        self.assertEqual(
+            applied_state["files"][ctl.QA_NGINX_CONFIG.as_posix()],
+            hashlib.sha256(expected_fixed).hexdigest(),
+        )
+        self.assertEqual(
+            applied_state["nginx_limit_fix"]["renewal_hook_sha256"],
+            ctl.LEGACY_RENEWAL_HOOK_SHA256,
+        )
+        self.assertEqual(applied_state["seed_fix"], state_before["seed_fix"])
+        self.assertEqual(applied_state["https_preparation"], https_before)
+        self.assertEqual(nginx.read_bytes(), nginx_before)
+        self.assertEqual(ownership.read_bytes(), ownership_before)
+        self.assertEqual(ctl._managed_file_identity(nginx), nginx_identity)
+        self.assertEqual(ctl._managed_file_identity(ownership), ownership_identity)
+        self.assertEqual((hook.read_bytes(), hook.stat().st_mtime_ns), hook_before)
+        self.assertEqual(self._unrelated_snapshot(), unrelated_before)
+
+    def test_nginx_limit_fix_failure_after_nginx_write_restores_exact_pair(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        before = (
+            nginx.read_bytes(), ownership.read_bytes(),
+            ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+        )
+        real_replace = ctl._atomic_replace_preserving
+        calls = 0
+
+        def fail_ownership_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ctl.QaHttpsError("forced ownership publish failure")
+            return real_replace(*args, **kwargs)
+
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(
+            ctl, "_atomic_replace_preserving", side_effect=fail_ownership_once,
+        ), self.assertRaisesRegex(ctl.QaHttpsError, "forced ownership publish failure"):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+        self.assertEqual(
+            (
+                nginx.read_bytes(), ownership.read_bytes(),
+                ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+            ),
+            before,
+        )
+
+    def test_nginx_limit_fix_final_gate_failure_restores_exact_pair(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        before = (
+            nginx.read_bytes(), ownership.read_bytes(),
+            ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+        )
+        real_load = ctl.load_disabled_installation
+        calls = 0
+
+        def fail_second(root):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ctl.QaHttpsError("forced final ownership gate")
+            return real_load(root)
+
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(
+            ctl, "load_disabled_installation", side_effect=fail_second,
+        ), self.assertRaisesRegex(ctl.QaHttpsError, "forced final ownership gate"):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+        self.assertEqual(
+            (
+                nginx.read_bytes(), ownership.read_bytes(),
+                ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+            ),
+            before,
+        )
+
+    def test_nginx_limit_fix_sigterm_during_publish_rolls_back_exact_pair(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        before = (nginx.read_bytes(), ownership.read_bytes())
+        real_replace = ctl._atomic_replace_preserving
+        calls = 0
+
+        def cancel_after_nginx(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ctl.QaHttpsCancelled("synthetic SIGTERM")
+            return real_replace(*args, **kwargs)
+
+        cancel_state = {"cancel_requested": True, "rollback_started": False}
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(
+            ctl, "_atomic_replace_preserving", side_effect=cancel_after_nginx,
+        ), self.assertRaises(ctl.QaHttpsCancelled):
+            ctl.change_nginx_limit_fix(self.root, "apply", cancel_state)
+        self.assertTrue(cancel_state["rollback_started"])
+        self.assertEqual((nginx.read_bytes(), ownership.read_bytes()), before)
+
+    def test_nginx_limit_fix_sigterm_after_pair_publish_rolls_back_exact_pair(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        before = (
+            nginx.read_bytes(), ownership.read_bytes(),
+            ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+        )
+        real_load = ctl.load_disabled_installation
+        calls = 0
+
+        def cancel_final_gate(root):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ctl.QaHttpsCancelled("synthetic SIGTERM after publish")
+            return real_load(root)
+
+        cancel_state = {"cancel_requested": True, "rollback_started": False}
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(
+            ctl, "load_disabled_installation", side_effect=cancel_final_gate,
+        ), self.assertRaises(ctl.QaHttpsCancelled):
+            ctl.change_nginx_limit_fix(self.root, "apply", cancel_state)
+        self.assertTrue(cancel_state["rollback_started"])
+        self.assertEqual(
+            (
+                nginx.read_bytes(), ownership.read_bytes(),
+                ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+            ),
+            before,
+        )
+
+    def test_nginx_limit_fix_rejects_mixed_state_before_writes(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["nginx_limit_fix"] = {"schema": ctl.NGINX_LIMIT_FIX_SCHEMA}
+        self._write_ownership_state(state)
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(ctl, "_atomic_replace_preserving") as publish:
+            with self.assertRaisesRegex(ctl.QaHttpsError, "ownership residue"):
+                ctl.change_nginx_limit_fix(self.root, "apply")
+        publish.assert_not_called()
+
+    def test_nginx_limit_fix_rejects_enabled_app_and_site_before_writes(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        app = self._path(ctl.APP_ENV)
+        app.write_text("SSE_PILOT_ENABLED=true\n", encoding="utf-8")
+        state = json.loads(self._path(ctl.OWNERSHIP_PATH).read_text(encoding="utf-8"))
+        state["files"][ctl.APP_ENV.as_posix()] = hashlib.sha256(app.read_bytes()).hexdigest()
+        self._write_ownership_state(state)
+        with legacy_patch, mock.patch.object(ctl, "_atomic_replace_preserving") as publish:
+            with self.assertRaisesRegex(ctl.QaHttpsError, "kill switch"):
+                ctl.change_nginx_limit_fix(self.root, "apply")
+        publish.assert_not_called()
+
+        app.write_text("SSE_PILOT_ENABLED=false\n", encoding="utf-8")
+        state["files"][ctl.APP_ENV.as_posix()] = hashlib.sha256(app.read_bytes()).hexdigest()
+        self._write_ownership_state(state)
+        site = self._path(ctl.QA_NGINX_SITE)
+        site.parent.mkdir(parents=True, exist_ok=True)
+        site.write_text("synthetic enabled site\n", encoding="utf-8")
+        legacy_patch = self._mark_seeded_hook_as_legacy()
+        with legacy_patch, mock.patch.object(ctl, "_atomic_replace_preserving") as publish:
+            with self.assertRaisesRegex(ctl.QaHttpsError, "must remain disabled"):
+                ctl.change_nginx_limit_fix(self.root, "apply")
+        publish.assert_not_called()
+
+    def test_nginx_limit_fix_rejects_active_service_before_writes(self) -> None:
+        self._limit_fix_ready()
+
+        def state(unit: str, name: str) -> str:
+            self.assertEqual(name, "ActiveState")
+            return "active" if unit == "sse-qa-wsgi.service" else "inactive"
+
+        with mock.patch.object(ctl, "REAL_ROOT", self.root), mock.patch.object(
+            ctl, "systemctl_property", side_effect=state,
+        ), mock.patch.object(ctl, "_atomic_replace_preserving") as publish:
+            with self.assertRaisesRegex(ctl.QaHttpsError, "must remain inactive"):
+                ctl.load_disabled_installation(self.root)
+        publish.assert_not_called()
+
+    def test_explicit_rollback_works_after_enable_failure_cleanup_without_retry(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        legacy_nginx = nginx.read_bytes()
+        legacy_ownership = ownership.read_bytes()
+        with legacy_patch, mock.patch.object(ctl, "certificate_state", return_value="valid"):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+
+            # Model the deterministic ownership mutations performed by base
+            # enable followed by its failure cleanup/disable.  No second enable
+            # is invoked before the explicit fixed rollback.
+            app = self._path(ctl.APP_ENV)
+            enabled = app.read_text(encoding="utf-8").replace(
+                "SSE_PILOT_ENABLED=false", "SSE_PILOT_ENABLED=true",
+            )
+            app.write_bytes(enabled.encode("utf-8"))
+            state = json.loads(ownership.read_text(encoding="utf-8"))
+            state["files"][ctl.APP_ENV.as_posix()] = hashlib.sha256(app.read_bytes()).hexdigest()
+            state["phase"] = "complete_enabled"
+            ownership.write_bytes(
+                (json.dumps(state, sort_keys=True) + "\n").encode("utf-8")
+            )
+            disabled = enabled.replace("SSE_PILOT_ENABLED=true", "SSE_PILOT_ENABLED=false")
+            app.write_bytes(disabled.encode("utf-8"))
+            state["files"][ctl.APP_ENV.as_posix()] = hashlib.sha256(app.read_bytes()).hexdigest()
+            state["phase"] = "complete_disabled"
+            ownership.write_bytes(
+                (json.dumps(state, sort_keys=True) + "\n").encode("utf-8")
+            )
+
+            summary = ctl.change_nginx_limit_fix(self.root, "rollback")
+        self.assertIn("action=rollback result=changed", summary)
+        self.assertEqual(nginx.read_bytes(), legacy_nginx)
+        self.assertEqual(ownership.read_bytes(), legacy_ownership)
 
     def test_source_has_no_shell_or_caller_supplied_paths(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")

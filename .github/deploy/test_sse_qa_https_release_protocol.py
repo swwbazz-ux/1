@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import io
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -32,6 +34,10 @@ def load_receiver():
 
 
 receiver = load_receiver()
+BASE_SPEC = importlib.util.spec_from_file_location("base_sse_qa_ctl", BASE_CONTROLLER)
+assert BASE_SPEC and BASE_SPEC.loader
+base_controller = importlib.util.module_from_spec(BASE_SPEC)
+BASE_SPEC.loader.exec_module(base_controller)
 
 
 def checkout_digest(path: Path) -> str:
@@ -52,6 +58,14 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             archive.writestr(
                 "scripts/sse_qa_https_ctl.py",
                 HTTPS_CONTROLLER.read_bytes().replace(b"\r\n", b"\n"),
+            )
+        self.base_qa_zip = self.root / "qa-base.zip"
+        with zipfile.ZipFile(
+            self.base_qa_zip, "w", compression=zipfile.ZIP_DEFLATED,
+        ) as archive:
+            archive.writestr(
+                "scripts/sse_qa_ctl.py",
+                BASE_CONTROLLER.read_bytes().replace(b"\r\n", b"\n"),
             )
 
     def tearDown(self) -> None:
@@ -110,6 +124,8 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
         for mode, cidr in (
             ("inspect_sse_qa_https", None),
             ("prepare_sse_qa_https", "92.50.235.178/32"),
+            ("apply_sse_qa_nginx_limit", None),
+            ("rollback_sse_qa_nginx_limit", None),
         ):
             with self.subTest(mode=mode):
                 built = self.build(
@@ -152,9 +168,33 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 self.assertIn("canonical IPv4 /32", built.stdout)
 
     def test_non_prepare_modes_reject_cidr(self) -> None:
-        built = self.build("inspect_sse_qa_https", cidr="92.50.235.178/32")
-        self.assertNotEqual(built.returncode, 0)
-        self.assertIn("accepted only by prepare_sse_qa_https", built.stdout)
+        for mode in (
+            "inspect_sse_qa_https",
+            "apply_sse_qa_nginx_limit",
+            "rollback_sse_qa_nginx_limit",
+        ):
+            with self.subTest(mode=mode):
+                built = self.build(mode, cidr="92.50.235.178/32")
+                self.assertNotEqual(built.returncode, 0)
+                self.assertIn("accepts no additional inputs" if "nginx_limit" in mode else "accepted only by prepare_sse_qa_https", built.stdout)
+
+    def test_nginx_limit_fix_packages_have_only_exact_https_controller(self) -> None:
+        for mode in (
+            "apply_sse_qa_nginx_limit",
+            "rollback_sse_qa_nginx_limit",
+        ):
+            with self.subTest(mode=mode):
+                built = self.build(mode)
+                self.assertEqual(built.returncode, 0, built.stdout)
+                manifest, payload = receiver.load_release(self.package(mode))
+                self.assertEqual(manifest["metadata"], receiver.SSE_QA_HTTPS_METADATA)
+                self.assertEqual(set(payload), {receiver.SSE_QA_PACKAGE_PAYLOAD})
+                with zipfile.ZipFile(
+                    io.BytesIO(payload[receiver.SSE_QA_PACKAGE_PAYLOAD])
+                ) as archive:
+                    self.assertEqual(
+                        archive.namelist(), ["scripts/sse_qa_https_ctl.py"]
+                    )
 
     def test_receiver_rejects_arbitrary_https_payload_target(self) -> None:
         with self.assertRaisesRegex(receiver.ReleaseError, "not allowed"):
@@ -221,6 +261,323 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
         self.assertIn("--allow-cidr-stdin", seen)
         self.assertNotIn("--bundle-root", seen)
         self.assertEqual(inputs, [cidr])
+
+    def test_receiver_scopes_fixed_apply_and_rollback_without_input(self) -> None:
+        payload = {receiver.SSE_QA_PACKAGE_PAYLOAD: self.qa_zip.read_bytes()}
+        for mode, operation, action in (
+            ("apply_sse_qa_nginx_limit", "apply-nginx-limit-fix", "apply"),
+            ("rollback_sse_qa_nginx_limit", "rollback-nginx-limit-fix", "rollback"),
+        ):
+            seen: list[str] = []
+            inputs: list[str | None] = []
+
+            class Process:
+                returncode = 0
+
+                def __init__(self, command, **_kwargs):
+                    seen.extend(command)
+
+                def communicate(self, input=None, timeout=None):
+                    inputs.append(input)
+                    return (
+                        "SSE_QA_NGINX_LIMIT_FIX_OK "
+                        f"action={action} result=changed qa=disabled "
+                        f"nginx_variant={'applied' if action == 'apply' else 'legacy'} "
+                        "ordinary_per_ip=8 "
+                        f"static_per_ip={'none' if action == 'apply' else '8'} "
+                        "realtime_total=2 ownership=updated renewal_hook=preserved\n",
+                        None,
+                    )
+
+            with self.subTest(mode=mode), mock.patch.object(
+                receiver, "_verify_sse_qa_seed_fix_overlay"
+            ) as seed_gate, mock.patch.object(
+                receiver.subprocess, "Popen", Process,
+            ), mock.patch.object(
+                receiver, "_receiver_unified_cgroup",
+                return_value="/system.slice/receiver.service",
+            ), mock.patch.object(
+                receiver, "_sse_qa_slice_cgroup",
+                return_value=receiver.SSE_QA_SLICE_CGROUP,
+            ):
+                summary = receiver.run_sse_qa(mode, payload)
+            seed_gate.assert_called_once_with()
+            self.assertIn("--unit=sse-qa-nginx-limit-fix.service", seen)
+            self.assertIn(operation, seen)
+            self.assertNotIn("--bundle-root", seen)
+            self.assertEqual(inputs, [None])
+            self.assertIn(f"action={action}", summary)
+
+    def test_receiver_rejects_wrong_nginx_limit_fix_summary_action(self) -> None:
+        payload = {receiver.SSE_QA_PACKAGE_PAYLOAD: self.qa_zip.read_bytes()}
+
+        class Process:
+            returncode = 0
+
+            def __init__(self, _command, **_kwargs):
+                pass
+
+            def communicate(self, input=None, timeout=None):
+                return (
+                    "SSE_QA_NGINX_LIMIT_FIX_OK action=rollback result=changed "
+                    "qa=disabled nginx_variant=legacy ordinary_per_ip=8 "
+                    "static_per_ip=8 realtime_total=2 ownership=updated "
+                    "renewal_hook=preserved\n",
+                    None,
+                )
+
+        with mock.patch.object(
+            receiver, "_verify_sse_qa_seed_fix_overlay",
+        ), mock.patch.object(
+            receiver.subprocess, "Popen", Process,
+        ), mock.patch.object(
+            receiver, "_receiver_unified_cgroup",
+            return_value="/system.slice/receiver.service",
+        ), mock.patch.object(
+            receiver, "_sse_qa_slice_cgroup",
+            return_value=receiver.SSE_QA_SLICE_CGROUP,
+        ), self.assertRaisesRegex(receiver.ReleaseError, "no fixed summary"):
+            receiver.run_sse_qa("apply_sse_qa_nginx_limit", payload)
+
+    def _seed_receiver_nginx_gate(self, *, enabled: bool = False):
+        gate_root = self.root / ("gate-enabled" if enabled else "gate-disabled")
+        ownership_path = gate_root / "OWNERSHIP.json"
+        nginx_path = gate_root / "nginx.conf"
+        hook_path = gate_root / "sse-qa-https-hook"
+        app_env_path = gate_root / "app.env"
+        auth_path = gate_root / "htpasswd"
+        gate_root.mkdir()
+        allow_cidr = "198.51.100.42/32"
+        fixed = receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "@@ALLOW_CIDR@@", allow_cidr,
+        )
+        legacy_template = receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "    client_max_body_size 2m;",
+            "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+            1,
+        ).replace(
+            "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+            "        proxy_pass http://sse_qa_wsgi;",
+            "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+            1,
+        )
+        legacy = legacy_template.replace("@@ALLOW_CIDR@@", allow_cidr)
+        disabled_env = "SSE_PILOT_ENABLED=false\n"
+        hook_bytes = b"synthetic exact legacy hook bytes\n"
+        hook_path.write_bytes(hook_bytes)
+        hook_path.chmod(0o755)
+        previous = {
+            "schema": "SSE_QA_OWNERSHIP_V2",
+            "complete": True,
+            "phase": "complete_disabled",
+            "files": {
+                app_env_path.as_posix(): hashlib.sha256(disabled_env.encode()).hexdigest(),
+                nginx_path.as_posix(): hashlib.sha256(legacy.encode()).hexdigest(),
+            },
+            "runtime_files": {},
+            "seed_fix": dict(receiver.SSE_QA_SEED_FIX_OVERLAY),
+            "https_preparation": {
+                "hook_sha256": receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
+                "webroot": "/var/lib/letsencrypt/sse-qa",
+                "webroot_marker_sha256": "1" * 64,
+            },
+        }
+        previous_bytes = (json.dumps(previous, sort_keys=True) + "\n").encode()
+        fixed_sha256 = hashlib.sha256(fixed.encode()).hexdigest()
+        applied = json.loads(json.dumps(previous))
+        applied["files"][nginx_path.as_posix()] = fixed_sha256
+        applied["nginx_limit_fix"] = {
+            "schema": receiver.SSE_QA_NGINX_LIMIT_FIX_SCHEMA,
+            "version": receiver.SSE_QA_NGINX_LIMIT_FIX_VERSION,
+            "source_template_sha256": receiver.SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256,
+            "target_template_sha256": receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+            "base_controller_sha256": receiver.SSE_QA_CONTROLLER_SHA256,
+            "runtime_sha256": receiver.SSE_QA_RUNTIME_SHA256,
+            "renewal_hook_sha256": receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
+            "previous_nginx_sha256": hashlib.sha256(legacy.encode()).hexdigest(),
+            "installed_nginx_sha256": fixed_sha256,
+            "previous_ownership_sha256": hashlib.sha256(previous_bytes).hexdigest(),
+            "ordinary_http_per_ip_limit": 8,
+            "static_per_ip_limit": None,
+            "realtime_total_limit": 2,
+        }
+        app_env = disabled_env
+        if enabled:
+            app_env = "SSE_PILOT_ENABLED=true\n"
+            applied["phase"] = "complete_enabled"
+            applied["files"][app_env_path.as_posix()] = hashlib.sha256(
+                app_env.encode()
+            ).hexdigest()
+            auth_bytes = b"qa:$2b$12$synthetic-runtime-verifier-for-gate-only-000000000000000\n"
+            auth_path.write_bytes(auth_bytes)
+            applied["runtime_files"][auth_path.as_posix()] = hashlib.sha256(
+                auth_bytes
+            ).hexdigest()
+        nginx_path.write_bytes(fixed.encode("utf-8"))
+        app_env_path.write_bytes(app_env.encode("utf-8"))
+        ownership_path.write_bytes(
+            (json.dumps(applied, sort_keys=True) + "\n").encode("utf-8")
+        )
+        real_digest = receiver.digest
+
+        def exact_digest(data: bytes) -> str:
+            if data == hook_bytes:
+                return receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256
+            return real_digest(data)
+
+        real_stat = Path.stat
+
+        def exact_stat(path: Path, *args, **kwargs):
+            details = real_stat(path, *args, **kwargs)
+            required_mode = None
+            required_gid = details.st_gid
+            if path == hook_path:
+                required_mode = 0o755
+            elif path == auth_path:
+                required_mode = 0o640
+                required_gid = 33
+            if required_mode is None:
+                return details
+            fields = list(details)
+            fields[0] = (details.st_mode & ~0o777) | required_mode
+            fields[4] = 0
+            fields[5] = required_gid
+            return os.stat_result(fields)
+
+        return (
+            ownership_path, nginx_path, hook_path, app_env_path, auth_path,
+            exact_digest, exact_stat,
+        )
+
+    def test_receiver_enable_and_smoke_gates_require_exact_fixed_overlay(self) -> None:
+        for enabled in (False, True):
+            fixture = self._seed_receiver_nginx_gate(enabled=enabled)
+            ownership, nginx, hook, app_env, auth, exact_digest, exact_stat = fixture
+            with self.subTest(enabled=enabled), mock.patch.object(
+                receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
+            ), mock.patch.object(
+                receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx,
+            ), mock.patch.object(
+                receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook,
+            ), mock.patch.object(
+                receiver, "SSE_QA_APP_ENV_PATH", app_env,
+            ), mock.patch.object(
+                receiver, "SSE_QA_NGINX_AUTH_PATH", auth,
+            ), mock.patch.object(
+                receiver, "digest", side_effect=exact_digest,
+            ), mock.patch.object(
+                Path, "stat", autospec=True, side_effect=exact_stat,
+            ), mock.patch.object(
+                receiver, "grp",
+                mock.Mock(getgrnam=mock.Mock(return_value=mock.Mock(gr_gid=33))),
+            ):
+                receiver._verify_sse_qa_nginx_limit_fix_overlay(
+                    expected_enabled=enabled,
+                )
+
+    def test_receiver_nginx_gate_rejects_mixed_config_or_overlay(self) -> None:
+        (
+            ownership, nginx, hook, app_env, auth, exact_digest, exact_stat,
+        ) = self._seed_receiver_nginx_gate()
+        nginx.write_bytes(nginx.read_bytes() + b"# foreign\n")
+        with mock.patch.object(
+            receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx,
+        ), mock.patch.object(
+            receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook,
+        ), mock.patch.object(
+            receiver, "SSE_QA_APP_ENV_PATH", app_env,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_AUTH_PATH", auth,
+        ), mock.patch.object(
+            receiver, "digest", side_effect=exact_digest,
+        ), mock.patch.object(
+            Path, "stat", autospec=True, side_effect=exact_stat,
+        ):
+            with self.assertRaisesRegex(receiver.ReleaseError, "exact template"):
+                receiver._verify_sse_qa_nginx_limit_fix_overlay(expected_enabled=False)
+
+    def test_receiver_nginx_gate_rejects_changed_enabled_runtime_auth(self) -> None:
+        (
+            ownership, nginx, hook, app_env, auth, exact_digest, exact_stat,
+        ) = self._seed_receiver_nginx_gate(enabled=True)
+        auth.write_bytes(auth.read_bytes() + b"foreign\n")
+        with mock.patch.object(
+            receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx,
+        ), mock.patch.object(
+            receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook,
+        ), mock.patch.object(
+            receiver, "SSE_QA_APP_ENV_PATH", app_env,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_AUTH_PATH", auth,
+        ), mock.patch.object(
+            receiver, "digest", side_effect=exact_digest,
+        ), mock.patch.object(
+            Path, "stat", autospec=True, side_effect=exact_stat,
+        ), mock.patch.object(
+            receiver, "grp",
+            mock.Mock(getgrnam=mock.Mock(return_value=mock.Mock(gr_gid=33))),
+        ):
+            with self.assertRaisesRegex(receiver.ReleaseError, "runtime auth ownership"):
+                receiver._verify_sse_qa_nginx_limit_fix_overlay(expected_enabled=True)
+
+    def test_base_enable_connects_site_before_test_then_reload_and_disables_on_failure(self) -> None:
+        source = inspect.getsource(base_controller._real_enable_scoped)
+        connect = source.index('site.symlink_to("/etc/sse-qa/nginx.conf")')
+        nginx_test = source.index('run(["nginx", "-t"])')
+        reload_nginx = source.index('run(["systemctl", "reload", "nginx"])')
+        rollback = source.index("real_disable(emit_summary=False)")
+        self.assertLess(connect, nginx_test)
+        self.assertLess(nginx_test, reload_nginx)
+        self.assertGreater(rollback, reload_nginx)
+        self.assertNotIn("_real_enable_scoped()", source[source.index("except Exception"):])
+
+    def test_receiver_routes_overlay_gate_only_to_enable_and_smoke(self) -> None:
+        base_payload = {
+            receiver.SSE_QA_PACKAGE_PAYLOAD: self.base_qa_zip.read_bytes(),
+        }
+        https_payload = {
+            receiver.SSE_QA_PACKAGE_PAYLOAD: self.qa_zip.read_bytes(),
+        }
+
+        class Process:
+            returncode = 0
+
+            def __init__(self, _command, **_kwargs):
+                pass
+
+            def communicate(self, input=None, timeout=None):
+                return ("SSE_QA_TEST_OK\n", None)
+
+        for mode, payload, gate_expected in (
+            ("enable_sse_qa", base_payload, True),
+            ("smoke_sse_qa", base_payload, True),
+            ("disable_sse_qa", base_payload, False),
+            ("inspect_sse_qa_https", https_payload, False),
+        ):
+            with self.subTest(mode=mode), mock.patch.object(
+                receiver, "_verify_sse_qa_seed_fix_overlay",
+            ), mock.patch.object(
+                receiver, "_verify_sse_qa_nginx_limit_fix_overlay",
+            ) as nginx_gate, mock.patch.object(
+                receiver.subprocess, "Popen", Process,
+            ), mock.patch.object(
+                receiver, "_receiver_unified_cgroup",
+                return_value="/system.slice/receiver.service",
+            ), mock.patch.object(
+                receiver, "_sse_qa_slice_cgroup",
+                return_value=receiver.SSE_QA_SLICE_CGROUP,
+            ):
+                receiver.run_sse_qa(mode, payload)
+            if gate_expected:
+                nginx_gate.assert_called_once_with(
+                    expected_enabled=mode == "smoke_sse_qa",
+                )
+            else:
+                nginx_gate.assert_not_called()
 
     def test_workflow_has_fixed_modes_confirmation_and_no_generic_server_input(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
