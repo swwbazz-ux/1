@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import re
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -136,9 +137,14 @@ SSE_QA_SEED_FIX_SUMMARY = re.compile(
     r"history=preserved access=preserved qa=disabled$"
 )
 APP_ENV_PATH = APP / ".env"
-DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
+DIAGNOSTIC_OPERATIONS = {
+    "trip_accounting_incident_v1",
+    "infra_capacity_v1",
+    "sse_qa_http_503_v1",
+}
 TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
 INFRA_DIAGNOSTIC_METADATA_KEYS = {"operation"}
+SSE_QA_HTTP_503_METADATA_KEYS = {"operation"}
 DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
 DIAGNOSTIC_MAX_WINDOW = timedelta(hours=24)
 DIAGNOSTIC_MAX_ROWS = 500
@@ -150,6 +156,17 @@ DIAGNOSTIC_OPENSSL = Path("/usr/bin/openssl")
 DIAGNOSTIC_CERT_TEMP_DIR = Path("/run")
 DIAGNOSTIC_ENCRYPT_TIMEOUT_SECONDS = 15
 DIAGNOSTIC_RECIPIENT_FINGERPRINT = "36:65:5B:1C:BD:66:01:2A:15:2C:97:8B:CF:79:AC:FE:E8:46:5A:7A:1C:50:FD:FD:5C:F7:52:2C:A2:BD:59:6D"
+SSE_QA_HTTP_503_WINDOW_FROM = "2026-10-04T07:09:30Z"
+SSE_QA_HTTP_503_WINDOW_TO = "2026-10-04T07:10:05Z"
+SSE_QA_HTTP_503_TARGET_AROUND = "2026-10-04T07:09:52Z"
+SSE_QA_HTTP_503_ERROR_LOG = Path("/srv/sse-qa/log/nginx-error.log")
+SSE_QA_HTTP_503_ACCESS_LOG = Path("/srv/sse-qa/log/nginx-access.log")
+SSE_QA_HTTP_503_NGINX_SITE = Path("/etc/nginx/sites-enabled/sse-qa.conf")
+SSE_QA_HTTP_503_WSGI_UNIT = "sse-qa-wsgi.service"
+SSE_QA_HTTP_503_MAX_LOG_BYTES = 16 * 1024 * 1024
+SSE_QA_HTTP_503_MAX_CONFIG_BYTES = 128 * 1024
+SSE_QA_HTTP_503_MAX_RECORDS = 240
+SSE_QA_HTTP_503_MAX_JOURNAL_BYTES = 256 * 1024
 DIAGNOSTIC_RECIPIENT_CERTIFICATE = b'''-----BEGIN CERTIFICATE-----
 MIIERTCCAq2gAwIBAgIUFuSdKm+OVGdq+pQqzXlwI5AHX1gwDQYJKoZIhvcNAQEL
 BQAwMjEwMC4GA1UEAwwnQ29wcGVyIFByb2R1Y3Rpb24gRGlhZ25vc3RpY3MgUmVj
@@ -1124,9 +1141,14 @@ def validate_diagnostic_metadata(metadata: object) -> dict[str, object]:
     operation = metadata.get("operation")
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise ReleaseError("diagnostic operation is not allowlisted")
-    if operation == "infra_capacity_v1":
-        if set(metadata) != INFRA_DIAGNOSTIC_METADATA_KEYS:
-            raise ReleaseError("infra capacity metadata keys do not match the fixed contract")
+    if operation in {"infra_capacity_v1", "sse_qa_http_503_v1"}:
+        expected_keys = (
+            INFRA_DIAGNOSTIC_METADATA_KEYS
+            if operation == "infra_capacity_v1"
+            else SSE_QA_HTTP_503_METADATA_KEYS
+        )
+        if set(metadata) != expected_keys:
+            raise ReleaseError(f"{operation} metadata keys do not match the fixed contract")
         return {"operation": operation}
     if set(metadata) != TRIP_DIAGNOSTIC_METADATA_KEYS:
         raise ReleaseError("diagnostic metadata keys do not match the fixed contract")
@@ -1662,9 +1684,766 @@ def validate_infra_capacity_report(raw: bytes, metadata: dict[str, object]) -> d
     return report
 
 
+SSE_QA_HTTP_503_LIMITATIONS = [
+    "fixed_historical_window_only",
+    "bounded_log_tail_may_omit_rotated_records",
+    "nginx_error_timestamps_interpreted_as_utc",
+    "static_access_log_disabled",
+    "no_raw_client_addresses_credentials_cookies_or_user_agents",
+    "wsgi_journal_queried_only_when_target_limit_not_confirmed",
+]
+SSE_QA_HTTP_503_ACCESS_RE = re.compile(
+    r'^\S+\s+\S+\s+\S+\s+\[(?P<time>[^]]+)\]\s+'
+    r'"(?P<method>[A-Z]{1,12})\s+(?P<target>\S+)\s+(?P<protocol>HTTP/[0-9.]{3,8})"\s+'
+    r'(?P<status>[0-9]{3})\s+(?P<bytes>[0-9]+|-)\s'
+)
+SSE_QA_HTTP_503_ERROR_TIME_RE = re.compile(
+    r"^(?P<time>[0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})"
+)
+SSE_QA_HTTP_503_ERROR_REQUEST_RE = re.compile(
+    r'request:\s+"(?P<method>[A-Z]{1,12})\s+(?P<target>\S+)\s+(?P<protocol>HTTP/[0-9.]{3,8})"'
+)
+SSE_QA_HTTP_503_ZONE_RE = re.compile(r'limiting connections by zone "(?P<zone>[a-z0-9_]{1,64})"')
+SSE_QA_HTTP_503_SAFE_ROUTE_RE = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/\-]{0,255}\Z")
+SSE_QA_HTTP_503_MONTHS = {
+    name: index for index, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        1,
+    )
+}
+
+
+def _sse_qa_http_503_fixed_window() -> tuple[datetime, datetime]:
+    return (
+        datetime.strptime(SSE_QA_HTTP_503_WINDOW_FROM, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+        datetime.strptime(SSE_QA_HTTP_503_WINDOW_TO, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+    )
+
+
+def _sse_qa_http_503_target_time() -> datetime:
+    return datetime.strptime(SSE_QA_HTTP_503_TARGET_AROUND, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def _sse_qa_http_503_near_target(moment: datetime) -> bool:
+    return abs((moment - _sse_qa_http_503_target_time()).total_seconds()) <= 5
+
+
+def _sse_qa_http_503_iso(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _sse_qa_http_503_access_time(value: str) -> datetime | None:
+    match = re.fullmatch(
+        r"([0-9]{2})/([A-Z][a-z]{2})/([0-9]{4}):([0-9]{2}):([0-9]{2}):([0-9]{2}) ([+-])([0-9]{2})([0-9]{2})",
+        value,
+    )
+    if not match or match.group(2) not in SSE_QA_HTTP_503_MONTHS:
+        return None
+    offset_minutes = (int(match.group(8)) * 60 + int(match.group(9))) * (-1 if match.group(7) == "-" else 1)
+    try:
+        return datetime(
+            int(match.group(3)),
+            SSE_QA_HTTP_503_MONTHS[match.group(2)],
+            int(match.group(1)),
+            int(match.group(4)),
+            int(match.group(5)),
+            int(match.group(6)),
+            tzinfo=timezone(timedelta(minutes=offset_minutes)),
+        ).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _sse_qa_http_503_error_time(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(value, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _sse_qa_http_503_route(target: str) -> str | None:
+    route = target.split("?", 1)[0]
+    if not SSE_QA_HTTP_503_SAFE_ROUTE_RE.fullmatch(route):
+        return None
+    return route
+
+
+def _sse_qa_http_503_classification(route: str) -> str:
+    if route == "/realtime/stream/":
+        return "realtime_stream"
+    if route.startswith("/static/"):
+        return "static"
+    return "ordinary_http"
+
+
+def _sse_qa_http_503_read_tail(path: Path, maximum: int) -> tuple[dict[str, object], list[str]]:
+    base = {
+        "status": "unavailable",
+        "bytes_examined": 0,
+        "lines_examined": 0,
+        "tail_truncated": False,
+    }
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            return base, []
+        size = metadata.st_size
+        offset = max(0, size - maximum)
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            data = handle.read(maximum + 1)
+    except OSError:
+        return base, []
+    if len(data) > maximum:
+        data = data[:maximum]
+    if offset:
+        newline = data.find(b"\n")
+        data = data[newline + 1:] if newline >= 0 else b""
+    lines = data.decode("utf-8", errors="ignore").splitlines()
+    return {
+        "status": "ok",
+        "bytes_examined": len(data),
+        "lines_examined": len(lines),
+        "tail_truncated": bool(offset),
+    }, lines
+
+
+def _sse_qa_http_503_config_scope(lines: list[str], source: dict[str, object]) -> dict[str, object]:
+    contexts: list[str] = []
+    zone_found = False
+    per_ip_server_limits: list[int] = []
+    location_limits: dict[str, list[tuple[str, int]]] = {
+        "ordinary_http": [], "static": [], "realtime_stream": [],
+    }
+    locations_seen: set[str] = set()
+    static_access_off = False
+    for raw in lines:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line == "limit_conn_zone $binary_remote_addr zone=sse_qa_per_ip:64k;" and not contexts:
+            zone_found = True
+        if line.endswith("{"):
+            if line == "server {":
+                contexts.append("server")
+            elif contexts and contexts[0] == "server" and line.startswith("location "):
+                if line == "location = /realtime/stream/ {":
+                    context = "realtime_stream"
+                elif line == "location /static/ {":
+                    context = "static"
+                elif line == "location / {":
+                    context = "ordinary_http"
+                else:
+                    context = "other"
+                contexts.append(context)
+                locations_seen.add(context)
+            else:
+                contexts.append("other")
+            continue
+        if line == "}":
+            if contexts:
+                contexts.pop()
+            continue
+        match = re.fullmatch(r"limit_conn ([a-z0-9_]{1,64}) ([0-9]{1,4});", line)
+        if match:
+            item = (match.group(1), int(match.group(2)))
+            if contexts == ["server"] and item[0] == "sse_qa_per_ip":
+                per_ip_server_limits.append(item[1])
+            elif len(contexts) == 2 and contexts[1] in location_limits:
+                location_limits[contexts[1]].append(item)
+        if contexts == ["server", "static"] and line == "access_log off;":
+            static_access_off = True
+
+    per_ip_limit = per_ip_server_limits[0] if len(per_ip_server_limits) == 1 else None
+    exact_locations = {"ordinary_http", "static", "realtime_stream"}.issubset(locations_seen)
+    confirmed = bool(zone_found and per_ip_limit == 8 and exact_locations)
+
+    def inherited_per_ip(name: str) -> int | None:
+        local = location_limits[name]
+        if local:
+            for zone, limit in local:
+                if zone == "sse_qa_per_ip":
+                    return limit
+            return None
+        return per_ip_limit
+
+    stream_total = None
+    for zone, limit in location_limits["realtime_stream"]:
+        if zone == "sse_qa_total":
+            stream_total = limit
+    if stream_total != 2:
+        confirmed = False
+    return {
+        "status": "confirmed" if source["status"] == "ok" and confirmed else (
+            "mismatch" if source["status"] == "ok" else "unavailable"
+        ),
+        "per_ip_zone": "sse_qa_per_ip" if zone_found else None,
+        "per_ip_limit": per_ip_limit,
+        "per_ip_placement": "server" if per_ip_limit is not None else None,
+        "ordinary_http_per_ip_limit": inherited_per_ip("ordinary_http") if exact_locations else None,
+        "static_per_ip_limit": inherited_per_ip("static") if exact_locations else None,
+        "realtime_per_ip_limit": inherited_per_ip("realtime_stream") if exact_locations else None,
+        "realtime_total_limit": stream_total,
+        "static_access_logged": False if static_access_off else None,
+    }
+
+
+def _sse_qa_http_503_journal() -> tuple[dict[str, object], list[dict[str, object]]]:
+    command = [
+        "/usr/bin/journalctl",
+        "--unit", SSE_QA_HTTP_503_WSGI_UNIT,
+        "--since", "2026-10-04 07:09:30 UTC",
+        "--until", "2026-10-04 07:10:05 UTC",
+        "--output=short-iso-precise",
+        "--no-pager",
+        "--lines=200",
+    ]
+    base = {
+        "status": "unavailable",
+        "queried": True,
+        "bytes_examined": 0,
+        "lines_examined": 0,
+        "tail_truncated": False,
+    }
+    try:
+        result = subprocess.run(
+            command,
+            cwd="/",
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            close_fds=True,
+            start_new_session=True,
+            env={"HOME": "/", "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return base, []
+    raw = result.stdout
+    truncated = len(raw) > SSE_QA_HTTP_503_MAX_JOURNAL_BYTES
+    raw = raw[:SSE_QA_HTTP_503_MAX_JOURNAL_BYTES]
+    lines = raw.decode("utf-8", errors="ignore").splitlines()
+    source = {
+        "status": "ok" if result.returncode == 0 else "error",
+        "queried": True,
+        "bytes_examined": len(raw),
+        "lines_examined": len(lines),
+        "tail_truncated": truncated,
+    }
+    records: list[dict[str, object]] = []
+    for line in lines:
+        lowered = line.casefold()
+        classification = None
+        for marker, label in (
+            ("traceback", "traceback"),
+            ("exception", "exception"),
+            ("timed out", "timeout"),
+            ("timeout", "timeout"),
+            ("worker", "worker"),
+            (" 503 ", "http_503"),
+            ("error", "error"),
+        ):
+            if marker in lowered:
+                classification = label
+                break
+        if classification is None:
+            continue
+        time_match = re.match(r"(?P<time>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(?:Z|[+-][0-9:]+))", line)
+        timestamp = "2026-10-04T07:09:30Z"
+        if time_match:
+            try:
+                timestamp = _sse_qa_http_503_iso(datetime.fromisoformat(time_match.group("time").replace("Z", "+00:00")))
+            except ValueError:
+                pass
+        records.append({
+            "timestamp_utc": timestamp,
+            "classification": classification,
+            "message_sha256": digest(line.encode("utf-8")),
+        })
+        if len(records) >= 50:
+            source["tail_truncated"] = True
+            break
+    return source, records
+
+
+def collect_sse_qa_http_503_report() -> dict[str, Any]:
+    window_from, window_to = _sse_qa_http_503_fixed_window()
+    error_source, error_lines = _sse_qa_http_503_read_tail(
+        SSE_QA_HTTP_503_ERROR_LOG, SSE_QA_HTTP_503_MAX_LOG_BYTES,
+    )
+    access_source, access_lines = _sse_qa_http_503_read_tail(
+        SSE_QA_HTTP_503_ACCESS_LOG, SSE_QA_HTTP_503_MAX_LOG_BYTES,
+    )
+    config_source, config_lines = _sse_qa_http_503_read_tail(
+        SSE_QA_HTTP_503_NGINX_SITE, SSE_QA_HTTP_503_MAX_CONFIG_BYTES,
+    )
+    configuration = _sse_qa_http_503_config_scope(config_lines, config_source)
+    target_access: list[dict[str, object]] = []
+    limit_events: list[dict[str, object]] = []
+    upstream_events: list[dict[str, object]] = []
+    observed_counts = {"ordinary_http": 0, "static": 0, "realtime_stream": 0}
+    status_counts: dict[str, int] = {}
+    truncated = any(
+        bool(source["tail_truncated"])
+        for source in (error_source, access_source, config_source)
+    )
+
+    for line in access_lines:
+        match = SSE_QA_HTTP_503_ACCESS_RE.match(line)
+        if not match:
+            continue
+        moment = _sse_qa_http_503_access_time(match.group("time"))
+        route = _sse_qa_http_503_route(match.group("target"))
+        if moment is None or route is None or not window_from <= moment <= window_to:
+            continue
+        classification = _sse_qa_http_503_classification(route)
+        observed_counts[classification] += 1
+        status = int(match.group("status"))
+        status_counts[str(status)] = status_counts.get(str(status), 0) + 1
+        if (
+            match.group("method") == "GET"
+            and route == "/driver/"
+            and status == 503
+            and _sse_qa_http_503_near_target(moment)
+        ):
+            response_bytes = None if match.group("bytes") == "-" else int(match.group("bytes"))
+            timestamp = _sse_qa_http_503_iso(moment)
+            record = {
+                "timestamp_utc": timestamp,
+                "method": "GET",
+                "route": route,
+                "protocol": match.group("protocol"),
+                "status": status,
+                "response_bytes": response_bytes,
+                "classification": classification,
+            }
+            record["sanitized_log_line"] = (
+                f'{timestamp} GET {route} {record["protocol"]} status=503 '
+                f'bytes={response_bytes if response_bytes is not None else "unknown"} class={classification}'
+            )
+            target_access.append(record)
+            if len(target_access) >= 20:
+                truncated = True
+                break
+
+    upstream_markers = (
+        ("upstream timed out", "upstream_timeout"),
+        ("upstream prematurely closed", "upstream_closed"),
+        ("connect() failed", "upstream_connect_failed"),
+        ("no live upstreams", "no_live_upstream"),
+    )
+    for line in error_lines:
+        time_match = SSE_QA_HTTP_503_ERROR_TIME_RE.match(line)
+        if not time_match:
+            continue
+        moment = _sse_qa_http_503_error_time(time_match.group("time"))
+        if moment is None or not window_from <= moment <= window_to:
+            continue
+        request_match = SSE_QA_HTTP_503_ERROR_REQUEST_RE.search(line)
+        method = request_match.group("method") if request_match else None
+        route = _sse_qa_http_503_route(request_match.group("target")) if request_match else None
+        protocol = request_match.group("protocol") if request_match else None
+        timestamp = _sse_qa_http_503_iso(moment)
+        zone_match = SSE_QA_HTTP_503_ZONE_RE.search(line)
+        if zone_match and method and route and protocol:
+            zone = zone_match.group("zone")
+            record = {
+                "timestamp_utc": timestamp,
+                "method": method,
+                "route": route,
+                "protocol": protocol,
+                "zone": zone,
+                "classification": _sse_qa_http_503_classification(route),
+            }
+            record["sanitized_log_line"] = (
+                f'{timestamp} limiting connections by zone "{zone}" '
+                f'request="{method} {route} {protocol}" class={record["classification"]}'
+            )
+            limit_events.append(record)
+        for marker, classification in upstream_markers:
+            if marker in line:
+                if len(upstream_events) < 50:
+                    upstream_events.append({
+                        "timestamp_utc": timestamp,
+                        "method": method,
+                        "route": route,
+                        "classification": classification,
+                        "message_sha256": digest(line.encode("utf-8")),
+                    })
+                else:
+                    truncated = True
+                break
+        if len(limit_events) + len(upstream_events) >= SSE_QA_HTTP_503_MAX_RECORDS:
+            truncated = True
+            break
+
+    target_limit = [
+        item for item in limit_events
+        if item["zone"] == "sse_qa_per_ip"
+        and item["method"] == "GET"
+        and item["route"] == "/driver/"
+        and _sse_qa_http_503_near_target(
+            datetime.strptime(item["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        )
+    ]
+    journal_queried = not bool(target_limit)
+    if journal_queried:
+        journal_source, wsgi_events = _sse_qa_http_503_journal()
+    else:
+        journal_source = {
+            "status": "not_required",
+            "queried": False,
+            "bytes_examined": 0,
+            "lines_examined": 0,
+            "tail_truncated": False,
+        }
+        wsgi_events = []
+    truncated = truncated or bool(journal_source["tail_truncated"])
+
+    if target_limit:
+        cause = "limit_conn_sse_qa_per_ip"
+        zone: str | None = "sse_qa_per_ip"
+    elif upstream_events or wsgi_events:
+        cause = "upstream_or_application"
+        zone = None
+    elif target_access:
+        cause = "other_nginx_or_access_layer"
+        zone = None
+    else:
+        cause = "not_established"
+        zone = None
+    row_count = len(target_access) + len(limit_events) + len(upstream_events) + len(wsgi_events)
+    report = {
+        "schema": 1,
+        "operation": "sse_qa_http_503_v1",
+        "request": {
+            "from_utc": SSE_QA_HTTP_503_WINDOW_FROM,
+            "to_utc": SSE_QA_HTTP_503_WINDOW_TO,
+            "target_around_utc": SSE_QA_HTTP_503_TARGET_AROUND,
+            "method": "GET",
+            "route": "/driver/",
+            "status": 503,
+        },
+        "sources": {
+            "nginx_error": error_source,
+            "nginx_access": access_source,
+            "nginx_site": config_source,
+            "wsgi_journal": journal_source,
+        },
+        "configuration": configuration,
+        "observed_access_counts": observed_counts,
+        "observed_status_counts": status_counts,
+        "target_access": target_access,
+        "limit_events": limit_events,
+        "upstream_events": upstream_events,
+        "wsgi_events": wsgi_events,
+        "finding": {
+            "cause": cause,
+            "target_limit_correlated": bool(target_limit),
+            "target_access_seen": bool(target_access),
+            "zone": zone,
+            "wsgi_journal_queried": journal_queried,
+        },
+        "summary": {"row_count": row_count, "truncated": truncated},
+        "limitations": SSE_QA_HTTP_503_LIMITATIONS,
+    }
+    return validate_sse_qa_http_503_report(
+        json.dumps(report, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+        {"operation": "sse_qa_http_503_v1"},
+    )
+
+
+def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
+    if metadata != {"operation": "sse_qa_http_503_v1"}:
+        raise ReleaseError("SSE QA HTTP 503 request contract mismatch")
+    if not raw or len(raw) > DIAGNOSTIC_MAX_OUTPUT_BYTES:
+        raise ReleaseError("diagnostic report size is invalid")
+    try:
+        report = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("diagnostic report is not valid JSON") from exc
+    expected_top = {
+        "schema", "operation", "request", "sources", "configuration",
+        "observed_access_counts", "observed_status_counts", "target_access",
+        "limit_events", "upstream_events", "wsgi_events", "finding", "summary",
+        "limitations",
+    }
+    if not isinstance(report, dict) or set(report) != expected_top:
+        raise ReleaseError("SSE QA HTTP 503 top-level contract mismatch")
+    if type(report.get("schema")) is not int or report["schema"] != 1:
+        raise ReleaseError("SSE QA HTTP 503 schema is invalid")
+    if report.get("operation") != "sse_qa_http_503_v1":
+        raise ReleaseError("SSE QA HTTP 503 operation mismatch")
+    if report.get("request") != {
+        "from_utc": SSE_QA_HTTP_503_WINDOW_FROM,
+        "to_utc": SSE_QA_HTTP_503_WINDOW_TO,
+        "target_around_utc": SSE_QA_HTTP_503_TARGET_AROUND,
+        "method": "GET",
+        "route": "/driver/",
+        "status": 503,
+    }:
+        raise ReleaseError("SSE QA HTTP 503 fixed request mismatch")
+    sources = report.get("sources")
+    if not isinstance(sources, dict) or set(sources) != {
+        "nginx_error", "nginx_access", "nginx_site", "wsgi_journal",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 sources contract mismatch")
+    source_keys = {"status", "bytes_examined", "lines_examined", "tail_truncated"}
+    for name, source in sources.items():
+        expected = source_keys | ({"queried"} if name == "wsgi_journal" else set())
+        if not isinstance(source, dict) or set(source) != expected:
+            raise ReleaseError("SSE QA HTTP 503 source contract mismatch")
+        allowed_status = {"ok", "unavailable"} if name != "wsgi_journal" else {
+            "ok", "error", "unavailable", "not_required",
+        }
+        if source["status"] not in allowed_status:
+            raise ReleaseError("SSE QA HTTP 503 source status is invalid")
+        for field in ("bytes_examined", "lines_examined"):
+            if type(source[field]) is not int or source[field] < 0:
+                raise ReleaseError("SSE QA HTTP 503 source count is invalid")
+        if type(source["tail_truncated"]) is not bool:
+            raise ReleaseError("SSE QA HTTP 503 source truncation is invalid")
+        if name == "wsgi_journal" and type(source["queried"]) is not bool:
+            raise ReleaseError("SSE QA HTTP 503 journal query flag is invalid")
+        maximum_bytes = (
+            SSE_QA_HTTP_503_MAX_JOURNAL_BYTES
+            if name == "wsgi_journal"
+            else SSE_QA_HTTP_503_MAX_CONFIG_BYTES
+            if name == "nginx_site"
+            else SSE_QA_HTTP_503_MAX_LOG_BYTES
+        )
+        if source["bytes_examined"] > maximum_bytes:
+            raise ReleaseError("SSE QA HTTP 503 source byte bound is invalid")
+    journal_source = sources["wsgi_journal"]
+    if journal_source["status"] == "not_required":
+        if journal_source != {
+            "status": "not_required",
+            "queried": False,
+            "bytes_examined": 0,
+            "lines_examined": 0,
+            "tail_truncated": False,
+        }:
+            raise ReleaseError("SSE QA HTTP 503 skipped journal state is invalid")
+    elif journal_source["queried"] is not True:
+        raise ReleaseError("SSE QA HTTP 503 journal state is invalid")
+
+    configuration = report.get("configuration")
+    if not isinstance(configuration, dict) or set(configuration) != {
+        "status", "per_ip_zone", "per_ip_limit", "per_ip_placement",
+        "ordinary_http_per_ip_limit", "static_per_ip_limit", "realtime_per_ip_limit",
+        "realtime_total_limit", "static_access_logged",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 configuration contract mismatch")
+    if configuration["status"] not in {"confirmed", "mismatch", "unavailable"}:
+        raise ReleaseError("SSE QA HTTP 503 configuration status is invalid")
+    if configuration["per_ip_zone"] not in {None, "sse_qa_per_ip"}:
+        raise ReleaseError("SSE QA HTTP 503 zone is invalid")
+    if configuration["per_ip_placement"] not in {None, "server"}:
+        raise ReleaseError("SSE QA HTTP 503 placement is invalid")
+    for field in (
+        "per_ip_limit", "ordinary_http_per_ip_limit", "static_per_ip_limit",
+        "realtime_per_ip_limit", "realtime_total_limit",
+    ):
+        if configuration[field] is not None and (
+            type(configuration[field]) is not int or not 1 <= configuration[field] <= 4096
+        ):
+            raise ReleaseError("SSE QA HTTP 503 connection limit is invalid")
+    if (
+        configuration["static_access_logged"] is not None
+        and type(configuration["static_access_logged"]) is not bool
+    ):
+        raise ReleaseError("SSE QA HTTP 503 static access logging state is invalid")
+    if configuration["status"] == "confirmed" and configuration != {
+        "status": "confirmed",
+        "per_ip_zone": "sse_qa_per_ip",
+        "per_ip_limit": 8,
+        "per_ip_placement": "server",
+        "ordinary_http_per_ip_limit": 8,
+        "static_per_ip_limit": 8,
+        "realtime_per_ip_limit": None,
+        "realtime_total_limit": 2,
+        "static_access_logged": False,
+    }:
+        raise ReleaseError("SSE QA HTTP 503 confirmed configuration is inconsistent")
+
+    observed = report.get("observed_access_counts")
+    if not isinstance(observed, dict) or set(observed) != {
+        "ordinary_http", "static", "realtime_stream",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 access count contract mismatch")
+    if any(type(value) is not int or value < 0 for value in observed.values()):
+        raise ReleaseError("SSE QA HTTP 503 access count is invalid")
+    status_counts = report.get("observed_status_counts")
+    if not isinstance(status_counts, dict) or any(
+        not isinstance(key, str)
+        or not re.fullmatch(r"[1-5][0-9]{2}", key)
+        or type(value) is not int
+        or value < 1
+        for key, value in status_counts.items()
+    ):
+        raise ReleaseError("SSE QA HTTP 503 status count is invalid")
+
+    def valid_timestamp(value: object) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            moment = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        start, finish = _sse_qa_http_503_fixed_window()
+        return start <= moment <= finish
+
+    access_rows = report.get("target_access")
+    if not isinstance(access_rows, list) or len(access_rows) > 20:
+        raise ReleaseError("SSE QA HTTP 503 target access rows are invalid")
+    for row in access_rows:
+        if not isinstance(row, dict) or set(row) != {
+            "timestamp_utc", "method", "route", "protocol", "status",
+            "response_bytes", "classification", "sanitized_log_line",
+        }:
+            raise ReleaseError("SSE QA HTTP 503 target access row contract mismatch")
+        if (
+            not valid_timestamp(row["timestamp_utc"])
+            or row["method"] != "GET"
+            or row["route"] != "/driver/"
+            or not re.fullmatch(r"HTTP/[0-9.]{3,8}", row["protocol"])
+            or row["status"] != 503
+            or row["classification"] != "ordinary_http"
+            or (row["response_bytes"] is not None and (type(row["response_bytes"]) is not int or row["response_bytes"] < 0))
+        ):
+            raise ReleaseError("SSE QA HTTP 503 target access row is invalid")
+        expected = (
+            f'{row["timestamp_utc"]} GET /driver/ {row["protocol"]} status=503 '
+            f'bytes={row["response_bytes"] if row["response_bytes"] is not None else "unknown"} class=ordinary_http'
+        )
+        if row["sanitized_log_line"] != expected:
+            raise ReleaseError("SSE QA HTTP 503 target access line is invalid")
+
+    limit_rows = report.get("limit_events")
+    if not isinstance(limit_rows, list) or len(limit_rows) > SSE_QA_HTTP_503_MAX_RECORDS:
+        raise ReleaseError("SSE QA HTTP 503 limit rows are invalid")
+    for row in limit_rows:
+        if not isinstance(row, dict) or set(row) != {
+            "timestamp_utc", "method", "route", "protocol", "zone",
+            "classification", "sanitized_log_line",
+        }:
+            raise ReleaseError("SSE QA HTTP 503 limit row contract mismatch")
+        if (
+            not valid_timestamp(row["timestamp_utc"])
+            or not isinstance(row["method"], str)
+            or not re.fullmatch(r"[A-Z]{1,12}", row["method"])
+            or not isinstance(row["route"], str)
+            or not SSE_QA_HTTP_503_SAFE_ROUTE_RE.fullmatch(row["route"])
+            or not re.fullmatch(r"HTTP/[0-9.]{3,8}", row["protocol"])
+            or not re.fullmatch(r"[a-z0-9_]{1,64}", row["zone"])
+            or row["classification"] != _sse_qa_http_503_classification(row["route"])
+        ):
+            raise ReleaseError("SSE QA HTTP 503 limit row is invalid")
+        expected = (
+            f'{row["timestamp_utc"]} limiting connections by zone "{row["zone"]}" '
+            f'request="{row["method"]} {row["route"]} {row["protocol"]}" class={row["classification"]}'
+        )
+        if row["sanitized_log_line"] != expected:
+            raise ReleaseError("SSE QA HTTP 503 limit line is invalid")
+
+    hash_rows = (
+        ("upstream_events", {"upstream_timeout", "upstream_closed", "upstream_connect_failed", "no_live_upstream"}, True),
+        ("wsgi_events", {"traceback", "exception", "timeout", "worker", "http_503", "error"}, False),
+    )
+    for name, classifications, has_request in hash_rows:
+        rows = report.get(name)
+        if not isinstance(rows, list) or len(rows) > 50:
+            raise ReleaseError("SSE QA HTTP 503 hashed rows are invalid")
+        expected_keys = {"timestamp_utc", "classification", "message_sha256"}
+        if has_request:
+            expected_keys |= {"method", "route"}
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != expected_keys:
+                raise ReleaseError("SSE QA HTTP 503 hashed row contract mismatch")
+            if (
+                not valid_timestamp(row["timestamp_utc"])
+                or row["classification"] not in classifications
+                or not isinstance(row["message_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", row["message_sha256"])
+            ):
+                raise ReleaseError("SSE QA HTTP 503 hashed row is invalid")
+            if has_request:
+                if row["method"] is not None and (
+                    not isinstance(row["method"], str) or not re.fullmatch(r"[A-Z]{1,12}", row["method"])
+                ):
+                    raise ReleaseError("SSE QA HTTP 503 upstream method is invalid")
+                if row["route"] is not None and (
+                    not isinstance(row["route"], str) or not SSE_QA_HTTP_503_SAFE_ROUTE_RE.fullmatch(row["route"])
+                ):
+                    raise ReleaseError("SSE QA HTTP 503 upstream route is invalid")
+
+    finding = report.get("finding")
+    if not isinstance(finding, dict) or set(finding) != {
+        "cause", "target_limit_correlated", "target_access_seen", "zone",
+        "wsgi_journal_queried",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 finding contract mismatch")
+    if finding["cause"] not in {
+        "limit_conn_sse_qa_per_ip", "upstream_or_application",
+        "other_nginx_or_access_layer", "not_established",
+    }:
+        raise ReleaseError("SSE QA HTTP 503 cause is invalid")
+    for field in ("target_limit_correlated", "target_access_seen", "wsgi_journal_queried"):
+        if type(finding[field]) is not bool:
+            raise ReleaseError("SSE QA HTTP 503 finding flag is invalid")
+    if finding["zone"] not in {None, "sse_qa_per_ip"}:
+        raise ReleaseError("SSE QA HTTP 503 finding zone is invalid")
+    if finding["target_limit_correlated"] != any(
+        row["zone"] == "sse_qa_per_ip"
+        and row["method"] == "GET"
+        and row["route"] == "/driver/"
+        and _sse_qa_http_503_near_target(
+            datetime.strptime(row["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        )
+        for row in limit_rows
+    ):
+        raise ReleaseError("SSE QA HTTP 503 target limit correlation is inconsistent")
+    if finding["target_access_seen"] != bool(access_rows):
+        raise ReleaseError("SSE QA HTTP 503 target access finding is inconsistent")
+    if finding["wsgi_journal_queried"] != sources["wsgi_journal"]["queried"]:
+        raise ReleaseError("SSE QA HTTP 503 journal finding is inconsistent")
+    correlated = finding["target_limit_correlated"]
+    if correlated:
+        expected_cause, expected_zone = "limit_conn_sse_qa_per_ip", "sse_qa_per_ip"
+    elif report["upstream_events"] or report["wsgi_events"]:
+        expected_cause, expected_zone = "upstream_or_application", None
+    elif access_rows:
+        expected_cause, expected_zone = "other_nginx_or_access_layer", None
+    else:
+        expected_cause, expected_zone = "not_established", None
+    if finding["cause"] != expected_cause or finding["zone"] != expected_zone:
+        raise ReleaseError("SSE QA HTTP 503 cause is inconsistent")
+    if finding["wsgi_journal_queried"] != (not correlated):
+        raise ReleaseError("SSE QA HTTP 503 conditional journal decision is inconsistent")
+
+    summary = report.get("summary")
+    row_count = len(access_rows) + len(limit_rows) + len(report["upstream_events"]) + len(report["wsgi_events"])
+    if (
+        not isinstance(summary, dict)
+        or set(summary) != {"row_count", "truncated"}
+        or type(summary["row_count"]) is not int
+        or summary["row_count"] != row_count
+        or row_count > 500
+        or type(summary["truncated"]) is not bool
+    ):
+        raise ReleaseError("SSE QA HTTP 503 summary is invalid")
+    if report.get("limitations") != SSE_QA_HTTP_503_LIMITATIONS:
+        raise ReleaseError("SSE QA HTTP 503 limitations contract mismatch")
+    reject_sensitive_diagnostic_value(report)
+    return report
+
+
 def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
     if metadata.get("operation") == "infra_capacity_v1":
         return validate_infra_capacity_report(raw, metadata)
+    if metadata.get("operation") == "sse_qa_http_503_v1":
+        return validate_sse_qa_http_503_report(raw, metadata)
     return validate_trip_diagnostic_report(raw, metadata)
 
 
@@ -2225,6 +3004,8 @@ def apply_data(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
 
 def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
     metadata = validate_diagnostic_metadata(manifest["metadata"])
+    if metadata["operation"] == "sse_qa_http_503_v1":
+        return collect_sse_qa_http_503_report()
     source = (
         INFRA_CAPACITY_SOURCE
         if metadata["operation"] == "infra_capacity_v1"

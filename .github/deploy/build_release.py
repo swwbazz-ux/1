@@ -91,7 +91,11 @@ SSE_QA_SEED_FIX_METADATA = {
     "seed_test_sha256": SSE_QA_SEED_TEST_SHA256,
 }
 
-DIAGNOSTIC_OPERATIONS = {"trip_accounting_incident_v1", "infra_capacity_v1"}
+DIAGNOSTIC_OPERATIONS = {
+    "trip_accounting_incident_v1",
+    "infra_capacity_v1",
+    "sse_qa_http_503_v1",
+}
 DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
 DIAGNOSTIC_MAX_WINDOW = timedelta(hours=24)
 DIAGNOSTIC_MAX_ROWS = 500
@@ -152,11 +156,11 @@ def load_diagnostic_metadata(event_path: Path) -> dict[str, object]:
     max_rows_text = inputs.get("diagnostic_max_rows", "500")
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise SystemExit("diagnostic operation is not allowlisted")
-    if operation == "infra_capacity_v1":
+    if operation in {"infra_capacity_v1", "sse_qa_http_503_v1"}:
         if any(value not in (None, "") for value in (equipment, from_text, to_text)):
-            raise SystemExit("infra capacity diagnostic does not accept parameters")
+            raise SystemExit(f"{operation} diagnostic does not accept parameters")
         if max_rows_text not in (None, "", "500"):
-            raise SystemExit("infra capacity diagnostic does not accept row limits")
+            raise SystemExit(f"{operation} diagnostic does not accept row limits")
         return {"operation": operation}
     if (
         not isinstance(equipment, str)
