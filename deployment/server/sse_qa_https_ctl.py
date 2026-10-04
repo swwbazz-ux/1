@@ -63,6 +63,7 @@ QA_SERVICES = (
 )
 QA_SLICE_CGROUP = "/sse.slice/sse-qa.slice"
 PREPARE_UNIT = "sse-qa-https.service"
+NGINX_LIMIT_FIX_UNIT = "sse-qa-nginx-limit-fix.service"
 COMMAND_TIMEOUT = 120
 CERTBOT_TIMEOUT = 300
 ROLLBACK_COMMAND_TIMEOUT = 20
@@ -165,6 +166,41 @@ server {
 """
 C2_NGINX_TEMPLATE_SHA256 = (
     "a9d33543398df5188734e152d056e04e3e27770e09bcf57ce73eba42f9e710c9"
+)
+
+# The only accepted post-C2 nginx change moves the per-IP limit from server
+# scope into the ordinary application location.  Static files then no longer
+# consume the eight-request HTTP/2 budget, while the exact two-client SSE
+# limit remains unchanged.  Both templates remain pinned so the operation can
+# be applied and rolled back without caller-supplied bytes.
+C2_NGINX_LIMIT_FIX_TEMPLATE = C2_NGINX_TEMPLATE.replace(
+    "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+    "    client_max_body_size 2m;",
+).replace(
+    "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+    "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+    "        proxy_pass http://sse_qa_wsgi;",
+)
+C2_NGINX_LIMIT_FIX_TEMPLATE_SHA256 = (
+    "686bd71cc95444a631b7c96d90811992794e0ebf1dc5582642d6be518cc1314a"
+)
+NGINX_LIMIT_FIX_SCHEMA = "SSE_QA_NGINX_LIMIT_FIX_V1"
+NGINX_LIMIT_FIX_VERSION = "C2 + seed-fix + nginx-limit-fix"
+BASE_CONTROLLER_SHA256 = (
+    "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
+)
+PINNED_RUNTIME_SHA256 = (
+    "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
+)
+
+# The installed renewal hook was copied from the LF-normalized HTTPS
+# controller accepted by the protected channel at control SHA 48343af.  The
+# HTTPS verifier may evolve, but that already-installed executable remains
+# valid only under this exact immutable digest (or the exact currently pinned
+# controller bytes for a new preparation).  No ownership-provided hash is
+# trusted as an allowlist entry.
+LEGACY_RENEWAL_HOOK_SHA256 = (
+    "a70916ea7e39d234cbd2fd232eccdeb79c632f69f6cc01fef4fcb2978746a722"
 )
 
 _C2_NGINX_CONTRACT_FRAGMENTS = (
@@ -358,17 +394,25 @@ def current_unified_cgroup() -> str:
     raise QaHttpsError("unified process cgroup is unavailable")
 
 
-def assert_prepare_scope() -> None:
-    if systemctl_property(PREPARE_UNIT, "Slice") != "sse-qa.slice":
-        raise QaHttpsError("HTTPS preparation is outside QA slice")
+def _assert_qa_operation_scope(unit: str, label: str) -> None:
+    if systemctl_property(unit, "Slice") != "sse-qa.slice":
+        raise QaHttpsError(f"{label} is outside QA slice")
     parent = systemctl_property("sse-qa.slice", "ControlGroup")
-    expected = f"{QA_SLICE_CGROUP}/{PREPARE_UNIT}"
+    expected = f"{QA_SLICE_CGROUP}/{unit}"
     if parent != QA_SLICE_CGROUP:
         raise QaHttpsError("QA slice cgroup hierarchy mismatch")
-    if systemctl_property(PREPARE_UNIT, "ControlGroup") != expected:
-        raise QaHttpsError("HTTPS preparation unit cgroup mismatch")
+    if systemctl_property(unit, "ControlGroup") != expected:
+        raise QaHttpsError(f"{label} unit cgroup mismatch")
     if current_unified_cgroup() != expected:
-        raise QaHttpsError("HTTPS preparation process cgroup mismatch")
+        raise QaHttpsError(f"{label} process cgroup mismatch")
+
+
+def assert_prepare_scope() -> None:
+    _assert_qa_operation_scope(PREPARE_UNIT, "HTTPS preparation")
+
+
+def assert_nginx_limit_fix_scope() -> None:
+    _assert_qa_operation_scope(NGINX_LIMIT_FIX_UNIT, "nginx limit-fix operation")
 
 
 def atomic_write(path: Path, data: bytes, mode: int, *, replace: bool) -> None:
@@ -395,6 +439,83 @@ def atomic_write(path: Path, data: bytes, mode: int, *, replace: bool) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _managed_file_identity(path: Path) -> tuple[int, int | None, int | None]:
+    if path.is_symlink() or not path.is_file():
+        raise QaHttpsError(f"managed regular file is missing or unsafe: {path}")
+    details = path.stat(follow_symlinks=False)
+    if not stat.S_ISREG(details.st_mode):
+        raise QaHttpsError(f"managed path is not a regular file: {path}")
+    return (
+        stat.S_IMODE(details.st_mode),
+        details.st_uid if os.name != "nt" else None,
+        details.st_gid if os.name != "nt" else None,
+    )
+
+
+def _atomic_replace_preserving(
+    path: Path,
+    data: bytes,
+    *,
+    expected_before_sha256: str,
+    identity: tuple[int, int | None, int | None],
+) -> None:
+    """Replace one authenticated file while preserving uid/gid/mode exactly."""
+    if _managed_file_identity(path) != identity:
+        raise QaHttpsError(f"managed file metadata changed before replacement: {path}")
+    if digest_path(path) != expected_before_sha256:
+        raise QaHttpsError(f"managed file changed before replacement: {path}")
+    mode, uid, gid = identity
+    descriptor, raw_temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.limit-fix-", dir=path.parent,
+    )
+    temporary = Path(raw_temporary)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, mode)
+        else:
+            os.chmod(temporary, mode)
+        if uid is not None or gid is not None:
+            if not hasattr(os, "fchown"):
+                raise QaHttpsError("managed file owner preservation is unavailable")
+            os.fchown(
+                descriptor,
+                -1 if uid is None else uid,
+                -1 if gid is None else gid,
+            )
+        view = memoryview(data)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short managed file write")
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+
+        # Recheck both bytes and metadata immediately before the atomic swap.
+        if _managed_file_identity(path) != identity:
+            raise QaHttpsError(f"managed file metadata changed before publish: {path}")
+        if digest_path(path) != expected_before_sha256:
+            raise QaHttpsError(f"managed file changed before publish: {path}")
+        os.replace(temporary, path)
+        if os.name != "nt":
+            directory_fd = os.open(
+                path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        if digest_path(path) != digest_bytes(data):
+            raise QaHttpsError(f"managed file replacement digest mismatch: {path}")
+        if _managed_file_identity(path) != identity:
+            raise QaHttpsError(f"managed file replacement metadata mismatch: {path}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+
+
 def save_ownership(root: Path, state: dict[str, object]) -> None:
     path = rooted(root, OWNERSHIP_PATH)
     atomic_write(
@@ -414,6 +535,44 @@ def _render_c2_nginx(allow_cidr: str) -> str:
     return rendered
 
 
+def _render_c2_nginx_limit_fix(allow_cidr: str) -> str:
+    if (
+        digest_bytes(C2_NGINX_LIMIT_FIX_TEMPLATE.encode("utf-8"))
+        != C2_NGINX_LIMIT_FIX_TEMPLATE_SHA256
+    ):
+        raise QaHttpsError("pinned C2 nginx limit-fix template digest mismatch")
+    if C2_NGINX_LIMIT_FIX_TEMPLATE.count("    limit_conn sse_qa_per_ip 8;\n") != 1:
+        raise QaHttpsError("pinned C2 nginx limit-fix directive count mismatch")
+    rendered = C2_NGINX_LIMIT_FIX_TEMPLATE.replace("@@ALLOW_CIDR@@", allow_cidr)
+    if "@@" in rendered:
+        raise QaHttpsError("pinned C2 nginx limit-fix template marker mismatch")
+    return rendered
+
+
+def _nginx_limit_fix_overlay(
+    *, allow_cidr: str, previous_ownership_sha256: str,
+) -> dict[str, object]:
+    legacy = _render_c2_nginx(allow_cidr).encode("utf-8")
+    fixed = _render_c2_nginx_limit_fix(allow_cidr).encode("utf-8")
+    if re.fullmatch(r"[0-9a-f]{64}", previous_ownership_sha256) is None:
+        raise QaHttpsError("previous QA ownership digest is invalid")
+    return {
+        "schema": NGINX_LIMIT_FIX_SCHEMA,
+        "version": NGINX_LIMIT_FIX_VERSION,
+        "source_template_sha256": C2_NGINX_TEMPLATE_SHA256,
+        "target_template_sha256": C2_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+        "base_controller_sha256": BASE_CONTROLLER_SHA256,
+        "runtime_sha256": PINNED_RUNTIME_SHA256,
+        "renewal_hook_sha256": LEGACY_RENEWAL_HOOK_SHA256,
+        "previous_nginx_sha256": digest_bytes(legacy),
+        "installed_nginx_sha256": digest_bytes(fixed),
+        "previous_ownership_sha256": previous_ownership_sha256,
+        "ordinary_http_per_ip_limit": 8,
+        "static_per_ip_limit": None,
+        "realtime_total_limit": 2,
+    }
+
+
 def _nginx_contract_id(actual: str, expected: str, allow_cidr: str) -> str:
     """Classify an exact-template mismatch without exposing file content.
 
@@ -427,7 +586,7 @@ def _nginx_contract_id(actual: str, expected: str, allow_cidr: str) -> str:
     return "nginx_c2_exact_template_v1"
 
 
-def _validate_installed_nginx(nginx_text: str) -> str:
+def _validate_installed_nginx_variant(nginx_text: str) -> tuple[str, str]:
     allow_values = re.findall(
         r"(?m)^[ \t]*allow[ \t]+([^;\r\n]+);[ \t]*$", nginx_text,
     )
@@ -443,13 +602,65 @@ def _validate_installed_nginx(nginx_text: str) -> str:
             "installed QA nginx template mismatch "
             "contract_id=nginx_c2_allow_cidr_v1"
         ) from exc
-    expected = _render_c2_nginx(allow_cidr)
-    if nginx_text != expected:
-        contract_id = _nginx_contract_id(nginx_text, expected, allow_cidr)
+    legacy = _render_c2_nginx(allow_cidr)
+    fixed = _render_c2_nginx_limit_fix(allow_cidr)
+    if nginx_text == legacy:
+        return allow_cidr, "legacy"
+    if nginx_text == fixed:
+        return allow_cidr, "applied"
+    if nginx_text != legacy:
+        contract_id = _nginx_contract_id(nginx_text, legacy, allow_cidr)
         raise QaHttpsError(
             f"installed QA nginx template mismatch contract_id={contract_id}"
         )
+    raise QaHttpsError("installed QA nginx template mismatch")
+
+
+def _validate_installed_nginx(nginx_text: str) -> str:
+    allow_cidr, _variant = _validate_installed_nginx_variant(nginx_text)
     return allow_cidr
+
+
+def _canonical_ownership_bytes(state: dict[str, object]) -> bytes:
+    return (json.dumps(state, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _validate_nginx_limit_fix_ownership(
+    state: dict[str, object], *, allow_cidr: str, variant: str,
+) -> None:
+    overlay = state.get("nginx_limit_fix")
+    if variant == "legacy":
+        if overlay is not None:
+            raise QaHttpsError("legacy QA nginx config has limit-fix ownership residue")
+        return
+    if variant != "applied" or not isinstance(overlay, dict):
+        raise QaHttpsError("QA nginx limit-fix ownership overlay is missing")
+    previous_sha256 = overlay.get("previous_ownership_sha256")
+    if not isinstance(previous_sha256, str):
+        raise QaHttpsError("QA nginx limit-fix ownership overlay mismatch")
+    expected = _nginx_limit_fix_overlay(
+        allow_cidr=allow_cidr,
+        previous_ownership_sha256=previous_sha256,
+    )
+    if overlay != expected:
+        raise QaHttpsError("QA nginx limit-fix ownership overlay mismatch")
+    files = state.get("files")
+    if (
+        not isinstance(files, dict)
+        or files.get(QA_NGINX_CONFIG.as_posix()) != expected["installed_nginx_sha256"]
+    ):
+        raise QaHttpsError("QA nginx limit-fix ownership file hash mismatch")
+
+    # Prove that removing only this fixed overlay and restoring the one fixed
+    # nginx hash reconstructs the exact pre-apply ownership bytes.
+    previous = json.loads(json.dumps(state))
+    previous.pop("nginx_limit_fix", None)
+    previous_files = previous.get("files")
+    if not isinstance(previous_files, dict):
+        raise QaHttpsError("QA nginx limit-fix previous ownership is invalid")
+    previous_files[QA_NGINX_CONFIG.as_posix()] = expected["previous_nginx_sha256"]
+    if digest_bytes(_canonical_ownership_bytes(previous)) != previous_sha256:
+        raise QaHttpsError("QA nginx limit-fix previous ownership digest mismatch")
 
 
 def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
@@ -462,7 +673,8 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     if not ownership_path.is_file() or ownership_path.is_symlink():
         raise QaHttpsError("QA ownership journal is missing")
     try:
-        state = json.loads(ownership_path.read_text(encoding="utf-8"))
+        ownership_bytes = ownership_path.read_bytes()
+        state = json.loads(ownership_bytes.decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise QaHttpsError("QA ownership journal is invalid") from exc
     if (
@@ -473,6 +685,8 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
         or not isinstance(state.get("files"), dict)
     ):
         raise QaHttpsError("QA must be complete and disabled")
+    if ownership_bytes != _canonical_ownership_bytes(state):
+        raise QaHttpsError("QA ownership journal is not canonical")
     files = state["files"]
     assert isinstance(files, dict)
     for logical in (APP_ENV.as_posix(), QA_NGINX_CONFIG.as_posix()):
@@ -493,7 +707,10 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     if site.exists() or site.is_symlink():
         raise QaHttpsError("QA nginx site must remain disabled")
     nginx_text = rooted(root, QA_NGINX_CONFIG).read_text(encoding="utf-8")
-    allow_cidr = _validate_installed_nginx(nginx_text)
+    allow_cidr, nginx_variant = _validate_installed_nginx_variant(nginx_text)
+    _validate_nginx_limit_fix_ownership(
+        state, allow_cidr=allow_cidr, variant=nginx_variant,
+    )
     if root == REAL_ROOT:
         active = [
             unit for unit in QA_SERVICES
@@ -753,6 +970,31 @@ def hook_controller_bytes() -> bytes:
     return Path(__file__).read_bytes()
 
 
+def accepted_renewal_hook_sha256() -> set[str]:
+    # The dynamic member is still exact: the receiver accepts this controller
+    # only by its frozen package SHA-256.  The static member preserves the
+    # already-installed hook without rewriting certificate state.
+    return {
+        LEGACY_RENEWAL_HOOK_SHA256,
+        digest_bytes(hook_controller_bytes()),
+    }
+
+
+def _journalled_renewal_hook_sha256(root: Path) -> str:
+    ownership = rooted(root, OWNERSHIP_PATH)
+    if ownership.is_symlink() or not ownership.is_file():
+        raise QaHttpsError("QA renewal hook ownership journal is missing or unsafe")
+    try:
+        state = json.loads(ownership.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QaHttpsError("QA renewal hook ownership journal is invalid") from exc
+    https = state.get("https_preparation") if isinstance(state, dict) else None
+    value = https.get("hook_sha256") if isinstance(https, dict) else None
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise QaHttpsError("QA renewal hook ownership digest is missing or invalid")
+    return value
+
+
 def renewal_hook_state(root: Path) -> str:
     hook = rooted(root, HOOK_CONTROLLER)
     if not hook.exists() and not hook.is_symlink():
@@ -760,13 +1002,21 @@ def renewal_hook_state(root: Path) -> str:
     if hook.is_symlink() or not hook.is_file():
         raise QaHttpsError("QA renewal hook path is unsafe")
     wrong_mode = root == REAL_ROOT and stat.S_IMODE(hook.stat().st_mode) != 0o755
-    if hook.read_bytes() != hook_controller_bytes() or wrong_mode:
-        raise QaHttpsError("QA renewal hook differs from the fixed controller")
+    actual_sha256 = digest_path(hook)
+    if (
+        actual_sha256 not in accepted_renewal_hook_sha256()
+        or _journalled_renewal_hook_sha256(root) != actual_sha256
+        or wrong_mode
+    ):
+        raise QaHttpsError("QA renewal hook differs from every exact accepted controller")
     return "valid"
 
 
 def inspect(root: Path) -> str:
     _state, allow_cidr = load_disabled_installation(root)
+    _validated_allow, nginx_limit_fix = _validate_installed_nginx_variant(
+        rooted(root, QA_NGINX_CONFIG).read_text(encoding="utf-8")
+    )
     if not dns_matches():
         raise QaHttpsError("public QA DNS does not match the fixed server IPv4")
     certbot_ready(root)
@@ -787,7 +1037,8 @@ def inspect(root: Path) -> str:
     return (
         "SSE_QA_HTTPS_INSPECT_OK "
         f"dns_ipv4=match certificate={certificate} renewal_hook={hook} "
-        f"nginx_conflict=none qa=disabled allow_cidr={allow_cidr}"
+        f"nginx_conflict=none qa=disabled allow_cidr={allow_cidr} "
+        f"nginx_limit_fix={nginx_limit_fix}"
     )
 
 
@@ -814,12 +1065,18 @@ def _load_https_ownership(
         or re.fullmatch(
             r"[0-9a-f]{64}", str(https.get("webroot_marker_sha256", ""))
         ) is None
-        or (
-            require_hook
-            and https.get("hook_sha256") != digest_bytes(hook_controller_bytes())
-        )
     ):
         raise QaHttpsError("HTTPS ownership journal mismatch")
+    if require_hook:
+        hook = rooted(root, HOOK_CONTROLLER)
+        if hook.is_symlink() or not hook.is_file():
+            raise QaHttpsError("HTTPS ownership renewal hook is missing or unsafe")
+        actual_hook_sha256 = digest_path(hook)
+        if (
+            actual_hook_sha256 not in accepted_renewal_hook_sha256()
+            or https.get("hook_sha256") != actual_hook_sha256
+        ):
+            raise QaHttpsError("HTTPS ownership renewal hook digest mismatch")
     return state, https
 
 
@@ -1225,6 +1482,195 @@ def _restore_allow_cidr(
         atomic_write(path, original, 0o640, replace=True)
 
 
+def _https_runtime_fingerprint(root: Path) -> tuple[str, str, int]:
+    if certificate_state(root) != "valid":
+        raise QaHttpsError("QA nginx limit-fix requires the existing valid certificate")
+    if renewal_hook_state(root) != "valid":
+        raise QaHttpsError("QA nginx limit-fix requires the existing exact renewal hook")
+    _state, https = _load_https_ownership(root)
+    hook = rooted(root, HOOK_CONTROLLER)
+    hook_sha256 = digest_path(hook)
+    return (
+        digest_bytes(_canonical_ownership_bytes(https)),
+        hook_sha256,
+        hook.stat(follow_symlinks=False).st_mtime_ns,
+    )
+
+
+def _restore_exact_nginx_limit_fix_pair(
+    root: Path,
+    *,
+    nginx_before: bytes,
+    nginx_after: bytes,
+    nginx_identity: tuple[int, int | None, int | None],
+    ownership_before: bytes,
+    ownership_after: bytes,
+    ownership_identity: tuple[int, int | None, int | None],
+) -> None:
+    nginx_path = rooted(root, QA_NGINX_CONFIG)
+    ownership_path = rooted(root, OWNERSHIP_PATH)
+    nginx_actual = nginx_path.read_bytes()
+    ownership_actual = ownership_path.read_bytes()
+    if nginx_actual not in {nginx_before, nginx_after}:
+        raise QaHttpsError("QA nginx limit-fix rollback found foreign nginx bytes")
+    if ownership_actual not in {ownership_before, ownership_after}:
+        raise QaHttpsError("QA nginx limit-fix rollback found foreign ownership bytes")
+    with _defer_sigterm():
+        if nginx_actual != nginx_before:
+            _atomic_replace_preserving(
+                nginx_path,
+                nginx_before,
+                expected_before_sha256=digest_bytes(nginx_after),
+                identity=nginx_identity,
+            )
+        if ownership_actual != ownership_before:
+            _atomic_replace_preserving(
+                ownership_path,
+                ownership_before,
+                expected_before_sha256=digest_bytes(ownership_after),
+                identity=ownership_identity,
+            )
+    if (
+        nginx_path.read_bytes() != nginx_before
+        or ownership_path.read_bytes() != ownership_before
+    ):
+        raise QaHttpsError("QA nginx limit-fix rollback byte verification failed")
+
+
+def change_nginx_limit_fix(
+    root: Path,
+    action: str,
+    cancel_state: dict[str, bool] | None = None,
+) -> str:
+    if action not in {"apply", "rollback"}:
+        raise QaHttpsError("unsupported fixed nginx limit-fix action")
+    if root == REAL_ROOT:
+        assert_nginx_limit_fix_scope()
+
+    state, allow_cidr = load_disabled_installation(root)
+    https_before, hook_before, hook_mtime_before = _https_runtime_fingerprint(root)
+    if hook_before != LEGACY_RENEWAL_HOOK_SHA256:
+        raise QaHttpsError("QA nginx limit-fix requires the exact installed legacy renewal hook")
+    nginx_path = rooted(root, QA_NGINX_CONFIG)
+    ownership_path = rooted(root, OWNERSHIP_PATH)
+    nginx_before = nginx_path.read_bytes()
+    ownership_before = ownership_path.read_bytes()
+    if ownership_before != _canonical_ownership_bytes(state):
+        raise QaHttpsError("QA ownership journal changed after disabled preflight")
+    nginx_identity = _managed_file_identity(nginx_path)
+    ownership_identity = _managed_file_identity(ownership_path)
+    _validated_allow, variant = _validate_installed_nginx_variant(
+        nginx_before.decode("utf-8")
+    )
+
+    if (action == "apply" and variant == "applied") or (
+        action == "rollback" and variant == "legacy"
+    ):
+        result = "unchanged"
+        return (
+            "SSE_QA_NGINX_LIMIT_FIX_OK "
+            f"action={action} result={result} qa=disabled "
+            f"nginx_variant={variant} ordinary_per_ip=8 "
+            f"static_per_ip={'none' if variant == 'applied' else '8'} "
+            "realtime_total=2 ownership=verified renewal_hook=preserved"
+        )
+
+    next_state = json.loads(json.dumps(state))
+    next_files = next_state.get("files")
+    if not isinstance(next_files, dict):
+        raise QaHttpsError("QA ownership file map is invalid")
+    if action == "apply":
+        nginx_after = _render_c2_nginx_limit_fix(allow_cidr).encode("utf-8")
+        previous_ownership_sha256 = digest_bytes(ownership_before)
+        next_files[QA_NGINX_CONFIG.as_posix()] = digest_bytes(nginx_after)
+        next_state["nginx_limit_fix"] = _nginx_limit_fix_overlay(
+            allow_cidr=allow_cidr,
+            previous_ownership_sha256=previous_ownership_sha256,
+        )
+        expected_variant = "applied"
+    else:
+        overlay = state.get("nginx_limit_fix")
+        if not isinstance(overlay, dict):
+            raise QaHttpsError("QA nginx limit-fix rollback ownership is missing")
+        nginx_after = _render_c2_nginx(allow_cidr).encode("utf-8")
+        next_files[QA_NGINX_CONFIG.as_posix()] = digest_bytes(nginx_after)
+        next_state.pop("nginx_limit_fix", None)
+        ownership_after_candidate = _canonical_ownership_bytes(next_state)
+        if (
+            digest_bytes(ownership_after_candidate)
+            != overlay.get("previous_ownership_sha256")
+        ):
+            raise QaHttpsError("QA nginx limit-fix rollback cannot reconstruct exact ownership")
+        expected_variant = "legacy"
+    ownership_after = _canonical_ownership_bytes(next_state)
+
+    mutation_started = False
+    try:
+        with _defer_sigterm():
+            mutation_started = True
+            _atomic_replace_preserving(
+                nginx_path,
+                nginx_after,
+                expected_before_sha256=digest_bytes(nginx_before),
+                identity=nginx_identity,
+            )
+            _atomic_replace_preserving(
+                ownership_path,
+                ownership_after,
+                expected_before_sha256=digest_bytes(ownership_before),
+                identity=ownership_identity,
+            )
+        _state_after, installed_allow = load_disabled_installation(root)
+        if installed_allow != allow_cidr:
+            raise QaHttpsError("QA nginx limit-fix changed the fixed allow CIDR")
+        _allow_after, variant_after = _validate_installed_nginx_variant(
+            nginx_path.read_text(encoding="utf-8")
+        )
+        if variant_after != expected_variant:
+            raise QaHttpsError("QA nginx limit-fix final template variant mismatch")
+        https_after, hook_after, hook_mtime_after = _https_runtime_fingerprint(root)
+        if (https_after, hook_after, hook_mtime_after) != (
+            https_before, hook_before, hook_mtime_before,
+        ):
+            raise QaHttpsError("QA nginx limit-fix changed renewal ownership or hook")
+        if (
+            _managed_file_identity(nginx_path) != nginx_identity
+            or _managed_file_identity(ownership_path) != ownership_identity
+        ):
+            raise QaHttpsError("QA nginx limit-fix changed uid, gid or mode")
+    except BaseException as exc:
+        primary = _failure_text(exc)
+        _begin_rollback(cancel_state)
+        rollback_error: BaseException | None = None
+        if mutation_started:
+            try:
+                _restore_exact_nginx_limit_fix_pair(
+                    root,
+                    nginx_before=nginx_before,
+                    nginx_after=nginx_after,
+                    nginx_identity=nginx_identity,
+                    ownership_before=ownership_before,
+                    ownership_after=ownership_after,
+                    ownership_identity=ownership_identity,
+                )
+            except BaseException as caught:
+                rollback_error = caught
+        if rollback_error is not None:
+            raise QaHttpsError(
+                f"primary=({primary}), rollback=incomplete "
+                f"error={_failure_text(rollback_error)}"
+            ) from exc
+        raise
+
+    return (
+        "SSE_QA_NGINX_LIMIT_FIX_OK "
+        f"action={action} result=changed qa=disabled "
+        f"nginx_variant={expected_variant} ordinary_per_ip=8 "
+        f"static_per_ip={'none' if expected_variant == 'applied' else '8'} "
+        "realtime_total=2 ownership=updated renewal_hook=preserved"
+    )
+
+
 def prepare(
     root: Path, allow_cidr: str, cancel_state: dict[str, bool] | None = None,
 ) -> str:
@@ -1407,7 +1853,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("inspect", "prepare", "renew-pre", "renew-post", "renew-deploy"),
+        choices=(
+            "inspect", "prepare", "renew-pre", "renew-post", "renew-deploy",
+            "apply-nginx-limit-fix", "rollback-nginx-limit-fix",
+        ),
     )
     parser.add_argument("--allow-cidr-stdin", action="store_true")
     parser.add_argument("--test-root", type=Path)
@@ -1433,6 +1882,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cancel_state = {"cancel_requested": False, "rollback_started": False}
     signal.signal(signal.SIGTERM, _install_cancel_handler(cancel_state))
+    if args.operation in {"apply-nginx-limit-fix", "rollback-nginx-limit-fix"}:
+        if args.allow_cidr_stdin:
+            raise QaHttpsError("nginx limit-fix accepts no input")
+        action = "apply" if args.operation == "apply-nginx-limit-fix" else "rollback"
+        print(change_nginx_limit_fix(root, action, cancel_state))
+        return 0
     if args.operation == "renew-pre":
         if args.allow_cidr_stdin:
             raise QaHttpsError("renew-pre accepts no input")

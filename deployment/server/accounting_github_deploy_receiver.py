@@ -44,9 +44,16 @@ RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
 SSE_QA_SEED_FIX_MODES = {"repair_sse_qa_seed"}
+SSE_QA_NGINX_LIMIT_FIX_MODES = {
+    "apply_sse_qa_nginx_limit",
+    "rollback_sse_qa_nginx_limit",
+}
+SSE_QA_HTTPS_MODES = {
+    "inspect_sse_qa_https", "prepare_sse_qa_https",
+} | SSE_QA_NGINX_LIMIT_FIX_MODES
 SSE_QA_MODES = {
     "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
-    "inspect_sse_qa_https", "prepare_sse_qa_https",
+    *SSE_QA_HTTPS_MODES,
     "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
 } | SSE_QA_SEED_FIX_MODES
 ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
@@ -80,7 +87,12 @@ SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
-SSE_QA_HTTPS_CONTROLLER_SHA256 = "a70916ea7e39d234cbd2fd232eccdeb79c632f69f6cc01fef4fcb2978746a722"
+SSE_QA_HTTPS_CONTROLLER_SHA256 = "3579f325d1ab6ed74c012fcca8a233a3f0bbe1ef614da4d5b3c09c17ad19051b"
+SSE_QA_LEGACY_RENEWAL_HOOK_SHA256 = "a70916ea7e39d234cbd2fd232eccdeb79c632f69f6cc01fef4fcb2978746a722"
+SSE_QA_NGINX_LIMIT_FIX_SCHEMA = "SSE_QA_NGINX_LIMIT_FIX_V1"
+SSE_QA_NGINX_LIMIT_FIX_VERSION = "C2 + seed-fix + nginx-limit-fix"
+SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256 = "a9d33543398df5188734e152d056e04e3e27770e09bcf57ce73eba42f9e710c9"
+SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256 = "686bd71cc95444a631b7c96d90811992794e0ebf1dc5582642d6be518cc1314a"
 SSE_QA_SEED_FIX_VERSION = "C2 + seed-fix"
 SSE_QA_SEED_FIX_CONTROLLER_SHA256 = "f17e2b143b99c5b0970d9b408eae9d2dbbc050e5b48546ba3449bb7678b4f7c2"
 SSE_QA_SEED_FIX_DB_HELPER_SHA256 = "2e25eabe333c99178caab70141711ba580abf0d6569c4693bc0afaa4c16f86da"
@@ -121,7 +133,79 @@ SSE_QA_SEED_FIX_OVERLAY = {
     "seed_sha256": SSE_QA_SEED_COMMAND_SHA256,
     "test_sha256": SSE_QA_SEED_TEST_SHA256,
 }
+SSE_QA_NGINX_LIMIT_FIX_TEMPLATE = """limit_conn_zone $server_name zone=sse_qa_total:32k;
+limit_conn_zone $binary_remote_addr zone=sse_qa_per_ip:64k;
+
+upstream sse_qa_wsgi {
+    server 127.0.0.1:18080;
+}
+
+upstream sse_qa_asgi {
+    server 127.0.0.1:18082;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name sse-qa.driverform.ru;
+    access_log /srv/sse-qa/log/nginx-access.log combined buffer=16k flush=5s;
+    error_log /srv/sse-qa/log/nginx-error.log warn;
+
+    ssl_certificate /etc/letsencrypt/live/sse-qa.driverform.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sse-qa.driverform.ru/privkey.pem;
+
+    auth_basic "SSE QA";
+    auth_basic_user_file /run/sse-qa-nginx/htpasswd;
+    satisfy all;
+    allow @@ALLOW_CIDR@@;
+    deny all;
+
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+    client_max_body_size 2m;
+
+    location = /realtime/stream/ {
+        limit_conn sse_qa_total 2;
+        proxy_pass http://sse_qa_asgi;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering no always;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+    }
+
+    location /static/ {
+        alias /srv/sse-qa/current/backend/staticfiles/;
+        access_log off;
+        expires 5m;
+    }
+
+    location /media/ {
+        return 404;
+    }
+
+    location / {
+        limit_conn sse_qa_per_ip 8;
+        proxy_pass http://sse_qa_wsgi;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}
+"""
 SSE_QA_OWNERSHIP_PATH = Path("/var/lib/sse-qa/OWNERSHIP.json")
+SSE_QA_NGINX_CONFIG_PATH = Path("/etc/sse-qa/nginx.conf")
+SSE_QA_RENEWAL_HOOK_PATH = Path("/usr/local/libexec/sse-qa-https-hook")
+SSE_QA_APP_ENV_PATH = Path("/etc/sse-qa/app.env")
+SSE_QA_NGINX_AUTH_PATH = Path("/run/sse-qa-nginx/htpasswd")
 SSE_QA_INSTALLED_SEED_PATH = Path(
     "/srv/sse-qa/releases/r3/backend/users/management/commands/seed_sse_qa.py"
 )
@@ -135,6 +219,13 @@ SSE_QA_SEED_FIX_SUMMARY = re.compile(
     r"action=(applied|already_applied) "
     r"source=(updated|already_fixed) database=(updated|already_fixed) "
     r"history=preserved access=preserved qa=disabled$"
+)
+SSE_QA_NGINX_LIMIT_FIX_SUMMARY = re.compile(
+    r"^SSE_QA_NGINX_LIMIT_FIX_OK "
+    r"action=(apply|rollback) result=(changed|unchanged) qa=disabled "
+    r"nginx_variant=(applied|legacy) ordinary_per_ip=8 "
+    r"static_per_ip=(none|8) realtime_total=2 "
+    r"ownership=(updated|verified) renewal_hook=preserved$"
 )
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {
@@ -2834,7 +2925,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             expected.add(SSE_QA_ALLOW_CIDR_PAYLOAD)
         expected_metadata = (
             SSE_QA_HTTPS_METADATA
-            if mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}
+            if mode in SSE_QA_HTTPS_MODES
             else SSE_QA_METADATA
         )
         if set(payload) != expected or metadata != expected_metadata:
@@ -3486,6 +3577,191 @@ def _verify_sse_qa_seed_fix_overlay() -> None:
             raise ReleaseError(f"SSE QA seed-fix installed file hash mismatch: {path}")
 
 
+def _verify_sse_qa_nginx_limit_fix_overlay(*, expected_enabled: bool) -> None:
+    """Require the one exact nginx limit overlay before enable or smoke."""
+    ownership_path = SSE_QA_OWNERSHIP_PATH
+    nginx_path = SSE_QA_NGINX_CONFIG_PATH
+    hook_path = SSE_QA_RENEWAL_HOOK_PATH
+    for label, path in (
+        ("ownership", ownership_path),
+        ("nginx", nginx_path),
+        ("renewal hook", hook_path),
+    ):
+        if path.is_symlink() or not path.is_file():
+            raise ReleaseError(f"SSE QA nginx limit-fix {label} is missing or unsafe")
+    try:
+        ownership_bytes = ownership_path.read_bytes()
+        ownership = json.loads(ownership_bytes.decode("utf-8"))
+        nginx_bytes = nginx_path.read_bytes()
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("SSE QA nginx limit-fix state cannot be read") from exc
+    if not isinstance(ownership, dict):
+        raise ReleaseError("SSE QA nginx limit-fix ownership is invalid")
+    canonical_ownership = (
+        json.dumps(ownership, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    if ownership_bytes != canonical_ownership:
+        raise ReleaseError("SSE QA nginx limit-fix ownership is not canonical")
+    expected_phase = "complete_enabled" if expected_enabled else "complete_disabled"
+    if (
+        ownership.get("schema") != "SSE_QA_OWNERSHIP_V2"
+        or ownership.get("complete") is not True
+        or ownership.get("phase") != expected_phase
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix ownership phase mismatch")
+
+    if digest(SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.encode("utf-8")) != (
+        SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix verifier template pin mismatch")
+    legacy_template = SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+        "    client_max_body_size 2m;",
+        "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+        1,
+    ).replace(
+        "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+        "        proxy_pass http://sse_qa_wsgi;",
+        "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+        1,
+    )
+    if digest(legacy_template.encode("utf-8")) != SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256:
+        raise ReleaseError("SSE QA nginx legacy verifier template pin mismatch")
+    try:
+        nginx_text = nginx_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ReleaseError("SSE QA nginx limit-fix config is not UTF-8") from exc
+    allow_values = re.findall(
+        r"(?m)^[ \t]*allow[ \t]+([^;\r\n]+);[ \t]*$", nginx_text,
+    )
+    if len(allow_values) != 1:
+        raise ReleaseError("SSE QA nginx limit-fix allow CIDR is ambiguous")
+    try:
+        allow_network = ipaddress.ip_network(allow_values[0], strict=True)
+    except ValueError as exc:
+        raise ReleaseError("SSE QA nginx limit-fix allow CIDR is invalid") from exc
+    allow_cidr = str(allow_network)
+    if (
+        allow_network.version != 4
+        or allow_network.prefixlen != 32
+        or allow_cidr != allow_values[0]
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix allow CIDR is not canonical /32")
+    fixed_rendered = SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace("@@ALLOW_CIDR@@", allow_cidr)
+    legacy_rendered = legacy_template.replace("@@ALLOW_CIDR@@", allow_cidr)
+    if nginx_text != fixed_rendered:
+        raise ReleaseError("SSE QA nginx limit-fix installed bytes are not the exact template")
+
+    files = ownership.get("files")
+    nginx_sha256 = digest(nginx_bytes)
+    if (
+        not isinstance(files, dict)
+        or files.get(SSE_QA_NGINX_CONFIG_PATH.as_posix()) != nginx_sha256
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix ownership file hash mismatch")
+    app_env_path = SSE_QA_APP_ENV_PATH
+    if app_env_path.is_symlink() or not app_env_path.is_file():
+        raise ReleaseError("SSE QA nginx limit-fix app.env is missing or unsafe")
+    try:
+        app_env_bytes = app_env_path.read_bytes()
+        app_env = app_env_bytes.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ReleaseError("SSE QA nginx limit-fix app.env cannot be read") from exc
+    expected_switch = "true" if expected_enabled else "false"
+    if (
+        re.findall(r"(?m)^SSE_PILOT_ENABLED=(true|false)$", app_env)
+        != [expected_switch]
+        or files.get(app_env_path.as_posix()) != digest(app_env_bytes)
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix app.env ownership mismatch")
+    overlay = ownership.get("nginx_limit_fix")
+    previous_ownership_sha256 = (
+        overlay.get("previous_ownership_sha256") if isinstance(overlay, dict) else None
+    )
+    if not isinstance(previous_ownership_sha256, str) or re.fullmatch(
+        r"[0-9a-f]{64}", previous_ownership_sha256,
+    ) is None:
+        raise ReleaseError("SSE QA nginx limit-fix previous ownership pin is invalid")
+    expected_overlay = {
+        "schema": SSE_QA_NGINX_LIMIT_FIX_SCHEMA,
+        "version": SSE_QA_NGINX_LIMIT_FIX_VERSION,
+        "source_template_sha256": SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256,
+        "target_template_sha256": SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+        "base_controller_sha256": SSE_QA_CONTROLLER_SHA256,
+        "runtime_sha256": SSE_QA_RUNTIME_SHA256,
+        "renewal_hook_sha256": SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
+        "previous_nginx_sha256": digest(legacy_rendered.encode("utf-8")),
+        "installed_nginx_sha256": nginx_sha256,
+        "previous_ownership_sha256": previous_ownership_sha256,
+        "ordinary_http_per_ip_limit": 8,
+        "static_per_ip_limit": None,
+        "realtime_total_limit": 2,
+    }
+    if overlay != expected_overlay:
+        raise ReleaseError("SSE QA nginx limit-fix exact ownership overlay mismatch")
+
+    https = ownership.get("https_preparation")
+    if (
+        not isinstance(https, dict)
+        or https.get("hook_sha256") != SSE_QA_LEGACY_RENEWAL_HOOK_SHA256
+        or digest(hook_path.read_bytes()) != SSE_QA_LEGACY_RENEWAL_HOOK_SHA256
+        or stat.S_IMODE(hook_path.stat(follow_symlinks=False).st_mode) != 0o755
+    ):
+        raise ReleaseError("SSE QA nginx limit-fix exact renewal hook pin mismatch")
+
+    runtime_files = ownership.get("runtime_files")
+    if not isinstance(runtime_files, dict):
+        raise ReleaseError("SSE QA nginx limit-fix runtime ownership is invalid")
+    auth_path = SSE_QA_NGINX_AUTH_PATH
+    auth_key = auth_path.as_posix()
+    if expected_enabled:
+        if auth_path.is_symlink() or not auth_path.is_file():
+            raise ReleaseError("SSE QA nginx limit-fix runtime auth is missing or unsafe")
+        try:
+            auth_bytes = auth_path.read_bytes()
+            auth_details = auth_path.stat(follow_symlinks=False)
+            www_gid = grp.getgrnam("www-data").gr_gid if grp is not None else None
+        except (OSError, KeyError, AttributeError) as exc:
+            raise ReleaseError("SSE QA nginx limit-fix runtime auth cannot be verified") from exc
+        if (
+            not isinstance(runtime_files.get(auth_key), str)
+            or runtime_files.get(auth_key) != digest(auth_bytes)
+            or stat.S_IMODE(auth_details.st_mode) != 0o640
+            or auth_details.st_uid != 0
+            or www_gid is None
+            or auth_details.st_gid != www_gid
+        ):
+            raise ReleaseError("SSE QA nginx limit-fix runtime auth ownership mismatch")
+    elif auth_path.exists() or auth_path.is_symlink() or auth_key in runtime_files:
+        raise ReleaseError("SSE QA nginx limit-fix disabled runtime auth residue")
+
+    # Reconstruct the exact disabled pre-apply ownership journal.  For the
+    # smoke gate, reverse only the deterministic enable mutations: phase,
+    # app.env and the one fixed materialized Basic Auth runtime entry.
+    previous = json.loads(json.dumps(ownership))
+    previous.pop("nginx_limit_fix", None)
+    previous_files = previous.get("files")
+    if not isinstance(previous_files, dict):
+        raise ReleaseError("SSE QA nginx limit-fix previous file map is invalid")
+    previous_files[SSE_QA_NGINX_CONFIG_PATH.as_posix()] = expected_overlay[
+        "previous_nginx_sha256"
+    ]
+    previous["phase"] = "complete_disabled"
+    if expected_enabled:
+        disabled_env, count = re.subn(
+            r"(?m)^SSE_PILOT_ENABLED=true$", "SSE_PILOT_ENABLED=false", app_env,
+        )
+        if count != 1:
+            raise ReleaseError("SSE QA nginx limit-fix enabled app.env mismatch")
+        previous_files[app_env_path.as_posix()] = digest(disabled_env.encode("utf-8"))
+        previous_runtime_files = previous.get("runtime_files")
+        if not isinstance(previous_runtime_files, dict):
+            raise ReleaseError("SSE QA nginx limit-fix previous runtime map is invalid")
+        previous_runtime_files.pop(auth_key, None)
+    previous_bytes = (json.dumps(previous, sort_keys=True) + "\n").encode("utf-8")
+    if digest(previous_bytes) != previous_ownership_sha256:
+        raise ReleaseError("SSE QA nginx limit-fix previous ownership cannot be reconstructed")
+
+
 def run_sse_qa_seed_fix(payload: dict[str, bytes]) -> str:
     """Run the one fixed, hash-pinned in-place repair for the isolated QA seed."""
     bundle_members = {
@@ -3542,14 +3818,22 @@ def run_sse_qa_seed_fix(payload: dict[str, bytes]) -> str:
 
 def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
-    if mode in {"enable_sse_qa", "smoke_sse_qa"}:
+    if mode in {
+        "enable_sse_qa", "smoke_sse_qa", *SSE_QA_NGINX_LIMIT_FIX_MODES,
+    }:
         _verify_sse_qa_seed_fix_overlay()
+    if mode in {"enable_sse_qa", "smoke_sse_qa"}:
+        _verify_sse_qa_nginx_limit_fix_overlay(
+            expected_enabled=mode == "smoke_sse_qa",
+        )
     operation = {
         "verify_sse_qa": "preflight",
         "prepare_sse_qa_host_key": "prepare-host-key",
         "install_sse_qa": "install",
         "inspect_sse_qa_https": "inspect",
         "prepare_sse_qa_https": "prepare",
+        "apply_sse_qa_nginx_limit": "apply-nginx-limit-fix",
+        "rollback_sse_qa_nginx_limit": "rollback-nginx-limit-fix",
         "enable_sse_qa": "enable",
         "smoke_sse_qa": "smoke",
         "disable_sse_qa": "disable",
@@ -3586,14 +3870,14 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                 if total_uncompressed > SSE_QA_MAX_UNCOMPRESSED_BYTES:
                     raise ReleaseError("SSE QA archive expands beyond its limit")
             archive.extractall(root / "bundle")
-        https_mode = mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}
+        https_mode = mode in SSE_QA_HTTPS_MODES
         controller_name = "sse_qa_https_ctl.py" if https_mode else "sse_qa_ctl.py"
         controller = root / "bundle" / "scripts" / controller_name
         checker = root / "bundle" / "scripts" / "package_self_check.py"
         control_only = mode in {
             "prepare_sse_qa_host_key", "enable_sse_qa", "smoke_sse_qa",
             "disable_sse_qa", "remove_sse_qa",
-            "inspect_sse_qa_https", "prepare_sse_qa_https",
+            *SSE_QA_HTTPS_MODES,
         }
         if not controller.is_file():
             raise ReleaseError("SSE QA controller is missing")
@@ -3647,6 +3931,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             scoped_unit = "sse-qa-smoke.service"
         elif mode == "prepare_sse_qa_https":
             scoped_unit = "sse-qa-https.service"
+        elif mode in SSE_QA_NGINX_LIMIT_FIX_MODES:
+            scoped_unit = "sse-qa-nginx-limit-fix.service"
         runtime_slice_digest = (
             _stage_sse_qa_runtime_slice(root / "bundle")
             if mode == "install_sse_qa" else None
@@ -3702,6 +3988,13 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             summary = output.strip().splitlines()[-1]
             if not summary.startswith("SSE_QA_"):
                 raise ReleaseError("SSE QA operation returned no fixed summary")
+            if mode in SSE_QA_NGINX_LIMIT_FIX_MODES:
+                matched = SSE_QA_NGINX_LIMIT_FIX_SUMMARY.fullmatch(summary)
+                expected_action = (
+                    "apply" if mode == "apply_sse_qa_nginx_limit" else "rollback"
+                )
+                if matched is None or matched.group(1) != expected_action:
+                    raise ReleaseError("SSE QA nginx limit-fix returned no fixed summary")
             if receiver_cgroup is not None and _receiver_unified_cgroup() != receiver_cgroup:
                 raise ReleaseError("production receiver cgroup changed during SSE QA operation")
             operation_succeeded = True

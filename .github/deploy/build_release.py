@@ -34,6 +34,8 @@ MODES = {
     "install_sse_qa",
     "inspect_sse_qa_https",
     "prepare_sse_qa_https",
+    "apply_sse_qa_nginx_limit",
+    "rollback_sse_qa_nginx_limit",
     "enable_sse_qa",
     "smoke_sse_qa",
     "disable_sse_qa",
@@ -42,6 +44,14 @@ MODES = {
     "diagnose",
     "rollback",
 }
+
+SSE_QA_NGINX_LIMIT_FIX_MODES = {
+    "apply_sse_qa_nginx_limit",
+    "rollback_sse_qa_nginx_limit",
+}
+SSE_QA_HTTPS_MODES = {
+    "inspect_sse_qa_https", "prepare_sse_qa_https",
+} | SSE_QA_NGINX_LIMIT_FIX_MODES
 
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
@@ -379,7 +389,7 @@ def main() -> None:
         metadata.update(SSE_QA_SEED_FIX_METADATA)
     elif args.mode in {
         "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
-        "inspect_sse_qa_https", "prepare_sse_qa_https",
+        *SSE_QA_HTTPS_MODES,
         "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
     }:
         if args.mode == "prepare_sse_qa_host_key" and any((
@@ -388,6 +398,13 @@ def main() -> None:
             args.sse_qa_secrets, args.sse_qa_secrets_stdin,
         )):
             raise SystemExit("prepare_sse_qa_host_key accepts no additional inputs")
+        if args.mode in SSE_QA_NGINX_LIMIT_FIX_MODES and any((
+            args.apk_dist, args.apk_profile, args.operation, args.receiver_source,
+            args.fcm_service_account, args.rollback_id, args.event_file,
+            args.sse_qa_secrets, args.sse_qa_secrets_stdin,
+            args.sse_qa_allow_cidr,
+        )):
+            raise SystemExit(f"{args.mode} accepts no additional inputs")
         if not args.sse_qa_package or not args.sse_qa_package.is_file():
             raise SystemExit("SSE QA mode requires --sse-qa-package")
         paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]
@@ -433,7 +450,7 @@ def main() -> None:
             if not re.fullmatch(r"[0-9a-f]{64}", provenance[field] or ""):
                 raise SystemExit(f"SSE QA {field} must be a lowercase SHA-256")
         metadata.update({"qa_schema": 2, **provenance})
-        if args.mode in {"inspect_sse_qa_https", "prepare_sse_qa_https"}:
+        if args.mode in SSE_QA_HTTPS_MODES:
             if not re.fullmatch(
                 r"[0-9a-f]{64}", args.sse_qa_https_controller_sha256 or ""
             ):
