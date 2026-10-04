@@ -2497,7 +2497,7 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
     ciphertext = encrypted.stdout
     if not ciphertext or len(ciphertext) > DIAGNOSTIC_MAX_OUTPUT_BYTES + 65536:
         raise ReleaseError("diagnostic ciphertext size is invalid")
-    return {
+    envelope = {
         "schema": 1,
         "kind": "production_diagnostic_ciphertext",
         "operation": report["operation"],
@@ -2507,6 +2507,36 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
         "ciphertext_sha256": digest(ciphertext),
         "ciphertext_base64": base64.b64encode(ciphertext).decode("ascii"),
     }
+    if report["operation"] == "sse_qa_http_503_v1":
+        target_line = report["target_access"][0]["sanitized_log_line"] if report["target_access"] else None
+        limit_line = next(
+            (
+                row["sanitized_log_line"]
+                for row in report["limit_events"]
+                if row["zone"] == "sse_qa_per_ip"
+                and row["method"] == "GET"
+                and row["route"] == "/driver/"
+                and _sse_qa_http_503_near_target(
+                    datetime.strptime(row["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                        tzinfo=timezone.utc
+                    )
+                )
+            ),
+            None,
+        )
+        configuration = report["configuration"]
+        envelope["public_evidence"] = {
+            "cause": report["finding"]["cause"],
+            "zone": report["finding"]["zone"],
+            "target_access": target_line,
+            "limit_event": limit_line,
+            "configuration_status": configuration["status"],
+            "ordinary_http_per_ip_limit": configuration["ordinary_http_per_ip_limit"],
+            "static_per_ip_limit": configuration["static_per_ip_limit"],
+            "realtime_per_ip_limit": configuration["realtime_per_ip_limit"],
+            "realtime_total_limit": configuration["realtime_total_limit"],
+        }
+    return envelope
 
 
 def run(command: list[str], *, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
