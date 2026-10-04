@@ -2,32 +2,49 @@
   "sqlite": [
     {
       "name": "users",
-      "apps": ["users"],
+      "apps": [
+        "users"
+      ],
       "tests": "users"
     },
     {
       "name": "field-core",
-      "apps": ["core", "trips", "downtimes"],
+      "apps": [
+        "core",
+        "trips",
+        "downtimes"
+      ],
       "tests": "core trips downtimes"
     },
     {
       "name": "planning",
-      "apps": ["shifts", "assignments", "references"],
+      "apps": [
+        "shifts",
+        "assignments",
+        "references"
+      ],
       "tests": "shifts assignments references"
     },
     {
       "name": "reports-and-portal",
-      "apps": ["reports", "portal"],
+      "apps": [
+        "reports",
+        "portal"
+      ],
       "tests": "reports portal"
     },
     {
       "name": "rotations",
-      "apps": ["rotations"],
+      "apps": [
+        "rotations"
+      ],
       "tests": "rotations"
     },
     {
       "name": "settlement-core",
-      "apps": ["settlement"],
+      "apps": [
+        "settlement"
+      ],
       "tests": "settlement.tests"
     },
     {
@@ -56,6 +73,10 @@
     {
       "name": "migration-portability",
       "tests": "settlement.tests.EmployeeBedOccupancyCanonicalIntervalMigrationTests settlement.tests.ResidentSubjectTransitionMigrationTests settlement.tests.M5ShiftSourceMigrationTests"
+    },
+    {
+      "name": "mechanics-concurrency",
+      "tests": "trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomicityTests trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests"
     }
   ]
 }

@@ -826,9 +826,6 @@ def mining_master_move_excavator_view(request):
             ),
             code='state_conflict',
         )
-    if not placement:
-        placement = ExcavatorPlacement.objects.create(excavator=excavator)
-
     scheduled_assignments = []
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         try:
@@ -851,6 +848,10 @@ def mining_master_move_excavator_view(request):
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return mining_master_client_action_error(payload, error, code='state_conflict')
 
+    # A caught state conflict commits the outer view transaction. Delay the
+    # placement and signal writes until the command has passed validation.
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
