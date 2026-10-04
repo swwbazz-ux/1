@@ -1,0 +1,61 @@
+[
+  {
+    "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/core/offline_sync.py",
+    "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+    "bytes_hint": 195830,
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 218043,
+    "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+    "verified_git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34"
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/downtimes/driver_workflow.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/downtimes/driver_workflow.py",
+    "git_blob_sha": "6166cc8a4e64ec328d024b32af3136927828a10f",
+    "bytes_hint": 7316,
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 8336,
+    "sha256": "6ec15a87ee3322d493dd5dc1a32610f6744208a82fb16f786d925936793eeef0",
+    "verified_git_blob_sha": "6166cc8a4e64ec328d024b32af3136927828a10f"
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/downtimes/models.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/downtimes/models.py",
+    "git_blob_sha": "97c17ae2357da4e858fe21d97aebccf25c4f4009",
+    "bytes_hint": 4745,
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 5293,
+    "sha256": "82334d3503022c122a8f4c6fad6c8bf431fa1da0b0952b56e5a3a54626f7ff15",
+    "verified_git_blob_sha": "97c17ae2357da4e858fe21d97aebccf25c4f4009"
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/downtimes/views.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/downtimes/views.py",
+    "git_blob_sha": "35132a550b604ceb31c78199cf92fc72d3f96e86",
+    "bytes_hint": 7019,
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 7251,
+    "sha256": "c117f1d503b1d7caa3e6f047fe7a6f164aa3c16c5de63f586fd75acf818a1699",
+    "verified_git_blob_sha": "35132a550b604ceb31c78199cf92fc72d3f96e86"
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/views.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/trips/views.py",
+    "git_blob_sha": "968e32d801a5ca022daca86d0afb24310bc24947",
+    "bytes_hint": 304009,
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 315431,
+    "sha256": "fc1f6c86201b8b24e512ce22f833930c2aecaff2b48fbdf955bc6d19566103b0",
+    "verified_git_blob_sha": "968e32d801a5ca022daca86d0afb24310bc24947"
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py",
+    "local": "recovered-mechanics/evidence/downtimes/source/trips/dispatcher_downtime_commands.py",
+    "git_blob_sha": "d4153c583ba23f23c78380e42fcb0dc521603790",
+    "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "bytes": 3456,
+    "sha256": "17581c8c30b2048e73b3c3ed384bdf4f84f40611a80b34e3c199bc0bfe58fffd",
+    "verified_git_blob_sha": "d4153c583ba23f23c78380e42fcb0dc521603790"
+  }
+]

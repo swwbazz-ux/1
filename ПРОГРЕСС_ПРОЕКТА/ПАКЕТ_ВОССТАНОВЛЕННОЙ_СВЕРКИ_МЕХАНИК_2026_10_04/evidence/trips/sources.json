@@ -1,0 +1,44 @@
+[
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/free_bucket.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "69fabfda2ede04505cfc9854ce56a054cb036d20",
+    "sha256": "5794e12981266288a6c5c8abf8eabfb6fbffa257f0cc8db84abfdfb293188bb4",
+    "bytes": 17356
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/views.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "968e32d801a5ca022daca86d0afb24310bc24947",
+    "sha256": "fc1f6c86201b8b24e512ce22f833930c2aecaff2b48fbdf955bc6d19566103b0",
+    "bytes": 315431
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+    "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+    "bytes": 218043
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/manual_loading.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "d93492e78bd43a1f21365a2e1d82d66acd5888d5",
+    "sha256": "089b53c810743a68b1219c23e7d4faf7e01f520f6dbf6f04a7ff9af73a26cf5f",
+    "bytes": 13547
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/trip_creation.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "f02a50bfd6501bbbed6705d7aafd5ab18d2a8370",
+    "sha256": "6ce8d208fe385a4638354a68c5471d4485d6007f2e8782c8df310b02e863ad66",
+    "bytes": 8687
+  },
+  {
+    "path": "СИСТЕМА_MVP/backend/trips/models.py",
+    "ref": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+    "git_blob_sha": "700686b701efc5d58601a8ab24843a59b809de16",
+    "sha256": "728a6e8e3cde76dd3d110e9cc4987b0290ae3b5fb63fe1234b994d6aaee9e0b8",
+    "bytes": 19072
+  }
+]

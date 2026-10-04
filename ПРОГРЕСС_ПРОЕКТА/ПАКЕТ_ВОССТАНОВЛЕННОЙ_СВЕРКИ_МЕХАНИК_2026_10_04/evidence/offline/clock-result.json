@@ -1,0 +1,13 @@
+{
+  "release": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "source_git_blob": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+  "scope": "Actual normalize function AST; standard-library environment, no Django/DB/request processing.",
+  "case": "same original event, transport flag changes effective time",
+  "device_occurred_at": "2026-10-03T10:00:00+00:00",
+  "received_at": "2026-10-03T10:10:00+00:00",
+  "without_sent_live": "2026-10-03T10:00:00+00:00",
+  "with_sent_live": "2026-10-03T10:10:00+00:00",
+  "fingerprint_unchanged": true,
+  "status": "COUNTEREXAMPLE_REPRODUCED",
+  "limitation": "Fixture supplies sent_live directly; does not prove a ten-minute network delay occurred in a real installation. Flag is not measured clock-offset evidence."
+}

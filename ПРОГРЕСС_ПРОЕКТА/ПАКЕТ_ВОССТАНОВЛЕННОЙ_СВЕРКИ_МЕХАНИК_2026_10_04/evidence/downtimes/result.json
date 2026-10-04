@@ -1,0 +1,44 @@
+{
+  "status": "REPRODUCED_FUNCTION_COUNTEREXAMPLE",
+  "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "function": "_process_downtime",
+  "source_git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+  "verified_source_files": 6,
+  "scope": "Exact function AST; ORM, shift lock and state broadcaster are explicit doubles. No full Django or PostgreSQL.",
+  "fixture_qualification": "The existing end is a trustworthy boundary for the same work interval; the incoming stop is ordinary, not an authorized correction. This does not approve universal min(timestamp) reconciliation.",
+  "cases": [
+    {
+      "initial_end": "2026-10-03T12:00:00+00:00",
+      "ordinary_stop": "2026-10-03T18:00:00+00:00",
+      "actual_end": "2026-10-03T18:00:00+00:00",
+      "writes": 1,
+      "discrepancy_codes": [
+        "downtime_already_closed"
+      ],
+      "server_ids": {
+        "downtime_event_id": 41,
+        "shift_id": 5
+      }
+    },
+    {
+      "initial_end": "2026-10-03T18:00:00+00:00",
+      "ordinary_stop": "2026-10-03T12:00:00+00:00",
+      "actual_end": "2026-10-03T12:00:00+00:00",
+      "writes": 1,
+      "discrepancy_codes": [
+        "downtime_already_closed"
+      ],
+      "server_ids": {
+        "downtime_event_id": 41,
+        "shift_id": 5
+      }
+    }
+  ],
+  "observation": "The function overwrites ended_at in either direction and only logs downtime_already_closed.",
+  "not_run": [
+    "Full HTTP handler and transaction",
+    "PostgreSQL locking and concurrent requests",
+    "Installed Android/iOS/PWA",
+    "Production requests"
+  ]
+}

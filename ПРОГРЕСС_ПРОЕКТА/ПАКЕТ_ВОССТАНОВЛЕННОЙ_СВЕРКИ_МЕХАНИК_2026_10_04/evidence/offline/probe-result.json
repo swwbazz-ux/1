@@ -1,0 +1,49 @@
+{
+  "release": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "scope": "Actual production JS; Node, memory/localStorage doubles. Not IndexedDB, browser, PostgreSQL or installed-device acceptance.",
+  "observations": [
+    {
+      "case": "durable-write-failure",
+      "observed": "enqueue rejects before onState",
+      "rejection": "QuotaExceededError",
+      "callbacks": 0,
+      "status": "PASS_ISOLATED_FUNCTION"
+    },
+    {
+      "case": "terminal-retention",
+      "observed": "25-hour terminal event removed from working storage; outbox writes no archive or identity receipt",
+      "calls": [
+        [
+          "remove",
+          "probe-old-conflict"
+        ]
+      ],
+      "status": "COUNTEREXAMPLE_REPRODUCED",
+      "scope": "outbox only; no assertion that server receipt itself is deleted"
+    },
+    {
+      "case": "future-no-effect-wire",
+      "observed": [
+        {
+          "state": "pending",
+          "attempt_count": 1,
+          "last_error": {
+            "code": "retry",
+            "message": "Сервер временно недоступен."
+          }
+        }
+      ],
+      "status": "FUTURE_PROTOCOL_INCOMPATIBILITY",
+      "scope": "synthetic future response; current production server is not claimed to emit literal no_effect"
+    },
+    {
+      "case": "unsettled-transport",
+      "observed": "pending-after-25ms",
+      "sends": 1,
+      "secondFlushReturnsSamePromise": true,
+      "storedRows": 1,
+      "status": "BOUNDED_TRANSPORT_DOUBLE_OBSERVATION",
+      "scope": "does not measure real transport timeout; outbox delegates completion to send"
+    }
+  ]
+}

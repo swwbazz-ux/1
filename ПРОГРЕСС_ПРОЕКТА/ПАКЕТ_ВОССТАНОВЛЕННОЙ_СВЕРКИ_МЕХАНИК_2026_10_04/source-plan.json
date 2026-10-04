@@ -1,0 +1,357 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/free_bucket.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/trips/free_bucket.py",
+      "git_blob_sha": "69fabfda2ede04505cfc9854ce56a054cb036d20",
+      "sha256": "5794e12981266288a6c5c8abf8eabfb6fbffa257f0cc8db84abfdfb293188bb4",
+      "bytes": 17356
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/views.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/trips/views.py",
+      "git_blob_sha": "968e32d801a5ca022daca86d0afb24310bc24947",
+      "sha256": "fc1f6c86201b8b24e512ce22f833930c2aecaff2b48fbdf955bc6d19566103b0",
+      "bytes": 315431
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "bytes": 218043
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/manual_loading.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/trips/manual_loading.py",
+      "git_blob_sha": "d93492e78bd43a1f21365a2e1d82d66acd5888d5",
+      "sha256": "089b53c810743a68b1219c23e7d4faf7e01f520f6dbf6f04a7ff9af73a26cf5f",
+      "bytes": 13547
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/trip_creation.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/trips/trip_creation.py",
+      "git_blob_sha": "f02a50bfd6501bbbed6705d7aafd5ab18d2a8370",
+      "sha256": "6ce8d208fe385a4638354a68c5471d4485d6007f2e8782c8df310b02e863ad66",
+      "bytes": 8687
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/models.py",
+      "destination": "evidence/trips/source/СИСТЕМА_MVP/backend/trips/models.py",
+      "git_blob_sha": "700686b701efc5d58601a8ab24843a59b809de16",
+      "sha256": "728a6e8e3cde76dd3d110e9cc4987b0290ae3b5fb63fe1234b994d6aaee9e0b8",
+      "bytes": 19072
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "destination": "evidence/downtimes/source/core/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "bytes": 218043
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/downtimes/driver_workflow.py",
+      "destination": "evidence/downtimes/source/downtimes/driver_workflow.py",
+      "git_blob_sha": "6166cc8a4e64ec328d024b32af3136927828a10f",
+      "sha256": "6ec15a87ee3322d493dd5dc1a32610f6744208a82fb16f786d925936793eeef0",
+      "bytes": 8336
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/downtimes/models.py",
+      "destination": "evidence/downtimes/source/downtimes/models.py",
+      "git_blob_sha": "97c17ae2357da4e858fe21d97aebccf25c4f4009",
+      "sha256": "82334d3503022c122a8f4c6fad6c8bf431fa1da0b0952b56e5a3a54626f7ff15",
+      "bytes": 5293
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/downtimes/views.py",
+      "destination": "evidence/downtimes/source/downtimes/views.py",
+      "git_blob_sha": "35132a550b604ceb31c78199cf92fc72d3f96e86",
+      "sha256": "c117f1d503b1d7caa3e6f047fe7a6f164aa3c16c5de63f586fd75acf818a1699",
+      "bytes": 7251
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/views.py",
+      "destination": "evidence/downtimes/source/trips/views.py",
+      "git_blob_sha": "968e32d801a5ca022daca86d0afb24310bc24947",
+      "sha256": "fc1f6c86201b8b24e512ce22f833930c2aecaff2b48fbdf955bc6d19566103b0",
+      "bytes": 315431
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py",
+      "destination": "evidence/downtimes/source/trips/dispatcher_downtime_commands.py",
+      "git_blob_sha": "d4153c583ba23f23c78380e42fcb0dc521603790",
+      "sha256": "17581c8c30b2048e73b3c3ed384bdf4f84f40611a80b34e3c199bc0bfe58fffd",
+      "bytes": 3456
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js",
+      "destination": "evidence/offline/source/driver-offline-outbox-v2.js",
+      "git_blob_sha": "56fcfac9677d5f1ca9623140c3236c1b487df43d",
+      "sha256": "9e08b4813cd4712741b860fb5cfcb9c26340051ec44dbea4ed438af5e45726cf",
+      "bytes": 75574
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "destination": "evidence/offline/source/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "bytes": 218043
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/connection-indicators-v1.js",
+      "destination": "evidence/offline/source/connection-indicators-v1.js",
+      "git_blob_sha": "c06274ae7506af7e4e93e7ea965cd339fcb03df1",
+      "sha256": "2e6c68678192799cfb979cd689cb6e3d4ee52679a671845c911954f73ba816b8",
+      "bytes": 1598
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/native-background-connection-v1.js",
+      "destination": "evidence/offline/source/native-background-connection-v1.js",
+      "git_blob_sha": "46af706bb91abd16f7cbdc835c0c074dade139c6",
+      "sha256": "8b62d6d9cade2922e586cdf20bc4aebbb893ec471a68d6a5e63b88f518e8a3fd",
+      "bytes": 7177
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/application-session-heartbeat.js",
+      "destination": "evidence/offline/source/application-session-heartbeat.js",
+      "git_blob_sha": "1ff77218a5b07272ccdea0d0ce4e65bfee3f5b4f",
+      "sha256": "5976eaf7a2d8c9030e4940d6f59b621406292983af3873b91565febf6a8e5783",
+      "bytes": 10847
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/users/session_device.py",
+      "destination": "evidence/offline/source/session_device.py",
+      "git_blob_sha": "c3b3c9c57a0421b398c0a0fa996e97a6208852a0",
+      "sha256": "67696f83dd428335d63996d6aa9312b564b025b590c226b3e46903508eb2eed2",
+      "bytes": 1581
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js",
+      "destination": "evidence/offline/source/excavator-field-outbox-v1.js",
+      "git_blob_sha": "0e590e91d5417432dae195fa64638e15e494d3a1",
+      "sha256": "4fb356b61702b6d87d7a196ed758eb879e3e9a72c97f09223b4977e1d1d54313",
+      "bytes": 36182
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-shift-refresh-v1.js",
+      "destination": "evidence/offline/source/driver-shift-refresh-v1.js",
+      "git_blob_sha": "73c3fcc769f3266fb50faa69e91fc5072dbc5a23",
+      "sha256": "bf4f29a06e7191427a164f130a418af5d4626444bed0fbb55155eb0dc545f4b5",
+      "bytes": 26661
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js",
+      "destination": "evidence/offline/source/driver-local-shift-v1.js",
+      "git_blob_sha": "c23a071d09ddad06e74ff103fc471abe11024647",
+      "sha256": "ebcf7caa2e0001cfc597557b3327810025ff47fdd9d392cab34d832de186bff9",
+      "bytes": 26283
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js",
+      "destination": "evidence/offline/source/driver-manifest-local-v1.js",
+      "git_blob_sha": "b212422aa535678fba9c93a5128bebcae9b5c133",
+      "sha256": "1731316a095681f51b030c3eb26a0c004a0d032f4007ab1f8f700934a6dd2486",
+      "bytes": 55708
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/shifts/services.py",
+      "destination": "evidence/shifts/source/services.py",
+      "git_blob_sha": "251ef129e0eb1cf9951a81af1889de3069dc4993",
+      "sha256": "4bd24d94875064c08ccefe2ac749ffed4ff1ad080e68ff326b0d2b8f0b6a2df2",
+      "bytes": 99243
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "destination": "evidence/shifts/source/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34",
+      "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+      "bytes": 218043
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py",
+      "destination": "evidence/shifts/source/driver_shift_timeline.py",
+      "git_blob_sha": "a1dffa82546214a94c8c00ef66b6b63eb05d33ca",
+      "sha256": "3aa15bc6973f4d3ec0a0e007ababc7ffd1eef9cd54199e8a2485b731f1777b34",
+      "bytes": 63892
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js",
+      "destination": "evidence/shifts/source/driver-local-shift-v1.js",
+      "git_blob_sha": "c23a071d09ddad06e74ff103fc471abe11024647",
+      "sha256": "ebcf7caa2e0001cfc597557b3327810025ff47fdd9d392cab34d832de186bff9",
+      "bytes": 26283
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py",
+      "destination": "evidence/shifts/source/dispatcher_shift_commands.py",
+      "git_blob_sha": "d3199e16fcc0688920473d9204a1d1f41a0d655f",
+      "sha256": "8270cecd3096524f8825dcc7262a854ef8b0428c0347f7928c96d8650fc658d2",
+      "bytes": 16857
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py",
+      "destination": "evidence/shifts/source/excavator_hourly_report.py",
+      "git_blob_sha": "772ffc809a4436e9fdeac1dd009161238bdba4d9",
+      "sha256": "8be3dd8cfdce42ebdb79a8d1a6c829931b5465575939423840729b8028b3740b",
+      "bytes": 4640
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js",
+      "destination": "evidence/shifts/source/excavator-hourly-report-v1.js",
+      "git_blob_sha": "5952584add3f9d9c6005508a82d49e72b70f2fcc",
+      "sha256": "01201f35fa70213b0e0511795c2ae71f38e73b0418166f69fd10ff2fb3ce4be6",
+      "bytes": 17082
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_guards.py",
+      "destination": "evidence/shifts/source/dispatcher_guards.py",
+      "git_blob_sha": "14e12b7362d90629a1244b25903f5b01677495b7",
+      "sha256": "5036eb1c5105b7249949787d98518883a5e8cb2e86a22dae03af58dd2711058f",
+      "bytes": 5573
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/manual_loading.py",
+      "destination": "evidence/shifts/source/manual_loading.py",
+      "git_blob_sha": "d93492e78bd43a1f21365a2e1d82d66acd5888d5",
+      "sha256": "089b53c810743a68b1219c23e7d4faf7e01f520f6dbf6f04a7ff9af73a26cf5f",
+      "bytes": 13547
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js",
+      "destination": "evidence/shifts/source/dispatcher-board-v1.js",
+      "git_blob_sha": "2ffa927b097076eb324ff163f3c04c61b466601e",
+      "sha256": "d071316fbe4f68a7187d625e6b40a254b26d95a22c875461a0f90726c7f4e7af",
+      "bytes": 8421
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_header.py",
+      "destination": "evidence/shifts/source/dispatcher_header.py",
+      "git_blob_sha": "b0c9b1b6dc0517d8cdca4760218e334cbbaf0ed4",
+      "sha256": "19ef423800001ffe37a66c81d44b72f8669775dabb87b29bc174f9326bf19f87",
+      "bytes": 8739
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/assignments/views.py",
+      "destination": "evidence/assignments/source/assignments/views.py",
+      "git_blob_sha": "87880b275f46a224335a5a58d85fc3d2c1461879",
+      "sha256": "578c470279f8ae12dfafa72a18aa60317ede7e8b9a8d71b8862ace0ddff312e1",
+      "bytes": 43820
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/assignments/services.py",
+      "destination": "evidence/assignments/source/assignments/services.py",
+      "git_blob_sha": "44f89fc88673a2b687023a7cc82f3c912edd226e",
+      "sha256": "f94e132113ba952ffee8a483f53868d9663cb8a23484fc43b575a1cfc8b1ac9b",
+      "bytes": 77626
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/assignments/command_guards.py",
+      "destination": "evidence/assignments/source/assignments/command_guards.py",
+      "git_blob_sha": "01bfee20e63652ea3ac7a7290dc2cc3a512685ee",
+      "sha256": "1881b26fedeafc470978953b41920412508f5727788497b2bd73d122a97b845b",
+      "bytes": 2319
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/assignments/models.py",
+      "destination": "evidence/assignments/source/assignments/models.py",
+      "git_blob_sha": "68d71f3b022349c3d45356245499a39a95db3335",
+      "sha256": "52095b88239425aea6c6aaea5efc704c1d875f8a19aa4d0ac35b412bbbf4a65d",
+      "bytes": 25419
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/users/active_role.py",
+      "destination": "evidence/assignments/source/users/active_role.py",
+      "git_blob_sha": "595f5af0ee767d2cc5e40555c87ce4fe27a81c1d",
+      "sha256": "ddda5ea45464e5a9e5577eb02d976ea2b5e1365c66d5f196dae298e0a117a5f1",
+      "bytes": 10294
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/users/role_apps.py",
+      "destination": "evidence/assignments/source/users/role_apps.py",
+      "git_blob_sha": "a4d34c3bb284fc778ab98b7d3ef236c79da083df",
+      "sha256": "39877acf3b90dc2532d3d93e6721e548df04cc0876f665315d2849038172fb90",
+      "bytes": 29053
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/dispatcher-transport-v1.js",
+      "destination": "evidence/assignments/source/static/js/dispatcher-transport-v1.js",
+      "git_blob_sha": "cb99c44ec9256d21181b5f54424438ff080de37e",
+      "sha256": "f8164e52af07282ead4f34b33e5c81b809eadd1b042a262aa509643278bf38f5",
+      "bytes": 12486
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/static/js/driver-shift-v1.js",
+      "destination": "evidence/assignments/source/static/js/driver-shift-v1.js",
+      "git_blob_sha": "fc38f590f824074a05433097aa05ed517af4e69d",
+      "sha256": "0aaba38d0e5e6a7aefd0708d1685853d5e6441750895a16942a92b36dbb7db4f",
+      "bytes": 209474
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py",
+      "destination": "evidence/assignments/source/trips/dispatcher_assignment_commands.py",
+      "git_blob_sha": "2966548ac45824f2a29450d076d02254e3099460",
+      "sha256": "0745bb7c8626708dc094403f0ccf51e9cee962c464b72c0a053ff8caf30c7305",
+      "bytes": 3488
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/trips/dispatcher_topology_commands.py",
+      "destination": "evidence/assignments/source/trips/dispatcher_topology_commands.py",
+      "git_blob_sha": "a0bf1c0042d7e724eb271a9e0cfba70aca720ada",
+      "sha256": "e7bd0ceca30a468fef611630fb26ee96aaadeaaaed1c72f2445ea96a5bde06a4",
+      "bytes": 14184
+    },
+    {
+      "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+      "repository_path": "СИСТЕМА_MVP/backend/users/session_device.py",
+      "destination": "evidence/assignments/source/users/session_device.py",
+      "git_blob_sha": "c3b3c9c57a0421b398c0a0fa996e97a6208852a0",
+      "sha256": "67696f83dd428335d63996d6aa9312b564b025b590c226b3e46903508eb2eed2",
+      "bytes": 1581
+    }
+  ]
+}

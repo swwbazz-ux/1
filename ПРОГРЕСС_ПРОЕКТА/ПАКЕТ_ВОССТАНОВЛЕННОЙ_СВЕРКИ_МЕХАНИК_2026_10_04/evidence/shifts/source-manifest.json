@@ -1,0 +1,61 @@
+{
+  "repository": "swwbazz-ux/1",
+  "commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "files": [
+    {
+      "path": "СИСТЕМА_MVP/backend/shifts/services.py",
+      "local_path": "source/services.py",
+      "git_blob_sha": "251ef129e0eb1cf9951a81af1889de3069dc4993"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/core/offline_sync.py",
+      "local_path": "source/offline_sync.py",
+      "git_blob_sha": "eb639a24f6651fcfeb3a58e580486f610c62ab34"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py",
+      "local_path": "source/driver_shift_timeline.py",
+      "git_blob_sha": "a1dffa82546214a94c8c00ef66b6b63eb05d33ca"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/driver-local-shift-v1.js",
+      "local_path": "source/driver-local-shift-v1.js",
+      "git_blob_sha": "c23a071d09ddad06e74ff103fc471abe11024647"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py",
+      "local_path": "source/dispatcher_shift_commands.py",
+      "git_blob_sha": "d3199e16fcc0688920473d9204a1d1f41a0d655f"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/excavator_hourly_report.py",
+      "local_path": "source/excavator_hourly_report.py",
+      "git_blob_sha": "772ffc809a4436e9fdeac1dd009161238bdba4d9"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js",
+      "local_path": "source/excavator-hourly-report-v1.js",
+      "git_blob_sha": "5952584add3f9d9c6005508a82d49e72b70f2fcc"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_guards.py",
+      "local_path": "source/dispatcher_guards.py",
+      "git_blob_sha": "14e12b7362d90629a1244b25903f5b01677495b7"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/manual_loading.py",
+      "local_path": "source/manual_loading.py",
+      "git_blob_sha": "d93492e78bd43a1f21365a2e1d82d66acd5888d5"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js",
+      "local_path": "source/dispatcher-board-v1.js",
+      "git_blob_sha": "2ffa927b097076eb324ff163f3c04c61b466601e"
+    },
+    {
+      "path": "СИСТЕМА_MVP/backend/trips/dispatcher_header.py",
+      "local_path": "source/dispatcher_header.py",
+      "git_blob_sha": "b0c9b1b6dc0517d8cdca4760218e334cbbaf0ed4"
+    }
+  ]
+}

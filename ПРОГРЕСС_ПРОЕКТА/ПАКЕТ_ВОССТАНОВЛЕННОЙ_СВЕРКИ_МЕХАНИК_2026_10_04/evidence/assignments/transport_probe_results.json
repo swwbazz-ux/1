@@ -1,0 +1,72 @@
+{
+  "run_at_utc": "2026-10-03T23:41:30.445Z",
+  "source_commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "source_path": "СИСТЕМА_MVP/backend/static/js/dispatcher-transport-v1.js",
+  "git_blob_sha": "cb99c44ec9256d21181b5f54424438ff080de37e",
+  "sha256": "f8164e52af07282ead4f34b33e5c81b809eadd1b042a262aa509643278bf38f5",
+  "runtime": "v24.19.0",
+  "scope": "actual whole JS module; VM with fetch/localStorage/timer doubles; diagnostic assertions",
+  "result": "6_DIAGNOSTIC_OBSERVATIONS_REPRODUCED",
+  "acceptance": "NOT_RUN_BROWSER_POSTGRESQL_DEVICE_FIELD",
+  "observations": [
+    {
+      "scenario": "queued_http_409",
+      "before": 1,
+      "after": 0,
+      "serverErrors": [
+        {
+          "code": "state_conflict",
+          "status": 409
+        }
+      ],
+      "verdict": "OBSERVED_GAP",
+      "meaning": "request removed on HTTP error; no receipt/archive is written by this module"
+    },
+    {
+      "scenario": "queued_http_503",
+      "before": 1,
+      "after": 0,
+      "serverErrors": [
+        {
+          "code": "server_unavailable",
+          "status": 503
+        }
+      ],
+      "verdict": "OBSERVED_GAP",
+      "meaning": "request removed on HTTP error; no receipt/archive is written by this module"
+    },
+    {
+      "scenario": "queued_http_200",
+      "before": 1,
+      "after": 0,
+      "serverErrors": [],
+      "verdict": "OBSERVED_POSITIVE_BASELINE",
+      "meaning": "success removes working request"
+    },
+    {
+      "scenario": "network_failure_retains_queue",
+      "after": 1,
+      "attempts": 1,
+      "verdict": "OBSERVED_POSITIVE_BASELINE"
+    },
+    {
+      "scenario": "enqueue_storage_failure",
+      "returned": true,
+      "durableQueue": 0,
+      "failedWrites": 1,
+      "verdict": "OBSERVED_GAP",
+      "meaning": "enqueue acknowledges true although storage write threw"
+    },
+    {
+      "scenario": "initial_send_precedes_durable_write",
+      "fetches": [
+        {
+          "url": "/fixture/assign/",
+          "durableQueueAtSend": 0
+        }
+      ],
+      "writeCount": 0,
+      "verdict": "OBSERVED_GAP"
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "source_commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "recovery_date_local": "2026-10-04",
+  "old_raw_reused": false,
+  "acceptance": "NOT_RUN",
+  "findings": [
+    {
+      "id": "REC-ASSIGN-01",
+      "mechanics": [
+        "M-ASSIGN-1",
+        "M-ASSIGN-2",
+        "M-CONTROL-1"
+      ],
+      "kind": "ACTUAL_JS_DIAGNOSTIC",
+      "severity": "HIGH",
+      "title": "HTTP 409 удаляет команду из рабочей очереди без сохранения квитанции этим модулем",
+      "source": "static/js/dispatcher-transport-v1.js:flush",
+      "scenario": "queued_http_409",
+      "remedy": "Не удалять оригинал до durable-сохранённого результата согласования; конфликт состояния согласовывать по исходной истории."
+    },
+    {
+      "id": "REC-ASSIGN-02",
+      "mechanics": [
+        "M-ASSIGN-1",
+        "M-ASSIGN-2",
+        "M-CONTROL-1"
+      ],
+      "kind": "ACTUAL_JS_DIAGNOSTIC",
+      "severity": "HIGH",
+      "title": "HTTP 503 удаляет команду из рабочей очереди",
+      "source": "static/js/dispatcher-transport-v1.js:flush",
+      "scenario": "queued_http_503",
+      "remedy": "Временные серверные отказы сохраняют запись и повторяют доставку с тем же ID."
+    },
+    {
+      "id": "REC-ASSIGN-03",
+      "mechanics": [
+        "M-CONTROL-1"
+      ],
+      "kind": "ACTUAL_JS_DIAGNOSTIC",
+      "severity": "HIGH",
+      "title": "enqueue возвращает true после ошибки записи localStorage",
+      "source": "static/js/dispatcher-transport-v1.js:enqueue/writeQueue",
+      "scenario": "enqueue_storage_failure",
+      "remedy": "Обещание локального успеха завершается только после устойчивой записи; ошибка не маскируется."
+    },
+    {
+      "id": "REC-ASSIGN-04",
+      "mechanics": [
+        "M-CONTROL-1"
+      ],
+      "kind": "ACTUAL_JS_DIAGNOSTIC",
+      "severity": "HIGH",
+      "title": "Первая отправка выполняется до устойчивого сохранения",
+      "source": "static/js/dispatcher-transport-v1.js:post",
+      "scenario": "initial_send_precedes_durable_write",
+      "remedy": "Единый durable-first путь первой и повторной попыток."
+    },
+    {
+      "id": "REC-ASSIGN-05",
+      "mechanics": [
+        "M-ASSIGN-1"
+      ],
+      "kind": "STATIC_CODE",
+      "severity": "HIGH",
+      "title": "Driver показывает принятое назначение до успешного enqueue",
+      "source": "static/js/driver-shift-v1.js:driverAcceptAssignmentLocally",
+      "remedy": "Атомарное сохранение события и проекции до UI успеха, восстановление из журнала."
+    },
+    {
+      "id": "REC-ASSIGN-06",
+      "mechanics": [
+        "M-ASSIGN-3"
+      ],
+      "kind": "STATIC_CODE_NORMATIVE_MISMATCH",
+      "severity": "HIGH",
+      "title": "Изменение позиции забоя начинает Перегон вопреки R-19",
+      "source": "trips/views.py:excavator_work_settings_view",
+      "remedy": "Явное действие перегона; настройки не открывают и не заменяют простой."
+    },
+    {
+      "id": "REC-ASSIGN-07",
+      "mechanics": [
+        "M-CONTROL-1"
+      ],
+      "kind": "STATIC_CODE_RISK",
+      "severity": "HIGH",
+      "title": "Placement активируется до пойманного конфликта назначения",
+      "source": "trips/dispatcher_topology_commands.py:execute_dispatcher_assign_truck",
+      "remedy": "Проверить PostgreSQL транзакционный откат; доменное изменение, журнал и квитанция образуют одну неделимую операцию."
+    },
+    {
+      "id": "REC-ASSIGN-08",
+      "mechanics": [
+        "M-ASSIGN-1"
+      ],
+      "kind": "STATIC_CODE_CONTRACT_GAP",
+      "severity": "MEDIUM",
+      "title": "Срок передачи не реализует полный доказательный R-23",
+      "source": "assignments/services.py:schedule_haul_assignment",
+      "remedy": "Версионный конверт исходного времени и причинного контекста; старый формат совместим, но не объявлен соответствующим R-23."
+    }
+  ],
+  "open_policy_boundaries": [
+    {
+      "id": "OP-ASSIGN-1",
+      "topic": "Молчание гружёного водителя на сроке передачи",
+      "source": "решение 233 сохраняет 137/138, где ожидание конца рейса"
+    },
+    {
+      "id": "OP-ASSIGN-2",
+      "topic": "Победитель независимых несовместимых управленческих команд/общего поля забоя",
+      "source": "R-18/R-20 не задают его"
+    },
+    {
+      "id": "OP-ROLE-1",
+      "topic": "Ретроспективное исполнение доказанного события при настоящем отзыве доступа",
+      "source": "R-22 регулирует обычную пересменку, не отзыв"
+    },
+    {
+      "id": "OP-ASSIGN-3",
+      "topic": "Самостоятельное нормативное основание пятиминутного RELEASE и его поведения с грузом",
+      "source": "Код использует общий effective_at, R-23 не расширяется автоматически на снятие в гараж"
+    }
+  ]
+}

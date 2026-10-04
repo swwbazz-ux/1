@@ -1,0 +1,77 @@
+[
+  {
+    "path": "README.md",
+    "sha256": "1ef83bb24d9b4c50d4772a04d5211f3aa575b428233e099e9f17f54fda22d8da",
+    "bytes": 3100
+  },
+  {
+    "path": "probe.py",
+    "sha256": "9b33e9ec217228668e5587b09c143c8a23d17736833260334082fb876202e12e",
+    "bytes": 7063
+  },
+  {
+    "path": "results.json",
+    "sha256": "11d8d2022aca32387a381c22c0c581c874b28a323cdce77ec0b8435715815324",
+    "bytes": 5216
+  },
+  {
+    "path": "source/dispatcher-board-v1.js",
+    "sha256": "d071316fbe4f68a7187d625e6b40a254b26d95a22c875461a0f90726c7f4e7af",
+    "bytes": 8421
+  },
+  {
+    "path": "source/dispatcher_guards.py",
+    "sha256": "5036eb1c5105b7249949787d98518883a5e8cb2e86a22dae03af58dd2711058f",
+    "bytes": 5573
+  },
+  {
+    "path": "source/dispatcher_header.py",
+    "sha256": "19ef423800001ffe37a66c81d44b72f8669775dabb87b29bc174f9326bf19f87",
+    "bytes": 8739
+  },
+  {
+    "path": "source/dispatcher_shift_commands.py",
+    "sha256": "8270cecd3096524f8825dcc7262a854ef8b0428c0347f7928c96d8650fc658d2",
+    "bytes": 16857
+  },
+  {
+    "path": "source/driver-local-shift-v1.js",
+    "sha256": "ebcf7caa2e0001cfc597557b3327810025ff47fdd9d392cab34d832de186bff9",
+    "bytes": 26283
+  },
+  {
+    "path": "source/driver_shift_timeline.py",
+    "sha256": "3aa15bc6973f4d3ec0a0e007ababc7ffd1eef9cd54199e8a2485b731f1777b34",
+    "bytes": 63892
+  },
+  {
+    "path": "source/excavator-hourly-report-v1.js",
+    "sha256": "01201f35fa70213b0e0511795c2ae71f38e73b0418166f69fd10ff2fb3ce4be6",
+    "bytes": 17082
+  },
+  {
+    "path": "source/excavator_hourly_report.py",
+    "sha256": "8be3dd8cfdce42ebdb79a8d1a6c829931b5465575939423840729b8028b3740b",
+    "bytes": 4640
+  },
+  {
+    "path": "source/manual_loading.py",
+    "sha256": "089b53c810743a68b1219c23e7d4faf7e01f520f6dbf6f04a7ff9af73a26cf5f",
+    "bytes": 13547
+  },
+  {
+    "path": "source/offline_sync.py",
+    "sha256": "e97c752eb51e5fd0f7847664ab2ade51bf1ce570164aaaefe975875c563f62dc",
+    "bytes": 218043
+  },
+  {
+    "path": "source/services.py",
+    "sha256": "4bd24d94875064c08ccefe2ac749ffed4ff1ad080e68ff326b0d2b8f0b6a2df2",
+    "bytes": 99243
+  },
+  {
+    "path": "source-manifest.json",
+    "sha256": "cd158f23e18f217af198224d3afe03a7160a3ae22c7cfa8e552e6a1499c0b02a",
+    "bytes": 2354
+  }
+]

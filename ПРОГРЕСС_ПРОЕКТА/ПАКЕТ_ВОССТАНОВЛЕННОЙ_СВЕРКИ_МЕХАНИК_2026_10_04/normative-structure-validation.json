@@ -1,0 +1,12 @@
+{
+  "scope": "DOCUMENT_STRUCTURE_ONLY",
+  "expected_mechanics": 42,
+  "actual_mechanics": 42,
+  "missing": [],
+  "extra": [],
+  "duplicates": {},
+  "old_CR_count": 50,
+  "new_CR_count": 50,
+  "CR_ids_and_order_unchanged": true,
+  "runtime_acceptance": "NOT_RUN"
+}

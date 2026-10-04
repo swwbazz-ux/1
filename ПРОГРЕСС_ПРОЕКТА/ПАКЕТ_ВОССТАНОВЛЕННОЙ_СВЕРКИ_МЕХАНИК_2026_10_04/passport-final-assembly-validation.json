@@ -1,0 +1,11 @@
+{
+  "mechanics": 42,
+  "anchors": 42,
+  "missing": [],
+  "GP0_including_GP06_preserved_verbatim": true,
+  "R3_R4_preserved_verbatim": true,
+  "previous_revision_entries_preserved": true,
+  "bytes": 270556,
+  "sha256": "0386ee55a48bb2f41302f38391b29f89a24933ff817c8c5227a9514d40c18c7d",
+  "runtime_acceptance": "NOT_RUN"
+}

@@ -1,0 +1,65 @@
+{
+  "code_commit": "ecb61af55b699a7a2417abba6df4dd490f3464a9",
+  "normative_commit": "2f06ca72f8cf3bfd6168d891ef8ce53d630ec2dd",
+  "new_probe_status": "REPRODUCED_FUNCTION_COUNTEREXAMPLE",
+  "full_acceptance": "NOT_RUN",
+  "findings": [
+    {
+      "id": "DOWN-R1",
+      "mechanics": ["M-DOWN-1"],
+      "evidence": "EXACT_AST_WITH_DOUBLES",
+      "source": "core/offline_sync.py:_process_downtime",
+      "observation": "Late ordinary stop overwrites already closed ended_at in either direction.",
+      "qualification": "Existing end is trustworthy for the same interval; incoming event is not an authorized historical correction. Universal min(timestamp) is not approved.",
+      "result": "evidence/downtimes/result.json"
+    },
+    {
+      "id": "DOWN-R2",
+      "mechanics": ["M-DOWN-1"],
+      "evidence": "STATIC_EXACT_SOURCE",
+      "source": "core/offline_sync.py:_process_downtime",
+      "observation": "Earlier arriving-in-late-order start is clamped to the current later interval start, losing its original operational boundary."
+    },
+    {
+      "id": "DOWN-R3",
+      "mechanics": ["M-DOWN-2", "M-DOWN-3"],
+      "evidence": "STATIC_EXACT_SOURCE",
+      "source": "downtimes/driver_workflow.py:close_open_truck_downtimes_for_reasons",
+      "observation": "Close helper selects open matching reasons without start<=close bound or explicit trip/interval causal scope."
+    },
+    {
+      "id": "DOWN-R4",
+      "mechanics": ["M-DOWN-3", "M-DOWN-4"],
+      "evidence": "STATIC_EXACT_SOURCE",
+      "source": "core/offline_sync.py:_process_excavator_loaded",
+      "observation": "Ordinary excavator loading closes all collected open excavator intervals at load time even after detecting later-started downtime."
+    },
+    {
+      "id": "DOWN-R5",
+      "mechanics": ["M-DOWN-3"],
+      "evidence": "STATIC_EXACT_SOURCE_AND_NORMATIVE_BOUNDARY",
+      "source": "core/offline_sync.py:_close_downtimes_for_load",
+      "observation": "Nonblocking load authority does not itself approve broad closure of truck Repair/Fueling/etc. R17 remains an explicit policy boundary."
+    },
+    {
+      "id": "DOWN-R6",
+      "mechanics": ["M-DOWN-4", "M-ASSIGN-3"],
+      "evidence": "STATIC_EXACT_SOURCE",
+      "source": "trips/views.py:excavator_work_settings_view/start_excavator_auto_downtime",
+      "observation": "Settings face change starts transfer and replaces active intervals at server time, contrary to explicit-start R19."
+    },
+    {
+      "id": "DOWN-R7",
+      "mechanics": ["M-DOWN-5"],
+      "evidence": "STATIC_EXACT_SOURCE",
+      "source": "trips/dispatcher_downtime_commands.py:execute_dispatcher_close_downtime",
+      "observation": "Existing already_closed guard preserves closed interval. Open interval command requires global version equality and uses receipt-side now rather than immutable action time."
+    }
+  ],
+  "policy_boundaries": [
+    "R17/R01: Which non-wait manual causes does physical loading close, for each machine?",
+    "R19: Effect of explicit transfer start on already active manual downtime is not approved merely by R19 explicit start.",
+    "R03: Allocation of actions physically after administrative shift close needs its own authority.",
+    "Work interval category Repair is distinct from physical equipment maintenance release authority."
+  ]
+}
