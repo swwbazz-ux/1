@@ -1720,12 +1720,9 @@ def _sse_qa_http_503_fixed_window() -> tuple[datetime, datetime]:
     )
 
 
-def _sse_qa_http_503_target_time() -> datetime:
-    return datetime.strptime(SSE_QA_HTTP_503_TARGET_AROUND, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-
-
-def _sse_qa_http_503_near_target(moment: datetime) -> bool:
-    return abs((moment - _sse_qa_http_503_target_time()).total_seconds()) <= 5
+def _sse_qa_http_503_in_fixed_window(moment: datetime) -> bool:
+    window_from, window_to = _sse_qa_http_503_fixed_window()
+    return window_from <= moment <= window_to
 
 
 def _sse_qa_http_503_iso(moment: datetime) -> str:
@@ -2034,7 +2031,6 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
             match.group("method") == "GET"
             and route == "/driver/"
             and status == 503
-            and _sse_qa_http_503_near_target(moment)
         ):
             response_bytes = None if match.group("bytes") == "-" else int(match.group("bytes"))
             timestamp = _sse_qa_http_503_iso(moment)
@@ -2120,7 +2116,7 @@ def collect_sse_qa_http_503_report() -> dict[str, Any]:
         if item["zone"] == "sse_qa_per_ip"
         and item["method"] == "GET"
         and item["route"] == "/driver/"
-        and _sse_qa_http_503_near_target(
+        and _sse_qa_http_503_in_fixed_window(
             datetime.strptime(item["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         )
     ]
@@ -2475,7 +2471,7 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
         row["zone"] == "sse_qa_per_ip"
         and row["method"] == "GET"
         and row["route"] == "/driver/"
-        and _sse_qa_http_503_near_target(
+        and _sse_qa_http_503_in_fixed_window(
             datetime.strptime(row["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         )
         for row in limit_rows
@@ -2593,7 +2589,7 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
                 if row["zone"] == "sse_qa_per_ip"
                 and row["method"] == "GET"
                 and row["route"] == "/driver/"
-                and _sse_qa_http_503_near_target(
+                and _sse_qa_http_503_in_fixed_window(
                     datetime.strptime(row["timestamp_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
                         tzinfo=timezone.utc
                     )
@@ -2603,6 +2599,17 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
         )
         configuration = report["configuration"]
         sources = report["sources"]
+        limit_counts = {
+            name: sum(1 for row in report["limit_events"] if row["classification"] == name)
+            for name in ("ordinary_http", "static", "realtime_stream")
+        }
+        driver_limit_count = sum(
+            1
+            for row in report["limit_events"]
+            if row["zone"] == "sse_qa_per_ip"
+            and row["method"] == "GET"
+            and row["route"] == "/driver/"
+        )
         envelope["public_evidence"] = {
             "cause": report["finding"]["cause"],
             "zone": report["finding"]["zone"],
@@ -2632,6 +2639,10 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
             "nginx_error_offset_minutes": report["time_basis"]["nginx_error_offset_minutes"],
             "target_access_seen": report["finding"]["target_access_seen"],
             "limit_event_count": len(report["limit_events"]),
+            "limit_ordinary_count": limit_counts["ordinary_http"],
+            "limit_static_count": limit_counts["static"],
+            "limit_realtime_count": limit_counts["realtime_stream"],
+            "driver_limit_count": driver_limit_count,
         }
     return envelope
 

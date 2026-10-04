@@ -579,7 +579,8 @@ jobs:
                   "nginx_access_source", "nginx_access_lines",
                   "nginx_site_source", "nginx_site_lines",
                   "wsgi_source", "wsgi_lines", "nginx_error_offset_minutes",
-                  "target_access_seen", "limit_event_count",
+                  "target_access_seen", "limit_event_count", "limit_ordinary_count",
+                  "limit_static_count", "limit_realtime_count", "driver_limit_count",
               }
               if not isinstance(evidence, dict) or set(evidence) != evidence_keys:
                   raise SystemExit("invalid SSE QA HTTP 503 public evidence")
@@ -593,11 +594,13 @@ jobs:
               if evidence["configuration_status"] not in {"confirmed", "mismatch", "unavailable"}:
                   raise SystemExit("invalid SSE QA HTTP 503 public configuration")
               target_pattern = re.compile(
-                  r"2026-10-04T07:09:(?:4[7-9]|5[0-7])Z GET /driver/ HTTP/[0-9.]{3,8} "
+                  r"2026-10-04T(?:07:09:(?:3[0-9]|[45][0-9])|07:10:0[0-5])Z "
+                  r"GET /driver/ HTTP/[0-9.]{3,8} "
                   r"status=503 bytes=(?:unknown|[0-9]+) class=ordinary_http\Z"
               )
               limit_pattern = re.compile(
-                  r'2026-10-04T07:09:(?:4[7-9]|5[0-7])Z limiting connections by zone '
+                  r'2026-10-04T(?:07:09:(?:3[0-9]|[45][0-9])|07:10:0[0-5])Z '
+                  r'limiting connections by zone '
                   r'"sse_qa_per_ip" request="GET /driver/ HTTP/[0-9.]{3,8}" class=ordinary_http\Z'
               )
               if evidence["target_access"] is not None and (
@@ -637,6 +640,10 @@ jobs:
                   "nginx_site_lines": 128 * 1024,
                   "wsgi_lines": 256 * 1024,
                   "limit_event_count": 240,
+                  "limit_ordinary_count": 240,
+                  "limit_static_count": 240,
+                  "limit_realtime_count": 240,
+                  "driver_limit_count": 240,
               }
               for field, maximum in count_limits.items():
                   value = evidence[field]
@@ -650,6 +657,14 @@ jobs:
                   raise SystemExit("invalid SSE QA HTTP 503 public timezone")
               if not isinstance(evidence["target_access_seen"], bool):
                   raise SystemExit("invalid SSE QA HTTP 503 public target flag")
+              if (
+                  evidence["limit_ordinary_count"]
+                  + evidence["limit_static_count"]
+                  + evidence["limit_realtime_count"]
+                  != evidence["limit_event_count"]
+                  or evidence["driver_limit_count"] > evidence["limit_ordinary_count"]
+              ):
+                  raise SystemExit("inconsistent SSE QA HTTP 503 public limit counts")
               if evidence["cause"] == "limit_conn_sse_qa_per_ip" and (
                   evidence["zone"] != "sse_qa_per_ip" or evidence["limit_event"] is None
               ):
@@ -689,7 +704,11 @@ jobs:
                   "SSE_QA_HTTP_503_CORRELATION "
                   f"error_offset_minutes={evidence['nginx_error_offset_minutes']} "
                   f"target_access_seen={str(evidence['target_access_seen']).lower()} "
-                  f"limit_events={evidence['limit_event_count']}"
+                  f"limit_events={evidence['limit_event_count']} "
+                  f"ordinary={evidence['limit_ordinary_count']} "
+                  f"static={evidence['limit_static_count']} "
+                  f"realtime={evidence['limit_realtime_count']} "
+                  f"driver={evidence['driver_limit_count']}"
               )
               if evidence["target_access"] is not None:
                   print(f"SSE_QA_HTTP_503_ACCESS {evidence['target_access']}")
