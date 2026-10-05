@@ -19,6 +19,139 @@ READY_TRAFFIC_ROLE_CODES = frozenset({
     'driver',
     'manager',
 })
+BOARD_SERVICE_WORKER_JS = r"""
+// Only the Master/Dispatcher workers include these bounded response paths.
+function boardDeadline(work, milliseconds, onTimeout) {
+  let timer;
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error("Board request deadline exceeded."));
+    }, milliseconds);
+  });
+  return Promise.race([Promise.resolve().then(work), deadline])
+    .finally(() => clearTimeout(timer));
+}
+
+function boardCanCache(request, response) {
+  if (!response || !response.ok || !response.url) return false;
+  const requested = new URL(typeof request === "string" ? request : request.url, self.location.origin);
+  const received = new URL(response.url, self.location.origin);
+  if (received.origin !== self.location.origin || received.pathname !== requested.pathname) return false;
+  if (requested.pathname.startsWith("/static/")) {
+    return requested.search === received.search &&
+      !String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html");
+  }
+  return true;
+}
+
+function boardCompleteFetch(request, init) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const options = Object.assign({}, init || {});
+  if (controller) options.signal = controller.signal;
+  return boardDeadline(async () => {
+    const response = await fetch(request, options);
+    // Headers alone do not complete navigation, a script or a JSON response.
+    await response.clone().arrayBuffer();
+    return response;
+  }, 8000, () => { if (controller) controller.abort(); });
+}
+
+function boardCacheResponse(request, response, fallbackUrl, event) {
+  // Clone before yielding: the browser may consume the returned body immediately.
+  const saved = response.clone();
+  const fallback = fallbackUrl && new URL(request.url).pathname === fallbackUrl
+    ? response.clone() : null;
+  let expired = false;
+  const work = boardDeadline(async () => {
+    const cache = await caches.open(CACHE_NAME);
+    if (expired) return;
+    await Promise.all([
+      cache.put(request, saved),
+      fallback ? cache.put(fallbackUrl, fallback) : Promise.resolve()
+    ]);
+  }, 2500, () => { expired = true; }).catch(() => undefined);
+  if (event && event.waitUntil) event.waitUntil(work);
+}
+
+async function boardCachedFallback(request, fallbackUrl) {
+  try {
+    return await boardDeadline(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      let key = request;
+      let response = await cache.match(key);
+      if (!response && fallbackUrl) {
+        key = fallbackUrl;
+        response = await cache.match(key);
+      }
+      if (!boardCanCache(key, response)) return null;
+      await response.clone().arrayBuffer();
+      return response;
+    }, 2500);
+  } catch (error) {
+    return null;
+  }
+}
+
+function boardUnavailable(message) {
+  return new Response(message, {
+    status: 503,
+    headers: {"Content-Type": "text/plain; charset=utf-8"}
+  });
+}
+
+function boardFetchAndCache(request, fallbackUrl, event, init) {
+  return boardCompleteFetch(request, init).then(response => {
+    if (response.status >= 500) throw new Error("Board server unavailable.");
+    if (boardCanCache(request, response)) boardCacheResponse(request, response, fallbackUrl, event);
+    return response;
+  });
+}
+
+async function boardNetworkFirst(request, fallbackUrl, event, init) {
+  const network = boardFetchAndCache(request, fallbackUrl, event, init);
+  if (event && event.waitUntil) event.waitUntil(network.catch(() => undefined));
+  try {
+    // Preserve the Master's fast saved-shell path, without letting cache access
+    // block a healthy network response or retaining an unlimited background GET.
+    if (ROLE_CODE === "mining_master" && fallbackUrl) {
+      const delay = self.navigator && self.navigator.onLine === false ? 0 : 2500;
+      return await boardDeadline(() => network, delay);
+    }
+    return await network;
+  } catch (error) {
+    const cached = await boardCachedFallback(request, fallbackUrl);
+    if (cached) return cached;
+    return await network.catch(() => boardUnavailable(
+      "Экран недоступен. Повторите попытку, когда появится связь."
+    ));
+  }
+}
+
+async function boardNetworkOnly(request) {
+  try {
+    return await boardCompleteFetch(request);
+  } catch (error) {
+    return boardUnavailable("Сеть недоступна: свежий фрагмент экрана не получен.");
+  }
+}
+
+function boardCacheFirstReleaseStatic(request, event) {
+  const result = (async () => {
+    const cached = await boardCachedFallback(request);
+    if (cached) return cached;
+    try {
+      return await boardFetchAndCache(request, null, event, {cache: "no-store"});
+    } catch (error) {
+      return boardUnavailable("Ресурс выпуска недоступен. Повторите попытку.");
+    }
+  })();
+  if (event && event.waitUntil) event.waitUntil(result.catch(() => undefined));
+  return result;
+}
+""".strip()
+
+
 RELEASE_STATIC_SERVICE_WORKER_JS = r"""
 const STATIC_ASSET_RELEASE = "__STATIC_ASSET_RELEASE__";
 const RELEASE_STATIC_PATHS = new Set(__RELEASE_STATIC_PATHS__);
@@ -271,7 +404,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v176',
+        shell_version='mining-master-mobile-shell-v177',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -308,7 +441,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v177',
+        shell_version='dispatcher-desktop-shell-v178',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -698,11 +831,18 @@ def add_release_static_cache(worker_script, role_code):
         'if (STATIC_ASSET_PATHS.has(url.pathname)) {',
         'if (isReleaseStaticRequest(url) || STATIC_ASSET_PATHS.has(url.pathname)) {',
     )
+    board_worker = role_code in {'mining_master', 'dispatcher'}
+    cache_first = (
+        'boardCacheFirstReleaseStatic(request, event)'
+        if board_worker else 'cacheFirstReleaseStatic(request)'
+    )
     worker_script = worker_script.replace(
         'event.respondWith(networkFirstStatic(request));',
-        'event.respondWith(isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request) : networkFirstStatic(request));',
+        f'event.respondWith(isReleaseStaticRequest(url) ? {cache_first} : networkFirstStatic(request));',
     )
     worker_parts = [release_helper]
+    if board_worker:
+        worker_parts.append(BOARD_SERVICE_WORKER_JS)
     if release_install_helper:
         worker_parts.append(release_install_helper)
     worker_parts.append(worker_script)

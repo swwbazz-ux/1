@@ -11,7 +11,7 @@ DISPATCHER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "dispatcher";
 const CACHE_PREFIX = "dispatcher-desktop-shell-";
-const CACHE_NAME = "dispatcher-desktop-shell-v177";
+const CACHE_NAME = "dispatcher-desktop-shell-v178";
 const APP_SHELL_URL = "/dispatcher/control/";
 const MANIFEST_URL = "/dispatcher.webmanifest";
 const CORE_ASSETS = [
@@ -72,53 +72,16 @@ self.addEventListener("activate", event => {
   );
 });
 
-async function networkFirst(request, fallbackUrl) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-      }
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
-      new Response("Оффлайн: экран диспетчера еще не сохранен на этом устройстве.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
+function networkFirst(request, fallbackUrl, event) {
+  return boardNetworkFirst(request, fallbackUrl, event);
 }
 
-async function networkOnly(request) {
-  try {
-    return await fetch(request);
-  } catch (error) {
-    return new Response("Сеть недоступна: свежий фрагмент экрана не получен.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
+function networkOnly(request) {
+  return boardNetworkOnly(request);
 }
 
-async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Ресурс недоступен без сети.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
+function networkFirstStatic(request) {
+  return boardNetworkFirst(request, null, null, {cache: "no-store"});
 }
 
 self.addEventListener("fetch", event => {
@@ -131,11 +94,11 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (request.mode === "navigate" || url.pathname === APP_SHELL_URL) {
-    event.respondWith(networkFirst(request, APP_SHELL_URL));
+    event.respondWith(networkFirst(request, APP_SHELL_URL, event));
     return;
   }
   if (url.pathname === MANIFEST_URL) {
-    event.respondWith(networkFirst(request, MANIFEST_URL));
+    event.respondWith(networkFirst(request, MANIFEST_URL, event));
     return;
   }
   if (url.pathname.startsWith("/static/")) {

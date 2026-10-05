@@ -94,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v176";
+const CACHE_NAME = "mining-master-mobile-shell-v177";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -103,7 +103,6 @@ const EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"];
    сохранённую доску, а страница сама держит плашку «Загружаем пульт», пока
    не придёт свежая расстановка (см. miningMasterStartupOverlay в шаблоне).
    Без сети сохранённая доска отдаётся без ожидания. */
-const NETWORK_FIRST_TIMEOUT_MS = 2500;
 const CORE_ASSETS = [
   LOGIN_URL,
   APP_SHELL_URL,
@@ -141,77 +140,16 @@ self.addEventListener("activate", event => {
   );
 });
 
-function networkDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function networkFirst(request, fallbackUrl, event) {
+  return boardNetworkFirst(request, fallbackUrl, event);
 }
 
-async function networkFirst(request, fallbackUrl, event) {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match(request)) ||
-    (fallbackUrl ? await cache.match(fallbackUrl) : null);
-  const networkRequest = fetch(request)
-    .then(response => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => undefined);
-        if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-          cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-        }
-      }
-      return response;
-    });
-  networkRequest.catch(() => undefined);
-  if (event && event.waitUntil) {
-    event.waitUntil(networkRequest.then(() => undefined).catch(() => undefined));
-  }
-  if (cached) {
-    if (self.navigator && self.navigator.onLine === false) {
-      return cached;
-    }
-    try {
-      return await Promise.race([
-        networkRequest,
-        networkDelay(NETWORK_FIRST_TIMEOUT_MS).then(() => cached)
-      ]);
-    } catch (error) {
-      return cached;
-    }
-  }
-  try {
-    return await networkRequest;
-  } catch (error) {
-    return new Response("Оффлайн: экран еще не сохранен на этом устройстве.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
+function networkOnly(request) {
+  return boardNetworkOnly(request);
 }
 
-async function networkOnly(request) {
-  try {
-    return await fetch(request);
-  } catch (error) {
-    return new Response("Сеть недоступна: свежий фрагмент экрана не получен.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
-}
-
-async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Ресурс недоступен без сети.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
+function networkFirstStatic(request) {
+  return boardNetworkFirst(request, null, null, {cache: "no-store"});
 }
 
 self.addEventListener("fetch", event => {

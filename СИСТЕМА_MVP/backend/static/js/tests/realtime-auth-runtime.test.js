@@ -1387,3 +1387,39 @@ test("active to hidden aborts the current poll and visible resumes exactly once"
     await settlePromises();
     assert.equal(runtime.window.AppRealtime.getDebugState().currentVersion, 8);
 });
+
+for (const role of [
+    {code: 'mining_master', name: 'mining-master', url: 'http://mining-master.localhost/mining-master/assignments/', path: '^/mining-master/assignments/?$'},
+    {code: 'dispatcher', name: 'dispatcher', url: 'http://dispatcher.localhost/dispatcher/control/', path: '^/dispatcher/control/?$'},
+]) test(role.code + ' resumes one fresh poll after background and ignores the previous response', async () => {
+    const resolvers = [], applied = [];
+    const runtime = createRuntime({
+        currentHref: role.url,
+        screens: [{name: role.name, role: role.code, mode: 'custom', path: role.path, customRefresh: true}],
+        fetch() { return new Promise(resolve => resolvers.push(resolve)); },
+        applyOperationalStateRefresh(payload) { applied.push(payload.version); return Promise.resolve({applied: true}); },
+    });
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+    runtime.document.hidden = true;
+    runtime.document.dispatchEvent({type: 'visibilitychange'});
+    runtime.advanceTime(60000);
+    runtime.runAllTimeouts();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 1);
+    runtime.document.hidden = false;
+    runtime.document.dispatchEvent({type: 'visibilitychange'});
+    runtime.window.dispatchEvent({type: 'focus'});
+    runtime.window.dispatchEvent({type: 'pageshow', persisted: true});
+    runtime.flushZeroTimers();
+    await settlePromises();
+    assert.equal(runtime.fetchCalls.length, 2);
+    resolvers[0](response(200, {version: 99, role_active: true, relevant: true, events: [{type: 'assignment_changed'}]}));
+    await settlePromises();
+    assert.deepEqual(applied, []);
+    resolvers[1](response(200, {version: 8, role_active: true, relevant: true, events: [{type: 'assignment_changed'}]}));
+    await settlePromises();
+    assert.deepEqual(applied, [8]);
+    assert.equal(runtime.window.AppRealtime.getDebugState().appliedVersion, 8);
+    assert.equal(runtime.reloads.length, 0);
+});

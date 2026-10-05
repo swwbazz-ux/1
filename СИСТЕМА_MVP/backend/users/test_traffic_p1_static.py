@@ -86,10 +86,18 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     script,
                 )
                 self.assertIn('async function cacheFirstReleaseStatic(request)', script)
-                self.assertIn(
-                    'isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request)',
-                    script,
+                board_worker = role_code in {'mining_master', 'dispatcher'}
+                cache_first = (
+                    'boardCacheFirstReleaseStatic(request, event)'
+                    if board_worker else 'cacheFirstReleaseStatic(request)'
                 )
+                self.assertIn(f'isReleaseStaticRequest(url) ? {cache_first}', script)
+                self.assertEqual('function boardDeadline(' in script, board_worker)
+                if board_worker:
+                    from .role_apps import BOARD_SERVICE_WORKER_JS
+                    self.assertIn(BOARD_SERVICE_WORKER_JS, script)
+                    self.assertIn('return boardNetworkFirst(request, fallbackUrl, event);', script)
+                    self.assertIn('return boardNetworkOnly(request);', script)
                 core_assets = re.search(
                     r'const CORE_ASSETS = (\[[\s\S]*?\]);',
                     script,
