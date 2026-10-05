@@ -121,8 +121,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v275/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v275/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v276/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v276/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

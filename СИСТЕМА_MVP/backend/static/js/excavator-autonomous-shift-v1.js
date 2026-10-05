@@ -174,7 +174,7 @@
             });
         };
         facade.discardUnsent = function (eventId) {
-            return ledger.getEvent(eventId).then(function (event) {
+            return ledger.hasEvent(eventId).then(function (event) {
                 // A cancellation is another immutable fact, not deletion.
                 return event ? false : transport.discardUnsent(eventId);
             });

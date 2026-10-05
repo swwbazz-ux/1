@@ -189,6 +189,7 @@
     }
 
     function loadFacts(shift) {
+        if (shift.archive_compaction) return clone(shift.archive_compaction.facts);
         var cancelled = {};
         (shift.events || []).forEach(function (entry) {
             if (!entry || !entry.event || entry.event.event_type !== "excavator.trip.loaded.cancelled") return;
@@ -444,6 +445,75 @@
         return result;
     }
 
+    function canCompact(state, shift) {
+        var recent = state.shifts.filter(function (item) {
+            return item.open_event_id && item.status === "closed";
+        }).slice(-2);
+        return shift && shift.status === "closed" && shift.open_event_id && !shift.archive_compaction
+            && shift.local_shift_id !== state.current_local_shift_id && recent.indexOf(shift) < 0;
+    }
+
+    function archiveCandidates(state) {
+        return state.shifts.filter(function (shift) {
+            return shift.open_event_id && shift.status === "closed" && !shift.archive_compaction
+                && (!shift.archive_coverage || (canCompact(state, shift)
+                    && (!shift.archive_coverage.source_digest
+                        || shift.archive_compaction_skipped !== shift.archive_coverage.source_digest)));
+        });
+    }
+
+    function shiftWorkContext(shift) {
+        if (shift.archive_compaction) return clone(shift.archive_compaction.work_context);
+        var entry = (shift.events || []).filter(function (item) {
+            return item && item.event && item.event.event_type === "excavator.work_context.changed";
+        }).sort(function (left, right) {
+            return Number(right.event.sequence || 0) - Number(left.event.sequence || 0);
+        })[0];
+        return entry ? clone(entry.event.payload || {}) : null;
+    }
+
+    function knownEvent(state, eventId) {
+        return state.shifts.some(function (shift) {
+            return Boolean(eventEntry(shift, eventId)) || Boolean(shift.archive_compaction
+                && shift.archive_coverage.manifest.some(function (item) { return item.event_id === eventId; }));
+        });
+    }
+
+    function validCompactedShift(shift, state) {
+        var compact = shift.archive_compaction, coverage = shift.archive_coverage;
+        if (!compact) return true;
+        if (state.schema_version !== 2 || compact.schema_version !== 1 || shift.status !== "closed"
+            || !shift.server_closed || state.current_local_shift_id === shift.local_shift_id
+            || !coverage || coverage.schema_version !== 1
+            || !/^[a-f0-9]{64}$/.test(coverage.source_digest || "")
+            || !/^[a-f0-9]{64}$/.test(coverage.snapshot_id || "")
+            || !sameEvent(coverage.identity, state.identity)
+            || !Array.isArray(coverage.manifest) || coverage.event_count !== coverage.manifest.length
+            || !Array.isArray(coverage.load_facts) || !Array.isArray(compact.facts)
+            || !Array.isArray(shift.events) || shift.events.length !== 2
+            || !(compact.work_context === null || (compact.work_context && typeof compact.work_context === "object"
+                && !Array.isArray(compact.work_context)))) return false;
+        var ids = new Set(coverage.manifest.map(function (item) { return item.event_id; }));
+        if (ids.size !== coverage.event_count || !ids.has(shift.open_event_id) || !ids.has(shift.close_event_id)
+            || !coverage.manifest.every(function (item) {
+                return typeof item.event_id === "string" && item.event_id && Number.isSafeInteger(item.receipt_id)
+                    && item.receipt_id > 0 && /^[a-f0-9]{64}$/.test(item.fingerprint || "");
+            })) return false;
+        var open = eventEntry(shift, shift.open_event_id), close = eventEntry(shift, shift.close_event_id);
+        return Boolean(open && close && open.event.event_type === "excavator.shift.opened"
+            && close.event.event_type === "excavator.shift.closed"
+            && shift.events.every(function (entry) { return entry.delivery_state === "confirmed"
+                && eventLocalShiftId(entry.event) === shift.local_shift_id; })
+            && sameEvent(compact.facts.map(function (fact) { return fact.event_id; }).sort(),
+                coverage.load_facts.map(function (fact) { return fact.event_id; }).sort())
+            && compact.facts.every(function (fact) {
+                return ids.has(fact.event_id) && typeof fact.cancelled === "boolean"
+                    && Number.isFinite(Date.parse(fact.occurred_at || ""))
+                    && (fact.volume_m3 === null || (typeof fact.volume_m3 === "number" && Number.isFinite(fact.volume_m3)))
+                    && Number.isSafeInteger(fact.server_trip_id) && fact.server_trip_id > 0;
+            }));
+    }
+
     function createLedger(options) {
         options = options || {};
         var identity = {
@@ -461,6 +531,29 @@
         var mutationTail = Promise.resolve();
         var readyPromise = null;
         var outbox = options.outbox || null;
+
+        function archiveDigest(shift) {
+            var source = clone(shift), coverage = source.archive_coverage;
+            delete source.archive_coverage;
+            delete source.archive_compaction_skipped;
+            delete coverage.source_digest;
+            source.events.forEach(function (entry) {
+                delete entry.saved_at;
+                delete entry.confirmed_at;
+            });
+            var crypto = options.crypto || root.crypto;
+            if (!crypto || !crypto.subtle || !root.TextEncoder) return Promise.reject(new Error("archive_digest_unavailable"));
+            var bytes = new root.TextEncoder().encode(JSON.stringify(canonical({shift: source, coverage: coverage})));
+            var timer;
+            return Promise.race([
+                Promise.resolve().then(function () { return crypto.subtle.digest("SHA-256", bytes); }),
+                new Promise(function (resolve, reject) {
+                    timer = setTimeout(function () { reject(new Error("archive_digest_deadline")); }, options.digestTimeoutMs || 1500);
+                })
+            ]).then(function (digest) {
+                return Array.from(new Uint8Array(digest)).map(function (byte) { return byte.toString(16).padStart(2, "0"); }).join("");
+            }).finally(function () { clearTimeout(timer); });
+        }
 
         function persist() {
             return storagePromise.then(function (storage) {
@@ -487,7 +580,7 @@
 
         function applyConfirmation(event, result) {
             var shift = findShift(state, eventLocalShiftId(event));
-            if (!shift) return false;
+            if (!shift || shift.archive_compaction) return false;
             var entry = eventEntry(shift, event.event_id);
             if (!entry || !sameEvent(entry.event, event)) return false;
             entry.delivery_state = "confirmed";
@@ -504,7 +597,8 @@
 
         function loadCommitted(stored) {
             if (stored && !validIdentity(stored)) throw new Error("Локальный журнал принадлежит другому доступу.");
-            if (stored && (stored.schema_version !== 1 || !Array.isArray(stored.shifts))) {
+            if (stored && ([1, 2].indexOf(stored.schema_version) < 0 || !Array.isArray(stored.shifts)
+                || !stored.shifts.every(function (shift) { return validCompactedShift(shift, stored); }))) {
                 throw new Error("Локальный журнал повреждён или имеет другую версию.");
             }
             state = stored || emptyState(identity);
@@ -637,6 +731,9 @@
                 if (!sameEvent(duplicate.event, event)) return Promise.reject(new Error("Локальный ID уже занят другим действием."));
                 return Promise.resolve(clone(duplicate));
             }
+            if (knownEvent(state, event.event_id)) {
+                return Promise.reject(new Error("Локальный ID сохранён в подтверждённом архиве."));
+            }
             var localShiftId = eventLocalShiftId(event);
             if (event.local_shift_id && (event.payload || {}).local_shift_id
                 && String(event.local_shift_id) !== String(event.payload.local_shift_id)) {
@@ -745,7 +842,7 @@
                 if (!saved || saved.schema_version !== 1 || !validIdentity(saved)
                     || !/^[a-f0-9]{64}$/.test(saved.snapshot_id || "")
                     || !Number.isFinite(Date.parse(saved.generated_at || ""))
-                    || !shift || shift.status !== "closed" || !shift.open_event_id
+                    || !shift || shift.status !== "closed" || !shift.open_event_id || shift.archive_compaction
                     || saved.shift.open_event_id !== shift.open_event_id
                     || saved.shift.close_event_id !== shift.close_event_id
                     || Number(saved.shift.equipment_id) !== Number(shift.equipment_id)
@@ -812,7 +909,37 @@
                         return {event_id: item.event.event_id, receipt_id: item.receipt_id, fingerprint: item.fingerprint};
                     })
                 };
-                return persist().then(function () { return clone(shift.archive_coverage); });
+                return archiveDigest(shift).then(function (digest) {
+                    shift.archive_coverage.source_digest = digest;
+                    return persist();
+                }).then(function () { return clone(shift.archive_coverage); });
+            });
+        }
+
+        function compactArchive(localShiftId) {
+            return mutate(function () {
+                var shift = findShift(state, localShiftId), coverage = shift && shift.archive_coverage;
+                if (!canCompact(state, shift) || !coverage || !coverage.source_digest
+                    || coverage.event_count !== shift.events.length || !shift.server_closed
+                    || shift.events.some(function (entry) { return entry.delivery_state !== "confirmed"; })) return false;
+                return archiveDigest(shift).then(function (digest) {
+                    if (digest !== coverage.source_digest) throw new Error("Подтверждённый архив изменился: требуется повторная сверка.");
+                    var original = clone(shift);
+                    var bytes = function (value) { return new root.TextEncoder().encode(JSON.stringify(value)).length; };
+                    shift.archive_compaction = {schema_version: 1, facts: loadFacts(shift), work_context: shiftWorkContext(shift)};
+                    shift.events = [eventEntry(shift, shift.open_event_id), eventEntry(shift, shift.close_event_id)];
+                    delete shift.archive_compaction_skipped;
+                    if (bytes(shift) >= bytes(original)) {
+                        Object.keys(shift).forEach(function (key) { delete shift[key]; });
+                        Object.assign(shift, original, {archive_compaction_skipped: digest});
+                        return persist().then(function () { return false; });
+                    }
+                    // v1 windows reject this schema before writing. They cannot
+                    // interpret the trimmed source list as an empty old report.
+                    state.schema_version = 2;
+                    if (!validCompactedShift(shift, state)) throw new Error("Сокращённый архив не прошёл проверку.");
+                    return persist().then(function () { return true; });
+                });
             });
         }
 
@@ -855,12 +982,7 @@
             return ready().then(function () {
                 var shift = findShift(committedState, localShiftId || committedState.current_local_shift_id);
                 if (!shift) return null;
-                var entry = (shift.events || []).filter(function (item) {
-                    return item && item.event && item.event.event_type === "excavator.work_context.changed";
-                }).sort(function (left, right) {
-                    return Number(right.event.sequence || 0) - Number(left.event.sequence || 0);
-                })[0];
-                return entry ? clone(entry.event.payload || {}) : null;
+                return shiftWorkContext(shift);
             });
         }
 
@@ -920,12 +1042,15 @@
             recordPreparedBatch: recordPreparedBatch,
             confirm: confirm,
             confirmArchive: confirmArchive,
+            compactArchive: compactArchive,
+            archiveCandidates: archiveCandidates,
             snapshot: snapshot,
             nextSequence: nextSequence,
             events: events,
             facts: facts,
             workContext: workContext,
             getEvent: getEvent,
+            hasEvent: function (eventId) { return ready().then(function () { return knownEvent(committedState, eventId); }); },
             hourlyReport: hourlyReport,
             shiftSummary: shiftSummary,
             storageKind: storageKind

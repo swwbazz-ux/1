@@ -7,11 +7,11 @@ const createController = require('../excavator-autonomous-shift-v1.js');
 const createArchive = require('../excavator-shift-archive-v1.js');
 const copy = value => JSON.parse(JSON.stringify(value));
 const identity = {actor_id: 12, access_id: 7, role_code: 'excavator_operator', device_id: 'archive-phone'};
-function setup(disk) {
+function setup(disk, extra = {}) {
     let value = null;
     disk ||= {read: async () => copy(value), write: async next => { value = copy(next); }};
     const ledger = createLedger({adapter: disk, accessId: 7, actorId: 12, deviceId: identity.device_id,
-        locks: {request: (name, options, callback) => Promise.resolve().then(() => callback({name}))}});
+        locks: {request: (name, options, callback) => Promise.resolve().then(() => callback({name}))}, ...extra});
     const controller = createController({ledger, transport: {queue: async () => {}}, identity});
     return {disk, ledger, controller};
 }
@@ -21,32 +21,36 @@ function event(id, sequence, type = 'excavator.trip.loaded') {
         occurred_at: '2026-10-05T01:00:00.000Z',
         payload: {local_shift_id: 'open', truck_id: 3, local_volume_m3: '10'}};
 }
-async function closed(count = 1) {
+async function closed(count = 1, beforeClose) {
     const result = setup();
     await result.controller.open({excavator_id: 7, fuel: '100', engine_hours: '1200'}, 'open');
     if (count) await result.ledger.recordPreparedBatch(state => Array.from({length: count}, (_, index) => event('load-' + index, state.next_sequence + index)));
+    if (beforeClose) await beforeClose(result);
     await result.controller.outbox.queue(event('close', 1, 'excavator.shift.closed'));
     return result;
 }
 async function proofFor(ledger, index = 0) {
     const state = await ledger.snapshot();
     const shift = state.shifts[index];
+    const facts = await ledger.facts(shift.local_shift_id);
     const entries = shift.events.map((entry, index) => {
         const event = copy(entry.event);
-        const load = event.event_type === 'excavator.trip.loaded';
+        const load = ['excavator.trip.loaded', 'excavator.free_bucket.loaded'].includes(event.event_type);
         const result = {server_ids: {event_receipt_id: index + 1, shift_id: 99, ...(load ? {trip_id: index + 100} : {})}};
         return {event: {...event, sent_live: true}, receipt_id: index + 1, status: 'accepted',
             fingerprint: (index + 1).toString(16).padStart(64, '0'), result,
             load_fact: load ? {event_id: event.event_id, trip_id: index + 100, occurred_at: event.occurred_at,
-                cancelled: false, volume_m3: '10', fleet_code: 'belaz', dump_point_id: 1, dump_point: 'Point'} : null};
+                cancelled: facts.find(fact => fact.event_id === event.event_id).cancelled,
+                volume_m3: '10', fleet_code: 'belaz', dump_point_id: 1, dump_point: 'Point'} : null};
     });
     const loads = entries.filter(entry => entry.load_fact);
+    const active = loads.filter(entry => !entry.load_fact.cancelled);
     return {ok: true, schema_version: 1, snapshot_id: 'a'.repeat(64), generated_at: '2026-10-05T02:00:00.000Z',
         identity: copy(identity), shift: {local_shift_id: shift.local_shift_id, open_event_id: shift.open_event_id, close_event_id: shift.close_event_id,
             equipment_id: 7, server_shift_id: 99, opened_at: shift.opened_at, closed_at: shift.closed_at},
         entries, event_count: entries.length, projection: {source_event_ids: loads.map(entry => entry.event.event_id),
-            source_trip_ids: loads.map(entry => entry.load_fact.trip_id), trip_count: loads.length,
-            cancelled_trip_count: 0, volume_m3: String(loads.length * 10), unknown_volume_trip_count: 0}};
+            source_trip_ids: loads.map(entry => entry.load_fact.trip_id), trip_count: active.length,
+            cancelled_trip_count: loads.length - active.length, volume_m3: String(active.length * 10), unknown_volume_trip_count: 0}};
 }
 function responder(proof, observe = () => {}) {
     return async (url, options) => {
@@ -230,6 +234,7 @@ test('temporary failure retries automatically with backoff and stops after all c
         assert.ok(timer, 'missing timer ' + delay);
         timers.delete(timer[0]);
         timer[1].callback();
+        await archive.refresh();
         await new Promise(resolve => setImmediate(resolve));
     }
     archive.schedule();
@@ -257,4 +262,298 @@ test('an unresolved old archive does not starve a later completed shift', async 
     const state = await ledger.snapshot();
     assert.equal(state.shifts[0].archive_coverage, undefined);
     assert.ok(state.shifts[1].archive_coverage);
+});
+
+async function laterShifts(controller) {
+    for (const id of ['recent-1', 'recent-2']) {
+        await controller.open({excavator_id: 7, fuel: '90', engine_hours: '1201'}, id);
+        await controller.outbox.queue(event(id + '-close', 1, 'excavator.shift.closed'));
+    }
+    await controller.open({excavator_id: 7, fuel: '90', engine_hours: '1202'}, 'current');
+    await controller.outbox.queue(event('pending-load', 1));
+}
+
+async function reports(ledger) {
+    const local = await ledger.hourlyReport(null, '2026-10-05T01:40:00.000Z', 'open');
+    return {local, merged: await ledger.hourlyReport(local, '2026-10-05T01:40:00.000Z', 'open'),
+        summary: await ledger.shiftSummary(null, 'open'), facts: await ledger.facts('open'),
+        context: await ledger.workContext('open')};
+}
+
+test('old 235-load archive shrinks while offline reports, cancellation, context and pending facts survive restart', async t => {
+    const {ledger, controller, disk} = await closed(235, async ({controller, ledger, disk}) => {
+        await controller.outbox.queue({...event('context', 1, 'excavator.work_context.changed'),
+            payload: {face_id: 4, face_name: 'Забой №4', dump_point_ids: [1], dump_point_name: 'Дробилка'}});
+        await controller.outbox.queue({...event('free', 1, 'excavator.free_bucket.loaded'),
+            payload: {local_fleet_code: 'nhl', local_volume_m3: null, dump_point_id: 1, dump_point_name: 'Склад'}});
+        await controller.outbox.queue({...event('cancel', 1, 'excavator.trip.loaded.cancelled'),
+            payload: {source_load_event_id: 'load-0'}});
+        const state = await disk.read();
+        state.shifts[0].events.find(entry => entry.event.event_id === 'load-1').event.payload = {
+            local_shift_id: 'open', local_fleet_code: 'nhl', local_volume_m3: '49.40', dump_point_name: 'Местная точка'};
+        await disk.write(state);
+        await ledger.refresh();
+    });
+    const proof = await proofFor(ledger);
+    proof.entries[2].result.effective_occurred_at = '2026-10-05T00:30:00.000Z';
+    await ledger.confirmArchive(proof);
+    await laterShifts(controller);
+    const before = await disk.read(), beforeReports = await reports(ledger);
+    const pending = await controller.outbox.pending(), sequence = await ledger.nextSequence();
+    assert.equal(await ledger.compactArchive('open'), true);
+    const after = await disk.read();
+    assert.equal(after.schema_version, 2);
+    assert.equal(after.shifts[0].events.length, 2);
+    assert.deepEqual(after.shifts.slice(1), before.shifts.slice(1));
+    assert.deepEqual(after.shifts[0].archive_coverage, before.shifts[0].archive_coverage);
+    assert.deepEqual(await reports(ledger), beforeReports);
+    assert.deepEqual(await controller.outbox.pending(), pending);
+    assert.equal(await ledger.nextSequence(), sequence);
+    const byteSize = value => Buffer.byteLength(JSON.stringify(value));
+    assert.ok(byteSize(after) < byteSize(before) * .7);
+    t.diagnostic(`journal bytes: ${byteSize(before)} -> ${byteSize(after)}`);
+    const restored = setup(disk);
+    await restored.controller.ready();
+    assert.deepEqual(await reports(restored.ledger), beforeReports);
+    assert.deepEqual(await restored.controller.outbox.pending(), pending);
+    assert.equal(await restored.ledger.compactArchive('open'), false);
+});
+
+test('ACK-only, unsealed legacy coverage, current and two latest closed shifts are never compacted', async () => {
+    const {ledger, controller, disk} = await closed(3);
+    const proof = await proofFor(ledger);
+    await laterShifts(controller);
+    for (const item of proof.entries) {
+        const original = await ledger.getEvent(item.event.event_id);
+        await ledger.confirm(original, item.result);
+    }
+    const acked = await disk.read();
+    assert.equal(await ledger.compactArchive('open'), false);
+    assert.deepEqual(await disk.read(), acked);
+    await ledger.confirmArchive(proof);
+    for (const id of ['recent-1', 'recent-2', 'current']) assert.equal(await ledger.compactArchive(id), false);
+    const legacy = await disk.read();
+    delete legacy.shifts[0].archive_coverage.source_digest;
+    await disk.write(legacy);
+    assert.equal(await ledger.compactArchive('open'), false);
+    assert.deepEqual(await disk.read(), legacy);
+    assert.ok(ledger.archiveCandidates(await ledger.snapshot()).some(shift => shift.local_shift_id === 'open'));
+});
+
+test('changed original, receipt or proof prevents deletion despite a previously valid coverage marker', async () => {
+    for (const change of [
+        shift => { shift.events[1].event.payload.local_volume_m3 = '999'; },
+        shift => { shift.events[1].server_result.effective_occurred_at = '2026-10-05T05:00:00Z'; },
+        shift => { shift.events[1].server_ids.trip_id++; },
+        shift => { shift.archive_coverage.manifest[1].receipt_id++; },
+        shift => { shift.archive_coverage.projection.volume_m3 = '999'; },
+    ]) {
+        const {ledger, controller, disk} = await closed(3);
+        await ledger.confirmArchive(await proofFor(ledger));
+        await laterShifts(controller);
+        const changed = await disk.read();
+        change(changed.shifts[0]);
+        await disk.write(changed);
+        await assert.rejects(ledger.compactArchive('open'), /повторная сверка/);
+        assert.deepEqual(await disk.read(), changed);
+    }
+});
+
+test('unconfirmed source blocks compaction; a duplicate matching ACK does not invalidate the seal', async () => {
+    const {ledger, controller, disk} = await closed(4);
+    const original = await ledger.getEvent('load-0'), proof = await proofFor(ledger);
+    await ledger.confirmArchive(proof);
+    await laterShifts(controller);
+    const covered = await disk.read(), unconfirmed = copy(covered);
+    unconfirmed.shifts[0].events[1].delivery_state = 'awaiting_outbox';
+    await disk.write(unconfirmed);
+    assert.equal(await ledger.compactArchive('open'), false);
+    assert.deepEqual(await disk.read(), unconfirmed);
+    await disk.write(covered);
+    await ledger.confirm(original, proof.entries[1].result);
+    assert.equal(await ledger.compactArchive('open'), true);
+});
+
+test('quota failure restores full archive in memory and on disk; retry commits once', async () => {
+    const {ledger, controller, disk} = await closed(20);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    const before = await disk.read(), beforeReports = await reports(ledger), write = disk.write;
+    disk.write = async () => { throw new Error('quota'); };
+    await assert.rejects(ledger.compactArchive('open'), /quota/);
+    assert.deepEqual(await ledger.snapshot(), before);
+    assert.deepEqual(await disk.read(), before);
+    assert.deepEqual(await reports(ledger), beforeReports);
+    disk.write = write;
+    assert.equal(await ledger.compactArchive('open'), true);
+    assert.equal((await disk.read()).revision, before.revision + 1);
+});
+
+test('compaction reloads another window’s pending actions and never rewinds the global sequence', async () => {
+    const {ledger, controller, disk} = await closed(20);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    const second = setup(disk);
+    await second.controller.ready();
+    await second.controller.outbox.queue(event('other-window', 1));
+    const latest = await disk.read();
+    await ledger.compactArchive('open');
+    assert.deepEqual((await disk.read()).shifts.slice(1), latest.shifts.slice(1));
+    await second.controller.outbox.queue(event('after-compaction', 1));
+    const saved = await disk.read();
+    assert.ok(saved.shifts[0].archive_compaction);
+    assert.equal(saved.shifts.at(-1).events.at(-1).event.sequence, latest.next_sequence);
+});
+
+test('archived IDs remain occupied; late receipts and discard cannot resurrect or remove accepted facts', async () => {
+    const {ledger, controller, disk} = await closed(20);
+    const original = await ledger.getEvent('load-0'), opening = await ledger.getEvent('open');
+    const proof = await proofFor(ledger);
+    await ledger.confirmArchive(proof);
+    await laterShifts(controller);
+    await ledger.compactArchive('open');
+    const before = await disk.read();
+    assert.equal(await ledger.getEvent('load-0'), null);
+    assert.equal(await ledger.hasEvent('load-0'), true);
+    assert.equal(await controller.outbox.discardUnsent('load-0'), false);
+    assert.equal(await ledger.confirm(original, {server_ids: {trip_id: 999}}), false);
+    assert.equal(await ledger.confirm(opening, {server_ids: {shift_id: 999}}), false);
+    await assert.rejects(ledger.recordAndQueue({...original, local_shift_id: 'current',
+        sequence: before.next_sequence, payload: {local_shift_id: 'current'}}), /подтверждённом архиве/);
+    await assert.rejects(ledger.confirmArchive(proof), /не подтверждено/);
+    assert.deepEqual(await disk.read(), before);
+});
+
+test('background worker re-fetches legacy coverage before compacting only the older shift', async () => {
+    const {ledger, controller, disk} = await closed(235);
+    const proof = await proofFor(ledger);
+    await ledger.confirmArchive(proof);
+    await laterShifts(controller);
+    const legacy = await disk.read();
+    delete legacy.shifts[0].archive_coverage.source_digest;
+    await disk.write(legacy);
+    await ledger.refresh();
+    const offsets = [];
+    const archive = client(ledger, responder(proof, url => offsets.push(Number(url.searchParams.get('offset')))));
+    assert.ok(await archive.refresh());
+    assert.deepEqual(offsets, [0, 100, 200]);
+    const saved = await disk.read();
+    assert.ok(saved.shifts[0].archive_compaction);
+    assert.deepEqual(saved.shifts.slice(1), legacy.shifts.slice(1));
+    assert.ok(!ledger.archiveCandidates(saved).some(shift => shift.local_shift_id === 'open'));
+});
+
+test('an empty shift that would grow is retained and is not repeatedly fetched for compaction', async () => {
+    const {ledger, controller, disk} = await closed(0);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    const originals = (await disk.read()).shifts[0].events;
+    assert.equal(await ledger.compactArchive('open'), false);
+    const saved = await disk.read();
+    assert.equal(saved.schema_version, 1);
+    assert.deepEqual(saved.shifts[0].events, originals);
+    assert.ok(saved.shifts[0].archive_compaction_skipped);
+    assert.ok(!ledger.archiveCandidates(saved).some(shift => shift.local_shift_id === 'open'));
+});
+
+test('digest deadline rolls back coverage, releases the writer and ignores a late digest', async () => {
+    const {ledger, disk} = await closed(4);
+    const proof = await proofFor(ledger), before = await disk.read();
+    let release;
+    const hung = setup(disk, {digestTimeoutMs: 15, crypto: {subtle: {digest: () => new Promise(resolve => { release = resolve; })}}});
+    await assert.rejects(hung.ledger.confirmArchive(proof), /archive_digest_deadline/);
+    assert.deepEqual(await disk.read(), before);
+    await hung.controller.open({excavator_id: 7, fuel: '90', engine_hours: '1201'}, 'next');
+    release(new ArrayBuffer(32));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await disk.read()).shifts[0].archive_coverage, undefined);
+    assert.equal((await disk.read()).current_local_shift_id, 'next');
+});
+
+test('malformed compacted state is rejected without overwriting it', async () => {
+    const {ledger, controller, disk} = await closed(4);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    await ledger.compactArchive('open');
+    const valid = await disk.read();
+    for (const change of [state => { state.schema_version = 1; },
+        state => { state.shifts[0].archive_compaction.facts.pop(); },
+        state => { state.shifts[0].events.pop(); },
+        state => { state.shifts[0].archive_coverage.manifest.pop(); },
+        state => { state.current_local_shift_id = 'open'; }]) {
+        const broken = copy(valid);
+        change(broken);
+        await disk.write(broken);
+        await assert.rejects(setup(disk).ledger.ready(), /повреждён/);
+        assert.deepEqual(await disk.read(), broken);
+    }
+});
+
+test('compaction in one mirror survives restart and an inaccessible newer mirror blocks stale writes', async () => {
+    const {ledger, controller, disk} = await closed(20);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    const seed = await disk.read();
+    let row = {state: copy(seed)}, mirror = JSON.stringify(seed), unavailable = false;
+    const indexedDB = {open() {
+        if (unavailable) throw new Error('offline storage');
+        const request = {result: {objectStoreNames: {contains: () => true}, close() {}, transaction() {
+            const tx = {objectStore() { return {
+                get() { const read = {}; queueMicrotask(() => { read.result = copy(row); read.onsuccess(); }); return read; },
+                put(next) { queueMicrotask(() => { row = copy(next); tx.oncomplete(); }); },
+            }; }};
+            return tx;
+        }}};
+        queueMicrotask(() => request.onsuccess());
+        return request;
+    }};
+    const extra = {adapter: undefined, indexedDB, localStorage: {
+        getItem: () => mirror, setItem: () => { throw new Error('quota'); },
+    }};
+    const first = setup(undefined, extra);
+    assert.equal(await first.ledger.compactArchive('open'), true);
+    assert.equal(row.state.schema_version, 2);
+    assert.equal(JSON.parse(mirror).schema_version, 1);
+    const restored = setup(undefined, extra);
+    await restored.ledger.ready();
+    assert.ok((await restored.ledger.snapshot()).shifts[0].archive_compaction);
+    assert.deepEqual(await reports(restored.ledger), await reports(ledger));
+    unavailable = true;
+    await assert.rejects(setup(undefined, extra).ledger.ready(), {code: 'local_shift_storage_unavailable'});
+    await assert.rejects(restored.controller.outbox.queue(event('unsafe-write', 1)), {code: 'local_shift_storage_unavailable'});
+    assert.equal(row.state.schema_version, 2);
+    unavailable = false;
+    await restored.controller.outbox.queue(event('safe-write', 1));
+    assert.ok(row.state.shifts[0].archive_compaction);
+    assert.equal(row.state.shifts.at(-1).events.at(-1).event.event_id, 'safe-write');
+});
+
+test('a hung compaction digest releases the shared lock on deadline without a late destructive commit', async () => {
+    const {ledger, controller, disk} = await closed(20);
+    await ledger.confirmArchive(await proofFor(ledger));
+    await laterShifts(controller);
+    let held = false, entered, release;
+    const started = new Promise(resolve => { entered = resolve; });
+    const locks = {request(name, options, callback) {
+        if (held) return Promise.resolve().then(() => callback(null));
+        held = true;
+        return Promise.resolve().then(() => callback({name})).finally(() => { held = false; });
+    }};
+    const slow = setup(disk, {locks, digestTimeoutMs: 30, crypto: {subtle: {digest: () => {
+        entered();
+        return new Promise(resolve => { release = resolve; });
+    }}}});
+    const other = setup(disk, {locks});
+    await other.controller.ready();
+    const saving = slow.ledger.compactArchive('open');
+    await started;
+    await assert.rejects(other.controller.outbox.queue(event('busy', 1)), {code: 'local_shift_busy'});
+    await assert.rejects(saving, /archive_digest_deadline/);
+    await other.controller.outbox.queue(event('after-timeout', 1));
+    const beforeLate = await disk.read();
+    release(new ArrayBuffer(32));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(await disk.read(), beforeLate);
+    assert.equal(beforeLate.shifts[0].archive_compaction, undefined);
+    assert.equal(held, false);
 });

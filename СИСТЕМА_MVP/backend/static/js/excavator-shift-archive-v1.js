@@ -24,9 +24,7 @@
             function allowed() { if (expired || !current()) throw new Error("archive_stale_request"); }
             var work = options.ledger.snapshot().then(function (state) {
                 allowed();
-                var candidates = state.shifts.filter(function (item) {
-                    return item.open_event_id && item.status === "closed" && !item.archive_coverage;
-                });
+                var candidates = options.ledger.archiveCandidates(state);
                 var previous = candidates.findIndex(function (item) { return item.local_shift_id === lastShiftId; });
                 var shift = candidates.length ? candidates[(previous + 1) % candidates.length] : null;
                 if (!shift) return null;
@@ -74,7 +72,11 @@
             });
             inFlight = Promise.race([work, deadline]).then(function (proof) {
                 allowed();
-                return proof ? options.ledger.confirmArchive(proof) : false;
+                if (!proof) return false;
+                return options.ledger.confirmArchive(proof).then(function (coverage) {
+                    allowed();
+                    return options.ledger.compactArchive(proof.shift.local_shift_id).then(function () { return coverage; });
+                });
             }).catch(function () { return false; }).finally(function () {
                 expired = true;
                 clearTimeout(timeout);
@@ -91,9 +93,7 @@
                     if (!current() || (root.navigator && root.navigator.onLine === false)) return;
                     if (covered) { retryMs = 5000; schedule(); return; }
                     return options.ledger.snapshot().then(function (state) {
-                        if (current() && state.shifts.some(function (shift) {
-                            return shift.open_event_id && shift.status === "closed" && !shift.archive_coverage;
-                        })) {
+                        if (current() && options.ledger.archiveCandidates(state).length) {
                             schedule(retryMs);
                             retryMs = Math.min(60000, retryMs * 2);
                         }
