@@ -422,3 +422,67 @@ test("quota служебного счётчика не отменяет уже �
     assert.equal(transport.readQueue().length, 1);
     assert.equal(transport.readQueue()[0].data.client_action_id, "metadata-quota");
 });
+
+test("HTTP carries the saved author, shift and time even when the cookie changes after the UI check", async () => {
+    let accepted = false;
+    let shown = {actor_id: "12", access_id: "7", role: "dispatcher", shift_id: "10"};
+    const r = createRuntime({fetch: async () => ({ok: accepted, status: accepted ? 200 : 409,
+        json: async () => accepted ? {ok: true} : {ok: false, code: "command_author_mismatch", error: "Другой сотрудник"}})});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => shown});
+    const payload = {client_action_id: "original-author", truck_id: 7};
+    await assert.rejects(transport.post("/dispatcher/control/truck/assign/", payload),
+        error => error.code === "command_author_mismatch");
+    const source = transport.readQueue()[0];
+    const firstHeader = r.fetchCalls[0].options.headers["X-Command-Context"];
+    const context = JSON.parse(firstHeader);
+    assert.deepEqual(context, {version: 1, id: source.id, author: shown, occurred_at: source.occurredAt});
+    assert.deepEqual(JSON.parse(r.fetchCalls[0].options.body), payload);
+    shown = {...shown, shift_id: "20"};
+    accepted = true;
+    await transport.send(source);
+    assert.equal(r.fetchCalls[1].options.headers["X-Command-Context"], firstHeader);
+    const record = JSON.parse(r.storage.get(transport.journalPrefix + encodeURIComponent(source.id)));
+    assert.deepEqual(record.request.author, context.author);
+    assert.equal(record.delivery.state, "acknowledged");
+});
+
+test("restarting the transport preserves the first command context instead of adopting the new shift", async () => {
+    const oldAuthor = {actor_id: "12", access_id: "7", role: "mining_master", shift_id: "10"};
+    const r = createRuntime({fetch: async () => { throw Error("offline"); }});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => oldAuthor});
+    await transport.post("/assign/", {client_action_id: "restart-context"});
+    const firstHeader = r.fetchCalls[0].options.headers["X-Command-Context"];
+    const next = createRuntime({storage: Object.fromEntries(r.storage)});
+    const restarted = next.context.createDispatcherTransport({getCommandContext: () => ({...oldAuthor, shift_id: "20"})});
+    await restarted.send(restarted.readQueue()[0]);
+    assert.equal(next.fetchCalls[0].options.headers["X-Command-Context"], firstHeader);
+});
+
+test("fresh fragment identity wins over the stale outer shell for newly saved commands", async () => {
+    for (const mobile of [true, false]) {
+        const r = createRuntime();
+        const fresh = {dispatcherCommandActorId: "12", dispatcherCommandAccessId: "7", dispatcherCommandRole: "mining_master", dispatcherCommandShiftId: "30"};
+        r.context.document = {querySelector: selector => {
+            if (selector.startsWith(".mm-mobile-shell")) return mobile ? {dataset: fresh} : null;
+            if (selector.startsWith(".dispatcher-board")) return {dataset: fresh};
+            return {dataset: {...fresh, dispatcherCommandShiftId: "10"}};
+        }};
+        const transport = r.context.createDispatcherTransport({});
+        await transport.post("/assign/", {client_action_id: "fresh-fragment"});
+        assert.equal(JSON.parse(r.fetchCalls[0].options.headers["X-Command-Context"]).author.shift_id, "30");
+    }
+});
+
+test("a legacy record missing its shift is sent as incomplete context, never rewritten from today's screen", async () => {
+    const author = {access_id: "7", role: "dispatcher", shift_id: ""};
+    const legacy = command("old-incomplete", {author});
+    const r = createRuntime({storage: {[QUEUE_KEY]: JSON.stringify([legacy])}, fetch: async () => ({ok:false,status:409,
+        json:async()=>({ok:false,code:"command_context_invalid",error:"Контекст неполон"})})});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => ({...author, actor_id:"12",shift_id:"30"})});
+    await transport.flush();
+    await drain();
+    const header = JSON.parse(r.fetchCalls[0].options.headers["X-Command-Context"]);
+    assert.deepEqual(header.author, author);
+    assert.equal(transport.readQueue().length,1);
+    assert.equal(transport.readQueue()[0].author.shift_id, "");
+});

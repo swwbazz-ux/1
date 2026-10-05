@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from assignments.command_context import bound_command
 from assignments.models import (
     AssignmentStatus,
     EquipmentAssignment,
@@ -3476,6 +3477,8 @@ def lock_dispatcher_mutation_access(request, access):
 
 @require_POST
 @transaction.atomic
+@bound_command('dispatcher_move_excavator', shift_getter=lambda access: get_active_dispatcher_shift(access),
+               allowed_roles={'dispatcher', 'admin', 'manager'})
 def dispatcher_move_excavator_view(request):
     return _execute_dispatcher_move_excavator(
         request,
@@ -3487,6 +3490,8 @@ def dispatcher_move_excavator_view(request):
 
 @require_POST
 @transaction.atomic
+@bound_command('dispatcher_assign_truck', shift_getter=lambda access: get_active_dispatcher_shift(access),
+               allowed_roles={'dispatcher', 'admin', 'manager'})
 def dispatcher_assign_truck_view(request):
     return _execute_dispatcher_assign_truck(
         request,

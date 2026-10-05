@@ -16,9 +16,12 @@
         var onAcknowledged = options.onAcknowledged || function () {};
         var fetchRequest = options.fetch || function (url, init) { return global.fetch(url, init); };
         var getCommandContext = options.getCommandContext || function () {
-            var shell = global.document && global.document.querySelector("[data-dispatcher-theme]");
+            var shell = global.document && (global.document.querySelector(".mm-mobile-shell[data-dispatcher-command-access-id]")
+                || global.document.querySelector(".dispatcher-board[data-dispatcher-command-access-id]")
+                || global.document.querySelector("[data-dispatcher-theme]"));
             var data = shell && shell.dataset || {};
             return {
+                actor_id: String(data.dispatcherCommandActorId || ""),
                 access_id: String(data.dispatcherCommandAccessId || ""),
                 role: String(data.dispatcherCommandRole || ""),
                 shift_id: String(data.dispatcherCommandShiftId || "")
@@ -194,7 +197,9 @@
             }).finally(function () { global.clearTimeout(timer); });
         }
         function requestPayload(request) {
-            var headers = {"X-CSRFToken": getCsrfToken()};
+            var headers = {"X-CSRFToken": getCsrfToken(), "X-Command-Context": JSON.stringify({
+                version: 1, id: request.id, author: request.author || {}, occurred_at: request.occurredAt || ""
+            })};
             var body;
             if (request.kind === "form") {
                 body = new global.FormData();

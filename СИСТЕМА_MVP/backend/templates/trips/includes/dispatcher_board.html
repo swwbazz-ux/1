@@ -1,5 +1,8 @@
 {% load static %}
-    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-server-now="{{ server_now|date:'c' }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
+    <section class="dispatcher-board{% if not dispatcher_header.active_shift %} is-readonly{% endif %}" data-dispatcher-command-access-id="{{ access.id }}"
+    data-dispatcher-command-actor-id="{{ access.employee_id }}"
+    data-dispatcher-command-role="{{ access.role.code }}"
+    data-dispatcher-command-shift-id="{{ dispatcher_header.active_shift.id|default:'' }}" data-dispatcher-shift-open="{% if dispatcher_header.active_shift %}true{% else %}false{% endif %}" data-dispatcher-own-shift-open="{% if dispatcher_header.shift_is_open %}true{% else %}false{% endif %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-server-now="{{ server_now|date:'c' }}" aria-label="{% if dispatcher_board_label %}{{ dispatcher_board_label }}{% else %}Горный диспетчер{% endif %}">
         <header class="dispatcher-topbar dispatcher-unified-topbar">
             {% include "includes/dispatcher_header.html" with dispatcher_nav_active="control" %}
         </header>

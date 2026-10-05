@@ -29,6 +29,7 @@ from users.models import EmployeeAccess
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
+from .command_context import bound_command
 from .command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
@@ -93,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v166";
+const CACHE_NAME = "mining-master-mobile-shell-v167";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -774,6 +775,8 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
 @require_POST
 @transaction.atomic
+@bound_command('mining_master_move_excavator', shift_getter=lambda access: get_shift_state_for_access(access)[0],
+               allowed_roles={'mining_master'})
 def mining_master_move_excavator_view(request):
     access = mining_master_access_from_request(request)
     if not access:
@@ -879,6 +882,8 @@ def mining_master_move_excavator_view(request):
 
 @require_POST
 @transaction.atomic
+@bound_command('mining_master_assign_truck', shift_getter=lambda access: get_shift_state_for_access(access)[0],
+               allowed_roles={'mining_master'})
 def mining_master_assign_truck_view(request):
     access = mining_master_access_from_request(request)
     if not access:

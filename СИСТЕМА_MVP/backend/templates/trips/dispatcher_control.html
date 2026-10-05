@@ -6,12 +6,12 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v167">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v167">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v167">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v167">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v167">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v167">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v168">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v168">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v168">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v168">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v168">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v168">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -25,8 +25,8 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v166" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v166" defer></script>
+        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v167" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v167" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -46,9 +46,10 @@
 <main
     class="dispatcher-shell"
     data-dispatcher-theme
-    data-dispatcher-command-access-id="{{ request.session.employee_access_id|default:'' }}"
-    data-dispatcher-command-role="{{ app_role_code }}"
-    data-dispatcher-command-shift-id="{{ dispatcher_header.shift_id|default:'' }}"
+    data-dispatcher-command-access-id="{{ access.id }}"
+    data-dispatcher-command-actor-id="{{ access.employee_id }}"
+    data-dispatcher-command-role="{{ access.role.code }}"
+    data-dispatcher-command-shift-id="{{ dispatcher_header.active_shift.id|default:'' }}"
     data-static-prefix="{% static '' %}"
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
@@ -68,7 +69,10 @@
     {% include "trips/includes/dispatcher_board.html" %}
 
     {% if mining_master_mobile_enabled %}
-    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" aria-label="Мобильный пульт Горного мастера">
+    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" data-dispatcher-command-access-id="{{ access.id }}"
+    data-dispatcher-command-actor-id="{{ access.employee_id }}"
+    data-dispatcher-command-role="{{ access.role.code }}"
+    data-dispatcher-command-shift-id="{{ dispatcher_header.active_shift.id|default:'' }}" aria-label="Мобильный пульт Горного мастера">
         <div class="mm-mobile-home" data-mm-mobile-view="home">
         <header class="mm-mobile-header">
             <div class="mm-mobile-title">
@@ -583,7 +587,7 @@
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v167"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v168"></script>
 {% else %}
 <script>
 (function () {
@@ -738,7 +742,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v166";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v167";
     var dispatcherTransport = window.createDispatcherTransport({
         getCsrfToken: getCsrfToken,
         onStateChange: function (state) {
@@ -6606,22 +6610,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v168" defer></script>
 {% endif %}
 {% endblock %}

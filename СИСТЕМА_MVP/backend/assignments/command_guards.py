@@ -53,6 +53,7 @@ def begin_client_action(*, employee, action_type, payload):
             'Номер действия уже использован для другой команды. Обновите экран.'
         )
     stored.pop('_request_signature', None)
+    stored.pop('_command_context', None)
     stored['deduplicated'] = True
     return client_action_id, signature, stored
 
