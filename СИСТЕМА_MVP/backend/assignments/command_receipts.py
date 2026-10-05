@@ -1,4 +1,4 @@
-"""Чтение принятой команды: никогда не исполняет присланный старый payload."""
+"""Чтение доказанного исхода: никогда не исполняет присланный старый payload."""
 import json
 
 from django.http import JsonResponse
@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
-from assignments.command_guards import _request_signature
+from assignments.command_guards import _request_signature, is_rejected_client_action
 from shifts.models import ShiftClientAction
 from users.active_role import role_session_state
 
@@ -54,9 +54,15 @@ def command_receipt_view(request):
     if not receipt:
         return JsonResponse(unresolved)
     stored = dict(receipt.response_payload or {})
-    if stored.get('_request_signature') != _request_signature(payload) or stored.get('ok') is not True:
+    rejected = is_rejected_client_action(stored)
+    if (stored.get('_request_signature') != _request_signature(payload)
+            or not (stored.get('ok') is True or rejected)):
         return JsonResponse(unresolved)
     context = stored.get('_command_context')
+    if rejected and (not context or source.get('id') != context['id']
+            or source.get('occurredAt') != context['occurred_at']
+            or any(str(author.get(field, '')) != str(saved) for field, saved in context['author'].items())):
+        return JsonResponse(unresolved)
     expected = {'actor_id': receipt.employee_id, 'shift_id': receipt.shift_id,
                 'access_id': access.pk, 'role': access.role.code}
     if context:
@@ -77,5 +83,9 @@ def command_receipt_view(request):
         evidence['command_context'] = context
     stored.pop('_request_signature', None)
     stored.pop('_command_context', None)
+    stored.pop('_command_outcome', None)
     stored['deduplicated'] = True
-    return JsonResponse({'ok': True, 'status': 'acknowledged', 'receipt': stored, 'evidence': evidence})
+    if rejected:
+        evidence['http_status'] = 409
+    return JsonResponse({'ok': True, 'status': 'rejected' if rejected else 'acknowledged',
+                         'receipt': stored, 'evidence': evidence})

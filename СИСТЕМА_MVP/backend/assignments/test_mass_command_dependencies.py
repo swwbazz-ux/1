@@ -115,7 +115,8 @@ class MassCommandDependencyTests(MassCommandFixture, TestCase):
                     response = self.post(mass)
                     self.assertEqual(response.status_code, 409)
                     self.assertEqual(response.json()['code'], 'state_conflict')
-                    self.assertEqual(before, (list(HaulAssignment.objects.values()), list(ExcavatorPlacement.objects.values()), ShiftClientAction.objects.count()))
+                    self.assertEqual(self.receipt(mass).response_payload['_command_outcome'], 'rejected')
+                    self.assertEqual(before, (list(HaulAssignment.objects.values()), list(ExcavatorPlacement.objects.values()), ShiftClientAction.objects.count() - 1))
 
     def test_late_conflict_on_second_truck_rolls_back_first_truck_and_signals(self):
         from core.models import OperationalStateEvent
@@ -137,8 +138,9 @@ class MassCommandDependencyTests(MassCommandFixture, TestCase):
                         response = self.post(mass)
                     self.assertEqual(len(calls), 2)
                     self.assertEqual(response.status_code, 409)
+                    self.assertEqual(self.receipt(mass).response_payload['_command_outcome'], 'rejected')
                     self.assertEqual(before, (list(HaulAssignment.objects.values()), list(ExcavatorPlacement.objects.values()),
-                        ShiftClientAction.objects.count(), OperationalStateEvent.objects.count()))
+                        ShiftClientAction.objects.count() - 1, OperationalStateEvent.objects.count()))
 
     def test_foreign_truck_wrong_access_missing_context_and_malformed_dependencies_never_execute(self):
         with self.isolated('mining_master') as parents:

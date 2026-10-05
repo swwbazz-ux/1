@@ -34,6 +34,7 @@ from .command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
     begin_client_action,
+    client_action_response,
     complete_client_action,
 )
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
@@ -93,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v174";
+const CACHE_NAME = "mining-master-mobile-shell-v175";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -794,7 +795,7 @@ def mining_master_move_excavator_view(request):
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects
@@ -894,7 +895,7 @@ def mining_master_assign_truck_view(request):
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
 
     if action == 'release_complex':

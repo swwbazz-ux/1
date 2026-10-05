@@ -127,7 +127,8 @@ function boardHarness(role, options = {}) {
     const c = r.context;
     const author = {actor_id: '1', access_id: '2', role, shift_id: '3'};
     const transport = c.createDispatcherTransport({getCommandContext: () => author,
-        onDependenciesBlocked: () => { if (c.onDependenciesBlocked) c.onDependenciesBlocked(); }});
+        onDependenciesBlocked: () => { if (c.onDependenciesBlocked) c.onDependenciesBlocked(); },
+        onRejected: () => { if (c.onRejected) c.onRejected(); }});
     const selector = role === 'mining_master' ? '.mm-mobile-shell' : '.dispatcher-board';
     const effects = {replace: [], cards: [], versions: [], restored: []};
     const requests = [];
@@ -175,6 +176,8 @@ function boardHarness(role, options = {}) {
         });
         c.onDependenciesBlocked = vm.runInContext('(' + extractBraceBlock(TEMPLATE,
             'onDependenciesBlocked: function ()', 'Master blocked callback').replace(/^onDependenciesBlocked: /, '') + ')', c);
+        c.onRejected = vm.runInContext('(' + extractBraceBlock(TEMPLATE,
+            'onRejected: function ()', 'Master rejected callback').replace(/^onRejected: /, '') + ')', c);
         refresh = opts => c.refreshMobileBoardFromServer(opts);
     } else {
         vm.runInContext(RECONCILER, c);
@@ -605,4 +608,163 @@ test('Master stops retrying a permanently stale fragment after five follow-ups',
     assert.equal(h.requests.length, 6);
     assert.equal(h.effects.replace.length, 0);
     assert.equal(h.version(), '10');
+});
+
+function conflictOutcome(request) {
+    return {ok: true, status: 'rejected',
+        receipt: {ok: false, code: 'state_conflict', conflict: true, client_action_id: request.data.client_action_id},
+        evidence: {http_status: 409, client_action_id: request.data.client_action_id,
+            action_type: (request.url.startsWith('/mining-master/') ? 'mining_master_' : 'dispatcher_')
+                + (request.url.endsWith('/excavator/move/') ? 'move_excavator' : 'assign_truck'),
+            actor_id: request.author.actor_id, shift_id: request.author.shift_id,
+            command_context: {version: 1, id: request.id, occurred_at: request.occurredAt, author: {...request.author}}}};
+}
+const jsonReply = body => ({ok: true, status: 200, json: async () => body});
+
+for (const role of ['mining_master', 'dispatcher']) {
+    for (const kind of ['single', 'release', 'disband']) {
+        test(role + ': ' + kind + ' 409 is held until exact receipt; dependent board then recovers without replay', async () => {
+            let root;
+            const h = boardHarness(role, {fetch: async (url, init) => {
+                if (url === '/assignments/commands/receipt/') return jsonReply(conflictOutcome(JSON.parse(init.body)));
+                return {ok: false, status: 409, json: async () => conflictOutcome(root).receipt};
+            }});
+            root = kind === 'single' ? h.command(h.transport, 'conflict') : bulkCommand(h, 'conflict', kind);
+            const child = h.command(h.transport, 'after-conflict');
+            const originals = [root, child].map(r => JSON.stringify(record(h, r).request));
+            await assert.rejects(h.transport.send(root), {code: 'state_conflict'});
+            assert.equal(record(h, root).delivery.state, 'held');
+            assert.equal(record(h, child).delivery.state, 'pending');
+            assert.equal(h.transport.boardRefreshToken(), null);
+            await h.transport.flush();
+            assert.equal(record(h, root).delivery.state, 'rejected');
+            assert.equal(record(h, child).delivery.state, 'blocked');
+            assert.deepEqual(h.fetchCalls.map(c => c.url), [root.url, '/assignments/commands/receipt/']);
+            assert.deepEqual([root, child].map(r => JSON.stringify(record(h, r).request)), originals);
+            assert.notEqual(h.transport.boardRefreshToken(), null);
+            if (role === 'mining_master') assert.equal(h.context.miningMasterBoardStale, true);
+            const refresh = h.refresh({preserveScreen: true, forceFullBoard: true});
+            assert.equal(h.requests.length, 1);
+            h.response(0, 10, 'actual-after-refusal');
+            await refresh;
+            assert.equal(h.active().marker, 'actual-after-refusal');
+            await h.transport.flush();
+            assert.equal(h.fetchCalls.length, 2);
+        });
+    }
+    for (const outcome of ['rejected', 'acknowledged']) {
+        test(role + ': lost ' + outcome + ' response is read before pending auto-retry', async () => {
+            const h = boardHarness(role, {fetch: async (url, init) => {
+                assert.equal(url, '/assignments/commands/receipt/');
+                const result = conflictOutcome(JSON.parse(init.body));
+                if (outcome === 'acknowledged') {
+                    result.status = 'acknowledged'; result.receipt = {ok: true, assignment_state_id: 99};
+                }
+                return jsonReply(result);
+            }});
+            const root = h.command(h.transport, 'lost-response');
+            saveRecord(h, root, r => { r.delivery.attempts = 1; });
+            await h.transport.flush();
+            assert.equal(record(h, root).delivery.state, outcome);
+            assert.equal(h.fetchCalls.length, 1);
+            await h.transport.flush();
+            assert.equal(h.fetchCalls.length, 1);
+        });
+    }
+}
+
+test('unresolved 409 and unverifiable refusal cannot block children or restore the board', async () => {
+    const invalid = [r => ({ok: true, status: 'unresolved'}), r => { delete r.evidence.command_context; return r; },
+        r => { r.evidence.command_context.author.shift_id = 'other'; return r; },
+        r => { r.evidence.command_context.author.access_id = 'other'; return r; },
+        r => { r.evidence.command_context.occurred_at = 'other'; return r; },
+        r => { r.evidence.action_type = 'dispatcher_move_excavator'; return r; },
+        r => { r.evidence.http_status = 400; return r; },
+        r => { r.receipt.client_action_id = 'other'; return r; }];
+    for (const mutate of invalid) {
+        const h = boardHarness('mining_master', {fetch: async (url, init) => jsonReply(mutate(conflictOutcome(JSON.parse(init.body))))});
+        const root = h.command(h.transport, 'unknown-root'), child = h.command(h.transport, 'unknown-child');
+        saveRecord(h, root, r => { r.delivery.state = 'held'; r.delivery.attempts = 1; });
+        await h.transport.flush();
+        await h.transport.flush();
+        assert.equal(record(h, root).delivery.state, 'held');
+        assert.equal(record(h, child).delivery.state, 'pending');
+        assert.equal(h.transport.boardRefreshToken(), null);
+        assert.equal(h.context.miningMasterBoardStale, false);
+        assert.equal(h.fetchCalls.length, 1, 'lookup cooldown; no replay or child POST');
+    }
+});
+
+test('receipt write failure never triggers refusal callback; restart recovers root even without children', async () => {
+    let deny = true;
+    const h = boardHarness('mining_master', {
+        storageFails: (key, value) => deny && key.includes(':command:') && JSON.parse(value).delivery.state === 'rejected',
+        fetch: async (url, init) => jsonReply(conflictOutcome(JSON.parse(init.body)))});
+    const root = h.command(h.transport, 'quota-conflict');
+    saveRecord(h, root, r => { r.delivery.state = 'held'; r.delivery.attempts = 1; });
+    await h.transport.flush();
+    assert.equal(record(h, root).delivery.state, 'held');
+    assert.equal(h.context.miningMasterBoardStale, false);
+    deny = false;
+    let notices = 0;
+    const restarted = h.context.createDispatcherTransport({getCommandContext: () => h.author,
+        onRejected: () => { notices++; assert.equal(record(h, root).delivery.state, 'rejected'); }});
+    await restarted.flush();
+    assert.equal(notices, 1);
+    const afterCrash = h.context.createDispatcherTransport({getCommandContext: () => h.author, onRejected: () => { notices++; }});
+    await afterCrash.flush();
+    await afterCrash.flush();
+    assert.equal(notices, 2, 'one projection recovery notification per run even if prior callback was lost');
+    assert.equal(h.fetchCalls.length, 2);
+});
+
+test('changed author during refusal lookup does not settle original or cascade dependencies', async () => {
+    let respond;
+    const h = boardHarness('mining_master', {fetch: () => new Promise(resolve => { respond = resolve; })});
+    const root = h.command(h.transport, 'switch-root'), child = h.command(h.transport, 'switch-child');
+    saveRecord(h, root, r => { r.delivery.state = 'held'; });
+    const pending = h.transport.flush();
+    await Promise.resolve(); await Promise.resolve();
+    h.author.access_id = 'other';
+    respond(jsonReply(conflictOutcome(root)));
+    await pending;
+    assert.equal(record(h, root).delivery.state, 'held');
+    assert.equal(record(h, child).delivery.state, 'pending');
+});
+
+test('direct send waits for its receipt lookup and cannot replay a proven refusal', async () => {
+    let respond;
+    const h = boardHarness('dispatcher', {fetch: () => new Promise(resolve => { respond = resolve; })});
+    const root = h.command(h.transport, 'overlap-root');
+    saveRecord(h, root, r => { r.delivery.attempts = 1; });
+    const lookup = h.transport.reconcileReceipt();
+    const send = assert.rejects(h.transport.send(root), {code: 'command_rejected'});
+    await Promise.resolve(); await Promise.resolve();
+    respond(jsonReply(conflictOutcome(root)));
+    await Promise.all([lookup, send]);
+    assert.equal(h.fetchCalls.length, 1);
+});
+
+test('desktop durable refusal schedules existing conflict projection recovery', () => {
+    const source = fs.readFileSync(path.join(BACKEND, 'static/js/dispatcher-control-v1.js'), 'utf8');
+    const delays = [];
+    const context = vm.createContext({dispatcherConflictRefreshPending: false,
+        scheduleDispatcherConflictRefresh: delay => delays.push(delay)});
+    const callback = vm.runInContext('(' + extractBraceBlock(source,
+        'onRejected: function ()', 'desktop refusal callback').replace(/^onRejected: /, '') + ')', context);
+    callback();
+    assert.equal(context.dispatcherConflictRefreshPending, true);
+    assert.deepEqual(delays, [0]);
+});
+
+test('restart blocks an unsent mass successor before considering its receipt lookup', async () => {
+    const h = boardHarness('mining_master', {fetch: async () => { throw new Error('No HTTP for proven blocked commands'); }});
+    const root = h.command(h.transport, 'durable-root');
+    const child = bulkCommand(h, 'unsent-mass', 'disband');
+    const result = conflictOutcome(root);
+    saveRecord(h, root, r => { r.delivery = {state: 'rejected', receipt: result.receipt,
+        lastError: {status: 409}, reconciliation: {source: 'server_receipt', evidence: result.evidence}}; });
+    await h.transport.flush();
+    assert.equal(record(h, child).delivery.state, 'blocked');
+    assert.equal(h.fetchCalls.length, 0);
 });

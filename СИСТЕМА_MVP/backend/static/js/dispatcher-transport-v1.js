@@ -14,6 +14,7 @@
         var onServerError = options.onServerError || function () {};
         var onStateChange = options.onStateChange || function () {};
         var onAcknowledged = options.onAcknowledged || function () {};
+        var onRejected = options.onRejected || function () {};
         var onDependenciesBlocked = options.onDependenciesBlocked || function () {};
         var fetchRequest = options.fetch || function (url, init) { return global.fetch(url, init); };
         var getCommandContext = options.getCommandContext || function () {
@@ -39,8 +40,10 @@
         var waitingForDependencies = Object.create(null);
         var lastStorageError = null;
         var receiptInFlight = null;
+        var receiptCheckingId = null;
         var receiptNextCheck = Object.create(null);
         var notifiedBlocked = Object.create(null);
+        var notifiedRejected = Object.create(null);
 
         // Старые v1/v2 не имеют достаточного контекста для автоповтора.
         // Сохраняем их без изменений: обновление не вправе уничтожать исходник.
@@ -172,15 +175,32 @@
             return Object.keys(candidates).filter(function (id) {
                 var candidate = candidates[id], delivery = candidate.delivery;
                 return !collisions[id] && (!delivery || delivery.state === "held" || delivery.state === "pending")
-                    && (!delivery || delivery.state === "held" || candidate.request.autoRetry === false || incompleteContext(candidate.request))
+                    && (!delivery || delivery.state === "held" || delivery.attempts > 0
+                        || candidate.request.autoRetry === false || incompleteContext(candidate.request))
                     && receiptOwnerPossible(candidate.request);
             }).map(function (id) { return candidates[id]; });
+        }
+        function provenConflictReceipt(request, receipt, evidence) {
+            if (!receiptSupported(request) || incompleteContext(request) || !receipt || !evidence) return false;
+            var context = evidence.command_context;
+            var action = (request.url.indexOf("/mining-master/") === 0 ? "mining_master_" : "dispatcher_")
+                + (/\/excavator\/move\/$/.test(request.url) ? "move_excavator" : "assign_truck");
+            return receipt.ok === false && receipt.code === "state_conflict" && evidence.http_status === 409
+                && receipt.client_action_id === request.data.client_action_id.trim()
+                && evidence.client_action_id === request.data.client_action_id.trim()
+                && evidence.action_type === action && context && context.version === 1
+                && context.id === request.id && context.occurred_at === request.occurredAt
+                && String(evidence.actor_id) === String(request.author.actor_id)
+                && String(evidence.shift_id) === String(request.author.shift_id)
+                && context.author && ["actor_id", "access_id", "role", "shift_id"].every(function (field) {
+                    return String(context.author[field]) === String(request.author[field]);
+                });
         }
         function reconcileReceipt() {
             if (roleIsReadonly()) return Promise.resolve();
             if (receiptInFlight) return receiptInFlight;
             var candidates;
-            try { candidates = receiptCandidates(); } catch (error) {
+            try { reconcileRejectedDependencies(); candidates = receiptCandidates(); } catch (error) {
                 lastStorageError = storageError(); return Promise.resolve();
             }
             var owner = getCommandContext() || {};
@@ -196,6 +216,7 @@
             }
             var request = copy(candidate.request), checkKey = scope + request.id;
             receiptNextCheck[checkKey] = Date.now() + 30000;
+            receiptCheckingId = request.id;
             receiptInFlight = withDeadline(function (signal) {
                 return fetchRequest("/assignments/commands/receipt/", {
                     method: "POST", credentials: "same-origin", cache: "no-store", signal: signal,
@@ -206,10 +227,12 @@
                     return response.json();
                 });
             }, DISPATCHER_SYNC_REQUEST_TIMEOUT_MS).then(function (result) {
-                if (!result || result.ok !== true || result.status !== "acknowledged"
-                    || !result.receipt || result.receipt.ok !== true || !result.evidence
+                if (!result || result.ok !== true || !result.receipt || !result.evidence
                     || result.evidence.client_action_id !== request.data.client_action_id.trim()
                     || String(result.evidence.actor_id) !== String(owner.actor_id)) return;
+                var rejected = result.status === "rejected"
+                    && provenConflictReceipt(request, result.receipt, result.evidence);
+                if (!rejected && !(result.status === "acknowledged" && result.receipt.ok === true)) return;
                 var existing = readRecord(request.id);
                 if (existing && JSON.stringify(existing.request) !== JSON.stringify(request)) return;
                 if (existing && existing.delivery.state === "acknowledged") return;
@@ -219,17 +242,24 @@
                 })) return;
                 var record = existing || {request: request, delivery: {}};
                 record.delivery = Object.assign({}, record.delivery, {
-                    state: "acknowledged", acknowledgedAt: Date.now(), receipt: result.receipt,
+                    state: rejected ? "rejected" : "acknowledged", receipt: result.receipt,
                     reconciliation: {source: "server_receipt", evidence: result.evidence}
                 });
-                // ACK пишется отдельно; legacy-массивы остаются побайтно прежними.
+                if (rejected) {
+                    record.delivery.rejectedAt = Date.now();
+                    record.delivery.lastError = {code: "state_conflict", status: 409,
+                        message: result.receipt.error || "Расстановка изменилась. Создайте новое распоряжение."};
+                } else record.delivery.acknowledgedAt = Date.now();
+                // Исход пишется отдельно; legacy-массивы остаются побайтно прежними.
                 try { saveRecord(record); } catch (error) { throw storageError(); }
                 lastStorageError = null;
-                try { onAcknowledged(record.request, result.receipt); } catch (callbackError) {}
+                if (rejected) reconcileRejectedDependencies();
+                else try { onAcknowledged(record.request, result.receipt); } catch (callbackError) {}
             }).catch(function (error) {
                 if (error.code === "storage_unavailable" || error.name === "QuotaExceededError") lastStorageError = storageError();
             }).finally(function () {
                 receiptInFlight = null;
+                receiptCheckingId = null;
                 notifyStateChange();
                 scheduleFlush(80);
             });
@@ -442,13 +472,16 @@
             }
             function provenRejection(record) {
                 var delivery = record.delivery;
-                // Только сохранённый окончательный отказ. Held, 409 и пропавший
-                // ответ не доказывают, что действие не было принято сервером.
+                // Сам HTTP 409 и отсутствие ответа не доказывают отказ.
+                var reconciliation = delivery.reconciliation;
                 return current(record.request) && delivery.state === "rejected"
                     && delivery.receipt && delivery.receipt.ok === false
-                    && delivery.lastError && delivery.lastError.status === 400;
+                    && delivery.lastError && (delivery.lastError.status === 400
+                        || reconciliation && reconciliation.source === "server_receipt"
+                            && provenConflictReceipt(record.request, delivery.receipt, reconciliation.evidence));
             }
-            var frontier = records.filter(provenRejection).map(function (record) { return record.request.id; });
+            var rejectedRoots = records.filter(provenRejection);
+            var frontier = rejectedRoots.map(function (record) { return record.request.id; });
             if (!frontier.length) return;
             var roots = Object.create(null), byClientId = Object.create(null), children = Object.create(null);
             frontier.forEach(function (id) { roots[id] = id; });
@@ -506,6 +539,12 @@
                 if (changed) mirrorQueue();
             }
             if (changed) lastStorageError = null;
+            rejectedRoots.forEach(function (record) {
+                if (record.delivery.reconciliation && !notifiedRejected[record.request.id]) {
+                    notifiedRejected[record.request.id] = true;
+                    try { onRejected(record.request, record.delivery.receipt); } catch (callbackError) {}
+                }
+            });
             if (blocked.length) {
                 blocked.forEach(function (id) { notifiedBlocked[id] = true; });
                 try { onDependenciesBlocked({commandIds: blocked}); } catch (callbackError) {}
@@ -705,6 +744,9 @@
                 return Promise.reject(error);
             }
             if (inFlight[request.id]) return inFlight[request.id];
+            if (receiptCheckingId === request.id && receiptInFlight) {
+                return receiptInFlight.then(function () { return send(request); });
+            }
             var record;
             try {
                 reconcileRejectedDependencies();
@@ -748,13 +790,14 @@
                 return payload;
             }).catch(function (error) {
                 var original = readRecord(request.id);
-                if (original && original.delivery.state !== "acknowledged") {
+                if (original && ["acknowledged", "rejected", "blocked"].indexOf(original.delivery.state) === -1) {
                     original.delivery.nextAttemptAt = Date.now() + Math.min(30000, 1200 * Math.pow(2, Math.min(original.delivery.attempts - 1, 5)));
                     original.delivery.lastError = {code: error.code || "network_error", status: error.status || 0, message: error.message || ""};
                     if (error.isTerminalResponse) {
                         original.delivery.state = "rejected";
                         original.delivery.receipt = error.responsePayload;
-                    } else if (original.request.autoRetry === false) {
+                    } else if (original.request.autoRetry === false
+                            || receiptSupported(original.request) && error.status === 409 && error.code === "state_conflict") {
                         // Старые structural-вызовы откатывают UI после ошибки. Не
                         // исполняем потом в фоне то, что интерфейс показал отменённым.
                         // Исходник сохранён для серверного согласования, не удалён.
@@ -784,7 +827,8 @@
             }
             var request = queue.find(function (item) {
                 return replayable(item)
-                    && dependencyReady(item) && !inFlight[item.id] && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
+                    && dependencyReady(item) && !inFlight[item.id] && receiptCheckingId !== item.id
+                    && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
             });
             if (!request) {
                 if (queue.some(replayable)) scheduleFlush(1200);
@@ -800,7 +844,9 @@
             });
         }
         function flush() {
-            return Promise.all([flushCommands(), reconcileReceipt()]);
+            // Сначала занять проверяемый ID: потерянный ответ можно восстановить
+            // чтением квитанции, не повторяя POST. Остальные команды идут параллельно.
+            return Promise.all([reconcileReceipt(), flushCommands()]);
         }
         function scheduleFlush(delayMs) {
             notifyStateChange();

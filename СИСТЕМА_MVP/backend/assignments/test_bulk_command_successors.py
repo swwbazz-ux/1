@@ -99,7 +99,8 @@ class BulkCommandSuccessorTests(BulkSuccessorFixture, TestCase):
                     response = self.post(child)
                     self.assertEqual(response.status_code, 409)
                     self.assertEqual(response.json()['code'], 'state_conflict')
-                    self.assertEqual(before, (list(HaulAssignment.objects.values()), list(ExcavatorPlacement.objects.values()), ShiftClientAction.objects.count()))
+                    self.assertEqual(self.receipt(child).response_payload['_command_outcome'], 'rejected')
+                    self.assertEqual(before, (list(HaulAssignment.objects.values()), list(ExcavatorPlacement.objects.values()), ShiftClientAction.objects.count() - 1))
 
 
 @skipUnless(connection.vendor == 'postgresql', 'PostgreSQL row locks required')

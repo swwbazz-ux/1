@@ -2,6 +2,7 @@ import hashlib
 import json
 
 from django.core.exceptions import ValidationError
+from django.http import JsonResponse
 
 from core.db_locks import lock_idempotency_key
 from shifts.models import ShiftClientAction
@@ -13,6 +14,19 @@ class ClientActionRequired(ValidationError):
 
 class ClientActionPayloadConflict(ValidationError):
     pass
+
+
+def is_rejected_client_action(payload):
+    return (payload.get('_command_outcome') == 'rejected'
+            and payload.get('ok') is False and payload.get('code') == 'state_conflict')
+
+
+def client_action_response(payload):
+    """Повтор отказа сохраняет HTTP 409, в том числе для прежнего клиента."""
+    status = 409 if is_rejected_client_action(payload) else 200
+    public = dict(payload)
+    public.pop('_command_outcome', None)
+    return JsonResponse(public, status=status)
 
 
 def _request_signature(payload):

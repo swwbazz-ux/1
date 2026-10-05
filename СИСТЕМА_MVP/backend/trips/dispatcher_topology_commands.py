@@ -9,6 +9,7 @@ from assignments.command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
     begin_client_action,
+    client_action_response,
     complete_client_action,
 )
 from assignments.models import ExcavatorPlacement
@@ -86,7 +87,7 @@ def execute_dispatcher_move_excavator(
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
@@ -206,7 +207,7 @@ def execute_dispatcher_assign_truck(
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
 
     if action == 'release_complex':

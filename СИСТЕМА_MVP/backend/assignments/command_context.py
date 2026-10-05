@@ -12,6 +12,8 @@ from assignments.command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
     begin_client_action,
+    client_action_response,
+    complete_client_action,
 )
 from core.models import lock_production_state
 from shifts.models import EmployeeShift, ShiftClientAction
@@ -195,13 +197,13 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
                         raise ValueError
                 except (UnicodeError, ValueError):
                     raise CommandContextError('command_context_invalid', 'Не удалось прочитать сохранённую команду.') from None
-                ident, _, repeated = begin_client_action(employee=access.employee, action_type=action_type, payload=payload)
+                ident, signature, repeated = begin_client_action(employee=access.employee, action_type=action_type, payload=payload)
                 if repeated is not None:
                     receipt = ShiftClientAction.objects.get(action_type=action_type, client_action_id=ident)
                     saved = (receipt.response_payload or {}).get('_command_context')
                     if receipt.shift_id != context['author']['shift_id'] or (saved is not None and saved != context):
                         raise CommandContextError('command_context_changed', 'Контекст принятой команды нельзя менять.')
-                    return JsonResponse(repeated)
+                    return client_action_response(repeated)
                 # Тот же порядок блокировок, что в изменении смены/расстановки:
                 # сотрудник и ключ команды, затем production, затем смена.
                 lock_production_state()
@@ -220,7 +222,22 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
                     request.assignment_deadline_origin = occurred_at
                 request.resolved_assignment_state_id = _assignment_predecessor(payload, context, action_type)
                 request.resolved_assignment_states = _mass_assignment_states(payload, context, action_type)
-                response = view(request, *args, **kwargs)
+                rejected = None
+                # Отказ становится доказательством только после отката всех
+                # изменений view, включая сигналы, события и версии расстановки.
+                with transaction.atomic():
+                    response = view(request, *args, **kwargs)
+                    if response.status_code == 409:
+                        body = json.loads(response.content)
+                        if (isinstance(body, dict) and body.get('ok') is False
+                                and body.get('code') == 'state_conflict'):
+                            rejected = body
+                            transaction.set_rollback(True)
+                if rejected is not None:
+                    complete_client_action(employee=access.employee, shift=shift,
+                        action_type=action_type, client_action_id=ident, signature=signature,
+                        response_payload={**rejected, '_command_context': context,
+                                          '_command_outcome': 'rejected'})
                 if response.status_code < 300:
                     receipt = ShiftClientAction.objects.get(action_type=action_type, client_action_id=ident)
                     if receipt.employee_id != access.employee_id or receipt.shift_id != shift.pk:
