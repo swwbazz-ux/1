@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v381'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v382'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -339,6 +339,7 @@ const CORE_ASSETS = [
     PRIVACY_POLICY_URL,
     "/static/portal/css/portal-shell-v5.css?v=7",
     "/static/js/driver-journal-storage-v1.js?v={DRIVER_SHELL_VERSION}",
+    "/static/js/driver-shift-close-plan-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-offline-outbox-v2.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-shift-archive-v1.js?v={DRIVER_SHELL_VERSION}",
     "/static/js/driver-local-shift-v1.js?v={DRIVER_SHELL_VERSION}",

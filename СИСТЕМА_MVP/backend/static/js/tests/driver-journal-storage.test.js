@@ -85,7 +85,7 @@ test('reused ID, late ACK/retry and stale fallback cannot replace a packed origi
     await assert.rejects(box.enqueue({...old, payload: {...old.payload, changed: true}}), /offline_event_id_reused/);
     await assert.rejects(data.repo.put({...old, state: 'pending'}), /driver_archive_immutable/);
     await assert.rejects(data.repo.remove(old.event_id), /driver_archive_immutable/);
-    const added = await box.enqueue({event_id: 'new-action', event_type: 'driver.assignment.accepted', payload: {assignment_id: 8}});
+    const added = await box.enqueue({event_id: 'new-action', event_type: 'driver.assignment.accepted', shift_id: 104, payload: {assignment_id: 8}});
     assert.equal(added.sequence, 4001);
     // A v380 window can write fallback after the v381 window has initialized.
     await fallback.put({...added, event_id: 'late-old-window', sequence: 4100});

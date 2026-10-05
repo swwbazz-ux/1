@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from core.db_locks import lock_idempotency_key
+from core.driver_shift_checkpoint import process_driver_shift_checkpoint
 from core.models import (
     OfflineFieldEvent,
     OfflineFieldEventConflict,
@@ -73,6 +74,7 @@ SUPPORTED_EVENT_ROLES = {
     'driver.downtime.started': 'driver',
     'driver.downtime.ended': 'driver',
     'driver.shift.closed': 'driver',
+    'driver.shift.checkpoint': 'driver',
     'driver.shift.opened': 'driver',
 }
 
@@ -3709,6 +3711,7 @@ PROCESSORS = {
     'driver.downtime.ended': lambda access, event: _process_downtime(access, event, role_code='driver', close=True),
     'excavator.shift.closed': lambda access, event: _process_shift_closed(access, event, role_code='excavator_operator'),
     'driver.shift.closed': lambda access, event: _process_driver_shift_closed_by_device(access, event),
+    'driver.shift.checkpoint': process_driver_shift_checkpoint,
     'driver.shift.opened': lambda access, event: _process_driver_shift_opened(access, event),
 }
 

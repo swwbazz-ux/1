@@ -1707,6 +1707,13 @@ window.bindDriverMobileShell = function () {
             onState: function (state) {
                 renderDriverOfflineState(state);
                 if (window.DriverShiftArchive) window.DriverShiftArchive.schedule();
+                if (window.DriverLocalShift && typeof window.DriverLocalShift.observe === "function") {
+                    var identity = driverOfflineContext();
+                    window.DriverLocalShift.observe(state && state.journalEvents, {
+                        actor_id: Number(identity.actorId), access_id: Number(identity.accessId),
+                        device_id: identity.deviceId, role_code: "driver"
+                    });
+                }
                 /* Путёвка ведёт свой журнал смены из тех же событий очереди. */
                 if (window.DriverManifestLocal && typeof window.DriverManifestLocal.observe === "function") {
                     try { window.DriverManifestLocal.observe(state && (state.journalEvents || state.events)); } catch (error) {}

@@ -259,6 +259,16 @@
     function createController(options) {
         options = options || {};
         var storage = storageFor(options);
+        var memoryProjection = {}, observedProjection = "";
+        function readProjection(accessId) { return memoryProjection[accessId] || read(storage, accessId); }
+        function saveProjection(accessId, state) {
+            try { write(storage, accessId, state); delete memoryProjection[accessId]; }
+            catch (error) {
+                // The immutable event is already committed in the outbox. This
+                // view is rebuildable after restart from the complete journal.
+                if (state) memoryProjection[accessId] = clone(state); else delete memoryProjection[accessId];
+            }
+        }
 
         function accessOf(shell) { return text(shell && shell.dataset.driverAccessId); }
         function outbox() { return options.outbox || root.driverOfflineOutbox || null; }
@@ -273,10 +283,10 @@
         function project(shell) {
             if (!shell) return null;
             var accessId = accessOf(shell);
-            var state = read(storage, accessId);
+            var state = readProjection(accessId);
             var decision = decide(state, serverView(shell));
             if (decision.drop) {
-                try { write(storage, accessId, null); } catch (error) {}
+                try { saveProjection(accessId, null); } catch (error) {}
                 state = null;
             }
             apply(shell, decision, state);
@@ -295,7 +305,7 @@
             var truckId = positive(shell.dataset.driverPreparedTruckId) || positive(shell.dataset.driverCurrentTruckId);
             if (!truckId) return Promise.reject(new Error("Самосвал не назначен — начать смену нельзя."));
             var readings = readingsFrom(form, "start_");
-            var previous = read(storage, accessId);
+            var previous = readProjection(accessId);
             var dependsOn = [];
             if (previous && previous.status === "closed" && previous.close_event_id && !previous.close_confirmed_version) {
                 dependsOn.push(String(previous.close_event_id));
@@ -315,7 +325,7 @@
                 }, readings),
                 context_snapshot: {source: "driver_local_shift"}
             }).then(function (event) {
-                write(storage, accessId, {
+                saveProjection(accessId, {
                     local_shift_id: eventId,
                     open_event_id: eventId,
                     server_shift_id: null,
@@ -329,91 +339,32 @@
             });
         }
 
-        /* Идущий простой заканчивается закрытием смены — так же считает сервер
-           (правило 8 владельца). Телефон ставит его завершение в очередь временем
-           закрытия, до самого закрытия: иначе новая местная смена наследовала
-           «простой уже идёт» и кнопки причин молчали (матрица B3a, 30.09.2026). */
-        function endActiveDowntimeBeforeClose(shell, box) {
-            var card = shell.querySelector("[data-driver-active-downtime-id]");
-            var activeId = text(card && card.dataset.driverActiveDowntimeId);
-            if (!activeId || typeof root.createDriverDowntimeEndEvent !== "function") return Promise.resolve(null);
-            var localStart = activeId.indexOf("local:") === 0 ? activeId.slice(6) : "";
-            var serverId = localStart ? null : positive(activeId);
-            var pending = typeof box.pending === "function" ? Promise.resolve(box.pending()) : Promise.resolve([]);
-            return pending.catch(function () { return []; }).then(function (events) {
-                var startPending = localStart && (Array.isArray(events) ? events : []).some(function (item) {
-                    return item && item.event_id === localStart && item.state === "pending";
-                });
-                if (localStart && !startPending && typeof box.getServerMapping === "function") {
-                    return Promise.resolve(box.getServerMapping(localStart)).catch(function () { return null; }).then(function (mapping) {
-                        return {pendingStartId: "", serverId: positive(mapping && (mapping.downtime_event_id || mapping.downtime_id))};
-                    });
-                }
-                return {pendingStartId: startPending ? localStart : "", serverId: serverId};
-            }).then(function (reference) {
-                return box.enqueue(root.createDriverDowntimeEndEvent({
-                    pendingStartId: reference.pendingStartId || null,
-                    serverId: reference.serverId,
-                    contextSnapshot: {source: "driver_local_shift_close"}
-                }));
-            }).catch(function () { return null; });
-        }
-
         function closeShift(form) {
             var shell = form && form.closest("[data-driver-shell]");
             var box = outbox();
-            if (!shell || !box) return Promise.reject(new Error("Очередь телефона недоступна. Обновите экран."));
-            var accessId = accessOf(shell);
-            var state = read(storage, accessId);
+            if (!shell || !box || typeof box.closeShift !== "function") {
+                return Promise.reject(new Error("Обновите экран перед закрытием смены."));
+            }
+            var accessId = accessOf(shell), state = readProjection(accessId);
             var localShiftId = text(shell.dataset.driverLocalShiftId);
             var serverShiftId = positive(shell.dataset.driverShiftId);
-            if (!localShiftId && !serverShiftId) {
-                return Promise.reject(new Error("Смена на телефоне не найдена. Обновите экран."));
-            }
+            if (!localShiftId && !serverShiftId) return Promise.reject(new Error("Смена на телефоне не найдена. Обновите экран."));
             var readings = readingsFrom(form, "end_");
-            var eventId = randomId("driver-shift-close");
-            /* Закрытие уходит на сервер только после всех неотправленных событий
-               своей смены. Без этого очередь, копившаяся без связи, отправляла
-               закрытие раньше простоев и выбора ковша той же смены (у старых
-               записей бэкофф длиннее), и выбор ковша попадал в уже закрытую
-               смену — отказ driver_shift_closed (стенд, 30.09.2026). */
-            var shiftKeys = [];
-            if (serverShiftId) shiftKeys.push(String(serverShiftId));
-            if (localShiftId) shiftKeys.push(localShiftId);
-            if (state && state.local_shift_id) shiftKeys.push(text(state.local_shift_id));
-            if (state && state.server_shift_id) shiftKeys.push(String(state.server_shift_id));
-            var pendingList = endActiveDowntimeBeforeClose(shell, box).then(function () {
-                return typeof box.pending === "function" ? box.pending() : [];
-            });
-            return Promise.resolve(pendingList).catch(function () { return []; }).then(function (events) {
-                var dependsOn = (Array.isArray(events) ? events : []).filter(function (item) {
-                    return item
-                        && item.state === "pending"
-                        && item.event_type !== "driver.shift.closed"
-                        && shiftKeys.indexOf(text(item.shift_id || item.local_shift_id)) >= 0;
-                }).map(function (item) { return String(item.event_id); });
-                return box.enqueue({
-                    event_id: eventId,
-                    event_type: "driver.shift.closed",
-                    shift_id: serverShiftId,
-                    local_shift_id: serverShiftId ? null : localShiftId,
-                    depends_on: dependsOn,
-                    payload: Object.assign({confirmation_token: ""}, readings),
-                    context_snapshot: {source: "driver_local_shift"}
-                });
-            }).then(function (event) {
+            var card = shell.querySelector("[data-driver-active-downtime-id]");
+            return box.closeShift({
+                event_id: randomId("driver-shift-close"), event_type: "driver.shift.closed",
+                shift_id: serverShiftId, local_shift_id: serverShiftId ? null : localShiftId,
+                payload: Object.assign({confirmation_token: ""}, readings),
+                context_snapshot: {source: "driver_local_shift"}
+            }, {activeDowntimeId: text(card && card.dataset.driverActiveDowntimeId), shiftState: state || {}}).then(function (event) {
                 var base = state && state.status === "open" ? state : {};
-                write(storage, accessId, {
+                saveProjection(accessId, {
                     local_shift_id: text(base.local_shift_id) || (serverShiftId ? "server-shift:" + serverShiftId : localShiftId),
-                    open_event_id: text(base.open_event_id),
-                    server_shift_id: serverShiftId || base.server_shift_id || null,
+                    open_event_id: text(base.open_event_id), server_shift_id: serverShiftId || base.server_shift_id || null,
                     equipment_id: base.equipment_id || positive(shell.dataset.driverCurrentTruckId),
-                    opened_at: base.opened_at || "",
-                    readings: base.readings || {},
+                    opened_at: base.opened_at || "", readings: base.readings || {},
                     open_confirmed_version: base.open_confirmed_version || null,
-                    status: "closed",
-                    close_event_id: eventId,
-                    closed_at: event.occurred_at,
+                    status: "closed", close_event_id: event.event_id, closed_at: event.occurred_at,
                     end_readings: readings
                 });
                 project(root.document.querySelector("[data-driver-shell]") || shell);
@@ -421,11 +372,27 @@
             });
         }
 
+        function observe(events, identity) {
+            var planner = root.DriverShiftClosePlan;
+            if (!planner || !identity) return false;
+            var state = planner.restored(events || [], identity);
+            if (!state) return false;
+            var shell = root.document && root.document.querySelector("[data-driver-shell]");
+            if (!shell || Number(shell.dataset.driverAccessId) !== Number(identity.access_id)) return false;
+            if (decide(state, serverView(shell)).drop) return false;
+            var token = JSON.stringify(state);
+            if (token === observedProjection) return false;
+            observedProjection = token;
+            saveProjection(accessOf(shell), state);
+            project(shell);
+            return true;
+        }
+
         function onConfirmed(event, result) {
             if (!event || !/^driver\.shift\.(opened|closed)$/.test(String(event.event_type || ""))) return false;
             var shell = root.document && root.document.querySelector("[data-driver-shell]");
             var accessId = shell ? accessOf(shell) : text(event.access_id);
-            var state = read(storage, accessId);
+            var state = readProjection(accessId);
             if (!state) return false;
             var version = Number(result && (result.version || result.server_version) || 0) || 1;
             var serverIds = result && result.server_ids || {};
@@ -441,7 +408,7 @@
                 changed = true;
             }
             if (!changed) return false;
-            try { write(storage, accessId, state); } catch (error) { return false; }
+            try { saveProjection(accessId, state); } catch (error) { return false; }
             if (shell) project(shell);
             return true;
         }
@@ -451,7 +418,8 @@
             open: openShift,
             close: closeShift,
             onConfirmed: onConfirmed,
-            state: function (shell) { return clone(read(storage, accessOf(shell))); }
+            observe: observe,
+            state: function (shell) { return clone(readProjection(accessOf(shell))); }
         };
     }
 

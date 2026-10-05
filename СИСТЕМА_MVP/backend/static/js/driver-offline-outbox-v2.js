@@ -19,6 +19,7 @@
         "driver.downtime.started",
         "driver.downtime.ended",
         "driver.shift.closed",
+        "driver.shift.checkpoint",
         "driver.shift.opened"
     ]);
     var IMMUTABLE_FIELDS = [
@@ -545,33 +546,60 @@
             if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("offline_meta_store_corrupt");
             return value;
         }
+        function locked(operation) {
+            var locks = root.navigator && root.navigator.locks;
+            if (!locks || typeof locks.request !== "function" || !root.AbortController) return Promise.resolve().then(operation);
+            var abort = new root.AbortController(), expired = false;
+            var timer = setTimeout(function () { expired = true; abort.abort(); }, 2500);
+            return locks.request("driver-journal:" + key, {mode: "exclusive", signal: abort.signal}, function () {
+                if (expired) throw new Error("driver_storage_busy");
+                return operation();
+            }).finally(function () { clearTimeout(timer); });
+        }
         return {
             kind: "localStorage",
+            append: function (prepare, metaKeys) {
+                return locked(function () {
+                    var items = read(), metadata = readMeta(), values = {};
+                    metaKeys.forEach(function (name) { values[name] = metadata[name]; });
+                    var plan = prepare(clone(items), values), ids = new Set(items.map(function (event) { return event.event_id; }));
+                    plan.events.forEach(function (event) {
+                        if (ids.has(event.event_id) || metadata["event-identity:" + event.event_id]) throw new Error("offline_event_id_reused");
+                        ids.add(event.event_id);
+                    });
+                    // Reserve sequence before the one atomic array write. A failed
+                    // write may leave a harmless gap, never half a close batch.
+                    Object.assign(metadata, plan.meta || {});
+                    storage.setItem(metaKey, JSON.stringify(metadata));
+                    if (plan.events.length) storage.setItem(key, JSON.stringify(items.concat(plan.events)));
+                    return clone(plan.value);
+                });
+            },
             list: async function () { return clone(read()); },
             get: async function (eventId) {
                 var value = read().find(function (item) { return item.event_id === eventId; });
                 return value ? clone(value) : null;
             },
-            put: async function (event) {
+            put: function (event) { return locked(function () {
                 var items = read();
                 var index = items.findIndex(function (item) { return item.event_id === event.event_id; });
                 if (index >= 0) items[index] = clone(event); else items.push(clone(event));
                 storage.setItem(key, JSON.stringify(items));
                 return clone(event);
-            },
-            remove: async function (eventId) {
+            }); },
+            remove: function (eventId) { return locked(function () {
                 storage.setItem(key, JSON.stringify(read().filter(function (item) { return item.event_id !== eventId; })));
-            },
+            }); },
             getMeta: async function (name) {
                 return readMeta()[name];
             },
-            setMeta: async function (name, value) {
+            setMeta: function (name, value) { return locked(function () {
                 var meta = readMeta();
                 meta[name] = value;
                 storage.setItem(metaKey, JSON.stringify(meta));
-            },
+            }); },
             exportMeta: async function () { return clone(readMeta()); },
-            clearEvents: async function (imported) {
+            clearEvents: function (imported) { return locked(function () {
                 // Перенос в IndexedDB асинхронный: за это время старый runtime
                 // мог дописать событие или ACK. Удаляем только точные копии
                 // успешно перенесённого снимка, оставляя новые записи на месте.
@@ -580,7 +608,7 @@
                         return JSON.stringify(canonical(source)) === JSON.stringify(canonical(event));
                     });
                 })));
-            }
+            }); }
         };
     }
 
@@ -604,7 +632,7 @@
                             // new raw facts in fallback even after this page starts.
                             if (imported) {
                                 try { if (!(await localRepository(options.localStorage, options.accessId).list()).length) return; }
-                                catch (error) { primary.migrationError = String(error && error.message || error); return; }
+                                catch (error) { imported = false; primary.migrationError = String(error && error.message || error); return; }
                             }
                             await primary.getMeta("probe");
                             await importLocalRepository(primary, options);
@@ -867,13 +895,8 @@
             }
             return items;
         }
-        async function enqueueOne(spec) {
-            var repo = await repoPromise;
-            var ctx = context();
+        function prepareEvent(spec, ctx, deviceId, grouped) {
             var occurredAt = String(spec.occurred_at || nowIso());
-            var deviceId = String(spec.device_id || ctx.deviceId || await repo.getMeta("device_id") || "");
-            if (!deviceId) deviceId = randomId("install");
-            await repo.setMeta("device_id", deviceId);
             var requestedId = String(spec.event_id || randomId("driver"));
             var actorId = number(spec.actor_id || ctx.actorId);
             var eventAccessId = number(spec.access_id || ctx.accessId || accessId);
@@ -889,7 +912,7 @@
             var dependsOn = Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [];
             /* Действие в смене, которую сервер ещё не видел, ждёт её открытия:
                пакет повезёт открытие первым, сервер привяжет действие к смене. */
-            if (localShiftId && !shiftId && eventType !== "driver.shift.opened" && dependsOn.indexOf(localShiftId) < 0) {
+            if (!grouped && localShiftId && !shiftId && eventType !== "driver.shift.opened" && dependsOn.indexOf(localShiftId) < 0) {
                 dependsOn.push(localShiftId);
             }
             /* Сервер читает местный ID смены только из payload самого события:
@@ -931,25 +954,61 @@
             };
             validateEvent(event);
             if (String(event.access_id) !== accessId) throw new Error("offline_event_access_mismatch");
-            var existing = typeof repo.get === "function"
-                ? await repo.get(requestedId)
-                : (await repo.list()).find(function (item) { return item.event_id === requestedId; });
-            if (existing) {
-                if (!sameIdentity(existing, event)) throw new Error("offline_event_id_reused");
-                return clone(existing);
-            }
-            var acknowledgedIdentity = await repo.getMeta("event-identity:" + requestedId);
-            if (acknowledgedIdentity) {
-                if (!sameIdentity(acknowledgedIdentity, event)) throw new Error("offline_event_id_reused");
-                return Object.assign(clone(acknowledgedIdentity), {state: "confirmed"});
-            }
-            event.sequence = await sequence(repo, actorId, deviceId);
-            await repo.put(event); // UI may change only after this resolves.
-            await publish();
-            return clone(event);
+            return event;
         }
-        function enqueue(spec) {
-            var operation = enqueueChain.then(function () { return enqueueOne(spec); });
+        async function enqueueOne(spec, capturedContext, closeOptions) {
+            var repo = await repoPromise;
+            var ctx = capturedContext;
+            var deviceId = String(spec.device_id || ctx.deviceId || await repo.getMeta("device_id") || randomId("install"));
+            var event = prepareEvent(spec, ctx, deviceId, !!closeOptions);
+            var stableKey = "sequence:driver:" + event.actor_id + ":" + deviceId;
+            var legacyKey = "sequence:" + accessId;
+            var identityKey = "event-identity:" + event.event_id;
+            var fallbackKey = "driver-offline-sequence:" + stableKey, fallbackValue = 0;
+            try { if (options.localStorage) fallbackValue = Number(options.localStorage.getItem(fallbackKey)) || 0; } catch (error) {}
+            if (typeof repo.append !== "function") throw new Error("driver_journal_atomic_write_required");
+            // Pull late raw facts from an older window before preparing closure.
+            if (closeOptions) {
+                await repo.list();
+                if (repo.migrationError) throw new Error("Не удалось прочитать весь журнал смены. Повторите закрытие.");
+            }
+            var saved = await repo.append(function (events, metadata) {
+                var existing = events.find(function (item) { return item.event_id === event.event_id; });
+                var known = metadata[identityKey];
+                if (existing || known) {
+                    if (!sameIdentity(existing || known, event)) throw new Error("offline_event_id_reused");
+                    return {events: [], meta: {}, value: existing || Object.assign(clone(known), {state: "confirmed"})};
+                }
+                var planner = root.DriverShiftClosePlan;
+                if (!planner && typeof require === "function") planner = require("./driver-shift-close-plan-v1.js");
+                var specs;
+                if (closeOptions) specs = planner.build(events, event, closeOptions);
+                else {
+                    if (planner) planner.assertOpen(events, event);
+                    specs = [event];
+                }
+                if (specs.existing) return {events: [], meta: {}, value: specs.existing};
+                var current = Math.max(Number(metadata[stableKey]) || 0, Number(metadata[legacyKey]) || 0, fallbackValue);
+                events.forEach(function (item) {
+                    if (item.actor_id === event.actor_id && item.role_code === "driver" && item.device_id === deviceId) current = Math.max(current, Number(item.sequence) || 0);
+                });
+                var prepared = specs.map(function (item) {
+                    var next = closeOptions ? prepareEvent(item, ctx, deviceId, true) : clone(item);
+                    next.sequence = ++current;
+                    validateEvent(next);
+                    if (next.depends_on.length > 32) throw new Error("offline_dependencies_overflow");
+                    return next;
+                });
+                var meta = {device_id: deviceId}; meta[stableKey] = current; meta[legacyKey] = current;
+                return {events: prepared, meta: meta, value: prepared[prepared.length - 1]};
+            }, ["device_id", stableKey, legacyKey, identityKey]);
+            try { if (options.localStorage) options.localStorage.setItem(fallbackKey, String(Math.max(fallbackValue, Number(saved.sequence) || 0))); } catch (error) {}
+            await publish();
+            return clone(saved);
+        }
+        function enqueue(spec, closeOptions) {
+            var frozen = clone(spec), captured = clone(context());
+            var operation = enqueueChain.then(function () { return enqueueOne(frozen, captured, closeOptions); });
             enqueueChain = operation.catch(function () {});
             return operation.then(function (event) {
                 drainRequested = true;
@@ -1374,7 +1433,8 @@
         }
         return {
             initialize: initialize,
-            enqueue: enqueue,
+            enqueue: function (spec) { return enqueue(spec); },
+            closeShift: function (spec, closeOptions) { return enqueue(spec, clone(closeOptions || {})); },
             flush: flush,
             retryNow: retryNow,
             pending: listAll,

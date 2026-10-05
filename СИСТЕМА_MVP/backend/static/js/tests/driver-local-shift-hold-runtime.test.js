@@ -172,6 +172,7 @@ function setup(options = {}) {
         },
         driverOfflineOutbox: {
             pending() { return Promise.resolve([]); },
+            closeShift(spec) { return this.enqueue(spec); },
             enqueue(spec) {
                 queued.push(spec);
                 return Promise.resolve(Object.assign({occurred_at: "2026-09-30T08:00:00.000Z"}, spec));

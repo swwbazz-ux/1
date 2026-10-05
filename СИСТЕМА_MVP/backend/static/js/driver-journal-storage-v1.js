@@ -190,6 +190,51 @@
         }
         var repo = {
             kind: "indexedDB",
+            append: function (prepare, metaKeys) {
+                return bounded(async function (allowed) {
+                    for (var attempt = 0; attempt < 3; attempt++) {
+                        var snapshot = await readSnapshot(), originals = await expand(snapshot);
+                        if (!allowed()) fail("driver_storage_deadline");
+                        var result = await transaction([EVENTS, META], "readwrite", function (tx, done, guard) {
+                            var store = tx.objectStore(EVENTS), metadata = tx.objectStore(META), current, values = {};
+                            var remaining = metaKeys.length + 1;
+                            function ready() {
+                                if (--remaining) return;
+                                if (json(current) !== json(snapshot.events)) { done({retry: true}); return; }
+                                var plan = prepare(copy(originals), copy(values));
+                                if (!plan || !Array.isArray(plan.events)) fail("driver_journal_plan_invalid");
+                                var ids = new Set(current.map(function (event) { return event.event_id; }));
+                                plan.events.forEach(function (event) {
+                                    if (!event.event_id || ids.has(event.event_id)) fail("offline_event_id_reused");
+                                    ids.add(event.event_id);
+                                });
+                                function commit() {
+                                    plan.events.forEach(function (event) { store.put(copy(event)); });
+                                    Object.keys(plan.meta || {}).forEach(function (key) { metadata.put(copy(plan.meta[key]), key); });
+                                    done({value: copy(plan.value)});
+                                }
+                                var pending = plan.events.length;
+                                if (!pending) { commit(); return; }
+                                plan.events.forEach(function (event) {
+                                    var tombstone = metadata.get("event-identity:" + event.event_id);
+                                    tombstone.onsuccess = guard(function () {
+                                        if (tombstone.result !== undefined) fail("offline_event_id_reused");
+                                        if (!--pending) commit();
+                                    });
+                                });
+                            }
+                            var read = store.getAll();
+                            read.onsuccess = guard(function () { current = read.result; ready(); });
+                            metaKeys.forEach(function (key) {
+                                var request = metadata.get(key);
+                                request.onsuccess = guard(function () { values[key] = request.result; ready(); });
+                            });
+                        }, allowed);
+                        if (!result.retry) return result.value;
+                    }
+                    fail("driver_storage_busy");
+                });
+            },
             list: function () { return bounded(async function () { return expand(await readSnapshot()); }); },
             get: function (id) {
                 return bounded(async function () {
