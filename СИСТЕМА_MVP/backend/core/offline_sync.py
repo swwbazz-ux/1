@@ -52,6 +52,7 @@ def _log_discrepancy(*, access, code, process, description):
 
 SUPPORTED_EVENT_ROLES = {
     'excavator.shift.opened': 'excavator_operator',
+    'excavator.work_context.changed': 'excavator_operator',
     'excavator.free_bucket.accepted': 'excavator_operator',
     'excavator.free_bucket.cancelled': 'excavator_operator',
     'excavator.free_bucket.loaded': 'excavator_operator',
@@ -1265,6 +1266,89 @@ def _process_excavator_shift_opened(access, normalized):
         'effective_occurred_at': normalized['occurred_at'].isoformat(),
         'time_source': 'server_receipt' if normalized.get('clock_adjusted') else 'device',
     }, {'shift': shift, 'equipment': shift.equipment}
+
+
+
+def _process_excavator_work_context_changed(access, normalized):
+    from assignments.models import ExcavatorPlacement
+    from references.models import Equipment
+    from shifts.models import EmployeeShift
+    from trips.forms import TripCreateForm
+    from trips.views import (
+        normalize_excavator_numeric_setting,
+        parse_excavator_operator_destinations,
+        restrict_excavator_trip_form,
+        save_excavator_work_context,
+    )
+
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
+    lock_production_state()
+    equipment = Equipment.objects.select_for_update().get(pk=shift.equipment_id)
+    placement = ExcavatorPlacement.objects.select_for_update().filter(excavator=equipment).first()
+    payload = normalized['payload']
+    form = restrict_excavator_trip_form(
+        TripCreateForm(excavator_operator=access.employee), equipment, shift,
+    )
+    rock_id = _positive_int(payload.get('rock_type_id'), field='rock_type_id')
+    rock = form.fields['rock_type'].queryset.filter(pk=rock_id).first()
+    if not rock:
+        _conflict('rock_reference_unavailable', 'Порода или её расчётные параметры недоступны.')
+    raw_ids = payload.get('dump_point_ids')
+    if not isinstance(raw_ids, list) or not raw_ids:
+        _invalid('dump_points_required', 'Выберите хотя бы одну точку разгрузки.')
+    dump_ids = list(dict.fromkeys(_positive_int(value, field='dump_point_id') for value in raw_ids))
+    destinations = parse_excavator_operator_destinations(
+        {'dump_point_ids': dump_ids}, form.fields['dump_point'].queryset, placement,
+    )
+    if {row['dump_point'].id for row in destinations} != set(dump_ids):
+        _conflict('dump_reference_unavailable', 'Одна из выбранных точек разгрузки недоступна.')
+    horizon = normalize_excavator_numeric_setting(payload.get('loading_horizon'))
+    block = normalize_excavator_numeric_setting(payload.get('loading_block'))
+    occurred_at = normalized['occurred_at']
+
+    # The immutable receipt retains every valid setting, including historical
+    # ones. Only a proven current setting may replace the live placement.
+    newer_shift = EmployeeShift.objects.filter(equipment=equipment, opened_at__gt=occurred_at).exists()
+    previous_at = (placement.work_context_updated_at or placement.changed_at) if placement else None
+    superseded = newer_shift or bool(previous_at and previous_at > occurred_at)
+    if previous_at == occurred_at:
+        previous = OfflineFieldEvent.objects.filter(
+            equipment=equipment, event_type='excavator.work_context.changed',
+            status=OfflineFieldEventStatus.ACCEPTED, occurred_at=occurred_at,
+        ).order_by('-sequence', '-id').first()
+        # Equal timestamps have an order only inside the same original stream.
+        superseded = superseded or not (
+            previous and previous.actor_id == access.employee_id
+            and previous.access_id == access.id and previous.device_id == normalized['device_id']
+            and previous.sequence < normalized['sequence']
+        )
+
+    version = None
+    if not superseded:
+        save_excavator_work_context(
+            current_excavator=equipment, actor=access.employee, rock_type=rock,
+            dump_points=[row['dump_point'] for row in destinations],
+            loading_horizon=horizon, loading_block=block,
+            destination_settings=destinations, occurred_at=occurred_at,
+        )
+        version = bump_operational_state(
+            'OfflineExcavatorWorkContext:update',
+            event_type='equipment_changed', object_type='Equipment', object_id=equipment.pk,
+            payload={'action': 'excavator_work_settings', 'excavator_id': equipment.pk,
+                     'source_event_id': normalized['event_id']},
+        ).version
+    # R-19: applying face coordinates is never a downtime/movement action.
+    return {
+        'server_ids': {'shift_id': shift.pk, 'equipment_id': equipment.pk, 'rock_type_id': rock.pk},
+        'version': version,
+        'rock_type_id': rock.pk,
+        'dump_point_ids': dump_ids,
+        'loading_horizon': horizon,
+        'loading_block': block,
+        'projection_applied': not superseded,
+        'projection_reason': 'newer_context_preserved' if superseded else 'current_context_applied',
+        'effective_occurred_at': occurred_at.isoformat(),
+    }, {'shift': shift, 'equipment': equipment}
 
 
 def _resolve_trip_reference(access, normalized):
@@ -3591,6 +3675,7 @@ def _process_driver_shift_closed_by_device(access, normalized):
 
 PROCESSORS = {
     'excavator.shift.opened': _process_excavator_shift_opened,
+    'excavator.work_context.changed': _process_excavator_work_context_changed,
     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,
     'excavator.free_bucket.loaded': _process_free_bucket_loaded,

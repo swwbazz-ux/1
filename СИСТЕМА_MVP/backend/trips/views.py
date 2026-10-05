@@ -4036,6 +4036,7 @@ def save_excavator_work_context(
     loading_block,
     transport_distance_km=_EXCAVATOR_DISTANCE_UNSET,
     destination_settings=_EXCAVATOR_DESTINATIONS_UNSET,
+    occurred_at=None,
 ):
     if not current_excavator:
         return None
@@ -4058,7 +4059,7 @@ def save_excavator_work_context(
     placement.work_rock_type = rock_type
     placement.loading_horizon = loading_horizon
     placement.loading_block = loading_block
-    placement.work_context_updated_at = timezone.now()
+    placement.work_context_updated_at = occurred_at or timezone.now()
     placement.changed_by = actor
     update_fields = [
         'work_rock_type',
