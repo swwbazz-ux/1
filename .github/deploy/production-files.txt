@@ -1,5 +1,7 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/core/excavator_shift_archive.py
+СИСТЕМА_MVP/backend/core/urls.py
 СИСТЕМА_MVP/backend/downtimes/driver_workflow.py
 СИСТЕМА_MVP/backend/core/dump_point_names.py
 СИСТЕМА_MVP/backend/core/equipment_numbers.py
@@ -70,6 +72,7 @@
 СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-autonomous-shift-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-shift-archive-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-native-push-v1.js

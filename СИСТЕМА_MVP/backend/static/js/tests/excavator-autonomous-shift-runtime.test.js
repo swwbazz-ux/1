@@ -203,10 +203,10 @@ test('local projection enables prepared cards only after opening and does not re
     assert.equal(ui.button.dataset.eoShiftAction, 'open');
 });
 
-test('both new modules are packaged in the prepared service worker shell', () => {
+test('local shift modules are packaged in the prepared service worker shell', () => {
     const views = fs.readFileSync(require.resolve('../../../trips/views.py'), 'utf8');
-    for (const script of ['excavator-local-shift-v1.js', 'excavator-autonomous-shift-v1.js']) {
-        assert.ok(views.includes('/static/js/' + script + '?v=excavator-mobile-shell-v274'));
+    for (const script of ['excavator-local-shift-v1.js', 'excavator-autonomous-shift-v1.js', 'excavator-shift-archive-v1.js']) {
+        assert.ok(views.includes('/static/js/' + script + '?v=excavator-mobile-shell-v275'));
         assert.ok(template.includes("js/" + script));
     }
 });

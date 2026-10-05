@@ -730,6 +730,92 @@
             });
         }
 
+        function confirmArchive(proof) {
+            var saved = clone(proof);
+            return mutate(function () {
+                function invalid() { throw new Error("Полное покрытие смены сервером не подтверждено."); }
+                function volumeHundredths(value) {
+                    if (typeof value !== "string" || !/^\d+(\.\d{1,2})?$/.test(value)) invalid();
+                    var parts = value.split(".");
+                    var amount = Number(parts[0]) * 100 + Number((parts[1] || "").padEnd(2, "0"));
+                    if (!Number.isSafeInteger(amount)) invalid();
+                    return amount;
+                }
+                var shift = saved && saved.shift && findShift(state, saved.shift.local_shift_id);
+                if (!saved || saved.schema_version !== 1 || !validIdentity(saved)
+                    || !/^[a-f0-9]{64}$/.test(saved.snapshot_id || "")
+                    || !Number.isFinite(Date.parse(saved.generated_at || ""))
+                    || !shift || shift.status !== "closed" || !shift.open_event_id
+                    || saved.shift.open_event_id !== shift.open_event_id
+                    || saved.shift.close_event_id !== shift.close_event_id
+                    || Number(saved.shift.equipment_id) !== Number(shift.equipment_id)
+                    || !Number.isSafeInteger(saved.shift.server_shift_id) || saved.shift.server_shift_id <= 0
+                    || (shift.server_shift_id && saved.shift.server_shift_id !== shift.server_shift_id)
+                    || !Number.isFinite(Date.parse(saved.shift.closed_at || ""))
+                    || !Number.isFinite(Date.parse(saved.shift.opened_at || ""))
+                    || (shift.archive_coverage && Date.parse(saved.generated_at) < Date.parse(shift.archive_coverage.generated_at))
+                    || !Array.isArray(saved.entries) || saved.entries.length !== shift.events.length
+                    || saved.event_count !== shift.events.length) invalid();
+                var byId = new Map();
+                var facts = [];
+                saved.entries.forEach(function (item) {
+                    if (!item || !item.event || byId.has(item.event.event_id) || item.status !== "accepted"
+                        || !/^[a-f0-9]{64}$/.test(item.fingerprint || "")
+                        || !Number.isSafeInteger(item.receipt_id) || item.receipt_id <= 0
+                        || !item.result || !item.result.server_ids
+                        || item.result.server_ids.event_receipt_id !== item.receipt_id) invalid();
+                    byId.set(item.event.event_id, item);
+                });
+                shift.events.forEach(function (entry) {
+                    var item = byId.get(entry.event.event_id);
+                    if (!item) invalid();
+                    var local = clone(entry.event), remote = clone(item.event);
+                    // The transport adds only this delivery-time hint. Every
+                    // original business/context field must still match exactly.
+                    delete local.sent_live;
+                    delete remote.sent_live;
+                    if (!sameEvent(local, remote)) invalid();
+                    if ((item.result.server_ids.shift_id && item.result.server_ids.shift_id !== saved.shift.server_shift_id)
+                        || ((local.event_type === "excavator.shift.opened" || local.event_type === "excavator.shift.closed")
+                            && item.result.server_ids.shift_id !== saved.shift.server_shift_id)) invalid();
+                    if (LOAD_TYPES.indexOf(local.event_type) >= 0) {
+                        var fact = item.load_fact;
+                        if (!fact || fact.event_id !== local.event_id || !Number.isSafeInteger(fact.trip_id)
+                            || fact.trip_id <= 0 || item.result.server_ids.trip_id !== fact.trip_id
+                            || typeof fact.cancelled !== "boolean" || !Number.isFinite(Date.parse(fact.occurred_at || ""))
+                            || ["belaz", "nhl", "unknown"].indexOf(fact.fleet_code) < 0
+                            || typeof fact.dump_point !== "string"
+                            || !(fact.dump_point_id === null || (Number.isSafeInteger(fact.dump_point_id) && fact.dump_point_id > 0))) invalid();
+                        if (fact.volume_m3 !== null) volumeHundredths(fact.volume_m3);
+                        facts.push(clone(fact));
+                    } else if (item.load_fact != null) invalid();
+                });
+                var projection = saved.projection;
+                var trips = new Map(facts.map(function (fact) { return [fact.trip_id, fact]; }));
+                var active = Array.from(trips.values()).filter(function (fact) { return !fact.cancelled; });
+                if (!projection || !Array.isArray(projection.source_event_ids) || !Array.isArray(projection.source_trip_ids)
+                    || !sameEvent(projection.source_event_ids.slice().sort(), facts.map(function (fact) { return fact.event_id; }).sort())
+                    || !sameEvent(projection.source_trip_ids.slice().sort(), Array.from(trips.keys()).sort())
+                    || projection.trip_count !== active.length || projection.cancelled_trip_count !== trips.size - active.length
+                    || volumeHundredths(projection.volume_m3) !== active.reduce(function (total, fact) {
+                        return total + (fact.volume_m3 === null ? 0 : volumeHundredths(fact.volume_m3));
+                    }, 0)
+                    || projection.unknown_volume_trip_count !== active.filter(function (fact) { return fact.volume_m3 === null; }).length) invalid();
+                // The snapshot also repairs a lost ACK. Originals are retained;
+                // acknowledging delivery alone never creates this coverage proof.
+                shift.events.forEach(function (entry) { applyConfirmation(entry.event, byId.get(entry.event.event_id).result); });
+                shift.archive_coverage = {
+                    schema_version: 1, snapshot_id: saved.snapshot_id, generated_at: saved.generated_at,
+                    identity: clone(saved.identity), shift: clone(saved.shift), event_count: saved.event_count,
+                    projection: clone(projection), load_facts: facts,
+                    manifest: saved.entries.map(function (item) {
+                        return {event_id: item.event.event_id, receipt_id: item.receipt_id, fingerprint: item.fingerprint};
+                    })
+                };
+                return persist().then(function () { return clone(shift.archive_coverage); });
+            });
+        }
+
         function snapshot() {
             return ready().then(function () { return clone(committedState); });
         }
@@ -833,6 +919,7 @@
             recordPrepared: recordPrepared,
             recordPreparedBatch: recordPreparedBatch,
             confirm: confirm,
+            confirmArchive: confirmArchive,
             snapshot: snapshot,
             nextSequence: nextSequence,
             events: events,
