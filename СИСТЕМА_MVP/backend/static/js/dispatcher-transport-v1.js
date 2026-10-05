@@ -35,6 +35,7 @@
         var realtimeLastSuccessAt = 0;
         var realtimeLastReason = "";
         var inFlight = Object.create(null);
+        var waitingForDependencies = Object.create(null);
         var lastStorageError = null;
         var receiptInFlight = null;
         var receiptNextCheck = Object.create(null);
@@ -243,6 +244,7 @@
                 }, 0),
                 isFlushing: syncQueueFlushing,
                 pendingCount: syncPendingCount,
+                waitingDependencyCount: Object.keys(waitingForDependencies).length,
                 heldForAuthorCount: queue.filter(function (request) { return !owns(request); }).length,
                 storageError: lastStorageError ? lastStorageError.code : ""
             };
@@ -262,16 +264,75 @@
                     return String((left.author || {})[key] || "") === String((right.author || {})[key] || "");
                 });
         }
-        function assignmentRecords(request) {
+        function journalRecords() {
             var records = [];
             for (var index = 0; index < global.localStorage.length; index += 1) {
                 var key = global.localStorage.key(index);
                 if (!key || key.indexOf(DISPATCHER_COMMAND_PREFIX) !== 0) continue;
                 var record = JSON.parse(global.localStorage.getItem(key));
                 if (!record || !record.request || !record.delivery) throw storageError();
-                if (record.request.id !== request.id && sameAssignmentScope(request, record.request)) records.push(record);
+                records.push(record);
             }
             return records;
+        }
+        function assignmentRecords(request) {
+            return journalRecords().filter(function (record) {
+                return record.request.id !== request.id && sameAssignmentScope(request, record.request);
+            });
+        }
+        function massCommand(request) {
+            return receiptSupported(request) && (
+                /\/excavator\/move\/$/.test(request.url) && request.data.zone === "inactive"
+                || /\/truck\/assign\/$/.test(request.url) && request.data.action === "release_complex");
+        }
+        function assignmentProbe(request, truckId) {
+            return Object.assign({}, request, {
+                url: request.url.replace(/excavator\/move\/$/, "truck/assign/"),
+                data: {action: "assign", truck_id: truckId, client_action_id: request.data.client_action_id}
+            });
+        }
+        function linkMassAssignments(request) {
+            if (!massCommand(request) || incompleteContext(request)) return;
+            var states = request.data.expected_assignment_states;
+            if (!states || typeof states !== "object" || Array.isArray(states)) return;
+            var truckIds = [];
+            journalRecords().forEach(function (record) {
+                if (!assignmentCommand(record.request) || record.delivery.state !== "pending"
+                        || record.request.autoRetry === false) return;
+                var truckId = String(record.request.data.truck_id);
+                if (sameAssignmentScope(assignmentProbe(request, truckId), record.request)
+                        && truckIds.indexOf(truckId) === -1) truckIds.push(truckId);
+            });
+            var dependencies = (request.data.assignment_dependencies || []).slice();
+            truckIds.forEach(function (truckId) {
+                var probe = assignmentProbe(request, truckId);
+                probe.data.expected_assignment_state_id = "0";
+                linkAssignment(probe);
+                var ident = predecessorId(probe);
+                if (!ident) return;
+                if (!dependencies.some(function (item) {
+                    return String(item.truck_id) === truckId && item.client_action_id === ident;
+                })) dependencies.push({truck_id: truckId, client_action_id: ident});
+                if (Object.prototype.hasOwnProperty.call(states, truckId) && /^\d+$/.test(String(states[truckId]))) {
+                    states[truckId] = "command:" + ident;
+                }
+            });
+            if (dependencies.length > 256) throw storageError();
+            if (dependencies.length) request.data.assignment_dependencies = dependencies;
+        }
+        function dependencyRefs(request) {
+            if (assignmentCommand(request) && predecessorId(request)) {
+                return [{truck_id: request.data.truck_id, client_action_id: predecessorId(request)}];
+            }
+            if (!massCommand(request)) return [];
+            var refs = (request.data.assignment_dependencies || []).slice();
+            var states = request.data.expected_assignment_states || {};
+            Object.keys(states).forEach(function (truckId) {
+                if (typeof states[truckId] === "string" && states[truckId].indexOf("command:") === 0) {
+                    refs.push({truck_id: truckId, client_action_id: states[truckId].slice(8)});
+                }
+            });
+            return refs;
         }
         function linkAssignment(request) {
             if (!assignmentCommand(request) || incompleteContext(request)
@@ -292,12 +353,70 @@
             if (tails.length) request.data.expected_assignment_state_id = "command:" + tails[0].request.data.client_action_id;
         }
         function dependencyReady(request) {
-            if (!assignmentCommand(request) || !predecessorId(request)) return true;
-            var parents = assignmentRecords(request).filter(function (record) {
-                return record.request.data.client_action_id === predecessorId(request);
+            var refs = dependencyRefs(request);
+            if (!refs.length) return true;
+            var records = journalRecords();
+            return refs.every(function (ref) {
+                var probe = assignmentProbe(request, ref.truck_id);
+                var parents = records.filter(function (record) {
+                    return record.request.id !== request.id && sameAssignmentScope(probe, record.request)
+                        && record.request.data.client_action_id === ref.client_action_id;
+                });
+                return parents.length === 1 && parents[0].delivery.state === "acknowledged"
+                    && parents[0].delivery.receipt && parents[0].delivery.receipt.ok === true;
             });
-            return parents.length === 1 && parents[0].delivery.state === "acknowledged"
-                && parents[0].delivery.receipt && parents[0].delivery.receipt.ok === true;
+        }
+        function waitForDependencies(request) {
+            if (waitingForDependencies[request.id]) return waitingForDependencies[request.id];
+            var timer = null, stopped = false;
+            setSyncPending(true);
+            var waiting = withDeadline(function () {
+                return new Promise(function (resolve, reject) {
+                    function check() {
+                        if (stopped) return;
+                        try {
+                            if (roleIsReadonly()) throw inactiveRoleError();
+                            if (!owns(request)) {
+                                var error = new Error("Действие сохранено за исходным сотрудником.");
+                                error.code = "command_author_mismatch";
+                                throw error;
+                            }
+                            var saved = readRecord(request.id);
+                            if (saved && saved.delivery.state !== "pending" || dependencyReady(request)) {
+                                stopped = true; resolve(); return;
+                            }
+                        } catch (error) { stopped = true; reject(error); return; }
+                        timer = global.setTimeout(check, 500);
+                    }
+                    check();
+                });
+            }, DISPATCHER_SYNC_REQUEST_TIMEOUT_MS).then(function () {
+                // send заново проверяет роль, исходник и статус перед HTTP.
+                return send(request);
+            }).catch(function (error) {
+                try {
+                    var record = readRecord(request.id);
+                    // Квитанция могла прийти из другой вкладки или read-only
+                    // сверки на границе тайм-аута. Не откатываем доказанный успех.
+                    if (record && record.delivery.state === "acknowledged" && owns(request) && !roleIsReadonly()) {
+                        return record.delivery.receipt;
+                    }
+                    if (record && record.delivery.state === "pending") {
+                        record.delivery.state = "held";
+                        record.delivery.lastError = {code: error.code || "dependency_error", message: error.message || ""};
+                        saveRecord(record);
+                    }
+                } catch (storageFailure) { lastStorageError = storageError(); }
+                throw error;
+            }).finally(function () {
+                stopped = true;
+                if (timer) global.clearTimeout(timer);
+                delete waitingForDependencies[request.id];
+                setSyncPending(false);
+            });
+            waitingForDependencies[request.id] = waiting;
+            scheduleFlush(0);
+            return waiting;
         }
         function prepare(request) {
             var prepared = copy(request || {});
@@ -311,7 +430,7 @@
             delete prepared.nextAttemptAt;
             delete prepared.lastError;
             // Повтор сохранения не пересчитывает ссылку по изменившемуся журналу.
-            if (!saved) linkAssignment(prepared);
+            if (!saved) { linkAssignment(prepared); linkMassAssignments(prepared); }
             return prepared;
         }
         function persist(request) {
@@ -459,6 +578,7 @@
                     return Promise.reject(heldError);
                 }
                 if (!dependencyReady(record.request)) {
+                    if (massCommand(record.request) && record.request.autoRetry === false) return waitForDependencies(record.request);
                     var dependencyError = new Error("Действие сохранено и ожидает подтверждения предыдущего распоряжения.");
                     dependencyError.code = "command_dependency_pending";
                     return Promise.reject(dependencyError);

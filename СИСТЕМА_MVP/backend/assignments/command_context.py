@@ -80,16 +80,9 @@ def _locked_author(request, context, allowed_roles):
     return access
 
 
-def _assignment_predecessor(payload, context, action_type):
-    """Разрешить неизменяемую ссылку; обычный CAS всё равно проверит результат."""
-    token = payload.get('expected_assignment_state_id')
-    if not isinstance(token, str) or not token.startswith('command:'):
-        return None
-    ident = token[len('command:'):]
-    if (action_type not in {'mining_master_assign_truck', 'dispatcher_assign_truck'}
-            or payload.get('action') not in {'assign', 'release'}
-            or not ident or len(ident) > 128 or ident != ident.strip()
-            or ident == payload.get('client_action_id')):
+def _confirmed_assignment_state(context, action_type, ident, truck_id, current_id):
+    if (not isinstance(ident, str) or not ident or len(ident) > 128
+            or ident != ident.strip() or ident == current_id):
         raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на предыдущее распоряжение.')
     receipt = ShiftClientAction.objects.filter(
         action_type=action_type, client_action_id=ident,
@@ -100,12 +93,53 @@ def _assignment_predecessor(payload, context, action_type):
     state_id = stored.get('assignment_state_id')
     if (stored.get('ok') is not True or not parent
             or parent.get('author') != context['author']
-            or str(stored.get('truck_id')) != str(payload.get('truck_id'))
+            or str(stored.get('truck_id')) != str(truck_id)
             or type(state_id) is not int or state_id < 0):
         raise CommandContextError('command_dependency_unresolved', 'Предыдущее распоряжение ещё не подтверждено для этого самосвала.')
     if parse_datetime(parent['occurred_at']) > parse_datetime(context['occurred_at']):
         raise CommandContextError('command_dependency_invalid', 'Время распоряжений не соответствует их порядку.')
     return state_id
+
+
+def _assignment_predecessor(payload, context, action_type):
+    """Разрешить неизменяемую ссылку; обычный CAS всё равно проверит результат."""
+    token = payload.get('expected_assignment_state_id')
+    if not isinstance(token, str) or not token.startswith('command:'):
+        return None
+    if (action_type not in {'mining_master_assign_truck', 'dispatcher_assign_truck'}
+            or payload.get('action') not in {'assign', 'release'}):
+        raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на предыдущее распоряжение.')
+    return _confirmed_assignment_state(context, action_type, token[8:], payload.get('truck_id'), payload.get('client_action_id'))
+
+
+def _mass_assignment_states(payload, context, action_type):
+    role = 'mining_master' if action_type.startswith('mining_master_') else 'dispatcher'
+    is_mass = (action_type == role + '_move_excavator' and payload.get('zone') == 'inactive'
+               or action_type == role + '_assign_truck' and payload.get('action') == 'release_complex')
+    if not is_mass:
+        return None
+    dependencies = payload.get('assignment_dependencies', [])
+    if not isinstance(dependencies, list) or len(dependencies) > 256:
+        raise CommandContextError('command_dependency_invalid', 'Некорректный список предыдущих распоряжений.')
+    resolved = {}
+    def resolve(ident, truck_id):
+        key = (str(ident), str(truck_id))
+        if key not in resolved:
+            resolved[key] = _confirmed_assignment_state(context, role + '_assign_truck', ident,
+                                                        truck_id, payload.get('client_action_id'))
+        return resolved[key]
+    # Включает ушедшие с карточки самосвалы: прежде чем сравнить состав,
+    # сервер обязан подтвердить и их предыдущие распоряжения.
+    for dependency in dependencies:
+        if not isinstance(dependency, dict):
+            raise CommandContextError('command_dependency_invalid', 'Некорректный список предыдущих распоряжений.')
+        resolve(dependency.get('client_action_id'), dependency.get('truck_id'))
+    states = payload.get('expected_assignment_states')
+    if not isinstance(states, dict):
+        return None  # прежний валидатор отвечает за обязательную карту состава
+    return {truck_id: resolve(value[8:], truck_id)
+            if isinstance(value, str) and value.startswith('command:') else value
+            for truck_id, value in states.items()}
 
 
 def bound_command(action_type, *, shift_getter, allowed_roles):
@@ -119,6 +153,13 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
         def wrapped(request, *args, **kwargs):
             raw = request.headers.get('X-Command-Context')
             if raw is None:
+                try:
+                    legacy_payload = json.loads(request.body.decode('utf-8'))
+                except (ValueError, UnicodeError):
+                    legacy_payload = None
+                if isinstance(legacy_payload, dict) and legacy_payload.get('assignment_dependencies'):
+                    return JsonResponse({'ok': False, 'code': 'command_context_invalid',
+                                         'error': 'Для связанных распоряжений нужен исходный контекст автора.'}, status=409)
                 return view(request, *args, **kwargs)
             try:
                 context = _context(raw)
@@ -153,6 +194,7 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
                         raise CommandContextError('command_time_invalid', 'Время команды не соответствует исходной смене или часам сервера.')
                     request.assignment_deadline_origin = occurred_at
                 request.resolved_assignment_state_id = _assignment_predecessor(payload, context, action_type)
+                request.resolved_assignment_states = _mass_assignment_states(payload, context, action_type)
                 response = view(request, *args, **kwargs)
                 if response.status_code < 300:
                     receipt = ShiftClientAction.objects.get(action_type=action_type, client_action_id=ident)

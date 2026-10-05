@@ -14,10 +14,9 @@ from assignments.command_guards import (
 from assignments.models import ExcavatorPlacement
 from assignments.services import (
     HaulAssignmentStateConflict,
-    projected_haul_assignments_for_excavator,
     schedule_haul_assignment,
     schedule_haul_release,
-    validate_projected_excavator_state,
+    schedule_projected_haul_releases,
 )
 from core.models import lock_production_state
 from references.models import Equipment
@@ -123,22 +122,13 @@ def execute_dispatcher_move_excavator(
     scheduled_assignments = []
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = required_projected_assignment_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            now = timezone.now()
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return dispatcher_client_action_error(payload, error, code='state_conflict')
 
@@ -227,22 +217,13 @@ def execute_dispatcher_assign_truck(
             is_active=True,
         )
         try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = required_projected_assignment_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            scheduled_assignments = []
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return dispatcher_client_action_error(payload, error, code='state_conflict')
         scheduled = len(scheduled_assignments)

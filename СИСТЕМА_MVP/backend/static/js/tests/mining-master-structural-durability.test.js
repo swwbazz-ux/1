@@ -62,7 +62,7 @@ function runtime(options = {}) {
     function confirmedEffect(name) {
         // Каждый предметный жест обязан уже иметь исходник, даже до HTTP.
         const records = [...storage].filter(([key]) => key.startsWith(prefix));
-        assert.equal(records.length, 1, name + " precedes durable storage");
+        assert.equal(records.length, options.expectedRecords || 1, name + " precedes durable storage");
         events.push(name);
     }
     const context = {
@@ -230,3 +230,46 @@ test("process loss between save and HTTP preserves original without unsafe struc
     await next.transport.flush();
     assert.equal(next.storage.get(next.transport.journalPrefix + command.id), original);
 });
+
+for (const action of ['disband', 'release']) {
+    test(action + ': waiting for predecessor then ACK preserves the intended cards', async () => {
+        const r = runtime({expectedRecords: 2});
+        const parent = r.transport.storePost('/mining-master/assignments/truck/assign/', {
+            client_action_id: 'before-mass', action: 'assign', truck_id: '7', excavator_id: '9', expected_assignment_state_id: 0,
+        });
+        r.events.length = 0;
+        const sending = r.invoke(action);
+        assert.equal(r.events.includes('http'), false);
+        await r.transport.send(parent);
+        for (const [id, timer] of [...r.timers]) {
+            if (timer.delay === 500) { r.timers.delete(id); timer.fn(); }
+        }
+        await sending; r.runUiTimers();
+        assert.equal(r.errors.length, 0);
+        assert.equal(r.events.filter(e => e === 'http').length, 2);
+        assert.equal(r.card.hidden, action === 'disband');
+        if (action === 'release') assert.equal(r.preview.children.length, 0);
+    });
+
+    test(action + ': dependency timeout restores cards permanently and holds the original', async () => {
+        const r = runtime({expectedRecords: 2});
+        r.transport.storePost('/mining-master/assignments/truck/assign/', {
+            client_action_id: 'before-mass', action: 'assign', truck_id: '7', excavator_id: '9', expected_assignment_state_id: 0,
+        });
+        r.events.length = 0;
+        const sending = r.invoke(action);
+        r.runUiTimers();
+        for (const [id, timer] of [...r.timers]) {
+            if (timer.delay === 12000) { r.timers.delete(id); timer.fn(); }
+        }
+        assert.equal(await sending, false); r.runUiTimers();
+        assert.equal(r.card.hidden, false);
+        assert.deepEqual(r.preview.children, r.trucks);
+        assert.equal(r.events.includes('http'), false);
+        assert.equal(r.errors[0].code, 'request_timeout');
+        assert.equal(r.transport.getQueueState().pendingCount, 0);
+        const mass = [...r.storage].filter(([key]) => key.startsWith(r.transport.journalPrefix))
+            .map(([, value]) => JSON.parse(value)).find(record => record.request.autoRetry === false);
+        assert.equal(mass.delivery.state, 'held');
+    });
+}

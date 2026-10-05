@@ -39,10 +39,9 @@ from .command_guards import (
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from .services import (
     HaulAssignmentStateConflict,
-    projected_haul_assignments_for_excavator,
     schedule_haul_assignment,
     schedule_haul_release,
-    validate_projected_excavator_state,
+    schedule_projected_haul_releases,
 )
 
 
@@ -94,7 +93,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v170";
+const CACHE_NAME = "mining-master-mobile-shell-v171";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -833,22 +832,13 @@ def mining_master_move_excavator_view(request):
     scheduled_assignments = []
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         try:
-            expected_states = mining_master_required_projected_states(payload)
-            visible_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = mining_master_required_projected_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(visible_assignments, expected_states)
-            now = timezone.now()
-            for visible_assignment in visible_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=visible_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=visible_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return mining_master_client_action_error(payload, error, code='state_conflict')
 
@@ -917,22 +907,13 @@ def mining_master_assign_truck_view(request):
             is_active=True,
         )
         try:
-            expected_states = mining_master_required_projected_states(payload)
-            assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = mining_master_required_projected_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(assignments, expected_states)
-            scheduled_assignments = []
-            for visible_assignment in assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=visible_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=visible_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return mining_master_client_action_error(payload, error, code='state_conflict')
         response_payload = {

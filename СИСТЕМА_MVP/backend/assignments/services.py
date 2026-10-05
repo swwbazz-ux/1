@@ -1612,6 +1612,21 @@ def validate_projected_excavator_state(assignments, expected_states):
 
 
 @transaction.atomic
+def schedule_projected_haul_releases(*, excavator, expected_states, assigned_by, now):
+    """Снять весь проверенный состав либо откатить каждый его эффект."""
+    lock_production_state()
+    assignments = projected_haul_assignments_for_excavator(excavator, for_update=True)
+    validate_projected_excavator_state(assignments, expected_states)
+    scheduled = []
+    for visible in assignments:
+        assignment, _ = schedule_haul_release(truck=visible.truck, assigned_by=assigned_by,
+                                               now=now, expected_state_id=visible.id)
+        if assignment:
+            scheduled.append(assignment)
+    return scheduled
+
+
+@transaction.atomic
 # select_for_update требует активную транзакцию. У соседней schedule_haul_release
 # декоратор уже стоял, а здесь его не было — молчало, пока действие «Назначить
 # самосвал» не сработало на редком стечении данных, и тогда падало 500-й ошибкой
