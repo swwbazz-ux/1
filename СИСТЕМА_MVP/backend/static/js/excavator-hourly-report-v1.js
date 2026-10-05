@@ -6,8 +6,11 @@
     var subtitle = null;
     var opener = null;
     var inFlight = null;
+    var activeRequest = null;
+    var REQUEST_TIMEOUT_MS = 8000;
     var requestGeneration = 0;
     var refreshQueued = false;
+    var refreshTimer = 0;
     var hourTimer = 0;
     var historyOwned = false;
     var closing = false;
@@ -29,10 +32,22 @@
     function safeCacheRead() {
         try {
             var value = localStorage.getItem(cacheKey());
-            return value ? JSON.parse(value) : null;
+            var payload = value ? JSON.parse(value) : null;
+            return validPayload(payload) ? payload : null;
         } catch (error) {
             return null;
         }
+    }
+
+    function validPayload(payload) {
+        return Boolean(payload && payload.schema_version === 2 && Array.isArray(payload.hours)
+            && payload.hours.length === 2 && payload.hours.every(function (hour, index) {
+                return hour && hour.code === (index === 0 ? "current" : "previous")
+                    && hour.period && typeof hour.period.label === "string"
+                    && Number.isFinite(Date.parse(hour.period.start || ""))
+                    && hour.totals && Array.isArray(hour.rows)
+                    && hour.rows.every(function (row) { return row && typeof row === "object"; });
+            }));
     }
 
     function safeCacheWrite(payload) {
@@ -211,6 +226,8 @@
             refreshQueued = true;
             return inFlight;
         }
+        window.clearTimeout(refreshTimer);
+        refreshTimer = 0;
         var url = modal.dataset.eoHourlyReportUrl;
         if (!url) {
             renderState("Почасовой отчёт временно недоступен");
@@ -218,24 +235,40 @@
         }
         var generation = ++requestGeneration;
         var controller = typeof AbortController === "function" ? new AbortController() : null;
+        var request = {timer: 0, cancel: null};
+        var retryDelay = 250;
+        activeRequest = request;
         modal._eoHourlyAbortController = controller;
         modal.dataset.eoHourlyLoading = "true";
-        inFlight = fetch(url, {
+        var deadline = new Promise(function (resolve, reject) {
+            request.cancel = function () {
+                var error = new Error("Обновление отчёта задерживается. Повторяем автоматически.");
+                error.name = "TimeoutError";
+                reject(error);
+                if (controller) controller.abort();
+            };
+            request.timer = window.setTimeout(request.cancel, REQUEST_TIMEOUT_MS);
+        });
+        var responseWork = Promise.resolve().then(function () { return fetch(url, {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
             headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"},
             signal: controller ? controller.signal : undefined
-        }).then(function (response) {
+        }); }).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (payload) {
                 if (!response.ok || !payload.ok) {
                     var error = new Error(payload.error || "Не удалось загрузить отчёт");
                     error.status = response.status;
                     throw error;
                 }
+                if (!validPayload(payload)) {
+                    throw new Error("Получена несовместимая версия почасового отчёта");
+                }
                 return payload;
             });
-        }).then(function (payload) {
+        });
+        inFlight = Promise.race([responseWork, deadline]).then(function (payload) {
             if (generation !== requestGeneration || modal.hidden) return false;
             if (payload.schema_version !== 2 || !Array.isArray(payload.hours)) {
                 throw new Error("Получена несовместимая версия почасового отчёта");
@@ -247,6 +280,10 @@
         }).catch(function (error) {
             if (error && error.name === "AbortError") return false;
             if (generation !== requestGeneration || modal.hidden) return false;
+            if (error && error.name === "TimeoutError" && !refreshQueued) {
+                refreshQueued = true;
+                retryDelay = 15000;
+            }
             var cached = safeCacheRead();
             if (cached) {
                 renderPayload(cached, true);
@@ -259,14 +296,15 @@
             }
             return false;
         }).finally(function () {
-            if (generation === requestGeneration) {
-                modal.dataset.eoHourlyLoading = "false";
-                modal._eoHourlyAbortController = null;
-            }
+            window.clearTimeout(request.timer);
+            if (activeRequest !== request) return;
+            modal.dataset.eoHourlyLoading = "false";
+            modal._eoHourlyAbortController = null;
+            activeRequest = null;
             inFlight = null;
             if (refreshQueued && modal && !modal.hidden) {
                 refreshQueued = false;
-                window.setTimeout(requestReport, 250);
+                refreshTimer = window.setTimeout(requestReport, retryDelay);
             }
         });
         return inFlight;
@@ -307,7 +345,16 @@
         if (!modal || modal.hidden) return;
         requestGeneration += 1;
         refreshQueued = false;
-        if (modal._eoHourlyAbortController) modal._eoHourlyAbortController.abort();
+        window.clearTimeout(refreshTimer);
+        refreshTimer = 0;
+        if (activeRequest) {
+            window.clearTimeout(activeRequest.timer);
+            activeRequest.cancel();
+        }
+        activeRequest = null;
+        inFlight = null;
+        modal._eoHourlyAbortController = null;
+        modal.dataset.eoHourlyLoading = "false";
         window.clearTimeout(hourTimer);
         hourTimer = 0;
         modal.hidden = true;
