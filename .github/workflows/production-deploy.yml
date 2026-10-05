@@ -76,6 +76,7 @@ on:
           - trip_accounting_incident_v1
           - infra_capacity_v1
           - sse_qa_http_503_v1
+          - sse_qa_http_403_v1
       diagnostic_equipment:
         description: "Exact or canonical garage number for diagnose mode"
         required: false
@@ -602,18 +603,23 @@ jobs:
               "recipient_fingerprint", "ciphertext_sha256", "ciphertext_base64",
           }
           operation = report.get("operation")
-          if operation == "sse_qa_http_503_v1":
+          if operation in {"sse_qa_http_503_v1", "sse_qa_http_403_v1"}:
               expected_keys.add("public_evidence")
           if set(report) != expected_keys or report.get("schema") != 1:
               raise SystemExit("invalid diagnostic envelope contract")
           if report.get("kind") != "production_diagnostic_ciphertext":
               raise SystemExit("invalid diagnostic envelope kind")
           summary = report.get("summary") or {}
-          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1"}:
+          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}:
               raise SystemExit("unexpected diagnostic operation")
           if report.get("ciphertext_format") != "CMS-DER":
               raise SystemExit("unexpected diagnostic ciphertext format")
-          if report.get("recipient_fingerprint") != "36:65:5B:1C:BD:66:01:2A:15:2C:97:8B:CF:79:AC:FE:E8:46:5A:7A:1C:50:FD:FD:5C:F7:52:2C:A2:BD:59:6D":
+          expected_recipient = (
+              "62:69:DF:C0:E3:F4:D5:AB:3C:47:07:BA:C3:44:98:7D:B3:CB:B2:63:70:EA:2D:EB:30:71:D9:48:FD:72:B6:AB"
+              if operation == "sse_qa_http_403_v1"
+              else "36:65:5B:1C:BD:66:01:2A:15:2C:97:8B:CF:79:AC:FE:E8:46:5A:7A:1C:50:FD:FD:5C:F7:52:2C:A2:BD:59:6D"
+          )
+          if report.get("recipient_fingerprint") != expected_recipient:
               raise SystemExit("unexpected diagnostic recipient")
           rows = summary.get("row_count")
           truncated = summary.get("truncated")
@@ -736,6 +742,83 @@ jobs:
                   or evidence["realtime_total_limit"] != 2
               ):
                   raise SystemExit("inconsistent SSE QA HTTP 503 public scope")
+          elif operation == "sse_qa_http_403_v1":
+              import re
+              evidence = report.get("public_evidence")
+              evidence_keys = {
+                  "cause", "driver_access_seen", "excavator_access_seen",
+                  "driver_denial_seen", "excavator_denial_seen",
+                  "driver_access_error_client_match", "excavator_access_error_client_match",
+                  "client_addresses_same", "common_client_available",
+                  "driver_matches_applied_allowlist", "excavator_matches_applied_allowlist",
+                  "common_client_matches_applied_allowlist",
+                  "nginx_error_source", "nginx_error_lines",
+                  "nginx_access_source", "nginx_access_lines",
+                  "wsgi_source", "wsgi_lines", "nginx_error_offset_minutes",
+                  "access_row_count", "denial_event_count", "upstream_event_count",
+              }
+              if not isinstance(evidence, dict) or set(evidence) != evidence_keys:
+                  raise SystemExit("invalid SSE QA HTTP 403 public evidence")
+              if evidence["cause"] not in {
+                  "allowlist_access_forbidden_by_rule", "upstream_or_application",
+                  "other_nginx_or_access_layer", "not_established",
+              }:
+                  raise SystemExit("invalid SSE QA HTTP 403 public cause")
+              boolean_fields = {
+                  "driver_access_seen", "excavator_access_seen",
+                  "driver_denial_seen", "excavator_denial_seen",
+                  "driver_access_error_client_match", "excavator_access_error_client_match",
+                  "client_addresses_same", "common_client_available",
+                  "driver_matches_applied_allowlist", "excavator_matches_applied_allowlist",
+                  "common_client_matches_applied_allowlist",
+              }
+              if any(type(evidence[field]) is not bool for field in boolean_fields):
+                  raise SystemExit("invalid SSE QA HTTP 403 public boolean")
+              file_source_pattern = re.compile(
+                  r"(?:ok:ok_regular|unavailable:(?:missing|type_rejected|symlink_target_rejected|read_error))\Z"
+              )
+              for field in ("nginx_error_source", "nginx_access_source"):
+                  if not isinstance(evidence[field], str) or not file_source_pattern.fullmatch(evidence[field]):
+                      raise SystemExit("invalid SSE QA HTTP 403 public file source")
+              if not isinstance(evidence["wsgi_source"], str) or not re.fullmatch(
+                  r"(?:ok:ok_command|error:command_error|unavailable:command_error|not_required:not_queried)\Z",
+                  evidence["wsgi_source"],
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 403 public WSGI source")
+              for field, maximum in {
+                  "nginx_error_lines": 16 * 1024 * 1024,
+                  "nginx_access_lines": 16 * 1024 * 1024,
+                  "wsgi_lines": 256 * 1024,
+                  "access_row_count": 40,
+                  "denial_event_count": 240,
+                  "upstream_event_count": 50,
+              }.items():
+                  value = evidence[field]
+                  if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+                      raise SystemExit("invalid SSE QA HTTP 403 public count")
+              if evidence["nginx_error_offset_minutes"] is not None and (
+                  isinstance(evidence["nginx_error_offset_minutes"], bool)
+                  or not isinstance(evidence["nginx_error_offset_minutes"], int)
+                  or not -840 <= evidence["nginx_error_offset_minutes"] <= 840
+              ):
+                  raise SystemExit("invalid SSE QA HTTP 403 public timezone")
+              if evidence["client_addresses_same"] != evidence["common_client_available"]:
+                  raise SystemExit("inconsistent SSE QA HTTP 403 common client")
+              if evidence["common_client_matches_applied_allowlist"] and not (
+                  evidence["driver_matches_applied_allowlist"]
+                  and evidence["excavator_matches_applied_allowlist"]
+                  and evidence["client_addresses_same"]
+              ):
+                  raise SystemExit("inconsistent SSE QA HTTP 403 allowlist match")
+              if evidence["cause"] == "allowlist_access_forbidden_by_rule" and not all(
+                  evidence[field]
+                  for field in (
+                      "driver_access_seen", "excavator_access_seen",
+                      "driver_denial_seen", "excavator_denial_seen",
+                      "driver_access_error_client_match", "excavator_access_error_client_match",
+                  )
+              ):
+                  raise SystemExit("inconsistent SSE QA HTTP 403 denial finding")
           with open(sys.argv[2], "wb") as output:
               output.write(ciphertext)
           print(f"DIAGNOSTIC_CAPTURED operation={operation} rows={rows} truncated={str(truncated).lower()}")
@@ -774,6 +857,29 @@ jobs:
                   print(f"SSE_QA_HTTP_503_ACCESS {evidence['target_access']}")
               if evidence["limit_event"] is not None:
                   print(f"SSE_QA_HTTP_503_LIMIT {evidence['limit_event']}")
+          elif operation == "sse_qa_http_403_v1":
+              print(
+                  "SSE_QA_HTTP_403_FINDING "
+                  f"cause={evidence['cause']} "
+                  f"driver_access={str(evidence['driver_access_seen']).lower()} "
+                  f"excavator_access={str(evidence['excavator_access_seen']).lower()} "
+                  f"driver_denial={str(evidence['driver_denial_seen']).lower()} "
+                  f"excavator_denial={str(evidence['excavator_denial_seen']).lower()}"
+              )
+              print(
+                  "SSE_QA_HTTP_403_CLIENT_COMPARISON "
+                  f"same={str(evidence['client_addresses_same']).lower()} "
+                  f"driver_matches_applied={str(evidence['driver_matches_applied_allowlist']).lower()} "
+                  f"excavator_matches_applied={str(evidence['excavator_matches_applied_allowlist']).lower()} "
+                  f"common_matches_applied={str(evidence['common_client_matches_applied_allowlist']).lower()}"
+              )
+              print(
+                  "SSE_QA_HTTP_403_SOURCES "
+                  f"error={evidence['nginx_error_source']}:{evidence['nginx_error_lines']} "
+                  f"access={evidence['nginx_access_source']}:{evidence['nginx_access_lines']} "
+                  f"wsgi={evidence['wsgi_source']}:{evidence['wsgi_lines']} "
+                  f"error_offset_minutes={evidence['nginx_error_offset_minutes']}"
+              )
           PY
             report_code=$?
             set -e

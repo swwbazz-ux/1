@@ -249,10 +249,12 @@ DIAGNOSTIC_OPERATIONS = {
     "trip_accounting_incident_v1",
     "infra_capacity_v1",
     "sse_qa_http_503_v1",
+    "sse_qa_http_403_v1",
 }
 TRIP_DIAGNOSTIC_METADATA_KEYS = {"operation", "equipment", "from_utc", "to_utc", "max_rows"}
 INFRA_DIAGNOSTIC_METADATA_KEYS = {"operation"}
 SSE_QA_HTTP_503_METADATA_KEYS = {"operation"}
+SSE_QA_HTTP_403_METADATA_KEYS = {"operation"}
 DIAGNOSTIC_EQUIPMENT_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё ._-]{1,64}\Z")
 DIAGNOSTIC_MAX_WINDOW = timedelta(hours=24)
 DIAGNOSTIC_MAX_ROWS = 500
@@ -275,6 +277,21 @@ SSE_QA_HTTP_503_MAX_LOG_BYTES = 16 * 1024 * 1024
 SSE_QA_HTTP_503_MAX_CONFIG_BYTES = 128 * 1024
 SSE_QA_HTTP_503_MAX_RECORDS = 240
 SSE_QA_HTTP_503_MAX_JOURNAL_BYTES = 256 * 1024
+SSE_QA_HTTP_403_WINDOW_FROM = "2026-10-05T09:49:00Z"
+SSE_QA_HTTP_403_WINDOW_TO = "2026-10-05T10:09:59Z"
+SSE_QA_HTTP_403_APPLIED_ALLOWLIST_CIDR_SHA256 = (
+    "8a8e10b31ecbf388a20d0dbbda294033c5c2606dcb833e560ad4695fa5c4c32d"
+)
+SSE_QA_HTTP_403_ROUTES = ("/driver/", "/excavator/work/")
+SSE_QA_HTTP_403_LIMITATIONS = [
+    "fixed_historical_window_only",
+    "bounded_log_tail_may_omit_rotated_records",
+    "nginx_error_timezone_derived_from_single_access_log_offset",
+    "client_ipv4_present_only_in_server_encrypted_artifact",
+    "applied_allowlist_compared_by_pinned_cidr_sha256",
+    "wsgi_journal_queried_only_when_allowlist_denial_not_confirmed",
+]
+DIAGNOSTIC_403_RECIPIENT_FINGERPRINT = "62:69:DF:C0:E3:F4:D5:AB:3C:47:07:BA:C3:44:98:7D:B3:CB:B2:63:70:EA:2D:EB:30:71:D9:48:FD:72:B6:AB"
 DIAGNOSTIC_RECIPIENT_CERTIFICATE = b'''-----BEGIN CERTIFICATE-----
 MIIERTCCAq2gAwIBAgIUFuSdKm+OVGdq+pQqzXlwI5AHX1gwDQYJKoZIhvcNAQEL
 BQAwMjEwMC4GA1UEAwwnQ29wcGVyIFByb2R1Y3Rpb24gRGlhZ25vc3RpY3MgUmVj
@@ -299,6 +316,33 @@ cQk9/ATndwAFu0Yf7N0+8SqrpX4e2sPTqq54G2bzweJioAMfCyOoUIT0+JXn4cJL
 UYcI3DlslDHKG+EMx879L1hBiKSLdpN8WcOjYfkhn2rivVj2RYHbNUIMY8pcG4lG
 AQwpRYR9ynTQpX26DDThJdq2PJXJxYa0cDZR7X+nkvmuC9EVjCnR0UkD5XKNoOT1
 e9+eGJoUtxF6kO3VLFRdxU8+kqXOxDgrpvJFjpht3j/S1UvB85V7s3I=
+-----END CERTIFICATE-----
+'''
+DIAGNOSTIC_403_RECIPIENT_CERTIFICATE = b'''-----BEGIN CERTIFICATE-----
+MIIEWTCCAsGgAwIBAgIUUU24Mh1UdAw+r77FTLgqzKWgFfkwDQYJKoZIhvcNAQEL
+BQAwPDE6MDgGA1UEAwwxQ29wcGVyIFNTRSBRQSA0MDMgRGlhZ25vc3RpYyBSZWNp
+cGllbnQgMjAyNi0xMC0wNTAeFw0yNjEwMDUxMDU3MjlaFw0yODEwMDQxMDU3Mjla
+MDwxOjA4BgNVBAMMMUNvcHBlciBTU0UgUUEgNDAzIERpYWdub3N0aWMgUmVjaXBp
+ZW50IDIwMjYtMTAtMDUwggGiMA0GCSqGSIb3DQEBAQUAA4IBjwAwggGKAoIBgQDI
+cYxk8tydrmXMTGZKugx+qnGfTu6omTaLshEoshV02+lQsMT+1GrtuheyZzsRr/71
+ycCIULvFCamYVgeftfOapwF0cQMGdguzlGVCh3+BFm1EXrsHVGVnSPhwnTLjIvpY
+BkELup5FMScapG+BmYIJKG8ZH7xle2bHXWqMB6pkrid9nzi69pEwDvYxH1nVzn8c
+I57DSrLAA70J3OxeWMUhn9gYhQBWZO2i1gE67vXQ8+Vhce/wi5MfuQpNtL5XZaK+
+r6Q80k9jH24CjMp7pBnykbKclSySusykokmrxHpUD1zKTevPvDSUuj5Si+6+MxDa
+828j8gXqJaB9JiYscA5JRivoBYSe33cGmnVo7rGs7jc0SWqmdc3SmpVqHbPzKdja
+V8+wZE8EhpG3L+puBEO7NzSdNmSy3NcdgyyQLqwLLsCvKZ68xveuSWPoOKe+i0rS
+Efi/3WrHxzSgf9hCBcAJAKBqgF48MAnYds1ZQCQ3x+48BFH/k3z3FmDBOArkvg8C
+AwEAAaNTMFEwHQYDVR0OBBYEFPnIEHBCm1bzRFOqvbRKC0j1syS2MB8GA1UdIwQY
+MBaAFPnIEHBCm1bzRFOqvbRKC0j1syS2MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggGBALKFnabRaHJmlC+SpDg/juOHHi2MCPlAc8vgZuzl5eP95ffi
+UmIH3ITU4HgiP6ckyaRSGPkK2N80Bwl9uf5w3c3v23XwTKrvjX+v+WEo/jhI2AWQ
+pJ6NxsdMGQYZwgxKnwOSnw+PraGRE54AXR/EatFvYG/MIEhhmzXvUlbnHo9LLVGC
+bWIq5piFXH5DboXPZE66eA5JGzDwt+suSpdLLg79cZ0IYpce4PrMTnQAX87NpVk2
+Vr3Rh1EwEpWqmojPBKmgeQLyDqD1WCG700+VKMTnonmm/w+5H1oChZIg1U+jPX4W
+QzPHfey7wiirRRWpME6/Y84LjdsO9h2ph7+OOTwRWNfvkjYIELctOZUFpPlNCe+3
+C9GEde8nDdOeb5hfIU3YyJIwFxKcEwyS+zr5mcoxX8XQJjWPglbgCjukIs1/pqSf
+/5HOQ7VSjVrTF0LcimeXWqoveE/cqGRVBnm0m22RW8SyIMjDUJBBEO2+80H4D5bm
+VUPco4ju/CcYpOcJOQ==
 -----END CERTIFICATE-----
 '''
 ALLOWED_TOP_LEVEL = {
@@ -1249,12 +1293,12 @@ def validate_diagnostic_metadata(metadata: object) -> dict[str, object]:
     operation = metadata.get("operation")
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise ReleaseError("diagnostic operation is not allowlisted")
-    if operation in {"infra_capacity_v1", "sse_qa_http_503_v1"}:
-        expected_keys = (
-            INFRA_DIAGNOSTIC_METADATA_KEYS
-            if operation == "infra_capacity_v1"
-            else SSE_QA_HTTP_503_METADATA_KEYS
-        )
+    if operation in {"infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}:
+        expected_keys = {
+            "infra_capacity_v1": INFRA_DIAGNOSTIC_METADATA_KEYS,
+            "sse_qa_http_503_v1": SSE_QA_HTTP_503_METADATA_KEYS,
+            "sse_qa_http_403_v1": SSE_QA_HTTP_403_METADATA_KEYS,
+        }[operation]
         if set(metadata) != expected_keys:
             raise ReleaseError(f"{operation} metadata keys do not match the fixed contract")
         return {"operation": operation}
@@ -1819,6 +1863,12 @@ SSE_QA_HTTP_503_MONTHS = {
         1,
     )
 }
+SSE_QA_HTTP_403_ACCESS_RE = re.compile(
+    r'^(?P<client>\S+)\s+\S+\s+\S+\s+\[(?P<time>[^]]+)\]\s+'
+    r'"(?P<method>[A-Z]{1,12})\s+(?P<target>\S+)\s+(?P<protocol>HTTP/[0-9.]{3,8})"\s+'
+    r'(?P<status>[0-9]{3})\s+(?P<bytes>[0-9]+|-)\s'
+)
+SSE_QA_HTTP_403_ERROR_CLIENT_RE = re.compile(r"client:\s+(?P<client>[^,\s]+),")
 
 
 def _sse_qa_http_503_fixed_window() -> tuple[datetime, datetime]:
@@ -2620,11 +2670,557 @@ def validate_sse_qa_http_503_report(raw: bytes, metadata: dict[str, object]) -> 
     return report
 
 
+def _sse_qa_http_403_fixed_window() -> tuple[datetime, datetime]:
+    return (
+        datetime.strptime(SSE_QA_HTTP_403_WINDOW_FROM, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+        datetime.strptime(SSE_QA_HTTP_403_WINDOW_TO, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc),
+    )
+
+
+def _sse_qa_http_403_ipv4(value: str) -> str | None:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    if not isinstance(address, ipaddress.IPv4Address):
+        return None
+    return str(address)
+
+
+def _sse_qa_http_403_matches_applied_allowlist(value: str) -> bool:
+    return digest(f"{value}/32".encode("ascii")) == SSE_QA_HTTP_403_APPLIED_ALLOWLIST_CIDR_SHA256
+
+
+def _sse_qa_http_403_journal() -> tuple[dict[str, object], list[dict[str, object]]]:
+    command = [
+        "/usr/bin/journalctl",
+        "--unit", SSE_QA_HTTP_503_WSGI_UNIT,
+        "--since", "2026-10-05 09:49:00 UTC",
+        "--until", "2026-10-05 10:09:59 UTC",
+        "--output=short-iso-precise",
+        "--no-pager",
+        "--lines=200",
+    ]
+    base = {
+        "status": "unavailable",
+        "reason": "command_error",
+        "queried": True,
+        "bytes_examined": 0,
+        "lines_examined": 0,
+        "tail_truncated": False,
+    }
+    try:
+        result = subprocess.run(
+            command,
+            cwd="/",
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            close_fds=True,
+            start_new_session=True,
+            env={"HOME": "/", "PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return base, []
+    raw = result.stdout
+    truncated = len(raw) > SSE_QA_HTTP_503_MAX_JOURNAL_BYTES
+    raw = raw[:SSE_QA_HTTP_503_MAX_JOURNAL_BYTES]
+    lines = raw.decode("utf-8", errors="ignore").splitlines()
+    source = {
+        "status": "ok" if result.returncode == 0 else "error",
+        "reason": "ok_command" if result.returncode == 0 else "command_error",
+        "queried": True,
+        "bytes_examined": len(raw),
+        "lines_examined": len(lines),
+        "tail_truncated": truncated,
+    }
+    records: list[dict[str, object]] = []
+    start, finish = _sse_qa_http_403_fixed_window()
+    for line in lines:
+        lowered = line.casefold()
+        classification = None
+        for marker, label in (
+            ("traceback", "traceback"),
+            ("exception", "exception"),
+            ("timed out", "timeout"),
+            ("timeout", "timeout"),
+            ("worker", "worker"),
+            (" 403 ", "http_403"),
+            ("error", "error"),
+        ):
+            if marker in lowered:
+                classification = label
+                break
+        if classification is None:
+            continue
+        timestamp = SSE_QA_HTTP_403_WINDOW_FROM
+        time_match = re.match(r"(?P<time>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(?:Z|[+-][0-9:]+))", line)
+        if time_match:
+            try:
+                moment = datetime.fromisoformat(time_match.group("time").replace("Z", "+00:00")).astimezone(timezone.utc)
+                if start <= moment <= finish:
+                    timestamp = _sse_qa_http_503_iso(moment)
+            except ValueError:
+                pass
+        records.append({
+            "timestamp_utc": timestamp,
+            "classification": classification,
+            "message_sha256": digest(line.encode("utf-8")),
+        })
+        if len(records) >= 50:
+            source["tail_truncated"] = True
+            break
+    return source, records
+
+
+def collect_sse_qa_http_403_report() -> dict[str, Any]:
+    window_from, window_to = _sse_qa_http_403_fixed_window()
+    error_source, error_lines = _sse_qa_http_503_read_tail(
+        SSE_QA_HTTP_503_ERROR_LOG, SSE_QA_HTTP_503_MAX_LOG_BYTES,
+    )
+    access_source, access_lines = _sse_qa_http_503_read_tail(
+        SSE_QA_HTTP_503_ACCESS_LOG, SSE_QA_HTTP_503_MAX_LOG_BYTES,
+    )
+    access_rows: list[dict[str, object]] = []
+    denial_events: list[dict[str, object]] = []
+    upstream_events: list[dict[str, object]] = []
+    offsets: set[int] = set()
+    truncated = bool(error_source["tail_truncated"] or access_source["tail_truncated"])
+
+    for line in access_lines:
+        match = SSE_QA_HTTP_403_ACCESS_RE.match(line)
+        if not match:
+            continue
+        parts = _sse_qa_http_503_access_parts(match.group("time"))
+        route = _sse_qa_http_503_route(match.group("target"))
+        client = _sse_qa_http_403_ipv4(match.group("client"))
+        if parts is None or route not in SSE_QA_HTTP_403_ROUTES or client is None:
+            continue
+        moment, offset = parts
+        if not window_from <= moment <= window_to:
+            continue
+        offsets.add(offset)
+        if match.group("method") != "GET" or int(match.group("status")) != 403:
+            continue
+        timestamp = _sse_qa_http_503_iso(moment)
+        response_bytes = None if match.group("bytes") == "-" else int(match.group("bytes"))
+        row = {
+            "timestamp_utc": timestamp,
+            "method": "GET",
+            "route": route,
+            "protocol": match.group("protocol"),
+            "status": 403,
+            "response_bytes": response_bytes,
+            "client_ipv4": client,
+        }
+        row["protected_log_line"] = (
+            f'{timestamp} client={client} GET {route} {row["protocol"]} '
+            f'status=403 bytes={response_bytes if response_bytes is not None else "unknown"}'
+        )
+        access_rows.append(row)
+        if len(access_rows) >= 40:
+            truncated = True
+            break
+
+    error_offset_minutes = next(iter(offsets)) if len(offsets) == 1 else None
+    upstream_markers = (
+        ("upstream timed out", "upstream_timeout"),
+        ("upstream prematurely closed", "upstream_closed"),
+        ("connect() failed", "upstream_connect_failed"),
+        ("no live upstreams", "no_live_upstream"),
+    )
+    for line in error_lines:
+        time_match = SSE_QA_HTTP_503_ERROR_TIME_RE.match(line)
+        if not time_match:
+            continue
+        moment = _sse_qa_http_503_error_time(time_match.group("time"), error_offset_minutes)
+        if moment is None or not window_from <= moment <= window_to:
+            continue
+        request_match = SSE_QA_HTTP_503_ERROR_REQUEST_RE.search(line)
+        client_match = SSE_QA_HTTP_403_ERROR_CLIENT_RE.search(line)
+        route = _sse_qa_http_503_route(request_match.group("target")) if request_match else None
+        client = _sse_qa_http_403_ipv4(client_match.group("client")) if client_match else None
+        method = request_match.group("method") if request_match else None
+        protocol = request_match.group("protocol") if request_match else None
+        if route not in SSE_QA_HTTP_403_ROUTES or method != "GET":
+            continue
+        timestamp = _sse_qa_http_503_iso(moment)
+        if "access forbidden by rule" in line and client is not None and protocol is not None:
+            row = {
+                "timestamp_utc": timestamp,
+                "method": "GET",
+                "route": route,
+                "protocol": protocol,
+                "client_ipv4": client,
+                "classification": "access_forbidden_by_rule",
+                "message_sha256": digest(line.encode("utf-8")),
+            }
+            row["protected_log_line"] = (
+                f'{timestamp} access forbidden by rule client={client} '
+                f'request="GET {route} {protocol}"'
+            )
+            denial_events.append(row)
+        for marker, classification in upstream_markers:
+            if marker in line:
+                upstream_events.append({
+                    "timestamp_utc": timestamp,
+                    "route": route,
+                    "classification": classification,
+                    "message_sha256": digest(line.encode("utf-8")),
+                })
+                break
+        if len(denial_events) + len(upstream_events) >= SSE_QA_HTTP_503_MAX_RECORDS:
+            truncated = True
+            break
+
+    access_clients = {
+        route: {row["client_ipv4"] for row in access_rows if row["route"] == route}
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    denial_clients = {
+        route: {row["client_ipv4"] for row in denial_events if row["route"] == route}
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    role_confirmed = {
+        route: len(access_clients[route]) == 1 and access_clients[route] == denial_clients[route]
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    driver_clients = access_clients["/driver/"]
+    excavator_clients = access_clients["/excavator/work/"]
+    common_client = (
+        next(iter(driver_clients))
+        if len(driver_clients) == 1 and driver_clients == excavator_clients
+        else None
+    )
+    allowlist_denial_confirmed = all(role_confirmed.values())
+    journal_queried = not allowlist_denial_confirmed
+    if journal_queried:
+        journal_source, wsgi_events = _sse_qa_http_403_journal()
+    else:
+        journal_source = {
+            "status": "not_required",
+            "reason": "not_queried",
+            "queried": False,
+            "bytes_examined": 0,
+            "lines_examined": 0,
+            "tail_truncated": False,
+        }
+        wsgi_events = []
+    truncated = truncated or bool(journal_source["tail_truncated"])
+    if allowlist_denial_confirmed:
+        cause = "allowlist_access_forbidden_by_rule"
+    elif upstream_events or wsgi_events:
+        cause = "upstream_or_application"
+    elif access_rows:
+        cause = "other_nginx_or_access_layer"
+    else:
+        cause = "not_established"
+
+    def exact_single_match(values: set[object]) -> bool:
+        return len(values) == 1 and _sse_qa_http_403_matches_applied_allowlist(str(next(iter(values))))
+
+    report = {
+        "schema": 1,
+        "operation": "sse_qa_http_403_v1",
+        "request": {
+            "from_utc": SSE_QA_HTTP_403_WINDOW_FROM,
+            "to_utc": SSE_QA_HTTP_403_WINDOW_TO,
+            "method": "GET",
+            "routes": list(SSE_QA_HTTP_403_ROUTES),
+            "status": 403,
+            "comparison_reference": "pinned_applied_allowlist_cidr_sha256",
+        },
+        "sources": {
+            "nginx_error": error_source,
+            "nginx_access": access_source,
+            "wsgi_journal": journal_source,
+        },
+        "time_basis": {
+            "access_offsets_minutes": sorted(offsets),
+            "nginx_error_offset_minutes": error_offset_minutes,
+            "nginx_error_timezone_source": (
+                "single_access_log_offset" if error_offset_minutes is not None else "unavailable"
+            ),
+        },
+        "access_rows": access_rows,
+        "denial_events": denial_events,
+        "upstream_events": upstream_events,
+        "wsgi_events": wsgi_events,
+        "finding": {
+            "cause": cause,
+            "driver_access_seen": bool(driver_clients),
+            "excavator_access_seen": bool(excavator_clients),
+            "driver_denial_seen": bool(denial_clients["/driver/"]),
+            "excavator_denial_seen": bool(denial_clients["/excavator/work/"]),
+            "driver_access_error_client_match": role_confirmed["/driver/"],
+            "excavator_access_error_client_match": role_confirmed["/excavator/work/"],
+            "client_addresses_same": common_client is not None,
+            "common_client_available": common_client is not None,
+            "driver_matches_applied_allowlist": exact_single_match(driver_clients),
+            "excavator_matches_applied_allowlist": exact_single_match(excavator_clients),
+            "common_client_matches_applied_allowlist": (
+                common_client is not None and _sse_qa_http_403_matches_applied_allowlist(common_client)
+            ),
+            "wsgi_journal_queried": journal_queried,
+        },
+        "summary": {
+            "row_count": len(access_rows) + len(denial_events) + len(upstream_events) + len(wsgi_events),
+            "truncated": truncated,
+        },
+        "limitations": SSE_QA_HTTP_403_LIMITATIONS,
+    }
+    return validate_sse_qa_http_403_report(
+        json.dumps(report, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+        {"operation": "sse_qa_http_403_v1"},
+    )
+
+
+def validate_sse_qa_http_403_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
+    if metadata != {"operation": "sse_qa_http_403_v1"}:
+        raise ReleaseError("SSE QA HTTP 403 request contract mismatch")
+    if not raw or len(raw) > DIAGNOSTIC_MAX_OUTPUT_BYTES:
+        raise ReleaseError("diagnostic report size is invalid")
+    try:
+        report = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("diagnostic report is not valid JSON") from exc
+    if not isinstance(report, dict) or set(report) != {
+        "schema", "operation", "request", "sources", "time_basis", "access_rows",
+        "denial_events", "upstream_events", "wsgi_events", "finding", "summary", "limitations",
+    }:
+        raise ReleaseError("SSE QA HTTP 403 top-level contract mismatch")
+    if report.get("schema") != 1 or report.get("operation") != "sse_qa_http_403_v1":
+        raise ReleaseError("SSE QA HTTP 403 identity mismatch")
+    if report.get("request") != {
+        "from_utc": SSE_QA_HTTP_403_WINDOW_FROM,
+        "to_utc": SSE_QA_HTTP_403_WINDOW_TO,
+        "method": "GET",
+        "routes": list(SSE_QA_HTTP_403_ROUTES),
+        "status": 403,
+        "comparison_reference": "pinned_applied_allowlist_cidr_sha256",
+    }:
+        raise ReleaseError("SSE QA HTTP 403 fixed request mismatch")
+    sources = report.get("sources")
+    if not isinstance(sources, dict) or set(sources) != {"nginx_error", "nginx_access", "wsgi_journal"}:
+        raise ReleaseError("SSE QA HTTP 403 sources contract mismatch")
+    source_keys = {"status", "reason", "bytes_examined", "lines_examined", "tail_truncated"}
+    for name, source in sources.items():
+        expected = source_keys | ({"queried"} if name == "wsgi_journal" else set())
+        if not isinstance(source, dict) or set(source) != expected:
+            raise ReleaseError("SSE QA HTTP 403 source contract mismatch")
+        allowed_status = {"ok", "unavailable"} if name != "wsgi_journal" else {
+            "ok", "error", "unavailable", "not_required",
+        }
+        if source["status"] not in allowed_status:
+            raise ReleaseError("SSE QA HTTP 403 source status is invalid")
+        if name == "wsgi_journal":
+            expected_reason = {
+                "ok": "ok_command", "error": "command_error", "unavailable": "command_error",
+                "not_required": "not_queried",
+            }[source["status"]]
+            if source["reason"] != expected_reason or type(source["queried"]) is not bool:
+                raise ReleaseError("SSE QA HTTP 403 journal source is invalid")
+        elif source["status"] == "ok":
+            if source["reason"] != "ok_regular":
+                raise ReleaseError("SSE QA HTTP 403 readable source reason is invalid")
+        elif source["reason"] not in {"missing", "type_rejected", "symlink_target_rejected", "read_error"}:
+            raise ReleaseError("SSE QA HTTP 403 unavailable source reason is invalid")
+        for field in ("bytes_examined", "lines_examined"):
+            if type(source[field]) is not int or source[field] < 0:
+                raise ReleaseError("SSE QA HTTP 403 source count is invalid")
+        if type(source["tail_truncated"]) is not bool:
+            raise ReleaseError("SSE QA HTTP 403 source truncation is invalid")
+        maximum = SSE_QA_HTTP_503_MAX_JOURNAL_BYTES if name == "wsgi_journal" else SSE_QA_HTTP_503_MAX_LOG_BYTES
+        if source["bytes_examined"] > maximum:
+            raise ReleaseError("SSE QA HTTP 403 source byte bound is invalid")
+    if sources["wsgi_journal"]["status"] == "not_required" and sources["wsgi_journal"] != {
+        "status": "not_required", "reason": "not_queried", "queried": False,
+        "bytes_examined": 0, "lines_examined": 0, "tail_truncated": False,
+    }:
+        raise ReleaseError("SSE QA HTTP 403 skipped journal state is invalid")
+
+    start, finish = _sse_qa_http_403_fixed_window()
+
+    def valid_timestamp(value: object) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            moment = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        return start <= moment <= finish
+
+    time_basis = report.get("time_basis")
+    if not isinstance(time_basis, dict) or set(time_basis) != {
+        "access_offsets_minutes", "nginx_error_offset_minutes", "nginx_error_timezone_source",
+    }:
+        raise ReleaseError("SSE QA HTTP 403 time basis mismatch")
+    offsets = time_basis["access_offsets_minutes"]
+    if (
+        not isinstance(offsets, list) or len(offsets) > 4
+        or any(type(value) is not int or not -840 <= value <= 840 for value in offsets)
+        or offsets != sorted(set(offsets))
+    ):
+        raise ReleaseError("SSE QA HTTP 403 offsets are invalid")
+    if len(offsets) == 1:
+        if (
+            time_basis["nginx_error_offset_minutes"] != offsets[0]
+            or time_basis["nginx_error_timezone_source"] != "single_access_log_offset"
+        ):
+            raise ReleaseError("SSE QA HTTP 403 error timezone is inconsistent")
+    elif (
+        time_basis["nginx_error_offset_minutes"] is not None
+        or time_basis["nginx_error_timezone_source"] != "unavailable"
+    ):
+        raise ReleaseError("SSE QA HTTP 403 unavailable error timezone is inconsistent")
+
+    access_rows = report.get("access_rows")
+    if not isinstance(access_rows, list) or len(access_rows) > 40:
+        raise ReleaseError("SSE QA HTTP 403 access rows are invalid")
+    for row in access_rows:
+        if not isinstance(row, dict) or set(row) != {
+            "timestamp_utc", "method", "route", "protocol", "status", "response_bytes",
+            "client_ipv4", "protected_log_line",
+        }:
+            raise ReleaseError("SSE QA HTTP 403 access row contract mismatch")
+        client = _sse_qa_http_403_ipv4(row["client_ipv4"]) if isinstance(row["client_ipv4"], str) else None
+        if (
+            not valid_timestamp(row["timestamp_utc"]) or row["method"] != "GET"
+            or row["route"] not in SSE_QA_HTTP_403_ROUTES
+            or not isinstance(row["protocol"], str) or not re.fullmatch(r"HTTP/[0-9.]{3,8}", row["protocol"])
+            or row["status"] != 403 or client != row["client_ipv4"]
+            or (row["response_bytes"] is not None and (type(row["response_bytes"]) is not int or row["response_bytes"] < 0))
+        ):
+            raise ReleaseError("SSE QA HTTP 403 access row is invalid")
+        expected = (
+            f'{row["timestamp_utc"]} client={client} GET {row["route"]} {row["protocol"]} '
+            f'status=403 bytes={row["response_bytes"] if row["response_bytes"] is not None else "unknown"}'
+        )
+        if row["protected_log_line"] != expected:
+            raise ReleaseError("SSE QA HTTP 403 protected access line is invalid")
+
+    denial_rows = report.get("denial_events")
+    if not isinstance(denial_rows, list) or len(denial_rows) > SSE_QA_HTTP_503_MAX_RECORDS:
+        raise ReleaseError("SSE QA HTTP 403 denial rows are invalid")
+    for row in denial_rows:
+        if not isinstance(row, dict) or set(row) != {
+            "timestamp_utc", "method", "route", "protocol", "client_ipv4", "classification",
+            "message_sha256", "protected_log_line",
+        }:
+            raise ReleaseError("SSE QA HTTP 403 denial row contract mismatch")
+        client = _sse_qa_http_403_ipv4(row["client_ipv4"]) if isinstance(row["client_ipv4"], str) else None
+        if (
+            not valid_timestamp(row["timestamp_utc"]) or row["method"] != "GET"
+            or row["route"] not in SSE_QA_HTTP_403_ROUTES
+            or not isinstance(row["protocol"], str) or not re.fullmatch(r"HTTP/[0-9.]{3,8}", row["protocol"])
+            or client != row["client_ipv4"] or row["classification"] != "access_forbidden_by_rule"
+            or not isinstance(row["message_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["message_sha256"])
+        ):
+            raise ReleaseError("SSE QA HTTP 403 denial row is invalid")
+        expected = (
+            f'{row["timestamp_utc"]} access forbidden by rule client={client} '
+            f'request="GET {row["route"]} {row["protocol"]}"'
+        )
+        if row["protected_log_line"] != expected:
+            raise ReleaseError("SSE QA HTTP 403 protected denial line is invalid")
+
+    hash_specs = {
+        "upstream_events": {"upstream_timeout", "upstream_closed", "upstream_connect_failed", "no_live_upstream"},
+        "wsgi_events": {"traceback", "exception", "timeout", "worker", "http_403", "error"},
+    }
+    for name, classifications in hash_specs.items():
+        rows = report.get(name)
+        if not isinstance(rows, list) or len(rows) > 50:
+            raise ReleaseError("SSE QA HTTP 403 hashed rows are invalid")
+        for row in rows:
+            expected_keys = {"timestamp_utc", "classification", "message_sha256"}
+            if name == "upstream_events":
+                expected_keys.add("route")
+            if not isinstance(row, dict) or set(row) != expected_keys:
+                raise ReleaseError("SSE QA HTTP 403 hashed row contract mismatch")
+            if (
+                not valid_timestamp(row["timestamp_utc"]) or row["classification"] not in classifications
+                or not isinstance(row["message_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["message_sha256"])
+                or (name == "upstream_events" and row["route"] not in SSE_QA_HTTP_403_ROUTES)
+            ):
+                raise ReleaseError("SSE QA HTTP 403 hashed row is invalid")
+
+    access_clients = {
+        route: {row["client_ipv4"] for row in access_rows if row["route"] == route}
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    denial_clients = {
+        route: {row["client_ipv4"] for row in denial_rows if row["route"] == route}
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    role_confirmed = {
+        route: len(access_clients[route]) == 1 and access_clients[route] == denial_clients[route]
+        for route in SSE_QA_HTTP_403_ROUTES
+    }
+    driver_clients = access_clients["/driver/"]
+    excavator_clients = access_clients["/excavator/work/"]
+    common_client = (
+        next(iter(driver_clients))
+        if len(driver_clients) == 1 and driver_clients == excavator_clients
+        else None
+    )
+
+    def exact_single_match(values: set[object]) -> bool:
+        return len(values) == 1 and _sse_qa_http_403_matches_applied_allowlist(str(next(iter(values))))
+
+    confirmed = all(role_confirmed.values())
+    if confirmed:
+        expected_cause = "allowlist_access_forbidden_by_rule"
+    elif report["upstream_events"] or report["wsgi_events"]:
+        expected_cause = "upstream_or_application"
+    elif access_rows:
+        expected_cause = "other_nginx_or_access_layer"
+    else:
+        expected_cause = "not_established"
+    expected_finding = {
+        "cause": expected_cause,
+        "driver_access_seen": bool(driver_clients),
+        "excavator_access_seen": bool(excavator_clients),
+        "driver_denial_seen": bool(denial_clients["/driver/"]),
+        "excavator_denial_seen": bool(denial_clients["/excavator/work/"]),
+        "driver_access_error_client_match": role_confirmed["/driver/"],
+        "excavator_access_error_client_match": role_confirmed["/excavator/work/"],
+        "client_addresses_same": common_client is not None,
+        "common_client_available": common_client is not None,
+        "driver_matches_applied_allowlist": exact_single_match(driver_clients),
+        "excavator_matches_applied_allowlist": exact_single_match(excavator_clients),
+        "common_client_matches_applied_allowlist": (
+            common_client is not None and _sse_qa_http_403_matches_applied_allowlist(common_client)
+        ),
+        "wsgi_journal_queried": not confirmed,
+    }
+    if report.get("finding") != expected_finding:
+        raise ReleaseError("SSE QA HTTP 403 finding is inconsistent")
+    if sources["wsgi_journal"]["queried"] != expected_finding["wsgi_journal_queried"]:
+        raise ReleaseError("SSE QA HTTP 403 journal decision is inconsistent")
+    summary = report.get("summary")
+    row_count = len(access_rows) + len(denial_rows) + len(report["upstream_events"]) + len(report["wsgi_events"])
+    if (
+        not isinstance(summary, dict) or set(summary) != {"row_count", "truncated"}
+        or type(summary["row_count"]) is not int or summary["row_count"] != row_count
+        or row_count > 500 or type(summary["truncated"]) is not bool
+    ):
+        raise ReleaseError("SSE QA HTTP 403 summary is invalid")
+    if report.get("limitations") != SSE_QA_HTTP_403_LIMITATIONS:
+        raise ReleaseError("SSE QA HTTP 403 limitations contract mismatch")
+    reject_sensitive_diagnostic_value(report)
+    return report
+
+
 def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
     if metadata.get("operation") == "infra_capacity_v1":
         return validate_infra_capacity_report(raw, metadata)
     if metadata.get("operation") == "sse_qa_http_503_v1":
         return validate_sse_qa_http_503_report(raw, metadata)
+    if metadata.get("operation") == "sse_qa_http_403_v1":
+        return validate_sse_qa_http_403_report(raw, metadata)
     return validate_trip_diagnostic_report(raw, metadata)
 
 
@@ -2641,13 +3237,19 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
         raise ReleaseError("diagnostic encryption tool is unavailable")
     if not DIAGNOSTIC_CERT_TEMP_DIR.is_dir():
         raise ReleaseError("diagnostic certificate runtime directory is unavailable")
+    if report["operation"] == "sse_qa_http_403_v1":
+        recipient_certificate = DIAGNOSTIC_403_RECIPIENT_CERTIFICATE
+        recipient_fingerprint = DIAGNOSTIC_403_RECIPIENT_FINGERPRINT
+    else:
+        recipient_certificate = DIAGNOSTIC_RECIPIENT_CERTIFICATE
+        recipient_fingerprint = DIAGNOSTIC_RECIPIENT_FINGERPRINT
     with tempfile.NamedTemporaryFile(
         mode="wb",
         prefix="accounting-diagnostic-recipient-",
         suffix=".pem",
         dir=DIAGNOSTIC_CERT_TEMP_DIR,
     ) as certificate_file:
-        certificate_file.write(DIAGNOSTIC_RECIPIENT_CERTIFICATE)
+        certificate_file.write(recipient_certificate)
         certificate_file.flush()
         os.chmod(certificate_file.name, 0o644)
         try:
@@ -2684,7 +3286,7 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
         "operation": report["operation"],
         "summary": report["summary"],
         "ciphertext_format": "CMS-DER",
-        "recipient_fingerprint": DIAGNOSTIC_RECIPIENT_FINGERPRINT,
+        "recipient_fingerprint": recipient_fingerprint,
         "ciphertext_sha256": digest(ciphertext),
         "ciphertext_base64": base64.b64encode(ciphertext).decode("ascii"),
     }
@@ -2751,6 +3353,33 @@ def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
             "limit_static_count": limit_counts["static"],
             "limit_realtime_count": limit_counts["realtime_stream"],
             "driver_limit_count": driver_limit_count,
+        }
+    elif report["operation"] == "sse_qa_http_403_v1":
+        finding = report["finding"]
+        sources = report["sources"]
+        envelope["public_evidence"] = {
+            "cause": finding["cause"],
+            "driver_access_seen": finding["driver_access_seen"],
+            "excavator_access_seen": finding["excavator_access_seen"],
+            "driver_denial_seen": finding["driver_denial_seen"],
+            "excavator_denial_seen": finding["excavator_denial_seen"],
+            "driver_access_error_client_match": finding["driver_access_error_client_match"],
+            "excavator_access_error_client_match": finding["excavator_access_error_client_match"],
+            "client_addresses_same": finding["client_addresses_same"],
+            "common_client_available": finding["common_client_available"],
+            "driver_matches_applied_allowlist": finding["driver_matches_applied_allowlist"],
+            "excavator_matches_applied_allowlist": finding["excavator_matches_applied_allowlist"],
+            "common_client_matches_applied_allowlist": finding["common_client_matches_applied_allowlist"],
+            "nginx_error_source": f'{sources["nginx_error"]["status"]}:{sources["nginx_error"]["reason"]}',
+            "nginx_error_lines": sources["nginx_error"]["lines_examined"],
+            "nginx_access_source": f'{sources["nginx_access"]["status"]}:{sources["nginx_access"]["reason"]}',
+            "nginx_access_lines": sources["nginx_access"]["lines_examined"],
+            "wsgi_source": f'{sources["wsgi_journal"]["status"]}:{sources["wsgi_journal"]["reason"]}',
+            "wsgi_lines": sources["wsgi_journal"]["lines_examined"],
+            "nginx_error_offset_minutes": report["time_basis"]["nginx_error_offset_minutes"],
+            "access_row_count": len(report["access_rows"]),
+            "denial_event_count": len(report["denial_events"]),
+            "upstream_event_count": len(report["upstream_events"]),
         }
     return envelope
 
@@ -3252,6 +3881,8 @@ def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
     metadata = validate_diagnostic_metadata(manifest["metadata"])
     if metadata["operation"] == "sse_qa_http_503_v1":
         return collect_sse_qa_http_503_report()
+    if metadata["operation"] == "sse_qa_http_403_v1":
+        return collect_sse_qa_http_403_report()
     source = (
         INFRA_CAPACITY_SOURCE
         if metadata["operation"] == "infra_capacity_v1"
