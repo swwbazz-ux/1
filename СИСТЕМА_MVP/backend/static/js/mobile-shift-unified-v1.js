@@ -58,7 +58,7 @@
             clearClock();
             completed = false;
             setProgress(0);
-            if (!button.classList.contains("is-pending")) setLabel(button, readyLabel);
+            if (!button.classList.contains("is-pending")) setLabel(button, typeof readyLabel === "function" ? readyLabel() : readyLabel);
         }
 
         function draw() {

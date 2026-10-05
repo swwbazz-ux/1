@@ -6,28 +6,30 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v266">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v266">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v266" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v267">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v267">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v267" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v266">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v266"></script>
-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v266"></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v267">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-local-shift-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-autonomous-shift-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v267" defer></script>
+<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v267"></script>
+<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v267"></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -43,6 +45,7 @@
     data-eo-current-excavator-id="{% if current_excavator %}{{ current_excavator.id }}{% endif %}"
     data-eo-shift-excavator-id="{% if shift_start_excavator %}{{ shift_start_excavator.id }}{% endif %}"
     data-native-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
+    data-eo-server-rendered-shift-id="{% if open_shift %}{{ open_shift.id }}{% endif %}"
     data-eo-settings-url="{% url 'excavator_work_settings' %}"
     data-eo-shift-url="{% url 'excavator_shift_action' %}"
     data-eo-truck-loaded-url="{% url 'excavator_truck_loaded' %}"
@@ -397,7 +400,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v266";
+var excavatorShellVersion = "excavator-mobile-shell-v267";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1410,6 +1413,9 @@ function ensureExcavatorFieldOutbox(shell) {
             }
         },
         onConfirmed: function (event, result) {
+            if (window.eoExcavatorAutonomousShift) {
+                window.eoExcavatorAutonomousShift.confirm(event, result).catch(function () {});
+            }
             if (typeof window.confirmExcavatorFieldEvent === "function") {
                 return window.confirmExcavatorFieldEvent(event, result);
             }
@@ -1485,6 +1491,145 @@ function ensureExcavatorFieldOutbox(shell) {
     return window.eoExcavatorFieldOutbox;
 }
 
+function projectExcavatorLocalShift(shell, ledger) {
+    if (!shell || !ledger) return;
+    var shift = ledger.currentShift();
+    if (!shift || !shift.open_event_id) return;
+    var renderedShiftId = Number(shell.dataset.eoServerRenderedShiftId || 0);
+    if (shift.status === "closed" && renderedShiftId && renderedShiftId !== Number(shift.server_shift_id || 0)) return;
+    if (typeof window !== "undefined" && typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) return;
+    var isOpen = Boolean(shift && shift.status === "open");
+    var shiftButton = shell.querySelector("[data-eo-shift-button]");
+    var shiftLabel = shell.querySelector("[data-eo-shift-label]");
+    var shiftScreen = shell.querySelector('[data-eo-screen="shift"]');
+    var workScreen = shell.querySelector('[data-eo-screen="trucks"]');
+    var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
+    var faceContent = shell.querySelector("[data-eo-face-settings-available]");
+    if (shift) {
+        shell.dataset.eoLocalShiftId = shift.local_shift_id || "";
+        shell.dataset.eoCurrentExcavatorId = String(shift.equipment_id || shell.dataset.eoCurrentExcavatorId || "");
+        shell.dataset.nativeShiftId = shift.server_shift_id ? String(shift.server_shift_id) : "";
+    }
+    var projectionKey = shift.local_shift_id + ":" + shift.status;
+    if (shell.dataset.eoProjectedLocalShift === projectionKey) return;
+    shell.dataset.eoProjectedLocalShift = projectionKey;
+    shell.dataset.eoOfflineShiftClosed = isOpen ? "false" : "true";
+    shell.dataset.eoLocalShiftOpen = isOpen ? "true" : "false";
+    var statusLabel = shell.querySelector(".eo-shift-status-text");
+    if (statusLabel) statusLabel.textContent = isOpen ? "Смена открыта" : "Смена закрыта";
+    if (shiftScreen) {
+        shiftScreen.dataset.eoShiftState = isOpen ? "open" : "closed";
+        shiftScreen.dataset.mobileShiftState = isOpen ? "open" : "closed";
+    }
+    if (workScreen) {
+        workScreen.dataset.eoWorkAvailable = isOpen ? "true" : "false";
+        workScreen.classList.toggle("is-shift-inactive", !isOpen);
+    }
+    if (eventsScreen) {
+        eventsScreen.dataset.eoDowntimeAvailable = isOpen ? "true" : "false";
+        eventsScreen.classList.toggle("is-shift-inactive", !isOpen);
+        eventsScreen.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    }
+    if (faceContent) {
+        faceContent.dataset.eoFaceSettingsAvailable = isOpen ? "true" : "false";
+        faceContent.classList.toggle("is-shift-inactive", !isOpen);
+        faceContent.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    }
+    shell.querySelectorAll("[data-eo-face-horizon], [data-eo-face-block], [data-eo-rock-select], [data-eo-dump-select]").forEach(function (control) {
+        control.disabled = !isOpen;
+        control.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    });
+    var settingsButton = shell.querySelector("[data-eo-apply-settings]");
+    if (settingsButton) {
+        settingsButton.dataset.eoSettingsAvailable = isOpen ? "true" : "false";
+        settingsButton.disabled = !isOpen;
+        settingsButton.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    }
+    shell.querySelectorAll("[data-eo-truck-card]").forEach(function (card) {
+        var enabled = isOpen && card.dataset.eoPreparedCanLoad === "1";
+        card.dataset.eoCanLoad = enabled ? "1" : "0";
+        card.dataset.eoManualAvailable = isOpen && card.dataset.eoPreparedManualAvailable === "1" ? "1" : "0";
+        card.draggable = isOpen && card.dataset.eoPreparedCanDrag === "1";
+        card.disabled = !isOpen;
+        card.setAttribute("aria-disabled", enabled ? "false" : "true");
+    });
+    shell.querySelectorAll("[data-eo-dump-target], [data-eo-downtime-reason-id]").forEach(function (control) {
+        control.disabled = !isOpen;
+        control.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    });
+    shell.querySelectorAll("[data-eo-free-bucket-open]").forEach(function (control) {
+        control.disabled = !isOpen;
+        control.setAttribute("aria-disabled", isOpen ? "false" : "true");
+    });
+    if (shiftButton) {
+        shiftButton.dataset.eoShiftAction = isOpen ? "close" : "open";
+        shiftButton.disabled = false;
+        shiftButton.classList.remove("is-disabled", "is-pending");
+        shiftButton.classList.toggle("mobile-shift__action--danger", isOpen);
+        shiftButton.classList.toggle("mobile-shift__action--primary", !isOpen);
+        shiftButton.setAttribute("aria-disabled", "false");
+        shiftButton.setAttribute("aria-label", isOpen
+            ? "Удерживайте 1 секунду, чтобы закрыть смену"
+            : "Удерживайте 1 секунду, чтобы начать смену");
+    }
+    if (shiftLabel) shiftLabel.textContent = isOpen ? "Закрыть смену" : "Начать смену";
+}
+
+function ensureExcavatorAutonomousShift(shell, transport) {
+    if (!shell || !transport || !window.createExcavatorLocalShiftLedger || !window.createExcavatorAutonomousShift) return null;
+    var deviceId = excavatorInstallDeviceId();
+    var key = [shell.dataset.eoAccessId, shell.dataset.eoEmployeeId, deviceId].join(":");
+    var controller = window.eoExcavatorAutonomousShift;
+    if (!controller || window.eoExcavatorAutonomousShiftKey !== key) {
+        var ledger = window.createExcavatorLocalShiftLedger({
+            indexedDB: window.indexedDB, localStorage: window.localStorage,
+            accessId: shell.dataset.eoAccessId, actorId: shell.dataset.eoEmployeeId,
+            roleCode: shell.dataset.eoRoleCode || "excavator_operator", deviceId: deviceId,
+            outbox: transport,
+            onQueued: function () {
+                if (navigator.onLine !== false) Promise.resolve(transport.flush()).catch(function () {});
+            },
+            onChange: function () {
+                var current = document.querySelector("[data-eo-shell]");
+                if (current && window.eoExcavatorAutonomousShiftKey === key
+                    && current.dataset.eoAccessId === shell.dataset.eoAccessId
+                    && current.dataset.eoEmployeeId === shell.dataset.eoEmployeeId) {
+                    projectExcavatorLocalShift(current, ledger);
+                    window.dispatchEvent(new CustomEvent("excavator-local-shift-changed"));
+                }
+            }
+        });
+        controller = window.createExcavatorAutonomousShift({ledger: ledger, transport: transport, identity: {
+            actor_id: Number(shell.dataset.eoEmployeeId), access_id: Number(shell.dataset.eoAccessId),
+            role_code: shell.dataset.eoRoleCode || "excavator_operator", device_id: deviceId
+        }});
+        window.eoExcavatorAutonomousShift = controller;
+        window.eoExcavatorAutonomousShiftKey = key;
+    }
+    controller.setServerShift(shell.dataset.eoServerRenderedShiftId);
+    controller.ready().then(function () { projectExcavatorLocalShift(shell, controller.ledger); }).catch(function () {
+        renderExcavatorOfflineStatus({storage_failed: true, total: 0});
+    });
+    if (!window.eoAutonomousFocusBound) {
+        window.eoAutonomousFocusBound = true;
+        window.addEventListener("focus", function () {
+            var active = window.eoExcavatorAutonomousShift;
+            if (!active) return;
+            active.refresh().then(function () {
+                if (active !== window.eoExcavatorAutonomousShift) return;
+                projectExcavatorLocalShift(document.querySelector("[data-eo-shell]"), active.ledger);
+                active.outbox.pending().then(function (events) {
+                    if (active === window.eoExcavatorAutonomousShift && typeof window.applyExcavatorPendingFieldEvents === "function") {
+                        window.applyExcavatorPendingFieldEvents(events);
+                    }
+                }).catch(function () {});
+                active.ledger.recoverDelivery().catch(function () {});
+            }).catch(function () {});
+        });
+    }
+    return controller;
+}
+
 window.initExcavatorWorkShell = function () {
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return;
@@ -1514,6 +1659,8 @@ window.initExcavatorWorkShell = function () {
     var truckLoadedCancelUrl = shell.dataset.eoTruckLoadedCancelUrl || "";
     var truckGreenIcon = shell.dataset.eoTruckGreenIcon || "";
     var fieldOutbox = ensureExcavatorFieldOutbox(shell);
+    var autonomousShift = ensureExcavatorAutonomousShift(shell, fieldOutbox);
+    if (autonomousShift) fieldOutbox = autonomousShift.outbox;
     var freeBucketController = null;
     var activeTruckDrag = null;
     var activeQueueDrag = null;
@@ -3103,7 +3250,9 @@ window.initExcavatorWorkShell = function () {
 
     window.applyExcavatorPendingFieldEvents = function (events) {
         var allCurrentEvents = (events || []).filter(function (event) {
-            return String(event.shift_id || "") === String(shell.dataset.nativeShiftId || "")
+            return (shell.dataset.eoLocalShiftId
+                ? String(event.local_shift_id || "") === shell.dataset.eoLocalShiftId
+                : String(event.shift_id || "") === String(shell.dataset.nativeShiftId || ""))
                 && String(event.equipment_id || "") === String(shell.dataset.eoCurrentExcavatorId || "");
         });
         if (freeBucketController) freeBucketController.reconcileEvents(allCurrentEvents);
@@ -3189,6 +3338,10 @@ window.initExcavatorWorkShell = function () {
         });
         if (currentEvents.some(function (event) { return event.event_type === "excavator.shift.closed"; })) {
             applyLocalShiftClose();
+            if (autonomousShift) {
+                delete shell.dataset.eoProjectedLocalShift;
+                projectExcavatorLocalShift(shell, autonomousShift.ledger);
+            }
         }
     };
 
@@ -4197,7 +4350,11 @@ window.initExcavatorWorkShell = function () {
                     "excavator.shift.closed"
                 ]
             }).then(function (event) { return {ok: true, local_saved: true, event_id: event.event_id}; })
-            : fetch(shiftUrl, {
+            : (autonomousShift && !payload.close_other_role_shift
+                ? autonomousShift.open(payload, shiftPendingActionId).then(function (event) {
+                    return {ok: true, local_saved: true, event_id: event.event_id};
+                })
+                : fetch(shiftUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -4214,7 +4371,7 @@ window.initExcavatorWorkShell = function () {
                 }
                 return data;
             });
-        });
+        }));
         return shiftRequest.then(function (result) {
             hideShiftConfirmation();
             playExcavatorVoice(
@@ -4226,10 +4383,14 @@ window.initExcavatorWorkShell = function () {
             if (shiftScreen) shiftScreen.dataset.eoShiftDirty = "false";
             clearShiftErrors();
             if (result && result.local_saved) {
-                applyLocalShiftClose();
-                showExcavatorNotice(navigator.onLine === false
+                if (action === "close") applyLocalShiftClose();
+                if (autonomousShift) {
+                    delete shell.dataset.eoProjectedLocalShift;
+                    projectExcavatorLocalShift(shell, autonomousShift.ledger);
+                }
+                showExcavatorNotice(action === "close"
                     ? "Закрытие смены сохранено на телефоне"
-                    : "Закрытие смены сохранено. Отправляем на сервер...");
+                    : "Смена открыта и сохранена на телефоне");
                 return true;
             }
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -4306,7 +4467,7 @@ window.initExcavatorWorkShell = function () {
     if (shiftButton) {
         shiftHoldController = window.MobileShiftHold.bind(shiftButton, {
             holdMs: currentShiftHoldMs,
-            readyLabel: isShiftCloseAction() ? "Закрыть смену" : "Начать смену",
+            readyLabel: function () { return isShiftCloseAction() ? "Закрыть смену" : "Начать смену"; },
             canStart: function () {
                 return !shiftServerBlocked && validateShiftReadings(false).valid;
             },

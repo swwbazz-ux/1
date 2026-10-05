@@ -586,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v266";
+const CACHE_NAME = "excavator-mobile-shell-v267";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,26 +600,28 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v266",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v266",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v266",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v266",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v266",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v266",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v266",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v267",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v267",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v267",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v267",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v267",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v267",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v267",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v266",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v266",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v266",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v267",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v267",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v267",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -5108,9 +5110,13 @@ def excavator_work_view(request):
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
     assignment_state = work_assignment_state(access.employee, work_assignment)
-    current_excavator = open_shift.equipment if open_shift else None
+    # Cache the verified assignment's resources before local opening. Mutating
+    # legacy POSTs still require their existing server-shift checks.
+    current_excavator = (open_shift.equipment if open_shift else
+        work_assignment.equipment if request.method == 'GET'
+        and work_assignment and assignment_state == 'assigned' else None)
     reconcile_excavator_waiting_for_trucks(
-        current_excavator,
+        current_excavator if open_shift else None,
         access.employee,
         start_when_empty=bool(open_shift),
     )

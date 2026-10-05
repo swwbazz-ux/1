@@ -473,6 +473,9 @@
         function deliver(event) {
             if (!outbox || typeof outbox.queue !== "function") return Promise.resolve();
             return Promise.resolve().then(function () { return outbox.queue(clone(event)); }).then(function (queued) {
+                if (typeof options.onQueued === "function") {
+                    try { options.onQueued(); } catch (error) { /* envelope remains durable */ }
+                }
                 if (queued && queued.sync_state === "confirmed" && queued.server_result) {
                     return confirm(event, queued.server_result);
                 }
@@ -619,6 +622,17 @@
             });
         }
 
+        function recordPrepared(prepare) {
+            var prepared;
+            return mutate(function () {
+                prepared = clone(prepare(clone(committedState)));
+                return recordEvent(prepared);
+            }).then(function () {
+                deliver(prepared);
+                return clone(prepared);
+            });
+        }
+
         function confirm(event, result) {
             var savedEvent = clone(event);
             var savedResult = clone(result || {});
@@ -720,6 +734,7 @@
             },
             recoverDelivery: function () { return ready().then(recoverDelivery); },
             recordAndQueue: recordAndQueue,
+            recordPrepared: recordPrepared,
             confirm: confirm,
             snapshot: snapshot,
             nextSequence: nextSequence,

@@ -3488,6 +3488,26 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         dump_card = next(card for card in response.context['dump_cards'] if card['point'] == self.dump_point)
         self.assertEqual(dump_card['completed_count'], 3)
 
+    def test_prepared_offline_shell_keeps_assigned_resources_disabled_before_opening(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['open_shift'])
+        self.assertEqual(response.context['current_excavator'], self.excavator)
+        self.assertContains(response, 'data-eo-prepared-can-load=')
+        self.assertContains(response, 'data-eo-can-load="0"')
+        self.assertContains(response, 'excavator-local-shift-v1.js')
+        self.assertContains(response, 'excavator-autonomous-shift-v1.js')
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).exists())
+
+    def test_offline_shell_does_not_prepare_an_excavator_without_assignment(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        EquipmentAssignment.objects.filter(employee=self.operator).delete()
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['current_excavator'])
+        self.assertIsNone(response.context['open_shift'])
+
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
         group = EquipmentPlanGroup.objects.create(
