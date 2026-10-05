@@ -138,5 +138,6 @@
 СИСТЕМА_MVP/backend/trips/trip_creation.py
 
 СИСТЕМА_MVP/backend/core/driver_shift_archive.py
+СИСТЕМА_MVP/backend/static/js/driver-journal-storage-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-archive-v1.js
 СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py

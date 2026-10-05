@@ -553,64 +553,7 @@ test("a projection callback failure does not turn a durable enqueue into a stora
     assert.equal(stateCalls, 1);
 });
 
-function fakeIndexedDB({failPut} = {}) {
-    const stores = new Map();
-    function storeApi(name, transaction) {
-        if (!stores.has(name)) stores.set(name, new Map());
-        const values = stores.get(name);
-        function request(operation) {
-            const result = {onsuccess: null, onerror: null};
-            queueMicrotask(() => {
-                try {
-                    result.result = operation();
-                    if (result.onsuccess) result.onsuccess();
-                    queueMicrotask(() => transaction.oncomplete && transaction.oncomplete());
-                } catch (error) {
-                    transaction.error = error;
-                    if (result.onerror) result.onerror();
-                    if (transaction.onerror) transaction.onerror();
-                }
-            });
-            return result;
-        }
-        return {
-            createIndex() {},
-            getAll() { return request(() => Array.from(values.values()).map(value => structuredClone(value))); },
-            get(key) { return request(() => values.has(key) ? structuredClone(values.get(key)) : undefined); },
-            put(value, key) {
-                return request(() => {
-                    if (failPut) failPut(name, value, key);
-                    const resolved = key === undefined ? value.event_id : key;
-                    values.set(resolved, structuredClone(value));
-                    return resolved;
-                });
-            },
-            delete(key) { return request(() => values.delete(key)); },
-        };
-    }
-    const db = {
-        objectStoreNames: {contains(name) { return stores.has(name); }},
-        createObjectStore(name) {
-            stores.set(name, new Map());
-            return {createIndex() {}};
-        },
-        transaction(name) {
-            const transaction = {error: null};
-            transaction.objectStore = () => storeApi(name, transaction);
-            return transaction;
-        },
-    };
-    return {
-        open() {
-            const request = {result: db};
-            queueMicrotask(() => {
-                if (request.onupgradeneeded) request.onupgradeneeded();
-                if (request.onsuccess) request.onsuccess();
-            });
-            return request;
-        },
-    };
-}
+const fakeIndexedDB = require("./helpers/transactional-indexeddb.js");
 
 test("recovered Driver IndexedDB merges fallback facts with its own queue and preserves order", async () => {
     const local = storage();
@@ -748,7 +691,8 @@ test("Driver migration cleanup preserves a new fallback fact appended while Inde
     }});
     const recovered = runtime({local, indexedDB});
     assert.equal((await recovered.pending())[0].event_id, original.event_id);
-    assert.deepEqual(JSON.parse(local.getItem(key)), [concurrent]);
+    assert.deepEqual((await recovered.journal()).map(event => event.event_id), [original.event_id, concurrent.event_id]);
+    assert.deepEqual(JSON.parse(local.getItem(key)), []);
     const next = runtime({local, indexedDB});
     assert.deepEqual((await next.pending()).map(event => event.event_id), [original.event_id, concurrent.event_id]);
 });

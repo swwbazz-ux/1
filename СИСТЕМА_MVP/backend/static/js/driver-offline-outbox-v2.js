@@ -585,45 +585,10 @@
     }
 
     function indexedRepository(indexedDB) {
-        var database = new Promise(function (resolve, reject) {
-            var request = indexedDB.open(DB_NAME, 1);
-            request.onupgradeneeded = function () {
-                var db = request.result;
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    var events = db.createObjectStore(STORE_NAME, {keyPath: "event_id"});
-                    events.createIndex("access_sequence", ["access_id", "sequence"], {unique: false});
-                }
-                if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE);
-            };
-            request.onsuccess = function () { resolve(request.result); };
-            request.onerror = function () { reject(request.error || new Error("indexeddb_open_failed")); };
-        });
-        function request(store, mode, operation) {
-            return database.then(function (db) {
-                return new Promise(function (resolve, reject) {
-                    var transaction = db.transaction(store, mode);
-                    var value;
-                    transaction.oncomplete = function () { resolve(value); };
-                    transaction.onabort = transaction.onerror = function () {
-                        reject(transaction.error || new Error("indexeddb_transaction_failed"));
-                    };
-                    value = operation(transaction.objectStore(store));
-                    if (value && typeof value.onsuccess !== "undefined") {
-                        value.onsuccess = function () { value = value.result; };
-                        value.onerror = function () { transaction.abort(); };
-                    }
-                });
-            });
-        }
-        return {
-            kind: "indexedDB",
-            list: function () { return request(STORE_NAME, "readonly", function (store) { return store.getAll(); }); },
-            get: function (eventId) { return request(STORE_NAME, "readonly", function (store) { return store.get(eventId); }); },
-            put: function (event) { return request(STORE_NAME, "readwrite", function (store) { store.put(clone(event)); return clone(event); }); },
-            remove: function (eventId) { return request(STORE_NAME, "readwrite", function (store) { store.delete(eventId); }); },
-            getMeta: function (name) { return request(META_STORE, "readonly", function (store) { return store.get(name); }); },
-            setMeta: function (name, value) { return request(META_STORE, "readwrite", function (store) { store.put(value, name); }); }
-        };
+        var storage = root.DriverJournalStorage;
+        if (!storage && typeof require === "function") storage = require("./driver-journal-storage-v1.js");
+        if (!storage) throw new Error("driver_journal_runtime_missing");
+        return storage.create(indexedDB);
     }
 
     async function defaultRepository(options) {
@@ -631,10 +596,33 @@
         if (options.indexedDB) {
             try {
                 var primary = indexedRepository(options.indexedDB);
+                if (options.localStorage) {
+                    var list = primary.list, importing = null, imported = false;
+                    primary.list = async function () {
+                        if (!importing) importing = (async function () {
+                            // Old clients cannot open IndexedDB v2 and can leave
+                            // new raw facts in fallback even after this page starts.
+                            if (imported) {
+                                try { if (!(await localRepository(options.localStorage, options.accessId).list()).length) return; }
+                                catch (error) { primary.migrationError = String(error && error.message || error); return; }
+                            }
+                            await primary.getMeta("probe");
+                            await importLocalRepository(primary, options);
+                            imported = !primary.migrationError;
+                        })().finally(function () { importing = null; });
+                        await importing;
+                        return list();
+                    };
+                }
                 await primary.getMeta("probe");
                 if (options.localStorage) await importLocalRepository(primary, options);
                 return primary;
-            } catch (error) {}
+            } catch (error) {
+                // A blocked upgrade or timeout is not an empty database. Keep
+                // retrying this repository; never hide its journal in fallback.
+                if (primary && /^driver_storage_/.test(String(error && error.message))) return primary;
+                if ((error && error.name === "VersionError") || String(error && error.message) === "driver_journal_runtime_missing") throw error;
+            }
         }
         if (!options.localStorage) throw new Error("durable_storage_unavailable");
         return localRepository(options.localStorage, options.accessId);
@@ -682,6 +670,7 @@
             for (var transfer of transfers) await primary.put(transfer);
             for (var entry of metaTransfers) await primary.setMeta(entry[0], entry[1]);
             if (legacy.length) await fallback.clearEvents(legacy);
+            primary.migrationError = "";
         } catch (error) {
             primary.migrationError = String(error && error.message || error);
         }
@@ -1390,6 +1379,14 @@
             retryNow: retryNow,
             pending: listAll,
             journal: journal,
+            archiveStatus: async function (closeId) {
+                var repo = await repoPromise;
+                return repo.archiveStatus ? repo.archiveStatus(closeId) : {unsupported: true};
+            },
+            compactArchive: async function (proof, target, current) {
+                var repo = await repoPromise;
+                return repo.compact ? repo.compact(proof, target, current) : false;
+            },
             publish: publish,
             setBindings: setBindings,
             resumeAuthRequired: resumeAuthRequired,

@@ -1,7 +1,7 @@
 (function (root) {
     "use strict";
-    // Coverage is a separate, source-bound proof. This stage never removes
-    // originals, changes ACK state, or replaces the driver's offline manifest.
+    // Coverage stays separate from delivery. Older closed shifts may be packed
+    // losslessly only after a fresh full server comparison and an atomic recheck.
     var PREFIX = "driver-shift-archive-v1:";
     var DELIVERY_FIELDS = ["state", "attempt_count", "next_retry_at", "last_error", "updated_at",
         "created_session", "created_mono", "auth_generation", "server_result", "server_received_at", "sent_live"];
@@ -171,7 +171,11 @@
                     if (sealed) delete sealed.proof_digest;
                     if (saved && same(saved.identity, candidate.identity) && saved.shift.close_event_id === candidate.close_event_id
                         && saved.proof_digest === await hash(sealed)
-                        && saved.source_digest === await digest(sources(events, candidate.identity, saved.shift))) continue;
+                        && saved.source_digest === await digest(sources(events, candidate.identity, saved.shift))) {
+                        var status = options.outbox.archiveStatus ? await options.outbox.archiveStatus(candidate.close_event_id) : {unsupported: true};
+                        if (status.unsupported || status.compacted || status.source_digest === saved.source_digest
+                            || !root.DriverJournalStorage || !root.DriverJournalStorage.eligible(events, candidate.identity, candidate)) continue;
+                    }
                     pending.push(candidate);
                 }
                 allowed();
@@ -221,6 +225,11 @@
                 var previous = readProof(options.storage, key(target));
                 if (previous && Date.parse(previous.generated_at) > Date.parse(coverage.generated_at)) throw new Error("driver_archive_older_snapshot");
                 options.storage.setItem(key(target), JSON.stringify(coverage));
+                if (typeof options.outbox.compactArchive === "function") {
+                    var stillCurrent = function () { return !expired && current(); };
+                    stillCurrent.signal = abort && abort.signal;
+                    await options.outbox.compactArchive(proof, target, stillCurrent);
+                }
                 return coverage;
             })();
             inFlight = Promise.race([work, deadline]).catch(function () { return false; }).finally(function () {
@@ -272,6 +281,6 @@
     }
     function scheduleActive() { if (active) active.schedule(); }
     root.DriverShiftArchive = {create: create, verify: verify, candidates: candidates, digest: digest,
-        bind: bind, schedule: scheduleActive};
+        sources: sources, bind: bind, schedule: scheduleActive};
     if (typeof module !== "undefined") module.exports = root.DriverShiftArchive;
 })(typeof window !== "undefined" ? window : globalThis);
