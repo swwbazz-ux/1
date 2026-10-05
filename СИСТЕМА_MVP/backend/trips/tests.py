@@ -372,7 +372,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'eventsTruncated',
             'function hasDispatcherRelevantEvents',
             'return Array.isArray(events) && events.length > 0;',
-            'incomingRefreshQueueGraceMs',
+            'transport.boardRefreshToken()',
             'DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000',
             'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
@@ -381,6 +381,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'type: "release_complex"',
         ):
             self.assertIn(marker, dispatcher_script)
+        self.assertNotIn('incomingRefreshQueueGraceMs', dispatcher_script)
         self.assertNotIn('canTrustLocalDispatcherAssignmentEvents', dispatcher_script)
         self.assertNotIn('localAssignmentAppliedUntil', dispatcher_script)
 
@@ -397,7 +398,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v173')
+        self.assertContains(response, 'dispatcher-desktop-shell-v174')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -408,36 +409,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v173',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v174',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v173',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v174',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)

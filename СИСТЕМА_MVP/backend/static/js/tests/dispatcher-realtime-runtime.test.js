@@ -124,6 +124,7 @@ function createHarness({payload = null, unsafeDrag = false, deferredRequests = f
     vm.runInNewContext(SOURCE, context, {filename: "dispatcher-realtime-v1.js"});
     const runtime = window.createDispatcherRealtime({
         transport: {
+            boardRefreshToken() { return "unchanged"; },
             getQueueState() { return {isFlushing: false, pendingCount: 0}; },
             readQueue() { return []; },
             scheduleFlush() {},

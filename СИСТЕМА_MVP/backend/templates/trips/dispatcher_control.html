@@ -6,12 +6,12 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v173">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v173">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v173">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v173">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v173">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v173">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v174">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v174">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v174">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v174">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v174">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v174">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -25,8 +25,8 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v172" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v172" defer></script>
+        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v173" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v173" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -587,7 +587,7 @@
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v173"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v174"></script>
 {% else %}
 <script>
 (function () {
@@ -742,7 +742,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v172";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v173";
     var dispatcherTransport = window.createDispatcherTransport({
         getCsrfToken: getCsrfToken,
         onStateChange: function (state) {
@@ -906,6 +906,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function storeMiningMasterRealtimeVersion(version) {
         var parsed = parseInt(version || "0", 10);
         if (!Number.isFinite(parsed) || parsed <= 0) return;
+        if (parsed < miningMasterRealtimeLastVersion) return;
         miningMasterRealtimeLastVersion = parsed;
         if (document.body) {
             document.body.dataset.operationalStateVersion = String(parsed);
@@ -1006,6 +1007,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var miningMasterMobileRefreshPromise = null;
     var miningMasterMobileRefreshFollowUp = null;
+    var miningMasterMobileRefreshFollowUpOptions = null;
     var miningMasterMobileRefreshRetryTimer = null;
     var MINING_MASTER_REFRESH_RETRY_MAX = 5;
     function scheduleMiningMasterRefreshRetry(options, attempt) {
@@ -1018,7 +1020,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 scheduleMiningMasterRefreshRetry(options, attempt + 1);
                 return;
             }
-            Promise.resolve(refreshMobileBoardFromServer(options)).catch(function () {});
+            Promise.resolve(refreshMobileBoardFromServer(Object.assign({}, options, {
+                refreshRetryAttempt: attempt + 1
+            }))).catch(function () {});
         }, 1200);
     }
     function refreshMobileBoardFromServer(options) {
@@ -1030,30 +1034,46 @@ document.addEventListener("DOMContentLoaded", function () {
                доской: на телефоне самосвал «отпрыгивал» в прежний комплекс,
                мастер тянул снова и получал 409 «Состояние изменилось».
                Поэтому вслед за летящим запросом ставим ещё один. */
+            miningMasterMobileRefreshFollowUpOptions = {
+                version: Math.max(Number(options.version || 0), Number(miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.version || 0)),
+                preserveScreen: Boolean(options.preserveScreen || miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.preserveScreen)
+            };
             if (!miningMasterMobileRefreshFollowUp) {
                 miningMasterMobileRefreshFollowUp = miningMasterMobileRefreshPromise
                     .catch(function () { return false; })
                     .then(function () {
+                        var followUpOptions = miningMasterMobileRefreshFollowUpOptions;
+                        miningMasterMobileRefreshFollowUpOptions = null;
                         miningMasterMobileRefreshFollowUp = null;
-                        return refreshMobileBoardFromServer(options);
+                        return refreshMobileBoardFromServer(followUpOptions);
                     });
             }
             return miningMasterMobileRefreshFollowUp;
         }
         var currentShell = document.querySelector(".mm-mobile-shell");
         if (!currentShell || !window.AppOperationalFragment) return Promise.resolve(false);
-        var state = captureMobileShellState(currentShell);
+        var commandToken = dispatcherTransport.boardRefreshToken();
+        if (commandToken === null) {
+            markMiningMasterBoardStale();
+            scheduleMiningMasterRefreshRetry(options, Number(options.refreshRetryAttempt || 0));
+            return Promise.resolve(false);
+        }
+        var requestedVersion = Math.max(Number(options.version || 0), Number(miningMasterRealtimeLastVersion || 0));
         miningMasterMobileRefreshPromise = window.AppOperationalFragment.request(
             "mining_master",
-            Number(options.version || 0)
+            requestedVersion
         ).then(function (payload) {
-            if (isMobileOperationalRefreshUnsafe()) {
-                /* Ответ пришёл посреди жеста — применять нельзя, но и терять
-                   нельзя: иначе доска остаётся с состоянием ДО команды, и
-                   следующий жест уходит с устаревшим id (409). Одна повторная
-                   попытка после жеста; таймер и realtime остаются страховкой. */
+            var freshVersion = Number(payload && payload.version);
+            var requiredVersion = Math.max(requestedVersion, Number(miningMasterRealtimeLastVersion || 0),
+                Number(miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.version || 0));
+            if (commandToken !== dispatcherTransport.boardRefreshToken()
+                    || !Number.isSafeInteger(freshVersion) || freshVersion < requiredVersion
+                    || isMobileOperationalRefreshUnsafe()) {
+                /* За время GET могла завершиться команда, начаться новый жест
+                   или потребоваться более свежая версия. Старый ответ не
+                   меняет доску; повтор ограничен общим бюджетом попыток. */
                 markMiningMasterBoardStale();
-                scheduleMiningMasterRefreshRetry(options, 0);
+                if (!miningMasterMobileRefreshFollowUp) scheduleMiningMasterRefreshRetry(options, Number(options.refreshRetryAttempt || 0));
                 return false;
             }
             var freshShell = window.AppOperationalFragment.parseRoot(
@@ -1062,7 +1082,7 @@ document.addEventListener("DOMContentLoaded", function () {
             );
             var currentShell = document.querySelector(".mm-mobile-shell");
             if (!freshShell || !currentShell) return false;
-            var freshVersion = parseInt(payload.version || "0", 10);
+            var state = captureMobileShellState(currentShell);
             miningMasterBoardStale = false;
             if (Number.isFinite(freshVersion) && freshVersion > 0) {
                 markMiningMasterBoardCurrent(freshVersion);
@@ -1143,7 +1163,6 @@ document.addEventListener("DOMContentLoaded", function () {
     var miningMasterRealtimeHardLagLimit = 150;
     var dispatcherRealtimeHardLagLimit = 150;
     var dispatcherLocalAssignmentAppliedUntil = 0;
-    var dispatcherIncomingRefreshQueueGraceMs = 15000;
     var dispatcherSyncQueueWakeThrottleMs = 1500;
     var dispatcherLastSyncQueueWakeAt = 0;
     function wakeDispatcherSyncQueueForRefresh() {
@@ -1153,22 +1172,9 @@ document.addEventListener("DOMContentLoaded", function () {
         scheduleDispatcherSyncFlush(0);
     }
     function isDispatcherSyncQueueBlockingRefresh() {
-        if (dispatcherSyncQueueFlushing || dispatcherSyncPendingCount > 0) {
-            return true;
-        }
-        var queue = readDispatcherSyncQueue();
-        if (!queue.length) {
-            return false;
-        }
+        if (dispatcherTransport.boardRefreshToken() !== null) return false;
         wakeDispatcherSyncQueueForRefresh();
-        if (navigator && navigator.onLine === false) {
-            return true;
-        }
-        var now = Date.now();
-        return queue.some(function (item) {
-            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-            return !createdAt || now - createdAt < dispatcherIncomingRefreshQueueGraceMs;
-        });
+        return true;
     }
     function isElementRendered(node) {
         if (!node) return false;
@@ -6670,22 +6676,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v173" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v174" defer></script>
 {% endif %}
 {% endblock %}

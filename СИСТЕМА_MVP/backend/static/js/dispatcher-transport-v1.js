@@ -294,6 +294,32 @@
             }
             return records;
         }
+        // Снимок журнала на границах чтения доски. Счётчик памяти не заметил бы
+        // команду/ACK из другой вкладки, а пустая очередь не доказывает, что
+        // за время GET не успела полностью выполниться новая команда.
+        function boardRefreshToken() {
+            try {
+                var author = getCommandContext() || {};
+                function affectsBoard(request) {
+                    return owns(request) && ["actor_id", "shift_id"].every(function (field) {
+                        var original = (request.author || {})[field];
+                        return !original || String(original) === String(author[field] || "");
+                    });
+                }
+                var queue = readQueue().filter(affectsBoard);
+                var records = journalRecords().filter(function (record) { return affectsBoard(record.request); });
+                if (syncPendingCount || syncQueueFlushing || Object.keys(waitingForDependencies).length
+                        || queue.length || records.some(function (record) { return record.delivery.state === "pending"; })) return null;
+                records.sort(function (left, right) { return left.request.id.localeCompare(right.request.id); });
+                return JSON.stringify([
+                    [author.actor_id, author.access_id, author.role, author.shift_id],
+                    records
+                ]);
+            } catch (error) {
+                lastStorageError = storageError();
+                return null;
+            }
+        }
         function assignmentRecords(request) {
             return journalRecords().filter(function (record) {
                 return record.request.id !== request.id && sameAssignmentScope(request, record.request);
@@ -738,7 +764,7 @@
         return {
             queueKey: DISPATCHER_SYNC_QUEUE_KEY, journalPrefix: DISPATCHER_COMMAND_PREFIX,
             readQueue: readQueue, readOwnQueue: function () { return readQueue().filter(owns); },
-            getQueueState: getQueueState, refreshState: notifyStateChange,
+            getQueueState: getQueueState, refreshState: notifyStateChange, boardRefreshToken: boardRefreshToken,
             roleIsReadonly: roleIsReadonly, inactiveRoleError: inactiveRoleError, storageError: storageError,
             setSyncPending: setSyncPending, enqueue: enqueue, send: send, fetchWithTimeout: fetchWithTimeout,
             flush: flush, reconcileReceipt: reconcileReceipt, scheduleFlush: scheduleFlush, storePost: storePost, post: post,

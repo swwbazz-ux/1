@@ -80,6 +80,9 @@ test("refreshMobileBoardFromServer отдаёт промис, а не undefined"
     };
     const sandbox = {
         miningMasterMobileRefreshPromise: null,
+        miningMasterRealtimeLastVersion: 0,
+        miningMasterMobileRefreshFollowUpOptions: null,
+        dispatcherTransport: {boardRefreshToken: () => "unchanged"},
         document: {
             querySelector: (selector) => (selector === ".mm-mobile-shell" ? shellStub : null),
         },
@@ -241,6 +244,9 @@ test("обновление, запрошенное во время летяще�
     };
     const sandbox = {
         miningMasterMobileRefreshPromise: null,
+        miningMasterRealtimeLastVersion: 0,
+        miningMasterMobileRefreshFollowUpOptions: null,
+        dispatcherTransport: {boardRefreshToken: () => "unchanged"},
         miningMasterMobileRefreshFollowUp: null,
         document: {querySelector: (s) => (s === ".mm-mobile-shell" ? shellStub : null)},
         window: {AppOperationalFragment: {
