@@ -386,6 +386,8 @@
         };
         var storageId = [identity.role_code, identity.access_id, identity.device_id].join(":");
         var storagePromise = createStorage(options, storageId);
+        var locks = options.locks || (root.navigator && root.navigator.locks);
+        var lockName = STORAGE_PREFIX + storageId;
         var state = null;
         var committedState = null;
         var mutationTail = Promise.resolve();
@@ -432,10 +434,35 @@
             return true;
         }
 
+        function loadCommitted(stored) {
+            if (stored && !validIdentity(stored)) throw new Error("Локальный журнал принадлежит другому доступу.");
+            if (stored && (stored.schema_version !== 1 || !Array.isArray(stored.shifts))) {
+                throw new Error("Локальный журнал повреждён или имеет другую версию.");
+            }
+            state = stored || emptyState(identity);
+            committedState = clone(state);
+        }
+
         function mutate(operation) {
             var result = mutationTail.then(ready).then(function () {
-                state = clone(committedState);
-                return operation();
+                if (!locks || typeof locks.request !== "function") {
+                    var unavailable = new Error("Безопасная запись смены в этом браузере недоступна.");
+                    unavailable.code = "local_shift_lock_unavailable";
+                    throw unavailable;
+                }
+                // Never wait indefinitely for a frozen/background window. The
+                // browser owns this lock until the whole durable write settles.
+                return locks.request(lockName, {mode: "exclusive", ifAvailable: true}, function (lock) {
+                    if (!lock) {
+                        var busy = new Error("Смена сохраняется в другом окне. Повторите действие.");
+                        busy.code = "local_shift_busy";
+                        throw busy;
+                    }
+                    return storagePromise.then(function (storage) { return storage.read(); }).then(function (stored) {
+                        loadCommitted(stored);
+                        return operation();
+                    });
+                });
             });
             mutationTail = result.then(function () {}, function () {
                 state = committedState ? clone(committedState) : null;
@@ -478,12 +505,7 @@
         function ready() {
             if (readyPromise) return readyPromise;
             readyPromise = storagePromise.then(function (storage) { return storage.read(); }).then(function (stored) {
-                if (stored && !validIdentity(stored)) throw new Error("Локальный журнал принадлежит другому доступу.");
-                if (stored && (stored.schema_version !== 1 || !Array.isArray(stored.shifts))) {
-                    throw new Error("Локальный журнал повреждён или имеет другую версию.");
-                }
-                state = stored || emptyState(identity);
-                committedState = clone(state);
+                loadCommitted(stored);
                 recoverDelivery().catch(function () {});
                 return clone(committedState);
             });
@@ -687,6 +709,7 @@
 
         return {
             ready: ready,
+            refresh: function () { return mutate(function () { return clone(committedState); }); },
             currentShift: function () {
                 var shift = committedState ? findShift(committedState, committedState.current_local_shift_id) : null;
                 return shift ? clone(shift) : null;

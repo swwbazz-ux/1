@@ -1,7 +1,18 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const createLedger = require('../excavator-local-shift-v1.js');
+const createLedgerModule = require('../excavator-local-shift-v1.js');
+// These tests isolate one ledger per device; cross-window behavior is exercised
+// separately with independent VM contexts and a shared lock manager.
+function createLedger(options) {
+    const held = new Set();
+    const locks = {request(name, config, callback) {
+        if (held.has(name)) return Promise.resolve().then(() => callback(null));
+        held.add(name);
+        return Promise.resolve().then(() => callback({name})).finally(() => held.delete(name));
+    }};
+    return createLedgerModule({locks, ...options});
+}
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -538,7 +549,7 @@ test('uncommitted opening is not visible while durable write is pending', async 
     const ledger = create({adapter: {read: async () => null, write: () => new Promise(resolve => { finish = resolve; })}});
     await ledger.ready();
     const saved = ledger.recordAndQueue(opening());
-    for (let i = 0; i < 20 && !finish; i++) await Promise.resolve();
+    for (let i = 0; i < 50 && !finish; i++) await Promise.resolve();
     assert.equal(typeof finish, 'function');
     assert.equal(ledger.currentShift(), null);
     finish();
