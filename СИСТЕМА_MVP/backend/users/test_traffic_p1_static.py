@@ -100,7 +100,7 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     self.assertIn('return boardNetworkOnly(request);', script)
                     self.assertEqual(script.count('self.addEventListener("install"'), 1)
                     self.assertIn('event.waitUntil(boardInstall()', script)
-                    self.assertIn('CORE_ASSETS.concat(releaseAssets)', script)
+                    self.assertIn('CORE_ASSETS.concat(releaseAssets, dependencies)', script)
                     self.assertNotIn('Promise.allSettled', script)
                 core_assets = re.search(
                     r'const CORE_ASSETS = (\[[\s\S]*?\]);',

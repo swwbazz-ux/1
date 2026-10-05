@@ -169,7 +169,7 @@ class DispatcherServiceWorkerPushContractTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('dispatcher-desktop-shell-v180', script)
+        self.assertIn('dispatcher-desktop-shell-v181', script)
         self.assertIn('/static/js/dispatcher-transport-v1.js', script)
         self.assertIn('/static/js/dispatcher-detail-settings-v1.js', script)
         self.assertIn('/static/js/dispatcher-detail-charts-v1.js', script)

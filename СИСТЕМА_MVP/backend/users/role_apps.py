@@ -33,15 +33,50 @@ function boardDeadline(work, milliseconds, onTimeout) {
     .finally(() => clearTimeout(timer));
 }
 
+function boardShellAssetURLs(response, html) {
+  if (!boardCanCache(APP_SHELL_URL, response) ||
+      !String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html")) {
+    throw new Error("Authenticated board shell unavailable.");
+  }
+  const attribute = (tag, name) => {
+    const match = tag.match(new RegExp("\\s" + name + "\\s*=\\s*([\"'])(.*?)\\1", "i"));
+    return match ? match[2] : "";
+  };
+  const assets = new Set();
+  let expectedRole = false;
+  // Consume entire scripts so strings inside inline code are not HTML tags.
+  const tags = html.replace(/<!--[\s\S]*?-->/g, "").match(
+    /<script\b[^>]*>[\s\S]*?<\/script\s*>|<link\b[^>]*>|<main\b[^>]*>/gi
+  ) || [];
+  for (const token of tags) {
+    const tag = token.slice(0, token.indexOf(">") + 1);
+    if (/^<main\b/i.test(tag)) {
+      if (attribute(tag, "class").split(/\s+/).includes("dispatcher-shell") &&
+          attribute(tag, "data-dispatcher-command-role") === ROLE_CODE) expectedRole = true;
+      continue;
+    }
+    const source = /^<script\b/i.test(tag) ? attribute(tag, "src") :
+      attribute(tag, "rel").toLowerCase().split(/\s+/).includes("stylesheet") ? attribute(tag, "href") : "";
+    if (!source) continue;
+    const url = new URL(source.replace(/&amp;/g, "&"), response.url);
+    if (url.origin !== self.location.origin || !url.pathname.startsWith("/static/")) {
+      throw new Error("Unsupported board dependency.");
+    }
+    assets.add(url.pathname + url.search);
+  }
+  if (!expectedRole || !assets.size) throw new Error("Incomplete board shell.");
+  return Array.from(assets);
+}
+
 function boardInstall() {
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   const releaseAssets = Array.from(RELEASE_STATIC_PATHS,
     path => `${path}?v=${encodeURIComponent(STATIC_ASSET_RELEASE)}`);
-  const assets = Array.from(new Set(CORE_ASSETS.concat(releaseAssets)));
   let expired = false;
   return boardDeadline(async () => {
     const cache = await boardDeadline(() => caches.open(CACHE_NAME), 2500);
-    const entries = await Promise.all(assets.map(async url => {
+    const download = async url => {
+      if (expired) throw new Error("Board installation expired.");
       const options = {cache: "reload"};
       if (controller) options.signal = controller.signal;
       const request = new Request(url, options);
@@ -50,8 +85,19 @@ function boardInstall() {
       const response = await fetch(request, options);
       if (!response.ok || response.status === 206) throw new Error("Incomplete board asset.");
       await response.clone().arrayBuffer();
+      if (new URL(request.url).pathname.startsWith("/static/") && !boardCanCache(request, response)) {
+        throw new Error("Invalid board asset response.");
+      }
       return {request, response};
-    }));
+    };
+    const shell = await download(APP_SHELL_URL);
+    const dependencies = boardShellAssetURLs(shell.response, await shell.response.clone().text());
+    if (expired) throw new Error("Board installation expired.");
+    // Cache the exact URLs used by this HTML, including their version queries.
+    // An unversioned CORE entry cannot satisfy a versioned offline request.
+    const assets = Array.from(new Set(CORE_ASSETS.concat(releaseAssets, dependencies)))
+      .filter(url => url !== APP_SHELL_URL);
+    const entries = [shell, ...await Promise.all(assets.map(download))];
     if (expired) throw new Error("Board installation expired.");
     // Only the candidate cache is written. It is never promoted unless every
     // write succeeds; the previous worker/cache stays intact on any failure.
@@ -466,7 +512,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v179',
+        shell_version='mining-master-mobile-shell-v180',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -503,7 +549,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v180',
+        shell_version='dispatcher-desktop-shell-v181',
     ),
     RoleApp(
         role_code='settlement_clerk',

@@ -7,8 +7,8 @@ const vm = require('node:vm');
 const root = process.env.BOARD_INSTALL_TEST_ROOT || path.resolve(__dirname, '../../..');
 const origin = 'https://mine.test';
 const roles = [
-    {code: 'mining_master', file: 'assignments/views.py', constant: 'MINING_MASTER_SERVICE_WORKER_JS'},
-    {code: 'dispatcher', file: 'trips/dispatcher_pwa.py', constant: 'DISPATCHER_SERVICE_WORKER_JS'},
+    {code: 'mining_master', file: 'assignments/views.py', constant: 'MINING_MASTER_SERVICE_WORKER_JS', shell: '/mining-master/assignments/'},
+    {code: 'dispatcher', file: 'trips/dispatcher_pwa.py', constant: 'DISPATCHER_SERVICE_WORKER_JS', shell: '/dispatcher/control/'},
 ];
 function raw(file, name) {
     return fs.readFileSync(path.join(root, file), 'utf8')
@@ -18,6 +18,19 @@ const helper = raw('users/role_apps.py', 'BOARD_SERVICE_WORKER_JS');
 const release = raw('users/role_apps.py', 'RELEASE_STATIC_SERVICE_WORKER_JS')
     .replaceAll('__STATIC_ASSET_RELEASE__', 'test-release')
     .replace('__RELEASE_STATIC_PATHS__', '["/static/js/realtime-client.js","/static/js/connection-indicators-v1.js"]');
+function response(body, url, status = 200, type = 'application/javascript') {
+    const value = new Response(body, {status, headers: {'Content-Type': type}});
+    return attachURL(value, new URL(url, origin).href);
+}
+function attachURL(value, url) {
+    Object.defineProperty(value, 'url', {value: url});
+    const clone = value.clone.bind(value);
+    value.clone = () => attachURL(clone(), url);
+    return value;
+}
+function shellHTML(role, assets = '<script src="/static/js/mobile-shift-unified-v1.js?v=exact-board"></script><link href="/static/css/app.css?v=exact-board" rel="stylesheet">') {
+    return `<html><head>${assets}</head><body><main class="dispatcher-shell" data-dispatcher-command-role="${role.code}"></main></body></html>`;
+}
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return {promise, resolve, reject}; }
 async function flush() { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); }
 function observe(promise) {
@@ -28,7 +41,8 @@ function observe(promise) {
 function harness(role, options = {}) {
     const handlers = {}, timers = new Map(), calls = [], batches = [], deleted = [];
     let sequence = 0, currentBatch = null;
-    const writes = [];
+    const writes = [], entries = options.entries || new Map();
+    const key = request => new URL(typeof request === 'string' ? request : request.url, origin).href;
     const worker = raw(role.file, role.constant).replaceAll('__STATIC_ASSET_RELEASE__', 'test-release');
     const cacheName = worker.match(/const CACHE_NAME = "([^"]+)"/)[1];
     const prefix = worker.match(/const CACHE_PREFIX = "([^"]+)"/)[1];
@@ -38,7 +52,8 @@ function harness(role, options = {}) {
         [futureName, 'future-shell'], ['driver-mobile-shell-v382', 'other-role'], [prefix + 'unrecognised', 'unknown']]);
     const cache = {
         addAll(requests) { calls.push('addAll'); batches.push(requests); return options.fetch ? options.fetch(requests[0]) : Promise.resolve(); },
-        put(request, response) { writes.push(request.url); return options.put ? options.put(request, response) : Promise.resolve(); },
+        put(request, value) { writes.push(key(request)); if (options.put) return options.put(request, value); entries.set(key(request), value.clone()); return Promise.resolve(); },
+        match(request) { return Promise.resolve(entries.get(key(request))?.clone()); },
     };
     const context = {
         URL, Response, AbortController, console,
@@ -46,7 +61,7 @@ function harness(role, options = {}) {
             calls.push('fetch');
             if (!currentBatch) { currentBatch = []; batches.push(currentBatch); }
             currentBatch.push(request);
-            return options.fetch ? options.fetch(request, init) : Promise.resolve(new Response('asset'));
+            return options.fetch ? options.fetch(request, init) : Promise.resolve(defaultResponse(request));
         },
         Request: class extends Request { constructor(url, init) { super(new URL(url, origin), init); } },
         setTimeout(fn, delay) { const id = ++sequence; timers.set(id, {fn, delay}); return id; },
@@ -63,9 +78,24 @@ function harness(role, options = {}) {
             delete(name) { calls.push('delete:' + name); deleted.push(name); return options.delete ? options.delete(name) : Promise.resolve(cachesPresent.delete(name)); },
         },
     };
-    vm.createContext(context); vm.runInContext(release + '\n' + helper + '\n' + worker, context);
-    return {context, cache, cacheName, oldName, futureName, cachesPresent, calls, batches, deleted, timers, writes,
+    function defaultResponse(request) {
+        const url = new URL(key(request));
+        if (url.pathname === role.shell) return response(options.html || shellHTML(role), url.href, 200, 'text/html');
+        const type = url.pathname.endsWith('.css') ? 'text/css' : 'application/javascript';
+        const body = options.realAssets && url.pathname.startsWith('/static/')
+            ? fs.readFileSync(path.join(root, url.pathname.slice(1))) : 'asset:' + url.pathname + url.search;
+        return response(body, url.href, 200, type);
+    }
+    vm.createContext(context); vm.runInContext(options.script || release + '\n' + helper + '\n' + worker, context);
+    return {context, cache, entries, defaultResponse, cacheName, oldName, futureName, cachesPresent, calls, batches, deleted, timers, writes,
         fire(delay) { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.fn(); } },
+        start(url) {
+            let result;
+            const waits = [];
+            for (const fn of handlers.fetch || []) fn({request: new Request(new URL(url, origin)),
+                respondWith(value) { result = value; }, waitUntil(value) { waits.push(value); }});
+            return result;
+        },
         event(name, detail = {}) {
             if (name === 'install') currentBatch = null;
             const waits = [];
@@ -76,6 +106,81 @@ function harness(role, options = {}) {
 }
 for (const role of roles) {
     const check = (name, run) => test(role.code + ': ' + name, run);
+    check('fresh install reopens exact HTML dependencies after a worker restart without network', async () => {
+        const h = harness(role); await h.event('install');
+        const restarted = harness(role, {entries: h.entries, fetch: () => Promise.reject(Error('offline'))});
+        assert.equal(await (await restarted.start(role.shell)).text(), shellHTML(role));
+        for (const url of ['/static/js/mobile-shift-unified-v1.js?v=exact-board', '/static/css/app.css?v=exact-board']) {
+            const saved = await restarted.start(url);
+            assert.equal(saved.status, 200); assert.equal(await saved.text(), 'asset:' + url);
+        }
+        assert.equal((await restarted.start('/static/js/mobile-shift-unified-v1.js?v=other-board')).status, 503);
+        assert.equal(restarted.timers.size, 0);
+    });
+    check('HTML extraction preserves exact queries and ignores inline code, comments and navigation', async () => {
+        const html = shellHTML(role, `
+            <script defer src='/static/js/mobile-shift-unified-v1.js?v=one&amp;mode=two#fragment'></script>
+            <script src='/static/js/mobile-shift-unified-v1.js?v=one&amp;mode=two'></script>
+            <script>const template = '<link rel="stylesheet" href="/static/fake.css">';</script>
+            <!-- <script src="/static/comment.js"></script> -->
+            <link href='/static/css/app.css?v=two' media='all' rel='stylesheet'>
+            <link rel='manifest' href='/app.webmanifest'>
+            <a href='https://external.test/'>Help</a>`);
+        const h = harness(role, {html}); await h.event('install');
+        const urls = h.batches.flat().map(request => request.url);
+        assert.equal(urls.filter(url => url === origin + '/static/js/mobile-shift-unified-v1.js?v=one&mode=two').length, 1);
+        assert.ok(urls.includes(origin + '/static/css/app.css?v=two'));
+        assert.equal(urls.some(url => /fake|comment|external/.test(url)), false);
+    });
+    for (const failure of ['404', '206', 'HTML', 'redirect', 'wrong query']) {
+        check('invalid exact dependency (' + failure + ') cannot replace the working installation', async () => {
+            const url = '/static/js/mobile-shift-unified-v1.js?v=exact-board';
+            let h;
+            h = harness(role, {fetch(request) {
+                if (new URL(request.url).pathname !== '/static/js/mobile-shift-unified-v1.js') return Promise.resolve(h.defaultResponse(request));
+                if (failure === '404' || failure === '206') return Promise.resolve(response('bad', url, Number(failure)));
+                if (failure === 'HTML') return Promise.resolve(response('<html>Login</html>', url, 200, 'text/html'));
+                return Promise.resolve(response('wrong', failure === 'redirect' ? '/' : url + '-other'));
+            }});
+            await assert.rejects(h.event('install'));
+            assert.deepEqual(h.writes, []); assert.deepEqual(h.deleted, []);
+            assert.equal(h.cachesPresent.get(h.oldName), 'working-old-shell');
+            assert.equal(h.calls.includes('skipWaiting'), false); assert.equal(h.timers.size, 0);
+        });
+    }
+    for (const failure of ['login redirect', 'wrong role', 'not HTML', 'no dependencies', 'external dependency']) {
+        check('invalid shell (' + failure + ') is not an offline-ready installation', async () => {
+            let html = shellHTML(role), url = role.shell, type = 'text/html';
+            if (failure === 'login redirect') url = '/';
+            if (failure === 'wrong role') html = shellHTML({code: 'driver'});
+            if (failure === 'not HTML') type = 'application/json';
+            if (failure === 'no dependencies') html = shellHTML(role, '');
+            if (failure === 'external dependency') html = shellHTML(role, '<script src="https://external.test/app.js"></script>');
+            const h = harness(role, {fetch: () => Promise.resolve(response(html, url, 200, type))});
+            await assert.rejects(h.event('install'));
+            assert.deepEqual(h.writes, []); assert.equal(h.calls.includes('skipWaiting'), false);
+            assert.equal(h.cachesPresent.get(h.oldName), 'working-old-shell'); assert.equal(h.timers.size, 0);
+        });
+    }
+    check('hung exact dependency body expires, cannot write late and next install succeeds', async () => {
+        const body = deferred(); let hanging = true, h;
+        h = harness(role, {fetch(request) {
+            if (hanging && new URL(request.url).pathname === '/static/js/mobile-shift-unified-v1.js') {
+                const value = response('asset', request.url);
+                value.clone = () => ({arrayBuffer: () => body.promise});
+                return Promise.resolve(value);
+            }
+            return Promise.resolve(h.defaultResponse(request));
+        }});
+        const state = observe(h.event('install')); await flush();
+        assert.equal(state.status, 'pending'); h.fire(30000); await flush();
+        assert.equal(state.status, 'rejected'); assert.ok(h.batches[0].every(request => request.signal.aborted));
+        body.resolve(new ArrayBuffer(0)); await flush();
+        assert.deepEqual(h.writes, []); assert.equal(h.calls.includes('skipWaiting'), false);
+        hanging = false; await h.event('install');
+        assert.ok(h.entries.has(origin + '/static/js/mobile-shift-unified-v1.js?v=exact-board'));
+        assert.equal(h.timers.size, 0);
+    });
     check('hung cache open rejects install and late cache cannot start download', async () => {
         const opened = deferred(); const h = harness(role, {open: () => opened.promise});
         const state = observe(h.event('install')); await flush(); h.fire(2500); await flush();
@@ -191,3 +296,25 @@ test('Dispatcher hung skipWaiting has a finite installation failure', async () =
     const state = observe(h.event('install')); await flush(); h.fire(2500); await flush();
     assert.equal(state.status, 'rejected'); assert.deepEqual(h.deleted, []); assert.equal(h.timers.size, 0);
 });
+
+if (process.env.BOARD_RENDERED_SHELL_PATH) {
+    test('fresh authenticated rendered shell and every script/style reopen offline', async () => {
+        // Django supplies real authenticated HTML, its served worker and a list
+        // extracted independently with Python's HTMLParser (not the SW regex).
+        const fixture = JSON.parse(fs.readFileSync(process.env.BOARD_RENDERED_SHELL_PATH, 'utf8'));
+        const role = roles.find(item => item.code === fixture.role);
+        assert.ok(role); assert.ok(fixture.assets.length > 5);
+        const h = harness(role, {html: fixture.html, script: fixture.script, realAssets: true});
+        await h.event('install');
+        const cold = harness(role, {entries: h.entries, script: fixture.script, fetch: () => Promise.reject(Error('offline'))});
+        assert.equal(await (await cold.start(role.shell)).text(), fixture.html);
+        for (const asset of fixture.assets) {
+            const url = new URL(asset, origin);
+            const result = await cold.start(url.href);
+            assert.equal(result.status, 200, asset);
+            assert.deepEqual(Buffer.from(await result.arrayBuffer()), fs.readFileSync(path.join(root, url.pathname.slice(1))), asset);
+        }
+        assert.equal(cold.timers.size, 0);
+        console.log(fixture.role + ': exact offline scripts/styles = ' + fixture.assets.length);
+    });
+}

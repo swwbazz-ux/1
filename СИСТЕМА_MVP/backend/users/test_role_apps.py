@@ -1,7 +1,10 @@
 import hashlib
 import json
 import os
+import shutil
+import tempfile
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from pathlib import Path
 import subprocess
 import sys
@@ -35,6 +38,43 @@ SECURITY_ENV_NAMES = (
     'DJANGO_SESSION_COOKIE_SECURE',
     'DJANGO_CSRF_COOKIE_SECURE',
 )
+
+
+def assert_board_dependencies_reopen_offline(test_case, role_code, response):
+    """Исполняет отданный Django worker с настоящей разметкой и файлами экрана."""
+    node = shutil.which('node')
+    if not node:
+        test_case.skipTest('Node.js is required for the executable board offline contract.')
+    test_case.assertEqual(response.status_code, 200)
+    html = response.content.decode('utf-8')
+    assets = set()
+
+    class Dependencies(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'script' and attrs.get('src'):
+                assets.add(attrs['src'])
+            elif tag == 'link' and 'stylesheet' in attrs.get('rel', '').split():
+                assets.add(attrs['href'])
+
+    Dependencies().feed(html)
+    app = ROLE_APPS_BY_CODE[role_code]
+    worker = test_case.client.get(app.service_worker_url)
+    test_case.assertEqual(worker.status_code, 200)
+    fixture = {'role': role_code, 'html': html, 'assets': sorted(assets),
+               'script': worker.content.decode('utf-8')}
+    with tempfile.TemporaryDirectory(prefix='board-offline-test-') as directory:
+        target = Path(directory) / 'shell.json'
+        target.write_text(json.dumps(fixture), encoding='utf-8')
+        environment = os.environ.copy()
+        environment['BOARD_RENDERED_SHELL_PATH'] = str(target)
+        completed = subprocess.run(
+            [node, '--test', '--test-name-pattern=fresh authenticated rendered shell',
+             str(Path(settings.BASE_DIR) / 'static/js/tests/board-install-deadline.test.js')],
+            cwd=settings.BASE_DIR, env=environment, capture_output=True, text=True,
+            encoding='utf-8', timeout=30, check=False,
+        )
+    test_case.assertEqual(completed.returncode, 0, completed.stdout + '\n' + completed.stderr)
 
 
 class ProductionSecuritySettingsTests(SimpleTestCase):

@@ -33,6 +33,12 @@ from .views import build_excavator_tile, build_truck_tile
 
 
 class MiningMasterAssignmentsViewTests(TestCase):
+    def test_rendered_board_dependencies_reopen_offline(self):
+        from users.test_role_apps import assert_board_dependencies_reopen_offline
+        assert_board_dependencies_reopen_offline(
+            self, 'mining_master', self.client.get(reverse('mining_master_assignments')),
+        )
+
     def setUp(self):
         self.master_role = Role.objects.create(code='mining_master', name='Горный мастер')
         self.master = Employee.objects.create(
@@ -645,7 +651,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v179')
+        self.assertContains(response, 'mining-master-mobile-shell-v180')
         self.assertContains(response, 'dispatcher-transport-v1.js')
         self.assertContains(response, 'expected_assignment_state_id')
         self.assertContains(response, 'expected_assignment_states')
@@ -663,7 +669,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v179</span>')
+        self.assertContains(response, '>версия v180</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -720,10 +726,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v179', script)
+        self.assertIn('mining-master-mobile-shell-v180', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v179',
+            'mining-master-mobile-shell-v180',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
