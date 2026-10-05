@@ -778,6 +778,7 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 required_gid = 33
             elif path == transaction:
                 required_mode = 0o600
+                required_gid = 0
             if required_mode is None:
                 return details
             fields = list(details)
@@ -825,6 +826,11 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 ownership, nginx, hook, app_env, auth, transaction,
                 exact_digest, exact_stat, _target,
             ) = fixture
+            transaction_details = exact_stat(transaction)
+            self.assertEqual(
+                (transaction_details.st_uid, transaction_details.st_gid),
+                (0, 0),
+            )
             with self.subTest(enabled=enabled), mock.patch.object(
                 receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
             ), mock.patch.object(
