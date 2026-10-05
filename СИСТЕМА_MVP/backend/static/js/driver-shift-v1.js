@@ -1706,6 +1706,7 @@ window.bindDriverMobileShell = function () {
             context: driverOfflineContext,
             onState: function (state) {
                 renderDriverOfflineState(state);
+                if (window.DriverShiftArchive) window.DriverShiftArchive.schedule();
                 /* Путёвка ведёт свой журнал смены из тех же событий очереди. */
                 if (window.DriverManifestLocal && typeof window.DriverManifestLocal.observe === "function") {
                     try { window.DriverManifestLocal.observe(state && (state.journalEvents || state.events)); } catch (error) {}
@@ -1851,6 +1852,7 @@ window.bindDriverMobileShell = function () {
     var driverOfflineOutbox = createDriverOfflineRuntime();
     // Проекция смены шла раньше привязки экрана — чужое состояние снимаем здесь.
     window.driverDropForeignShiftState(shell);
+    if (window.DriverShiftArchive) window.DriverShiftArchive.bind(driverOfflineOutbox);
     /* Замок контракта не должен включаться из-за отсутствия сети (владелец,
        30.09.2026). Оболочка из кэша той же версии, что service worker, — её
        скрипты и воркер сверяются на месте; сервер лишь подтверждает, что не
