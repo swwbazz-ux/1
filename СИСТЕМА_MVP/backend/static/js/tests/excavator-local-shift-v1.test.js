@@ -662,3 +662,57 @@ test('unknown stored schema is rejected instead of silently replacing its histor
     await assert.rejects(create({adapter}).ready(), /другую версию/);
     assert.deepEqual(adapter.inspect(), stored);
 });
+
+test('hourly facts survive a shift change with the site UTC offset and hour rollover', async () => {
+    const ledger = create({reportUtcOffset: '+0530'});
+    const first = opening('first', 1, '2026-09-29T17:40:00.000Z');
+    await ledger.recordAndQueue(first);
+    await ledger.recordAndQueue(load(first, 'old-load', 2, '2026-09-29T18:20:00.000Z'));
+    await ledger.recordAndQueue({...first, event_id:'close-first', event_type:'excavator.shift.closed', sequence:3});
+    const next = opening('next', 4, '2026-09-29T18:35:00.000Z');
+    await ledger.recordAndQueue(next);
+    await ledger.recordAndQueue(load(next, 'next-load', 5, '2026-09-29T18:40:00.000Z'));
+    const report = await ledger.hourlyReport(null, Date.parse('2026-09-29T18:45:00.000Z'));
+    assert.equal(report.hours[0].period.label, '00:00–00:15');
+    assert.equal(report.hours[0].totals.trip_count, 1);
+    assert.equal(report.hours[1].totals.trip_count, 1);
+    assert.match(report.work_date, /30/);
+});
+
+test('aggregate without source evidence cannot double local counts', async () => {
+    const ledger = create({reportUtcOffset:'+0000'});
+    const open = opening();
+    await ledger.recordAndQueue(open);
+    await ledger.recordAndQueue(load(open, 'load', 2, '2026-09-29T00:10:00.000Z'));
+    const at = Date.parse('2026-09-29T00:15:00.000Z');
+    const server = await ledger.hourlyReport(null, at);
+    delete server.hours[0].source_event_ids;
+    const result = await ledger.hourlyReport(server, at);
+    assert.equal(result.hours[0].totals.trip_count, 1);
+    assert.equal(result.local_projection.includes_server_snapshot, false);
+});
+
+test('cancellation subtracts a covered server trip once using server classification despite local aliases', async () => {
+    const ledger = create({reportUtcOffset:'+0000'});
+    const open = opening();
+    await ledger.recordAndQueue(open);
+    for (let i=0; i<2; i++) await ledger.recordAndQueue(load(open, 'load-'+i, i+2, '2026-09-29T00:10:00.000Z'));
+    const at = Date.parse('2026-09-29T00:15:00.000Z');
+    const server = await ledger.hourlyReport(null, at);
+    Object.assign(server.hours[0], {
+        source_trip_ids:[42], source_event_ids:['load-0','load-1'], source_trip_count:1,
+        source_facts:[{trip_id:42,event_ids:['load-0','load-1'],fleet_code:'nhl',dump_point_id:9}],
+        rows:[{dump_point_id:9,dump_point:'Server point',belaz:0,nhl:1}],
+        totals:{belaz:0,nhl:1,trip_count:1},
+    });
+    for (let i=0; i<2; i++) await ledger.recordAndQueue({
+        ...load(open,'cancel-'+i,i+4,'2026-09-29T00:12:00.000Z'),
+        event_type:'excavator.trip.loaded.cancelled',
+        payload:{local_shift_id:open.local_shift_id,source_load_event_id:'load-'+i},
+    });
+    const report = await ledger.hourlyReport(server, at);
+    assert.equal(report.hours[0].totals.trip_count, 0);
+    assert.equal(report.hours[0].totals.nhl, 0);
+    assert.equal(report.hours[0].source_trip_count, 0);
+    assert.deepEqual(report.hours[0].rows, []);
+});

@@ -17,7 +17,7 @@ function payload(name = 'Сохранённый') {
         rows: [], totals: {trip_count: 0}, is_empty: true,
     }))};
 }
-function harness(fetcher, {cached = payload(), abort = true} = {}) {
+function harness(fetcher, {cached = payload(), abort = true, ledger = null} = {}) {
     const listeners = {};
     const timers = new Map();
     let nextTimer = 0;
@@ -40,13 +40,15 @@ function harness(fetcher, {cached = payload(), abort = true} = {}) {
     let requests = 0;
     const window = {setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, {fn, delay}); return id; },
         clearTimeout(id) { timers.delete(id); }, addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener() {}};
+    if (ledger) window.eoExcavatorAutonomousShift = {ledger};
     const history = {state: null, pushState(state) { this.state = state; }, back() { this.state = null; listeners.popstate(); }};
     vm.runInNewContext(source, {window, document, navigator: {onLine: true}, history, location: {href: '/work/'},
         AbortController: abort ? AbortController : undefined,
         localStorage: {getItem: k => storage.get(k), setItem: (k, value) => storage.set(k, value)},
         fetch: (...args) => { requests++; return fetcher(...args); }});
     const api = window.ExcavatorHourlyReport;
-    return {api, modal, content, subtitle, storage, timers, get requests() { return requests; },
+    return {api, modal, content, subtitle, storage, timers, shell,
+        emit(name) { if (listeners[name]) listeners[name](); }, get requests() { return requests; },
         open() { listeners.click({target: {closest: selector => selector.includes('open') ? button : null}, preventDefault() {}}); },
         close() { listeners.keydown({key: 'Escape', target: {}, preventDefault() {}}); },
         fire(delay) { const found = [...timers].find(([, t]) => t.delay === delay); assert.ok(found, `timer ${delay}`); timers.delete(found[0]); found[1].fn(); },
@@ -137,4 +139,83 @@ test('closing the report cancels the scheduled retry', async () => {
     assert.ok([...h.timers.values()].some(t => t.delay === 15000));
     h.close(); await flush();
     assert.equal(h.timers.size, 0);
+});
+
+const createLedger = require('../excavator-local-shift-v1.js');
+function reportLedger() {
+    let state = null;
+    return createLedger({accessId: 7, actorId: 12, deviceId: 'phone',
+        adapter: {read: async () => state, write: async value => { state = structuredClone(value); }},
+        locks: {request: (name, opts, callback) => Promise.resolve().then(() => callback({name}))},
+    });
+}
+function localEvent(id, sequence, type = 'excavator.trip.loaded') {
+    return {event_id: id, event_type: type, sequence, actor_id: 12, access_id: 7,
+        role_code: 'excavator_operator', device_id: 'phone', local_shift_id: 'open', equipment_id: 1,
+        occurred_at: new Date(Date.now() - 1000).toISOString(), local_trip_id: 'trip-' + id,
+        payload: {local_shift_id: 'open', dump_point_id: 4, dump_point_name: 'ККД', local_fleet_code: 'belaz'}};
+}
+function textOf(node) { return node.textContent + (node.children || []).map(textOf).join(' '); }
+async function seededLedger() {
+    const ledger = reportLedger();
+    await ledger.recordAndQueue(localEvent('open', 1, 'excavator.shift.opened'));
+    await ledger.recordAndQueue(localEvent('load', 2));
+    return ledger;
+}
+test('uncached local report renders before hung HTTP and refreshes new loads while HTTP remains pending', async () => {
+    const ledger = await seededLedger();
+    const h = harness(() => new Promise(() => {}), {cached: null, ledger});
+    h.open(); await flush();
+    assert.match(textOf(h.content), /1 рейс/);
+    assert.match(textOf(h.content), /ККД/);
+    assert.equal(h.requests, 1);
+    await ledger.recordAndQueue(localEvent('load-2', 3));
+    h.emit('excavator-local-shift-changed'); await flush();
+    assert.match(textOf(h.content), /2 рейса/);
+    assert.equal(h.requests, 1);
+    assert.equal(h.storage.size, 0, 'local projection must never overwrite the raw server cache');
+    h.fire(8000); await flush();
+    assert.match(textOf(h.content), /2 рейса/);
+    h.close();
+});
+
+test('server source IDs prevent double counting before a lost receipt arrives', async () => {
+    const ledger = await seededLedger();
+    const response = deferred();
+    const h = harness(() => response.promise, {cached: null, ledger});
+    h.open(); await flush();
+    const server = await ledger.hourlyReport(null, Date.now());
+    server.ok = true;
+    server.hours[0].source_trip_ids = [42];
+    server.hours[0].source_event_ids = ['load'];
+    response.resolve({ok: true, json: async () => server}); await flush(); await flush();
+    assert.match(textOf(h.content), /1 рейс/);
+    assert.doesNotMatch(textOf(h.content), /2 рейса/);
+    assert.equal(await ledger.confirm(await ledger.getEvent('load'), {server_ids: {trip_id: 42}}), true);
+    h.emit('excavator-local-shift-changed'); await flush();
+    assert.doesNotMatch(textOf(h.content), /2 рейса/);
+    h.close();
+});
+
+test('a late local projection cannot repaint a closed modal', async () => {
+    const ready = deferred();
+    const ledger = {ready: () => ready.promise, currentShift: () => ({equipment_id: 1}), hourlyReport: async () => payload('Поздний')};
+    const h = harness(() => new Promise(() => {}), {cached: null, ledger});
+    h.open(); h.close();
+    const before = textOf(h.content);
+    ready.resolve(); await flush();
+    assert.equal(textOf(h.content), before);
+    assert.equal(h.modal.hidden, true);
+});
+
+test('a response for the previous excavator cannot enter the new excavator cache', async () => {
+    const response = deferred();
+    const h = harness(() => response.promise, {cached: null});
+    h.open(); await flush();
+    h.shell.dataset.eoCurrentExcavatorId = '2';
+    response.resolve({ok:true, json:async () => ({...payload('Первая техника'), excavator:{id:1,name:'Первая техника'}})});
+    await flush();
+    assert.equal(h.storage.size, 0);
+    assert.doesNotMatch(h.subtitle.textContent, /Первая техника/);
+    h.close();
 });

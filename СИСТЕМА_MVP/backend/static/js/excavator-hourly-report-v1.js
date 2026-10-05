@@ -9,6 +9,7 @@
     var activeRequest = null;
     var REQUEST_TIMEOUT_MS = 8000;
     var requestGeneration = 0;
+    var projectionGeneration = 0;
     var refreshQueued = false;
     var refreshTimer = 0;
     var hourTimer = 0;
@@ -26,14 +27,18 @@
     }
 
     function cacheKey() {
-        return "eo-hourly-report-v2:" + currentExcavatorId();
+        var current = shell();
+        var access = current && current.dataset.eoAccessId;
+        return access ? "eo-hourly-report-v3:" + access + ":" + currentExcavatorId()
+            : "eo-hourly-report-v2:" + currentExcavatorId();
     }
 
     function safeCacheRead() {
         try {
             var value = localStorage.getItem(cacheKey());
             var payload = value ? JSON.parse(value) : null;
-            return validPayload(payload) ? payload : null;
+            return validPayload(payload) && (!(payload.excavator || {}).id
+                || String(payload.excavator.id) === currentExcavatorId()) ? payload : null;
         } catch (error) {
             return null;
         }
@@ -195,14 +200,37 @@
         freshness.dateTime = payload.generated_at || "";
         meta.appendChild(freshness);
         content.appendChild(meta);
-        if (offline) {
-            content.appendChild(element(
-                "p",
-                "eo-hourly-report__note",
-                "Локально сохранённые, но ещё не синхронизированные погрузки появятся после подтверждения сервера."
-            ));
+        if (payload.local_projection) {
+            content.appendChild(element("p", "eo-hourly-report__note",
+                payload.local_projection.includes_server_snapshot
+                    ? "Включены погрузки, сохранённые на этом телефоне."
+                    : "Показаны погрузки, сохранённые на этом телефоне."));
+        } else if (offline) {
+            content.appendChild(element("p", "eo-hourly-report__note",
+                "Показан последний сохранённый серверный отчёт."));
         }
         scheduleHourRefresh(payload);
+    }
+
+    function renderWithLocal(payload, offline) {
+        var generation = ++projectionGeneration;
+        var equipmentId = currentExcavatorId();
+        var key = cacheKey();
+        var controller = window.eoExcavatorAutonomousShift;
+        if (payload) renderPayload(payload, offline);
+        if (!controller || !controller.ledger) return Promise.resolve(Boolean(payload));
+        return controller.ledger.ready().then(function () {
+            var shift = controller.ledger.currentShift();
+            if (!shift || String(shift.equipment_id) !== equipmentId) return null;
+            return controller.ledger.hourlyReport(payload, Date.now());
+        }).then(function (projected) {
+            if (generation !== projectionGeneration || modal.hidden || key !== cacheKey()
+                || controller !== window.eoExcavatorAutonomousShift) return true;
+            if (!projected) return Boolean(payload);
+            renderPayload(projected, offline);
+            modal.dataset.eoHourlyState = offline ? "offline" : "ready";
+            return true;
+        }).catch(function () { return Boolean(payload); });
     }
 
     function scheduleHourRefresh(payload) {
@@ -222,6 +250,7 @@
 
     function requestReport() {
         if (!modal || modal.hidden) return Promise.resolve(false);
+        renderWithLocal(safeCacheRead(), navigator.onLine === false);
         if (inFlight) {
             refreshQueued = true;
             return inFlight;
@@ -234,6 +263,8 @@
             return Promise.resolve(false);
         }
         var generation = ++requestGeneration;
+        var requestCacheKey = cacheKey();
+        var requestEquipmentId = currentExcavatorId();
         var controller = typeof AbortController === "function" ? new AbortController() : null;
         var request = {timer: 0, cancel: null};
         var retryDelay = 250;
@@ -269,12 +300,15 @@
             });
         });
         inFlight = Promise.race([responseWork, deadline]).then(function (payload) {
-            if (generation !== requestGeneration || modal.hidden) return false;
+            if (generation !== requestGeneration || modal.hidden || requestCacheKey !== cacheKey()) return false;
+            if ((payload.excavator || {}).id && String(payload.excavator.id) !== requestEquipmentId) {
+                throw new Error("Получен отчёт другой техники");
+            }
             if (payload.schema_version !== 2 || !Array.isArray(payload.hours)) {
                 throw new Error("Получена несовместимая версия почасового отчёта");
             }
             safeCacheWrite(payload);
-            renderPayload(payload, false);
+            renderWithLocal(payload, false);
             modal.dataset.eoHourlyState = "ready";
             return true;
         }).catch(function (error) {
@@ -285,15 +319,16 @@
                 retryDelay = 15000;
             }
             var cached = safeCacheRead();
-            if (cached) {
-                renderPayload(cached, true);
-                modal.dataset.eoHourlyState = "offline";
-            } else {
-                renderState(navigator.onLine === false
-                    ? "Нет связи. Сохранённого отчёта пока нет."
-                    : (error.message || "Почасовой отчёт временно недоступен"));
-                modal.dataset.eoHourlyState = "error";
-            }
+            renderWithLocal(cached, true).then(function (rendered) {
+                if (generation !== requestGeneration || modal.hidden) return;
+                if (rendered) modal.dataset.eoHourlyState = "offline";
+                else {
+                    renderState(navigator.onLine === false
+                        ? "Нет связи. Сохранённых погрузок пока нет."
+                        : (error.message || "Почасовой отчёт временно недоступен"));
+                    modal.dataset.eoHourlyState = "error";
+                }
+            });
             return false;
         }).finally(function () {
             window.clearTimeout(request.timer);
@@ -329,21 +364,28 @@
         }
     }
 
+    function onLocalUpdate() {
+        if (modal && !modal.hidden) renderWithLocal(safeCacheRead(), navigator.onLine === false);
+    }
+
     function bindOpenLifecycle() {
         window.addEventListener("online", onLiveUpdate);
         window.addEventListener("native-connectivity-resume", onLiveUpdate);
         window.addEventListener("operational-state-refresh-applied", onLiveUpdate);
+        window.addEventListener("excavator-local-shift-changed", onLocalUpdate);
     }
 
     function unbindOpenLifecycle() {
         window.removeEventListener("online", onLiveUpdate);
         window.removeEventListener("native-connectivity-resume", onLiveUpdate);
         window.removeEventListener("operational-state-refresh-applied", onLiveUpdate);
+        window.removeEventListener("excavator-local-shift-changed", onLocalUpdate);
     }
 
     function finishClose() {
         if (!modal || modal.hidden) return;
         requestGeneration += 1;
+        projectionGeneration += 1;
         refreshQueued = false;
         window.clearTimeout(refreshTimer);
         refreshTimer = 0;
@@ -392,7 +434,7 @@
         setUnderlyingBlocked(true);
         bindOpenLifecycle();
         var cached = safeCacheRead();
-        if (cached) renderPayload(cached, navigator.onLine === false);
+        if (cached) renderWithLocal(cached, navigator.onLine === false);
         else renderState("Загружаем рейсы…");
         if (!(history.state && history.state[OPEN_STATE_KEY])) {
             var state = Object.assign({}, history.state || {});

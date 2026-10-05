@@ -10,7 +10,7 @@ from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
 
 from .excavator_hourly_report import build_excavator_hourly_report
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
 from users.role_apps import ROLE_APPS_BY_CODE
 
 
@@ -117,7 +117,7 @@ class ExcavatorHourlyReportTests(TestCase):
         self.trip(self.belaz, captured_at - timedelta(minutes=3), status=TripStatus.CANCELLED)
         self.trip(self.belaz, captured_at - timedelta(minutes=4), excavator=self.other_excavator)
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
 
         self.assertEqual(report['schema_version'], 2)
@@ -218,3 +218,29 @@ class ExcavatorHourlyReportTests(TestCase):
             work_response,
             ROLE_APPS_BY_CODE['excavator_operator'].shell_version,
         )
+
+    def test_source_evidence_contains_only_included_loads_and_preserves_classification(self):
+        captured_at = timezone.make_aware(datetime(2026, 9, 14, 11, 24))
+        active = self.trip(self.nhl, captured_at - timedelta(minutes=2), dump_point=self.point_b)
+        cancelled = self.trip(self.belaz, captured_at - timedelta(minutes=3), status=TripStatus.CANCELLED)
+        other = self.trip(self.belaz, captured_at - timedelta(minutes=4), excavator=self.other_excavator)
+        for trip, kind, event_id in [
+            (active, 'truck_loaded', 'load-active'),
+            (active, 'free_bucket_loaded', 'load-alias'),
+            (active, 'truck_unloaded', 'unload-active'),
+            (cancelled, 'truck_loaded', 'load-cancelled'),
+            (other, 'truck_loaded', 'load-other'),
+        ]:
+            TripClientAction.objects.create(trip=trip, actor=self.operator, action_type=kind, client_action_id=event_id)
+        with self.assertNumQueries(2):
+            report = build_excavator_hourly_report(self.excavator, captured_at=captured_at)
+        hour = report['hours'][0]
+        self.assertEqual(hour['source_trip_ids'], [active.pk])
+        self.assertCountEqual(hour['source_event_ids'], ['load-active', 'load-alias'])
+        self.assertEqual(len(hour['source_facts']), 1)
+        source = hour['source_facts'][0]
+        self.assertEqual(source['trip_id'], active.pk)
+        self.assertEqual(source['fleet_code'], 'nhl')
+        self.assertEqual(source['dump_point_id'], self.point_b.pk)
+        self.assertCountEqual(source['event_ids'], hour['source_event_ids'])
+        self.assertEqual(report['hours'][1]['source_event_ids'], [])

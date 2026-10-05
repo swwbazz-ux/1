@@ -193,7 +193,7 @@
             return {
                 event_id: event.event_id,
                 local_trip_id: event.local_trip_id || payload.local_trip_id || "",
-                occurred_at: event.occurred_at,
+                occurred_at: (entry.server_result || {}).effective_occurred_at || event.occurred_at,
                 truck_id: payload.truck_id || null,
                 truck_number: payload.truck_number || "",
                 fleet_code: payload.local_fleet_code || "unknown",
@@ -210,49 +210,61 @@
         return String(value).padStart(2, "0");
     }
 
-    function localHourPayload(code, title, start, end) {
+    function localHourPayload(code, title, start, end, offset) {
+        function label(date) {
+            var local = new Date(date.getTime() + offset * 60000);
+            return twoDigits(local.getUTCHours()) + ":" + twoDigits(local.getUTCMinutes());
+        }
         return {
             code: code,
             title: title,
             period: {
                 start: start.toISOString(),
                 end: end.toISOString(),
-                label: twoDigits(start.getHours()) + ":00–" + twoDigits(end.getHours()) + ":00"
+                label: label(start) + "–" + label(end)
             },
             rows: [],
             totals: {belaz: 0, nhl: 0, trip_count: 0, volume_m3: 0},
             source_trip_count: 0,
             source_trip_ids: [],
+            source_event_ids: [],
             unclassified_trip_count: 0,
             unknown_volume_trip_count: 0,
             is_empty: true
         };
     }
 
-    function emptyHourlyReport(shift, capturedAt) {
+    function emptyHourlyReport(shift, capturedAt, utcOffset) {
         var now = new Date(capturedAt || Date.now());
-        var currentStart = new Date(now.getTime());
-        currentStart.setMinutes(0, 0, 0);
+        var match = /^([+-])(\d{2}):?(\d{2})$/.exec(String(utcOffset || ""));
+        var offset = match ? (Number(match[2]) * 60 + Number(match[3])) * (match[1] === "-" ? -1 : 1) : -now.getTimezoneOffset();
+        var localNow = new Date(now.getTime() + offset * 60000);
+        var currentStart = new Date(Math.floor(localNow.getTime() / 3600000) * 3600000 - offset * 60000);
         var previousStart = new Date(currentStart.getTime() - 3600000);
         return {
             schema_version: 2,
             generated_at: now.toISOString(),
-            freshness_label: "Данные на " + twoDigits(now.getHours()) + ":" + twoDigits(now.getMinutes()),
+            freshness_label: "Данные на " + twoDigits(localNow.getUTCHours()) + ":" + twoDigits(localNow.getUTCMinutes()),
             excavator: {id: shift ? shift.equipment_id : null, name: "Экскаватор"},
-            work_date: now.toLocaleDateString("ru-RU", {day: "numeric", month: "long"}),
+            work_date: localNow.toLocaleDateString("ru-RU", {day: "numeric", month: "long", timeZone: "UTC"}),
             hours: [
-                localHourPayload("current", "Текущий час", currentStart, now),
-                localHourPayload("previous", "Предыдущий час", previousStart, currentStart)
+                localHourPayload("current", "Текущий час", currentStart, now, offset),
+                localHourPayload("previous", "Предыдущий час", previousStart, currentStart, offset)
             ],
             data_quality: {unclassified_trip_count: 0, unknown_dump_point_trip_count: 0, complete: true}
         };
     }
 
-    function rebasedHourlyReport(serverPayload, shift, capturedAt) {
-        var target = emptyHourlyReport(shift, capturedAt);
+    function rebasedHourlyReport(serverPayload, shift, capturedAt, utcOffset) {
+        var target = emptyHourlyReport(shift, capturedAt, utcOffset);
         if (!serverPayload || serverPayload.schema_version !== 2 || !Array.isArray(serverPayload.hours)) {
             return target;
         }
+        if (shift && Number((serverPayload.excavator || {}).id) !== Number(shift.equipment_id)) return target;
+        // Old aggregates without source IDs cannot be safely added to local facts.
+        if (!serverPayload.hours.every(function (hour) {
+            return Array.isArray(hour.source_trip_ids) && Array.isArray(hour.source_event_ids);
+        })) return target;
         target.excavator = clone(serverPayload.excavator || target.excavator);
         target.work_date = target.work_date || serverPayload.work_date;
         target.data_quality = clone(serverPayload.data_quality || target.data_quality);
@@ -309,10 +321,11 @@
         }
     }
 
-    function mergeHourlyReport(serverPayload, shift, facts, capturedAt) {
-        var payload = rebasedHourlyReport(serverPayload, shift, capturedAt);
+    function mergeHourlyReport(serverPayload, shift, facts, capturedAt, utcOffset) {
+        var payload = rebasedHourlyReport(serverPayload, shift, capturedAt, utcOffset);
         var coveredTrips = {};
         var coveredEvents = {};
+        var cancelledSources = {};
         (payload.hours || []).forEach(function (hour) {
             hour.rows = Array.isArray(hour.rows) ? hour.rows : [];
             (hour.source_trip_ids || []).forEach(function (id) { coveredTrips[String(id)] = hour; });
@@ -322,7 +335,17 @@
             var coveredHour = coveredEvents[String(fact.event_id || "")]
                 || (fact.server_trip_id ? coveredTrips[String(fact.server_trip_id)] : null);
             if (coveredHour) {
-                if (fact.cancelled) mergeFact(coveredHour, fact, -1);
+                if (fact.cancelled) {
+                    var source = (coveredHour.source_facts || []).find(function (item) {
+                        return (item.event_ids || []).indexOf(fact.event_id) !== -1
+                            || (fact.server_trip_id && String(item.trip_id) === String(fact.server_trip_id));
+                    });
+                    var sourceKey = source ? "trip:" + source.trip_id : "event:" + fact.event_id;
+                    if (!cancelledSources[sourceKey]) {
+                        mergeFact(coveredHour, source ? Object.assign({}, fact, source) : fact, -1);
+                        cancelledSources[sourceKey] = true;
+                    }
+                }
                 return;
             }
             if (fact.cancelled) return;
@@ -337,6 +360,7 @@
         payload.local_projection = {
             local_shift_id: shift ? shift.local_shift_id : "",
             retained_event_count: facts ? facts.length : 0,
+            includes_server_snapshot: Boolean(payload.server_generated_at),
             generated_at: new Date(capturedAt || Date.now()).toISOString()
         };
         return payload;
@@ -710,7 +734,13 @@
         function hourlyReport(serverPayload, capturedAt, localShiftId) {
             return ready().then(function () {
                 var shift = findShift(committedState, localShiftId || committedState.current_local_shift_id);
-                return mergeHourlyReport(serverPayload, shift, shift ? loadFacts(shift) : [], capturedAt);
+                var facts = [];
+                if (shift) committedState.shifts.forEach(function (candidate) {
+                    if (Number(candidate.equipment_id) === Number(shift.equipment_id)) {
+                        facts = facts.concat(loadFacts(candidate));
+                    }
+                });
+                return mergeHourlyReport(serverPayload, shift, facts, capturedAt, options.reportUtcOffset);
             });
         }
 

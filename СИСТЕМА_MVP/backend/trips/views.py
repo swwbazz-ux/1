@@ -105,7 +105,7 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from .excavator_hourly_report import build_excavator_hourly_report
+from .excavator_hourly_report import build_excavator_hourly_report, fleet_code_for_truck
 from .dispatcher_header import build_dispatcher_header_context, get_active_dispatcher_shift
 from .dispatcher_assignment_commands import (
     execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
@@ -586,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v267";
+const CACHE_NAME = "excavator-mobile-shell-v268";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,28 +600,28 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v267",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v267",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v267",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v267",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v267",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v267",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v267",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v268",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v267",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v267",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v267",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v268",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -6032,6 +6032,7 @@ def excavator_work_view(request):
     shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
     for card in truck_cards:
+        card['local_fleet_code'] = fleet_code_for_truck(card['assignment'].truck)
         truck_progress = None
         if open_shift:
             truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
