@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import inspect
@@ -9,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import stat
 import sys
 import tarfile
 import tempfile
@@ -92,9 +94,16 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             "--sse-qa-https-controller-sha256",
             https_controller_sha256 or receiver.SSE_QA_HTTPS_CONTROLLER_SHA256,
         ]
-        if cidr is not None:
+        operation_input = None
+        if mode == "apply_sse_qa_allow_cidr":
+            command.append("--sse-qa-allow-cidr-stdin")
+            operation_input = cidr
+        elif cidr is not None:
             command.extend(("--sse-qa-allow-cidr", cidr))
-        return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return subprocess.run(
+            command, input=operation_input, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
 
     def package(self, mode: str) -> Path:
         return self.root / f"{mode}.tar.gz"
@@ -126,6 +135,8 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             ("prepare_sse_qa_https", "92.50.235.178/32"),
             ("apply_sse_qa_nginx_limit", None),
             ("rollback_sse_qa_nginx_limit", None),
+            ("apply_sse_qa_allow_cidr", "203.0.113.77/32"),
+            ("restore_sse_qa_allow_cidr", None),
         ):
             with self.subTest(mode=mode):
                 built = self.build(
@@ -196,6 +207,40 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                         archive.namelist(), ["scripts/sse_qa_https_ctl.py"]
                     )
 
+    def test_allow_cidr_packages_have_exact_payload_contracts(self) -> None:
+        target = "203.0.113.77/32"
+        applied = self.build("apply_sse_qa_allow_cidr", cidr=target)
+        self.assertEqual(applied.returncode, 0, applied.stdout)
+        self.assertNotIn(target, applied.stdout)
+        manifest, payload = receiver.load_release(
+            self.package("apply_sse_qa_allow_cidr")
+        )
+        self.assertEqual(manifest["metadata"], receiver.SSE_QA_HTTPS_METADATA)
+        self.assertEqual(
+            set(payload),
+            {receiver.SSE_QA_PACKAGE_PAYLOAD, receiver.SSE_QA_ALLOW_CIDR_PAYLOAD},
+        )
+        self.assertEqual(payload[receiver.SSE_QA_ALLOW_CIDR_PAYLOAD], target.encode())
+        self.assertNotIn(target, json.dumps(manifest, sort_keys=True))
+
+        restored = self.build("restore_sse_qa_allow_cidr")
+        self.assertEqual(restored.returncode, 0, restored.stdout)
+        manifest, payload = receiver.load_release(
+            self.package("restore_sse_qa_allow_cidr")
+        )
+        self.assertEqual(manifest["metadata"], receiver.SSE_QA_HTTPS_METADATA)
+        self.assertEqual(set(payload), {receiver.SSE_QA_PACKAGE_PAYLOAD})
+
+    def test_allow_cidr_apply_rejects_missing_broad_ipv6_or_cli_value(self) -> None:
+        for target in (None, "203.0.113.0/24", "2001:db8::1/128", "203.0.113.77"):
+            with self.subTest(target=target):
+                built = self.build("apply_sse_qa_allow_cidr", cidr=target)
+                self.assertNotEqual(built.returncode, 0)
+                self.assertIn("canonical IPv4 /32 on stdin", built.stdout)
+        command_target = self.build("restore_sse_qa_allow_cidr", cidr="203.0.113.77/32")
+        self.assertNotEqual(command_target.returncode, 0)
+        self.assertIn("accepts no CIDR input", command_target.stdout)
+
     def test_receiver_rejects_arbitrary_https_payload_target(self) -> None:
         with self.assertRaisesRegex(receiver.ReleaseError, "not allowed"):
             receiver.validate_target("deploy/sse-qa/hostname.txt", "prepare_sse_qa_https")
@@ -215,7 +260,8 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 return (
                     "SSE_QA_HTTPS_INSPECT_OK dns_ipv4=match certificate=missing "
                     "renewal_hook=missing nginx_conflict=none qa=disabled "
-                    "allow_cidr=77.41.146.126/32\n",
+                    "allow_cidr=canonical_ipv4_32 nginx_limit_fix=applied "
+                    "allow_cidr_swap=none\n",
                     None,
                 )
 
@@ -339,6 +385,93 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
         ), self.assertRaisesRegex(receiver.ReleaseError, "no fixed summary"):
             receiver.run_sse_qa("apply_sse_qa_nginx_limit", payload)
 
+    def test_receiver_scopes_allow_cidr_apply_and_restore(self) -> None:
+        target = "203.0.113.77/32"
+        for mode, operation, operation_input, action, swap in (
+            (
+                "apply_sse_qa_allow_cidr", "apply-allow-cidr", target,
+                "apply", "active",
+            ),
+            (
+                "restore_sse_qa_allow_cidr", "restore-allow-cidr", None,
+                "restore", "restored",
+            ),
+        ):
+            payload = {receiver.SSE_QA_PACKAGE_PAYLOAD: self.qa_zip.read_bytes()}
+            if operation_input is not None:
+                payload[receiver.SSE_QA_ALLOW_CIDR_PAYLOAD] = target.encode("ascii")
+            seen: list[str] = []
+            inputs: list[str | None] = []
+
+            class Process:
+                returncode = 0
+
+                def __init__(self, command, **_kwargs):
+                    seen.extend(command)
+
+                def communicate(self, input=None, timeout=None):
+                    inputs.append(input)
+                    return (
+                        "SSE_QA_ALLOW_CIDR_OK "
+                        f"action={action} result=changed qa=disabled "
+                        f"swap={swap} recovery=none nginx_limit_fix=applied "
+                        "ownership=updated renewal_hook=preserved\n",
+                        None,
+                    )
+
+            with self.subTest(mode=mode), mock.patch.object(
+                receiver, "_verify_sse_qa_seed_fix_overlay",
+            ) as seed_gate, mock.patch.object(
+                receiver.subprocess, "Popen", Process,
+            ), mock.patch.object(
+                receiver, "_receiver_unified_cgroup",
+                return_value="/system.slice/receiver.service",
+            ), mock.patch.object(
+                receiver, "_sse_qa_slice_cgroup",
+                return_value=receiver.SSE_QA_SLICE_CGROUP,
+            ):
+                summary = receiver.run_sse_qa(mode, payload)
+            seed_gate.assert_called_once_with()
+            self.assertIn("--unit=sse-qa-allow-cidr.service", seen)
+            self.assertIn(operation, seen)
+            self.assertNotIn("--bundle-root", seen)
+            self.assertEqual("--allow-cidr-stdin" in seen, operation_input is not None)
+            self.assertEqual(inputs, [operation_input])
+            self.assertNotIn(target, summary)
+
+    def test_receiver_rejects_wrong_allow_cidr_summary_action(self) -> None:
+        payload = {
+            receiver.SSE_QA_PACKAGE_PAYLOAD: self.qa_zip.read_bytes(),
+            receiver.SSE_QA_ALLOW_CIDR_PAYLOAD: b"203.0.113.77/32",
+        }
+
+        class Process:
+            returncode = 0
+
+            def __init__(self, _command, **_kwargs):
+                pass
+
+            def communicate(self, input=None, timeout=None):
+                return (
+                    "SSE_QA_ALLOW_CIDR_OK action=restore result=changed qa=disabled "
+                    "swap=restored recovery=none nginx_limit_fix=applied "
+                    "ownership=updated renewal_hook=preserved\n",
+                    None,
+                )
+
+        with mock.patch.object(
+            receiver, "_verify_sse_qa_seed_fix_overlay",
+        ), mock.patch.object(
+            receiver.subprocess, "Popen", Process,
+        ), mock.patch.object(
+            receiver, "_receiver_unified_cgroup",
+            return_value="/system.slice/receiver.service",
+        ), mock.patch.object(
+            receiver, "_sse_qa_slice_cgroup",
+            return_value=receiver.SSE_QA_SLICE_CGROUP,
+        ), self.assertRaisesRegex(receiver.ReleaseError, "no fixed summary"):
+            receiver.run_sse_qa("apply_sse_qa_allow_cidr", payload)
+
     def _seed_receiver_nginx_gate(self, *, enabled: bool = False):
         gate_root = self.root / ("gate-enabled" if enabled else "gate-disabled")
         ownership_path = gate_root / "OWNERSHIP.json"
@@ -380,6 +513,7 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 "hook_sha256": receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
                 "webroot": "/var/lib/letsencrypt/sse-qa",
                 "webroot_marker_sha256": "1" * 64,
+                "allow_cidr": allow_cidr,
             },
         }
         previous_bytes = (json.dumps(previous, sort_keys=True) + "\n").encode()
@@ -449,6 +583,215 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             exact_digest, exact_stat,
         )
 
+    def _seed_receiver_allow_gate(self, *, enabled: bool = False):
+        suffix = "allow-enabled" if enabled else "allow-disabled"
+        ownership, nginx, hook, app_env, auth, exact_digest, exact_stat = (
+            self._seed_receiver_nginx_gate(enabled=False)
+        )
+        old_gate_root = ownership.parent
+        gate_root = self.root / suffix
+        gate_root.mkdir()
+        moved = {}
+        for name, old in (
+            ("OWNERSHIP.json", ownership), ("nginx.conf", nginx),
+            ("sse-qa-https-hook", hook), ("app.env", app_env),
+            ("htpasswd", auth),
+        ):
+            new = gate_root / name
+            if old.exists():
+                new.write_bytes(old.read_bytes())
+                new.chmod(stat.S_IMODE(old.stat().st_mode))
+            moved[name] = new
+        ownership = moved["OWNERSHIP.json"]
+        nginx = moved["nginx.conf"]
+        hook = moved["sse-qa-https-hook"]
+        app_env = moved["app.env"]
+        auth = moved["htpasswd"]
+        transaction = gate_root / "ALLOW_CIDR_TRANSACTION.json"
+        for child in old_gate_root.iterdir():
+            child.unlink()
+        old_gate_root.rmdir()
+
+        source_state = json.loads(ownership.read_text(encoding="utf-8"))
+        old_nginx_key = next(
+            key for key in source_state["files"] if key.endswith("/nginx.conf")
+        )
+        old_app_env_key = next(
+            key for key in source_state["files"] if key.endswith("/app.env")
+        )
+        source_state["files"][nginx.as_posix()] = source_state["files"].pop(
+            old_nginx_key
+        )
+        source_state["files"][app_env.as_posix()] = source_state["files"].pop(
+            old_app_env_key
+        )
+        source_allow = source_state["https_preparation"]["allow_cidr"]
+        source_legacy_template = receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "    client_max_body_size 2m;",
+            "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+            1,
+        ).replace(
+            "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+            "        proxy_pass http://sse_qa_wsgi;",
+            "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+            1,
+        )
+        source_legacy = source_legacy_template.replace(
+            "@@ALLOW_CIDR@@", source_allow,
+        ).encode("utf-8")
+        source_previous = json.loads(json.dumps(source_state))
+        source_previous.pop("nginx_limit_fix")
+        source_previous["files"][nginx.as_posix()] = hashlib.sha256(
+            source_legacy
+        ).hexdigest()
+        source_state["nginx_limit_fix"]["previous_ownership_sha256"] = (
+            hashlib.sha256(
+                (json.dumps(source_previous, sort_keys=True) + "\n").encode()
+            ).hexdigest()
+        )
+        source_ownership = (
+            json.dumps(source_state, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        ownership.write_bytes(source_ownership)
+        source_nginx = nginx.read_bytes()
+        target_allow = "203.0.113.77/32"
+        target_nginx = receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "@@ALLOW_CIDR@@", target_allow,
+        ).encode("utf-8")
+
+        def identity(path: Path) -> list[int | None]:
+            details = path.stat(follow_symlinks=False)
+            return [
+                stat.S_IMODE(details.st_mode),
+                details.st_uid if os.name != "nt" else None,
+                details.st_gid if os.name != "nt" else None,
+            ]
+
+        journal = {
+            "schema": receiver.SSE_QA_ALLOW_CIDR_TRANSACTION_SCHEMA,
+            "source_nginx_sha256": hashlib.sha256(source_nginx).hexdigest(),
+            "source_nginx_b64": base64.b64encode(source_nginx).decode("ascii"),
+            "source_nginx_identity": identity(nginx),
+            "source_ownership_sha256": hashlib.sha256(source_ownership).hexdigest(),
+            "source_ownership_b64": base64.b64encode(source_ownership).decode("ascii"),
+            "source_ownership_identity": identity(ownership),
+            "target_allow_cidr": target_allow,
+            "target_payload_sha256": hashlib.sha256(target_allow.encode()).hexdigest(),
+            "target_nginx_sha256": hashlib.sha256(target_nginx).hexdigest(),
+        }
+        journal_bytes = (json.dumps(journal, sort_keys=True) + "\n").encode()
+        transaction.write_bytes(journal_bytes)
+        transaction.chmod(0o600)
+        journal_sha256 = hashlib.sha256(journal_bytes).hexdigest()
+        source_limit = source_state["nginx_limit_fix"]
+        active = json.loads(json.dumps(source_state))
+        active["files"][nginx.as_posix()] = hashlib.sha256(target_nginx).hexdigest()
+        active["files"][transaction.as_posix()] = journal_sha256
+        active["https_preparation"]["allow_cidr"] = target_allow
+        active["allow_cidr_swap"] = {
+            "schema": receiver.SSE_QA_ALLOW_CIDR_SWAP_SCHEMA,
+            "version": receiver.SSE_QA_ALLOW_CIDR_SWAP_VERSION,
+            "previous_allow_cidr": source_allow,
+            "installed_allow_cidr": target_allow,
+            "previous_nginx_sha256": hashlib.sha256(source_nginx).hexdigest(),
+            "installed_nginx_sha256": hashlib.sha256(target_nginx).hexdigest(),
+            "previous_ownership_sha256": hashlib.sha256(source_ownership).hexdigest(),
+            "previous_nginx_limit_fix": json.loads(json.dumps(source_limit)),
+            "transaction_journal_path": transaction.as_posix(),
+            "transaction_journal_sha256": journal_sha256,
+            "ordinary_http_per_ip_limit": 8,
+            "static_per_ip_limit": None,
+            "realtime_total_limit": 2,
+        }
+        legacy_template = receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "    client_max_body_size 2m;",
+            "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+            1,
+        ).replace(
+            "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+            "        proxy_pass http://sse_qa_wsgi;",
+            "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+            1,
+        )
+        target_legacy = legacy_template.replace(
+            "@@ALLOW_CIDR@@", target_allow,
+        ).encode("utf-8")
+        synthetic = json.loads(json.dumps(active))
+        synthetic.pop("nginx_limit_fix")
+        synthetic["files"][nginx.as_posix()] = hashlib.sha256(
+            target_legacy
+        ).hexdigest()
+        synthetic_sha256 = hashlib.sha256(
+            (json.dumps(synthetic, sort_keys=True) + "\n").encode()
+        ).hexdigest()
+        active["nginx_limit_fix"] = {
+            "schema": receiver.SSE_QA_NGINX_LIMIT_FIX_SCHEMA,
+            "version": receiver.SSE_QA_NGINX_LIMIT_FIX_VERSION,
+            "source_template_sha256": receiver.SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256,
+            "target_template_sha256": receiver.SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+            "base_controller_sha256": receiver.SSE_QA_CONTROLLER_SHA256,
+            "runtime_sha256": receiver.SSE_QA_RUNTIME_SHA256,
+            "renewal_hook_sha256": receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
+            "previous_nginx_sha256": hashlib.sha256(target_legacy).hexdigest(),
+            "installed_nginx_sha256": hashlib.sha256(target_nginx).hexdigest(),
+            "previous_ownership_sha256": synthetic_sha256,
+            "ordinary_http_per_ip_limit": 8,
+            "static_per_ip_limit": None,
+            "realtime_total_limit": 2,
+        }
+        nginx.write_bytes(target_nginx)
+        if enabled:
+            enabled_env = app_env.read_text(encoding="utf-8").replace(
+                "SSE_PILOT_ENABLED=false", "SSE_PILOT_ENABLED=true",
+            )
+            app_env.write_bytes(enabled_env.encode("utf-8"))
+            active["files"][app_env.as_posix()] = hashlib.sha256(
+                enabled_env.encode()
+            ).hexdigest()
+            active["phase"] = "complete_enabled"
+            auth_bytes = (
+                b"qa:$2b$12$synthetic-runtime-verifier-for-gate-only-000000000000000\n"
+            )
+            auth.write_bytes(auth_bytes)
+            active["runtime_files"][auth.as_posix()] = hashlib.sha256(
+                auth_bytes
+            ).hexdigest()
+        ownership.write_bytes((json.dumps(active, sort_keys=True) + "\n").encode())
+
+        real_digest = receiver.digest
+
+        def allow_exact_digest(data: bytes) -> str:
+            if data == hook.read_bytes():
+                return receiver.SSE_QA_LEGACY_RENEWAL_HOOK_SHA256
+            return real_digest(data)
+
+        real_stat = Path.stat
+
+        def allow_exact_stat(path: Path, *args, **kwargs):
+            details = real_stat(path, *args, **kwargs)
+            required_mode = None
+            required_gid = details.st_gid
+            if path == hook:
+                required_mode = 0o755
+            elif path == auth:
+                required_mode = 0o640
+                required_gid = 33
+            elif path == transaction:
+                required_mode = 0o600
+            if required_mode is None:
+                return details
+            fields = list(details)
+            fields[0] = (details.st_mode & ~0o777) | required_mode
+            if path in {hook, auth, transaction}:
+                fields[4] = 0
+            fields[5] = required_gid
+            return os.stat_result(fields)
+
+        return (
+            ownership, nginx, hook, app_env, auth, transaction,
+            allow_exact_digest, allow_exact_stat, target_allow,
+        )
+
     def test_receiver_enable_and_smoke_gates_require_exact_fixed_overlay(self) -> None:
         for enabled in (False, True):
             fixture = self._seed_receiver_nginx_gate(enabled=enabled)
@@ -474,6 +817,119 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 receiver._verify_sse_qa_nginx_limit_fix_overlay(
                     expected_enabled=enabled,
                 )
+
+    def test_receiver_allow_gate_accepts_exact_active_and_clean_states(self) -> None:
+        for enabled in (False, True):
+            fixture = self._seed_receiver_allow_gate(enabled=enabled)
+            (
+                ownership, nginx, hook, app_env, auth, transaction,
+                exact_digest, exact_stat, _target,
+            ) = fixture
+            with self.subTest(enabled=enabled), mock.patch.object(
+                receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
+            ), mock.patch.object(
+                receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx,
+            ), mock.patch.object(
+                receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook,
+            ), mock.patch.object(
+                receiver, "SSE_QA_APP_ENV_PATH", app_env,
+            ), mock.patch.object(
+                receiver, "SSE_QA_NGINX_AUTH_PATH", auth,
+            ), mock.patch.object(
+                receiver, "SSE_QA_ALLOW_CIDR_TRANSACTION_PATH", transaction,
+            ), mock.patch.object(
+                receiver, "digest", side_effect=exact_digest,
+            ), mock.patch.object(
+                Path, "stat", autospec=True, side_effect=exact_stat,
+            ), mock.patch.object(
+                receiver, "grp",
+                mock.Mock(getgrnam=mock.Mock(return_value=mock.Mock(gr_gid=33))),
+            ):
+                receiver._verify_sse_qa_nginx_limit_fix_overlay(
+                    expected_enabled=enabled,
+                )
+                self.assertEqual(
+                    receiver._verify_sse_qa_allow_cidr_stable_state(
+                        expected_enabled=enabled,
+                    ),
+                    "active",
+                )
+
+        clean = self._seed_receiver_nginx_gate(enabled=False)
+        ownership, nginx, hook, app_env, auth, exact_digest, exact_stat = clean
+        missing_transaction = self.root / "missing-allow-transaction.json"
+        with mock.patch.object(
+            receiver, "SSE_QA_OWNERSHIP_PATH", ownership,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx,
+        ), mock.patch.object(
+            receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook,
+        ), mock.patch.object(
+            receiver, "SSE_QA_APP_ENV_PATH", app_env,
+        ), mock.patch.object(
+            receiver, "SSE_QA_NGINX_AUTH_PATH", auth,
+        ), mock.patch.object(
+            receiver, "SSE_QA_ALLOW_CIDR_TRANSACTION_PATH", missing_transaction,
+        ), mock.patch.object(
+            receiver, "digest", side_effect=exact_digest,
+        ), mock.patch.object(
+            Path, "stat", autospec=True, side_effect=exact_stat,
+        ):
+            receiver._verify_sse_qa_nginx_limit_fix_overlay(expected_enabled=False)
+            self.assertEqual(
+                receiver._verify_sse_qa_allow_cidr_stable_state(
+                    expected_enabled=False,
+                ),
+                "none",
+            )
+
+    def test_receiver_allow_gate_rejects_asymmetric_or_tampered_state(self) -> None:
+        fixture = self._seed_receiver_allow_gate(enabled=False)
+        (
+            ownership, nginx, hook, app_env, auth, transaction,
+            exact_digest, exact_stat, target,
+        ) = fixture
+
+        def patches():
+            return (
+                mock.patch.object(receiver, "SSE_QA_OWNERSHIP_PATH", ownership),
+                mock.patch.object(receiver, "SSE_QA_NGINX_CONFIG_PATH", nginx),
+                mock.patch.object(receiver, "SSE_QA_RENEWAL_HOOK_PATH", hook),
+                mock.patch.object(receiver, "SSE_QA_APP_ENV_PATH", app_env),
+                mock.patch.object(receiver, "SSE_QA_NGINX_AUTH_PATH", auth),
+                mock.patch.object(
+                    receiver, "SSE_QA_ALLOW_CIDR_TRANSACTION_PATH", transaction,
+                ),
+                mock.patch.object(receiver, "digest", side_effect=exact_digest),
+                mock.patch.object(Path, "stat", autospec=True, side_effect=exact_stat),
+            )
+
+        transaction_before = transaction.read_bytes()
+        transaction.unlink()
+        with patches()[0], patches()[1], patches()[2], patches()[3], patches()[4], patches()[5], patches()[6], patches()[7]:
+            with self.assertRaisesRegex(receiver.ReleaseError, "asymmetric"):
+                receiver._verify_sse_qa_allow_cidr_stable_state(expected_enabled=False)
+        transaction.write_bytes(transaction_before)
+        transaction.chmod(0o600)
+
+        ownership_before = ownership.read_bytes()
+        active = json.loads(ownership_before)
+        active["allow_cidr_swap"]["transaction_journal_sha256"] = "0" * 64
+        ownership.write_bytes((json.dumps(active, sort_keys=True) + "\n").encode())
+        with patches()[0], patches()[1], patches()[2], patches()[3], patches()[4], patches()[5], patches()[6], patches()[7]:
+            with self.assertRaisesRegex(receiver.ReleaseError, "active overlay"):
+                receiver._verify_sse_qa_allow_cidr_stable_state(expected_enabled=False)
+        ownership.write_bytes(ownership_before)
+
+        journal = json.loads(transaction_before)
+        journal["source_nginx_identity"][0] ^= 0o020
+        transaction.write_bytes((json.dumps(journal, sort_keys=True) + "\n").encode())
+        transaction.chmod(0o600)
+        with patches()[0], patches()[1], patches()[2], patches()[3], patches()[4], patches()[5], patches()[6], patches()[7]:
+            with self.assertRaisesRegex(receiver.ReleaseError, "identity mismatch"):
+                receiver._verify_sse_qa_allow_cidr_stable_state(expected_enabled=False)
+
+        self.assertNotIn(target, str(receiver.SSE_QA_ALLOW_CIDR_SUMMARY.pattern))
 
     def test_receiver_nginx_gate_rejects_mixed_config_or_overlay(self) -> None:
         (
@@ -563,6 +1019,8 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             ), mock.patch.object(
                 receiver, "_verify_sse_qa_nginx_limit_fix_overlay",
             ) as nginx_gate, mock.patch.object(
+                receiver, "_verify_sse_qa_allow_cidr_stable_state",
+            ) as allow_gate, mock.patch.object(
                 receiver.subprocess, "Popen", Process,
             ), mock.patch.object(
                 receiver, "_receiver_unified_cgroup",
@@ -576,8 +1034,12 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
                 nginx_gate.assert_called_once_with(
                     expected_enabled=mode == "smoke_sse_qa",
                 )
+                allow_gate.assert_called_once_with(
+                    expected_enabled=mode == "smoke_sse_qa",
+                )
             else:
                 nginx_gate.assert_not_called()
+                allow_gate.assert_not_called()
 
     def test_workflow_has_fixed_modes_confirmation_and_no_generic_server_input(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -586,12 +1048,18 @@ class HttpsReleaseProtocolTests(unittest.TestCase):
             "prepare_sse_qa_https",
             "INSPECT_SSE_QA_HTTPS",
             "PREPARE_SSE_QA_HTTPS",
+            "apply_sse_qa_allow_cidr",
+            "restore_sse_qa_allow_cidr",
+            "APPLY_SSE_QA_ALLOW_CIDR",
+            "RESTORE_SSE_QA_ALLOW_CIDR",
+            "--sse-qa-allow-cidr-stdin",
             "sse_qa_allow_cidr",
             receiver.SSE_QA_HTTPS_CONTROLLER_SHA256,
         ):
             self.assertIn(value, workflow)
         self.assertNotIn("server_command", workflow)
         self.assertNotIn("server_path", workflow)
+        self.assertNotIn('python - "$SSE_QA_ALLOW_CIDR"', workflow)
 
     def test_release_manifest_contains_no_secret_or_private_key(self) -> None:
         built = self.build("prepare_sse_qa_https", cidr="92.50.235.178/32")

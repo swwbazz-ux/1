@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -106,6 +107,7 @@ class HttpsControlTests(unittest.TestCase):
             "hook_sha256": hashlib.sha256(ctl.hook_controller_bytes()).hexdigest(),
             "webroot": ctl.ACME_WEBROOT.as_posix(),
             "webroot_marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
+            "allow_cidr": "198.51.100.42/32",
         }
         self._write_ownership_state(state)
 
@@ -992,6 +994,10 @@ class HttpsControlTests(unittest.TestCase):
             "schema": "SSE_QA_SEED_FIX_V1",
             "version": "C2 + seed-fix",
         }
+        # The installed base controller records successful disable cleanup as
+        # an explicit empty list.  Keep the fixture representative so the
+        # allow-CIDR gate cannot accidentally reject a healthy QA baseline.
+        state["cleanup_errors"] = []
         self._write_ownership_state(state)
         nginx = self._path(ctl.QA_NGINX_CONFIG)
         ownership = self._path(ctl.OWNERSHIP_PATH)
@@ -1269,6 +1275,224 @@ class HttpsControlTests(unittest.TestCase):
         self.assertIn("action=rollback result=changed", summary)
         self.assertEqual(nginx.read_bytes(), legacy_nginx)
         self.assertEqual(ownership.read_bytes(), legacy_ownership)
+
+    def test_allow_cidr_apply_repeat_restore_and_inspect_are_exact(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        journal = self._path(ctl.ALLOW_CIDR_TRANSACTION)
+        hook = self._path(ctl.HOOK_CONTROLLER)
+        target = "203.0.113.77/32"
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ), mock.patch.object(ctl.socket, "getaddrinfo", return_value=self._dns()), mock.patch.object(
+            ctl, "run", side_effect=self._run_ok,
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            source = (
+                nginx.read_bytes(), ownership.read_bytes(),
+                ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership),
+                hook.read_bytes(), hook.stat().st_mtime_ns,
+            )
+            applied = ctl.change_allow_cidr(self.root, "apply", target)
+            active = (
+                nginx.read_bytes(), ownership.read_bytes(), journal.read_bytes(),
+                stat.S_IMODE(journal.stat(follow_symlinks=False).st_mode),
+            )
+            reapplied = ctl.change_allow_cidr(self.root, "apply", target)
+            inspected = ctl.inspect(self.root)
+            restored = ctl.change_allow_cidr(self.root, "restore")
+            restore_noop = ctl.change_allow_cidr(self.root, "restore")
+
+        self.assertIn("action=apply result=changed", applied)
+        self.assertIn("action=apply result=unchanged", reapplied)
+        self.assertIn("action=restore result=changed", restored)
+        self.assertIn("action=restore result=unchanged", restore_noop)
+        self.assertNotIn(target, applied + reapplied + restored + inspected)
+        self.assertIn("allow_cidr_swap=active", inspected)
+        self.assertEqual((nginx.read_bytes(), ownership.read_bytes()), source[:2])
+        self.assertEqual(
+            (ctl._managed_file_identity(nginx), ctl._managed_file_identity(ownership)),
+            source[2:4],
+        )
+        self.assertEqual((hook.read_bytes(), hook.stat().st_mtime_ns), source[4:])
+        self.assertFalse(journal.exists())
+        if os.name != "nt":
+            self.assertEqual(active[3], 0o600)
+        active_state = json.loads(active[1])
+        self.assertEqual(
+            active_state["files"][ctl.ALLOW_CIDR_TRANSACTION.as_posix()],
+            hashlib.sha256(active[2]).hexdigest(),
+        )
+        self.assertEqual(
+            active_state["allow_cidr_swap"]["transaction_journal_sha256"],
+            hashlib.sha256(active[2]).hexdigest(),
+        )
+
+    def test_allow_cidr_different_active_target_fails_without_mutation(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            ctl.change_allow_cidr(self.root, "apply", "203.0.113.77/32")
+            active = self._snapshot()
+            with self.assertRaisesRegex(ctl.QaHttpsError, "different temporary"):
+                ctl.change_allow_cidr(self.root, "apply", "203.0.113.78/32")
+            self.assertEqual(self._snapshot(), active)
+            ctl.change_allow_cidr(self.root, "restore")
+
+    def test_allow_cidr_rejects_cleanup_error_history_before_journal(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        journal = self._path(ctl.ALLOW_CIDR_TRANSACTION)
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            state = json.loads(ownership.read_text(encoding="utf-8"))
+            state["cleanup_errors"] = ["synthetic prior disable failure"]
+            self._write_ownership_state(state)
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            before = self._snapshot()
+            with self.assertRaisesRegex(ctl.QaHttpsError, "clean disabled lifecycle"):
+                ctl.change_allow_cidr(self.root, "apply", "203.0.113.77/32")
+        self.assertEqual(self._snapshot(), before)
+        self.assertFalse(journal.exists())
+
+    def _assert_allow_cidr_apply_failure_recovers(self, failure: BaseException) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        journal = self._path(ctl.ALLOW_CIDR_TRANSACTION)
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            source = (nginx.read_bytes(), ownership.read_bytes())
+            real_replace = ctl._atomic_replace_preserving
+            calls = 0
+
+            def fail_second(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise failure
+                return real_replace(*args, **kwargs)
+
+            cancel_state = {"cancel_requested": True, "rollback_started": False}
+            with mock.patch.object(
+                ctl, "_atomic_replace_preserving", side_effect=fail_second,
+            ), self.assertRaises(type(failure)):
+                ctl.change_allow_cidr(
+                    self.root, "apply", "203.0.113.77/32", cancel_state,
+                )
+        self.assertEqual((nginx.read_bytes(), ownership.read_bytes()), source)
+        self.assertFalse(journal.exists())
+        self.assertTrue(cancel_state["rollback_started"])
+
+    def test_allow_cidr_apply_fault_restores_exact_source(self) -> None:
+        self._assert_allow_cidr_apply_failure_recovers(
+            ctl.QaHttpsError("synthetic fault")
+        )
+
+    def test_allow_cidr_apply_sigterm_restores_exact_source(self) -> None:
+        self._assert_allow_cidr_apply_failure_recovers(
+            ctl.QaHttpsCancelled("synthetic SIGTERM")
+        )
+
+    def test_allow_cidr_retained_transaction_classifies_all_pair_states(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            ctl.change_allow_cidr(self.root, "apply", "203.0.113.77/32")
+            (
+                _classification, _journal_sha256, source_nginx, source_ownership,
+                target_nginx, target_ownership,
+            ) = ctl._classify_allow_cidr_transaction(self.root)
+            pairs = {
+                "source/source": (source_nginx, source_ownership),
+                "source/target": (source_nginx, target_ownership),
+                "target/source": (target_nginx, source_ownership),
+                "target/target": (target_nginx, target_ownership),
+            }
+            for expected, (nginx_bytes, ownership_bytes) in pairs.items():
+                with self.subTest(pair=expected):
+                    nginx.write_bytes(nginx_bytes)
+                    ownership.write_bytes(ownership_bytes)
+                    self.assertEqual(
+                        ctl._classify_allow_cidr_transaction(self.root)[0], expected,
+                    )
+            nginx.write_bytes(target_nginx + b"\n")
+            before = (nginx.read_bytes(), ownership.read_bytes())
+            with self.assertRaisesRegex(ctl.QaHttpsError, "foreign nginx bytes"):
+                ctl._classify_allow_cidr_transaction(self.root)
+            self.assertEqual((nginx.read_bytes(), ownership.read_bytes()), before)
+            nginx.write_bytes(target_nginx)
+            ownership.write_bytes(target_ownership)
+            ctl.change_allow_cidr(self.root, "restore")
+
+    def test_allow_cidr_apply_recovers_each_interrupted_pair_before_reapply(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        target = "203.0.113.77/32"
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            for pair in ("source/source", "source/target", "target/source"):
+                ctl.change_allow_cidr(self.root, "apply", target)
+                (
+                    _classification, _journal_sha256, source_nginx, source_ownership,
+                    target_nginx, target_ownership,
+                ) = ctl._classify_allow_cidr_transaction(self.root)
+                nginx_side, ownership_side = pair.split("/")
+                nginx.write_bytes(
+                    source_nginx if nginx_side == "source" else target_nginx
+                )
+                ownership.write_bytes(
+                    source_ownership if ownership_side == "source" else target_ownership
+                )
+                summary = ctl.change_allow_cidr(self.root, "apply", target)
+                self.assertIn("recovery=completed", summary)
+                self.assertEqual(
+                    ctl._classify_allow_cidr_transaction(self.root)[0], "target/target",
+                )
+                ctl.change_allow_cidr(self.root, "restore")
+
+    def test_allow_cidr_restore_sigterm_completes_exact_rollback(self) -> None:
+        legacy_patch = self._limit_fix_ready()
+        nginx = self._path(ctl.QA_NGINX_CONFIG)
+        ownership = self._path(ctl.OWNERSHIP_PATH)
+        journal = self._path(ctl.ALLOW_CIDR_TRANSACTION)
+        with legacy_patch, mock.patch.object(
+            ctl, "certificate_state", return_value="valid",
+        ):
+            ctl.change_nginx_limit_fix(self.root, "apply")
+            source = (nginx.read_bytes(), ownership.read_bytes())
+            ctl.change_allow_cidr(self.root, "apply", "203.0.113.77/32")
+            real_replace = ctl._atomic_replace_preserving
+            calls = 0
+
+            def cancel_second(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise ctl.QaHttpsCancelled("synthetic restore SIGTERM")
+                return real_replace(*args, **kwargs)
+
+            cancel_state = {"cancel_requested": True, "rollback_started": False}
+            with mock.patch.object(
+                ctl, "_atomic_replace_preserving", side_effect=cancel_second,
+            ), self.assertRaises(ctl.QaHttpsCancelled):
+                ctl.change_allow_cidr(self.root, "restore", cancel_state=cancel_state)
+        self.assertTrue(cancel_state["rollback_started"])
+        self.assertEqual((nginx.read_bytes(), ownership.read_bytes()), source)
+        self.assertFalse(journal.exists())
 
     def test_source_has_no_shell_or_caller_supplied_paths(self) -> None:
         source = SOURCE.read_text(encoding="utf-8")

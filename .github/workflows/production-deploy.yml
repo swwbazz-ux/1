@@ -28,6 +28,8 @@ on:
           - prepare_sse_qa_https
           - apply_sse_qa_nginx_limit
           - rollback_sse_qa_nginx_limit
+          - apply_sse_qa_allow_cidr
+          - restore_sse_qa_allow_cidr
           - enable_sse_qa
           - smoke_sse_qa
           - disable_sse_qa
@@ -61,7 +63,7 @@ on:
         required: false
         type: string
       sse_qa_allow_cidr:
-        description: "One approved canonical IPv4 /32 for prepare_sse_qa_https only"
+        description: "One approved canonical IPv4 /32 for prepare_sse_qa_https or apply_sse_qa_allow_cidr"
         required: false
         type: string
       diagnostic_operation:
@@ -154,6 +156,8 @@ jobs:
             prepare_sse_qa_https) expected=PREPARE_SSE_QA_HTTPS ;;
             apply_sse_qa_nginx_limit) expected=APPLY_SSE_QA_NGINX_LIMIT ;;
             rollback_sse_qa_nginx_limit) expected=ROLLBACK_SSE_QA_NGINX_LIMIT ;;
+            apply_sse_qa_allow_cidr) expected=APPLY_SSE_QA_ALLOW_CIDR ;;
+            restore_sse_qa_allow_cidr) expected=RESTORE_SSE_QA_ALLOW_CIDR ;;
             enable_sse_qa) expected=ENABLE_SSE_QA ;;
             smoke_sse_qa) expected=SMOKE_SSE_QA ;;
             disable_sse_qa) expected=DISABLE_SSE_QA ;;
@@ -173,17 +177,43 @@ jobs:
           if [[ "$MODE" == "rollback" ]]; then
             [[ "$ROLLBACK_ID" =~ ^github-[A-Za-z0-9._-]+$ ]]
           fi
-          if [[ "$MODE" == "prepare_sse_qa_https" ]]; then
-            python - "$SSE_QA_ALLOW_CIDR" <<'PY'
+          if [[ "$MODE" == "prepare_sse_qa_https" || "$MODE" == "apply_sse_qa_allow_cidr" ]]; then
+            printf '%s' "$SSE_QA_ALLOW_CIDR" | python -c '
           import ipaddress
           import sys
-          value = sys.argv[1]
-          network = ipaddress.ip_network(value, strict=True)
-          if network.version != 4 or network.prefixlen != 32 or str(network) != value:
-              raise SystemExit("prepare_sse_qa_https requires one canonical IPv4 /32")
-          PY
+          value = sys.stdin.read(65)
+          try:
+              network = ipaddress.ip_network(value, strict=True)
+          except ValueError:
+              raise SystemExit("selected SSE QA operation requires one canonical IPv4 /32") from None
+          if len(value) > 64 or network.version != 4 or network.prefixlen != 32 or str(network) != value:
+              raise SystemExit("selected SSE QA operation requires one canonical IPv4 /32")
+          '
           else
             test -z "$SSE_QA_ALLOW_CIDR"
+          fi
+          if [[ "$MODE" == "apply_sse_qa_allow_cidr" || "$MODE" == "restore_sse_qa_allow_cidr" ]]; then
+            test "$APK_PROFILE" = "none"
+            test -z "$DATA_OPERATION"
+            test -z "$ROLLBACK_ID"
+            python - "$GITHUB_EVENT_PATH" "$MODE" <<'PY'
+          import json
+          import sys
+          inputs = json.load(open(sys.argv[1], encoding="utf-8")).get("inputs") or {}
+          mode = sys.argv[2]
+          expected = {
+            "diagnostic_operation": "none",
+            "diagnostic_equipment": "",
+            "diagnostic_from_utc": "",
+            "diagnostic_to_utc": "",
+            "diagnostic_max_rows": "500",
+          }
+          if any(str(inputs.get(name, "")) != value for name, value in expected.items()):
+            raise SystemExit("SSE QA allow CIDR operation rejects unrelated inputs")
+          cidr = str(inputs.get("sse_qa_allow_cidr", ""))
+          if mode == "restore_sse_qa_allow_cidr" and cidr:
+            raise SystemExit("restore_sse_qa_allow_cidr accepts no CIDR input")
+          PY
           fi
           if [[ "$MODE" == "prepare_sse_qa_host_key" ]]; then
             test "$APK_PROFILE" = "none"
@@ -379,7 +409,7 @@ jobs:
           SSE_QA_CANDIDATE_SHA: 9d336723f3dc2fc574937a57602a27b54c54fd77
           SSE_QA_CONTROLLER_SHA256: 3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44
           SSE_QA_RUNTIME_SHA256: 8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e
-          SSE_QA_HTTPS_CONTROLLER_SHA256: 3579f325d1ab6ed74c012fcca8a233a3f0bbe1ef614da4d5b3c09c17ad19051b
+          SSE_QA_HTTPS_CONTROLLER_SHA256: 0d0bb7b151f03a24382a3c723ecb21ad0791450a315248c73d6f94a4c831c7d7
           SSE_QA_ALLOW_CIDR: ${{ inputs.sse_qa_allow_cidr }}
         run: |
           set -euo pipefail
@@ -433,7 +463,7 @@ jobs:
             controller_source="$base_controller_source"
             controller_expected="$SSE_QA_CONTROLLER_SHA256"
             controller_name="sse_qa_ctl.py"
-            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" || "$MODE" == "apply_sse_qa_nginx_limit" || "$MODE" == "rollback_sse_qa_nginx_limit" ]]; then
+            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" || "$MODE" == "apply_sse_qa_nginx_limit" || "$MODE" == "rollback_sse_qa_nginx_limit" || "$MODE" == "apply_sse_qa_allow_cidr" || "$MODE" == "restore_sse_qa_allow_cidr" ]]; then
               controller_source="$https_controller_source"
               controller_expected="$SSE_QA_HTTPS_CONTROLLER_SHA256"
               controller_name="sse_qa_https_ctl.py"
@@ -476,11 +506,14 @@ jobs:
               --sse-qa-controller-sha256 "$base_controller_actual"
               --sse-qa-runtime-sha256 "$runtime_actual"
             )
-            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" || "$MODE" == "apply_sse_qa_nginx_limit" || "$MODE" == "rollback_sse_qa_nginx_limit" ]]; then
+            if [[ "$MODE" == "inspect_sse_qa_https" || "$MODE" == "prepare_sse_qa_https" || "$MODE" == "apply_sse_qa_nginx_limit" || "$MODE" == "rollback_sse_qa_nginx_limit" || "$MODE" == "apply_sse_qa_allow_cidr" || "$MODE" == "restore_sse_qa_allow_cidr" ]]; then
               args+=(--sse-qa-https-controller-sha256 "$https_controller_actual")
             fi
             if [[ "$MODE" == "prepare_sse_qa_https" ]]; then
               args+=(--sse-qa-allow-cidr "$SSE_QA_ALLOW_CIDR")
+            fi
+            if [[ "$MODE" == "apply_sse_qa_allow_cidr" ]]; then
+              args+=(--sse-qa-allow-cidr-stdin)
             fi
             if [[ "$MODE" == "install_sse_qa" ]]; then
               test -n "$SSE_QA_SECRETS_JSON_B64"
@@ -491,6 +524,9 @@ jobs:
           fi
           if [[ "$MODE" == "install_sse_qa" ]]; then
             printf '%s' "$SSE_QA_SECRETS_JSON_B64" | base64 --decode | \
+              python .github/deploy/build_release.py "${args[@]}"
+          elif [[ "$MODE" == "apply_sse_qa_allow_cidr" ]]; then
+            printf '%s' "$SSE_QA_ALLOW_CIDR" | \
               python .github/deploy/build_release.py "${args[@]}"
           else
             python .github/deploy/build_release.py "${args[@]}"

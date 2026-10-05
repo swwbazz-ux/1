@@ -14,6 +14,7 @@ There are no caller supplied paths, hostnames or commands.
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import contextmanager
 import hashlib
 import ipaddress
@@ -64,6 +65,8 @@ QA_SERVICES = (
 QA_SLICE_CGROUP = "/sse.slice/sse-qa.slice"
 PREPARE_UNIT = "sse-qa-https.service"
 NGINX_LIMIT_FIX_UNIT = "sse-qa-nginx-limit-fix.service"
+ALLOW_CIDR_UNIT = "sse-qa-allow-cidr.service"
+ALLOW_CIDR_TRANSACTION = STATE_ROOT / "ALLOW_CIDR_TRANSACTION.json"
 COMMAND_TIMEOUT = 120
 CERTBOT_TIMEOUT = 300
 ROLLBACK_COMMAND_TIMEOUT = 20
@@ -186,6 +189,9 @@ C2_NGINX_LIMIT_FIX_TEMPLATE_SHA256 = (
 )
 NGINX_LIMIT_FIX_SCHEMA = "SSE_QA_NGINX_LIMIT_FIX_V1"
 NGINX_LIMIT_FIX_VERSION = "C2 + seed-fix + nginx-limit-fix"
+ALLOW_CIDR_SWAP_SCHEMA = "SSE_QA_ALLOW_CIDR_SWAP_V1"
+ALLOW_CIDR_SWAP_VERSION = "temporary-single-ipv4-32"
+ALLOW_CIDR_TRANSACTION_SCHEMA = "SSE_QA_ALLOW_CIDR_TRANSACTION_V1"
 BASE_CONTROLLER_SHA256 = (
     "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 )
@@ -415,6 +421,10 @@ def assert_nginx_limit_fix_scope() -> None:
     _assert_qa_operation_scope(NGINX_LIMIT_FIX_UNIT, "nginx limit-fix operation")
 
 
+def assert_allow_cidr_scope() -> None:
+    _assert_qa_operation_scope(ALLOW_CIDR_UNIT, "allow CIDR operation")
+
+
 def atomic_write(path: Path, data: bytes, mode: int, *, replace: bool) -> None:
     if path.is_symlink() or (path.exists() and not replace):
         raise QaHttpsError(f"managed path already exists: {path}")
@@ -573,6 +583,52 @@ def _nginx_limit_fix_overlay(
     }
 
 
+def _allow_cidr_swap_overlay(
+    *,
+    previous_allow_cidr: str,
+    installed_allow_cidr: str,
+    previous_ownership_sha256: str,
+    previous_nginx_limit_fix: dict[str, object],
+    transaction_journal_sha256: str,
+) -> dict[str, object]:
+    previous_allow_cidr = validate_allow_cidr(previous_allow_cidr)
+    installed_allow_cidr = validate_allow_cidr(installed_allow_cidr)
+    if previous_allow_cidr == installed_allow_cidr:
+        raise QaHttpsError("temporary QA allow CIDR must differ from the installed CIDR")
+    if re.fullmatch(r"[0-9a-f]{64}", previous_ownership_sha256) is None:
+        raise QaHttpsError("previous QA ownership digest is invalid")
+    if re.fullmatch(r"[0-9a-f]{64}", transaction_journal_sha256) is None:
+        raise QaHttpsError("QA allow CIDR transaction journal digest is invalid")
+    previous_limit_pin = previous_nginx_limit_fix.get("previous_ownership_sha256")
+    if not isinstance(previous_limit_pin, str):
+        raise QaHttpsError("previous QA nginx limit-fix overlay is invalid")
+    expected_previous_limit = _nginx_limit_fix_overlay(
+        allow_cidr=previous_allow_cidr,
+        previous_ownership_sha256=previous_limit_pin,
+    )
+    if previous_nginx_limit_fix != expected_previous_limit:
+        raise QaHttpsError("previous QA nginx limit-fix overlay mismatch")
+    return {
+        "schema": ALLOW_CIDR_SWAP_SCHEMA,
+        "version": ALLOW_CIDR_SWAP_VERSION,
+        "previous_allow_cidr": previous_allow_cidr,
+        "installed_allow_cidr": installed_allow_cidr,
+        "previous_nginx_sha256": digest_bytes(
+            _render_c2_nginx_limit_fix(previous_allow_cidr).encode("utf-8")
+        ),
+        "installed_nginx_sha256": digest_bytes(
+            _render_c2_nginx_limit_fix(installed_allow_cidr).encode("utf-8")
+        ),
+        "previous_ownership_sha256": previous_ownership_sha256,
+        "previous_nginx_limit_fix": json.loads(json.dumps(previous_nginx_limit_fix)),
+        "transaction_journal_path": ALLOW_CIDR_TRANSACTION.as_posix(),
+        "transaction_journal_sha256": transaction_journal_sha256,
+        "ordinary_http_per_ip_limit": 8,
+        "static_per_ip_limit": None,
+        "realtime_total_limit": 2,
+    }
+
+
 def _nginx_contract_id(actual: str, expected: str, allow_cidr: str) -> str:
     """Classify an exact-template mismatch without exposing file content.
 
@@ -663,6 +719,58 @@ def _validate_nginx_limit_fix_ownership(
         raise QaHttpsError("QA nginx limit-fix previous ownership digest mismatch")
 
 
+def _validate_allow_cidr_swap_ownership(
+    state: dict[str, object], *, allow_cidr: str, variant: str,
+) -> str:
+    https = state.get("https_preparation")
+    if isinstance(https, dict):
+        journalled_allow = https.get("allow_cidr")
+        if journalled_allow is not None and journalled_allow != allow_cidr:
+            raise QaHttpsError("QA HTTPS and nginx allow CIDR mismatch")
+
+    overlay = state.get("allow_cidr_swap")
+    if overlay is None:
+        return "restored"
+    if variant != "applied" or not isinstance(overlay, dict):
+        raise QaHttpsError("QA allow CIDR swap requires the applied nginx limit-fix")
+    if not isinstance(https, dict) or https.get("allow_cidr") != allow_cidr:
+        raise QaHttpsError("QA allow CIDR swap HTTPS ownership mismatch")
+
+    previous_allow = overlay.get("previous_allow_cidr")
+    installed_allow = overlay.get("installed_allow_cidr")
+    previous_ownership_sha256 = overlay.get("previous_ownership_sha256")
+    previous_limit = overlay.get("previous_nginx_limit_fix")
+    transaction_journal_sha256 = overlay.get("transaction_journal_sha256")
+    if not all(isinstance(value, str) for value in (
+        previous_allow, installed_allow, previous_ownership_sha256,
+        transaction_journal_sha256,
+    )) or not isinstance(previous_limit, dict):
+        raise QaHttpsError("QA allow CIDR swap ownership overlay is invalid")
+    expected = _allow_cidr_swap_overlay(
+        previous_allow_cidr=previous_allow,
+        installed_allow_cidr=installed_allow,
+        previous_ownership_sha256=previous_ownership_sha256,
+        previous_nginx_limit_fix=previous_limit,
+        transaction_journal_sha256=transaction_journal_sha256,
+    )
+    if overlay != expected or installed_allow != allow_cidr:
+        raise QaHttpsError("QA allow CIDR swap ownership overlay mismatch")
+
+    restored = json.loads(json.dumps(state))
+    restored.pop("allow_cidr_swap", None)
+    restored_files = restored.get("files")
+    restored_https = restored.get("https_preparation")
+    if not isinstance(restored_files, dict) or not isinstance(restored_https, dict):
+        raise QaHttpsError("QA allow CIDR swap previous ownership is invalid")
+    restored_files[QA_NGINX_CONFIG.as_posix()] = expected["previous_nginx_sha256"]
+    restored_files.pop(ALLOW_CIDR_TRANSACTION.as_posix(), None)
+    restored_https["allow_cidr"] = previous_allow
+    restored["nginx_limit_fix"] = json.loads(json.dumps(previous_limit))
+    if digest_bytes(_canonical_ownership_bytes(restored)) != previous_ownership_sha256:
+        raise QaHttpsError("QA allow CIDR swap previous ownership digest mismatch")
+    return "active"
+
+
 def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     marker = rooted(root, INSTALLATION_MARKER)
     if not marker.is_file() or marker.is_symlink():
@@ -711,6 +819,33 @@ def load_disabled_installation(root: Path) -> tuple[dict[str, object], str]:
     _validate_nginx_limit_fix_ownership(
         state, allow_cidr=allow_cidr, variant=nginx_variant,
     )
+    swap_status = _validate_allow_cidr_swap_ownership(
+        state, allow_cidr=allow_cidr, variant=nginx_variant,
+    )
+    transaction = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if swap_status == "active":
+        overlay = state.get("allow_cidr_swap")
+        assert isinstance(overlay, dict)
+        if (
+            transaction.is_symlink()
+            or not transaction.is_file()
+            or (
+                os.name != "nt"
+                and stat.S_IMODE(transaction.stat().st_mode) != 0o600
+            )
+            or digest_path(transaction) != overlay.get("transaction_journal_sha256")
+            or state["files"].get(ALLOW_CIDR_TRANSACTION.as_posix())
+            != overlay.get("transaction_journal_sha256")
+        ):
+            raise QaHttpsError("QA allow CIDR transaction journal ownership mismatch")
+        if root == REAL_ROOT and (
+            transaction.stat().st_uid != 0 or transaction.stat().st_gid != 0
+        ):
+            raise QaHttpsError("QA allow CIDR transaction journal owner mismatch")
+        if _classify_allow_cidr_transaction(root)[0] != "target/target":
+            raise QaHttpsError("QA allow CIDR transaction recovery is required")
+    elif transaction.exists() or transaction.is_symlink():
+        raise QaHttpsError("QA allow CIDR transaction recovery is required")
     if root == REAL_ROOT:
         active = [
             unit for unit in QA_SERVICES
@@ -1013,7 +1148,7 @@ def renewal_hook_state(root: Path) -> str:
 
 
 def inspect(root: Path) -> str:
-    _state, allow_cidr = load_disabled_installation(root)
+    state, _allow_cidr = load_disabled_installation(root)
     _validated_allow, nginx_limit_fix = _validate_installed_nginx_variant(
         rooted(root, QA_NGINX_CONFIG).read_text(encoding="utf-8")
     )
@@ -1037,8 +1172,9 @@ def inspect(root: Path) -> str:
     return (
         "SSE_QA_HTTPS_INSPECT_OK "
         f"dns_ipv4=match certificate={certificate} renewal_hook={hook} "
-        f"nginx_conflict=none qa=disabled allow_cidr={allow_cidr} "
-        f"nginx_limit_fix={nginx_limit_fix}"
+        "nginx_conflict=none qa=disabled allow_cidr=canonical_ipv4_32 "
+        f"nginx_limit_fix={nginx_limit_fix} "
+        f"allow_cidr_swap={'active' if 'allow_cidr_swap' in state else 'none'}"
     )
 
 
@@ -1537,6 +1673,361 @@ def _restore_exact_nginx_limit_fix_pair(
         raise QaHttpsError("QA nginx limit-fix rollback byte verification failed")
 
 
+def _transaction_identity(
+    identity: tuple[int, int | None, int | None],
+) -> list[int | None]:
+    return [identity[0], identity[1], identity[2]]
+
+
+def _write_allow_cidr_transaction(
+    root: Path,
+    *,
+    source_nginx: bytes,
+    source_nginx_identity: tuple[int, int | None, int | None],
+    source_ownership: bytes,
+    source_ownership_identity: tuple[int, int | None, int | None],
+    target_allow_cidr: str,
+) -> str:
+    target_allow_cidr = validate_allow_cidr(target_allow_cidr)
+    target_nginx = _render_c2_nginx_limit_fix(target_allow_cidr).encode("utf-8")
+    payload = {
+        "schema": ALLOW_CIDR_TRANSACTION_SCHEMA,
+        "source_nginx_sha256": digest_bytes(source_nginx),
+        "source_nginx_b64": base64.b64encode(source_nginx).decode("ascii"),
+        "source_nginx_identity": _transaction_identity(source_nginx_identity),
+        "source_ownership_sha256": digest_bytes(source_ownership),
+        "source_ownership_b64": base64.b64encode(source_ownership).decode("ascii"),
+        "source_ownership_identity": _transaction_identity(source_ownership_identity),
+        "target_allow_cidr": target_allow_cidr,
+        "target_payload_sha256": digest_bytes(target_allow_cidr.encode("ascii")),
+        "target_nginx_sha256": digest_bytes(target_nginx),
+    }
+    encoded = _canonical_ownership_bytes(payload)
+    if len(encoded) > 256 * 1024:
+        raise QaHttpsError("QA allow CIDR transaction journal is too large")
+    path = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if path.is_symlink() or path.exists():
+        raise QaHttpsError("QA allow CIDR transaction journal already exists")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, raw_temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.publish-", dir=path.parent,
+    )
+    temporary = Path(raw_temporary)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        os.chmod(temporary, 0o600)
+        view = memoryview(encoded)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short allow CIDR journal write")
+            view = view[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except (FileExistsError, FileNotFoundError) as exc:
+            raise QaHttpsError(
+                "QA allow CIDR transaction journal changed before publish"
+            ) from exc
+        temporary.unlink()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+    if os.name != "nt":
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    if path.read_bytes() != encoded or (
+        os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != 0o600
+    ):
+        raise QaHttpsError("QA allow CIDR transaction journal publication failed")
+    if root == REAL_ROOT and (path.stat().st_uid != 0 or path.stat().st_gid != 0):
+        raise QaHttpsError("QA allow CIDR transaction journal owner mismatch")
+    return digest_bytes(encoded)
+
+
+def _load_allow_cidr_transaction(
+    root: Path,
+) -> tuple[dict[str, object], bytes, bytes]:
+    path = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if path.is_symlink() or not path.is_file():
+        raise QaHttpsError("QA allow CIDR transaction journal is missing or unsafe")
+    if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != 0o600:
+        raise QaHttpsError("QA allow CIDR transaction journal mode mismatch")
+    if root == REAL_ROOT and (path.stat().st_uid != 0 or path.stat().st_gid != 0):
+        raise QaHttpsError("QA allow CIDR transaction journal owner mismatch")
+    raw = path.read_bytes()
+    if not raw or len(raw) > 256 * 1024:
+        raise QaHttpsError("QA allow CIDR transaction journal size is invalid")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QaHttpsError("QA allow CIDR transaction journal is invalid") from exc
+    expected_keys = {
+        "schema",
+        "source_nginx_sha256", "source_nginx_b64", "source_nginx_identity",
+        "source_ownership_sha256", "source_ownership_b64",
+        "source_ownership_identity", "target_allow_cidr",
+        "target_payload_sha256", "target_nginx_sha256",
+    }
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != expected_keys
+        or payload.get("schema") != ALLOW_CIDR_TRANSACTION_SCHEMA
+        or raw != _canonical_ownership_bytes(payload)
+    ):
+        raise QaHttpsError("QA allow CIDR transaction journal contract mismatch")
+
+    decoded: list[bytes] = []
+    for prefix in ("source_nginx", "source_ownership"):
+        identity = payload.get(f"{prefix}_identity")
+        if (
+            not isinstance(identity, list)
+            or len(identity) != 3
+            or not isinstance(identity[0], int)
+            or any(value is not None and not isinstance(value, int) for value in identity[1:])
+        ):
+            raise QaHttpsError("QA allow CIDR transaction identity is invalid")
+        encoded_value = payload.get(f"{prefix}_b64")
+        expected_sha256 = payload.get(f"{prefix}_sha256")
+        if (
+            not isinstance(encoded_value, str)
+            or not isinstance(expected_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+        ):
+            raise QaHttpsError("QA allow CIDR transaction digest is invalid")
+        try:
+            value = base64.b64decode(encoded_value, validate=True)
+        except Exception as exc:
+            raise QaHttpsError("QA allow CIDR transaction payload is invalid") from exc
+        if digest_bytes(value) != expected_sha256:
+            raise QaHttpsError("QA allow CIDR transaction payload digest mismatch")
+        decoded.append(value)
+    target_allow = payload.get("target_allow_cidr")
+    if not isinstance(target_allow, str):
+        raise QaHttpsError("QA allow CIDR transaction target is invalid")
+    target_allow = validate_allow_cidr(target_allow)
+    if (
+        payload.get("target_payload_sha256")
+        != digest_bytes(target_allow.encode("ascii"))
+        or payload.get("target_nginx_sha256")
+        != digest_bytes(_render_c2_nginx_limit_fix(target_allow).encode("utf-8"))
+    ):
+        raise QaHttpsError("QA allow CIDR transaction target digest mismatch")
+    source_nginx, source_ownership = decoded
+    return payload, source_nginx, source_ownership
+
+
+def _remove_allow_cidr_transaction(root: Path, expected_sha256: str) -> None:
+    path = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if path.is_symlink() or not path.is_file() or digest_path(path) != expected_sha256:
+        raise QaHttpsError("QA allow CIDR transaction journal changed before removal")
+    details = path.stat(follow_symlinks=False)
+    if os.name != "nt" and stat.S_IMODE(details.st_mode) != 0o600:
+        raise QaHttpsError("QA allow CIDR transaction journal mode changed before removal")
+    if root == REAL_ROOT and (details.st_uid != 0 or details.st_gid != 0):
+        raise QaHttpsError("QA allow CIDR transaction journal owner changed before removal")
+    path.unlink()
+    if os.name != "nt":
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+
+def _build_allow_cidr_active_pair(
+    source_ownership: bytes,
+    source_nginx: bytes,
+    *,
+    target_allow_cidr: str,
+    transaction_journal_sha256: str,
+) -> tuple[bytes, bytes]:
+    try:
+        state = json.loads(source_ownership.decode("utf-8"))
+        nginx_text = source_nginx.decode("utf-8")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QaHttpsError("QA allow CIDR transaction source is invalid") from exc
+    if not isinstance(state, dict) or source_ownership != _canonical_ownership_bytes(state):
+        raise QaHttpsError("QA allow CIDR transaction source ownership is not canonical")
+    previous_allow, variant = _validate_installed_nginx_variant(nginx_text)
+    if variant != "applied":
+        raise QaHttpsError("QA allow CIDR transaction source lacks nginx limit-fix")
+    _validate_nginx_limit_fix_ownership(
+        state, allow_cidr=previous_allow, variant=variant,
+    )
+    if _validate_allow_cidr_swap_ownership(
+        state, allow_cidr=previous_allow, variant=variant,
+    ) != "restored":
+        raise QaHttpsError("QA allow CIDR transaction source already has a swap")
+    if (
+        state.get("phase") != "complete_disabled"
+        or state.get("complete") is not True
+        or state.get("schema") != OWNERSHIP_SCHEMA
+        or state.get("cleanup_errors", []) != []
+    ):
+        raise QaHttpsError("QA allow CIDR transaction source is not complete and disabled")
+    files = state.get("files")
+    https = state.get("https_preparation")
+    previous_limit = state.get("nginx_limit_fix")
+    if (
+        not isinstance(files, dict)
+        or files.get(QA_NGINX_CONFIG.as_posix()) != digest_bytes(source_nginx)
+        or ALLOW_CIDR_TRANSACTION.as_posix() in files
+        or not isinstance(https, dict)
+        or https.get("allow_cidr") != previous_allow
+        or not isinstance(previous_limit, dict)
+    ):
+        raise QaHttpsError("QA allow CIDR transaction source ownership mismatch")
+    target_allow_cidr = validate_allow_cidr(target_allow_cidr)
+    if target_allow_cidr == previous_allow:
+        raise QaHttpsError("temporary QA allow CIDR must differ from the installed CIDR")
+
+    active = json.loads(json.dumps(state))
+    active_files = active["files"]
+    active_https = active["https_preparation"]
+    assert isinstance(active_files, dict) and isinstance(active_https, dict)
+    target_nginx = _render_c2_nginx_limit_fix(target_allow_cidr).encode("utf-8")
+    active_files[QA_NGINX_CONFIG.as_posix()] = digest_bytes(target_nginx)
+    active_files[ALLOW_CIDR_TRANSACTION.as_posix()] = transaction_journal_sha256
+    active_https["allow_cidr"] = target_allow_cidr
+    active["allow_cidr_swap"] = _allow_cidr_swap_overlay(
+        previous_allow_cidr=previous_allow,
+        installed_allow_cidr=target_allow_cidr,
+        previous_ownership_sha256=digest_bytes(source_ownership),
+        previous_nginx_limit_fix=previous_limit,
+        transaction_journal_sha256=transaction_journal_sha256,
+    )
+    synthetic_legacy = json.loads(json.dumps(active))
+    synthetic_legacy.pop("nginx_limit_fix", None)
+    synthetic_files = synthetic_legacy.get("files")
+    if not isinstance(synthetic_files, dict):
+        raise QaHttpsError("QA allow CIDR synthetic ownership map is invalid")
+    synthetic_files[QA_NGINX_CONFIG.as_posix()] = digest_bytes(
+        _render_c2_nginx(target_allow_cidr).encode("utf-8")
+    )
+    active["nginx_limit_fix"] = _nginx_limit_fix_overlay(
+        allow_cidr=target_allow_cidr,
+        previous_ownership_sha256=digest_bytes(
+            _canonical_ownership_bytes(synthetic_legacy)
+        ),
+    )
+    return target_nginx, _canonical_ownership_bytes(active)
+
+
+def _classify_allow_cidr_transaction(
+    root: Path,
+) -> tuple[str, str, bytes, bytes, bytes, bytes]:
+    journal = rooted(root, ALLOW_CIDR_TRANSACTION)
+    journal_sha256 = digest_path(journal) if journal.is_file() and not journal.is_symlink() else ""
+    payload, source_nginx, source_ownership = _load_allow_cidr_transaction(root)
+    target_allow = payload.get("target_allow_cidr")
+    assert isinstance(target_allow, str)
+    target_nginx, target_ownership = _build_allow_cidr_active_pair(
+        source_ownership,
+        source_nginx,
+        target_allow_cidr=target_allow,
+        transaction_journal_sha256=journal_sha256,
+    )
+    source_state = json.loads(source_ownership.decode("utf-8"))
+    source_files = source_state.get("files") if isinstance(source_state, dict) else None
+    app_env_path = rooted(root, APP_ENV)
+    if app_env_path.is_symlink() or not app_env_path.is_file():
+        raise QaHttpsError("QA allow CIDR transaction app.env is missing or unsafe")
+    app_env = app_env_path.read_bytes()
+    try:
+        app_env_text = app_env.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise QaHttpsError("QA allow CIDR transaction app.env is not UTF-8") from exc
+    if (
+        not isinstance(source_files, dict)
+        or source_files.get(APP_ENV.as_posix()) != digest_bytes(app_env)
+        or re.findall(
+            r"(?m)^SSE_PILOT_ENABLED=(true|false)$", app_env_text
+        ) != ["false"]
+    ):
+        raise QaHttpsError("QA allow CIDR transaction requires a disabled app.env")
+    site = rooted(root, QA_NGINX_SITE)
+    if site.exists() or site.is_symlink():
+        raise QaHttpsError("QA allow CIDR transaction requires the disabled nginx site")
+    if root == REAL_ROOT:
+        active_services = [
+            unit for unit in QA_SERVICES
+            if systemctl_property(unit, "ActiveState") != "inactive"
+        ]
+        if active_services:
+            raise QaHttpsError("QA allow CIDR transaction requires inactive QA services")
+    nginx_path = rooted(root, QA_NGINX_CONFIG)
+    ownership_path = rooted(root, OWNERSHIP_PATH)
+    nginx_identity = tuple(payload["source_nginx_identity"])
+    ownership_identity = tuple(payload["source_ownership_identity"])
+    if (
+        _managed_file_identity(nginx_path) != nginx_identity
+        or _managed_file_identity(ownership_path) != ownership_identity
+    ):
+        raise QaHttpsError("QA allow CIDR transaction recovery metadata mismatch")
+    nginx_actual = nginx_path.read_bytes()
+    ownership_actual = ownership_path.read_bytes()
+    if nginx_actual not in {source_nginx, target_nginx}:
+        raise QaHttpsError("QA allow CIDR transaction recovery found foreign nginx bytes")
+    if ownership_actual not in {source_ownership, target_ownership}:
+        raise QaHttpsError("QA allow CIDR transaction recovery found foreign ownership bytes")
+    nginx_side = "source" if nginx_actual == source_nginx else "target"
+    ownership_side = "source" if ownership_actual == source_ownership else "target"
+    return (
+        f"{nginx_side}/{ownership_side}", journal_sha256,
+        source_nginx, source_ownership, target_nginx, target_ownership,
+    )
+
+
+def _restore_allow_cidr_source_pair(root: Path) -> str:
+    (
+        classification, journal_sha256, source_nginx, source_ownership,
+        target_nginx, target_ownership,
+    ) = _classify_allow_cidr_transaction(root)
+    payload, _source_nginx, _source_ownership = _load_allow_cidr_transaction(root)
+    nginx_identity = tuple(payload["source_nginx_identity"])
+    ownership_identity = tuple(payload["source_ownership_identity"])
+    nginx_path = rooted(root, QA_NGINX_CONFIG)
+    ownership_path = rooted(root, OWNERSHIP_PATH)
+    with _defer_sigterm():
+        if nginx_path.read_bytes() != source_nginx:
+            _atomic_replace_preserving(
+                nginx_path,
+                source_nginx,
+                expected_before_sha256=digest_bytes(target_nginx),
+                identity=nginx_identity,
+            )
+        if ownership_path.read_bytes() != source_ownership:
+            _atomic_replace_preserving(
+                ownership_path,
+                source_ownership,
+                expected_before_sha256=digest_bytes(target_ownership),
+                identity=ownership_identity,
+            )
+    if nginx_path.read_bytes() != source_nginx or ownership_path.read_bytes() != source_ownership:
+        raise QaHttpsError("QA allow CIDR transaction recovery verification failed")
+    _remove_allow_cidr_transaction(root, journal_sha256)
+    return classification
+
+
+def _recover_allow_cidr_transaction_for_apply(root: Path) -> str:
+    journal = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if not journal.exists() and not journal.is_symlink():
+        return "none"
+    classification = _classify_allow_cidr_transaction(root)[0]
+    if classification == "target/target":
+        return "active"
+    _restore_allow_cidr_source_pair(root)
+    return "completed"
+
+
 def change_nginx_limit_fix(
     root: Path,
     action: str,
@@ -1548,6 +2039,8 @@ def change_nginx_limit_fix(
         assert_nginx_limit_fix_scope()
 
     state, allow_cidr = load_disabled_installation(root)
+    if action == "rollback" and "allow_cidr_swap" in state:
+        raise QaHttpsError("restore the temporary QA allow CIDR before nginx limit rollback")
     https_before, hook_before, hook_mtime_before = _https_runtime_fingerprint(root)
     if hook_before != LEGACY_RENEWAL_HOOK_SHA256:
         raise QaHttpsError("QA nginx limit-fix requires the exact installed legacy renewal hook")
@@ -1668,6 +2161,166 @@ def change_nginx_limit_fix(
         f"nginx_variant={expected_variant} ordinary_per_ip=8 "
         f"static_per_ip={'none' if expected_variant == 'applied' else '8'} "
         "realtime_total=2 ownership=updated renewal_hook=preserved"
+    )
+
+
+def change_allow_cidr(
+    root: Path,
+    action: str,
+    allow_cidr: str | None = None,
+    cancel_state: dict[str, bool] | None = None,
+) -> str:
+    if action not in {"apply", "restore"}:
+        raise QaHttpsError("unsupported fixed allow CIDR action")
+    if root == REAL_ROOT:
+        assert_allow_cidr_scope()
+    if action == "apply":
+        if allow_cidr is None:
+            raise QaHttpsError("temporary QA allow CIDR is required")
+        allow_cidr = validate_allow_cidr(allow_cidr)
+    elif allow_cidr is not None:
+        raise QaHttpsError("restore QA allow CIDR accepts no input")
+
+    journal = rooted(root, ALLOW_CIDR_TRANSACTION)
+    if action == "restore":
+        if not journal.exists() and not journal.is_symlink():
+            state, _installed_allow = load_disabled_installation(root)
+            if "allow_cidr_swap" in state:
+                raise QaHttpsError("QA allow CIDR swap exists without its transaction journal")
+            return (
+                "SSE_QA_ALLOW_CIDR_OK action=restore result=unchanged qa=disabled "
+                "swap=restored recovery=none nginx_limit_fix=applied "
+                "ownership=verified renewal_hook=preserved"
+            )
+        classification = _classify_allow_cidr_transaction(root)[0]
+        recovery = "none" if classification == "target/target" else "completed"
+        _https_before, hook_before, hook_mtime_before = _https_runtime_fingerprint(root)
+        if hook_before != LEGACY_RENEWAL_HOOK_SHA256:
+            raise QaHttpsError(
+                "QA allow CIDR restore requires the exact installed legacy renewal hook"
+            )
+        try:
+            _restore_allow_cidr_source_pair(root)
+            restored_state, _restored_allow = load_disabled_installation(root)
+            if "allow_cidr_swap" in restored_state:
+                raise QaHttpsError("QA allow CIDR restore left an active overlay")
+            _https_after, hook_after, hook_mtime_after = _https_runtime_fingerprint(root)
+            if (hook_after, hook_mtime_after) != (hook_before, hook_mtime_before):
+                raise QaHttpsError("QA allow CIDR restore changed the renewal hook")
+        except BaseException as exc:
+            primary = _failure_text(exc)
+            _begin_rollback(cancel_state)
+            rollback_error: BaseException | None = None
+            if journal.exists() or journal.is_symlink():
+                try:
+                    _restore_allow_cidr_source_pair(root)
+                except BaseException as caught:
+                    rollback_error = caught
+            if rollback_error is not None:
+                raise QaHttpsError(
+                    f"primary=({primary}), rollback=incomplete "
+                    f"error={_failure_text(rollback_error)}"
+                ) from exc
+            raise
+        return (
+            "SSE_QA_ALLOW_CIDR_OK action=restore result=changed qa=disabled "
+            f"swap=restored recovery={recovery} nginx_limit_fix=applied "
+            "ownership=updated renewal_hook=preserved"
+        )
+
+    assert allow_cidr is not None
+    recovery_state = _recover_allow_cidr_transaction_for_apply(root)
+    if recovery_state == "active":
+        state, _installed_allow = load_disabled_installation(root)
+        active = state.get("allow_cidr_swap")
+        if not isinstance(active, dict) or active.get("installed_allow_cidr") != allow_cidr:
+            raise QaHttpsError("a different temporary QA allow CIDR is already active")
+        return (
+            "SSE_QA_ALLOW_CIDR_OK action=apply result=unchanged qa=disabled "
+            "swap=active recovery=none nginx_limit_fix=applied "
+            "ownership=verified renewal_hook=preserved"
+        )
+    recovery = "completed" if recovery_state == "completed" else "none"
+    state, installed_allow = load_disabled_installation(root)
+    if state.get("cleanup_errors", []) != []:
+        raise QaHttpsError("QA allow CIDR requires clean disabled lifecycle history")
+    if allow_cidr == installed_allow:
+        raise QaHttpsError("temporary QA allow CIDR must differ from the installed CIDR")
+    _https_before, hook_before, hook_mtime_before = _https_runtime_fingerprint(root)
+    if hook_before != LEGACY_RENEWAL_HOOK_SHA256:
+        raise QaHttpsError(
+            "QA allow CIDR operation requires the exact installed legacy renewal hook"
+        )
+    nginx_path = rooted(root, QA_NGINX_CONFIG)
+    ownership_path = rooted(root, OWNERSHIP_PATH)
+    nginx_before = nginx_path.read_bytes()
+    ownership_before = ownership_path.read_bytes()
+    nginx_identity = _managed_file_identity(nginx_path)
+    ownership_identity = _managed_file_identity(ownership_path)
+    nginx_after: bytes | None = None
+    ownership_after: bytes | None = None
+    mutation_started = False
+    try:
+        journal_sha256 = _write_allow_cidr_transaction(
+            root,
+            source_nginx=nginx_before,
+            source_nginx_identity=nginx_identity,
+            source_ownership=ownership_before,
+            source_ownership_identity=ownership_identity,
+            target_allow_cidr=allow_cidr,
+        )
+        nginx_after, ownership_after = _build_allow_cidr_active_pair(
+            ownership_before,
+            nginx_before,
+            target_allow_cidr=allow_cidr,
+            transaction_journal_sha256=journal_sha256,
+        )
+        with _defer_sigterm():
+            mutation_started = True
+            _atomic_replace_preserving(
+                nginx_path,
+                nginx_after,
+                expected_before_sha256=digest_bytes(nginx_before),
+                identity=nginx_identity,
+            )
+            _atomic_replace_preserving(
+                ownership_path,
+                ownership_after,
+                expected_before_sha256=digest_bytes(ownership_before),
+                identity=ownership_identity,
+            )
+        if _classify_allow_cidr_transaction(root)[0] != "target/target":
+            raise QaHttpsError("QA allow CIDR apply did not publish the exact target pair")
+        state_after, installed_after = load_disabled_installation(root)
+        if installed_after != allow_cidr or "allow_cidr_swap" not in state_after:
+            raise QaHttpsError("QA allow CIDR final ownership state mismatch")
+        _https_after, hook_after, hook_mtime_after = _https_runtime_fingerprint(root)
+        if (hook_after, hook_mtime_after) != (hook_before, hook_mtime_before):
+            raise QaHttpsError("QA allow CIDR operation changed the renewal hook")
+        if (
+            _managed_file_identity(nginx_path) != nginx_identity
+            or _managed_file_identity(ownership_path) != ownership_identity
+        ):
+            raise QaHttpsError("QA allow CIDR operation changed uid, gid or mode")
+    except BaseException as exc:
+        primary = _failure_text(exc)
+        _begin_rollback(cancel_state)
+        rollback_error: BaseException | None = None
+        try:
+            if mutation_started or journal.exists() or journal.is_symlink():
+                _restore_allow_cidr_source_pair(root)
+        except BaseException as caught:
+            rollback_error = caught
+        if rollback_error is not None:
+            raise QaHttpsError(
+                f"primary=({primary}), rollback=incomplete "
+                f"error={_failure_text(rollback_error)}"
+            ) from exc
+        raise
+    return (
+        "SSE_QA_ALLOW_CIDR_OK action=apply result=changed qa=disabled "
+        f"swap=active recovery={recovery} nginx_limit_fix=applied "
+        "ownership=updated renewal_hook=preserved"
     )
 
 
@@ -1856,6 +2509,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=(
             "inspect", "prepare", "renew-pre", "renew-post", "renew-deploy",
             "apply-nginx-limit-fix", "rollback-nginx-limit-fix",
+            "apply-allow-cidr", "restore-allow-cidr",
         ),
     )
     parser.add_argument("--allow-cidr-stdin", action="store_true")
@@ -1882,6 +2536,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     cancel_state = {"cancel_requested": False, "rollback_started": False}
     signal.signal(signal.SIGTERM, _install_cancel_handler(cancel_state))
+    if args.operation in {"apply-allow-cidr", "restore-allow-cidr"}:
+        if args.operation == "apply-allow-cidr":
+            if not args.allow_cidr_stdin:
+                raise QaHttpsError("apply allow CIDR requires one /32 on stdin")
+            allow_cidr = read_allow_cidr_stdin()
+            print(change_allow_cidr(root, "apply", allow_cidr, cancel_state))
+        else:
+            if args.allow_cidr_stdin:
+                raise QaHttpsError("restore allow CIDR accepts no input")
+            print(change_allow_cidr(root, "restore", None, cancel_state))
+        return 0
     if args.operation in {"apply-nginx-limit-fix", "rollback-nginx-limit-fix"}:
         if args.allow_cidr_stdin:
             raise QaHttpsError("nginx limit-fix accepts no input")
