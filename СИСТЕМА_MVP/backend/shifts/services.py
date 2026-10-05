@@ -2052,6 +2052,35 @@ def validate_excavator_close_confirmation(token, shift, employee, **payload):
         )
 
 
+def validate_excavator_device_close_confirmation(confirmation, shift, *, local_shift_id='', **payload):
+    """Explicit operator acknowledgement retained in an authenticated F3 event.
+
+    Unlike the online challenge this has no delivery-time expiry. It confirms
+    only the exact readings, starting hours, capacity and warnings shown on the
+    device. Callers must already have resolved the event's original own shift.
+    """
+    def canonical(value):
+        return None if value is None else format(Decimal(value).normalize(), 'f')
+
+    expected = {
+        'version': 1, 'accepted': True,
+        'shift_ref': f'local:{local_shift_id}' if local_shift_id else f'server:{shift.pk}',
+        'equipment_id': shift.equipment_id,
+        'fuel': canonical(payload['end_fuel']),
+        'fuel_percent': canonical(payload['submitted_fuel_percent']),
+        'engine_hours': canonical(payload['end_engine_hours']),
+        'start_engine_hours': canonical(shift.start_engine_hours),
+        'fuel_capacity_l': canonical(payload['fuel_capacity_l']),
+        'warning_codes': [warning['code'] for warning in payload['warnings']],
+    }
+    if (not isinstance(confirmation, dict) or confirmation.get('accepted') is not True
+            or type(confirmation.get('version')) is not int or confirmation != expected):
+        raise ExcavatorShiftError(
+            'Показания или условия смены отличаются от подтверждённых на телефоне.',
+            status=422, code='confirmation_context_changed',
+        )
+
+
 def existing_shift_action_payload(
     action_type,
     client_action_id,
@@ -2345,6 +2374,8 @@ def close_excavator_shift(
     fuel_limit_override=None,
     submitted_fuel_percent=None,
     confirmation_token='',
+    device_confirmation=None,
+    local_shift_id='',
     expected_shift_id=None,
     occurred_at=None,
 ):
@@ -2457,7 +2488,11 @@ def close_excavator_shift(
         'client_action_id': client_action_id,
         'warnings': warnings,
     }
-    if confirmation_token:
+    if device_confirmation is not None:
+        validate_excavator_device_close_confirmation(
+            device_confirmation, shift, local_shift_id=local_shift_id, **confirmation_payload,
+        )
+    elif confirmation_token:
         validate_excavator_close_confirmation(
             confirmation_token,
             shift,

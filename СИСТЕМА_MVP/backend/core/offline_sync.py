@@ -3401,6 +3401,8 @@ def _process_shift_closed(access, normalized, *, role_code):
                 client_action_id=normalized['event_id'],
                 submitted_fuel_percent=payload.get('fuel_percent'),
                 confirmation_token=str(payload.get('confirmation_token') or ''),
+                device_confirmation=payload.get('reading_confirmation'),
+                local_shift_id=normalized.get('local_shift_id') or '',
                 expected_shift_id=shift.id,
                 occurred_at=normalized['occurred_at'],
             )

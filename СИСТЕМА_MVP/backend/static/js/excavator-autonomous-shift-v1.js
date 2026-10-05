@@ -1,6 +1,42 @@
 (function (root) {
     "use strict";
     function copy(value) { return JSON.parse(JSON.stringify(value)); }
+    function reviewClose(payload, basis) {
+        function number(value, name, optional) {
+            if (optional && (value == null || String(value).trim() === "")) return null;
+            var result = Number(String(value == null ? "" : value).trim().replace(/\s/g, "").replace(",", "."));
+            if (value == null || String(value).trim() === "" || !Number.isFinite(result) || result < 0
+                || result > 99999999 || (!optional && !Number.isInteger(result))) {
+                throw new Error(name + ": проверьте показание (от 0 до 99 999 999).");
+            }
+            return result;
+        }
+        var fuel = number(payload.fuel, "Топливо");
+        var hours = number(payload.engine_hours, "Моточасы");
+        var percent = number(payload.fuel_percent, "Топливо, %", true);
+        var capacity = number(basis.fuel_capacity_l, "Вместимость бака", true);
+        var start = number(basis.start_engine_hours, "Начальные моточасы", true);
+        if (!capacity) throw new Error("Вместимость топливного бака не настроена.");
+        if (percent !== null && (!Number.isInteger(percent) || Math.round(capacity * percent / 100) !== fuel)) {
+            throw new Error("Проценты и рассчитанные литры не совпадают.");
+        }
+        var warnings = [];
+        function warning(code, field, title, message) { warnings.push({code: code, field: field, title: title, message: message}); }
+        if (fuel > capacity) warning("fuel_above_capacity", "fuel", "Топливо выше вместимости бака",
+            "Вместимость бака: " + capacity + " л. Введено: " + fuel + " л. Превышение: " + (fuel - capacity) + " л.");
+        if (start === null) warning("engine_hours_start_missing", "engine_hours", "Нет начального показания моточасов",
+            "Введено на конец: " + hours + " м/ч; сравнить разницу невозможно.");
+        else if (hours < start) warning("engine_hours_decreased", "engine_hours", "Моточасы меньше начального показания",
+            "На начало: " + start + " м/ч. Введено: " + hours + " м/ч. Разница: " + (hours - start) + " м/ч.");
+        else if (hours - start > 12) warning("engine_hours_delta_high", "engine_hours", "Моточасы за смену выросли больше чем на 12",
+            "На начало: " + start + " м/ч. Введено: " + hours + " м/ч. Разница: " + (hours - start) + " м/ч.");
+        return {warnings: warnings, confirmation: {
+            version: 1, accepted: true, shift_ref: String(basis.shift_ref), equipment_id: Number(basis.equipment_id),
+            fuel: String(fuel), fuel_percent: percent === null ? null : String(percent), engine_hours: String(hours),
+            start_engine_hours: start === null ? null : String(start), fuel_capacity_l: String(capacity),
+            warning_codes: warnings.map(function (item) { return item.code; })
+        }};
+    }
     function latestContext(shift) {
         return (shift && shift.events || []).map(function (entry) { return entry.event; })
             .filter(function (event) { return event.event_type === "excavator.work_context.changed"; })
@@ -58,6 +94,16 @@
                     }
                 }
                 if (event.event_type === "excavator.shift.closed") {
+                    if (event.payload.reading_confirmation) {
+                        var review = reviewClose(event.payload, {
+                            shift_ref: "local:" + current.local_shift_id, equipment_id: current.equipment_id,
+                            start_engine_hours: current.readings.engine_hours,
+                            fuel_capacity_l: event.payload.fuel_capacity_l
+                        });
+                        if (JSON.stringify(review.confirmation) !== JSON.stringify(event.payload.reading_confirmation)) {
+                            throw new Error("Показания или смена изменились. Подтвердите закрытие ещё раз.");
+                        }
+                    }
                     current.events.forEach(function (entry) { dependencies.push(entry.event.event_id); });
                 }
                 event.depends_on = dependencies.filter(function (id, index, all) {
@@ -151,5 +197,7 @@
         };
     }
     root.createExcavatorAutonomousShift = create;
+    root.reviewExcavatorShiftClose = reviewClose;
+    create.reviewClose = reviewClose;
     if (typeof module !== "undefined") module.exports = create;
 })(typeof window !== "undefined" ? window : globalThis);
