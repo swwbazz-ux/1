@@ -14,6 +14,7 @@
         var onServerError = options.onServerError || function () {};
         var onStateChange = options.onStateChange || function () {};
         var onAcknowledged = options.onAcknowledged || function () {};
+        var onDependenciesBlocked = options.onDependenciesBlocked || function () {};
         var fetchRequest = options.fetch || function (url, init) { return global.fetch(url, init); };
         var getCommandContext = options.getCommandContext || function () {
             var shell = global.document && (global.document.querySelector(".mm-mobile-shell[data-dispatcher-command-access-id]")
@@ -39,6 +40,7 @@
         var lastStorageError = null;
         var receiptInFlight = null;
         var receiptNextCheck = Object.create(null);
+        var notifiedBlocked = Object.create(null);
 
         // Старые v1/v2 не имеют достаточного контекста для автоповтора.
         // Сохраняем их без изменений: обновление не вправе уничтожать исходник.
@@ -429,6 +431,86 @@
                         && Object.prototype.hasOwnProperty.call(parents[0].delivery.receipt.assignment_state_ids, String(ref.truck_id)));
             });
         }
+        function reconcileRejectedDependencies() {
+            if (roleIsReadonly()) return;
+            var records = journalRecords(), author = getCommandContext() || {};
+            function current(request) {
+                return receiptSupported(request) && !incompleteContext(request)
+                    && ["actor_id", "access_id", "role", "shift_id"].every(function (field) {
+                        return String(request.author[field]) === String(author[field] || "");
+                    });
+            }
+            function provenRejection(record) {
+                var delivery = record.delivery;
+                // Только сохранённый окончательный отказ. Held, 409 и пропавший
+                // ответ не доказывают, что действие не было принято сервером.
+                return current(record.request) && delivery.state === "rejected"
+                    && delivery.receipt && delivery.receipt.ok === false
+                    && delivery.lastError && delivery.lastError.status === 400;
+            }
+            var frontier = records.filter(provenRejection).map(function (record) { return record.request.id; });
+            if (!frontier.length) return;
+            var roots = Object.create(null), byClientId = Object.create(null), children = Object.create(null);
+            frontier.forEach(function (id) { roots[id] = id; });
+            records.forEach(function (record) {
+                var id = record.request.data && record.request.data.client_action_id;
+                if (id) (byClientId[id] || (byClientId[id] = [])).push(record);
+            });
+            records.forEach(function (record) {
+                if (!current(record.request) || ["pending", "blocked"].indexOf(record.delivery.state) === -1
+                        || record.delivery.attempts || inFlight[record.request.id]) return;
+                dependencyRefs(record.request).forEach(function (ref) {
+                    var parents = (byClientId[ref.client_action_id] || []).filter(function (parent) {
+                        return isReferenceParent(record.request, ref, parent.request);
+                    });
+                    if (parents.length !== 1) return;
+                    var parentId = parents[0].request.id;
+                    (children[parentId] || (children[parentId] = [])).push(record.request.id);
+                });
+            });
+            // Обход без рекурсии: длинная сохранённая цепочка не переполняет
+            // стек и не перечитывается целиком для каждого потомка.
+            for (var index = 0; index < frontier.length; index += 1) {
+                var parentId = frontier[index];
+                (children[parentId] || []).forEach(function (id) {
+                    if (roots[id]) return;
+                    roots[id] = roots[parentId];
+                    frontier.push(id);
+                });
+            }
+            var changed = false, blocked = [];
+            try {
+                records.forEach(function (record) {
+                    if (!current(record.request) || ["pending", "blocked"].indexOf(record.delivery.state) === -1
+                            || record.delivery.attempts || inFlight[record.request.id]) return;
+                    var rootId = roots[record.request.id];
+                    if (!rootId) return;
+                    var latest = readRecord(record.request.id);
+                    if (!latest || JSON.stringify(latest.request) !== JSON.stringify(record.request)
+                            || ["pending", "blocked"].indexOf(latest.delivery.state) === -1 || latest.delivery.attempts) return;
+                    if (latest.delivery.state === "pending") {
+                        latest.delivery = Object.assign({}, latest.delivery, {
+                            state: "blocked", blockedAt: Date.now(), blockedBy: rootId,
+                            lastError: {code: "command_dependency_rejected", message:
+                                "Связанные распоряжения не выполнены: предыдущее действие отклонено. Расстановка будет сверена с сервером."}
+                        });
+                        // Исходник и ссылки остаются прежними; у потомка нет
+                        // выдуманной серверной квитанции и нет нового HTTP.
+                        saveRecord(latest);
+                        record.delivery = latest.delivery;
+                        changed = true;
+                    }
+                    if (!notifiedBlocked[record.request.id]) blocked.push(record.request.id);
+                });
+            } finally {
+                if (changed) mirrorQueue();
+            }
+            if (changed) lastStorageError = null;
+            if (blocked.length) {
+                blocked.forEach(function (id) { notifiedBlocked[id] = true; });
+                try { onDependenciesBlocked({commandIds: blocked}); } catch (callbackError) {}
+            }
+        }
         function waitForDependencies(request) {
             if (waitingForDependencies[request.id]) return waitingForDependencies[request.id];
             var timer = null, stopped = false;
@@ -444,6 +526,7 @@
                                 error.code = "command_author_mismatch";
                                 throw error;
                             }
+                            reconcileRejectedDependencies();
                             var saved = readRecord(request.id);
                             if (saved && saved.delivery.state !== "pending" || dependencyReady(request)) {
                                 stopped = true; resolve(); return;
@@ -624,6 +707,7 @@
             if (inFlight[request.id]) return inFlight[request.id];
             var record;
             try {
+                reconcileRejectedDependencies();
                 record = readRecord(request.id);
                 if (!record) {
                     // Legacy без автора не получает нынешнего автора при переносе.
@@ -637,7 +721,7 @@
                 if (record.delivery.state !== "pending") {
                     var heldError = new Error(record.delivery.lastError && record.delivery.lastError.message || "Результат сохранённого действия пока не подтверждён.");
                     heldError.isServerResponse = true;
-                    heldError.code = "command_" + record.delivery.state;
+                    heldError.code = record.delivery.state === "blocked" ? "command_dependency_rejected" : "command_" + record.delivery.state;
                     return Promise.reject(heldError);
                 }
                 if (!dependencyReady(record.request)) {
@@ -678,6 +762,7 @@
                     }
                     try { saveRecord(original); } catch (storageFailure) { lastStorageError = storageError(); }
                 }
+                try { reconcileRejectedDependencies(); } catch (storageFailure) { lastStorageError = storageError(); }
                 mirrorQueue();
                 throw error;
             }).finally(function () {
@@ -691,7 +776,7 @@
         function flushCommands() {
             if (roleIsReadonly() || syncQueueFlushing) { notifyStateChange(); return Promise.resolve(); }
             var queue;
-            try { queue = readQueue(); } catch (error) {
+            try { reconcileRejectedDependencies(); queue = readQueue(); } catch (error) {
                 lastStorageError = storageError(); notifyStateChange(); return Promise.resolve();
             }
             function replayable(item) {
