@@ -336,7 +336,7 @@ test('OFF-08: receipt mapping does not remove facts and covering server projecti
     assert.equal(shiftSummary.volume_m3, 49.4);
 });
 
-test('OFF-09: IndexedDB failure falls back, both storages unavailable reject without false success', async () => {
+test('OFF-09: missing IndexedDB supports localStorage, inaccessible replicas reject without false success', async () => {
     const values = new Map();
     const storage = {
         getItem: (key) => values.has(key) ? values.get(key) : null,
@@ -344,7 +344,7 @@ test('OFF-09: IndexedDB failure falls back, both storages unavailable reject wit
     };
     const brokenIndexedDB = {open() { throw new Error('idb blocked'); }};
     const fallback = createLedger({
-        indexedDB: brokenIndexedDB, localStorage: storage, outbox: fakeOutbox(),
+        localStorage: storage, outbox: fakeOutbox(),
         accessId: 7, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
     });
     await fallback.ready();
@@ -359,7 +359,7 @@ test('OFF-09: IndexedDB failure falls back, both storages unavailable reject wit
     await assert.rejects(unavailable.ready(), /хранилище недоступно/i);
 });
 
-test('OFF-09: successful IndexedDB writes are mirrored for a later fallback-only restart', async () => {
+test('OFF-09: an inaccessible replica blocks restart until both copies can be compared', async () => {
     const values = new Map();
     const storage = {
         getItem: (key) => values.has(key) ? values.get(key) : null,
@@ -378,10 +378,9 @@ test('OFF-09: successful IndexedDB writes are mirrored for a later fallback-only
         localStorage: storage, outbox: fakeOutbox(),
         accessId: 7, actorId: 12, roleCode: 'excavator_operator', deviceId: 'off-c1-device',
     });
-    await restarted.ready();
-
-    assert.equal(await restarted.storageKind(), 'localStorage');
-    assert.equal(restarted.currentShift().local_shift_id, 'shift-local-1');
+    await assert.rejects(restarted.ready(), /хранилище недоступно/i);
+    assert.equal(restarted.currentShift(), null);
+    assert.equal(JSON.parse([...values.values()][0]).shifts[0].local_shift_id, 'shift-local-1');
 });
 
 test('OFF-10: another identity cannot open the stored ledger', async () => {
@@ -715,4 +714,129 @@ test('cancellation subtracts a covered server trip once using server classificat
     assert.equal(report.hours[0].totals.nhl, 0);
     assert.equal(report.hours[0].source_trip_count, 0);
     assert.deepEqual(report.hours[0].rows, []);
+});
+
+function faultStorage() {
+    const control = {row:null, unavailable:false, hangOpen:false, hangWrite:false, aborted:0, closed:0, late:[], opens:[]};
+    const db = {
+        objectStoreNames:{contains:()=>true}, close(){control.closed++;},
+        transaction(name, mode) {
+            let aborted = false;
+            const tx = {
+                abort(){aborted=true;control.aborted++;if(tx.onabort)tx.onabort();},
+                objectStore(){return {
+                    get(){const r={};if(control.hangRead)return r;queueMicrotask(()=>{r.result=control.row;if(r.onsuccess)r.onsuccess();});return r;},
+                    put(row){
+                        const commit=()=>{if(aborted)return;control.row=clone(row);if(tx.oncomplete)tx.oncomplete();};
+                        if(control.hangWrite) control.late.push(commit); else queueMicrotask(commit);
+                    },
+                };},
+            };
+            return tx;
+        },
+    };
+    control.indexedDB={open(){
+        if(control.unavailable)throw Error('unavailable');
+        const r={result:db};control.opens.push(r);
+        if(!control.hangOpen)queueMicrotask(()=>r.onsuccess&&r.onsuccess());
+        return r;
+    }};
+    const values=new Map();
+    control.mirrorUnavailable=false;control.mirrorWriteFails=false;
+    control.localStorage={
+        getItem(key){if(control.mirrorUnavailable)throw Error('unavailable');return values.get(key)||null;},
+        setItem(key,value){if(control.mirrorUnavailable||control.mirrorWriteFails)throw Error('quota');values.set(key,value);},
+    };
+    control.values=values;
+    control.ledger=()=>createLedger({indexedDB:control.indexedDB,localStorage:control.localStorage,
+        storageTimeoutMs:15,accessId:7,actorId:12,deviceId:'off-c1-device'});
+    return control;
+}
+
+test('hung IndexedDB open expires, late success closes without a transaction, same ledger can retry', async () => {
+    const f=faultStorage();f.hangOpen=true;
+    const ledger=f.ledger();
+    await assert.rejects(ledger.ready(), {code:'local_shift_storage_unavailable'});
+    f.opens[0].onsuccess();
+    assert.equal(f.closed,1);
+    assert.equal(f.row,null);
+    f.hangOpen=false;
+    await ledger.recordAndQueue(opening());
+    assert.equal(ledger.currentShift().local_shift_id,'shift-local-1');
+});
+
+test('timed-out IndexedDB write is aborted before the next revision; late completion cannot overwrite it', async () => {
+    const f=faultStorage();const ledger=f.ledger();const open=opening();
+    await ledger.recordAndQueue(open);
+    f.hangWrite=true;
+    await ledger.recordAndQueue(load(open,'load-a',2,'2026-09-29T00:10:00.000Z'));
+    assert.equal(f.aborted,1);
+    assert.equal((await ledger.events()).length,2);
+    f.hangWrite=false;
+    await ledger.recordAndQueue(load(open,'load-b',3,'2026-09-29T00:11:00.000Z'));
+    f.late.forEach(commit=>commit());
+    assert.deepEqual((await f.ledger().events()).map(e=>e.event_id),[open.event_id,'load-a','load-b']);
+    assert.equal(f.row.state.revision,3);
+});
+
+test('newer IndexedDB-only commit is never replaced by stale mirror when IndexedDB becomes inaccessible', async () => {
+    const f=faultStorage();const ledger=f.ledger();const open=opening();
+    await ledger.recordAndQueue(open);f.mirrorWriteFails=true;
+    await ledger.recordAndQueue(load(open,'durable',2,'2026-09-29T00:10:00.000Z'));
+    const before=clone(f.row);
+    f.unavailable=true;f.mirrorWriteFails=false;
+    const restarted=f.ledger();
+    await assert.rejects(restarted.recordAndQueue(load(open,'next',3,'2026-09-29T00:11:00.000Z')),
+        {code:'local_shift_storage_unavailable'});
+    assert.deepEqual(f.row,before);
+    f.unavailable=false;
+    await restarted.recordAndQueue(load(open,'next',3,'2026-09-29T00:11:00.000Z'));
+    assert.deepEqual((await restarted.events()).map(e=>e.event_id),[open.event_id,'durable','next']);
+});
+
+test('newer mirror-only commit is preserved when the mirror later becomes inaccessible', async () => {
+    const f=faultStorage();const ledger=f.ledger();const open=opening();
+    await ledger.recordAndQueue(open);f.hangWrite=true;
+    await ledger.recordAndQueue(load(open,'durable',2,'2026-09-29T00:10:00.000Z'));
+    f.hangWrite=false;f.mirrorUnavailable=true;
+    const restarted=f.ledger();
+    await assert.rejects(restarted.ready(),{code:'local_shift_storage_unavailable'});
+    assert.equal(f.row.state.revision,1);
+    f.mirrorUnavailable=false;
+    assert.deepEqual((await restarted.events()).map(e=>e.event_id),[open.event_id,'durable']);
+});
+
+test('equal-revision divergent replicas stop without overwriting either history', async () => {
+    const f=faultStorage();await f.ledger().recordAndQueue(opening());
+    const [key,raw]=[...f.values.entries()][0];
+    const conflicting=JSON.parse(raw);conflicting.next_sequence=99;
+    f.values.set(key,JSON.stringify(conflicting));
+    const before=clone(f.row);
+    await assert.rejects(f.ledger().recordAndQueue(load(opening(),'next',2,'2026-09-29T00:10:00.000Z')),
+        {code:'local_shift_replica_conflict'});
+    assert.deepEqual(f.row,before);
+    assert.equal(JSON.parse(f.values.get(key)).next_sequence,99);
+});
+
+
+test('hung IndexedDB read expires and releases startup for a later retry', async () => {
+    const f=faultStorage();f.hangRead=true;const ledger=f.ledger();
+    await assert.rejects(ledger.ready(),{code:'local_shift_storage_unavailable'});
+    assert.equal(f.aborted,1);
+    f.hangRead=false;
+    await ledger.recordAndQueue(opening());
+    assert.equal((await ledger.events()).length,1);
+});
+
+test('timeout plus mirror write failure reports no success and retries the original event safely', async () => {
+    const f=faultStorage();const ledger=f.ledger();const open=opening();
+    await ledger.recordAndQueue(open);
+    const event=load(open,'retry',2,'2026-09-29T00:10:00.000Z');
+    f.hangWrite=true;f.mirrorWriteFails=true;
+    await assert.rejects(ledger.recordAndQueue(event),{code:'local_shift_storage_unavailable'});
+    assert.deepEqual((await ledger.events()).map(e=>e.event_id),[open.event_id]);
+    f.hangWrite=false;f.mirrorWriteFails=false;
+    await ledger.recordAndQueue(event);
+    f.late.forEach(commit=>commit());
+    assert.deepEqual((await f.ledger().events()).map(e=>e.event_id),[open.event_id,'retry']);
 });

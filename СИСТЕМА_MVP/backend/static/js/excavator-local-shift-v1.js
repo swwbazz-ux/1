@@ -26,52 +26,70 @@
         return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
     }
 
-    function requestPromise(request) {
-        return new Promise(function (resolve, reject) {
-            request.onsuccess = function () { resolve(request.result); };
-            request.onerror = function () { reject(request.error || new Error("IndexedDB unavailable")); };
-        });
+    function storageError() {
+        var error = new Error("Локальное хранилище недоступно. Повторите попытку после восстановления доступа.");
+        error.code = "local_shift_storage_unavailable";
+        return error;
     }
 
-    function indexedAdapter(indexedDB, storageId) {
-        var dbPromise = new Promise(function (resolve, reject) {
-            var request;
-            try { request = indexedDB.open(DB_NAME, DB_VERSION); } catch (error) { reject(error); return; }
-            request.onupgradeneeded = function () {
-                if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-                    request.result.createObjectStore(STORE_NAME, {keyPath: "storage_id"});
+    function indexedAdapter(indexedDB, storageId, timeoutMs) {
+        function operation(mode, state) {
+            return new Promise(function (resolve, reject) {
+                var settled = false;
+                var db = null;
+                var tx = null;
+                var request;
+                var timer = setTimeout(function () { finish(storageError()); }, timeoutMs);
+                function finish(error, value) {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timer);
+                    // Abort before releasing the Web Lock: a timed-out write
+                    // must never commit later over a newer ledger revision.
+                    if (error && tx) { try { tx.abort(); } catch (ignored) { /* already finished */ } }
+                    if (db && db.close) db.close();
+                    if (error) reject(error);
+                    else resolve(value);
                 }
-            };
-            request.onsuccess = function () { resolve(request.result); };
-            request.onerror = function () { reject(request.error || new Error("IndexedDB unavailable")); };
-        });
-
-        function transaction(mode, operation) {
-            return dbPromise.then(function (db) {
-                return new Promise(function (resolve, reject) {
-                    var tx;
-                    try { tx = db.transaction(STORE_NAME, mode); } catch (error) { reject(error); return; }
-                    var result;
-                    try { result = operation(tx.objectStore(STORE_NAME)); } catch (error) { reject(error); return; }
-                    tx.oncomplete = function () { resolve(result); };
-                    tx.onerror = function () { reject(tx.error || new Error("IndexedDB write failed")); };
-                    tx.onabort = function () { reject(tx.error || new Error("IndexedDB write aborted")); };
-                });
+                try { request = indexedDB.open(DB_NAME, DB_VERSION); }
+                catch (error) { finish(storageError()); return; }
+                request.onblocked = function () { finish(storageError()); };
+                request.onerror = function () { finish(storageError()); };
+                request.onupgradeneeded = function () {
+                    if (settled) {
+                        if (request.transaction) request.transaction.abort();
+                        return;
+                    }
+                    if (!request.result.objectStoreNames.contains(STORE_NAME)) {
+                        request.result.createObjectStore(STORE_NAME, {keyPath: "storage_id"});
+                    }
+                };
+                request.onsuccess = function () {
+                    db = request.result;
+                    if (settled) { if (db.close) db.close(); return; }
+                    try {
+                        tx = db.transaction(STORE_NAME, mode);
+                        tx.onerror = tx.onabort = function () { finish(storageError()); };
+                        var store = tx.objectStore(STORE_NAME);
+                        if (mode === "readonly") {
+                            var read = store.get(storageId);
+                            read.onerror = function () { finish(storageError()); };
+                            read.onsuccess = function () {
+                                try { finish(null, read.result ? clone(read.result.state) : null); }
+                                catch (error) { finish(storageError()); }
+                            };
+                        } else {
+                            tx.oncomplete = function () { finish(null); };
+                            store.put({storage_id: storageId, state: clone(state)});
+                        }
+                    } catch (error) { finish(storageError()); }
+                };
             });
         }
-
         return {
             kind: "indexedDB",
-            read: function () {
-                return dbPromise.then(function (db) {
-                    return requestPromise(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(storageId));
-                }).then(function (row) { return row ? clone(row.state) : null; });
-            },
-            write: function (state) {
-                return transaction("readwrite", function (store) {
-                    store.put({storage_id: storageId, state: clone(state)});
-                });
-            }
+            read: function () { return operation("readonly"); },
+            write: function (state) { return operation("readwrite", state); }
         };
     }
 
@@ -99,49 +117,42 @@
         var fallback;
         try { fallback = localStorageAdapter(options.localStorage, storageId); } catch (error) { fallback = null; }
         if (!options.indexedDB) {
-            if (!fallback) return Promise.reject(new Error("Локальное хранилище недоступно."));
-            return fallback.read().then(function () { return fallback; }).catch(function () {
-                throw new Error("Локальное хранилище недоступно.");
-            });
+            if (!fallback) return Promise.reject(storageError());
+            return Promise.resolve(fallback);
         }
-        var indexed = indexedAdapter(options.indexedDB, storageId);
-        return indexed.read().then(function () {
-            if (!fallback) return indexed;
-            return {
-                kind: "indexedDB+localStorage-fallback",
-                read: function () {
-                    return Promise.allSettled([indexed.read(), fallback.read()]).then(function (results) {
-                        var values = results.filter(function (result) {
-                            return result.status === "fulfilled" && result.value;
-                        }).map(function (result) { return result.value; });
-                        if (!values.length) {
-                            if (results.every(function (result) { return result.status === "rejected"; })) {
-                                throw new Error("Локальное хранилище недоступно.");
-                            }
-                            return null;
-                        }
-                        values.sort(function (left, right) {
-                            return Number(right.revision || 0) - Number(left.revision || 0)
-                                || Date.parse(right.updated_at || "") - Date.parse(left.updated_at || "");
-                        });
-                        return clone(values[0]);
+        var timeout = Number(options.storageTimeoutMs);
+        var indexed = indexedAdapter(options.indexedDB, storageId,
+            Number.isFinite(timeout) && timeout > 0 ? timeout : 2500);
+        if (!fallback) return Promise.resolve(indexed);
+        return Promise.resolve({
+            kind: "indexedDB+localStorage-fallback",
+            read: function () {
+                return Promise.allSettled([indexed.read(), fallback.read()]).then(function (results) {
+                    // An inaccessible replica may contain the only newer copy.
+                    // Never turn an uncertain old snapshot into a new commit.
+                    if (results.some(function (result) { return result.status === "rejected"; })) {
+                        throw storageError();
+                    }
+                    var values = results.map(function (result) { return result.value; }).filter(Boolean);
+                    if (!values.length) return null;
+                    values.sort(function (left, right) {
+                        return Number(right.revision || 0) - Number(left.revision || 0);
                     });
-                },
-                write: function (state) {
-                    return Promise.allSettled([
-                        indexed.write(state),
-                        fallback.write(state)
-                    ]).then(function (results) {
-                        if (results.some(function (result) { return result.status === "fulfilled"; })) return;
-                        throw new Error("Локальное хранилище недоступно.");
-                    });
-                }
-            };
-        }).catch(function () {
-            if (!fallback) throw new Error("Локальное хранилище недоступно.");
-            return fallback.read().then(function () { return fallback; }).catch(function () {
-                throw new Error("Локальное хранилище недоступно.");
-            });
+                    if (values.length > 1 && Number(values[0].revision || 0) === Number(values[1].revision || 0)
+                        && !sameEvent(values[0], values[1])) {
+                        var conflict = storageError();
+                        conflict.code = "local_shift_replica_conflict";
+                        throw conflict;
+                    }
+                    return clone(values[0]);
+                });
+            },
+            write: function (state) {
+                return Promise.allSettled([indexed.write(state), fallback.write(state)]).then(function (results) {
+                    if (results.some(function (result) { return result.status === "fulfilled"; })) return;
+                    throw storageError();
+                });
+            }
         });
     }
 
@@ -535,6 +546,9 @@
                 loadCommitted(stored);
                 recoverDelivery().catch(function () {});
                 return clone(committedState);
+            }).catch(function (error) {
+                readyPromise = null;
+                throw error;
             });
             return readyPromise;
         }
