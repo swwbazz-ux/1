@@ -52,6 +52,7 @@ def _log_discrepancy(*, access, code, process, description):
 
 SUPPORTED_EVENT_ROLES = {
     'excavator.shift.opened': 'excavator_operator',
+    'excavator.shift.checkpoint': 'excavator_operator',
     'excavator.work_context.changed': 'excavator_operator',
     'excavator.free_bucket.accepted': 'excavator_operator',
     'excavator.free_bucket.cancelled': 'excavator_operator',
@@ -3675,8 +3676,19 @@ def _process_driver_shift_closed_by_device(access, normalized):
     }, {'shift': shift, 'equipment': shift.equipment}
 
 
+def _process_excavator_shift_checkpoint(access, normalized):
+    # _dependency_state has already checked every direct parent's immutable
+    # accepted receipt, identity and sequence. This receipt joins <=32 parents
+    # without a domain effect; further checkpoints compose the proof for close.
+    if not normalized.get('local_shift_id') or not normalized['depends_on']:
+        _invalid('checkpoint_context_required', 'Не переданы местная смена или зависимости закрытия.')
+    shift = _locked_shift(access, normalized, role_code='excavator_operator')
+    return {'server_ids': {'shift_id': shift.pk}}, {'shift': shift, 'equipment': shift.equipment}
+
+
 PROCESSORS = {
     'excavator.shift.opened': _process_excavator_shift_opened,
+    'excavator.shift.checkpoint': _process_excavator_shift_checkpoint,
     'excavator.work_context.changed': _process_excavator_work_context_changed,
     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,

@@ -43,6 +43,40 @@
             .sort(function (a, b) { return Number(b.sequence) - Number(a.sequence); })[0] || null;
     }
 
+    function closeBatch(event) {
+        var batch = [];
+        var dependencies = event.depends_on;
+        // Preserve every reference, including already confirmed originals.
+        // A receipt for each group proves all its parents were accepted. Build
+        // another level when necessary; never truncate a long shift's history.
+        while (dependencies.length > 32) {
+            var parents = [];
+            for (var offset = 0; offset < dependencies.length; offset += 32) {
+                if (!root.crypto || typeof root.crypto.getRandomValues !== "function") {
+                    throw new Error("Не удалось создать ID закрытия. Повторите действие.");
+                }
+                var bytes = root.crypto.getRandomValues(new Uint8Array(16));
+                var id = "exc-checkpoint:" + Array.from(bytes, function (value) {
+                    return value.toString(16).padStart(2, "0");
+                }).join("");
+                batch.push({
+                    event_id: id, event_type: "excavator.shift.checkpoint", format_version: 1,
+                    actor_id: event.actor_id, access_id: event.access_id, role_code: event.role_code,
+                    device_id: event.device_id, equipment_id: event.equipment_id,
+                    shift_id: event.shift_id, local_shift_id: event.local_shift_id,
+                    occurred_at: event.occurred_at, sequence: event.sequence++,
+                    depends_on: dependencies.slice(offset, offset + 32),
+                    payload: {local_shift_id: event.local_shift_id}
+                });
+                parents.push(id);
+            }
+            dependencies = parents;
+        }
+        event.depends_on = dependencies;
+        batch.push(event);
+        return batch;
+    }
+
     // The existing transport remains authoritative for pre-existing server
     // shifts. Only shifts opened by this ledger use the autonomous envelope.
     function create(options) {
@@ -57,7 +91,7 @@
             return shift && shift.open_event_id ? shift : null;
         }
         function prepare(raw, expectedId) {
-            return ledger.recordPrepared(function (state) {
+            return ledger.recordPreparedBatch(function (state) {
                 var current = state.shifts.find(function (shift) {
                     return shift.local_shift_id === state.current_local_shift_id;
                 });
@@ -109,8 +143,8 @@
                 event.depends_on = dependencies.filter(function (id, index, all) {
                     return id && id !== event.event_id && all.indexOf(id) === index;
                 });
-                return event;
-            });
+                return event.event_type === "excavator.shift.closed" ? closeBatch(event) : [event];
+            }).then(function (batch) { return batch[batch.length - 1]; });
         }
         facade.pending = function () {
             return ledger.ready().then(function () {

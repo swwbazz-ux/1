@@ -624,7 +624,7 @@
             return persist().then(function () { return imported; });
         }
 
-        function recordEvent(event) {
+        function recordEvent(event, deferPersist) {
             if (!event || !event.event_id || !validIdentity({identity: event})) {
                 return Promise.reject(new Error("Действие не принадлежит текущему доступу."));
             }
@@ -681,6 +681,7 @@
                 shift.closed_at = event.occurred_at;
                 shift.close_event_id = event.event_id;
             }
+            if (deferPersist) return Promise.resolve(clone(entry));
             return persist().then(function () { return clone(entry); });
         }
 
@@ -700,6 +701,22 @@
                 return recordEvent(prepared);
             }).then(function () {
                 deliver(prepared);
+                return clone(prepared);
+            });
+        }
+
+        function recordPreparedBatch(prepare) {
+            var prepared;
+            return mutate(function () {
+                prepared = clone(prepare(clone(committedState)));
+                if (!Array.isArray(prepared) || !prepared.length) throw new Error("Пустая запись смены.");
+                // One lock and one durable write: no checkpoint or closed UI
+                // can escape a failed validation/storage commit halfway through.
+                return prepared.reduce(function (tail, event) {
+                    return tail.then(function () { return recordEvent(event, true); });
+                }, Promise.resolve()).then(persist);
+            }).then(function () {
+                prepared.forEach(deliver);
                 return clone(prepared);
             });
         }
@@ -814,6 +831,7 @@
             recoverDelivery: function () { return ready().then(recoverDelivery); },
             recordAndQueue: recordAndQueue,
             recordPrepared: recordPrepared,
+            recordPreparedBatch: recordPreparedBatch,
             confirm: confirm,
             snapshot: snapshot,
             nextSequence: nextSequence,
