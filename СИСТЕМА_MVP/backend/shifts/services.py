@@ -1029,10 +1029,16 @@ def reconcile_earlier_own_shift_close(
                 submitted_fuel_percent=submitted_fuel_percent,
             )
         )
+        # Driver signatures are SHA-256 strings; excavator signatures are
+        # structured readings, as in close_excavator_shift. Keep the latter
+        # in JSON so PostgreSQL's varchar(64) is never given a dict string.
+        stored_response = response if role_code == 'driver' else {
+            **response, '_request_signature': request_signature,
+        }
         ShiftClientAction.objects.create(
             action_type=action_type, client_action_id=client_action_id,
-            employee=employee, shift=shift, response_payload=response,
-            request_signature=request_signature,
+            employee=employee, shift=shift, response_payload=stored_response,
+            request_signature=request_signature if role_code == 'driver' else '',
         )
         bump_operational_state('EmployeeShift:earlier_own_close', event_type=action_type,
                                object_type='EmployeeShift', object_id=shift.pk,

@@ -249,6 +249,29 @@ class HistoricalBoundariesTests(TestCase):
         self.assertEqual(self.shift.end_engine_hours, Decimal('1202'))
         self.assertEqual(ShiftClientAction.objects.get(client_action_id=event['event_id']).response_payload[
             'previous_service_close']['closed_at'], service_time.isoformat())
+        from shifts.services import (
+            ExcavatorShiftError, excavator_close_request_signature, existing_shift_action_payload,
+        )
+        signature = excavator_close_request_signature(
+            fuel=Decimal('90'), engine_hours=Decimal('1202'), submitted_fuel_percent=None,
+        )
+        action = ShiftClientAction.objects.get(client_action_id=event['event_id'])
+        self.assertEqual(action.request_signature, '')
+        self.assertEqual(action.response_payload['_request_signature'], signature)
+        replay = existing_shift_action_payload(
+            'excavator_shift_closed', event['event_id'], employee=self.operator,
+            expected_shift_id=self.shift.pk, request_signature=signature,
+        )
+        self.assertTrue(replay['deduplicated'])
+        self.assertNotIn('_request_signature', replay)
+        with self.assertRaises(ExcavatorShiftError):
+            existing_shift_action_payload(
+                'excavator_shift_closed', event['event_id'], employee=self.operator,
+                expected_shift_id=self.shift.pk,
+                request_signature={**signature, 'engine_hours': '1203'},
+            )
+        self.assertEqual(self.sync([event]).json()['results'][0]['status'], 'deduplicated')
+        self.assertEqual(ShiftClientAction.objects.filter(client_action_id=event['event_id']).count(), 1)
 
     def test_sent_live_hint_does_not_change_reliable_original_time(self):
         at = self.base + timedelta(hours=1)
