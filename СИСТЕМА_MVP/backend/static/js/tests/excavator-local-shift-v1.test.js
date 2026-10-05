@@ -232,6 +232,8 @@ test('OFF-04/OFF-05: 35 loads, cancellation, hour boundary and more than 200 rec
     assert.equal(report.hours[0].totals.trip_count, 10);
     assert.equal(report.hours[1].totals.trip_count, 19);
     assert.equal(report.hours[1].unknown_volume_trip_count, 1);
+    assert.equal(report.local_shift_report.source_trip_count, 234);
+    assert.equal(report.local_shift_report.cancelled_trip_count, 1);
     const shiftSummary = await ledger.shiftSummary(null);
     assert.equal(shiftSummary.trip_count, 234);
     assert.equal(shiftSummary.unknown_volume_trip_count, 1);
@@ -839,4 +841,58 @@ test('timeout plus mirror write failure reports no success and retries the origi
     await ledger.recordAndQueue(event);
     f.late.forEach(commit=>commit());
     assert.deepEqual((await f.ledger().events()).map(e=>e.event_id),[open.event_id,'retry']);
+});
+
+
+test('full-shift report retains old hours, cancellation and unknown fleet after ACK and restart', async () => {
+    const adapter=memoryAdapter();
+    const options={adapter,reportUtcOffset:'+1000'};
+    const ledger=create(options);
+    const open=opening('full-shift',1,'2026-09-28T22:00:00.000Z');
+    await ledger.recordAndQueue(open);
+    const events=[
+        load(open,'morning',2,'2026-09-28T22:10:00.000Z'),
+        load(open,'cancelled',3,'2026-09-29T01:00:00.000Z'),
+        load(open,'unknown',4,'2026-09-29T04:00:00.000Z',{payload:{local_fleet_code:'unknown'}}),
+        load(open,'evening',5,'2026-09-29T09:10:00.000Z',{payload:{local_fleet_code:'nhl'}}),
+    ];
+    for (const event of events) await ledger.recordAndQueue(event);
+    await ledger.recordAndQueue({...events[1],event_id:'cancel',event_type:'excavator.trip.loaded.cancelled',
+        sequence:6,payload:{local_shift_id:open.local_shift_id,source_load_event_id:'cancelled'}});
+    const at=Date.parse('2026-09-29T09:30:00.000Z');
+    const before=await ledger.hourlyReport(null,at);
+    assert.equal(before.local_shift_report.source_trip_count,3);
+    assert.equal(before.local_shift_report.totals.belaz,1);
+    assert.equal(before.local_shift_report.totals.nhl,1);
+    assert.equal(before.local_shift_report.unclassified_trip_count,1);
+    assert.equal(before.local_shift_report.cancelled_trip_count,1);
+    assert.equal(before.local_shift_report.period.label,'29.09 08:00–29.09 19:30');
+    assert.equal(before.hours[0].source_trip_count,1);
+    assert.equal(before.hours[1].source_trip_count,0);
+    for (const event of events) assert.equal(await ledger.confirm(event,{server_ids:{trip_id:100+event.sequence}}),true);
+    const server=structuredClone(before);
+    server.hours[0].source_trip_count=500;
+    server.hours[0].totals.trip_count=500;
+    const restarted=create(options);
+    const after=await restarted.hourlyReport(server,at);
+    assert.deepEqual(after.local_shift_report,before.local_shift_report);
+    assert.equal((await restarted.events()).length,6);
+});
+
+test('full-shift report freezes on close and starts from zero for the next shift', async () => {
+    const ledger=create({reportUtcOffset:'+0000'}),open=opening();
+    await ledger.recordAndQueue(open);
+    await ledger.recordAndQueue(load(open,'first-load',2,'2026-09-29T00:10:00.000Z'));
+    await ledger.recordAndQueue({...open,event_id:'close',event_type:'excavator.shift.closed',sequence:3,
+        occurred_at:'2026-09-29T12:00:00.000Z'});
+    const closed=(await ledger.hourlyReport(null,Date.parse('2026-09-30T12:00:00.000Z'))).local_shift_report;
+    assert.equal(closed.title,'Смена завершена');
+    assert.equal(closed.source_trip_count,1);
+    assert.equal(closed.period.end,'2026-09-29T12:00:00.000Z');
+    await ledger.recordAndQueue(opening('second',4,'2026-09-29T12:01:00.000Z'));
+    const next=(await ledger.hourlyReport(null,Date.parse('2026-09-29T12:02:00.000Z'))).local_shift_report;
+    assert.equal(next.local_shift_id,'second');
+    assert.equal(next.source_trip_count,0);
+    assert.equal(next.is_empty,true);
+    assert.equal((await ledger.hourlyReport(null,Date.parse('2026-09-29T12:02:00.000Z'),open.event_id)).local_shift_report.source_trip_count,1);
 });

@@ -245,10 +245,14 @@
         };
     }
 
+    function reportOffsetMinutes(utcOffset, now) {
+        var match = /^([+-])(\d{2}):?(\d{2})$/.exec(String(utcOffset || ""));
+        return match ? (Number(match[2]) * 60 + Number(match[3])) * (match[1] === "-" ? -1 : 1) : -now.getTimezoneOffset();
+    }
+
     function emptyHourlyReport(shift, capturedAt, utcOffset) {
         var now = new Date(capturedAt || Date.now());
-        var match = /^([+-])(\d{2}):?(\d{2})$/.exec(String(utcOffset || ""));
-        var offset = match ? (Number(match[2]) * 60 + Number(match[3])) * (match[1] === "-" ? -1 : 1) : -now.getTimezoneOffset();
+        var offset = reportOffsetMinutes(utcOffset, now);
         var localNow = new Date(now.getTime() + offset * 60000);
         var currentStart = new Date(Math.floor(localNow.getTime() / 3600000) * 3600000 - offset * 60000);
         var previousStart = new Date(currentStart.getTime() - 3600000);
@@ -375,6 +379,35 @@
             generated_at: new Date(capturedAt || Date.now()).toISOString()
         };
         return payload;
+    }
+
+    function localShiftReport(shift, capturedAt, utcOffset) {
+        // This section counts this device's immutable originals only. Server
+        // hour totals and receipts cannot add the same loading a second time.
+        if (!shift || !shift.open_event_id) return null;
+        var now = new Date(capturedAt || Date.now());
+        var start = new Date(shift.opened_at);
+        var end = shift.status === "closed" ? new Date(shift.closed_at) : now;
+        var offset = reportOffsetMinutes(utcOffset, now);
+        var result = localHourPayload("shift", shift.status === "closed" ? "Смена завершена" : "За смену", start, end, offset);
+        function label(date) {
+            var local = new Date(date.getTime() + offset * 60000);
+            return twoDigits(local.getUTCDate()) + "." + twoDigits(local.getUTCMonth() + 1)
+                + " " + twoDigits(local.getUTCHours()) + ":" + twoDigits(local.getUTCMinutes());
+        }
+        result.period.label = label(start) + "–" + label(end);
+        result.local_shift_id = shift.local_shift_id;
+        result.server_shift_id = shift.server_shift_id || null;
+        result.status = shift.status;
+        result.cancelled_trip_count = 0;
+        loadFacts(shift).forEach(function (fact) {
+            if (fact.cancelled) result.cancelled_trip_count += 1;
+            else mergeFact(result, fact, 1);
+        });
+        result.rows.sort(function (left, right) {
+            return String(left.dump_point).localeCompare(String(right.dump_point), "ru");
+        });
+        return result;
     }
 
     function mergeShiftSummary(serverProjection, shift) {
@@ -754,7 +787,9 @@
                         facts = facts.concat(loadFacts(candidate));
                     }
                 });
-                return mergeHourlyReport(serverPayload, shift, facts, capturedAt, options.reportUtcOffset);
+                var report = mergeHourlyReport(serverPayload, shift, facts, capturedAt, options.reportUtcOffset);
+                report.local_shift_report = localShiftReport(shift, capturedAt, options.reportUtcOffset);
+                return report;
             });
         }
 

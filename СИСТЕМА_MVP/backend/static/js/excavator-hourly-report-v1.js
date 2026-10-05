@@ -101,7 +101,9 @@
         var showNhl = nhlTotal > 0;
         var classifiedTotal = Number(hour.totals && hour.totals.trip_count) || 0;
         var unknownTotal = Number(hour.unclassified_trip_count) || 0;
-        var accentClass = hour.code === "current" ? "is-current-hour" : "is-previous-hour";
+        var isShift = hour.code === "shift";
+        var displayTotal = isShift ? Number(hour.source_trip_count || 0) : classifiedTotal;
+        var accentClass = hour.code === "current" ? "is-current-hour" : (isShift ? "is-shift-report" : "is-previous-hour");
         var block = element("section", "eo-hourly-report__hour " + accentClass);
         if (!showNhl) block.classList.add("is-no-nhl");
         block.setAttribute("aria-label", hour.title + " " + period.label);
@@ -116,7 +118,7 @@
         heading.appendChild(element(
             "span",
             "eo-hourly-report__hour-total",
-            classifiedTotal + " " + tripWord(classifiedTotal)
+            displayTotal + " " + tripWord(displayTotal)
         ));
         block.appendChild(heading);
 
@@ -124,7 +126,7 @@
             block.appendChild(element(
                 "p",
                 "eo-hourly-report__hour-empty",
-                "За этот час рейсов нет"
+                isShift ? "За эту смену рейсов нет" : "За этот час рейсов нет"
             ));
         } else if (!rows.length) {
             block.appendChild(element(
@@ -173,8 +175,14 @@
             block.appendChild(element(
                 "p",
                 "eo-hourly-report__unknown",
-                unknownTotal + " " + tripWord(unknownTotal) + " требуют уточнения типа самосвала"
+                unknownTotal + " " + tripWord(unknownTotal)
+                    + (tripWord(unknownTotal) === "рейс" ? " требует" : " требуют") + " уточнения типа самосвала"
             ));
+        }
+        if (isShift) {
+            block.appendChild(element("p", "eo-hourly-report__note", "Погрузки этой смены, сохранённые на этом телефоне."));
+            if (hour.cancelled_trip_count) block.appendChild(element("p", "eo-hourly-report__note",
+                "Отменено: " + hour.cancelled_trip_count + ". В итог не включены."));
         }
         return block;
     }
@@ -190,6 +198,16 @@
             content.appendChild(element("p", "eo-hourly-report__offline", "Нет связи · " + cachedAt.toLowerCase()));
         }
 
+        if (payload.local_projection && payload.local_shift_report) {
+            var shiftReport = payload.local_shift_report;
+            var renderedShiftId = Number((shell() && shell().dataset.eoServerRenderedShiftId) || 0);
+            // Do not show the previous locally closed shift as the total for a
+            // newer shift opened through the server on this equipment.
+            if (!(shiftReport.status === "closed" && renderedShiftId
+                && renderedShiftId !== Number(shiftReport.server_shift_id || 0))) {
+                content.appendChild(renderHourBlock(shiftReport));
+            }
+        }
         payload.hours.forEach(function (hour) {
             content.appendChild(renderHourBlock(hour));
         });

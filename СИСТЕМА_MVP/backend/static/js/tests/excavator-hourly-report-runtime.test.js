@@ -219,3 +219,33 @@ test('a response for the previous excavator cannot enter the new excavator cache
     assert.doesNotMatch(h.subtitle.textContent, /Первая техника/);
     h.close();
 });
+
+
+test('whole-shift section shows older loads and cancellations while the network hangs', async () => {
+    const ledger=await seededLedger();
+    const old=localEvent('old',3);old.occurred_at=new Date(Date.now()-5*3600000).toISOString();
+    await ledger.recordAndQueue(old);
+    await ledger.recordAndQueue({...localEvent('unknown',4),payload:{local_shift_id:'open',local_fleet_code:'unknown'}});
+    await ledger.recordAndQueue({...localEvent('cancel',5),event_type:'excavator.trip.loaded.cancelled',
+        payload:{local_shift_id:'open',source_load_event_id:'load'}});
+    const h=harness(()=>new Promise(()=>{}),{cached:null,ledger});
+    h.open();await flush();
+    const section=h.content.children.find(n=>n.className?.includes('is-shift-report'));
+    assert.ok(section);
+    assert.match(textOf(section),/За смену/);
+    assert.match(textOf(section),/2 рейса/);
+    assert.match(textOf(section),/Отменено: 1/);
+    assert.match(textOf(section),/1 рейс требует уточнения/);
+    assert.equal(h.storage.size,0);
+    h.close();
+});
+
+test('previous local shift is not labelled as the total for a newer server shift', async () => {
+    const ledger=await seededLedger();
+    await ledger.recordAndQueue({...localEvent('close',3),event_type:'excavator.shift.closed'});
+    const h=harness(()=>new Promise(()=>{}),{cached:null,ledger});
+    h.shell.dataset.eoServerRenderedShiftId='999';
+    h.open();await flush();
+    assert.equal(h.content.children.some(n=>n.className?.includes('is-shift-report')),false);
+    h.close();
+});
