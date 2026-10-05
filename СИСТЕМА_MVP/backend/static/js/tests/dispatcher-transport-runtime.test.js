@@ -82,7 +82,7 @@ test("сохраняет production-ключ и исходные legacy v1/v2 б
     assert.equal(transport.getQueueState().length, 1);
 });
 
-test("сетевой сбой ставит JSON-команду в совместимую очередь", async () => {
+test("сетевой сбой сохраняет JSON-команду в журнале, не выдавая её старому отправителю", async () => {
     const runtime = createRuntime({
         fetch: () => Promise.reject(new Error("offline")),
     });
@@ -91,7 +91,8 @@ test("сетевой сбой ставит JSON-команду в совмест
     });
 
     const result = await transport.post("/dispatcher/assign/", {action: "assign"});
-    const queue = JSON.parse(runtime.storage.get(QUEUE_KEY));
+    const queue = transport.readQueue();
+    assert.equal(runtime.storage.has(QUEUE_KEY), false);
 
     assert.deepEqual(JSON.parse(JSON.stringify(result)), {queued: true});
     assert.equal(queue.length, 1);
@@ -137,7 +138,7 @@ test("серверная ошибка не маскируется успехом
     assert.equal(transport.readQueue().length, 1);
 });
 
-test("flush отправляет старую запись с CSRF и удаляет её только после успеха", async () => {
+test("flush сохраняет исходник старой записи после успеха и исключает его из рабочей очереди", async () => {
     const queued = [{
         id: "queued-1",
         createdAt: 10,
@@ -157,7 +158,7 @@ test("flush отправляет старую запись с CSRF и удаля
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.fetchCalls[0].options.headers["X-CSRFToken"], "csrf-token");
     assert.equal(runtime.fetchCalls[0].options.credentials, "same-origin");
-    assert.deepEqual(JSON.parse(runtime.storage.get(QUEUE_KEY)), []);
+    assert.deepEqual(JSON.parse(runtime.storage.get(QUEUE_KEY)), queued);
     assert.equal(transport.getQueueState().isFlushing, false);
 });
 

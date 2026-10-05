@@ -1,5 +1,5 @@
-/* Общий транспорт диспетчера и горного мастера. Исходная команда живёт в
-   отдельной записи журнала; v3 остаётся совместимой проекцией очереди. */
+/* Общий транспорт диспетчера и горного мастера. Новые команды живут только
+   в журнале: старый отправитель v3 не умеет передавать их исходный контекст. */
 (function (global) {
     "use strict";
 
@@ -113,9 +113,39 @@
             });
             return queue.sort(function (left, right) { return (left.createdAt || 0) - (right.createdAt || 0); });
         }
-        function mirrorQueue() {
-            // Журнал — источник восстановления даже при quota/обрыве до mirror.
-            try { global.localStorage.setItem(DISPATCHER_SYNC_QUEUE_KEY, JSON.stringify(readQueue())); } catch (error) {}
+        function isJournalProjection(request, record) {
+            if (!request || !record) return false;
+            var fields = ["attempts", "nextAttemptAt", "lastError"];
+            if (!fields.every(function (field) {
+                return Object.prototype.hasOwnProperty.call(request, field)
+                    && !Object.prototype.hasOwnProperty.call(record.request, field);
+            })) return false;
+            var original = copy(request);
+            fields.forEach(function (field) { delete original[field]; });
+            return JSON.stringify(original) === JSON.stringify(record.request);
+        }
+        function isolateLegacyQueue() {
+            if (roleIsReadonly()) return;
+            // Никогда не экспортируем journal в v3: старая вкладка отправит
+            // такую запись без X-Command-Context, используя нынешнюю cookie.
+            // Убираем только точную производную копию, уже сохранённую в journal
+            // прежним новым транспортом. Настоящие legacy-исходники сохраняем.
+            try {
+                var raw = global.localStorage.getItem(DISPATCHER_SYNC_QUEUE_KEY);
+                if (!raw) return;
+                var queue = JSON.parse(raw);
+                if (!Array.isArray(queue)) throw storageError();
+                var retained = queue.filter(function (request) {
+                    return !isJournalProjection(request, request && request.id && readRecord(request.id));
+                });
+                if (retained.length === queue.length) return;
+                // Старая вкладка могла дописать свою команду во время чтения
+                // journal. Не заменяем уже изменённый массив старым снимком.
+                if (global.localStorage.getItem(DISPATCHER_SYNC_QUEUE_KEY) !== raw) return;
+                var serialized = JSON.stringify(retained);
+                global.localStorage.setItem(DISPATCHER_SYNC_QUEUE_KEY, serialized);
+                if (global.localStorage.getItem(DISPATCHER_SYNC_QUEUE_KEY) !== serialized) throw storageError();
+            } catch (error) { lastStorageError = storageError(); }
         }
         function owns(request) {
             var current = getCommandContext() || {};
@@ -156,8 +186,7 @@
                     if (!Array.isArray(items)) throw storageError();
                     items.forEach(function (request) {
                         var saved = request && request.id && readRecord(request.id);
-                        // v3 — изменяемая проекция; исходник уже находится в journal.
-                        if (saved && key === DISPATCHER_SYNC_QUEUE_KEY) return;
+                        if (key === DISPATCHER_SYNC_QUEUE_KEY && isJournalProjection(request, saved)) return;
                         add(request, key, null);
                     });
                 } catch (error) { lastStorageError = storageError(); }
@@ -536,9 +565,11 @@
                     if (!notifiedBlocked[record.request.id]) blocked.push(record.request.id);
                 });
             } finally {
-                if (changed) mirrorQueue();
+                if (changed) {
+                    lastStorageError = null;
+                    isolateLegacyQueue();
+                }
             }
-            if (changed) lastStorageError = null;
             rejectedRoots.forEach(function (record) {
                 if (record.delivery.reconciliation && !notifiedRejected[record.request.id]) {
                     notifiedRejected[record.request.id] = true;
@@ -633,7 +664,7 @@
             var record = {request: request, delivery: {state: "pending", attempts: 0}};
             saveRecord(record);
             lastStorageError = null;
-            mirrorQueue();
+            isolateLegacyQueue();
             return record;
         }
         function enqueue(request, delayMs) {
@@ -785,7 +816,7 @@
                 };
                 // ACK сначала в журнал. Не удалось записать — исходник остаётся на повтор.
                 saveRecord(record);
-                mirrorQueue();
+                isolateLegacyQueue();
                 try { onAcknowledged(record.request, payload); } catch (callbackError) {}
                 return payload;
             }).catch(function (error) {
@@ -806,7 +837,7 @@
                     try { saveRecord(original); } catch (storageFailure) { lastStorageError = storageError(); }
                 }
                 try { reconcileRejectedDependencies(); } catch (storageFailure) { lastStorageError = storageError(); }
-                mirrorQueue();
+                isolateLegacyQueue();
                 throw error;
             }).finally(function () {
                 delete inFlight[request.id];
@@ -844,6 +875,7 @@
             });
         }
         function flush() {
+            isolateLegacyQueue();
             // Сначала занять проверяемый ID: потерянный ответ можно восстановить
             // чтением квитанции, не повторяя POST. Остальные команды идут параллельно.
             return Promise.all([reconcileReceipt(), flushCommands()]);
@@ -892,6 +924,7 @@
             return {realtimeConnected: realtimeConnected, realtimeLastSuccessAt: realtimeLastSuccessAt,
                 realtimeLastReason: realtimeLastReason, syncQueue: getQueueState()};
         }
+        isolateLegacyQueue();
         return {
             queueKey: DISPATCHER_SYNC_QUEUE_KEY, journalPrefix: DISPATCHER_COMMAND_PREFIX,
             readQueue: readQueue, readOwnQueue: function () { return readQueue().filter(owns); },
