@@ -466,7 +466,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v178',
+        shell_version='mining-master-mobile-shell-v179',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -503,7 +503,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v179',
+        shell_version='dispatcher-desktop-shell-v180',
     ),
     RoleApp(
         role_code='settlement_clerk',

@@ -200,12 +200,18 @@ class RoleAppManifestTests(SimpleTestCase):
     def test_existing_workers_delete_only_their_own_cache_family(self):
         for worker_url, cache_prefix in (
             ('/dispatcher-sw.js', 'dispatcher-desktop-shell-'),
+            ('/mining-master-sw.js', 'mining-master-mobile-shell-'),
             ('/excavator-sw.js', 'excavator-mobile-shell-'),
         ):
             with self.subTest(worker=worker_url):
                 script = Client().get(worker_url, HTTP_HOST='localhost').content.decode('utf-8')
                 self.assertIn(f'const CACHE_PREFIX = "{cache_prefix}";', script)
-                self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
+                if worker_url in {'/dispatcher-sw.js', '/mining-master-sw.js'}:
+                    self.assertIn('keys.filter(boardIsOlderCache)', script)
+                    self.assertIn('if (!key.startsWith(CACHE_PREFIX)) return false;', script)
+                    self.assertIn('previousVersion < currentVersion', script)
+                else:
+                    self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
                 self.assertNotIn('keys.filter(key => key !== CACHE_NAME)', script)
                 self.assertIn('new URL(request.url).pathname === fallbackUrl', script)
 

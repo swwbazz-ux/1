@@ -6,12 +6,12 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v179">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v179">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v179">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v179">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v179">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v179">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v180">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v180">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v180">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v180">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v180">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v180">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -25,8 +25,8 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v178" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v178" defer></script>
+        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v179" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v179" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -587,7 +587,7 @@
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v179"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v180"></script>
 {% else %}
 <script>
 (function () {
@@ -742,7 +742,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v178";
+    var miningMasterShellVersion = "mining-master-mobile-shell-v179";
     var dispatcherTransport = window.createDispatcherTransport({
         getCsrfToken: getCsrfToken,
         onStateChange: function (state) {
@@ -1642,7 +1642,8 @@ document.addEventListener("DOMContentLoaded", function () {
             requestMiningMasterWorkerVersion(worker)
         ]).then(function (versions) {
             if (
-                inspectionGeneration !== miningMasterWaitingInspectionGeneration
+                (options && options.isCurrent && !options.isCurrent())
+                || inspectionGeneration !== miningMasterWaitingInspectionGeneration
                 || miningMasterServiceWorkerRegistration !== registration
                 || registration.waiting !== worker
                 || worker === navigator.serviceWorker.controller
@@ -1653,6 +1654,7 @@ document.addEventListener("DOMContentLoaded", function () {
             showMiningMasterUpdateModal(worker, versions[1], versions[0]);
             return true;
         }).catch(function () {
+            if (options && options.isCurrent && !options.isCurrent()) return false;
             if (options && options.manual && miningMasterUpdateStatus) {
                 miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
             }
@@ -1669,14 +1671,32 @@ document.addEventListener("DOMContentLoaded", function () {
             ? String(version)
             : "";
     }
+    function miningMasterPwaDeadline(work, timeoutMs, onTimeout) {
+        var timer;
+        var deadline = new Promise(function (resolve, reject) {
+            timer = window.setTimeout(function () {
+                if (onTimeout) onTimeout();
+                reject(new Error("Mining Master update timed out."));
+            }, timeoutMs);
+        });
+        return Promise.race([Promise.resolve().then(work), deadline]).finally(function () {
+            window.clearTimeout(timer);
+        });
+    }
+    function getMiningMasterRegistration() {
+        return miningMasterPwaDeadline(function () {
+            if (miningMasterServiceWorkerRegistration) return miningMasterServiceWorkerRegistration;
+            var guard = window.AppPwaContractGuard;
+            return guard && typeof guard.getRegistration === "function"
+                ? guard.getRegistration()
+                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+        }, 8000);
+    }
     function getMiningMasterCurrentWorkerVersion() {
         if (!("serviceWorker" in navigator)) {
             return Promise.resolve(miningMasterShellVersion);
         }
-        var registrationPromise = miningMasterServiceWorkerRegistration
-            ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        return registrationPromise.then(function (registration) {
+        return getMiningMasterRegistration().then(function (registration) {
             if (registration) {
                 miningMasterServiceWorkerRegistration = registration;
             }
@@ -1753,54 +1773,62 @@ document.addEventListener("DOMContentLoaded", function () {
             miningMasterUpdateStatus.textContent = "Проверяем новую версию приложения...";
         }
         var guard = window.AppPwaContractGuard;
-        var registrationSource = miningMasterServiceWorkerRegistration
-            ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : guard && typeof guard.getRegistration === "function"
-                ? guard.getRegistration()
-                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+        var active = true;
         var currentVersion = "";
-        miningMasterManualUpdatePromise = Promise.resolve(registrationSource).then(function (registration) {
-            if (!registration) throw new Error("Service worker недоступен.");
-            miningMasterServiceWorkerRegistration = registration;
-            return requestMiningMasterWorkerVersion(
-                registration.active || navigator.serviceWorker.controller
-            ).then(function (version) {
-                currentVersion = version || miningMasterShellVersion;
-                var update = guard && typeof guard.requestManualUpdate === "function"
-                    ? guard.requestManualUpdate()
-                    : registration.update
-                        ? registration.update().then(function () {
-                            return {status: "current", registration: registration};
-                        })
-                        : Promise.resolve({status: "unavailable", registration: registration});
-                return Promise.resolve(update);
-            }).then(function (result) {
-                var updateStatus = result && result.status;
-                if (updateStatus === "error" || updateStatus === "unavailable") {
-                    var updateError = new Error("PWA manual update " + updateStatus);
-                    updateError.pwaUpdateStatus = updateStatus;
-                    throw updateError;
-                }
-                registration = result && result.registration
-                    ? result.registration
-                    : registration;
-                if (registration.waiting) {
-                    return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
-                }
-                var serverVersion = miningMasterServerContractVersion();
-                if (
-                    !serverVersion
-                    || formatMiningMasterVersion(currentVersion)
-                        === formatMiningMasterVersion(serverVersion)
-                ) {
-                    showMiningMasterNoUpdateModal(currentVersion);
-                    return true;
-                }
-                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
-                showMiningMasterUpdateModal(null, serverVersion, currentVersion);
-                return false;
+        function isCurrent() {
+            return active && miningMasterManualUpdatePromise === currentFlight;
+        }
+        var work = function () {
+            return getMiningMasterRegistration().then(function (registration) {
+                if (!isCurrent()) return false;
+                if (!registration) throw new Error("Service worker недоступен.");
+                miningMasterServiceWorkerRegistration = registration;
+                return requestMiningMasterWorkerVersion(
+                    registration.active || navigator.serviceWorker.controller
+                ).then(function (version) {
+                    if (!isCurrent()) return false;
+                    currentVersion = version || miningMasterShellVersion;
+                    var update = guard && typeof guard.requestManualUpdate === "function"
+                        ? guard.requestManualUpdate()
+                        : registration.update
+                            ? registration.update().then(function () {
+                                return {status: "current", registration: registration};
+                            })
+                            : Promise.resolve({status: "unavailable", registration: registration});
+                    return Promise.resolve(update);
+                }).then(function (result) {
+                    if (!isCurrent()) return false;
+                    var updateStatus = result && result.status;
+                    if (updateStatus === "error" || updateStatus === "unavailable") {
+                        var updateError = new Error("PWA manual update " + updateStatus);
+                        updateError.pwaUpdateStatus = updateStatus;
+                        throw updateError;
+                    }
+                    registration = result && result.registration
+                        ? result.registration
+                        : registration;
+                    if (registration.waiting) {
+                        return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true, isCurrent: isCurrent });
+                    }
+                    var serverVersion = miningMasterServerContractVersion();
+                    if (
+                        !serverVersion
+                        || formatMiningMasterVersion(currentVersion)
+                            === formatMiningMasterVersion(serverVersion)
+                    ) {
+                        showMiningMasterNoUpdateModal(currentVersion);
+                        return true;
+                    }
+                    setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                    showMiningMasterUpdateModal(null, serverVersion, currentVersion);
+                    return false;
+                });
             });
+        };
+        var currentFlight = miningMasterPwaDeadline(work, 20000, function () {
+            active = false;
         }).catch(function (error) {
+            if (miningMasterManualUpdatePromise !== currentFlight) return false;
             if (miningMasterUpdateStatus) {
                 miningMasterUpdateStatus.textContent = error && error.pwaUpdateStatus === "unavailable"
                     ? "Служба обновления недоступна. Закройте и снова откройте приложение."
@@ -1808,10 +1836,13 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             return false;
         }).finally(function () {
+            active = false;
+            if (miningMasterManualUpdatePromise !== currentFlight) return;
             setMiningMasterCheckUpdateButtonsDisabled(false);
             miningMasterManualUpdatePromise = null;
         });
-        return miningMasterManualUpdatePromise;
+        miningMasterManualUpdatePromise = currentFlight;
+        return currentFlight;
     }
     function applyMiningMasterPwaUpdate() {
         var waitingWorker = miningMasterWaitingWorker;
@@ -5505,12 +5536,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             });
         }
-        var miningMasterGuard = window.AppPwaContractGuard;
-        var miningMasterRegistrationSource = miningMasterGuard
-            && typeof miningMasterGuard.getRegistration === "function"
-            ? miningMasterGuard.getRegistration()
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        Promise.resolve(miningMasterRegistrationSource).then(function (registration) {
+        getMiningMasterRegistration().then(function (registration) {
             if (!registration) return;
             miningMasterServiceWorkerRegistration = registration;
             watchMiningMasterRegistration(registration);
@@ -6684,22 +6710,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v179" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v180" defer></script>
 {% endif %}
 {% endblock %}

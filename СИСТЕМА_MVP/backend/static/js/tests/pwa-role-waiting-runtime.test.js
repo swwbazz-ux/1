@@ -13,7 +13,8 @@ const excavatorTemplate = fs.readFileSync(
     path.join(backendRoot, "templates", "trips", "excavator_work.html"),
     "utf8"
 );
-const miningMasterTemplate = dispatcherScreenSource();
+const miningMasterTemplate = process.env.PWA_REGISTRATION_TEST_MASTER
+    ? fs.readFileSync(process.env.PWA_REGISTRATION_TEST_MASTER, "utf8") : dispatcherScreenSource();
 
 class EventTargetStub {
     constructor() {
@@ -267,6 +268,7 @@ function createRoleRuntime(options = {}) {
         installing: null,
         update() {
             registrationUpdateCalls += 1;
+            if (options.update) return options.update(registration);
             return Promise.resolve(registration);
         },
     });
@@ -274,17 +276,17 @@ function createRoleRuntime(options = {}) {
         controller: activeWorker,
         ready: Promise.resolve(registration),
         getRegistration() {
-            return Promise.resolve(registration);
+            return options.lookup ? options.lookup(registration) : Promise.resolve(registration);
         },
     });
     const navigator = {serviceWorker};
     const windowTarget = new EventTargetStub();
     const localStorage = new StorageStub();
 
-    function setTimeoutStub(callback) {
+    function setTimeoutStub(callback, delay) {
         const timerId = nextTimerId;
         nextTimerId += 1;
-        timers.set(timerId, callback);
+        timers.set(timerId, {callback, delay});
         return timerId;
     }
 
@@ -294,7 +296,7 @@ function createRoleRuntime(options = {}) {
 
     const guard = {
         getRegistration() {
-            return Promise.resolve(registration);
+            return options.lookup ? options.lookup(registration) : Promise.resolve(registration);
         },
         getState() {
             return {
@@ -375,6 +377,13 @@ function createRoleRuntime(options = {}) {
         registration,
         waitingWorker,
         waitingWorkerMessages,
+        runTimers(delay) {
+            for (const [id, timer] of [...timers]) if (timer.delay === delay) {
+                timers.delete(id);
+                timer.callback();
+            }
+        },
+        pendingTimers(delay) { return [...timers.values()].filter(timer => timer.delay === delay).length; },
         get registrationUpdateCalls() {
             return registrationUpdateCalls;
         },
@@ -812,3 +821,86 @@ test(
         );
     }
 );
+
+function manualDeferred() {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return {promise, resolve};
+}
+async function settleManualUpdate() {
+    for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+}
+function observeManualUpdate(promise) {
+    const state = {done: false};
+    promise.then(value => { state.done = true; state.value = value; });
+    return state;
+}
+function manualRuntime(options = {}) {
+    const runtime = createRoleRuntime({roleCode: 'mining_master',
+        activeVersion: 'mining-master-mobile-shell-v120',
+        waitingVersion: 'mining-master-mobile-shell-v121', hasWaitingWorker: false, ...options});
+    const nodes = addMiningMasterNodes(runtime);
+    if (options.noGuard) runtime.window.AppPwaContractGuard = undefined;
+    vm.runInContext(extractMiningMasterPwaSource(), runtime.context);
+    return {runtime, nodes};
+}
+for (const noGuard of [false, true]) test('Mining Master: lookup timeout restores button, guard=' + !noGuard, async () => {
+    const lookup = manualDeferred(); let broken = true;
+    const {runtime, nodes} = manualRuntime({noGuard,
+        lookup: registration => broken ? lookup.promise : Promise.resolve(registration)});
+    await settleManualUpdate();
+    const first = runtime.context.checkMiningMasterPwaUpdateManually();
+    assert.equal(runtime.context.checkMiningMasterPwaUpdateManually(), first);
+    const state = observeManualUpdate(first); await settleManualUpdate();
+    assert.equal(nodes.checkButton.disabled, true);
+    runtime.runTimers(8000); await settleManualUpdate();
+    assert.equal(state.done, true); assert.equal(state.value, false);
+    assert.equal(nodes.checkButton.disabled, false); assert.equal(runtime.context.miningMasterManualUpdatePromise, null);
+    assert.match(nodes.status.textContent, /Не удалось проверить обновление/);
+    assert.equal(runtime.pendingTimers(20000), 0);
+    broken = false; await runtime.context.checkMiningMasterPwaUpdateManually();
+    const currentStatus = nodes.status.textContent;
+    lookup.resolve({active: null, waiting: runtime.waitingWorker}); await settleManualUpdate();
+    assert.equal(nodes.status.textContent, currentStatus);
+    assert.equal(runtime.context.miningMasterServiceWorkerRegistration, runtime.registration);
+    assert.equal(nodes.checkButton.disabled, false);
+});
+for (const noGuard of [false, true]) test('Mining Master: update deadline isolates late response, guard=' + !noGuard, async () => {
+    const updates = [manualDeferred(), manualDeferred()]; let next = 0;
+    const deferredUpdate = () => updates[next++].promise;
+    const {runtime, nodes} = manualRuntime({noGuard, update: deferredUpdate, manualUpdateResult: deferredUpdate});
+    await settleManualUpdate();
+    const first = observeManualUpdate(runtime.context.checkMiningMasterPwaUpdateManually()); await settleManualUpdate();
+    runtime.runTimers(20000); await settleManualUpdate();
+    assert.equal(first.done, true); assert.equal(first.value, false); assert.equal(nodes.checkButton.disabled, false);
+    const second = runtime.context.checkMiningMasterPwaUpdateManually(); await settleManualUpdate();
+    const state = observeManualUpdate(second);
+    assert.equal(nodes.checkButton.disabled, true);
+    updates[0].resolve({status: 'current', registration: runtime.registration}); await settleManualUpdate();
+    assert.equal(state.done, false); assert.equal(nodes.checkButton.disabled, true);
+    assert.equal(runtime.context.miningMasterManualUpdatePromise, second);
+    assert.equal(nodes.modal.hidden, true);
+    updates[1].resolve({status: 'current', registration: runtime.registration}); await settleManualUpdate();
+    assert.equal(state.done, true); assert.equal(nodes.checkButton.disabled, false);
+    assert.equal(runtime.context.miningMasterManualUpdatePromise, null); assert.equal(runtime.pendingTimers(20000), 0);
+});
+for (const operation of ['lookup', 'update']) test('Mining Master: synchronous ' + operation + ' error releases manual check', async () => {
+    let broken = true;
+    const failure = registration => { if (broken) throw Error('SecurityError'); return Promise.resolve(registration); };
+    const {runtime, nodes} = manualRuntime(operation === 'lookup' ? {lookup: failure} : {noGuard: true, update: failure});
+    await settleManualUpdate();
+    assert.equal(await runtime.context.checkMiningMasterPwaUpdateManually(), false);
+    assert.equal(nodes.checkButton.disabled, false); assert.equal(runtime.context.miningMasterManualUpdatePromise, null);
+    broken = false; await runtime.context.checkMiningMasterPwaUpdateManually();
+    assert.equal(nodes.checkButton.disabled, false); assert.equal(runtime.pendingTimers(20000), 0);
+});
+test('Mining Master: expired waiting-worker inspection cannot reopen the update dialog', async () => {
+    const {runtime, nodes} = manualRuntime(); await settleManualUpdate();
+    runtime.registration.waiting = runtime.waitingWorker;
+    const first = observeManualUpdate(runtime.context.checkMiningMasterPwaUpdateManually()); await settleManualUpdate();
+    runtime.runTimers(20000); await settleManualUpdate();
+    assert.equal(first.done, true); assert.equal(nodes.modal.hidden, true);
+    runtime.resolveWaitingVersion(); await settleManualUpdate();
+    assert.equal(nodes.modal.hidden, true); assert.equal(nodes.checkButton.disabled, false);
+    assert.match(nodes.status.textContent, /Не удалось проверить обновление/);
+});
