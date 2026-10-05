@@ -36,6 +36,8 @@ MODES = {
     "prepare_sse_qa_https",
     "apply_sse_qa_nginx_limit",
     "rollback_sse_qa_nginx_limit",
+    "apply_sse_qa_allow_cidr",
+    "restore_sse_qa_allow_cidr",
     "enable_sse_qa",
     "smoke_sse_qa",
     "disable_sse_qa",
@@ -49,9 +51,13 @@ SSE_QA_NGINX_LIMIT_FIX_MODES = {
     "apply_sse_qa_nginx_limit",
     "rollback_sse_qa_nginx_limit",
 }
+SSE_QA_ALLOW_CIDR_MODES = {
+    "apply_sse_qa_allow_cidr",
+    "restore_sse_qa_allow_cidr",
+}
 SSE_QA_HTTPS_MODES = {
     "inspect_sse_qa_https", "prepare_sse_qa_https",
-} | SSE_QA_NGINX_LIMIT_FIX_MODES
+} | SSE_QA_NGINX_LIMIT_FIX_MODES | SSE_QA_ALLOW_CIDR_MODES
 
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
@@ -137,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sse-qa-runtime-sha256")
     parser.add_argument("--sse-qa-https-controller-sha256")
     parser.add_argument("--sse-qa-allow-cidr")
+    parser.add_argument("--sse-qa-allow-cidr-stdin", action="store_true")
     return parser.parse_args()
 
 
@@ -375,6 +382,7 @@ def main() -> None:
             args.sse_qa_secrets_stdin, args.sse_qa_candidate_commit,
             args.sse_qa_controller_sha256, args.sse_qa_runtime_sha256,
             args.sse_qa_https_controller_sha256, args.sse_qa_allow_cidr,
+            args.sse_qa_allow_cidr_stdin,
         )):
             raise SystemExit("repair_sse_qa_seed accepts no additional inputs")
         paths = []
@@ -402,9 +410,19 @@ def main() -> None:
             args.apk_dist, args.apk_profile, args.operation, args.receiver_source,
             args.fcm_service_account, args.rollback_id, args.event_file,
             args.sse_qa_secrets, args.sse_qa_secrets_stdin,
-            args.sse_qa_allow_cidr,
+            args.sse_qa_allow_cidr, args.sse_qa_allow_cidr_stdin,
         )):
             raise SystemExit(f"{args.mode} accepts no additional inputs")
+        if args.mode in SSE_QA_ALLOW_CIDR_MODES and any((
+            args.apk_dist, args.apk_profile, args.operation, args.receiver_source,
+            args.fcm_service_account, args.rollback_id, args.event_file,
+            args.sse_qa_secrets, args.sse_qa_secrets_stdin,
+        )):
+            raise SystemExit(f"{args.mode} rejects unrelated inputs")
+        if args.mode == "restore_sse_qa_allow_cidr" and any((
+            args.sse_qa_allow_cidr, args.sse_qa_allow_cidr_stdin,
+        )):
+            raise SystemExit("restore_sse_qa_allow_cidr accepts no CIDR input")
         if not args.sse_qa_package or not args.sse_qa_package.is_file():
             raise SystemExit("SSE QA mode requires --sse-qa-package")
         paths = [(PurePosixPath("deploy/sse-qa/package.zip"), args.sse_qa_package.resolve())]
@@ -423,6 +441,8 @@ def main() -> None:
         elif args.sse_qa_secrets or args.sse_qa_secrets_stdin:
             raise SystemExit("SSE QA secrets are accepted only by install_sse_qa")
         if args.mode == "prepare_sse_qa_https":
+            if args.sse_qa_allow_cidr_stdin:
+                raise SystemExit("prepare_sse_qa_https does not accept allow_cidr stdin")
             try:
                 allow_network = ipaddress.ip_network(args.sse_qa_allow_cidr or "", strict=True)
             except ValueError as exc:
@@ -437,8 +457,37 @@ def main() -> None:
                 PurePosixPath("deploy/sse-qa/allow-cidr.txt"),
                 args.sse_qa_allow_cidr.encode("ascii"),
             ))
-        elif args.sse_qa_allow_cidr:
-            raise SystemExit("SSE QA allow_cidr is accepted only by prepare_sse_qa_https")
+        elif args.mode == "apply_sse_qa_allow_cidr":
+            if args.sse_qa_allow_cidr or not args.sse_qa_allow_cidr_stdin:
+                raise SystemExit(
+                    "apply_sse_qa_allow_cidr requires one canonical IPv4 /32 on stdin"
+                )
+            raw_allow = sys.stdin.buffer.read(65)
+            try:
+                allow_cidr = raw_allow.decode("ascii")
+                allow_network = ipaddress.ip_network(allow_cidr, strict=True)
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise SystemExit(
+                    "apply_sse_qa_allow_cidr requires one canonical IPv4 /32 on stdin"
+                ) from exc
+            if (
+                not raw_allow
+                or len(raw_allow) > 64
+                or allow_network.version != 4
+                or allow_network.prefixlen != 32
+                or str(allow_network) != allow_cidr
+            ):
+                raise SystemExit(
+                    "apply_sse_qa_allow_cidr requires one canonical IPv4 /32 on stdin"
+                )
+            inline_payload.append((
+                PurePosixPath("deploy/sse-qa/allow-cidr.txt"), raw_allow,
+            ))
+        elif args.sse_qa_allow_cidr or args.sse_qa_allow_cidr_stdin:
+            raise SystemExit(
+                "SSE QA allow_cidr is accepted only by prepare_sse_qa_https "
+                "or apply_sse_qa_allow_cidr stdin"
+            )
         provenance = {
             "candidate_commit": args.sse_qa_candidate_commit,
             "controller_sha256": args.sse_qa_controller_sha256,

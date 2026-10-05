@@ -48,9 +48,13 @@ SSE_QA_NGINX_LIMIT_FIX_MODES = {
     "apply_sse_qa_nginx_limit",
     "rollback_sse_qa_nginx_limit",
 }
+SSE_QA_ALLOW_CIDR_MODES = {
+    "apply_sse_qa_allow_cidr",
+    "restore_sse_qa_allow_cidr",
+}
 SSE_QA_HTTPS_MODES = {
     "inspect_sse_qa_https", "prepare_sse_qa_https",
-} | SSE_QA_NGINX_LIMIT_FIX_MODES
+} | SSE_QA_NGINX_LIMIT_FIX_MODES | SSE_QA_ALLOW_CIDR_MODES
 SSE_QA_MODES = {
     "verify_sse_qa", "prepare_sse_qa_host_key", "install_sse_qa",
     *SSE_QA_HTTPS_MODES,
@@ -87,10 +91,13 @@ SSE_QA_PERSISTENT_SLICE_PATH = Path("/etc/systemd/system/sse-qa.slice")
 SSE_QA_CANDIDATE_COMMIT = "9d336723f3dc2fc574937a57602a27b54c54fd77"
 SSE_QA_CONTROLLER_SHA256 = "3e3ee8af9b2877bb93a7487f89a832834331a647d87f721180fe4b2ae8c2ea44"
 SSE_QA_RUNTIME_SHA256 = "8717926a7c9d437e96e76243ce9bd2c14acf45b6a8fa325f08e885d9a296366e"
-SSE_QA_HTTPS_CONTROLLER_SHA256 = "3579f325d1ab6ed74c012fcca8a233a3f0bbe1ef614da4d5b3c09c17ad19051b"
+SSE_QA_HTTPS_CONTROLLER_SHA256 = "0d0bb7b151f03a24382a3c723ecb21ad0791450a315248c73d6f94a4c831c7d7"
 SSE_QA_LEGACY_RENEWAL_HOOK_SHA256 = "a70916ea7e39d234cbd2fd232eccdeb79c632f69f6cc01fef4fcb2978746a722"
 SSE_QA_NGINX_LIMIT_FIX_SCHEMA = "SSE_QA_NGINX_LIMIT_FIX_V1"
 SSE_QA_NGINX_LIMIT_FIX_VERSION = "C2 + seed-fix + nginx-limit-fix"
+SSE_QA_ALLOW_CIDR_SWAP_SCHEMA = "SSE_QA_ALLOW_CIDR_SWAP_V1"
+SSE_QA_ALLOW_CIDR_SWAP_VERSION = "temporary-single-ipv4-32"
+SSE_QA_ALLOW_CIDR_TRANSACTION_SCHEMA = "SSE_QA_ALLOW_CIDR_TRANSACTION_V1"
 SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256 = "a9d33543398df5188734e152d056e04e3e27770e09bcf57ce73eba42f9e710c9"
 SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256 = "686bd71cc95444a631b7c96d90811992794e0ebf1dc5582642d6be518cc1314a"
 SSE_QA_SEED_FIX_VERSION = "C2 + seed-fix"
@@ -203,6 +210,9 @@ server {
 """
 SSE_QA_OWNERSHIP_PATH = Path("/var/lib/sse-qa/OWNERSHIP.json")
 SSE_QA_NGINX_CONFIG_PATH = Path("/etc/sse-qa/nginx.conf")
+SSE_QA_ALLOW_CIDR_TRANSACTION_PATH = Path(
+    "/var/lib/sse-qa/ALLOW_CIDR_TRANSACTION.json"
+)
 SSE_QA_RENEWAL_HOOK_PATH = Path("/usr/local/libexec/sse-qa-https-hook")
 SSE_QA_APP_ENV_PATH = Path("/etc/sse-qa/app.env")
 SSE_QA_NGINX_AUTH_PATH = Path("/run/sse-qa-nginx/htpasswd")
@@ -226,6 +236,13 @@ SSE_QA_NGINX_LIMIT_FIX_SUMMARY = re.compile(
     r"nginx_variant=(applied|legacy) ordinary_per_ip=8 "
     r"static_per_ip=(none|8) realtime_total=2 "
     r"ownership=(updated|verified) renewal_hook=preserved$"
+)
+SSE_QA_ALLOW_CIDR_SUMMARY = re.compile(
+    r"^SSE_QA_ALLOW_CIDR_OK "
+    r"action=(apply|restore) result=(changed|unchanged) qa=disabled "
+    r"swap=(active|restored) recovery=(none|completed) "
+    r"nginx_limit_fix=applied ownership=(updated|verified) "
+    r"renewal_hook=preserved$"
 )
 APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {
@@ -2770,7 +2787,7 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         allowed = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
             allowed.add(SSE_QA_SECRETS_PAYLOAD)
-        if mode == "prepare_sse_qa_https":
+        if mode in {"prepare_sse_qa_https", "apply_sse_qa_allow_cidr"}:
             allowed.add(SSE_QA_ALLOW_CIDR_PAYLOAD)
         if path.as_posix() not in allowed:
             raise ReleaseError(f"SSE QA target is not allowed: {value}")
@@ -2921,7 +2938,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
         expected = {SSE_QA_PACKAGE_PAYLOAD}
         if mode == "install_sse_qa":
             expected.add(SSE_QA_SECRETS_PAYLOAD)
-        if mode == "prepare_sse_qa_https":
+        if mode in {"prepare_sse_qa_https", "apply_sse_qa_allow_cidr"}:
             expected.add(SSE_QA_ALLOW_CIDR_PAYLOAD)
         expected_metadata = (
             SSE_QA_HTTPS_METADATA
@@ -2939,7 +2956,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
                 raise ReleaseError("invalid SSE QA secrets envelope") from exc
             if not isinstance(secrets, dict) or secrets.get("schema") != 1:
                 raise ReleaseError("invalid SSE QA secrets schema")
-        if mode == "prepare_sse_qa_https":
+        if mode in {"prepare_sse_qa_https", "apply_sse_qa_allow_cidr"}:
             try:
                 allow_cidr = payload[SSE_QA_ALLOW_CIDR_PAYLOAD].decode("ascii")
                 network = ipaddress.ip_network(allow_cidr, strict=True)
@@ -3762,6 +3779,307 @@ def _verify_sse_qa_nginx_limit_fix_overlay(*, expected_enabled: bool) -> None:
         raise ReleaseError("SSE QA nginx limit-fix previous ownership cannot be reconstructed")
 
 
+def _verify_sse_qa_allow_cidr_swap_overlay(*, expected_enabled: bool) -> None:
+    """Require the retained transaction and one deterministic active /32 state."""
+    ownership_path = SSE_QA_OWNERSHIP_PATH
+    nginx_path = SSE_QA_NGINX_CONFIG_PATH
+    app_env_path = SSE_QA_APP_ENV_PATH
+    transaction_path = SSE_QA_ALLOW_CIDR_TRANSACTION_PATH
+    for label, path in (
+        ("ownership", ownership_path),
+        ("nginx", nginx_path),
+        ("app.env", app_env_path),
+        ("transaction", transaction_path),
+    ):
+        if path.is_symlink() or not path.is_file():
+            raise ReleaseError(f"SSE QA allow CIDR {label} is missing or unsafe")
+
+    def canonical(value: dict[str, object]) -> bytes:
+        return (json.dumps(value, sort_keys=True) + "\n").encode("utf-8")
+
+    def canonical_ipv4_32(value: object, label: str) -> str:
+        if not isinstance(value, str):
+            raise ReleaseError(f"SSE QA allow CIDR {label} is invalid")
+        try:
+            network = ipaddress.ip_network(value, strict=True)
+        except ValueError as exc:
+            raise ReleaseError(f"SSE QA allow CIDR {label} is invalid") from exc
+        if network.version != 4 or network.prefixlen != 32 or str(network) != value:
+            raise ReleaseError(f"SSE QA allow CIDR {label} is not canonical /32")
+        return value
+
+    legacy_template = SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+        "    client_max_body_size 2m;",
+        "    limit_conn sse_qa_per_ip 8;\n    client_max_body_size 2m;",
+        1,
+    ).replace(
+        "    location / {\n        limit_conn sse_qa_per_ip 8;\n"
+        "        proxy_pass http://sse_qa_wsgi;",
+        "    location / {\n        proxy_pass http://sse_qa_wsgi;",
+        1,
+    )
+
+    def fixed_nginx(value: str) -> bytes:
+        return SSE_QA_NGINX_LIMIT_FIX_TEMPLATE.replace(
+            "@@ALLOW_CIDR@@", value,
+        ).encode("utf-8")
+
+    def legacy_nginx(value: str) -> bytes:
+        return legacy_template.replace("@@ALLOW_CIDR@@", value).encode("utf-8")
+
+    def limit_overlay(value: str, previous_pin: str) -> dict[str, object]:
+        if re.fullmatch(r"[0-9a-f]{64}", previous_pin) is None:
+            raise ReleaseError("SSE QA allow CIDR limit ownership pin is invalid")
+        return {
+            "schema": SSE_QA_NGINX_LIMIT_FIX_SCHEMA,
+            "version": SSE_QA_NGINX_LIMIT_FIX_VERSION,
+            "source_template_sha256": SSE_QA_NGINX_LEGACY_TEMPLATE_SHA256,
+            "target_template_sha256": SSE_QA_NGINX_LIMIT_FIX_TEMPLATE_SHA256,
+            "base_controller_sha256": SSE_QA_CONTROLLER_SHA256,
+            "runtime_sha256": SSE_QA_RUNTIME_SHA256,
+            "renewal_hook_sha256": SSE_QA_LEGACY_RENEWAL_HOOK_SHA256,
+            "previous_nginx_sha256": digest(legacy_nginx(value)),
+            "installed_nginx_sha256": digest(fixed_nginx(value)),
+            "previous_ownership_sha256": previous_pin,
+            "ordinary_http_per_ip_limit": 8,
+            "static_per_ip_limit": None,
+            "realtime_total_limit": 2,
+        }
+
+    try:
+        ownership_bytes = ownership_path.read_bytes()
+        ownership = json.loads(ownership_bytes.decode("utf-8"))
+        nginx_bytes = nginx_path.read_bytes()
+        app_env_bytes = app_env_path.read_bytes()
+        app_env = app_env_bytes.decode("utf-8")
+        transaction_bytes = transaction_path.read_bytes()
+        transaction = json.loads(transaction_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("SSE QA allow CIDR state cannot be read") from exc
+    if (
+        not isinstance(ownership, dict)
+        or ownership_bytes != canonical(ownership)
+        or not isinstance(transaction, dict)
+        or transaction_bytes != canonical(transaction)
+        or not transaction_bytes
+        or len(transaction_bytes) > 256 * 1024
+    ):
+        raise ReleaseError("SSE QA allow CIDR state is invalid or non-canonical")
+    transaction_details = transaction_path.stat(follow_symlinks=False)
+    if stat.S_IMODE(transaction_details.st_mode) != 0o600 or (
+        os.name != "nt"
+        and (transaction_details.st_uid != 0 or transaction_details.st_gid != 0)
+    ):
+        raise ReleaseError("SSE QA allow CIDR transaction ownership mismatch")
+
+    transaction_keys = {
+        "schema",
+        "source_nginx_sha256", "source_nginx_b64", "source_nginx_identity",
+        "source_ownership_sha256", "source_ownership_b64",
+        "source_ownership_identity", "target_allow_cidr",
+        "target_payload_sha256", "target_nginx_sha256",
+    }
+    if (
+        set(transaction) != transaction_keys
+        or transaction.get("schema") != SSE_QA_ALLOW_CIDR_TRANSACTION_SCHEMA
+    ):
+        raise ReleaseError("SSE QA allow CIDR transaction contract mismatch")
+    decoded: dict[str, bytes] = {}
+    for prefix in ("source_nginx", "source_ownership"):
+        encoded = transaction.get(f"{prefix}_b64")
+        expected_sha256 = transaction.get(f"{prefix}_sha256")
+        identity = transaction.get(f"{prefix}_identity")
+        if (
+            not isinstance(encoded, str)
+            or not isinstance(expected_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+            or not isinstance(identity, list)
+            or len(identity) != 3
+            or not isinstance(identity[0], int)
+            or any(item is not None and not isinstance(item, int) for item in identity[1:])
+        ):
+            raise ReleaseError("SSE QA allow CIDR transaction source metadata mismatch")
+        try:
+            value = base64.b64decode(encoded, validate=True)
+        except Exception as exc:
+            raise ReleaseError("SSE QA allow CIDR transaction source is invalid") from exc
+        if digest(value) != expected_sha256:
+            raise ReleaseError("SSE QA allow CIDR transaction source digest mismatch")
+        decoded[prefix] = value
+
+    def path_identity(path: Path) -> list[int | None]:
+        details = path.stat(follow_symlinks=False)
+        return [
+            stat.S_IMODE(details.st_mode),
+            details.st_uid if os.name != "nt" else None,
+            details.st_gid if os.name != "nt" else None,
+        ]
+
+    if (
+        path_identity(nginx_path) != transaction["source_nginx_identity"]
+        or path_identity(ownership_path) != transaction["source_ownership_identity"]
+    ):
+        raise ReleaseError("SSE QA allow CIDR managed file identity mismatch")
+
+    target_allow = canonical_ipv4_32(
+        transaction.get("target_allow_cidr"), "transaction target",
+    )
+    target_nginx = fixed_nginx(target_allow)
+    if (
+        transaction.get("target_payload_sha256")
+        != digest(target_allow.encode("ascii"))
+        or transaction.get("target_nginx_sha256") != digest(target_nginx)
+        or nginx_bytes != target_nginx
+    ):
+        raise ReleaseError("SSE QA allow CIDR transaction target mismatch")
+
+    source_nginx = decoded["source_nginx"]
+    source_ownership_bytes = decoded["source_ownership"]
+    try:
+        source_nginx_text = source_nginx.decode("utf-8")
+        source_ownership = json.loads(source_ownership_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("SSE QA allow CIDR transaction source cannot be decoded") from exc
+    source_allow_values = re.findall(
+        r"(?m)^[ \t]*allow[ \t]+([^;\r\n]+);[ \t]*$", source_nginx_text,
+    )
+    if len(source_allow_values) != 1:
+        raise ReleaseError("SSE QA allow CIDR transaction source is ambiguous")
+    source_allow = canonical_ipv4_32(source_allow_values[0], "transaction source")
+    if (
+        source_allow == target_allow
+        or source_nginx != fixed_nginx(source_allow)
+        or not isinstance(source_ownership, dict)
+        or source_ownership_bytes != canonical(source_ownership)
+        or source_ownership.get("schema") != "SSE_QA_OWNERSHIP_V2"
+        or source_ownership.get("complete") is not True
+        or source_ownership.get("phase") != "complete_disabled"
+        or "allow_cidr_swap" in source_ownership
+    ):
+        raise ReleaseError("SSE QA allow CIDR transaction source state mismatch")
+    source_files = source_ownership.get("files")
+    source_https = source_ownership.get("https_preparation")
+    source_runtime = source_ownership.get("runtime_files")
+    source_limit = source_ownership.get("nginx_limit_fix")
+    source_limit_pin = (
+        source_limit.get("previous_ownership_sha256")
+        if isinstance(source_limit, dict) else None
+    )
+    if (
+        not isinstance(source_files, dict)
+        or source_files.get(nginx_path.as_posix()) != digest(source_nginx)
+        or transaction_path.as_posix() in source_files
+        or not isinstance(source_https, dict)
+        or source_https.get("allow_cidr") != source_allow
+        or not isinstance(source_runtime, dict)
+        or not isinstance(source_limit_pin, str)
+        or source_limit != limit_overlay(source_allow, source_limit_pin)
+    ):
+        raise ReleaseError("SSE QA allow CIDR authenticated source mismatch")
+
+    expected_phase = "complete_enabled" if expected_enabled else "complete_disabled"
+    files = ownership.get("files")
+    runtime_files = ownership.get("runtime_files")
+    if (
+        ownership.get("schema") != "SSE_QA_OWNERSHIP_V2"
+        or ownership.get("complete") is not True
+        or ownership.get("phase") != expected_phase
+        or not isinstance(files, dict)
+        or not isinstance(runtime_files, dict)
+        or files.get(nginx_path.as_posix()) != digest(nginx_bytes)
+        or files.get(app_env_path.as_posix()) != digest(app_env_bytes)
+    ):
+        raise ReleaseError("SSE QA allow CIDR active ownership mismatch")
+    expected_switch = "true" if expected_enabled else "false"
+    if re.findall(r"(?m)^SSE_PILOT_ENABLED=(true|false)$", app_env) != [expected_switch]:
+        raise ReleaseError("SSE QA allow CIDR app.env state mismatch")
+
+    transaction_sha256 = digest(transaction_bytes)
+    expected_overlay = {
+        "schema": SSE_QA_ALLOW_CIDR_SWAP_SCHEMA,
+        "version": SSE_QA_ALLOW_CIDR_SWAP_VERSION,
+        "previous_allow_cidr": source_allow,
+        "installed_allow_cidr": target_allow,
+        "previous_nginx_sha256": digest(source_nginx),
+        "installed_nginx_sha256": digest(target_nginx),
+        "previous_ownership_sha256": digest(source_ownership_bytes),
+        "previous_nginx_limit_fix": json.loads(json.dumps(source_limit)),
+        "transaction_journal_path": transaction_path.as_posix(),
+        "transaction_journal_sha256": transaction_sha256,
+        "ordinary_http_per_ip_limit": 8,
+        "static_per_ip_limit": None,
+        "realtime_total_limit": 2,
+    }
+    if (
+        ownership.get("allow_cidr_swap") != expected_overlay
+        or files.get(transaction_path.as_posix()) != transaction_sha256
+    ):
+        raise ReleaseError("SSE QA allow CIDR exact active overlay mismatch")
+
+    disabled_active = json.loads(json.dumps(ownership))
+    disabled_active["phase"] = "complete_disabled"
+    disabled_files = disabled_active.get("files")
+    disabled_runtime = disabled_active.get("runtime_files")
+    if not isinstance(disabled_files, dict) or not isinstance(disabled_runtime, dict):
+        raise ReleaseError("SSE QA allow CIDR active ownership maps are invalid")
+    if expected_enabled:
+        disabled_env, count = re.subn(
+            r"(?m)^SSE_PILOT_ENABLED=true$", "SSE_PILOT_ENABLED=false", app_env,
+        )
+        if count != 1:
+            raise ReleaseError("SSE QA allow CIDR enabled app.env mismatch")
+        disabled_env_bytes = disabled_env.encode("utf-8")
+        disabled_files[app_env_path.as_posix()] = digest(disabled_env_bytes)
+        disabled_runtime.pop(SSE_QA_NGINX_AUTH_PATH.as_posix(), None)
+    else:
+        disabled_env_bytes = app_env_bytes
+    if source_files.get(app_env_path.as_posix()) != digest(disabled_env_bytes):
+        raise ReleaseError("SSE QA allow CIDR source app.env mismatch")
+
+    expected_active = json.loads(json.dumps(source_ownership))
+    expected_files = expected_active["files"]
+    expected_https = expected_active["https_preparation"]
+    assert isinstance(expected_files, dict) and isinstance(expected_https, dict)
+    expected_files[nginx_path.as_posix()] = digest(target_nginx)
+    expected_files[transaction_path.as_posix()] = transaction_sha256
+    expected_https["allow_cidr"] = target_allow
+    expected_active["allow_cidr_swap"] = expected_overlay
+    synthetic_legacy = json.loads(json.dumps(expected_active))
+    synthetic_legacy.pop("nginx_limit_fix", None)
+    synthetic_files = synthetic_legacy.get("files")
+    if not isinstance(synthetic_files, dict):
+        raise ReleaseError("SSE QA allow CIDR synthetic ownership is invalid")
+    synthetic_files[nginx_path.as_posix()] = digest(legacy_nginx(target_allow))
+    expected_active["nginx_limit_fix"] = limit_overlay(
+        target_allow, digest(canonical(synthetic_legacy)),
+    )
+    if canonical(disabled_active) != canonical(expected_active):
+        raise ReleaseError("SSE QA allow CIDR target state cannot be reconstructed")
+
+
+def _verify_sse_qa_allow_cidr_stable_state(*, expected_enabled: bool) -> str:
+    """Accept only exact clean or exact active states; reject asymmetric residue."""
+    if SSE_QA_OWNERSHIP_PATH.is_symlink() or not SSE_QA_OWNERSHIP_PATH.is_file():
+        raise ReleaseError("SSE QA allow CIDR ownership is missing or unsafe")
+    try:
+        ownership = json.loads(SSE_QA_OWNERSHIP_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("SSE QA allow CIDR ownership cannot be read") from exc
+    if not isinstance(ownership, dict):
+        raise ReleaseError("SSE QA allow CIDR ownership is invalid")
+    overlay_present = "allow_cidr_swap" in ownership
+    journal_present = (
+        SSE_QA_ALLOW_CIDR_TRANSACTION_PATH.exists()
+        or SSE_QA_ALLOW_CIDR_TRANSACTION_PATH.is_symlink()
+    )
+    if overlay_present != journal_present:
+        raise ReleaseError("SSE QA allow CIDR state has asymmetric transaction residue")
+    if not overlay_present:
+        return "none"
+    _verify_sse_qa_allow_cidr_swap_overlay(expected_enabled=expected_enabled)
+    return "active"
+
+
 def run_sse_qa_seed_fix(payload: dict[str, bytes]) -> str:
     """Run the one fixed, hash-pinned in-place repair for the isolated QA seed."""
     bundle_members = {
@@ -3820,10 +4138,14 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
     if mode in {
         "enable_sse_qa", "smoke_sse_qa", *SSE_QA_NGINX_LIMIT_FIX_MODES,
+        *SSE_QA_ALLOW_CIDR_MODES,
     }:
         _verify_sse_qa_seed_fix_overlay()
     if mode in {"enable_sse_qa", "smoke_sse_qa"}:
         _verify_sse_qa_nginx_limit_fix_overlay(
+            expected_enabled=mode == "smoke_sse_qa",
+        )
+        _verify_sse_qa_allow_cidr_stable_state(
             expected_enabled=mode == "smoke_sse_qa",
         )
     operation = {
@@ -3834,6 +4156,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
         "prepare_sse_qa_https": "prepare",
         "apply_sse_qa_nginx_limit": "apply-nginx-limit-fix",
         "rollback_sse_qa_nginx_limit": "rollback-nginx-limit-fix",
+        "apply_sse_qa_allow_cidr": "apply-allow-cidr",
+        "restore_sse_qa_allow_cidr": "restore-allow-cidr",
         "enable_sse_qa": "enable",
         "smoke_sse_qa": "smoke",
         "disable_sse_qa": "disable",
@@ -3916,7 +4240,7 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             except UnicodeError as exc:
                 raise ReleaseError("SSE QA secrets payload is not UTF-8") from exc
             command.append("--secrets-stdin")
-        elif mode == "prepare_sse_qa_https":
+        elif mode in {"prepare_sse_qa_https", "apply_sse_qa_allow_cidr"}:
             try:
                 operation_input = payload[SSE_QA_ALLOW_CIDR_PAYLOAD].decode("ascii")
             except UnicodeError as exc:
@@ -3933,6 +4257,8 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
             scoped_unit = "sse-qa-https.service"
         elif mode in SSE_QA_NGINX_LIMIT_FIX_MODES:
             scoped_unit = "sse-qa-nginx-limit-fix.service"
+        elif mode in SSE_QA_ALLOW_CIDR_MODES:
+            scoped_unit = "sse-qa-allow-cidr.service"
         runtime_slice_digest = (
             _stage_sse_qa_runtime_slice(root / "bundle")
             if mode == "install_sse_qa" else None
@@ -3961,7 +4287,7 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                     command.extend(("--bundle-root", str(root / "bundle")))
                 if mode == "install_sse_qa":
                     command.append("--secrets-stdin")
-                elif mode == "prepare_sse_qa_https":
+                elif mode in {"prepare_sse_qa_https", "apply_sse_qa_allow_cidr"}:
                     command.append("--allow-cidr-stdin")
         except BaseException:
             if runtime_slice_digest is not None:
@@ -3995,6 +4321,13 @@ def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
                 )
                 if matched is None or matched.group(1) != expected_action:
                     raise ReleaseError("SSE QA nginx limit-fix returned no fixed summary")
+            if mode in SSE_QA_ALLOW_CIDR_MODES:
+                matched = SSE_QA_ALLOW_CIDR_SUMMARY.fullmatch(summary)
+                expected_action = (
+                    "apply" if mode == "apply_sse_qa_allow_cidr" else "restore"
+                )
+                if matched is None or matched.group(1) != expected_action:
+                    raise ReleaseError("SSE QA allow CIDR operation returned no fixed summary")
             if receiver_cgroup is not None and _receiver_unified_cgroup() != receiver_cgroup:
                 raise ReleaseError("production receiver cgroup changed during SSE QA operation")
             operation_succeeded = True
