@@ -1,6 +1,11 @@
 (function (root) {
     "use strict";
     function copy(value) { return JSON.parse(JSON.stringify(value)); }
+    function latestContext(shift) {
+        return (shift && shift.events || []).map(function (entry) { return entry.event; })
+            .filter(function (event) { return event.event_type === "excavator.work_context.changed"; })
+            .sort(function (a, b) { return Number(b.sequence) - Number(a.sequence); })[0] || null;
+    }
 
     // The existing transport remains authoritative for pre-existing server
     // shifts. Only shifts opened by this ledger use the autonomous envelope.
@@ -38,6 +43,20 @@
                 var dependencies = (event.depends_on || []).slice();
                 if (opening && current && current.close_event_id) dependencies.push(current.close_event_id);
                 if (!opening && current.open_event_id) dependencies.push(current.open_event_id);
+                var context = latestContext(current);
+                var isLoad = event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded";
+                if (context && (isLoad || event.event_type === "excavator.work_context.changed")) {
+                    dependencies.push(context.event_id);
+                    if (isLoad) {
+                        var settings = context.payload;
+                        if (!(settings.dump_point_ids || []).some(function (id) {
+                            return String(id) === String(event.payload.dump_point_id);
+                        })) throw new Error("Точка разгрузки изменилась. Выберите действующую точку.");
+                        ["rock_type_id", "loading_horizon", "loading_block"].forEach(function (key) {
+                            event.payload[key] = settings[key];
+                        });
+                    }
+                }
                 if (event.event_type === "excavator.shift.closed") {
                     current.events.forEach(function (entry) { dependencies.push(entry.event.event_id); });
                 }
@@ -85,6 +104,31 @@
             setServerShift: function (id) { serverShiftId = Number(id || 0); },
             ledger: ledger,
             ready: function () { return ledger.ready(); },
+            currentShift: owned,
+            workContext: function () {
+                var event = latestContext(owned());
+                return event ? copy(event) : null;
+            },
+            saveWorkContext: function (payload, eventId) {
+                var shift = owned();
+                if (!shift || shift.status !== "open") return Promise.reject(new Error("Сначала начните смену."));
+                var saved = copy(payload);
+                if (!saved.rock_type_id || !Array.isArray(saved.dump_point_ids) || !saved.dump_point_ids.length) {
+                    return Promise.reject(new Error("Выберите породу и хотя бы одну точку разгрузки."));
+                }
+                saved.dump_point_ids = saved.dump_point_ids.map(String).filter(function (id, index, all) {
+                    return id && all.indexOf(id) === index;
+                });
+                ["loading_horizon", "loading_block"].forEach(function (key) {
+                    saved[key] = String(saved[key] || "").replace(/\D/g, "").slice(0, 16);
+                });
+                var event = Object.assign({}, options.identity, {
+                    event_id: eventId, event_type: "excavator.work_context.changed", format_version: 1,
+                    equipment_id: Number(shift.equipment_id), occurred_at: new Date().toISOString(),
+                    sequence: 1, depends_on: [], payload: saved
+                });
+                return prepare(event, shift.local_shift_id);
+            },
             open: function (payload, eventId) {
                 var savedPayload = copy(payload);
                 var expected = owned();

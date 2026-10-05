@@ -94,6 +94,77 @@ test('concurrent actions from one screen receive increasing durable sequence num
     assert.ok(b.sequence > a.sequence);
 });
 
+const face = {rock_type_id: '8', dump_point_ids: ['10', '11'], loading_horizon: '075', loading_block: '52'};
+test('saved settings, repeated settings and both loading modes retain a causal chain and committed fields', async () => {
+    const {controller, ledger} = make();
+    await controller.open(readings, 'open-1');
+    const settings = await controller.saveWorkContext(face, 'settings-1');
+    assert.ok(settings.depends_on.includes('open-1'));
+    const second = await controller.saveWorkContext({...face, loading_block: '53'}, 'settings-2');
+    assert.ok(second.depends_on.includes('settings-1'));
+    for (const type of ['excavator.trip.loaded', 'excavator.free_bucket.loaded']) {
+        const raw = {...work(type, type), payload: {truck_id: 4, dump_point_id: 11, rock_type_id: 'draft', loading_horizon: '999', loading_block: '999'}};
+        const saved = await controller.outbox.queue(raw);
+        assert.ok(saved.depends_on.includes('settings-2'));
+        assert.equal(saved.payload.rock_type_id, '8');
+        assert.equal(saved.payload.loading_horizon, '075');
+        assert.equal(saved.payload.loading_block, '53');
+        assert.equal(raw.payload.rock_type_id, 'draft');
+    }
+    assert.deepEqual(await ledger.getEvent('settings-1'), settings);
+});
+
+test('settings survive restart and a hung network without becoming another shift defaults', async () => {
+    const adapter = storage();
+    const first = make(adapter, {queue: () => new Promise(() => {})});
+    await first.controller.open(readings, 'open-1');
+    const source = await first.controller.saveWorkContext(face, 'settings-1');
+    const second = make(adapter);
+    await second.controller.ready();
+    assert.deepEqual(second.controller.workContext(), source);
+    await second.controller.outbox.queue(work('close-1', 'excavator.shift.closed'));
+    await second.controller.open(readings, 'open-2');
+    assert.equal(second.controller.workContext(), null);
+});
+
+test('a stale window loading a removed destination fails without recording a load', async () => {
+    const adapter = storage();
+    const first = make(adapter);
+    await first.controller.open(readings, 'open-1');
+    await first.controller.saveWorkContext(face, 'settings-1');
+    const second = make(adapter);
+    await second.controller.ready();
+    await first.controller.saveWorkContext({...face, dump_point_ids: ['11']}, 'settings-2');
+    await assert.rejects(second.controller.outbox.queue({...work('stale-load'), payload: {dump_point_id: 10}}), /Точка разгрузки изменилась/);
+    assert.equal(await second.ledger.getEvent('stale-load'), null);
+    const loaded = await second.controller.outbox.queue({...work('valid-load'), payload: {dump_point_id: 11}});
+    assert.ok(loaded.depends_on.includes('settings-2'));
+});
+
+test('failed settings storage preserves the previous settings and does not deliver the failed event', async () => {
+    let fail = false;
+    const disk = storage();
+    const {controller, sent} = make({read: disk.read, write: state => { if (fail) throw new Error('quota'); return disk.write(state); }});
+    await controller.open(readings, 'open-1');
+    await controller.saveWorkContext(face, 'settings-1');
+    fail = true;
+    await assert.rejects(controller.saveWorkContext({...face, rock_type_id: '9'}, 'failed-settings'), /quota/);
+    assert.equal(controller.workContext().event_id, 'settings-1');
+    assert.equal(sent.some(e => e.event_id === 'failed-settings'), false);
+});
+
+test('settings cannot be recorded into an already closed or superseded shift', async () => {
+    const adapter = storage();
+    const first = make(adapter);
+    await first.controller.open(readings, 'open-1');
+    const stale = make(adapter);
+    await stale.controller.ready();
+    await first.controller.outbox.queue(work('close-1', 'excavator.shift.closed'));
+    await assert.rejects(first.controller.saveWorkContext(face, 'closed-settings'), /Сначала начните/);
+    await first.controller.open(readings, 'open-2');
+    await assert.rejects(stale.controller.saveWorkContext(face, 'stale-settings'), /Смена изменилась/);
+});
+
 const template = fs.readFileSync(require.resolve('../../../templates/trips/excavator_work.html'), 'utf8');
 test('screen scripts remain syntactically valid after template substitution', () => {
     for (const match of template.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) {
@@ -135,7 +206,7 @@ test('local projection enables prepared cards only after opening and does not re
 test('both new modules are packaged in the prepared service worker shell', () => {
     const views = fs.readFileSync(require.resolve('../../../trips/views.py'), 'utf8');
     for (const script of ['excavator-local-shift-v1.js', 'excavator-autonomous-shift-v1.js']) {
-        assert.ok(views.includes('/static/js/' + script + '?v=excavator-mobile-shell-v271'));
+        assert.ok(views.includes('/static/js/' + script + '?v=excavator-mobile-shell-v272'));
         assert.ok(template.includes("js/" + script));
     }
 });

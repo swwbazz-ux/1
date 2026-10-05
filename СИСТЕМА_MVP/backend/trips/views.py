@@ -586,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v271";
+const CACHE_NAME = "excavator-mobile-shell-v272";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,28 +600,28 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v271",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v271",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v271",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v271",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v271",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v271",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v271",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v272",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v272",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v272",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v272",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v272",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v272",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v272",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v271",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v271",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v271",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v272",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v272",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v272",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -6006,6 +6006,15 @@ def excavator_work_view(request):
         distance_values=work_settings['destination_distance_values'],
         include_all=True,
     )
+    # Prepare unselected destinations too: the local settings action must not
+    # need a server fragment before the newly selected card can accept a load.
+    selected_dump_ids = {str(point.id) for point in dump_points}
+    prepared_dump_cards = build_excavator_dump_cards(
+        [point for point in work_settings['dump_point_choices'] if str(point.id) not in selected_dump_ids],
+        distance_values=work_settings['destination_distance_values'],
+    )
+    for card in prepared_dump_cards:
+        card['is_prepared_hidden'] = True
     rock_choices = work_settings['rock_choices']
     downtime_equipment_type = current_excavator.equipment_type if current_excavator else None
     downtime_reasons = list(DowntimeReason.for_workplace('excavator_operator', downtime_equipment_type))
@@ -6239,7 +6248,7 @@ def excavator_work_view(request):
         if row['effective_dump_point_id']:
             completed_by_dump_id[row['effective_dump_point_id']] = row['total']
 
-    for card in dump_cards:
+    for card in dump_cards + prepared_dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
         card['is_last_sent'] = point_id == last_sent_dump_point_id
@@ -6295,6 +6304,7 @@ def excavator_work_view(request):
             'legacy_trip_client_action_id': legacy_trip_client_action_id,
             'truck_detail_cards': truck_detail_cards,
             'dump_cards': dump_cards,
+            'prepared_dump_cards': prepared_dump_cards,
             'dump_choice_cards': dump_choice_cards,
             'rock_choices': rock_choices,
             'has_applied_settings': work_settings['has_applied_settings'],

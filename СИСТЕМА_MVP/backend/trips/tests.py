@@ -2533,7 +2533,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, f'data-eo-dump-select="{self.dump_point.id}"')
         self.assertContains(response, f'data-eo-dump-select="{second_dump.id}"')
         self.assertContains(response, f'data-eo-dump-target="{self.dump_point.id}"')
-        self.assertNotContains(response, f'data-eo-dump-target="{second_dump.id}"')
+        self.assertNotIn(second_dump.id, [card['point'].id for card in response.context['dump_cards']])
+        self.assertRegex(response.content.decode(), rf'<button[^>]* hidden[^>]*data-eo-dump-target="{second_dump.id}"[^>]*disabled')
         self.assertEqual([card['point'].id for card in response.context['dump_cards']], [self.dump_point.id])
         self.assertEqual(
             {card['point'].id for card in response.context['dump_choice_cards']},
@@ -3507,6 +3508,20 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.context['current_excavator'])
         self.assertIsNone(response.context['open_shift'])
+
+    def test_offline_shell_prepares_unselected_allowed_destinations_without_enabling_them(self):
+        extra = DumpPoint.objects.create(name='Новая доступная точка')
+        inactive = DumpPoint.objects.create(name='Закрытая точка', is_active=False)
+        response = self.client.get(reverse('excavator_work'))
+        selected = {card['point'].id for card in response.context['dump_cards']}
+        prepared = response.context['prepared_dump_cards']
+        prepared_ids = {card['point'].id for card in prepared}
+        self.assertIn(extra.id, prepared_ids)
+        self.assertFalse(selected & prepared_ids)
+        self.assertNotIn(inactive.id, prepared_ids | selected)
+        self.assertTrue(all(card['is_prepared_hidden'] for card in prepared))
+        self.assertRegex(response.content.decode(), rf'<button[^>]* hidden[^>]*data-eo-dump-target="{extra.id}"[^>]*disabled')
+        self.assertEqual(response.content.decode().count(f'data-eo-dump-target="{extra.id}"'), 1)
 
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())

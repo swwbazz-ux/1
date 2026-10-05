@@ -4171,3 +4171,7 @@ body.excavator-operator-screen:has(.eo-offline-sync:not([hidden])) .eo-shell[dat
        только те, кто шрифт увеличил, то есть самые старшие машинисты. */
     margin-top: calc(1.65rem + 10px) !important;
 }
+
+/* Prepared offline destinations stay hidden until their settings are applied. */
+body.excavator-operator-screen [data-eo-dump-target][hidden],
+body.excavator-operator-screen [data-eo-empty-dumps][hidden] { display: none !important; }

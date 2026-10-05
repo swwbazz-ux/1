@@ -96,7 +96,7 @@ function extractDumpStateSource() {
 
 function extractSettingsSuccessHandler() {
     const successMarker =
-        '}).then(function (data) {\n                playExcavatorVoice("action_ok", "voice_face_settings_saved");\n                var savedIds = normalizeDumpPointIds(data.dump_point_ids || ids);';
+        'saveExcavatorFaceSettings(payload).then(function (data) {';
     const successStart = TEMPLATE_SOURCE.indexOf(successMarker);
     assert.notEqual(successStart, -1, "Production Face-settings success handler was not found.");
     return extractBraceBlock(
@@ -218,6 +218,7 @@ function createRuntime({refreshResult = true} = {}) {
         applySettings,
         ids: ["1"],
         window: {},
+        document: {querySelector: () => shell},
         showExcavatorNotice(message) {
             notices.push(message);
         },
