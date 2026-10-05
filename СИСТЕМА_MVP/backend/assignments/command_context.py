@@ -1,5 +1,6 @@
 """Привязка сохранённой команды расстановки к автору и исходной смене."""
 import json
+from datetime import timedelta
 from functools import wraps
 
 from django.db import transaction
@@ -116,6 +117,13 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
                 shift = EmployeeShift.objects.select_for_update(of=('self',)).get(pk=shift.pk)
                 if shift.closed_at:
                     raise CommandContextError('command_shift_mismatch', 'Исходная смена команды уже закрыта.')
+                if action_type in {'mining_master_assign_truck', 'dispatcher_assign_truck'} and payload.get('action') == 'assign':
+                    occurred_at = parse_datetime(context['occurred_at'])
+                    # Как при приёме полевых событий: ошибочные часы не обрезаем
+                    # до текущего времени и не превращаем в новый пятиминутный срок.
+                    if occurred_at < shift.opened_at or occurred_at > timezone.now() + timedelta(minutes=5):
+                        raise CommandContextError('command_time_invalid', 'Время команды не соответствует исходной смене или часам сервера.')
+                    request.assignment_deadline_origin = occurred_at
                 response = view(request, *args, **kwargs)
                 if response.status_code < 300:
                     receipt = ShiftClientAction.objects.get(action_type=action_type, client_action_id=ident)

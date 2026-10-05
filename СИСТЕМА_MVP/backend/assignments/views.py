@@ -1010,6 +1010,7 @@ def mining_master_assign_truck_view(request):
             assigned_by=access.employee,
             now=now,
             expected_state_id=expected_state_id,
+            deadline_origin=getattr(request, 'assignment_deadline_origin', None),
         )
     except HaulAssignmentStateConflict as error:
         return mining_master_client_action_error(payload, error, code='state_conflict')
@@ -1017,6 +1018,7 @@ def mining_master_assign_truck_view(request):
         'ok': True,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
+        'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,
         'created': created,
         'client_action_id': client_action_id,
     }

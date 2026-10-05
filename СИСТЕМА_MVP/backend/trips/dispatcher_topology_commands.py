@@ -339,6 +339,7 @@ def execute_dispatcher_assign_truck(
                 assigned_by=access.employee,
                 now=now,
                 expected_state_id=expected_state_id,
+                deadline_origin=getattr(request, 'assignment_deadline_origin', None),
             )
     except HaulAssignmentStateConflict as error:
         return dispatcher_client_action_error(payload, error, code='state_conflict')
@@ -352,6 +353,7 @@ def execute_dispatcher_assign_truck(
         'ok': True,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
+        'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,
         'created': created,
         'client_action_id': client_action_id,
     }

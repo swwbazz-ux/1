@@ -1618,6 +1618,7 @@ def validate_projected_excavator_state(assignments, expected_states):
 # ровно на той кнопке, которой горный мастер и диспетчер пользуются каждый день.
 def schedule_haul_assignment(
     *, truck, excavator, assigned_by=None, now=None, expected_state_id=None,
+    deadline_origin=None,
 ):
     now = now or timezone.now()
     lock_production_state()
@@ -1656,7 +1657,9 @@ def schedule_haul_assignment(
         assigned_by=assigned_by,
         action=HaulAssignmentAction.ASSIGN,
         status=AssignmentStatus.PENDING,
-        effective_at=haul_assignment_effective_at(truck, now),
+        # Срок распоряжения не продлевается временем доставки. now остаётся
+        # временем обработки для отмен/переходов; это не исторический replay.
+        effective_at=haul_assignment_effective_at(truck, deadline_origin or now),
     )
     _preserve_previous_loading_authority(
         previous_assignment=accepted,
