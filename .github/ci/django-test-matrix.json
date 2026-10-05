@@ -76,7 +76,7 @@
     },
     {
       "name": "mechanics-concurrency",
-      "tests": "trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomicityTests trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests core.test_historical_boundaries.HistoricalCarryoverPostgresTests core.test_offline_durable_replay.OfflineDurableReplayPostgresTests core.test_notification_outbox.NotificationOutboxPostgresTests core.test_historical_boundaries.HistoricalBoundariesTests"
+      "tests": "trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomicityTests trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests core.test_historical_boundaries.HistoricalCarryoverPostgresTests core.test_offline_durable_replay.OfflineDurableReplayPostgresTests core.test_notification_outbox.NotificationOutboxPostgresTests core.test_historical_boundaries.HistoricalBoundariesTests core.test_excavator_offline_opening.ExcavatorOfflineOpeningTests"
     }
   ]
 }

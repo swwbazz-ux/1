@@ -51,6 +51,7 @@ def _log_discrepancy(*, access, code, process, description):
 
 
 SUPPORTED_EVENT_ROLES = {
+    'excavator.shift.opened': 'excavator_operator',
     'excavator.free_bucket.accepted': 'excavator_operator',
     'excavator.free_bucket.cancelled': 'excavator_operator',
     'excavator.free_bucket.loaded': 'excavator_operator',
@@ -991,6 +992,17 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
         'context_snapshot': context_snapshot,
         'received_at': received_at,
     }
+    # Optional excavator local identity must be protected without changing
+    # fingerprints of legacy events or the existing driver wire contract.
+    if role_code == 'excavator_operator':
+        local_ids = [str(value).strip() for value in (
+            raw_event.get('local_shift_id'), payload.get('local_shift_id'),
+            context_snapshot.get('local_shift_id'),
+        ) if value not in (None, '')]
+        if len(set(local_ids)) > 1:
+            _invalid('local_shift_id_mismatch', 'Ссылки на локальную смену не совпадают.')
+        if local_ids:
+            normalized['local_shift_id'] = _clean_identifier(local_ids[0], field='local_shift_id')
     canonical = {
         **normalized,
         'occurred_at': occurred_at.isoformat(),
@@ -1117,7 +1129,25 @@ def _validate_claimed_context(access, normalized):
 def _locked_shift(access, normalized, *, role_code):
     from shifts.models import EmployeeShift
 
-    shift_id = _positive_int(normalized['shift_id'], field='shift_id')
+    shift_id = _positive_int(normalized['shift_id'], field='shift_id', required=False)
+    if role_code == 'excavator_operator' and normalized.get('local_shift_id'):
+        source = OfflineFieldEvent.objects.filter(
+            event_id=normalized['local_shift_id'], event_type='excavator.shift.opened',
+            actor=access.employee, access=access, role_code=role_code,
+            device_id=normalized['device_id'],
+        ).first()
+        if not source or source.status != OfflineFieldEventStatus.ACCEPTED:
+            _retry('shift_reference_pending', 'Локальная смена ещё не сопоставлена с сервером.')
+        if source.sequence >= normalized['sequence']:
+            _conflict('dependency_order_invalid', 'Открытие должно предшествовать событию смены.')
+        source_shift_id = source.shift_id
+        if not source_shift_id:
+            _retry('shift_reference_pending', 'Квитанция открытия ещё не содержит ID смены.')
+        if shift_id and shift_id != source_shift_id:
+            _conflict('shift_context_changed', 'Серверная и локальная ссылки на смену не совпадают.')
+        shift_id = source_shift_id
+    if not shift_id:
+        _invalid('shift_id_required', 'Не передана ссылка на смену.')
     shift = (
         EmployeeShift.objects.select_for_update(of=('self',))
         .select_related('equipment', 'equipment__equipment_type')
@@ -1174,6 +1204,67 @@ def _locked_shift(access, normalized, *, role_code):
             normalized.get('event_id'), occurred_at, shift.id, shift.closed_at,
         )
     return shift
+
+
+def _process_excavator_shift_opened(access, normalized):
+    from assignments.services import get_active_equipment_assignment, work_assignment_state
+    from shifts.models import EmployeeShift
+    from shifts.services import (
+        ExcavatorShiftError,
+        excavator_fuel_liters_from_percent,
+        open_excavator_shift,
+    )
+
+    local_shift_id = normalized.get('local_shift_id')
+    if not local_shift_id or local_shift_id != normalized['event_id']:
+        _invalid('local_shift_id_invalid', 'Локальный ID смены должен совпадать с ID открытия.')
+    assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
+    assignment_state = work_assignment_state(access.employee, assignment)
+    if assignment_state not in {'assigned', 'assignment_conflict'} or not assignment:
+        _conflict('assignment_not_available', 'Действующая расстановка машиниста не найдена.')
+    equipment_id = _positive_int(normalized['equipment_id'], field='equipment_id')
+    if assignment.equipment_id != equipment_id:
+        _conflict('equipment_context_changed', 'Техника локальной смены не совпадает с действующей расстановкой.')
+
+    payload = normalized['payload']
+    fuel_value = payload.get('fuel')
+    fuel_limit_override = None
+    try:
+        if payload.get('fuel_percent') not in (None, ''):
+            fuel_value, _, fuel_limit_override = excavator_fuel_liters_from_percent(
+                assignment.equipment,
+                payload.get('fuel_percent'),
+            )
+        result = open_excavator_shift(
+            employee=access.employee,
+            equipment=assignment.equipment,
+            shift_type=assignment.shift_type,
+            fuel_value=fuel_value,
+            engine_hours_value=payload.get('engine_hours'),
+            client_action_id=normalized['event_id'],
+            fuel_limit_override=fuel_limit_override,
+            close_other_role_shift=False,
+            opened_at=normalized['occurred_at'],
+        )
+    except ExcavatorShiftError as error:
+        _conflict(
+            getattr(error, 'code', 'shift_open_failed'),
+            str(error),
+            details={
+                'field_errors': getattr(error, 'field_errors', {}),
+                **getattr(error, 'extra', {}),
+            },
+        )
+    shift = EmployeeShift.objects.select_related('equipment').get(pk=result['shift_id'])
+    return {
+        'server_ids': {'shift_id': shift.id, 'equipment_id': shift.equipment_id},
+        'version': result.get('version'),
+        'local_shift_id': local_shift_id,
+        'opened_at': shift.opened_at.isoformat(),
+        'device_occurred_at': normalized['device_occurred_at'].isoformat(),
+        'effective_occurred_at': normalized['occurred_at'].isoformat(),
+        'time_source': 'server_receipt' if normalized.get('clock_adjusted') else 'device',
+    }, {'shift': shift, 'equipment': shift.equipment}
 
 
 def _resolve_trip_reference(access, normalized):
@@ -3499,6 +3590,7 @@ def _process_driver_shift_closed_by_device(access, normalized):
 
 
 PROCESSORS = {
+    'excavator.shift.opened': _process_excavator_shift_opened,
     'excavator.free_bucket.accepted': _process_free_bucket_accepted,
     'excavator.free_bucket.cancelled': _process_free_bucket_cancelled,
     'excavator.free_bucket.loaded': _process_free_bucket_loaded,
