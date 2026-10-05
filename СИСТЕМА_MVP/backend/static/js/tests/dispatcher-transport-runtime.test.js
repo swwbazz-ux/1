@@ -473,7 +473,7 @@ test("fresh fragment identity wins over the stale outer shell for newly saved co
     }
 });
 
-test("a legacy record missing its shift is sent as incomplete context, never rewritten from today's screen", async () => {
+test("unsupported legacy endpoint retains its original behavior without invented context", async () => {
     const author = {access_id: "7", role: "dispatcher", shift_id: ""};
     const legacy = command("old-incomplete", {author});
     const r = createRuntime({storage: {[QUEUE_KEY]: JSON.stringify([legacy])}, fetch: async () => ({ok:false,status:409,
@@ -485,4 +485,162 @@ test("a legacy record missing its shift is sent as incomplete context, never rew
     assert.deepEqual(header.author, author);
     assert.equal(transport.readQueue().length,1);
     assert.equal(transport.readQueue()[0].author.shift_id, "");
+});
+
+const receiptOwner = {actor_id: "12", access_id: "7", role: "dispatcher", shift_id: "30"};
+const receiptCommand = (extra = {}) => command("sync-old", {url: "/dispatcher/control/truck/assign/",
+    author: {access_id: "7", role: "dispatcher", shift_id: ""}, ...extra});
+const receiptResult = (request) => ({ok: true, status: "acknowledged", receipt: {ok: true, deduplicated: true},
+    evidence: {actor_id: 12, shift_id: 10, client_action_id: request.data.client_action_id, action_type: "dispatcher_assign_truck"}});
+const receiptReply = (request) => ({ok: true, json: async () => receiptResult(request)});
+
+for (const version of [1, 2, 3]) {
+    test("legacy v" + version + " recovers only the receipt and keeps the exact original array and author", async () => {
+        const source = receiptCommand();
+        const key = "mining-master-mobile-sync-queue-v" + version;
+        const raw = JSON.stringify([source], null, 2);
+        const r = createRuntime({storage: {[key]: raw}, fetch: async () => receiptReply(source)});
+        const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+        await transport.flush();
+        assert.equal(r.fetchCalls.length, 1);
+        assert.equal(r.fetchCalls[0].url, "/assignments/commands/receipt/");
+        assert.deepEqual(JSON.parse(r.fetchCalls[0].options.body), source);
+        assert.equal(r.storage.get(key), raw);
+        const record = JSON.parse(r.storage.get(transport.journalPrefix + source.id));
+        assert.deepEqual(record.request, source);
+        assert.equal(record.delivery.state, "acknowledged");
+        assert.equal(record.delivery.reconciliation.evidence.shift_id, 10);
+        assert.equal(record.request.author.shift_id, "");
+        assert.equal(transport.readQueue().length, 0);
+        const restarted = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+        await restarted.flush();
+        assert.equal(r.fetchCalls.length, 1, "durable receipt prevents duplicate lookup after restart");
+    });
+}
+
+test("held and pending autoRetry:false recover accepted commands without reposting the mutation", async () => {
+    for (const state of ["held", "pending"]) {
+        const source = receiptCommand({autoRetry: false, author: {...receiptOwner, shift_id: "10"}, occurredAt: "2026-10-05T00:00:00Z"});
+        const key = QUEUE_KEY + ":command:" + source.id;
+        const r = createRuntime({storage: {[key]: JSON.stringify({request: source, delivery: {state}})},
+            fetch: async () => receiptReply(source)});
+        const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+        await transport.flush();
+        assert.deepEqual(r.fetchCalls.map(c => c.url), ["/assignments/commands/receipt/"]);
+        assert.equal(JSON.parse(r.storage.get(key)).delivery.state, "acknowledged");
+        assert.deepEqual(JSON.parse(r.storage.get(key)).request, source);
+    }
+});
+
+test("unresolved or wrong receipts never remove, reject, execute or enrich the legacy source", async () => {
+    for (const result of [{ok: true, status: "unresolved"}, {ok: true}, {ok: false},
+        {...receiptResult(receiptCommand()), evidence: {actor_id: 13, client_action_id: "sync-old"}},
+        {...receiptResult(receiptCommand()), evidence: {actor_id: 12, client_action_id: "different"}}]) {
+        const raw = JSON.stringify([receiptCommand()]);
+        const r = createRuntime({storage: {[QUEUE_KEY]: raw}, fetch: async () => ({ok: true, json: async () => result})});
+        const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+        await transport.flush();
+        await transport.flush();
+        assert.equal(r.fetchCalls.length, 1, "unresolved lookup is throttled");
+        assert.equal(r.storage.get(QUEUE_KEY), raw);
+        assert.equal(r.storage.has(transport.journalPrefix + "sync-old"), false);
+        await assert.rejects(transport.send(receiptCommand()), e => e.code === "command_context_incomplete");
+        assert.equal(r.fetchCalls.length, 1);
+    }
+});
+
+test("receipt lookup waits for the original author and never uses a changed session as proof", async () => {
+    let current = {...receiptOwner, access_id: "8", actor_id: "13"};
+    const source = receiptCommand(), raw = JSON.stringify([source]);
+    const r = createRuntime({storage: {[QUEUE_KEY]: raw}, fetch: async () => receiptReply(source)});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => current});
+    await transport.flush();
+    assert.equal(r.fetchCalls.length, 0);
+    current = receiptOwner;
+    await transport.flush();
+    assert.equal(JSON.parse(r.storage.get(transport.journalPrefix + source.id)).delivery.state, "acknowledged");
+});
+
+test("receipt quota failure preserves original and restart can retry without executing it", async () => {
+    const source = receiptCommand(), raw = JSON.stringify([source]);
+    const r = createRuntime({storage: {[QUEUE_KEY]: raw}, storageFails: () => true,
+        fetch: async () => receiptReply(source)});
+    await r.context.createDispatcherTransport({getCommandContext: () => receiptOwner}).flush();
+    assert.equal(r.storage.get(QUEUE_KEY), raw);
+    assert.equal(r.storage.size, 1);
+    const next = createRuntime({storage: Object.fromEntries(r.storage), fetch: async () => receiptReply(source)});
+    const transport = next.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+    await transport.flush();
+    assert.equal(JSON.parse(next.storage.get(transport.journalPrefix + source.id)).delivery.state, "acknowledged");
+});
+
+test("hanging receipt body releases the transport on deadline and late response cannot write ACK", async () => {
+    const source = receiptCommand(), raw = JSON.stringify([source]);
+    let respond;
+    const r = createRuntime({storage: {[QUEUE_KEY]: raw}, fetch: async () => ({ok: true,
+        json: () => new Promise(resolve => {respond = resolve;})})});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+    const pending = transport.flush();
+    await drain();
+    Array.from(r.timers.values()).find(timer => timer.delay === 12000).callback();
+    await pending;
+    respond(receiptResult(source));
+    await drain();
+    assert.equal(r.storage.size, 1);
+    assert.equal(r.storage.get(QUEUE_KEY), raw);
+    assert.equal(transport.getQueueState().isFlushing, false);
+});
+
+test("corrupt legacy and duplicate IDs with different originals are preserved and never guessed", async () => {
+    const source = receiptCommand();
+    const v1 = "mining-master-mobile-sync-queue-v1", v2 = "mining-master-mobile-sync-queue-v2";
+    const first = JSON.stringify([source]);
+    const second = JSON.stringify([{...source, data: {...source.data, truck_id: 999}}]);
+    const r = createRuntime({storage: {[v1]: first, [v2]: second, [QUEUE_KEY]: "broken"}});
+    await r.context.createDispatcherTransport({getCommandContext: () => receiptOwner}).flush();
+    assert.equal(r.fetchCalls.length, 0);
+    assert.deepEqual(Object.fromEntries(r.storage), {[v1]: first, [v2]: second, [QUEUE_KEY]: "broken"});
+});
+
+test("receipt backlog advances past an unresolved first record and never delays a new send timer", async () => {
+    const first = receiptCommand(), second = receiptCommand({id: "sync-second", data: {client_action_id: "second"}});
+    const r = createRuntime({storage: {[QUEUE_KEY]: JSON.stringify([first, second])},
+        fetch: async (url, init) => JSON.parse(init.body).id === first.id
+            ? {ok: true, json: async () => ({ok: true, status: "unresolved"})} : receiptReply(second)});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+    transport.scheduleFlush(0);
+    await transport.flush();
+    assert.ok(Array.from(r.timers.values()).some(timer => timer.delay === 0), "receipt callback cannot postpone new work");
+    await transport.flush();
+    assert.equal(r.fetchCalls.length, 2);
+    assert.equal(JSON.parse(r.storage.get(transport.journalPrefix + second.id)).delivery.state, "acknowledged");
+    assert.equal(transport.readQueue().length, 1);
+    await transport.flush();
+    assert.equal(r.fetchCalls.length, 2);
+});
+
+test("changed original during receipt HTTP cannot be overwritten by an old acknowledgement", async () => {
+    const source = receiptCommand(), key = QUEUE_KEY + ":command:" + source.id;
+    let resolve;
+    const r = createRuntime({storage: {[key]: JSON.stringify({request: source, delivery: {state: "held"}})},
+        fetch: () => new Promise(done => {resolve = done;})});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+    const pending = transport.flush();
+    await drain();
+    const replaced = JSON.stringify({request: {...source, data: {...source.data, truck_id: 888}}, delivery: {state: "held"}});
+    r.storage.set(key, replaced);
+    resolve(receiptReply(source));
+    await pending;
+    assert.equal(r.storage.get(key), replaced);
+});
+
+test("legacy autoRetry:false with full context is checked without automatically executing it", async () => {
+    const source = receiptCommand({autoRetry: false, author: receiptOwner, occurredAt: "2026-10-05T00:00:00Z"});
+    const raw = JSON.stringify([source]);
+    const r = createRuntime({storage: {[QUEUE_KEY]: raw}, fetch: async () => ({ok: true,
+        json: async () => ({ok: true, status: "unresolved"})})});
+    const transport = r.context.createDispatcherTransport({getCommandContext: () => receiptOwner});
+    await transport.flush();
+    assert.deepEqual(r.fetchCalls.map(c => c.url), ["/assignments/commands/receipt/"]);
+    assert.equal(r.storage.get(QUEUE_KEY), raw);
 });

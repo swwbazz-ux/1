@@ -145,3 +145,5 @@
 СИСТЕМА_MVP/backend/static/js/driver-shift-close-plan-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-shift-archive-v1.js
 СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py
+СИСТЕМА_MVP/backend/assignments/urls.py
+СИСТЕМА_MVP/backend/assignments/command_receipts.py

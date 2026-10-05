@@ -30,11 +30,14 @@
         var syncPendingCount = 0;
         var syncQueueFlushing = false;
         var syncFlushTimer = null;
+        var syncFlushDueAt = 0;
         var realtimeConnected = true;
         var realtimeLastSuccessAt = 0;
         var realtimeLastReason = "";
         var inFlight = Object.create(null);
         var lastStorageError = null;
+        var receiptInFlight = null;
+        var receiptNextCheck = Object.create(null);
 
         // Старые v1/v2 не имеют достаточного контекста для автоповтора.
         // Сохраняем их без изменений: обновление не вправе уничтожать исходник.
@@ -113,6 +116,121 @@
             var author = request.author || {};
             return String(author.access_id || "") === String(current.access_id || "")
                 && String(author.role || "") === String(current.role || "");
+        }
+        function receiptSupported(request) {
+            return request && request.kind === "json" && typeof request.id === "string" && request.id
+                && request.data && typeof request.data.client_action_id === "string"
+                && /^(\/mining-master\/assignments|\/dispatcher\/control)\/(excavator\/move|truck\/assign)\/$/.test(request.url);
+        }
+        function incompleteContext(request) {
+            var author = request.author || {};
+            return !author.actor_id || !author.access_id || !author.role || !author.shift_id || !request.occurredAt;
+        }
+        function receiptOwnerPossible(request) {
+            var current = getCommandContext() || {}, author = request.author || {};
+            if (!current.actor_id || !current.access_id || !current.role) return false;
+            return ["actor_id", "access_id", "role"].every(function (field) {
+                return !author[field] || String(author[field]) === String(current[field]);
+            });
+        }
+        function receiptCandidates() {
+            var candidates = Object.create(null), collisions = Object.create(null);
+            function add(request, sourceKey, delivery) {
+                if (!receiptSupported(request)) return;
+                var id = request.id, prior = candidates[id];
+                if (prior && JSON.stringify(prior.request) !== JSON.stringify(request)) collisions[id] = true;
+                if (!prior) candidates[id] = {request: request, sourceKey: sourceKey, delivery: delivery};
+            }
+            // Не переписываем и не удаляем ни один legacy-массив.
+            ["mining-master-mobile-sync-queue-v1", "mining-master-mobile-sync-queue-v2", DISPATCHER_SYNC_QUEUE_KEY].forEach(function (key) {
+                var raw = global.localStorage.getItem(key);
+                if (!raw) return;
+                try {
+                    var items = JSON.parse(raw);
+                    if (!Array.isArray(items)) throw storageError();
+                    items.forEach(function (request) {
+                        var saved = request && request.id && readRecord(request.id);
+                        // v3 — изменяемая проекция; исходник уже находится в journal.
+                        if (saved && key === DISPATCHER_SYNC_QUEUE_KEY) return;
+                        add(request, key, null);
+                    });
+                } catch (error) { lastStorageError = storageError(); }
+            });
+            for (var index = 0; index < global.localStorage.length; index += 1) {
+                var key = global.localStorage.key(index);
+                if (!key || key.indexOf(DISPATCHER_COMMAND_PREFIX) !== 0) continue;
+                try {
+                    var record = JSON.parse(global.localStorage.getItem(key));
+                    if (!record || !record.request || !record.delivery) throw storageError();
+                    add(record.request, key, record.delivery);
+                    if (candidates[record.request.id]) candidates[record.request.id].delivery = record.delivery;
+                } catch (error) { lastStorageError = storageError(); }
+            }
+            return Object.keys(candidates).filter(function (id) {
+                var candidate = candidates[id], delivery = candidate.delivery;
+                return !collisions[id] && (!delivery || delivery.state === "held" || delivery.state === "pending")
+                    && (!delivery || delivery.state === "held" || candidate.request.autoRetry === false || incompleteContext(candidate.request))
+                    && receiptOwnerPossible(candidate.request);
+            }).map(function (id) { return candidates[id]; });
+        }
+        function reconcileReceipt() {
+            if (roleIsReadonly()) return Promise.resolve();
+            if (receiptInFlight) return receiptInFlight;
+            var candidates;
+            try { candidates = receiptCandidates(); } catch (error) {
+                lastStorageError = storageError(); return Promise.resolve();
+            }
+            var owner = getCommandContext() || {};
+            var scope = String(owner.access_id) + ":" + String(owner.role) + ":";
+            var candidate = candidates.find(function (item) {
+                return !inFlight[item.request.id] && (!receiptNextCheck[scope + item.request.id] || receiptNextCheck[scope + item.request.id] <= Date.now());
+            });
+            if (!candidate) {
+                if (candidates.length) scheduleFlush(Math.max(80, Math.min.apply(null, candidates.map(function (item) {
+                    return (receiptNextCheck[scope + item.request.id] || Date.now() + 1200) - Date.now();
+                }))));
+                return Promise.resolve();
+            }
+            var request = copy(candidate.request), checkKey = scope + request.id;
+            receiptNextCheck[checkKey] = Date.now() + 30000;
+            receiptInFlight = withDeadline(function (signal) {
+                return fetchRequest("/assignments/commands/receipt/", {
+                    method: "POST", credentials: "same-origin", cache: "no-store", signal: signal,
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": getCsrfToken()},
+                    body: JSON.stringify(request)
+                }).then(function (response) {
+                    if (!response.ok) return null;
+                    return response.json();
+                });
+            }, DISPATCHER_SYNC_REQUEST_TIMEOUT_MS).then(function (result) {
+                if (!result || result.ok !== true || result.status !== "acknowledged"
+                    || !result.receipt || result.receipt.ok !== true || !result.evidence
+                    || result.evidence.client_action_id !== request.data.client_action_id.trim()
+                    || String(result.evidence.actor_id) !== String(owner.actor_id)) return;
+                var existing = readRecord(request.id);
+                if (existing && JSON.stringify(existing.request) !== JSON.stringify(request)) return;
+                if (existing && existing.delivery.state === "acknowledged") return;
+                // Повторная проверка защищает исходник от замены во время HTTP.
+                if (!receiptCandidates().some(function (item) {
+                    return JSON.stringify(item.request) === JSON.stringify(request);
+                })) return;
+                var record = existing || {request: request, delivery: {}};
+                record.delivery = Object.assign({}, record.delivery, {
+                    state: "acknowledged", acknowledgedAt: Date.now(), receipt: result.receipt,
+                    reconciliation: {source: "server_receipt", evidence: result.evidence}
+                });
+                // ACK пишется отдельно; legacy-массивы остаются побайтно прежними.
+                try { saveRecord(record); } catch (error) { throw storageError(); }
+                lastStorageError = null;
+                try { onAcknowledged(record.request, result.receipt); } catch (callbackError) {}
+            }).catch(function (error) {
+                if (error.code === "storage_unavailable" || error.name === "QuotaExceededError") lastStorageError = storageError();
+            }).finally(function () {
+                receiptInFlight = null;
+                notifyStateChange();
+                scheduleFlush(80);
+            });
+            return receiptInFlight;
         }
         function getQueueState() {
             var queue = [];
@@ -257,6 +375,11 @@
         }
         function send(request) {
             if (roleIsReadonly()) return Promise.reject(inactiveRoleError());
+            if (receiptSupported(request) && incompleteContext(request)) {
+                var contextError = new Error("Старая команда сохранена для проверки серверной квитанции.");
+                contextError.code = "command_context_incomplete";
+                return Promise.reject(contextError);
+            }
             if (!owns(request)) {
                 var error = new Error("Действие сохранено за исходным сотрудником.");
                 error.code = "command_author_mismatch";
@@ -323,17 +446,21 @@
             inFlight[request.id] = sending;
             return sending;
         }
-        function flush() {
+        function flushCommands() {
             if (roleIsReadonly() || syncQueueFlushing) { notifyStateChange(); return Promise.resolve(); }
             var queue;
             try { queue = readQueue(); } catch (error) {
                 lastStorageError = storageError(); notifyStateChange(); return Promise.resolve();
             }
+            function replayable(item) {
+                return owns(item) && item.autoRetry !== false && !(receiptSupported(item) && incompleteContext(item));
+            }
             var request = queue.find(function (item) {
-                return owns(item) && !inFlight[item.id] && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
+                return replayable(item)
+                    && !inFlight[item.id] && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
             });
             if (!request) {
-                if (queue.some(function (item) { return owns(item); })) scheduleFlush(1200);
+                if (queue.some(replayable)) scheduleFlush(1200);
                 notifyStateChange();
                 return Promise.resolve();
             }
@@ -345,10 +472,18 @@
                 notifyStateChange();
             });
         }
+        function flush() {
+            return Promise.all([flushCommands(), reconcileReceipt()]);
+        }
         function scheduleFlush(delayMs) {
             notifyStateChange();
+            var delay = typeof delayMs === "number" ? delayMs : 80;
+            var dueAt = Date.now() + delay;
+            // Долгая сверка квитанции не отодвигает уже назначенную отправку.
+            if (syncFlushTimer && syncFlushDueAt <= dueAt) return;
             if (syncFlushTimer) global.clearTimeout(syncFlushTimer);
-            syncFlushTimer = global.setTimeout(function () { syncFlushTimer = null; flush(); }, typeof delayMs === "number" ? delayMs : 80);
+            syncFlushDueAt = dueAt;
+            syncFlushTimer = global.setTimeout(function () { syncFlushTimer = null; syncFlushDueAt = 0; flush(); }, delay);
         }
         function post(url, data, postOptions) {
             if (roleIsReadonly()) return Promise.reject(inactiveRoleError());
@@ -382,7 +517,7 @@
             getQueueState: getQueueState, refreshState: notifyStateChange,
             roleIsReadonly: roleIsReadonly, inactiveRoleError: inactiveRoleError, storageError: storageError,
             setSyncPending: setSyncPending, enqueue: enqueue, send: send, fetchWithTimeout: fetchWithTimeout,
-            flush: flush, scheduleFlush: scheduleFlush, post: post,
+            flush: flush, reconcileReceipt: reconcileReceipt, scheduleFlush: scheduleFlush, post: post,
             updateRealtimeConnection: updateRealtimeConnection, getDebugState: getDebugState
         };
     }
