@@ -26,6 +26,7 @@ class FakeResponse {
     }
     clone() { return new FakeResponse(this.body, {url: this.url, type: this.headers.type, ok: this.ok}); }
     text() { return Promise.resolve(this.body); }
+    arrayBuffer() { return Promise.resolve(new TextEncoder().encode(this.body).buffer); }
 }
 
 class FakeRequest {

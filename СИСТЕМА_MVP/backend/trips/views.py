@@ -586,7 +586,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v269";
+const CACHE_NAME = "excavator-mobile-shell-v270";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,28 +600,28 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v269",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v269",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v269",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v269",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v269",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v269",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v269",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v270",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v270",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v270",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v270",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v270",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v270",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v270",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v269",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v269",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v269",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v270",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v270",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v270",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -810,54 +810,95 @@ async function migratePreviousExcavatorCache(cacheNames) {
   return false;
 }
 
-async function networkFirst(request, fallbackUrl, responseValidator) {
-  const cache = await caches.open(CACHE_NAME);
+function excavatorDeadline(work, milliseconds, onTimeout) {
+  let timer;
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error("Excavator request deadline exceeded."));
+    }, milliseconds);
+  });
+  return Promise.race([Promise.resolve().then(work), deadline])
+    .finally(() => clearTimeout(timer));
+}
+
+function completeExcavatorFetch(request, init, validator) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const options = Object.assign({}, init || {});
+  if (controller) options.signal = controller.signal;
+  return excavatorDeadline(async () => {
+    const response = await fetch(request, options);
+    // A response with headers alone is not a completed request. Drain a clone
+    // so navigation, scripts and JSON cannot stall on a never-ending body.
+    await response.clone().arrayBuffer();
+    const canCache = response.ok && (!validator || await validator(response));
+    return {response, canCache};
+  }, 8000, () => { if (controller) controller.abort(); });
+}
+
+function cacheExcavatorResponse(request, response, fallbackUrl) {
+  // Cache writes never hold screen startup. Only a fully received and validated
+  // network response reaches this function. Timed-out fetches never reach it.
+  return caches.open(CACHE_NAME).then(cache => Promise.all([
+    cache.put(request, response.clone()),
+    fallbackUrl && new URL(request.url).pathname === fallbackUrl
+      ? cache.put(fallbackUrl, response.clone()) : Promise.resolve()
+  ])).catch(() => undefined);
+}
+
+async function excavatorCachedFallback(request, fallbackUrl, validator) {
   try {
-    const response = await fetch(request);
-    const canCache = response && response.ok &&
-      (!responseValidator || await responseValidator(response));
-    if (canCache) {
-      cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-      }
-    }
-    return response;
+    return await excavatorDeadline(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const response = (await cache.match(request)) ||
+        (fallbackUrl ? await cache.match(fallbackUrl) : null);
+      if (!response) return null;
+      await response.clone().arrayBuffer();
+      if (validator && !await validator(response)) return null;
+      return response;
+    }, 2500);
   } catch (error) {
-    return (await cache.match(request)) ||
-      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
-      new Response("Offline: excavator shell is not cached on this device yet.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
+    return null;
+  }
+}
+
+function excavatorUnavailable(message) {
+  return new Response(message, {
+    status: 503,
+    headers: {"Content-Type": "text/plain; charset=utf-8"}
+  });
+}
+
+async function networkFirst(request, fallbackUrl, responseValidator) {
+  try {
+    const result = await completeExcavatorFetch(request, null, responseValidator);
+    if (result.response.status >= 500) throw new Error("Excavator server unavailable.");
+    if (result.canCache) cacheExcavatorResponse(request, result.response, fallbackUrl);
+    return result.response;
+  } catch (error) {
+    return (await excavatorCachedFallback(request, fallbackUrl, responseValidator)) ||
+      excavatorUnavailable("Offline: excavator shell is not cached or could not be read. Retry when access is restored.");
   }
 }
 
 async function networkOnly(request) {
   try {
-    return await fetch(request);
+    return (await completeExcavatorFetch(request)).response;
   } catch (error) {
-    return new Response("Network unavailable: fresh excavator data was not received.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
+    return excavatorUnavailable("Network unavailable: fresh excavator data was not received.");
   }
 }
 
 async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
+  const validator = response => isSafeExcavatorCacheEntry(request, response);
   try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
+    const result = await completeExcavatorFetch(request, {cache: "no-store"}, validator);
+    if (result.response.status >= 500) throw new Error("Static resource unavailable.");
+    if (result.canCache) cacheExcavatorResponse(request, result.response);
+    return result.response;
   } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Resource unavailable offline.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
+    return (await excavatorCachedFallback(request, null, validator)) ||
+      excavatorUnavailable("Resource unavailable offline.");
   }
 }
 
