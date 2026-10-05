@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.dispatcher_push import notification_for_event
-from core.models import bump_operational_state
+from core.models import NotificationDelivery, NotificationIntent, bump_operational_state
 from users.models import (
     Employee,
     EmployeeAccess,
@@ -144,9 +144,9 @@ class DispatcherSystemPushTests(TestCase):
         self.assertIsNotNone(own.shown_at)
         self.assertIsNone(foreign.shown_at)
 
-    @patch('core.dispatcher_push.send_dispatcher_push_for_event')
-    def test_operational_event_schedules_push_only_after_commit(self, send):
-        with self.captureOnCommitCallbacks(execute=True):
+    @patch('users.webpush._deliver')
+    def test_operational_event_persists_intent_without_an_on_commit_callback(self, send):
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
             bump_operational_state(
                 'Trip:truck_loaded',
                 event_type='trip_changed',
@@ -155,7 +155,12 @@ class DispatcherSystemPushTests(TestCase):
                 payload={'action': 'truck_loaded', 'trip_id': 44},
             )
 
-        send.assert_called_once()
+        send.assert_not_called()
+        self.assertEqual(callbacks, [])
+        intent = NotificationIntent.objects.get()
+        self.assertEqual(intent.notification.employee_id, self.dispatcher.pk)
+        self.assertEqual(intent.payload['role_code'], 'dispatcher')
+        self.assertEqual(NotificationDelivery.objects.get().target_id, self.dispatcher_subscription.pk)
 
 
 class DispatcherServiceWorkerPushContractTests(TestCase):

@@ -455,8 +455,8 @@ class DispatcherAssignTruckAtomicityTests(TestCase):
             1,
         )
         self.assertEqual(DispatcherActionLog.objects.count(), 1)
-        self.assertEqual(len(callbacks), 1)
-        send_push.assert_called_once()
+        self.assertEqual(len(callbacks), 0)
+        send_push.assert_not_called()  # Delivery uses the durable outbox worker.
         version_after_first = self.version()
         self.assertGreater(version_after_first, version_before)
         assignments_after_first = self.assignment_snapshot()

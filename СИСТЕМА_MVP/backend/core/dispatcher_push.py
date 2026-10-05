@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-
-from users.webpush import notify_role_web_subscribers
-
-
-logger = logging.getLogger(__name__)
+from django.db import transaction
 
 DISPATCHER_ROLE_CODE = 'dispatcher'
 DISPATCHER_START_URL = '/dispatcher/control/'
@@ -88,16 +83,29 @@ def notification_for_event(event) -> dict | None:
     }
 
 
+@transaction.atomic
+def enqueue_dispatcher_push_for_event(event) -> int:
+    """Freeze the role's recipients and event revision in the domain transaction."""
+    from users.models import WebPushSubscription
+    from .notification_outbox import enqueue_notification
+
+    notification = notification_for_event(event)
+    if not notification:
+        return 0
+    employee_ids = list(WebPushSubscription.objects.filter(
+        role_code=DISPATCHER_ROLE_CODE, is_active=True,
+    ).order_by().values_list('employee_id', flat=True).distinct())
+    for employee_id in employee_ids:
+        enqueue_notification(
+            source_key=f'operational:{event.key}:{event.version}:{event.pk}',
+            employee_id=employee_id, role_code=DISPATCHER_ROLE_CODE,
+            version=event.version, web_only=True, **notification,
+        )
+    return len(employee_ids)
+
+
 def send_dispatcher_push_for_event(event_id: int) -> int:
-    """После commit создаёт ролевое уведомление; сбой push не ломает доменную операцию."""
+    """Compatibility entry point: enqueue only; network belongs to the worker."""
     from .models import OperationalStateEvent
 
-    try:
-        event = OperationalStateEvent.objects.get(pk=event_id)
-        notification = notification_for_event(event)
-        if not notification:
-            return 0
-        return notify_role_web_subscribers(DISPATCHER_ROLE_CODE, **notification)
-    except Exception:
-        logger.exception('Не удалось отправить системное уведомление Диспетчера для event=%s.', event_id)
-        return 0
+    return enqueue_dispatcher_push_for_event(OperationalStateEvent.objects.get(pk=event_id))

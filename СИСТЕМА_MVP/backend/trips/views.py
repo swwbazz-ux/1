@@ -4327,47 +4327,37 @@ def trip_loaded_payload(trip, *, client_action_id=''):
     }
 
 
-def notify_driver_truck_loaded(trip):
-    """Сообщает водителю, что его самосвал загружен и куда ехать.
-
-    Главное в уведомлении — точка разгрузки: именно её водитель ждёт от
-    экскаваторщика. Ошибки отправки намеренно проглатываются: уведомление не
-    должно ломать саму погрузку.
-    """
-    from users.webpush import notify_employee
+def notify_driver_truck_loaded(trip, *, source_key=None, version=None):
+    """Сохраняет текст и адресата вместе с погрузкой; сеть выполняет worker."""
+    from core.notification_outbox import enqueue_notification
 
     if trip.driver_participation_recorded and not trip.driver_control_shift_id:
         return
-    try:
-        driver_shift = trip.driver_control_shift if trip.driver_participation_recorded else (
-            EmployeeShift.objects
-            .select_related('employee')
-            .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
-            .filter(
-                Q(workplace_code='driver')
-                | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
-            )
-            .order_by('-opened_at')
-            .first()
+    driver_shift = trip.driver_control_shift if trip.driver_participation_recorded else (
+        EmployeeShift.objects
+        .select_related('employee')
+        .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
         )
-        if not driver_shift or not driver_shift.employee_id:
-            return
-        dump_point = trip.assigned_dump_point or trip.dump_point
-        dump_name = getattr(dump_point, 'name', '') or 'не указана'
-        rock_name = getattr(trip.rock_type, 'name', '') or ''
-        body = f'Точка разгрузки: {dump_name}'
-        if rock_name:
-            body = f'{body} · {rock_name}'
-        notify_employee(
-            driver_shift.employee,
-            title='Самосвал загружен',
-            body=body,
-            url='/driver/',
-            tag='driver-trip-loaded',
-            kind='driver_trip_loaded',
-        )
-    except Exception:
-        logger.exception('Не удалось отправить водителю уведомление о погрузке.')
+        .order_by('-opened_at')
+        .first()
+    )
+    if not driver_shift or not driver_shift.employee_id:
+        return
+    dump_point = trip.assigned_dump_point or trip.dump_point
+    dump_name = getattr(dump_point, 'name', '') or 'не указана'
+    rock_name = getattr(trip.rock_type, 'name', '') or ''
+    body = f'Точка разгрузки: {dump_name}'
+    if rock_name:
+        body = f'{body} · {rock_name}'
+    return enqueue_notification(
+        source_key=source_key or f'trip:{trip.pk}:loaded:{trip.loaded_at.isoformat()}',
+        employee_id=driver_shift.employee_id, role_code='driver', version=version,
+        title='Самосвал загружен', body=body, url='/driver/',
+        tag='driver-trip-loaded', kind='driver_trip_loaded',
+    )
 
 
 @require_POST
@@ -4593,7 +4583,7 @@ def excavator_truck_loaded_view(request):
             },
         )
 
-    notify_driver_truck_loaded(trip)
+        notify_driver_truck_loaded(trip, source_key=f'truck_loaded:{client_action_id}', version=state.version)
     response_payload = trip_loaded_payload(trip, client_action_id=client_action_id)
     response_payload['version'] = state.version
     response_payload['downtime_status'] = excavator_downtime_status_payload(current_excavator, open_shift)

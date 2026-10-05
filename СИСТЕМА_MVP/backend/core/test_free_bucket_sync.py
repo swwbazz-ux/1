@@ -1927,8 +1927,10 @@ class FreeBucketServerIntegrationTests(TestCase):
         accepted_result = self.sync([accepted]).json()['results'][0]
         self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
 
+        self.assertEqual(Trip.objects.count(), 1)  # No second load upload needed.
         replayed = self.sync([loaded]).json()['results'][0]
-        self.assertEqual(replayed['status'], 'accepted', replayed)
+        # Accepting the parent already resumed its saved load on the server.
+        self.assertEqual(replayed['status'], 'deduplicated', replayed)
         trip = Trip.objects.get()
         self.assertEqual(trip.loaded_at, timezone.datetime.fromisoformat(loaded['occurred_at']))
         self.assertEqual(trip.excavator_id, self.excavator.id)

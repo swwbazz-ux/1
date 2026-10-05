@@ -19,6 +19,10 @@ from core.models import (
     bump_operational_state,
     lock_production_state,
 )
+from core.offline_replay import (
+    build_input_envelope, lock_stream, mark_invalid_saved_input, restore_input, resume_dependents,
+    same_identity, schedule_retry, snapshot_input,
+)
 
 
 SYNC_FORMAT_VERSION = 1
@@ -100,7 +104,7 @@ def _resolve_free_bucket_acceptance(access, normalized):
     )
     if not acceptance:
         source = (
-            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            OfflineFieldEvent.objects
             .filter(
                 actor=access.employee,
                 access=access,
@@ -828,7 +832,7 @@ def _process_free_bucket_loaded(access, normalized):
         payload={'action': 'free_bucket_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
                  'excavator_id': trip.excavator_id, 'free_bucket_acceptance_id': acceptance.id},
     )
-    transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
+    notify_driver_truck_loaded(trip, source_key=f'offline:{normalized["event_id"]}', version=state.version)
     return {
         'server_ids': {'trip_id': trip.id, 'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
         'version': state.version,
@@ -1004,8 +1008,8 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     # Подсказки оболочки о достоверности её собственных часов. Читаются и с
     # верхнего уровня события, и из payload: клиентская часть общая для обеих
     # ролей, и жёсткая привязка к одному месту уже расходилась между чатами.
-    # Верхний уровень в fingerprint не входит, поэтому подсказку можно уточнить
-    # при повторной отправке, не сломав идентичность события.
+    # Верхний уровень исторически не входит в fingerprint. После первой
+    # квитанции подсказки заморожены в input_envelope вместе с effective time.
     sent_live = _clock_hint(raw_event, payload, 'sent_live')
     clock_unreliable = _clock_hint(raw_event, payload, 'clock_unreliable')
     normalized['device_occurred_at'] = occurred_at
@@ -1023,6 +1027,7 @@ def normalize_offline_event(raw_event, *, role_code, device_id, received_at=None
     )
     if normalized['clock_adjusted']:
         normalized['occurred_at'] = received_at
+    snapshot_input(normalized, raw_event)
     return normalized
 
 
@@ -1064,7 +1069,7 @@ def _record_conflict_attempt(*, existing, access, normalized, code):
         submitted_event={
             key: (value.isoformat() if hasattr(value, 'isoformat') else value)
             for key, value in normalized.items()
-            if key not in {'received_at', 'fingerprint'}
+            if key not in {'received_at', 'fingerprint'} and not key.startswith('_')
         },
     )
 
@@ -1180,7 +1185,7 @@ def _resolve_trip_reference(access, normalized):
         trip = Trip.objects.select_for_update().filter(pk=_positive_int(trip_id, field='trip_id')).first()
     elif local_trip_id:
         source = (
-            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            OfflineFieldEvent.objects
             .filter(
                 actor=access.employee,
                 device_id=normalized['device_id'],
@@ -1328,7 +1333,7 @@ def _automatic_load_receipt(trip, *, acceptance=None):
         else 'excavator.trip.loaded'
     )
     return (
-        OfflineFieldEvent.objects.select_for_update(of=('self',))
+        OfflineFieldEvent.objects
         .filter(
             trip=trip,
             event_type=expected_type,
@@ -2176,7 +2181,7 @@ def _process_excavator_loaded_via_free_bucket(access, normalized, *, shift, exca
         payload={'action': 'free_bucket_loaded', 'trip_id': trip.id, 'truck_id': trip.truck_id,
                  'excavator_id': trip.excavator_id, 'free_bucket_acceptance_id': acceptance.id},
     )
-    transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
+    notify_driver_truck_loaded(trip, source_key=f'offline:{normalized["event_id"]}', version=state.version)
     return {
         'server_ids': {'trip_id': trip.id, 'free_bucket_acceptance_id': acceptance.id, 'shift_id': shift.id},
         'version': state.version,
@@ -2269,7 +2274,7 @@ def _process_excavator_loaded(access, normalized):
     linked_previous = None
     if expected_local:
         previous_event = (
-            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            OfflineFieldEvent.objects
             .filter(
                 actor=access.employee, device_id=normalized['device_id'],
                 local_trip_id=expected_local, event_type='excavator.trip.loaded',
@@ -2283,7 +2288,7 @@ def _process_excavator_loaded(access, normalized):
         expected_id = linked_previous.id
     if open_trip:
         manual_receipt = (
-            OfflineFieldEvent.objects.select_for_update(of=('self',))
+            OfflineFieldEvent.objects
             .filter(
                 trip=open_trip,
                 event_type='driver.trip.loaded',
@@ -2473,7 +2478,7 @@ def _process_excavator_loaded(access, normalized):
             'status': trip.status,
         },
     )
-    transaction.on_commit(lambda: notify_driver_truck_loaded(trip))
+    notify_driver_truck_loaded(trip, source_key=f'offline:{normalized["event_id"]}', version=state.version)
     return {
         'server_ids': {'trip_id': trip.id, 'shift_id': shift.id},
         'version': state.version,
@@ -2924,7 +2929,7 @@ def _process_driver_dump_point_changed(access, normalized):
         _conflict('trip_driver_shift_changed', 'Рейс закреплён за другой сменой водителя.')
     if normalized['occurred_at'] < (trip.loaded_at or trip.created_at):
         _conflict('dump_point_change_before_load', 'Время изменения точки раньше погрузки.')
-    latest_offline_change = OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+    latest_offline_change = OfflineFieldEvent.objects.filter(
         trip=trip,
         event_type='driver.trip.dump_point_changed',
         status=OfflineFieldEventStatus.ACCEPTED,
@@ -3033,7 +3038,7 @@ def _process_downtime(access, normalized, *, role_code, close):
             event = DowntimeEvent.objects.select_for_update(of=('self',)).filter(pk=downtime_id).first()
         elif normalized['local_downtime_id']:
             source = (
-                OfflineFieldEvent.objects.select_for_update(of=('self',))
+                OfflineFieldEvent.objects
                 .filter(
                     actor=access.employee, device_id=normalized['device_id'],
                     local_downtime_id=normalized['local_downtime_id'],
@@ -3383,7 +3388,7 @@ def _bind_driver_local_shift(access, normalized):
     if not local_shift_id:
         return
     source = (
-        OfflineFieldEvent.objects.select_for_update(of=('self',))
+        OfflineFieldEvent.objects
         .filter(
             event_id=local_shift_id,
             event_type='driver.shift.opened',
@@ -3570,9 +3575,12 @@ def _exact_driver_terminal_can_recover_missing_dependency(normalized):
 def _dependency_state(access, normalized):
     if not normalized['depends_on']:
         return
+    # Accepted receipts are immutable. Do not lock another stream's receipt
+    # before validating ownership: foreign A -> B / B -> A must not deadlock.
+    # The stream lock already serializes valid parents with their descendants.
     dependencies = {
         item.event_id: item
-        for item in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+        for item in OfflineFieldEvent.objects.filter(
             event_id__in=normalized['depends_on']
         )
     }
@@ -3795,7 +3803,7 @@ def _removed_refusal_lineage(
         return False, set()
     dependencies = {
         dependency.event_id: dependency
-        for dependency in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+        for dependency in OfflineFieldEvent.objects.filter(
             event_id__in=dependency_ids,
         )
     }
@@ -3836,7 +3844,7 @@ def _removed_refusal_dependency_roots(existing, access, normalized):
         return set()
     dependencies = {
         dependency.event_id: dependency
-        for dependency in OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+        for dependency in OfflineFieldEvent.objects.filter(
             event_id__in=dependency_ids,
         )
     }
@@ -3860,7 +3868,7 @@ def _removed_refusal_dependency_roots(existing, access, normalized):
     return roots
 
 
-def process_one_offline_event(access, normalized):
+def _apply_one_offline_event(access, normalized):
     try:
         with transaction.atomic():
             lock_idempotency_key('offline_field_event', normalized['event_id'])
@@ -3870,14 +3878,7 @@ def process_one_offline_event(access, normalized):
             recoverable_removed_refusal = False
             removed_refusal_dependency_roots = set()
             if existing:
-                same_identity = (
-                    existing.actor_id == access.employee_id
-                    and existing.access_id == access.id
-                    and existing.role_code == normalized['role_code']
-                    and existing.device_id == normalized['device_id']
-                    and existing.fingerprint == normalized['fingerprint']
-                )
-                if not same_identity:
+                if not same_identity(existing, access, normalized):
                     _record_conflict_attempt(
                         existing=existing, access=access, normalized=normalized,
                         code='event_id_reused',
@@ -3886,6 +3887,21 @@ def process_one_offline_event(access, normalized):
                         normalized['event_id'], 'conflict', code='event_id_reused',
                         message='Идентификатор уже использован для другого события.',
                     )
+                if existing.input_envelope == {}:
+                    # A legacy receipt has insufficient inputs for autonomous
+                    # replay. Only an identity-checked client resubmission can
+                    # supply them; never invent source IDs from application links.
+                    original = normalize_offline_event(
+                        normalized['_raw_event'], role_code=existing.role_code,
+                        device_id=existing.device_id, received_at=existing.received_at,
+                    )
+                    existing.input_envelope = build_input_envelope(access, original, legacy=True)
+                    existing.save(update_fields=['input_envelope'])
+                try:
+                    normalized = restore_input(existing)
+                except (ValueError, KeyError, TypeError):
+                    mark_invalid_saved_input(existing)
+                    return _stored_result(existing)
                 device_clock_was_invalid = bool(
                     existing.occurred_at > existing.received_at + MAX_FUTURE_CLOCK_SKEW
                 )
@@ -3897,7 +3913,7 @@ def process_one_offline_event(access, normalized):
                     and existing.depends_on
                 ):
                     dependency_receipts = list(
-                        OfflineFieldEvent.objects.select_for_update(of=('self',)).filter(
+                        OfflineFieldEvent.objects.filter(
                             event_id__in=existing.depends_on,
                         )
                     )
@@ -3981,7 +3997,7 @@ def process_one_offline_event(access, normalized):
                 )
                 if existing.status != OfflineFieldEventStatus.RETRY and not recoverable_existing_conflict:
                     return _stored_result(existing, deduplicated=True)
-                if recoverable_existing_conflict:
+                if recoverable_existing_conflict and existing.input_envelope['source'] == 'legacy_resubmission':
                     # Reprocess the same immutable event at its original server
                     # receipt time. The id, sequence, dependencies and raw
                     # device timestamp stay unchanged, so no duplicate action
@@ -4033,13 +4049,15 @@ def process_one_offline_event(access, normalized):
                     depends_on=normalized['depends_on'],
                     occurred_at=normalized['device_occurred_at'],
                     received_at=normalized['received_at'],
-                    shift_id=_positive_int(normalized['shift_id'], field='shift_id', required=False),
-                    equipment_id=_positive_int(normalized['equipment_id'], field='equipment_id', required=False),
+                    # Claimed IDs live in the envelope. Application links are
+                    # assigned only after validation; even a missing FK must
+                    # leave a durable receipt rather than roll it back.
                     local_trip_id=normalized['local_trip_id'],
                     local_downtime_id=normalized['local_downtime_id'],
                     context_snapshot=normalized['context_snapshot'],
                     payload=normalized['payload'],
                     fingerprint=normalized['fingerprint'],
+                    input_envelope=build_input_envelope(access, normalized),
                 )
             try:
                 with transaction.atomic():
@@ -4167,12 +4185,35 @@ def process_one_offline_event(access, normalized):
     except IntegrityError:
         existing = OfflineFieldEvent.objects.filter(event_id=normalized['event_id']).first()
         if existing:
+            if not same_identity(existing, access, normalized):
+                _record_conflict_attempt(
+                    existing=existing, access=access, normalized=normalized, code='event_id_reused',
+                )
+                return _result(normalized['event_id'], 'conflict', code='event_id_reused',
+                               message='Идентификатор уже использован для другого события.')
             return _stored_result(existing, deduplicated=(existing.status == OfflineFieldEventStatus.ACCEPTED))
         return _result(
             normalized['event_id'], 'retry', retryable=True,
             code='concurrent_receipt_retry',
             message='Параллельная синхронизация. Повторите позже.',
         )
+
+
+def process_one_offline_event(access, normalized, *, _resume=True):
+    with transaction.atomic():
+        lock_stream(access, normalized)
+        result = _apply_one_offline_event(access, normalized)
+        receipt = OfflineFieldEvent.objects.filter(event_id=normalized['event_id']).first()
+        if receipt is not None and same_identity(receipt, access, normalized):
+            schedule_retry(receipt)
+            if _resume and result['status'] in {'accepted', 'deduplicated'}:
+                try:
+                    parent = restore_input(receipt)
+                except (ValueError, KeyError, TypeError):
+                    mark_invalid_saved_input(receipt)
+                    return _stored_result(receipt)
+                resume_dependents(access, parent)
+        return result
 
 
 def process_offline_batch(access, *, role_code, device_id, events):

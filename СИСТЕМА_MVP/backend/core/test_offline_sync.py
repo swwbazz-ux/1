@@ -2076,7 +2076,8 @@ class OfflineEventSyncTests(TestCase):
 
         dependency = self.load_event('load-before-missing', 1)
         accepted = self.sync([dependency, event]).json()['results']
-        self.assertEqual([item['status'] for item in accepted], ['accepted', 'accepted'])
+        # Accepting the parent already resumed the durable child receipt.
+        self.assertEqual([item['status'] for item in accepted], ['accepted', 'deduplicated'])
         self.assertEqual(Trip.objects.count(), 2)
 
     def test_loaded_event_can_be_cancelled_by_dependent_local_reference(self):
