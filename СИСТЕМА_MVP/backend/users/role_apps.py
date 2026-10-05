@@ -33,6 +33,68 @@ function boardDeadline(work, milliseconds, onTimeout) {
     .finally(() => clearTimeout(timer));
 }
 
+function boardInstall() {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const releaseAssets = Array.from(RELEASE_STATIC_PATHS,
+    path => `${path}?v=${encodeURIComponent(STATIC_ASSET_RELEASE)}`);
+  const assets = Array.from(new Set(CORE_ASSETS.concat(releaseAssets)));
+  let expired = false;
+  return boardDeadline(async () => {
+    const cache = await boardDeadline(() => caches.open(CACHE_NAME), 2500);
+    const entries = await Promise.all(assets.map(async url => {
+      const options = {cache: "reload"};
+      if (controller) options.signal = controller.signal;
+      const request = new Request(url, options);
+      // Use fetch explicitly: Cache.addAll does not guarantee propagation of
+      // Request.signal to its internal fetches. The deadline covers bodies too.
+      const response = await fetch(request, options);
+      if (!response.ok || response.status === 206) throw new Error("Incomplete board asset.");
+      await response.clone().arrayBuffer();
+      return {request, response};
+    }));
+    if (expired) throw new Error("Board installation expired.");
+    // Only the candidate cache is written. It is never promoted unless every
+    // write succeeds; the previous worker/cache stays intact on any failure.
+    await Promise.all(entries.map(entry => cache.put(entry.request, entry.response)));
+  }, 30000, () => {
+    expired = true;
+    if (controller) controller.abort();
+  }).catch(error => {
+    expired = true;
+    if (controller) controller.abort();
+    throw error;
+  });
+}
+
+function boardIsOlderCache(key) {
+  if (!key.startsWith(CACHE_PREFIX)) return false;
+  const previous = key.slice(CACHE_PREFIX.length);
+  const current = CACHE_NAME.slice(CACHE_PREFIX.length);
+  if (!/^v[0-9]+$/.test(previous) || !/^v[0-9]+$/.test(current)) return false;
+  const previousVersion = Number(previous.slice(1));
+  const currentVersion = Number(current.slice(1));
+  return Number.isSafeInteger(previousVersion) && Number.isSafeInteger(currentVersion)
+    && previousVersion < currentVersion;
+}
+
+async function boardActivate() {
+  try {
+    // Cleanup cannot keep a ready worker from controlling its clients.
+    await boardDeadline(() => self.clients.claim(), 2500);
+  } catch (error) {
+    // Keep old caches if claiming clients did not complete. Activation itself
+    // still finishes; subsequent navigations can use the new worker.
+    return;
+  }
+  let expired = false;
+  await boardDeadline(async () => {
+    const keys = await caches.keys();
+    if (expired) return;
+    // An older worker finishing late must never delete a newer worker's cache.
+    await Promise.all(keys.filter(boardIsOlderCache).map(key => caches.delete(key)));
+  }, 2500, () => { expired = true; }).catch(() => undefined);
+}
+
 function boardCanCache(request, response) {
   if (!response || !response.ok || !response.url) return false;
   const requested = new URL(typeof request === "string" ? request : request.url, self.location.origin);
@@ -404,7 +466,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v177',
+        shell_version='mining-master-mobile-shell-v178',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -441,7 +503,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v178',
+        shell_version='dispatcher-desktop-shell-v179',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -812,7 +874,7 @@ def add_release_static_cache(worker_script, role_code):
         json.dumps(release_static_paths),
     )
     release_install_helper = ''
-    if role_code != 'dispatcher':
+    if role_code not in {'dispatcher', 'mining_master'}:
         release_install_helper = RELEASE_STATIC_INSTALL_JS
     worker_script = worker_script.replace(
         '__STATIC_ASSET_RELEASE__',
