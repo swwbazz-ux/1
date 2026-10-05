@@ -485,8 +485,10 @@
             syncFlushDueAt = dueAt;
             syncFlushTimer = global.setTimeout(function () { syncFlushTimer = null; syncFlushDueAt = 0; flush(); }, delay);
         }
-        function post(url, data, postOptions) {
-            if (roleIsReadonly()) return Promise.reject(inactiveRoleError());
+        // Синхронная граница сохранения для локального UI: вернуть команду
+        // можно только после проверенной записи исходника; HTTP здесь нет.
+        function storePost(url, data, postOptions) {
+            if (roleIsReadonly()) throw inactiveRoleError();
             var payload = copy(data || {});
             if (!payload.client_action_id) payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
             var request;
@@ -494,7 +496,13 @@
                 request = prepare({id: "sync-" + payload.client_action_id, kind: "json", url: url, data: payload,
                     autoRetry: !(postOptions && postOptions.queueOnNetworkFailure === false)});
                 persist(request);
-            } catch (error) { return Promise.reject(error.code ? error : storageError()); }
+            } catch (error) { throw error.code ? error : storageError(); }
+            return request;
+        }
+        function post(url, data, postOptions) {
+            var request;
+            try { request = storePost(url, data, postOptions); }
+            catch (error) { return Promise.reject(error); }
             return send(request).catch(function (error) {
                 if (error.isServerResponse || error.code === "storage_unavailable" || error.code === "command_author_mismatch" || postOptions && postOptions.queueOnNetworkFailure === false) throw error;
                 return {queued: true};
@@ -517,7 +525,7 @@
             getQueueState: getQueueState, refreshState: notifyStateChange,
             roleIsReadonly: roleIsReadonly, inactiveRoleError: inactiveRoleError, storageError: storageError,
             setSyncPending: setSyncPending, enqueue: enqueue, send: send, fetchWithTimeout: fetchWithTimeout,
-            flush: flush, reconcileReceipt: reconcileReceipt, scheduleFlush: scheduleFlush, post: post,
+            flush: flush, reconcileReceipt: reconcileReceipt, scheduleFlush: scheduleFlush, storePost: storePost, post: post,
             updateRealtimeConnection: updateRealtimeConnection, getDebugState: getDebugState
         };
     }
