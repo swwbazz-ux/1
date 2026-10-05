@@ -247,6 +247,58 @@
                 storageError: lastStorageError ? lastStorageError.code : ""
             };
         }
+        function assignmentCommand(request) {
+            return receiptSupported(request) && /\/truck\/assign\/$/.test(request.url)
+                && ["assign", "release"].indexOf(request.data.action) !== -1 && request.data.truck_id;
+        }
+        function predecessorId(request) {
+            var value = request.data && request.data.expected_assignment_state_id;
+            return typeof value === "string" && value.indexOf("command:") === 0 ? value.slice(8) : "";
+        }
+        function sameAssignmentScope(left, right) {
+            return assignmentCommand(left) && assignmentCommand(right) && left.url === right.url
+                && String(left.data.truck_id) === String(right.data.truck_id)
+                && ["actor_id", "access_id", "role", "shift_id"].every(function (key) {
+                    return String((left.author || {})[key] || "") === String((right.author || {})[key] || "");
+                });
+        }
+        function assignmentRecords(request) {
+            var records = [];
+            for (var index = 0; index < global.localStorage.length; index += 1) {
+                var key = global.localStorage.key(index);
+                if (!key || key.indexOf(DISPATCHER_COMMAND_PREFIX) !== 0) continue;
+                var record = JSON.parse(global.localStorage.getItem(key));
+                if (!record || !record.request || !record.delivery) throw storageError();
+                if (record.request.id !== request.id && sameAssignmentScope(request, record.request)) records.push(record);
+            }
+            return records;
+        }
+        function linkAssignment(request) {
+            if (!assignmentCommand(request) || incompleteContext(request)
+                    || !/^\d+$/.test(String(request.data.expected_assignment_state_id))) return;
+            var pending = assignmentRecords(request).filter(function (record) {
+                return record.delivery.state === "pending" && record.request.autoRetry !== false;
+            });
+            var tails = pending.filter(function (record) {
+                return !pending.some(function (child) {
+                    return predecessorId(child.request) === record.request.data.client_action_id;
+                });
+            });
+            if (tails.length > 1 || pending.length && !tails.length) {
+                var error = new Error("Порядок сохранённых распоряжений не определён. Дождитесь подтверждения.");
+                error.code = "command_dependency_conflict";
+                throw error;
+            }
+            if (tails.length) request.data.expected_assignment_state_id = "command:" + tails[0].request.data.client_action_id;
+        }
+        function dependencyReady(request) {
+            if (!assignmentCommand(request) || !predecessorId(request)) return true;
+            var parents = assignmentRecords(request).filter(function (record) {
+                return record.request.data.client_action_id === predecessorId(request);
+            });
+            return parents.length === 1 && parents[0].delivery.state === "acknowledged"
+                && parents[0].delivery.receipt && parents[0].delivery.receipt.ok === true;
+        }
         function prepare(request) {
             var prepared = copy(request || {});
             prepared.id = prepared.id || "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2);
@@ -258,6 +310,8 @@
             delete prepared.attempts;
             delete prepared.nextAttemptAt;
             delete prepared.lastError;
+            // Повтор сохранения не пересчитывает ссылку по изменившемуся журналу.
+            if (!saved) linkAssignment(prepared);
             return prepared;
         }
         function persist(request) {
@@ -404,6 +458,11 @@
                     heldError.code = "command_" + record.delivery.state;
                     return Promise.reject(heldError);
                 }
+                if (!dependencyReady(record.request)) {
+                    var dependencyError = new Error("Действие сохранено и ожидает подтверждения предыдущего распоряжения.");
+                    dependencyError.code = "command_dependency_pending";
+                    return Promise.reject(dependencyError);
+                }
                 record.delivery.attempts = (record.delivery.attempts || 0) + 1;
                 // Исходник уже записан. Сбой служебного счётчика не превращает
                 // сохранённое действие в якобы несохранённое и не блокирует сеть.
@@ -457,7 +516,7 @@
             }
             var request = queue.find(function (item) {
                 return replayable(item)
-                    && !inFlight[item.id] && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
+                    && dependencyReady(item) && !inFlight[item.id] && (!item.nextAttemptAt || item.nextAttemptAt <= Date.now());
             });
             if (!request) {
                 if (queue.some(replayable)) scheduleFlush(1200);

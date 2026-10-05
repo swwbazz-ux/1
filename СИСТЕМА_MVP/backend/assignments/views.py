@@ -94,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v169";
+const CACHE_NAME = "mining-master-mobile-shell-v170";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -960,7 +960,9 @@ def mining_master_assign_truck_view(request):
         is_active=True,
     )
     try:
-        expected_state_id = mining_master_required_assignment_state_id(payload)
+        expected_state_id = getattr(request, 'resolved_assignment_state_id', None)
+        if expected_state_id is None:
+            expected_state_id = mining_master_required_assignment_state_id(payload)
     except ClientActionRequired as error:
         return mining_master_client_action_error(payload, error)
 
@@ -976,6 +978,7 @@ def mining_master_assign_truck_view(request):
             return mining_master_client_action_error(payload, error, code='state_conflict')
         response_payload = {
             'ok': True,
+            'truck_id': truck.id,
             'assignment_id': assignment.id if assignment else None,
             'assignment_state_id': assignment.id if assignment else 0,
             'created': created,
@@ -1016,6 +1019,7 @@ def mining_master_assign_truck_view(request):
         return mining_master_client_action_error(payload, error, code='state_conflict')
     response_payload = {
         'ok': True,
+        'truck_id': truck.id,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
         'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,

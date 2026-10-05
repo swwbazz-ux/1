@@ -109,7 +109,7 @@ test("chart module is loaded before detail and packaged exactly once", () => {
     const detailIndex = TEMPLATE.indexOf("dispatcher-detail-v1.js");
     assert.ok(chartIndex >= 0, "chart module is absent from the dispatcher template");
     assert.ok(detailIndex > chartIndex, "chart module must load before the detail runtime");
-    assert.match(TEMPLATE, /dispatcher-detail-charts-v1\.js[^\n]+dispatcher-desktop-shell-v170/);
+    assert.match(TEMPLATE, /dispatcher-detail-charts-v1\.js[^\n]+dispatcher-desktop-shell-v171/);
 
     const pwaMatches = PWA_SOURCE.match(/\/static\/js\/dispatcher-detail-charts-v1\.js/g) || [];
     assert.equal(pwaMatches.length, 1, "chart module must occur once in PWA CORE_ASSETS");

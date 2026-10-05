@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const template = fs.readFileSync(path.resolve(__dirname, "../../../templates/trips/dispatcher_control.html"), "utf8");
 const fillCode = template.slice(template.indexOf("        function confirmMobileFillScreen("), template.indexOf("        function moveMobileHomeTruckLocal("));
 const transferCode = template.slice(template.indexOf("        function completeMobileTruckTransfer("), template.indexOf("        if (mobileTruckTransferCancel)", template.indexOf("        function completeMobileTruckTransfer(")));
+const stateCode = template.slice(template.indexOf("    function haulAssignmentStateId("), template.indexOf("    function applyHaulAssignmentStates("));
 const classes = {remove() {}, add() {}, contains() { return false; }};
 function fillRuntime(post) {
     const events = [];
@@ -27,7 +28,7 @@ function fillRuntime(post) {
         updateMobileHomeComplexGridLayout() {}, scheduleMobileLocalLayoutReconcile() {},
         window: {requestAnimationFrame: (fn) => fn()},
     });
-    vm.runInContext(fillCode, context);
+    vm.runInContext(stateCode + fillCode, context);
     return {context, events, screen, assigned, released};
 }
 
@@ -36,9 +37,11 @@ test("master fill confirms the home board only after all commands are saved", as
     const r = fillRuntime(() => new Promise((resolve) => resolvers.push(resolve)));
     const saved = r.context.confirmMobileFillScreen(r.screen);
     assert.deepEqual(r.events, []);
-    resolvers.forEach((resolve) => resolve({queued: true}));
+    resolvers.forEach((resolve, index) => resolve({queued: true, assignment_state_id: "command:saved-" + index}));
     await saved;
     assert.deepEqual(r.events, ["home", "close"]);
+    assert.equal(r.assigned.dataset.haulAssignmentStateId, "command:saved-0");
+    assert.equal(r.released.dataset.haulAssignmentStateId, "command:saved-1");
 });
 
 test("partial quota keeps unsaved fill intent and does not repeat commands already recorded", async () => {
@@ -62,7 +65,7 @@ test("partial quota keeps unsaved fill intent and does not repeat commands alrea
 test("master transfer does not show completion or move the truck before the command is saved", async () => {
     const events = [];
     let resolveSave;
-    const transfer = {truckId: "7", sourceExcavatorId: "8", assignmentStateId: "11", sourceLabel: "К-1", truckNumber: "101", homeMini: {}};
+    const transfer = {truckId: "7", sourceExcavatorId: "8", assignmentStateId: "11", sourceLabel: "К-1", truckNumber: "101", homeMini: {dataset: {haulAssignmentStateId: "11"}}};
     const target = {classList: classes, dataset: {mmMobileExcavatorId: "9"}, querySelector: () => ({textContent: "К-2", classList: classes, dataset: {}})};
     const context = vm.createContext({
         Promise, mobileTruckTransfer: transfer, home: {}, CSS: {escape: (v) => v},
@@ -71,10 +74,11 @@ test("master transfer does not show completion or move the truck before the comm
         finishMobileTruckTransferUi: () => events.push("finish"), showDispatcherDnDError: () => events.push("error"),
         pulseMiningMasterInfoTarget() {},
     });
-    vm.runInContext(transferCode, context);
+    vm.runInContext(stateCode + transferCode, context);
     const saved = context.completeMobileTruckTransfer(target);
     assert.deepEqual(events, []);
-    resolveSave({queued: true});
+    resolveSave({queued: true, assignment_state_id: "command:transfer"});
     await saved;
     assert.deepEqual(events, ["move", "finish", "commit"]);
+    assert.equal(transfer.homeMini.dataset.haulAssignmentStateId, "command:transfer");
 });

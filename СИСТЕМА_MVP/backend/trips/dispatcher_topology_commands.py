@@ -276,7 +276,9 @@ def execute_dispatcher_assign_truck(
         is_active=True,
     )
     try:
-        expected_state_id = required_assignment_state_id(payload)
+        expected_state_id = getattr(request, 'resolved_assignment_state_id', None)
+        if expected_state_id is None:
+            expected_state_id = required_assignment_state_id(payload)
     except ClientActionRequired as error:
         return dispatcher_client_action_error(payload, error)
     if action == 'release':
@@ -296,6 +298,7 @@ def execute_dispatcher_assign_truck(
         )
         response_payload = {
             'ok': True,
+            'truck_id': truck.id,
             'assignment_id': assignment.id if assignment else None,
             'assignment_state_id': assignment.id if assignment else 0,
             'created': created,
@@ -351,6 +354,7 @@ def execute_dispatcher_assign_truck(
     )
     response_payload = {
         'ok': True,
+        'truck_id': truck.id,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
         'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,

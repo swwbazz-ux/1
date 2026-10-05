@@ -80,6 +80,34 @@ def _locked_author(request, context, allowed_roles):
     return access
 
 
+def _assignment_predecessor(payload, context, action_type):
+    """Разрешить неизменяемую ссылку; обычный CAS всё равно проверит результат."""
+    token = payload.get('expected_assignment_state_id')
+    if not isinstance(token, str) or not token.startswith('command:'):
+        return None
+    ident = token[len('command:'):]
+    if (action_type not in {'mining_master_assign_truck', 'dispatcher_assign_truck'}
+            or payload.get('action') not in {'assign', 'release'}
+            or not ident or len(ident) > 128 or ident != ident.strip()
+            or ident == payload.get('client_action_id')):
+        raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на предыдущее распоряжение.')
+    receipt = ShiftClientAction.objects.filter(
+        action_type=action_type, client_action_id=ident,
+        employee_id=context['author']['actor_id'], shift_id=context['author']['shift_id'],
+    ).first()
+    stored = receipt.response_payload if receipt else {}
+    parent = stored.get('_command_context')
+    state_id = stored.get('assignment_state_id')
+    if (stored.get('ok') is not True or not parent
+            or parent.get('author') != context['author']
+            or str(stored.get('truck_id')) != str(payload.get('truck_id'))
+            or type(state_id) is not int or state_id < 0):
+        raise CommandContextError('command_dependency_unresolved', 'Предыдущее распоряжение ещё не подтверждено для этого самосвала.')
+    if parse_datetime(parent['occurred_at']) > parse_datetime(context['occurred_at']):
+        raise CommandContextError('command_dependency_invalid', 'Время распоряжений не соответствует их порядку.')
+    return state_id
+
+
 def bound_command(action_type, *, shift_getter, allowed_roles):
     """Внутри atomic-view: проверить контекст до эффекта и сохранить с квитанцией.
 
@@ -124,6 +152,7 @@ def bound_command(action_type, *, shift_getter, allowed_roles):
                     if occurred_at < shift.opened_at or occurred_at > timezone.now() + timedelta(minutes=5):
                         raise CommandContextError('command_time_invalid', 'Время команды не соответствует исходной смене или часам сервера.')
                     request.assignment_deadline_origin = occurred_at
+                request.resolved_assignment_state_id = _assignment_predecessor(payload, context, action_type)
                 response = view(request, *args, **kwargs)
                 if response.status_code < 300:
                     receipt = ShiftClientAction.objects.get(action_type=action_type, client_action_id=ident)
