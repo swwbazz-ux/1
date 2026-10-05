@@ -548,6 +548,83 @@ class ReleaseProtocolTests(unittest.TestCase):
     def sse_qa_http_503_metadata(self):
         return {"operation": "sse_qa_http_503_v1"}
 
+    def sse_qa_http_403_metadata(self):
+        return {"operation": "sse_qa_http_403_v1"}
+
+    def sse_qa_http_403_report(self):
+        client = "198.51.100.50"
+        source = {
+            "status": "ok", "reason": "ok_regular", "bytes_examined": 200,
+            "lines_examined": 2, "tail_truncated": False,
+        }
+        access_rows = []
+        denial_events = []
+        for second, route in ((1, "/driver/"), (2, "/excavator/work/")):
+            timestamp = f"2026-10-05T09:55:0{second}Z"
+            access_rows.append({
+                "timestamp_utc": timestamp, "method": "GET", "route": route,
+                "protocol": "HTTP/2.0", "status": 403, "response_bytes": 146,
+                "client_ipv4": client,
+                "protected_log_line": (
+                    f"{timestamp} client={client} GET {route} HTTP/2.0 status=403 bytes=146"
+                ),
+            })
+            denial_events.append({
+                "timestamp_utc": timestamp, "method": "GET", "route": route,
+                "protocol": "HTTP/2.0", "client_ipv4": client,
+                "classification": "access_forbidden_by_rule",
+                "message_sha256": hashlib.sha256(route.encode("ascii")).hexdigest(),
+                "protected_log_line": (
+                    f'{timestamp} access forbidden by rule client={client} '
+                    f'request="GET {route} HTTP/2.0"'
+                ),
+            })
+        return {
+            "schema": 1,
+            "operation": "sse_qa_http_403_v1",
+            "request": {
+                "from_utc": receiver.SSE_QA_HTTP_403_WINDOW_FROM,
+                "to_utc": receiver.SSE_QA_HTTP_403_WINDOW_TO,
+                "method": "GET", "routes": list(receiver.SSE_QA_HTTP_403_ROUTES),
+                "status": 403,
+                "comparison_reference": "pinned_applied_allowlist_cidr_sha256",
+            },
+            "sources": {
+                "nginx_error": dict(source),
+                "nginx_access": dict(source),
+                "wsgi_journal": {
+                    "status": "not_required", "reason": "not_queried", "queried": False,
+                    "bytes_examined": 0, "lines_examined": 0, "tail_truncated": False,
+                },
+            },
+            "time_basis": {
+                "access_offsets_minutes": [600],
+                "nginx_error_offset_minutes": 600,
+                "nginx_error_timezone_source": "single_access_log_offset",
+            },
+            "access_rows": access_rows,
+            "denial_events": denial_events,
+            "upstream_events": [],
+            "wsgi_events": [],
+            "finding": {
+                "cause": "allowlist_access_forbidden_by_rule",
+                "driver_access_seen": True,
+                "excavator_access_seen": True,
+                "driver_denial_seen": True,
+                "excavator_denial_seen": True,
+                "driver_access_error_client_match": True,
+                "excavator_access_error_client_match": True,
+                "client_addresses_same": True,
+                "common_client_available": True,
+                "driver_matches_applied_allowlist": False,
+                "excavator_matches_applied_allowlist": False,
+                "common_client_matches_applied_allowlist": False,
+                "wsgi_journal_queried": False,
+            },
+            "summary": {"row_count": 4, "truncated": False},
+            "limitations": receiver.SSE_QA_HTTP_403_LIMITATIONS,
+        }
+
     def sse_qa_http_503_report(self):
         access_line = (
             "2026-10-04T07:09:52Z GET /driver/ HTTP/2.0 "
@@ -1136,6 +1213,167 @@ class ReleaseProtocolTests(unittest.TestCase):
         for forbidden in ("client:", "user-agent", "cookie", "authorization", "?", "https://"):
             self.assertNotIn(forbidden, public.casefold())
 
+    def test_sse_qa_http_403_metadata_is_parameter_free_and_fixed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            inputs = {
+                "diagnostic_operation": "sse_qa_http_403_v1",
+                "diagnostic_equipment": "",
+                "diagnostic_from_utc": "",
+                "diagnostic_to_utc": "",
+                "diagnostic_max_rows": "500",
+            }
+            event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+            metadata = self.sse_qa_http_403_metadata()
+            self.assertEqual(builder.load_diagnostic_metadata(event_path), metadata)
+            self.assertEqual(receiver.validate_diagnostic_metadata(metadata), metadata)
+            receiver.validate_mode_contract({
+                "schema": 2, "mode": "diagnose", "commit": "a" * 40,
+                "files": [], "metadata": metadata,
+            }, {})
+            for field, value in (
+                ("diagnostic_equipment", "driver"),
+                ("diagnostic_from_utc", receiver.SSE_QA_HTTP_403_WINDOW_FROM),
+                ("diagnostic_to_utc", receiver.SSE_QA_HTTP_403_WINDOW_TO),
+                ("diagnostic_max_rows", "100"),
+            ):
+                with self.subTest(field=field):
+                    candidate = dict(inputs)
+                    candidate[field] = value
+                    event_path.write_text(json.dumps({"inputs": candidate}), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        builder.load_diagnostic_metadata(event_path)
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_metadata({
+                    "operation": "sse_qa_http_403_v1",
+                    "file": "/srv/sse-qa/log/nginx-error.log",
+                })
+
+    def test_sse_qa_http_403_collects_both_roles_and_compares_pinned_allowlist(self):
+        client = "198.51.100.77"
+        applied_digest = hashlib.sha256(f"{client}/32".encode("ascii")).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            error_log = root / "nginx-error.log"
+            access_log = root / "nginx-access.log"
+            error_log.write_text(
+                '2026/10/05 19:55:01 [error] 7#7: *41 access forbidden by rule, '
+                f'client: {client}, server: qa.invalid, request: "GET /driver/?private=1 HTTP/2.0", '
+                'host: "qa.invalid"\n'
+                '2026/10/05 19:55:02 [error] 7#7: *42 access forbidden by rule, '
+                f'client: {client}, server: qa.invalid, request: "GET /excavator/work/ HTTP/2.0", '
+                'host: "qa.invalid"\n',
+                encoding="utf-8",
+            )
+            access_log.write_text(
+                f'{client} - basic-user [05/Oct/2026:19:55:01 +1000] '
+                '"GET /driver/?private=1 HTTP/2.0" 403 146 "https://secret.invalid/" "SensitiveBrowser"\n'
+                f'{client} - basic-user [05/Oct/2026:19:55:02 +1000] '
+                '"GET /excavator/work/ HTTP/2.0" 403 146 "-" "SensitiveBrowser"\n',
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ERROR_LOG", error_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_503_ACCESS_LOG", access_log),
+                mock.patch.object(receiver, "SSE_QA_HTTP_403_APPLIED_ALLOWLIST_CIDR_SHA256", applied_digest),
+                mock.patch.object(receiver, "_sse_qa_http_403_journal") as journal,
+            ):
+                report = receiver.collect_sse_qa_http_403_report()
+            journal.assert_not_called()
+        self.assertEqual(report["finding"], {
+            "cause": "allowlist_access_forbidden_by_rule",
+            "driver_access_seen": True,
+            "excavator_access_seen": True,
+            "driver_denial_seen": True,
+            "excavator_denial_seen": True,
+            "driver_access_error_client_match": True,
+            "excavator_access_error_client_match": True,
+            "client_addresses_same": True,
+            "common_client_available": True,
+            "driver_matches_applied_allowlist": True,
+            "excavator_matches_applied_allowlist": True,
+            "common_client_matches_applied_allowlist": True,
+            "wsgi_journal_queried": False,
+        })
+        self.assertEqual({row["client_ipv4"] for row in report["access_rows"]}, {client})
+        serialized = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn("basic-user", serialized)
+        self.assertNotIn("private=1", serialized)
+        self.assertNotIn("secret.invalid", serialized)
+        self.assertNotIn("SensitiveBrowser", serialized)
+
+    def test_sse_qa_http_403_encrypted_envelope_exposes_only_boolean_comparison(self):
+        report = self.sse_qa_http_403_report()
+        receiver.validate_diagnostic_report(
+            json.dumps(report).encode("utf-8"), self.sse_qa_http_403_metadata(),
+        )
+        ciphertext = b"\x30\x82server-encrypted-sse-qa-http-403"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=ciphertext, stderr=b"")
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            openssl = runtime / "openssl"
+            openssl.write_bytes(b"test executable placeholder")
+            with (
+                mock.patch.object(receiver, "DIAGNOSTIC_OPENSSL", openssl),
+                mock.patch.object(receiver, "DIAGNOSTIC_CERT_TEMP_DIR", runtime),
+                mock.patch.object(receiver.subprocess, "run", return_value=completed) as execute,
+            ):
+                envelope = receiver.encrypt_diagnostic_report(report)
+        self.assertEqual(envelope["recipient_fingerprint"], receiver.DIAGNOSTIC_403_RECIPIENT_FINGERPRINT)
+        self.assertEqual(execute.call_args.kwargs["input"], json.dumps(
+            report, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8"))
+        public = json.dumps(envelope["public_evidence"], sort_keys=True)
+        self.assertNotIn(report["access_rows"][0]["client_ipv4"], public)
+        self.assertNotIn(receiver.SSE_QA_HTTP_403_APPLIED_ALLOWLIST_CIDR_SHA256, public)
+        self.assertEqual(envelope["public_evidence"]["cause"], "allowlist_access_forbidden_by_rule")
+        self.assertTrue(envelope["public_evidence"]["client_addresses_same"])
+        self.assertFalse(envelope["public_evidence"]["common_client_matches_applied_allowlist"])
+
+    def test_sse_qa_http_403_distinguishes_two_role_client_addresses(self):
+        report = self.sse_qa_http_403_report()
+        other = "198.51.100.51"
+        for rows in (report["access_rows"], report["denial_events"]):
+            row = next(item for item in rows if item["route"] == "/excavator/work/")
+            row["client_ipv4"] = other
+            if "status" in row:
+                row["protected_log_line"] = (
+                    f'{row["timestamp_utc"]} client={other} GET {row["route"]} '
+                    f'{row["protocol"]} status=403 bytes={row["response_bytes"]}'
+                )
+            else:
+                row["protected_log_line"] = (
+                    f'{row["timestamp_utc"]} access forbidden by rule client={other} '
+                    f'request="GET {row["route"]} {row["protocol"]}"'
+                )
+        report["finding"].update({
+            "client_addresses_same": False,
+            "common_client_available": False,
+            "common_client_matches_applied_allowlist": False,
+        })
+        validated = receiver.validate_diagnostic_report(
+            json.dumps(report).encode("utf-8"), self.sse_qa_http_403_metadata(),
+        )
+        self.assertFalse(validated["finding"]["client_addresses_same"])
+        self.assertEqual(
+            {row["client_ipv4"] for row in validated["access_rows"]},
+            {"198.51.100.50", other},
+        )
+
+    def test_sse_qa_http_403_run_diagnostic_has_no_free_form_subprocess(self):
+        expected = {
+            "schema": 1, "operation": "sse_qa_http_403_v1",
+            "summary": {"row_count": 0, "truncated": False},
+        }
+        with (
+            mock.patch.object(receiver, "collect_sse_qa_http_403_report", return_value=expected) as collect,
+            mock.patch.object(receiver.subprocess, "run") as execute,
+        ):
+            result = receiver.run_diagnostic({"metadata": self.sse_qa_http_403_metadata()})
+        self.assertIs(result, expected)
+        collect.assert_called_once_with()
+        execute.assert_not_called()
+
     def test_infra_capacity_package_contains_only_the_fixed_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1571,14 +1809,17 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn("production_diagnostic_ciphertext", workflow)
         self.assertIn("- infra_capacity_v1", workflow)
         self.assertIn("- sse_qa_http_503_v1", workflow)
+        self.assertIn("- sse_qa_http_403_v1", workflow)
         self.assertIn(
-            '{"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1"}',
+            '{"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}',
             workflow,
         )
         self.assertIn('expected_keys.add("public_evidence")', workflow)
         self.assertIn("SSE_QA_HTTP_503_FINDING", workflow)
         self.assertIn("SSE_QA_HTTP_503_ACCESS", workflow)
         self.assertIn("SSE_QA_HTTP_503_LIMIT", workflow)
+        self.assertIn("SSE_QA_HTTP_403_FINDING", workflow)
+        self.assertIn("SSE_QA_HTTP_403_CLIENT_COMPARISON", workflow)
         self.assertNotIn("openssl cms -encrypt", workflow)
         self.assertIn("production-diagnostic-${{ github.run_id }}.cms", workflow)
         certificate = (ROOT / ".github" / "deploy" / "diagnostic-recipient-cert.pem").read_text(encoding="ascii")
@@ -1590,9 +1831,27 @@ class ReleaseProtocolTests(unittest.TestCase):
             certificate_digest[index:index + 2] for index in range(0, len(certificate_digest), 2)
         )
         self.assertEqual(calculated_fingerprint, receiver.DIAGNOSTIC_RECIPIENT_FINGERPRINT)
+        diagnostic_403_certificate = (
+            ROOT / ".github" / "deploy" / "diagnostic-403-recipient-cert.pem"
+        ).read_text(encoding="ascii")
+        self.assertTrue(diagnostic_403_certificate.startswith("-----BEGIN CERTIFICATE-----"))
+        self.assertNotIn("PRIVATE " "KEY", diagnostic_403_certificate)
+        self.assertEqual(
+            diagnostic_403_certificate.encode("ascii"), receiver.DIAGNOSTIC_403_RECIPIENT_CERTIFICATE,
+        )
+        diagnostic_403_digest = hashlib.sha256(
+            ssl.PEM_cert_to_DER_cert(diagnostic_403_certificate)
+        ).hexdigest().upper()
+        diagnostic_403_fingerprint = ":".join(
+            diagnostic_403_digest[index:index + 2]
+            for index in range(0, len(diagnostic_403_digest), 2)
+        )
+        self.assertEqual(diagnostic_403_fingerprint, receiver.DIAGNOSTIC_403_RECIPIENT_FINGERPRINT)
         ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("diagnostic-recipient-private.pem", ignore)
         self.assertIn(".github/deploy/diagnostic-recipient-private.pem", ignore)
+        self.assertIn("diagnostic-403-recipient-private.pem", ignore)
+        self.assertIn(".github/deploy/diagnostic-403-recipient-private.pem", ignore)
 
     def test_host_key_builder_uses_exact_mode_commit_payload_and_rejects_extra_inputs(self):
         with tempfile.TemporaryDirectory() as raw:
