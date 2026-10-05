@@ -80,7 +80,7 @@ def _locked_author(request, context, allowed_roles):
     return access
 
 
-def _confirmed_assignment_state(context, action_type, ident, truck_id, current_id):
+def _confirmed_assignment_state(context, action_type, ident, truck_id, current_id, *, bulk=False):
     if (not isinstance(ident, str) or not ident or len(ident) > 128
             or ident != ident.strip() or ident == current_id):
         raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на предыдущее распоряжение.')
@@ -90,10 +90,14 @@ def _confirmed_assignment_state(context, action_type, ident, truck_id, current_i
     ).first()
     stored = receipt.response_payload if receipt else {}
     parent = stored.get('_command_context')
-    state_id = stored.get('assignment_state_id')
+    states = stored.get('assignment_state_ids')
+    if bulk:
+        state_id = states.get(str(truck_id)) if isinstance(states, dict) else None
+    else:
+        state_id = stored.get('assignment_state_id')
     if (stored.get('ok') is not True or not parent
             or parent.get('author') != context['author']
-            or str(stored.get('truck_id')) != str(truck_id)
+            or (not bulk and str(stored.get('truck_id')) != str(truck_id))
             or type(state_id) is not int or state_id < 0):
         raise CommandContextError('command_dependency_unresolved', 'Предыдущее распоряжение ещё не подтверждено для этого самосвала.')
     if parse_datetime(parent['occurred_at']) > parse_datetime(context['occurred_at']):
@@ -101,15 +105,37 @@ def _confirmed_assignment_state(context, action_type, ident, truck_id, current_i
     return state_id
 
 
+def _assignment_reference(token):
+    if isinstance(token, str) and token.startswith('command:'):
+        return 'single', token[8:]
+    if isinstance(token, str) and token.startswith('bulk:'):
+        parts = token.split(':', 2)
+        if len(parts) != 3 or parts[1] not in {'release', 'disband'}:
+            raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на массовое распоряжение.')
+        return parts[1], parts[2]
+    return None
+
+
+def _resolve_assignment_reference(token, payload, context, action_type, truck_id):
+    reference = _assignment_reference(token)
+    if reference is None:
+        return None
+    kind, ident = reference
+    role = 'mining_master' if action_type.startswith('mining_master_') else 'dispatcher'
+    parent_action = role + ('_move_excavator' if kind == 'disband' else '_assign_truck')
+    return _confirmed_assignment_state(context, parent_action, ident, truck_id,
+                                       payload.get('client_action_id'), bulk=kind != 'single')
+
+
 def _assignment_predecessor(payload, context, action_type):
     """Разрешить неизменяемую ссылку; обычный CAS всё равно проверит результат."""
     token = payload.get('expected_assignment_state_id')
-    if not isinstance(token, str) or not token.startswith('command:'):
+    if _assignment_reference(token) is None:
         return None
     if (action_type not in {'mining_master_assign_truck', 'dispatcher_assign_truck'}
             or payload.get('action') not in {'assign', 'release'}):
         raise CommandContextError('command_dependency_invalid', 'Некорректная ссылка на предыдущее распоряжение.')
-    return _confirmed_assignment_state(context, action_type, token[8:], payload.get('truck_id'), payload.get('client_action_id'))
+    return _resolve_assignment_reference(token, payload, context, action_type, payload.get('truck_id'))
 
 
 def _mass_assignment_states(payload, context, action_type):
@@ -137,9 +163,8 @@ def _mass_assignment_states(payload, context, action_type):
     states = payload.get('expected_assignment_states')
     if not isinstance(states, dict):
         return None  # прежний валидатор отвечает за обязательную карту состава
-    return {truck_id: resolve(value[8:], truck_id)
-            if isinstance(value, str) and value.startswith('command:') else value
-            for truck_id, value in states.items()}
+    return {truck_id: _resolve_assignment_reference(value, payload, context, action_type, truck_id)
+            if _assignment_reference(value) else value for truck_id, value in states.items()}
 
 
 def bound_command(action_type, *, shift_getter, allowed_roles):

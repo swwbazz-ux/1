@@ -218,7 +218,7 @@ test('previous employee or previous shift commands are never attached to mass op
 test('real Master ACK callback does not refresh the board in the middle of a waiting structural gesture', async () => {
     const r = setup({fetch: (_url, init) => ack(init)});
     const template = fs.readFileSync(path.join(BACKEND, 'templates/trips/dispatcher_control.html'), 'utf8');
-    const start = template.indexOf('        onAcknowledged: function (request) {');
+    const start = template.indexOf('        onAcknowledged: function (request, response) {');
     const end = template.indexOf('\n    });', start);
     const callback = template.slice(start, end).trim().replace(/^onAcknowledged: /, '');
     let refreshes = 0;

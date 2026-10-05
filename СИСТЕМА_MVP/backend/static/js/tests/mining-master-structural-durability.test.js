@@ -51,12 +51,13 @@ function runtime(options = {}) {
     let timerId = 0;
     const grid = new Node(), preview = new Node(), card = new Node({mmMobileExcavatorId: "9"});
     const button = new Node({mmMobileActivateExcavator: "9"});
-    const trucks = [new Node({mmMobileHomeTruckId: "7"}), new Node({mmMobileHomeTruckId: "8"})];
+    const trucks = [new Node({mmMobileHomeTruckId: "7", haulAssignmentStateId: "11"}), new Node({mmMobileHomeTruckId: "8", haulAssignmentStateId: "12"})];
     trucks.forEach(truck => preview.appendChild(truck)); grid.appendChild(card);
     card.querySelector = selector => selector === ".mm-mobile-truck-preview" ? preview : null;
     const shell = new Node();
     shell.querySelector = selector => selector === ".mm-mobile-complex-grid" ? grid : null;
-    const garageTrucks = new Set();
+    const garageTrucks = new Set(), garageNodes = new Map();
+    shell.querySelectorAll = () => [...garageNodes.values()];
     let createdCard = null, garageButton = null;
     const prefix = "mining-master-mobile-sync-queue-v3:command:";
     function confirmedEffect(name) {
@@ -102,8 +103,12 @@ function runtime(options = {}) {
         },
         hideMobileGarageExcavatorButton: node => { confirmedEffect("hideExcavator"); node.hidden = true; },
         animateMobileComplexTrucksToGarage: () => { confirmedEffect("animateTrucks"); return 720; },
-        restoreMobileTruckToGarages: node => { confirmedEffect("garageTruck"); garageTrucks.add(node.dataset.mmMobileHomeTruckId); },
-        removeMobileTruckFromGarages: id => garageTrucks.delete(id),
+        restoreMobileTruckToGarages: node => {
+            confirmedEffect("garageTruck"); garageTrucks.add(node.dataset.mmMobileHomeTruckId);
+            garageNodes.set(node.dataset.mmMobileHomeTruckId, new Node({equipmentCardId: node.dataset.mmMobileHomeTruckId,
+                haulAssignmentStateId: node.dataset.haulAssignmentStateId}));
+        },
+        removeMobileTruckFromGarages: id => { garageTrucks.delete(id); garageNodes.delete(id); },
         createMobileGarageExcavatorFromHome: () => {
             confirmedEffect("garageExcavator"); garageButton = new Node(); grid.appendChild(garageButton);
             return {created: true, button: garageButton};
@@ -122,7 +127,7 @@ function runtime(options = {}) {
     })});
     if (options.oldTransport) delete transport.storePost;
     context.dispatcherTransport = transport;
-    vm.runInContext(handlers, context);
+    vm.runInContext(template.slice(template.indexOf("    function applyHaulAssignmentStateMap("), template.indexOf('    window.addEventListener("focus"')) + handlers, context);
     function invoke(action) {
         return action === "activate" ? context.activateMobileGarageExcavator(button, 0, "home")
             : action === "disband" ? context.executeMobileComplexToGarage(card)
@@ -133,7 +138,7 @@ function runtime(options = {}) {
             if ([120, 180, 260, 880].includes(timer.delay)) { timers.delete(id); timer.fn(); }
         }
     }
-    return {invoke, events, storage, transport, errors, timers, runUiTimers, card, button, preview, trucks, garageTrucks,
+    return {invoke, events, storage, transport, errors, timers, runUiTimers, card, button, preview, trucks, garageTrucks, garageNodes,
         get createdCard() { return createdCard; }, get garageButton() { return garageButton; }};
 }
 
@@ -271,5 +276,47 @@ for (const action of ['disband', 'release']) {
         const mass = [...r.storage].filter(([key]) => key.startsWith(r.transport.journalPrefix))
             .map(([, value]) => JSON.parse(value)).find(record => record.request.autoRetry === false);
         assert.equal(mass.delivery.state, 'held');
+    });
+}
+
+for (const action of ['disband', 'release']) {
+    test(action + ': garage copies retain pending reference, ACK updates them and next assign uses the new ID', async () => {
+        let reply;
+        const calls = [];
+        const r = runtime({fetch: async (url, init) => {
+            const data = JSON.parse(init.body); calls.push(data);
+            if (data.action === 'assign') return {ok: true, status: 200, json: async () => ({ok: true, truck_id: 7, assignment_state_id: 81})};
+            return {ok: true, status: 200, json: () => new Promise(resolve => { reply = resolve; })};
+        }});
+        const sending = r.invoke(action);
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+        const expectedToken = 'bulk:' + (action === 'disband' ? 'disband' : 'release') + ':' + calls[0].client_action_id;
+        assert.equal(r.garageNodes.get('7').dataset.haulAssignmentStateId, expectedToken);
+        reply({ok: true, assignment_state_ids: {7: 71, 8: 72}}); await sending;
+        assert.equal(r.garageNodes.get('7').dataset.haulAssignmentStateId, '71');
+        assert.equal(r.garageNodes.get('8').dataset.haulAssignmentStateId, '72');
+        assert.equal(r.trucks[0].dataset.haulAssignmentStateId, '71');
+        const child = r.transport.storePost('/mining-master/assignments/truck/assign/', {
+            action: 'assign', client_action_id: 'after-bulk', truck_id: '7', excavator_id: '10',
+            expected_assignment_state_id: r.garageNodes.get('7').dataset.haulAssignmentStateId,
+        });
+        await r.transport.send(child);
+        assert.equal(calls[1].expected_assignment_state_id, '71');
+    });
+    test(action + ': late bulk ACK never replaces a newer local command token in a garage copy', async () => {
+        let reply;
+        const r = runtime({fetch: async () => ({ok: true, status: 200, json: () => new Promise(resolve => { reply = resolve; })})});
+        const sending = r.invoke(action);
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+        r.garageNodes.get('7').dataset.haulAssignmentStateId = 'command:newer';
+        reply({ok: true, assignment_state_ids: {7: 71, 8: 72}}); await sending;
+        assert.equal(r.garageNodes.get('7').dataset.haulAssignmentStateId, 'command:newer');
+        assert.equal(r.garageNodes.get('8').dataset.haulAssignmentStateId, '72');
+    });
+    test(action + ': conflict restores original assignment tokens along with the cards', async () => {
+        const r = runtime({fetch: async () => ({ok: false, status: 409, json: async () => ({ok: false, code: 'state_conflict'})})});
+        assert.equal(await r.invoke(action), false); r.runUiTimers();
+        assert.deepEqual(r.trucks.map(node => node.dataset.haulAssignmentStateId), ['11', '12']);
+        assert.equal(r.garageNodes.size, 0);
     });
 }

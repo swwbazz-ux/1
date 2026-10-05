@@ -253,9 +253,28 @@
             return receiptSupported(request) && /\/truck\/assign\/$/.test(request.url)
                 && ["assign", "release"].indexOf(request.data.action) !== -1 && request.data.truck_id;
         }
+        function assignmentReference(value, truckId) {
+            if (typeof value !== "string") return null;
+            if (value.indexOf("command:") === 0) return {truck_id: truckId, client_action_id: value.slice(8)};
+            var bulk = /^bulk:(release|disband):(.+)$/.exec(value);
+            return bulk ? {truck_id: truckId, client_action_id: bulk[2], bulk: bulk[1]} : null;
+        }
         function predecessorId(request) {
-            var value = request.data && request.data.expected_assignment_state_id;
-            return typeof value === "string" && value.indexOf("command:") === 0 ? value.slice(8) : "";
+            var ref = assignmentReference(request.data && request.data.expected_assignment_state_id, request.data && request.data.truck_id);
+            return ref ? ref.client_action_id : "";
+        }
+        function commandReference(request) {
+            return (massCommand(request) ? "bulk:" + (request.data.zone === "inactive" ? "disband" : "release") + ":" : "command:")
+                + request.data.client_action_id;
+        }
+        function isReferenceParent(request, ref, candidate) {
+            if (candidate.id === request.id || !candidate.data || candidate.data.client_action_id !== ref.client_action_id) return false;
+            if (ref.bulk) {
+                if (!massCommand(candidate) || (candidate.data.zone === "inactive" ? "disband" : "release") !== ref.bulk) return false;
+                if (!Object.prototype.hasOwnProperty.call(candidate.data.expected_assignment_states || {}, String(ref.truck_id))) return false;
+            } else if (!assignmentCommand(candidate)) return false;
+            return sameAssignmentScope(assignmentProbe(request, ref.truck_id),
+                ref.bulk ? assignmentProbe(candidate, ref.truck_id) : candidate);
         }
         function sameAssignmentScope(left, right) {
             return assignmentCommand(left) && assignmentCommand(right) && left.url === right.url
@@ -307,9 +326,10 @@
             truckIds.forEach(function (truckId) {
                 var probe = assignmentProbe(request, truckId);
                 probe.data.expected_assignment_state_id = "0";
-                linkAssignment(probe);
-                var ident = predecessorId(probe);
-                if (!ident) return;
+                linkAssignment(probe, true);
+                var ref = assignmentReference(probe.data.expected_assignment_state_id, truckId);
+                if (!ref || ref.bulk) return;
+                var ident = ref.client_action_id;
                 if (!dependencies.some(function (item) {
                     return String(item.truck_id) === truckId && item.client_action_id === ident;
                 })) dependencies.push({truck_id: truckId, client_action_id: ident});
@@ -322,27 +342,44 @@
         }
         function dependencyRefs(request) {
             if (assignmentCommand(request) && predecessorId(request)) {
-                return [{truck_id: request.data.truck_id, client_action_id: predecessorId(request)}];
+                return [assignmentReference(request.data.expected_assignment_state_id, request.data.truck_id)];
             }
             if (!massCommand(request)) return [];
             var refs = (request.data.assignment_dependencies || []).slice();
             var states = request.data.expected_assignment_states || {};
             Object.keys(states).forEach(function (truckId) {
-                if (typeof states[truckId] === "string" && states[truckId].indexOf("command:") === 0) {
-                    refs.push({truck_id: truckId, client_action_id: states[truckId].slice(8)});
-                }
+                var ref = assignmentReference(states[truckId], truckId);
+                if (ref) refs.push(ref);
             });
             return refs;
         }
-        function linkAssignment(request) {
+        function linkAssignment(request, singlesOnly) {
             if (!assignmentCommand(request) || incompleteContext(request)
                     || !/^\d+$/.test(String(request.data.expected_assignment_state_id))) return;
-            var pending = assignmentRecords(request).filter(function (record) {
-                return record.delivery.state === "pending" && record.request.autoRetry !== false;
+            var records = journalRecords();
+            var pending = records.filter(function (record) {
+                if (record.delivery.state !== "pending" || !assignmentCommand(record.request)
+                        && (singlesOnly || !massCommand(record.request))) return false;
+                var ref = assignmentReference(commandReference(record.request), request.data.truck_id);
+                return (massCommand(record.request) || record.request.autoRetry !== false)
+                    && isReferenceParent(request, ref, record.request);
             });
+            function dependsOn(child, parent, seen) {
+                if (seen[child.request.id]) return false;
+                seen[child.request.id] = true;
+                return dependencyRefs(child.request).some(function (ref) {
+                    if (String(ref.truck_id) !== String(request.data.truck_id)) return false;
+                    if (isReferenceParent(child.request, ref, parent.request)) return true;
+                    // Массовый узел остаётся частью цепочки, даже когда для
+                    // нового массового барьера выбираем только одиночные хвосты.
+                    return records.some(function (middle) {
+                        return isReferenceParent(child.request, ref, middle.request) && dependsOn(middle, parent, seen);
+                    });
+                });
+            }
             var tails = pending.filter(function (record) {
                 return !pending.some(function (child) {
-                    return predecessorId(child.request) === record.request.data.client_action_id;
+                    return child.request.id !== record.request.id && dependsOn(child, record, Object.create(null));
                 });
             });
             if (tails.length > 1 || pending.length && !tails.length) {
@@ -350,20 +387,20 @@
                 error.code = "command_dependency_conflict";
                 throw error;
             }
-            if (tails.length) request.data.expected_assignment_state_id = "command:" + tails[0].request.data.client_action_id;
+            if (tails.length) request.data.expected_assignment_state_id = commandReference(tails[0].request);
         }
         function dependencyReady(request) {
             var refs = dependencyRefs(request);
             if (!refs.length) return true;
             var records = journalRecords();
             return refs.every(function (ref) {
-                var probe = assignmentProbe(request, ref.truck_id);
                 var parents = records.filter(function (record) {
-                    return record.request.id !== request.id && sameAssignmentScope(probe, record.request)
-                        && record.request.data.client_action_id === ref.client_action_id;
+                    return isReferenceParent(request, ref, record.request);
                 });
                 return parents.length === 1 && parents[0].delivery.state === "acknowledged"
-                    && parents[0].delivery.receipt && parents[0].delivery.receipt.ok === true;
+                    && parents[0].delivery.receipt && parents[0].delivery.receipt.ok === true
+                    && (!ref.bulk || parents[0].delivery.receipt.assignment_state_ids
+                        && Object.prototype.hasOwnProperty.call(parents[0].delivery.receipt.assignment_state_ids, String(ref.truck_id)));
             });
         }
         function waitForDependencies(request) {
