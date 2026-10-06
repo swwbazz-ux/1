@@ -41,7 +41,7 @@ function observe(promise) {
 function harness(role, options = {}) {
     const handlers = {}, timers = new Map(), calls = [], batches = [], deleted = [];
     let sequence = 0, currentBatch = null;
-    const writes = [], entries = options.entries || new Map();
+    const writes = [], fetchWaits = [], entries = options.entries || new Map();
     const key = request => new URL(typeof request === 'string' ? request : request.url, origin).href;
     const worker = raw(role.file, role.constant).replaceAll('__STATIC_ASSET_RELEASE__', 'test-release');
     const cacheName = worker.match(/const CACHE_NAME = "([^"]+)"/)[1];
@@ -87,13 +87,12 @@ function harness(role, options = {}) {
         return response(body, url.href, 200, type);
     }
     vm.createContext(context); vm.runInContext(options.script || release + '\n' + helper + '\n' + worker, context);
-    return {context, cache, entries, defaultResponse, cacheName, oldName, futureName, cachesPresent, calls, batches, deleted, timers, writes,
+    return {context, cache, entries, fetchWaits, defaultResponse, cacheName, oldName, futureName, cachesPresent, calls, batches, deleted, timers, writes,
         fire(delay) { for (const [id, timer] of [...timers]) if (timer.delay === delay) { timers.delete(id); timer.fn(); } },
         start(url) {
             let result;
-            const waits = [];
             for (const fn of handlers.fetch || []) fn({request: new Request(new URL(url, origin)),
-                respondWith(value) { result = value; }, waitUntil(value) { waits.push(value); }});
+                respondWith(value) { result = value; }, waitUntil(value) { fetchWaits.push(value); }});
             return result;
         },
         event(name, detail = {}) {
@@ -304,10 +303,21 @@ if (process.env.BOARD_RENDERED_SHELL_PATH) {
         const fixture = JSON.parse(fs.readFileSync(process.env.BOARD_RENDERED_SHELL_PATH, 'utf8'));
         const role = roles.find(item => item.code === fixture.role);
         assert.ok(role); assert.ok(fixture.assets.length > 5);
-        const h = harness(role, {html: fixture.html, script: fixture.script, realAssets: true});
+        const options = {html: fixture.html, script: fixture.script, realAssets: true};
+        const h = harness(role, options);
         await h.event('install');
+        // Repeat with another actual Django rendering and one missing exact
+        // dependency: network HTML is returned immediately, offline replacement
+        // must wait for the real static file to be restored.
+        options.html = fixture.refresh_html;
+        const missing = fixture.assets.find(url => url.includes('/js/'));
+        h.entries.delete(new URL(missing, origin).href);
+        const previousWrites = h.writes.length;
+        assert.equal(await (await h.start(role.shell + '?offline-refresh=1')).text(), fixture.refresh_html);
+        await flush(); await Promise.all(h.fetchWaits);
+        assert.deepEqual(h.writes.slice(previousWrites), [new URL(missing, origin).href, origin + role.shell]);
         const cold = harness(role, {entries: h.entries, script: fixture.script, fetch: () => Promise.reject(Error('offline'))});
-        assert.equal(await (await cold.start(role.shell)).text(), fixture.html);
+        assert.equal(await (await cold.start(role.shell)).text(), fixture.refresh_html);
         for (const asset of fixture.assets) {
             const url = new URL(asset, origin);
             const result = await cold.start(url.href);

@@ -142,7 +142,7 @@ async function boardActivate() {
 }
 
 function boardCanCache(request, response) {
-  if (!response || !response.ok || !response.url) return false;
+  if (!response || !response.ok || response.status === 206 || !response.url) return false;
   const requested = new URL(typeof request === "string" ? request : request.url, self.location.origin);
   const received = new URL(response.url, self.location.origin);
   if (received.origin !== self.location.origin || received.pathname !== requested.pathname) return false;
@@ -165,9 +165,62 @@ function boardCompleteFetch(request, init) {
   }, 8000, () => { if (controller) controller.abort(); });
 }
 
-function boardCacheResponse(request, response, fallbackUrl, event) {
+let boardShellGeneration = 0;
+let boardShellWrite = null;
+
+function boardIsShellRequest(request) {
+  return new URL(request.url).pathname === APP_SHELL_URL;
+}
+
+function boardCacheShellResponse(saved, generation) {
+  let expired = false;
+  const ensureCurrent = () => {
+    if (expired || generation !== boardShellGeneration) throw new Error("Board refresh superseded.");
+  };
+  return boardDeadline(async () => {
+    const dependencies = boardShellAssetURLs(saved, await saved.clone().text());
+    ensureCurrent();
+    const cache = await boardDeadline(() => caches.open(CACHE_NAME), 2500);
+    ensureCurrent();
+    await Promise.all(dependencies.map(async url => {
+      const request = new Request(new URL(url, self.location.origin));
+      const cached = await boardDeadline(() => cache.match(request), 2500);
+      ensureCurrent();
+      if (boardCanCache(request, cached)) {
+        await boardDeadline(() => cached.clone().arrayBuffer(), 2500);
+        ensureCurrent();
+        return;
+      }
+      const response = await boardCompleteFetch(request, {cache: "reload"});
+      ensureCurrent();
+      if (!boardCanCache(request, response)) throw new Error("Board dependency unavailable.");
+      await boardDeadline(() => cache.put(request, response), 2500);
+      ensureCurrent();
+    }));
+    // Cache.put cannot be cancelled. Do not overlap HTML writes: a timed-out
+    // older write must settle before a newer snapshot can replace it.
+    if (boardShellWrite) await boardDeadline(() => boardShellWrite, 2500);
+    ensureCurrent();
+    const write = Promise.resolve(cache.put(APP_SHELL_URL, saved)).finally(() => {
+      if (boardShellWrite === write) boardShellWrite = null;
+    });
+    boardShellWrite = write;
+    await boardDeadline(() => write, 2500);
+  }, 30000, () => { expired = true; }).catch(() => {
+    // All late continuations stop before the next write. Completed assets are
+    // harmless; the previous HTML and its dependencies have not been deleted.
+    expired = true;
+  });
+}
+
+function boardCacheResponse(request, response, fallbackUrl, event, generation) {
   // Clone before yielding: the browser may consume the returned body immediately.
   const saved = response.clone();
+  if (boardIsShellRequest(request)) {
+    const work = boardCacheShellResponse(saved, generation);
+    if (event && event.waitUntil) event.waitUntil(work);
+    return work;
+  }
   const fallback = fallbackUrl && new URL(request.url).pathname === fallbackUrl
     ? response.clone() : null;
   let expired = false;
@@ -186,7 +239,9 @@ async function boardCachedFallback(request, fallbackUrl) {
   try {
     return await boardDeadline(async () => {
       const cache = await caches.open(CACHE_NAME);
-      let key = request;
+      // One canonical HTML entry is committed after all exact dependencies.
+      // A stale query-specific entry must not mask the newly prepared shell.
+      let key = boardIsShellRequest(request) ? APP_SHELL_URL : request;
       let response = await cache.match(key);
       if (!response && fallbackUrl) {
         key = fallbackUrl;
@@ -209,9 +264,10 @@ function boardUnavailable(message) {
 }
 
 function boardFetchAndCache(request, fallbackUrl, event, init) {
+  const generation = boardIsShellRequest(request) ? ++boardShellGeneration : null;
   return boardCompleteFetch(request, init).then(response => {
     if (response.status >= 500) throw new Error("Board server unavailable.");
-    if (boardCanCache(request, response)) boardCacheResponse(request, response, fallbackUrl, event);
+    if (boardCanCache(request, response)) boardCacheResponse(request, response, fallbackUrl, event, generation);
     return response;
   });
 }
@@ -512,7 +568,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v180',
+        shell_version='mining-master-mobile-shell-v181',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -549,7 +605,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v181',
+        shell_version='dispatcher-desktop-shell-v182',
     ),
     RoleApp(
         role_code='settlement_clerk',

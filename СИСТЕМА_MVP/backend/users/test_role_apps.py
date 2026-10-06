@@ -61,7 +61,10 @@ def assert_board_dependencies_reopen_offline(test_case, role_code, response):
     app = ROLE_APPS_BY_CODE[role_code]
     worker = test_case.client.get(app.service_worker_url)
     test_case.assertEqual(worker.status_code, 200)
+    refreshed = test_case.client.get(response.wsgi_request.get_full_path())
+    test_case.assertEqual(refreshed.status_code, 200)
     fixture = {'role': role_code, 'html': html, 'assets': sorted(assets),
+               'refresh_html': refreshed.content.decode('utf-8'),
                'script': worker.content.decode('utf-8')}
     with tempfile.TemporaryDirectory(prefix='board-offline-test-') as directory:
         target = Path(directory) / 'shell.json'

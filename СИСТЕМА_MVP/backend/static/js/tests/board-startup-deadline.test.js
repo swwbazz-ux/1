@@ -19,6 +19,9 @@ const release = raw('users/role_apps.py', 'RELEASE_STATIC_SERVICE_WORKER_JS')
     .replaceAll('__STATIC_ASSET_RELEASE__', 'test-release')
     .replace('__RELEASE_STATIC_PATHS__', '["/static/js/realtime-client.js"]');
 const releasePath = '/static/js/realtime-client.js?v=test-release';
+function boardHTML(role) {
+    return `<main class="dispatcher-shell" data-dispatcher-command-role="${role.code}">Fresh board</main><script src="${releasePath}"></script>`;
+}
 function response(body = 'Saved board', url = '/', status = 200, type = 'text/html') {
     const r = new Response(body, {status, headers: {'Content-Type': type}});
     Object.defineProperty(r, 'url', {value: origin + url});
@@ -93,10 +96,12 @@ for (const role of roles) {
     });
     check('empty cache returns finite 503 and next healthy navigation succeeds', async () => {
         let healthy = false;
-        const h = harness(role, () => healthy ? response('Fresh board', role.shell) : new Promise(() => {}), {cached: false});
+        const h = harness(role, request => healthy ? (new URL(request.url).pathname === role.shell
+            ? response(boardHTML(role), role.shell) : response('asset', releasePath, 200, 'text/javascript'))
+            : new Promise(() => {}), {cached: false});
         const state = observe(h.start()); await flush(); h.fire(8000); await flush();
         assert.equal(state.settled, true); assert.equal(state.value.status, 503);
-        healthy = true; assert.equal(await (await h.start()).text(), 'Fresh board');
+        healthy = true; assert.equal(await (await h.start()).text(), boardHTML(role));
         await flush(); assert.ok(h.writes.length); assert.equal(h.timers.size, 0);
     });
     for (const failure of ['hangCache', 'hangMatch']) {
@@ -114,9 +119,9 @@ for (const role of roles) {
     });
     check('healthy navigation bypasses stalled cache; expired write cannot start later', async () => {
         const opened = deferred();
-        const h = harness(role, () => response('Fresh board', role.shell), {cacheOpen: () => opened.promise});
+        const h = harness(role, () => response(boardHTML(role), role.shell), {cacheOpen: () => opened.promise});
         const state = observe(h.start()); await flush();
-        assert.equal(state.settled, true); assert.equal(await state.value.text(), 'Fresh board');
+        assert.equal(state.settled, true); assert.equal(await state.value.text(), boardHTML(role));
         h.fire(2500); await flush(); opened.resolve(h.cache); await flush();
         assert.deepEqual(h.writes, []); assert.equal(h.timers.size, 0);
     });
