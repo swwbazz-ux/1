@@ -1,0 +1,38 @@
+{
+  "name": "mechanics-django",
+  "returncode": 0,
+  "duration_seconds": 46.4,
+  "command": [
+    "/workspace/scratch/d31f8c8018c5/mechanics-test-venv/bin/python",
+    "-u",
+    "manage.py",
+    "test",
+    "core.test_historical_boundaries",
+    "core.test_offline_sync",
+    "core.test_free_bucket_sync",
+    "trips.test_dispatcher_topology_commands",
+    "reports.test_driver_shift_timeline",
+    "reports.test_driver_shift_passport_snapshots",
+    "--noinput"
+  ],
+  "cwd": "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend",
+  "complete": true,
+  "summary": [
+    "..offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_cancelled_revived_by_driver_load) employee=2 role=7 — ковш #1 был отменён сервером 2026-10-04T22:53:07.055316+00:00; погрузка водителя 2026-10-04T22:44:07.055316+00:00 записана по факту",
+    "offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T22:44:07.055316+00:00; машинист на смене: нет",
+    ".offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T23:15:07.152151+00:00; машинист на смене: есть",
+    "offline_sync: accepted despite discrepancy (Ручная отправка водителя/downtime_closed_by_load) employee=2 role=7 — Простой #1 «ОФР ковш v376» самосвала Самосвал 21 был открыт в момент погрузки 2026-10-04 23:15:07.152151+00:00; закрыт временем погрузки.",
+    ".offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T23:15:07.246346+00:00; машинист на смене: есть",
+    ".offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #1 принят отметкой водителя 2026-10-04T23:15:07.352319+00:00; машинист на смене: нет",
+    "..offline_sync: accepted despite discrepancy (Выбор свободного ковша/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 23:17:07.577950+00:00, действие принято.",
+    "offline_sync: accepted despite discrepancy (driver.trip.loaded/free_bucket_accepted_by_driver_action) employee=2 role=7 — запрос свободного ковша #2 принят отметкой водителя 2026-10-04T23:18:07.577950+00:00; машинист на смене: есть",
+    "..................................................................................sssssssssss....",
+    "----------------------------------------------------------------------",
+    "Ran 265 tests in 18.287s",
+    "",
+    "OK (skipped=11)",
+    "Destroying test database for alias 'default'..."
+  ],
+  "tests": 265,
+  "skipped": 11
+}

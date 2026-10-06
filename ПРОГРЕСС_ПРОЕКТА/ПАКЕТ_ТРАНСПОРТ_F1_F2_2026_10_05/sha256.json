@@ -1,0 +1,24 @@
+{
+  "base_commit": "48343af71a8efe5b4cf980483bb2402c1664e942",
+  "source_files": {
+    "СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js": "ed2471e0d814fca6cc7ac04657e376c3ba8c66a3b9f690c734328138c80a7cb0",
+    "СИСТЕМА_MVP/backend/static/js/dispatcher-transport-v1.js": "88230403e54492b7f6a56531def5b87e813ed336f9a691f0a9298147b7ad5554",
+    "СИСТЕМА_MVP/backend/static/js/driver-shift-v1.js": "fb4cdd4dd1b18598a8dc6c9ae42e156d80f8dc57b2ea6bc4a259743745d2f5b4",
+    "СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js": "8eec2b2142b55300152cbfdffa0cea275edaaa0feb27483140332dc0cbcc25ea",
+    "СИСТЕМА_MVP/backend/static/js/tests/driver-assignment-corner.test.js": "db5ef076ec5b70a061027741b4286a485ee748941425826d799ec3afdbce7f97",
+    "СИСТЕМА_MVP/backend/static/js/tests/mining-master-board-refresh-runtime.test.js": "756fe97ff5bbbc77e0215ef659fce5d70e0a647c9ef481ca25b405fbe4de08ed",
+    "СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html": "5a479fc8187854ec79316fb09a5d06d5aa7de1f046276f53e648022efa2ebdbb",
+    "СИСТЕМА_MVP/backend/static/js/tests/mining-master-command-durability.test.js": "ae712dd2185748b79081714ea2a7a529bbd79f6cf95d38695a84eec8813e2843"
+  },
+  "logs": {
+    "transport-before.log": "8b3e9823ae31e67089965899eecb4046ea7499273b372fba8f7341af6bf6f9fd",
+    "transport-after.log": "556f34dca6251e18d664c71b15aee82612b07e43827b57ad6e78c8aa2c58bbd5",
+    "driver-before.log": "44a7aafc1352b8ebccf8c671409f18dd4bf40caf633f136c00a9e8f72ad3ab90",
+    "master-before.log": "d7fa424b3c35e02a0ba2e7c1291ea9605ad1b8a7d8fd4d1d0c2bb66d27994c66",
+    "backend-node.log": "47ae6ffe11bf545fb4f8dd7403f77f1de4a3ee110c5581e7d19f8d578eab0eda",
+    "mobile.log": "e690e8c84abf748ceae80e4a63c15742feddac7148db43bb5212625bef84e613",
+    "users.log": "7148c4b7aa952d489a1eb7a1907c27a710ba78928e058d6ba2b4a9b5cda2deb9",
+    "dispatcher-django.log": "558e7dd4d613d56c3418a47734ee282870ade184cbb0d697457f88d68f9fba0f",
+    "check.log": "1e3e63f221bde88816c4a4ef7367691607b20cc1d194028a02ec9ae0586cf9b1"
+  }
+}

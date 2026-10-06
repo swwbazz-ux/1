@@ -1,5 +1,7 @@
 # Paths are relative to the repository root. Only these files enter a release.
 СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/core/excavator_shift_archive.py
+СИСТЕМА_MVP/backend/core/urls.py
 СИСТЕМА_MVP/backend/downtimes/driver_workflow.py
 СИСТЕМА_MVP/backend/core/dump_point_names.py
 СИСТЕМА_MVP/backend/core/equipment_numbers.py
@@ -53,6 +55,8 @@
 СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_push_invite.html
 СИСТЕМА_MVP/backend/templates/includes/dispatcher_header.html
 СИСТЕМА_MVP/backend/templates/includes/dispatcher_shift_action.html
+СИСТЕМА_MVP/backend/assignments/command_context.py
+СИСТЕМА_MVP/backend/assignments/command_guards.py
 СИСТЕМА_MVP/backend/assignments/services.py
 СИСТЕМА_MVP/backend/assignments/views.py
 СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
@@ -68,6 +72,9 @@
 СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js
 СИСТЕМА_MVP/backend/static/js/driver-offline-outbox-v2.js
 СИСТЕМА_MVP/backend/static/js/excavator-field-outbox-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-local-shift-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-autonomous-shift-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-shift-archive-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
 СИСТЕМА_MVP/backend/static/js/excavator-native-push-v1.js
@@ -131,3 +138,12 @@
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_source_card.html
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_workspace.html
 СИСТЕМА_MVP/backend/trips/trip_creation.py
+
+СИСТЕМА_MVP/backend/core/driver_shift_archive.py
+СИСТЕМА_MVP/backend/core/driver_shift_checkpoint.py
+СИСТЕМА_MVP/backend/static/js/driver-journal-storage-v1.js
+СИСТЕМА_MVP/backend/static/js/driver-shift-close-plan-v1.js
+СИСТЕМА_MVP/backend/static/js/driver-shift-archive-v1.js
+СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py
+СИСТЕМА_MVP/backend/assignments/urls.py
+СИСТЕМА_MVP/backend/assignments/command_receipts.py

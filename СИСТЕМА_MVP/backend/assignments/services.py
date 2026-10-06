@@ -1612,12 +1612,28 @@ def validate_projected_excavator_state(assignments, expected_states):
 
 
 @transaction.atomic
+def schedule_projected_haul_releases(*, excavator, expected_states, assigned_by, now):
+    """Снять весь проверенный состав либо откатить каждый его эффект."""
+    lock_production_state()
+    assignments = projected_haul_assignments_for_excavator(excavator, for_update=True)
+    validate_projected_excavator_state(assignments, expected_states)
+    scheduled = []
+    for visible in assignments:
+        assignment, _ = schedule_haul_release(truck=visible.truck, assigned_by=assigned_by,
+                                               now=now, expected_state_id=visible.id)
+        if assignment:
+            scheduled.append(assignment)
+    return scheduled
+
+
+@transaction.atomic
 # select_for_update требует активную транзакцию. У соседней schedule_haul_release
 # декоратор уже стоял, а здесь его не было — молчало, пока действие «Назначить
 # самосвал» не сработало на редком стечении данных, и тогда падало 500-й ошибкой
 # ровно на той кнопке, которой горный мастер и диспетчер пользуются каждый день.
 def schedule_haul_assignment(
     *, truck, excavator, assigned_by=None, now=None, expected_state_id=None,
+    deadline_origin=None,
 ):
     now = now or timezone.now()
     lock_production_state()
@@ -1656,7 +1672,9 @@ def schedule_haul_assignment(
         assigned_by=assigned_by,
         action=HaulAssignmentAction.ASSIGN,
         status=AssignmentStatus.PENDING,
-        effective_at=haul_assignment_effective_at(truck, now),
+        # Срок распоряжения не продлевается временем доставки. now остаётся
+        # временем обработки для отмен/переходов; это не исторический replay.
+        effective_at=haul_assignment_effective_at(truck, deadline_origin or now),
     )
     _preserve_previous_loading_authority(
         previous_assignment=accepted,
@@ -1719,57 +1737,38 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_i
 
 @transaction.atomic
 def notify_excavator_assignment_changed(assignment, *, released, previous_excavator_ids=()):
-    """Сообщает машинисту, что ему дали или забрали самосвал.
-
-    Внутри приложения об этом уже говорит звук и сообщение на экране, но при
-    свёрнутом приложении человек ничего не узнает и может ждать машину,
-    которую у него забрали. Ошибки отправки проглатываются: уведомление не
-    должно ломать саму расстановку.
-    """
+    """Сохраняет намерение в транзакции применения назначения, без сети."""
+    from core.notification_outbox import enqueue_notification
+    from core.models import OperationalStateVersion
     from shifts.models import EmployeeShift
-    from users.webpush import notify_employee
 
-    try:
-        truck_number = (
-            getattr(assignment.truck, 'garage_number', '') or 'без номера'
-        )
-        # При снятии назначение уже закрыто, поэтому берём экскаваторы, которые
-        # были заняты этим самосвалом до применения.
-        excavator_ids = (
-            list(previous_excavator_ids)
-            if released
-            else [assignment.excavator_id]
-        )
-        for excavator_id in {item for item in excavator_ids if item}:
-            shift = (
-                EmployeeShift.objects
-                .select_related('employee')
-                .filter(equipment_id=excavator_id, closed_at__isnull=True)
-                .filter(
-                    Q(workplace_code='excavator_operator')
-                    | Q(workplace_code='', equipment__equipment_type__name='Экскаватор')
-                )
-                .order_by('-opened_at')
-                .first()
+    truck_number = getattr(assignment.truck, 'garage_number', '') or 'без номера'
+    excavator_ids = list(previous_excavator_ids) if released else [assignment.excavator_id]
+    transition_at = HaulAssignment.objects.filter(pk=assignment.pk).values_list(
+        'ended_at' if released else 'accepted_at', flat=True,
+    ).first() or assignment.assigned_at
+    version = OperationalStateVersion.objects.filter(key='production').values_list('version', flat=True).first()
+    for excavator_id in sorted({item for item in excavator_ids if item}):
+        shift = (
+            EmployeeShift.objects
+            .filter(equipment_id=excavator_id, closed_at__isnull=True)
+            .filter(
+                Q(workplace_code='excavator_operator')
+                | Q(workplace_code='', equipment__equipment_type__name='Экскаватор')
             )
-            if not shift or not shift.employee_id:
-                continue
-            if released:
-                title = 'Самосвал снят'
-                body = f'{truck_number} больше не закреплён за вами.'
-            else:
-                title = 'Назначен самосвал'
-                body = f'{truck_number} закреплён за вашим экскаватором.'
-            notify_employee(
-                shift.employee,
-                title=title,
-                body=body,
-                url='/excavator/work/',
-                tag='excavator-assignment',
-                kind='excavator_assignment_released' if released else 'excavator_assignment_added',
-            )
-    except Exception:
-        logger.exception('Не удалось отправить машинисту уведомление о назначении.')
+            .order_by('-opened_at').first()
+        )
+        if not shift or not shift.employee_id:
+            continue
+        kind = 'excavator_assignment_released' if released else 'excavator_assignment_added'
+        enqueue_notification(
+            source_key=f'assignment:{assignment.pk}:{kind}:{transition_at.isoformat()}:{excavator_id}',
+            employee_id=shift.employee_id, role_code='excavator_operator', version=version,
+            title='Самосвал снят' if released else 'Назначен самосвал',
+            body=(f'{truck_number} больше не закреплён за вами.' if released
+                  else f'{truck_number} закреплён за вашим экскаватором.'),
+            url='/excavator/work/', tag='excavator-assignment', kind=kind,
+        )
 
 
 def apply_pending_haul_assignment(assignment_id, *, now=None):
@@ -1835,22 +1834,22 @@ def apply_pending_haul_assignment(assignment_id, *, now=None):
                 resolved_by_trip=None,
             )
 
-    # Уведомления — за пределами блокировки: сетевой вызов внутри select_for_update
-    # держал бы строки взаперти, пока не ответит сервер уведомлений.
-    _emit_assignment_changed(
-        action=applied_action, truck_id=pending.truck_id,
-        excavator_ids=excavator_ids, assignment_id=pending.id,
-        target_excavator_id=(
-            pending.excavator_id
-            if pending.action != HaulAssignmentAction.RELEASE
-            else None
-        ),
-    )
-    notify_excavator_assignment_changed(
-        pending,
-        released=pending.action == HaulAssignmentAction.RELEASE,
-        previous_excavator_ids=excavator_ids,
-    )
+        # Both the operational event and notification intent commit with the
+        # assignment. Enqueueing does no HTTP, including under an outer atomic.
+        _emit_assignment_changed(
+            action=applied_action, truck_id=pending.truck_id,
+            excavator_ids=excavator_ids, assignment_id=pending.id,
+            target_excavator_id=(
+                pending.excavator_id
+                if pending.action != HaulAssignmentAction.RELEASE
+                else None
+            ),
+        )
+        notify_excavator_assignment_changed(
+            pending,
+            released=pending.action == HaulAssignmentAction.RELEASE,
+            previous_excavator_ids=excavator_ids,
+        )
     return pending
 
 

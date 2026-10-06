@@ -181,12 +181,13 @@ def close_open_truck_downtimes_for_reasons(truck, reason_names, *, ended_at=None
     """Close matching truck waits within the caller's database transaction."""
     if not truck:
         return 0
+    closed_at = ended_at or timezone.now()
     reason_keys = frozenset(_reason_name_key(name) for name in reason_names)
     events = list(
         DowntimeEvent.objects
         .select_for_update(of=('self',))
         .select_related('reason')
-        .filter(equipment=truck, ended_at__isnull=True)
+        .filter(equipment=truck, ended_at__isnull=True, started_at__lte=closed_at)
         .order_by('id')
     )
     matching_events = [
@@ -196,7 +197,6 @@ def close_open_truck_downtimes_for_reasons(truck, reason_names, *, ended_at=None
     ]
     if not matching_events:
         return 0
-    closed_at = ended_at or timezone.now()
     for event in matching_events:
         event.ended_at = closed_at
         event.save(update_fields=['ended_at'])

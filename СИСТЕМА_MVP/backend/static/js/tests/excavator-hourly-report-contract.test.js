@@ -53,11 +53,11 @@ test('report lifecycle is coalesced, stale guarded and closes only once', () => 
     assert.match(template, /eo-hourly-report__backdrop" type="button" tabindex="-1"/);
 });
 
-test('offline cache is explicit and unresolved local loads are not claimed', () => {
+test('offline report distinguishes local facts from the cached server snapshot', () => {
     assert.match(source, /eo-hourly-report-v2:/);
     assert.match(source, /"Нет связи · " \+ cachedAt/);
-    assert.match(source, /Локально сохранённые, но ещё не синхронизированные погрузки/);
-    assert.match(source, /Сохранённого отчёта пока нет/);
+    assert.match(source, /Показаны погрузки, сохранённые на этом телефоне/);
+    assert.match(source, /Сохранённых погрузок пока нет/);
 });
 
 test('layout matches mobile block structure without horizontal overflow', () => {

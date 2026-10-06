@@ -10,7 +10,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const backendRoot = path.resolve(__dirname, "../../..");
-const baseTemplatePath = path.join(backendRoot, "templates", "base.html");
+const baseTemplatePath = process.env.PWA_REGISTRATION_TEST_BASE || path.join(backendRoot, "templates", "base.html");
 const baseTemplate = fs.readFileSync(baseTemplatePath, "utf8");
 const driverTemplatePath = path.join(
     backendRoot,
@@ -424,6 +424,7 @@ function createRuntime(options = {}) {
     let reloadCalls = 0;
     let updateCalls = 0;
     let registerCalls = 0;
+    let lookupCalls = 0;
     let unregisterCalls = 0;
     const registerRequests = [];
     let registerFailuresRemaining = Number(options.registerFailures || 0);
@@ -557,6 +558,8 @@ function createRuntime(options = {}) {
         controller: activeWorker,
         ready: Promise.resolve(registration),
         getRegistration() {
+            lookupCalls += 1;
+            if (options.lookup) return options.lookup(registration);
             return Promise.resolve(registrationAvailable ? registration : null);
         },
         getRegistrations() {
@@ -569,6 +572,7 @@ function createRuntime(options = {}) {
                 scope: String(registerOptions.scope || ""),
                 updateViaCache: String(registerOptions.updateViaCache || ""),
             });
+            if (options.registerResult) return options.registerResult(registration);
             if (registerFailuresRemaining > 0) {
                 registerFailuresRemaining -= 1;
                 return Promise.reject(new Error("transient registration failure"));
@@ -668,6 +672,15 @@ function createRuntime(options = {}) {
         },
         get registerCalls() {
             return registerCalls;
+        },
+        get lookupCalls() { return lookupCalls; },
+        runTimersByDelay(delay) {
+            for (const timer of timers.slice()) {
+                if (!timer.cancelled && timer.delay === delay) {
+                    timer.cancelled = true;
+                    timer.callback();
+                }
+            }
         },
         get unregisterCalls() {
             return unregisterCalls;
@@ -3114,3 +3127,86 @@ test("all role PWA cache prefixes are unique and cleanup stays role-scoped", () 
         /key\.startsWith\(CACHE_PREFIX\) && key !== CACHE_NAME/
     );
 });
+
+function registrationDeferred() {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    return {promise, resolve};
+}
+async function settleRegistration() {
+    for (let i = 0; i < 3; i++) await new Promise(resolve => setImmediate(resolve));
+}
+function observeRegistration(promise) {
+    const state = {done: false};
+    promise.then(value => { state.done = true; state.value = value; });
+    return state;
+}
+for (const role of [
+    {code: 'mining_master', host: 'mining-master', scope: '/mining-master/', worker: '/mining-master-sw.js'},
+    {code: 'dispatcher', host: 'dispatcher', scope: '/dispatcher/', worker: '/dispatcher-sw.js'},
+]) {
+    function boardRuntime(options = {}) {
+        return createRuntime({roleCode: role.code, locationOrigin: 'https://' + role.host + '.localhost',
+            locationHref: 'https://' + role.host + '.localhost' + role.scope,
+            serviceWorkerScope: role.scope, serviceWorkerUrl: role.worker,
+            hasWaitingWorker: false, online: false, ...options});
+    }
+    test(role.code + ': hung lookup expires, retry is single-flight, late lookup cannot register', async () => {
+        const lookups = [registrationDeferred(), registrationDeferred()]; let next = 0;
+        const runtime = boardRuntime({lookup: () => lookups[next++].promise});
+        const first = runtime.guard.getRegistration();
+        assert.equal(runtime.guard.getRegistration(), first);
+        const state = observeRegistration(first); await settleRegistration();
+        assert.equal(runtime.lookupCalls, 1);
+        runtime.runTimersByDelay(8000); await settleRegistration();
+        assert.equal(state.done, true); assert.equal(state.value, null);
+        const second = runtime.guard.getRegistration(); await settleRegistration();
+        for (let i = 0; i < 3; i++) runtime.window.dispatchEvent(new CustomEventStub('online'));
+        await settleRegistration(); assert.equal(runtime.lookupCalls, 2);
+        lookups[0].resolve(null); await settleRegistration();
+        assert.equal(runtime.registerCalls, 0); assert.equal(runtime.guard.getRegistration(), second);
+        lookups[1].resolve(runtime.registration); await settleRegistration();
+        assert.equal(await second, runtime.registration); assert.equal(runtime.registerCalls, 1);
+    });
+    test(role.code + ': late registration cannot replace or clear its successor', async () => {
+        const registrations = [registrationDeferred(), registrationDeferred()]; let next = 0;
+        const runtime = boardRuntime({registrationAvailable: false, registerResult: () => registrations[next++].promise});
+        const first = observeRegistration(runtime.guard.getRegistration()); await settleRegistration();
+        runtime.runTimersByDelay(8000); await settleRegistration(); assert.equal(first.done, true);
+        const second = runtime.guard.getRegistration(); const state = observeRegistration(second); await settleRegistration();
+        registrations[0].resolve(runtime.registration); await settleRegistration();
+        assert.equal(state.done, false); assert.equal(runtime.registration.__appPwaContractGuardBound, undefined);
+        assert.equal(runtime.guard.getRegistration(), second);
+        const fresh = Object.assign(new EventTargetStub(), {scope: runtime.registration.scope,
+            active: runtime.activeWorker, waiting: null});
+        registrations[1].resolve(fresh); await settleRegistration();
+        assert.equal(await second, fresh); assert.equal(await runtime.guard.getRegistration(), fresh);
+        assert.equal(fresh.__appPwaContractGuardBound, true); assert.equal(runtime.registerCalls, 2);
+    });
+    test(role.code + ': manual update joins registration recovery instead of replacing it', async () => {
+        const retry = registrationDeferred(); let calls = 0;
+        const runtime = boardRuntime({lookup: () => ++calls === 1 ? new Promise(() => {}) : retry.promise});
+        await settleRegistration(); runtime.runTimersByDelay(8000); await settleRegistration();
+        const registration = runtime.guard.getRegistration(); await settleRegistration();
+        const manual = runtime.guard.requestManualUpdate(); await settleRegistration();
+        assert.equal(runtime.lookupCalls, 2); assert.equal(runtime.guard.getRegistration(), registration);
+        retry.resolve(runtime.registration); await settleRegistration();
+        assert.equal((await manual).status, 'current'); assert.equal(runtime.updateCalls, 1);
+    });
+    for (const operation of ['lookup', 'register']) test(role.code + ': synchronous ' + operation + ' error permits recovery', async () => {
+        let broken = true;
+        const options = operation === 'lookup'
+            ? {lookup: registration => { if (broken) throw Error('SecurityError'); return Promise.resolve(registration); }}
+            : {registrationAvailable: false, registerResult: registration => { if (broken) throw Error('SecurityError'); return Promise.resolve(registration); }};
+        const runtime = boardRuntime(options); const failed = runtime.guard.getRegistration();
+        await settleRegistration(); assert.equal(await failed, null);
+        broken = false; assert.equal(await runtime.guard.getRegistration(), runtime.registration);
+    });
+    test(role.code + ': manual update finishes unavailable after hung initial registration', async () => {
+        const runtime = boardRuntime({lookup: () => new Promise(() => {})});
+        const manual = runtime.guard.requestManualUpdate(); const state = observeRegistration(manual);
+        await settleRegistration(); runtime.runTimersByDelay(8000); await settleRegistration();
+        assert.equal(state.done, true); assert.equal(state.value.status, 'unavailable');
+        assert.equal(runtime.updateCalls, 0);
+    });
+}

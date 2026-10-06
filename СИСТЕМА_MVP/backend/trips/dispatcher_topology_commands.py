@@ -1,5 +1,6 @@
 """Команды расстановки техники на Диспетчерском пульте."""
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -8,15 +9,15 @@ from assignments.command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
     begin_client_action,
+    client_action_response,
     complete_client_action,
 )
 from assignments.models import ExcavatorPlacement
 from assignments.services import (
     HaulAssignmentStateConflict,
-    projected_haul_assignments_for_excavator,
     schedule_haul_assignment,
     schedule_haul_release,
-    validate_projected_excavator_state,
+    schedule_projected_haul_releases,
 )
 from core.models import lock_production_state
 from references.models import Equipment
@@ -86,7 +87,7 @@ def execute_dispatcher_move_excavator(
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects.select_for_update().select_related('equipment_type'),
@@ -119,31 +120,23 @@ def execute_dispatcher_move_excavator(
             ),
             code='state_conflict',
         )
-    if not placement:
-        placement = ExcavatorPlacement.objects.create(excavator=excavator)
-
     scheduled_assignments = []
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = required_projected_assignment_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            now = timezone.now()
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return dispatcher_client_action_error(payload, error, code='state_conflict')
 
+    # Validation errors return a normal HTTP response inside the view's atomic
+    # block. Do not persist a new placement (or its signals) before validation.
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
@@ -214,7 +207,7 @@ def execute_dispatcher_assign_truck(
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return dispatcher_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
 
     if action == 'release_complex':
@@ -225,22 +218,13 @@ def execute_dispatcher_assign_truck(
             is_active=True,
         )
         try:
-            expected_states = required_projected_assignment_states(payload)
-            current_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = required_projected_assignment_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(current_assignments, expected_states)
-            scheduled_assignments = []
-            for current_assignment in current_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=current_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=current_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return dispatcher_client_action_error(payload, error, code='state_conflict')
         scheduled = len(scheduled_assignments)
@@ -274,7 +258,9 @@ def execute_dispatcher_assign_truck(
         is_active=True,
     )
     try:
-        expected_state_id = required_assignment_state_id(payload)
+        expected_state_id = getattr(request, 'resolved_assignment_state_id', None)
+        if expected_state_id is None:
+            expected_state_id = required_assignment_state_id(payload)
     except ClientActionRequired as error:
         return dispatcher_client_action_error(payload, error)
     if action == 'release':
@@ -294,6 +280,7 @@ def execute_dispatcher_assign_truck(
         )
         response_payload = {
             'ok': True,
+            'truck_id': truck.id,
             'assignment_id': assignment.id if assignment else None,
             'assignment_state_id': assignment.id if assignment else 0,
             'created': created,
@@ -318,20 +305,27 @@ def execute_dispatcher_assign_truck(
         equipment_type__name__icontains='Экскаватор',
         is_active=True,
     )
-    placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
-    if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
-        placement.zone = ExcavatorPlacement.Zone.ACTIVE
-        placement.changed_by = access.employee
-        placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
-
     try:
-        assignment, created = schedule_haul_assignment(
-            truck=truck,
-            excavator=excavator,
-            assigned_by=access.employee,
-            now=now,
-            expected_state_id=expected_state_id,
-        )
+        # The public view owns the outer transaction, but a stale-state error is
+        # converted to HTTP 409 below.  Keep placement activation and the
+        # assignment command in an inner savepoint so that crossing this block
+        # rolls back every signal-driven version/event write before the error is
+        # converted to a normal response.
+        with transaction.atomic():
+            placement, _ = ExcavatorPlacement.objects.get_or_create(excavator=excavator)
+            if placement.zone != ExcavatorPlacement.Zone.ACTIVE:
+                placement.zone = ExcavatorPlacement.Zone.ACTIVE
+                placement.changed_by = access.employee
+                placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
+
+            assignment, created = schedule_haul_assignment(
+                truck=truck,
+                excavator=excavator,
+                assigned_by=access.employee,
+                now=now,
+                expected_state_id=expected_state_id,
+                deadline_origin=getattr(request, 'assignment_deadline_origin', None),
+            )
     except HaulAssignmentStateConflict as error:
         return dispatcher_client_action_error(payload, error, code='state_conflict')
     action_logger(
@@ -342,8 +336,10 @@ def execute_dispatcher_assign_truck(
     )
     response_payload = {
         'ok': True,
+        'truck_id': truck.id,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
+        'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,
         'created': created,
         'client_action_id': client_action_id,
     }

@@ -1,0 +1,17 @@
+PASS no-auto-retry survives quota in post-error metadata and restart
+PASS terminal application rejection is archived and never retried
+PASS hung response body releases delivery without AbortController reliance
+PASS ACK write quota keeps original identity and suppresses success callback
+PASS concurrent retries of the same command share one network attempt
+PASS authorless production v3 is retained without impersonating current employee
+{
+  "passed": 6,
+  "tests": [
+    "no-auto-retry survives quota in post-error metadata and restart",
+    "terminal application rejection is archived and never retried",
+    "hung response body releases delivery without AbortController reliance",
+    "ACK write quota keeps original identity and suppresses success callback",
+    "concurrent retries of the same command share one network attempt",
+    "authorless production v3 is retained without impersonating current employee"
+  ]
+}

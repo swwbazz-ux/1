@@ -1,0 +1,35 @@
+PASS corrupted legacy preserves valid IndexedDB facts and raw source
+PASS more than 200 ACK facts remain recoverable after restart
+PASS migration retains ordering when fallback has only confirmed facts
+PASS identity conflict cannot hide unrelated primary pending facts
+PASS Driver quota schedules bounded ACK retry and no success callback
+PASS corrupted manifest projection can rebuild from durable outbox facts
+{
+  "source_label": "followup-final-42b1d64d-ed855983",
+  "findings": [
+    {
+      "name": "corrupted legacy preserves valid IndexedDB facts and raw source",
+      "passed": true
+    },
+    {
+      "name": "more than 200 ACK facts remain recoverable after restart",
+      "passed": true
+    },
+    {
+      "name": "migration retains ordering when fallback has only confirmed facts",
+      "passed": true
+    },
+    {
+      "name": "identity conflict cannot hide unrelated primary pending facts",
+      "passed": true
+    },
+    {
+      "name": "Driver quota schedules bounded ACK retry and no success callback",
+      "passed": true
+    },
+    {
+      "name": "corrupted manifest projection can rebuild from durable outbox facts",
+      "passed": true
+    }
+  ]
+}

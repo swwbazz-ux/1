@@ -6,6 +6,7 @@
     var META_STORE = "meta";
     var FORMAT_VERSION = 1;
     var TERMINAL_STATES = new Set(["conflict", "auth_required", "invalid"]);
+    var ARCHIVED_STATES = new Set(["confirmed", "cancelled_locally"]);
     var SUPPORTED_TYPES = new Set([
         "driver.trip.unloaded",
         "driver.trip.dump_point_changed",
@@ -18,6 +19,7 @@
         "driver.downtime.started",
         "driver.downtime.ended",
         "driver.shift.closed",
+        "driver.shift.checkpoint",
         "driver.shift.opened"
     ]);
     var IMMUTABLE_FIELDS = [
@@ -55,6 +57,34 @@
         return (prefix || "event") + ":" + uuid;
     }
     function clone(value) { return JSON.parse(JSON.stringify(value)); }
+    /* Срок включает тело и разбор ответа: send обязан вернуть разобранный
+       результат. Одного abort недостаточно для зависшего WebView/transport. */
+    function sendWithDeadline(send, payload, timeoutMs) {
+        var duration = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Number(timeoutMs) : 12000;
+        var controller = root.AbortController ? new root.AbortController() : null;
+        var deadline = Date.now() + duration;
+        var started = monotonicNow();
+        return new Promise(function (resolve, reject) {
+            var settled = false;
+            function finish(error, result) {
+                if (settled) return;
+                settled = true;
+                root.clearTimeout(timeout);
+                if (error) reject(error); else resolve(result);
+            }
+            function expire() {
+                if (controller) controller.abort();
+                finish(new Error("offline_request_timeout"));
+            }
+            var timeout = root.setTimeout(expire, duration);
+            Promise.resolve().then(function () {
+                return send(payload, {signal: controller ? controller.signal : undefined, deadlineAt: deadline});
+            }).then(function (result) {
+                var elapsed = Number.isFinite(started) ? monotonicNow() - started : duration - (deadline - Date.now());
+                if (elapsed >= duration) expire(); else finish(null, result);
+            }, function (error) { finish(error); });
+        });
+    }
     function canonical(value) {
         if (Array.isArray(value)) return value.map(canonical);
         if (value && typeof value === "object") {
@@ -511,75 +541,82 @@
             if (!Array.isArray(value)) throw new Error("offline_store_corrupt");
             return value;
         }
+        function readMeta() {
+            var value = JSON.parse(storage.getItem(metaKey) || "{}");
+            if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("offline_meta_store_corrupt");
+            return value;
+        }
+        function locked(operation) {
+            var locks = root.navigator && root.navigator.locks;
+            if (!locks || typeof locks.request !== "function" || !root.AbortController) return Promise.resolve().then(operation);
+            var abort = new root.AbortController(), expired = false;
+            var timer = setTimeout(function () { expired = true; abort.abort(); }, 2500);
+            return locks.request("driver-journal:" + key, {mode: "exclusive", signal: abort.signal}, function () {
+                if (expired) throw new Error("driver_storage_busy");
+                return operation();
+            }).finally(function () { clearTimeout(timer); });
+        }
         return {
             kind: "localStorage",
+            append: function (prepare, metaKeys) {
+                return locked(function () {
+                    var items = read(), metadata = readMeta(), values = {};
+                    metaKeys.forEach(function (name) { values[name] = metadata[name]; });
+                    var plan = prepare(clone(items), values), ids = new Set(items.map(function (event) { return event.event_id; }));
+                    plan.events.forEach(function (event) {
+                        if (ids.has(event.event_id) || metadata["event-identity:" + event.event_id]) throw new Error("offline_event_id_reused");
+                        ids.add(event.event_id);
+                    });
+                    // Reserve sequence before the one atomic array write. A failed
+                    // write may leave a harmless gap, never half a close batch.
+                    Object.assign(metadata, plan.meta || {});
+                    storage.setItem(metaKey, JSON.stringify(metadata));
+                    if (plan.events.length) storage.setItem(key, JSON.stringify(items.concat(plan.events)));
+                    return clone(plan.value);
+                });
+            },
             list: async function () { return clone(read()); },
             get: async function (eventId) {
                 var value = read().find(function (item) { return item.event_id === eventId; });
                 return value ? clone(value) : null;
             },
-            put: async function (event) {
+            put: function (event) { return locked(function () {
                 var items = read();
                 var index = items.findIndex(function (item) { return item.event_id === event.event_id; });
                 if (index >= 0) items[index] = clone(event); else items.push(clone(event));
                 storage.setItem(key, JSON.stringify(items));
                 return clone(event);
-            },
-            remove: async function (eventId) {
+            }); },
+            remove: function (eventId) { return locked(function () {
                 storage.setItem(key, JSON.stringify(read().filter(function (item) { return item.event_id !== eventId; })));
-            },
+            }); },
             getMeta: async function (name) {
-                var meta = JSON.parse(storage.getItem(metaKey) || "{}");
-                return meta[name];
+                return readMeta()[name];
             },
-            setMeta: async function (name, value) {
-                var meta = JSON.parse(storage.getItem(metaKey) || "{}");
+            setMeta: function (name, value) { return locked(function () {
+                var meta = readMeta();
                 meta[name] = value;
                 storage.setItem(metaKey, JSON.stringify(meta));
-            }
+            }); },
+            exportMeta: async function () { return clone(readMeta()); },
+            clearEvents: function (imported) { return locked(function () {
+                // Перенос в IndexedDB асинхронный: за это время старый runtime
+                // мог дописать событие или ACK. Удаляем только точные копии
+                // успешно перенесённого снимка, оставляя новые записи на месте.
+                storage.setItem(key, JSON.stringify(read().filter(function (event) {
+                    return !imported.some(function (source) {
+                        return JSON.stringify(canonical(source)) === JSON.stringify(canonical(event));
+                    });
+                })));
+            }); }
         };
     }
 
     function indexedRepository(indexedDB) {
-        var database = new Promise(function (resolve, reject) {
-            var request = indexedDB.open(DB_NAME, 1);
-            request.onupgradeneeded = function () {
-                var db = request.result;
-                if (!db.objectStoreNames.contains(STORE_NAME)) {
-                    var events = db.createObjectStore(STORE_NAME, {keyPath: "event_id"});
-                    events.createIndex("access_sequence", ["access_id", "sequence"], {unique: false});
-                }
-                if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE);
-            };
-            request.onsuccess = function () { resolve(request.result); };
-            request.onerror = function () { reject(request.error || new Error("indexeddb_open_failed")); };
-        });
-        function request(store, mode, operation) {
-            return database.then(function (db) {
-                return new Promise(function (resolve, reject) {
-                    var transaction = db.transaction(store, mode);
-                    var value;
-                    transaction.oncomplete = function () { resolve(value); };
-                    transaction.onabort = transaction.onerror = function () {
-                        reject(transaction.error || new Error("indexeddb_transaction_failed"));
-                    };
-                    value = operation(transaction.objectStore(store));
-                    if (value && typeof value.onsuccess !== "undefined") {
-                        value.onsuccess = function () { value = value.result; };
-                        value.onerror = function () { transaction.abort(); };
-                    }
-                });
-            });
-        }
-        return {
-            kind: "indexedDB",
-            list: function () { return request(STORE_NAME, "readonly", function (store) { return store.getAll(); }); },
-            get: function (eventId) { return request(STORE_NAME, "readonly", function (store) { return store.get(eventId); }); },
-            put: function (event) { return request(STORE_NAME, "readwrite", function (store) { store.put(clone(event)); return clone(event); }); },
-            remove: function (eventId) { return request(STORE_NAME, "readwrite", function (store) { store.delete(eventId); }); },
-            getMeta: function (name) { return request(META_STORE, "readonly", function (store) { return store.get(name); }); },
-            setMeta: function (name, value) { return request(META_STORE, "readwrite", function (store) { store.put(value, name); }); }
-        };
+        var storage = root.DriverJournalStorage;
+        if (!storage && typeof require === "function") storage = require("./driver-journal-storage-v1.js");
+        if (!storage) throw new Error("driver_journal_runtime_missing");
+        return storage.create(indexedDB);
     }
 
     async function defaultRepository(options) {
@@ -587,12 +624,84 @@
         if (options.indexedDB) {
             try {
                 var primary = indexedRepository(options.indexedDB);
+                if (options.localStorage) {
+                    var list = primary.list, importing = null, imported = false;
+                    primary.list = async function () {
+                        if (!importing) importing = (async function () {
+                            // Old clients cannot open IndexedDB v2 and can leave
+                            // new raw facts in fallback even after this page starts.
+                            if (imported) {
+                                try { if (!(await localRepository(options.localStorage, options.accessId).list()).length) return; }
+                                catch (error) { imported = false; primary.migrationError = String(error && error.message || error); return; }
+                            }
+                            await primary.getMeta("probe");
+                            await importLocalRepository(primary, options);
+                            imported = !primary.migrationError;
+                        })().finally(function () { importing = null; });
+                        await importing;
+                        return list();
+                    };
+                }
                 await primary.getMeta("probe");
+                if (options.localStorage) await importLocalRepository(primary, options);
                 return primary;
-            } catch (error) {}
+            } catch (error) {
+                // A blocked upgrade or timeout is not an empty database. Keep
+                // retrying this repository; never hide its journal in fallback.
+                if (primary && /^driver_storage_/.test(String(error && error.message))) return primary;
+                if ((error && error.name === "VersionError") || String(error && error.message) === "driver_journal_runtime_missing") throw error;
+            }
         }
         if (!options.localStorage) throw new Error("durable_storage_unavailable");
         return localRepository(options.localStorage, options.accessId);
+    }
+
+    async function importLocalRepository(primary, options) {
+        var fallback = localRepository(options.localStorage, options.accessId);
+        // Ошибка импорта не переключает приложение с уже рабочей IndexedDB
+        // на fallback: иначе собственная очередь IndexedDB стала бы невидимой.
+        // Raw fallback очищается лишь после всех успешных записей.
+        try {
+            var legacy = await fallback.list();
+            var metadata = await fallback.exportMeta();
+            var transfers = [];
+            for (var event of legacy) {
+                var current = await primary.get(event.event_id);
+                var known = await primary.getMeta("event-identity:" + event.event_id);
+                if ((current && !sameIdentity(current, event)) || (known && !sameIdentity(known, event))) {
+                    throw new Error("offline_migration_identity_conflict");
+                }
+                if (!current || (ARCHIVED_STATES.has(event.state) && !ARCHIVED_STATES.has(current.state))) transfers.push(event);
+                var seqKey = "sequence:driver:" + String(event.actor_id || "") + ":" + String(event.device_id || "");
+                metadata[seqKey] = Math.max(Number(metadata[seqKey]) || 0, Number(event.sequence) || 0);
+                var legacySeqKey = "sequence:" + options.accessId;
+                metadata[legacySeqKey] = Math.max(Number(metadata[legacySeqKey]) || 0, Number(event.sequence) || 0);
+            }
+            var metaTransfers = [];
+            for (var name of Object.keys(metadata)) {
+                var value = metadata[name];
+                var stored = await primary.getMeta(name);
+                if (name.indexOf("event-identity:") === 0) {
+                    var source = await primary.get(name.slice("event-identity:".length));
+                    if ((stored && !sameIdentity(stored, value)) || (source && !sameIdentity(source, value))) {
+                        throw new Error("offline_migration_identity_conflict");
+                    }
+                }
+                if (name.indexOf("sequence:") === 0) value = Math.max(Number(value) || 0, Number(stored) || 0);
+                // null — сохранённое снятие проекции, а не отсутствие ключа.
+                // Старый fallback не должен воскресить уже завершённый рейс.
+                else if (stored !== undefined) continue;
+                if (JSON.stringify(stored) !== JSON.stringify(value)) metaTransfers.push([name, value]);
+            }
+            // Проверка всех идентичностей предшествует переносу: чужой конверт
+            // с тем же ID не перезаписывает ни факты, ни серверную карту.
+            for (var transfer of transfers) await primary.put(transfer);
+            for (var entry of metaTransfers) await primary.setMeta(entry[0], entry[1]);
+            if (legacy.length) await fallback.clearEvents(legacy);
+            primary.migrationError = "";
+        } catch (error) {
+            primary.migrationError = String(error && error.message || error);
+        }
     }
 
     function backoff(attempt) {
@@ -613,7 +722,9 @@
         var running = null;
         var timer = null;
         var enqueueChain = Promise.resolve();
+        var updateChain = Promise.resolve();
         var drainRequested = false;
+        var storageFailureCount = 0;
         var callbacks = {
             onState: options.onState,
             onConfirmed: options.onConfirmed,
@@ -646,11 +757,8 @@
             }
             return current;
         }
-        /* Записи «на сверке» (conflict / invalid / auth_required) — конечные: сервер
-           их уже отклонил и сообщил об этом всплывающим сообщением. Раньше они
-           лежали в хранилище вечно: на боевом телефоне 20.09.2026 нашлись восемь
-           отклонённых стартов простоя трёхдневной давности, из-за которых подпись
-           связи навсегда показывала «Не подтверждено». Старше суток — убираем. */
+        /* Возраст скрывает старый отказ из индикатора доставки, но не удаляет
+           исходный факт из журнала. ACK также не доказывает покрытие снимком. */
         var reviewRetentionMs = Number(options.reviewRetentionMs) > 0 ? Number(options.reviewRetentionMs) : 24 * 60 * 60 * 1000;
         /* События, которые прямо сейчас в отправке: их нельзя убирать из очереди —
            ответ сервера записал бы их обратно (update), а принятая погрузка без
@@ -673,9 +781,20 @@
            как только новая погрузка подтверждалась и уходила из очереди, «последней»
            становилась зомби-погрузка, её отмена «выигрывала», и круг пустел, хотя
            сервер держал рейс открытым (стенд 28.09.2026, телефон: 336 повторов).
-           Обе записи снимаются локально, без отправки, с отметкой в журнале. */
+           Обе записи снимаются только с доставки; полные исходники остаются
+           в журнале. Сначала сохраняется связь пары: restart между двумя
+           записями не должен отправить оставшуюся половину. */
         async function annihilateManualLoadCancelPairs(repo, items) {
             var removed = new Set();
+            for (var archived of items) {
+                if (archived.state !== "cancelled_locally" || !archived.local_cancellation_event_id) continue;
+                removed.add(String(archived.event_id));
+                removed.add(String(archived.local_cancellation_event_id));
+                var tail = items.find(function (item) { return item.event_id === archived.local_cancellation_event_id; });
+                if (tail && tail.state !== "cancelled_locally") {
+                    try { await update(tail, {state: "cancelled_locally"}); } catch (error) {}
+                }
+            }
             for (var cancel of items) {
                 if (cancel.event_type !== "driver.trip.loaded.cancelled" || cancel.state !== "pending") continue;
                 var localId = String(cancel.local_trip_id || "");
@@ -696,7 +815,7 @@
                 var pairIds = [String(load.event_id), String(cancel.event_id)];
                 var loadLocalId = String(load.local_trip_id || "");
                 var otherDependent = items.some(function (item) {
-                    if (pairIds.indexOf(String(item.event_id)) >= 0 || TERMINAL_STATES.has(item.state)) return false;
+                    if (pairIds.indexOf(String(item.event_id)) >= 0 || TERMINAL_STATES.has(item.state) || ARCHIVED_STATES.has(item.state)) return false;
                     var deps = Array.isArray(item.depends_on) ? item.depends_on.map(String) : [];
                     return deps.indexOf(pairIds[0]) >= 0
                         || deps.indexOf(pairIds[1]) >= 0
@@ -704,13 +823,13 @@
                 });
                 if (otherDependent) continue;
                 try {
-                    await repo.remove(cancel.event_id);
-                    await repo.remove(load.event_id);
+                    await update(load, {state: "cancelled_locally", local_cancellation_event_id: cancel.event_id});
                 } catch (error) {
                     continue;
                 }
                 removed.add(pairIds[0]);
                 removed.add(pairIds[1]);
+                try { await update(cancel, {state: "cancelled_locally"}); } catch (error) {}
                 var record = {
                     load_event_id: pairIds[0],
                     cancel_event_id: pairIds[1],
@@ -738,24 +857,27 @@
             var repo = await repoPromise;
             var items = await repo.list();
             var mine = items.filter(function (item) { return String(item.access_id) === accessId; });
+            var annihilated = await annihilateManualLoadCancelPairs(repo, mine);
             var now = Date.now();
             var kept = [];
             for (var item of mine) {
+                if (ARCHIVED_STATES.has(item.state) || annihilated.has(String(item.event_id))) continue;
                 var stamp = Date.parse(item.updated_at || item.occurred_at || "") || 0;
                 if (TERMINAL_STATES.has(item.state) && stamp && now - stamp > reviewRetentionMs) {
-                    try { await repo.remove(item.event_id); } catch (error) {}
                     continue;
                 }
                 kept.push(item);
             }
-            var annihilated = await annihilateManualLoadCancelPairs(repo, kept);
-            if (annihilated.size) {
-                kept = kept.filter(function (item) { return !annihilated.has(String(item.event_id)); });
-            }
             return kept.sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
+        }
+        async function journal() {
+            var repo = await repoPromise;
+            return (await repo.list()).filter(function (item) { return String(item.access_id) === accessId; })
+                .sort(function (a, b) { return Number(a.sequence) - Number(b.sequence); });
         }
         async function publish() {
             var items = await listAll();
+            var journalEvents = await journal();
             if (typeof callbacks.onState === "function") {
                 try {
                     callbacks.onState({
@@ -763,7 +885,9 @@
                         review: items.filter(function (item) { return TERMINAL_STATES.has(item.state); }).length,
                         sending: !!running,
                         storage: (await repoPromise).kind,
-                        events: clone(items)
+                        migration_error: (await repoPromise).migrationError || "",
+                        events: clone(items),
+                        journalEvents: clone(journalEvents)
                     });
                 } catch (error) {
                     // The event is already durable. A rendering error must not be reported as a storage failure.
@@ -771,13 +895,8 @@
             }
             return items;
         }
-        async function enqueueOne(spec) {
-            var repo = await repoPromise;
-            var ctx = context();
+        function prepareEvent(spec, ctx, deviceId, grouped) {
             var occurredAt = String(spec.occurred_at || nowIso());
-            var deviceId = String(spec.device_id || ctx.deviceId || await repo.getMeta("device_id") || "");
-            if (!deviceId) deviceId = randomId("install");
-            await repo.setMeta("device_id", deviceId);
             var requestedId = String(spec.event_id || randomId("driver"));
             var actorId = number(spec.actor_id || ctx.actorId);
             var eventAccessId = number(spec.access_id || ctx.accessId || accessId);
@@ -793,7 +912,7 @@
             var dependsOn = Array.isArray(spec.depends_on) ? spec.depends_on.map(String) : [];
             /* Действие в смене, которую сервер ещё не видел, ждёт её открытия:
                пакет повезёт открытие первым, сервер привяжет действие к смене. */
-            if (localShiftId && !shiftId && eventType !== "driver.shift.opened" && dependsOn.indexOf(localShiftId) < 0) {
+            if (!grouped && localShiftId && !shiftId && eventType !== "driver.shift.opened" && dependsOn.indexOf(localShiftId) < 0) {
                 dependsOn.push(localShiftId);
             }
             /* Сервер читает местный ID смены только из payload самого события:
@@ -835,25 +954,61 @@
             };
             validateEvent(event);
             if (String(event.access_id) !== accessId) throw new Error("offline_event_access_mismatch");
-            var existing = typeof repo.get === "function"
-                ? await repo.get(requestedId)
-                : (await repo.list()).find(function (item) { return item.event_id === requestedId; });
-            if (existing) {
-                if (!sameIdentity(existing, event)) throw new Error("offline_event_id_reused");
-                return clone(existing);
-            }
-            var acknowledgedIdentity = await repo.getMeta("event-identity:" + requestedId);
-            if (acknowledgedIdentity) {
-                if (!sameIdentity(acknowledgedIdentity, event)) throw new Error("offline_event_id_reused");
-                return Object.assign(clone(acknowledgedIdentity), {state: "confirmed"});
-            }
-            event.sequence = await sequence(repo, actorId, deviceId);
-            await repo.put(event); // UI may change only after this resolves.
-            await publish();
-            return clone(event);
+            return event;
         }
-        function enqueue(spec) {
-            var operation = enqueueChain.then(function () { return enqueueOne(spec); });
+        async function enqueueOne(spec, capturedContext, closeOptions) {
+            var repo = await repoPromise;
+            var ctx = capturedContext;
+            var deviceId = String(spec.device_id || ctx.deviceId || await repo.getMeta("device_id") || randomId("install"));
+            var event = prepareEvent(spec, ctx, deviceId, !!closeOptions);
+            var stableKey = "sequence:driver:" + event.actor_id + ":" + deviceId;
+            var legacyKey = "sequence:" + accessId;
+            var identityKey = "event-identity:" + event.event_id;
+            var fallbackKey = "driver-offline-sequence:" + stableKey, fallbackValue = 0;
+            try { if (options.localStorage) fallbackValue = Number(options.localStorage.getItem(fallbackKey)) || 0; } catch (error) {}
+            if (typeof repo.append !== "function") throw new Error("driver_journal_atomic_write_required");
+            // Pull late raw facts from an older window before preparing closure.
+            if (closeOptions) {
+                await repo.list();
+                if (repo.migrationError) throw new Error("Не удалось прочитать весь журнал смены. Повторите закрытие.");
+            }
+            var saved = await repo.append(function (events, metadata) {
+                var existing = events.find(function (item) { return item.event_id === event.event_id; });
+                var known = metadata[identityKey];
+                if (existing || known) {
+                    if (!sameIdentity(existing || known, event)) throw new Error("offline_event_id_reused");
+                    return {events: [], meta: {}, value: existing || Object.assign(clone(known), {state: "confirmed"})};
+                }
+                var planner = root.DriverShiftClosePlan;
+                if (!planner && typeof require === "function") planner = require("./driver-shift-close-plan-v1.js");
+                var specs;
+                if (closeOptions) specs = planner.build(events, event, closeOptions);
+                else {
+                    if (planner) planner.assertOpen(events, event);
+                    specs = [event];
+                }
+                if (specs.existing) return {events: [], meta: {}, value: specs.existing};
+                var current = Math.max(Number(metadata[stableKey]) || 0, Number(metadata[legacyKey]) || 0, fallbackValue);
+                events.forEach(function (item) {
+                    if (item.actor_id === event.actor_id && item.role_code === "driver" && item.device_id === deviceId) current = Math.max(current, Number(item.sequence) || 0);
+                });
+                var prepared = specs.map(function (item) {
+                    var next = closeOptions ? prepareEvent(item, ctx, deviceId, true) : clone(item);
+                    next.sequence = ++current;
+                    validateEvent(next);
+                    if (next.depends_on.length > 32) throw new Error("offline_dependencies_overflow");
+                    return next;
+                });
+                var meta = {device_id: deviceId}; meta[stableKey] = current; meta[legacyKey] = current;
+                return {events: prepared, meta: meta, value: prepared[prepared.length - 1]};
+            }, ["device_id", stableKey, legacyKey, identityKey]);
+            try { if (options.localStorage) options.localStorage.setItem(fallbackKey, String(Math.max(fallbackValue, Number(saved.sequence) || 0))); } catch (error) {}
+            await publish();
+            return clone(saved);
+        }
+        function enqueue(spec, closeOptions) {
+            var frozen = clone(spec), captured = clone(context());
+            var operation = enqueueChain.then(function () { return enqueueOne(frozen, captured, closeOptions); });
             enqueueChain = operation.catch(function () {});
             return operation.then(function (event) {
                 drainRequested = true;
@@ -861,9 +1016,16 @@
                 return event;
             });
         }
-        async function update(event, patch) {
-            var repo = await repoPromise;
-            await repo.put(Object.assign({}, event, patch, {updated_at: nowIso()}));
+        function update(event, patch) {
+            var operation = updateChain.then(async function () {
+                var repo = await repoPromise;
+                var current = typeof repo.get === "function" ? await repo.get(event.event_id) : null;
+                // Фоновый retry, начатый до ACK, не возвращает архив в доставку.
+                if (current && ARCHIVED_STATES.has(current.state)) return;
+                await repo.put(Object.assign({}, current || event, patch, {updated_at: nowIso()}));
+            });
+            updateChain = operation.catch(function () {});
+            return operation;
         }
         function schedule(delay) {
             if (timer || typeof root.setTimeout !== "function") return;
@@ -890,14 +1052,13 @@
                 if (status === "accepted" || status === "deduplicated") {
                     /* Счётчик подтверждений: экран сервера, запрошенный до этого
                        ответа, может не знать о событии (driver-shift-refresh-v1.js). */
-                    root.driverOutboxAcceptedCount = (Number(root.driverOutboxAcceptedCount) || 0) + 1;
                     await repo.setMeta("event-identity:" + event.event_id, identityRecord(event));
                     if (result.server_ids) {
                         await repo.setMeta("server-map:" + event.event_id, clone(result.server_ids));
                         var confirmedDowntimeId = result.server_ids.downtime_event_id || result.server_ids.downtime_id;
                         if (event.event_type === "driver.downtime.started" && confirmedDowntimeId) {
                             /* Синхронно, в момент подтверждения — событие тут же
-                               удаляется из очереди (см. repo.remove ниже), и
+                               уходит из очереди в архив, и
                                driver-shift-v1.js больше не сможет узнать связь
                                "local:<uuid>" ↔ серверный числовой ID из самой
                                очереди. Без этого алиаса опознавание того же
@@ -980,7 +1141,10 @@
                             )
                         ) await repo.setMeta(manualReceiptKey, null);
                     }
-                    await repo.remove(event.event_id);
+                    // Одна долговечная запись переводит доставку в архив. Даже
+                    // смерть процесса до UI callback оставляет полный факт/ACK.
+                    await update(event, {state: "confirmed", server_result: clone(result), next_retry_at: 0});
+                    root.driverOutboxAcceptedCount = (Number(root.driverOutboxAcceptedCount) || 0) + 1;
                     confirmed.push([clone(event), clone(result)]);
                 } else if (TERMINAL_STATES.has(status)) {
                     await update(event, {
@@ -1061,7 +1225,7 @@
                 var callbackBatch = {confirmed: [], review: []};
                 var response;
                 try {
-                    response = await options.send({
+                    response = await sendWithDeadline(options.send, {
                         protocol_version: FORMAT_VERSION,
                         format_version: FORMAT_VERSION,
                         role_code: "driver",
@@ -1084,7 +1248,7 @@
                             if (sentLive) copy.sent_live = true;
                             return copy;
                         })
-                    });
+                    }, options.requestTimeoutMs);
                 } catch (error) {
                     try {
                         for (var event of due) {
@@ -1099,6 +1263,16 @@
                 }
                 try {
                     callbackBatch = await applyResults(due, response || {});
+                    storageFailureCount = 0;
+                } catch (error) {
+                    // ACK мог дойти, а durable archive — упереться в quota.
+                    // Повтор с тем же ID безопасен, но не должен крутиться
+                    // каждую секунду вместе с тяжёлой записью полного журнала.
+                    storageFailureCount += 1;
+                    drainRequested = false;
+                    if (timer) { root.clearTimeout(timer); timer = null; }
+                    schedule(backoff(storageFailureCount));
+                    throw error;
                 } finally {
                     inFlightIds.clear();
                 }
@@ -1259,10 +1433,20 @@
         }
         return {
             initialize: initialize,
-            enqueue: enqueue,
+            enqueue: function (spec) { return enqueue(spec); },
+            closeShift: function (spec, closeOptions) { return enqueue(spec, clone(closeOptions || {})); },
             flush: flush,
             retryNow: retryNow,
             pending: listAll,
+            journal: journal,
+            archiveStatus: async function (closeId) {
+                var repo = await repoPromise;
+                return repo.archiveStatus ? repo.archiveStatus(closeId) : {unsupported: true};
+            },
+            compactArchive: async function (proof, target, current) {
+                var repo = await repoPromise;
+                return repo.compact ? repo.compact(proof, target, current) : false;
+            },
             publish: publish,
             setBindings: setBindings,
             resumeAuthRequired: resumeAuthRequired,

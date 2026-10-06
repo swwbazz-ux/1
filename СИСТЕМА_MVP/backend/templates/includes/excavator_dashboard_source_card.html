@@ -4,6 +4,10 @@
     type="button"
     draggable="{% if open_shift and card.can_drag %}true{% else %}false{% endif %}"
     style="--eo-truck-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --eo-truck-total-progress: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}%; --plan-progress: {% if card.plan_has_plan %}{{ card.plan_visual.loop_progress }}{% else %}0{% endif %}%; --truck-plan-percent: {% if card.plan_has_plan %}{{ card.plan_percent }}{% else %}0{% endif %}; --eo-transfer-progress: 0;"
+    data-eo-local-fleet-code="{{ card.local_fleet_code|default:'unknown' }}"
+    data-eo-prepared-can-drag="{% if card.can_drag %}1{% else %}0{% endif %}"
+    data-eo-prepared-can-load="{% if card.can_load %}1{% else %}0{% endif %}"
+    data-eo-prepared-manual-available="{% if card.manual_available %}1{% else %}0{% endif %}"
     data-eo-truck-card
     data-eo-manual-available="{% if open_shift and card.manual_available %}1{% else %}0{% endif %}"
     data-eo-open-trip-id="{{ card.open_trip_id }}"

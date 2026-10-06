@@ -254,12 +254,13 @@ def _aggregate_shift_passports(passports, cycle_sample_groups):
     available_seconds = time['available_seconds']
     output_attribution = {
         key: sum(
-            passport['production']['output_attribution'][key]
+            passport['production']['output_attribution'].get(key, 0)
             for passport in passports
         )
         for key in (
             'unloading_shift_trip_count',
             'legacy_driver_trip_count',
+            'driver_control_shift_trip_count',
             'ambiguous_trip_count',
         )
     }

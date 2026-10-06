@@ -1,0 +1,83 @@
+Found 610 test(s).
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+.......................................................................s..................................................{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+.{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+.{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+.{"category_preserved": 0, "created": 1, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 0}
+............................................................................................................................{"created": 1, "eligible": 1, "mode": "commit", "skipped_existing": 0, "would_create": 0}
+.{"created": 0, "eligible": 1, "mode": "dry-run", "skipped_existing": 0, "would_create": 1}
+...{"category_preserved": 0, "created": 0, "mode": "commit", "skip_reasons": {}, "skipped": 0, "source_rows": 1, "unchanged": 0, "updated": 1}
+...............................................................Forbidden (CSRF token missing.): /
+Forbidden (CSRF token missing.): /
+.......................................................................................................................................................................................Роли созданы/обновлены: 13
+Демо-доступы созданы: 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000, 910000, 920000
+Готово.
+Демо-сценарий MVP подготовлен.
+Коды доступа: 100000 админ, 200000 водитель, 300000 машинист, 400000 горный мастер, 500000 диспетчер, 600000 руководство, 700000 механик.
+Активный рейс: Самосвал 10 -> ККД демо (Первичная сульфидная руда)
+.Роли созданы/обновлены: 13
+Демо-доступы созданы: 100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000, 910000, 920000
+Готово.
+Демо-сценарий MVP подготовлен.
+Коды доступа: 100000 админ, 200000 водитель, 300000 машинист, 400000 горный мастер, 500000 диспетчер, 600000 руководство, 700000 механик.
+Активный рейс: Самосвал 10 -> ККД демо (Первичная сульфидная руда)
+..............................................Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend/users/start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpnv0queo5/apk/driver-update.json'
+.Android update manifest is invalid for driver
+.Android update manifest is invalid for excavator_operator
+....Universal start result cache write failed
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend/users/start_views.py", line 95, in _issue_start_result
+    if cache.add(
+       ^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: cache down
+......Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend/users/start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpc0dt7jr4/apk/driver-update.json'
+Android update manifest is unavailable for driver
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-integration/СИСТЕМА_MVP/backend/users/start_views.py", line 157, in android_apk_for_role
+    payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1029, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpc0dt7jr4/apk/driver-update.json'
+.......Forbidden (Origin checking failed - null does not match any trusted origins.): /start/
+........ss...................................
+----------------------------------------------------------------------
+Ran 610 tests in 233.379s
+
+OK (skipped=3)
+Destroying test database for alias 'default'...

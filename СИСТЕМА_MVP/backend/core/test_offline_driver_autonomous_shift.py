@@ -203,11 +203,26 @@ class DriverAutonomousShiftTests(TestCase):
         self.assertEqual(first['status'], 'retry', first)
         self.assertEqual(self.new_shifts(), [])
 
-        # Открытие дошло — отметка по местной смене проходит при повторе.
-        results = self.sync_driver([open1, load]).json()['results']
-        self.assertEqual([item['status'] for item in results], ['accepted', 'accepted'], results)
+        # Дошло только открытие: сохранённая отметка применяется без телефона.
+        opened = self.sync_driver([open1]).json()['results'][0]
+        self.assertEqual(opened['status'], 'accepted', opened)
         (shift,) = self.new_shifts()
-        self.assertEqual(Trip.objects.get(pk=results[1]['server_ids']['trip_id']).driver_control_shift_id, shift.id)
+        receipt = OfflineFieldEvent.objects.get(event_id=load['event_id'])
+        self.assertEqual(receipt.status, 'accepted')
+        self.assertEqual(receipt.shift_id, shift.id)
+        self.assertEqual(receipt.actor_id, self.driver.id)
+        self.assertIsNone(receipt.input_envelope['normalized']['shift_id'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.pk, receipt.trip_id)
+        self.assertEqual(trip.driver_control_shift_id, shift.id)
+        self.assertEqual(trip.loaded_at, self.base + timedelta(minutes=3))
+
+        # Повтор телефона возвращает уже созданный рейс и не создаёт второй.
+        repeated = self.sync_driver([load]).json()['results'][0]
+        self.assertEqual(repeated['status'], 'deduplicated', repeated)
+        self.assertEqual(repeated['server_ids']['trip_id'], trip.pk)
+        self.assertEqual(Trip.objects.count(), 1)
+        self.assertEqual(len(self.new_shifts()), 1)
 
     def test_event_without_dependency_on_an_unknown_local_shift_is_retried(self):
         load = self.manual_load(

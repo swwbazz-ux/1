@@ -1,11 +1,12 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db.models import Prefetch
 from django.utils import formats, timezone
 
 from shifts.equipment_plan_groups import equipment_is_belaz_truck, equipment_is_nhl_truck
 
-from .models import Trip, TripStatus
+from .models import Trip, TripClientAction, TripStatus
 
 
 def _period_label(start, end):
@@ -14,9 +15,9 @@ def _period_label(start, end):
     return f'{start:%d.%m %H:%M}–{end:%d.%m %H:%M}'
 
 
-def _fleet_code(trip):
-    belongs_to_belaz = equipment_is_belaz_truck(trip.truck)
-    belongs_to_nhl = equipment_is_nhl_truck(trip.truck)
+def fleet_code_for_truck(truck):
+    belongs_to_belaz = equipment_is_belaz_truck(truck)
+    belongs_to_nhl = equipment_is_nhl_truck(truck)
     if belongs_to_belaz == belongs_to_nhl:
         return 'unknown'
     return 'belaz' if belongs_to_belaz else 'nhl'
@@ -37,6 +38,9 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
         )
         .exclude(status=TripStatus.CANCELLED)
         .select_related('assigned_dump_point', 'truck__equipment_type', 'truck__model')
+        .prefetch_related(Prefetch('client_actions', queryset=TripClientAction.objects.filter(
+            action_type__in=('truck_loaded', 'free_bucket_loaded'),
+        ).only('trip_id', 'client_action_id'), to_attr='report_load_actions'))
         .order_by('loaded_at', 'id')
     )
 
@@ -44,12 +48,17 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
     point_names = {}
     point_ids = {}
     source_counts = [0, 0]
+    source_trip_ids = [[], []]
+    source_event_ids = [[], []]
+    source_facts = [[], []]
     unclassified_counts = [0, 0]
     unknown_point_counts = [0, 0]
 
     for trip in trips:
         bucket = 0 if trip.loaded_at < current_start else 1
         source_counts[bucket] += 1
+        source_trip_ids[bucket].append(trip.pk)
+        source_event_ids[bucket].extend(action.client_action_id for action in trip.report_load_actions)
 
         # assigned_dump_point is the immutable destination captured when the
         # Excavator operator sends the truck. The mutable dump_point and the
@@ -61,7 +70,13 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
         if point is None:
             unknown_point_counts[bucket] += 1
 
-        fleet_code = _fleet_code(trip)
+        fleet_code = fleet_code_for_truck(trip.truck)
+        source_facts[bucket].append({
+            'trip_id': trip.pk,
+            'event_ids': [action.client_action_id for action in trip.report_load_actions],
+            'fleet_code': fleet_code,
+            'dump_point_id': point.pk if point else None,
+        })
         if fleet_code == 'unknown':
             unclassified_counts[bucket] += 1
             continue
@@ -109,6 +124,9 @@ def build_excavator_hourly_report(excavator, *, captured_at=None):
                 'trip_count': belaz_total + nhl_total,
             },
             'source_trip_count': source_counts[bucket],
+            'source_trip_ids': source_trip_ids[bucket],
+            'source_event_ids': source_event_ids[bucket],
+            'source_facts': source_facts[bucket],
             'unclassified_trip_count': unclassified_counts[bucket],
             'is_empty': source_counts[bucket] == 0,
         })

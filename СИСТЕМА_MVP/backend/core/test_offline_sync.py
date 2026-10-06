@@ -2076,7 +2076,8 @@ class OfflineEventSyncTests(TestCase):
 
         dependency = self.load_event('load-before-missing', 1)
         accepted = self.sync([dependency, event]).json()['results']
-        self.assertEqual([item['status'] for item in accepted], ['accepted', 'accepted'])
+        # Accepting the parent already resumed the durable child receipt.
+        self.assertEqual([item['status'] for item in accepted], ['accepted', 'deduplicated'])
         self.assertEqual(Trip.objects.count(), 2)
 
     def test_loaded_event_can_be_cancelled_by_dependent_local_reference(self):
@@ -2222,14 +2223,8 @@ class OfflineEventSyncTests(TestCase):
             show_for_excavator_operator=True,
         )
 
-    def test_lagging_clock_does_not_block_a_downtime_reason_switch(self):
-        """Сервер не отклоняет работника из-за отставших часов.
-
-        Машинист с отведёнными назад часами всё равно переключает причину —
-        сервер принимает переключение и использует эффективное время (начало
-        текущего простоя), а не заявленное более раннее время устройства, так
-        что интервал не становится отрицательным.
-        """
+    def test_late_historical_downtime_does_not_replace_newer_interval(self):
+        """Без доказанного сдвига часов исходное время остаётся историческим."""
         self._open_shift_two_hours_ago()
         first = self._excavator_downtime_reason('Экскаватор: первая причина')
         second = self._excavator_downtime_reason('Экскаватор: вторая причина')
@@ -2247,16 +2242,12 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(switch['status'], 'accepted', switch)
         first_event = DowntimeEvent.objects.get(reason=first)
         second_event = DowntimeEvent.objects.get(reason=second)
-        self.assertEqual(first_event.ended_at, first_started_at)
-        self.assertEqual(second_event.started_at, first_started_at)
-        self.assertIsNone(second_event.ended_at)
+        self.assertIsNone(first_event.ended_at)
+        self.assertLess(second_event.started_at, first_started_at)
+        self.assertEqual(second_event.ended_at, first_started_at)
 
-    def test_sent_live_unblocks_a_downtime_reason_switch(self):
-        """Подмена времени идёт до проверок порядка, поэтому лечит блокировку.
-
-        Тот же сценарий с подсказкой оболочки: переключение проходит, а обе
-        записи простоя сходятся на времени расписки сервера — без разрыва.
-        """
+    def test_sent_live_hint_preserves_historical_downtime_order(self):
+        """Попытка немедленной отправки не доказывает ошибку часов."""
         self._open_shift_two_hours_ago()
         first = self._excavator_downtime_reason('Экскаватор: первая причина')
         second = self._excavator_downtime_reason('Экскаватор: вторая причина')
@@ -2270,20 +2261,16 @@ class OfflineEventSyncTests(TestCase):
         )]).json()['results'][0]
 
         self.assertEqual(switch['status'], 'accepted', switch)
-        self.assertTrue(switch['device_clock_adjusted'])
+        self.assertFalse(switch.get('device_clock_adjusted', False))
         receipt = OfflineFieldEvent.objects.get(event_id='eo-live-b')
         opened = DowntimeEvent.objects.get(reason=second)
         closed = DowntimeEvent.objects.get(reason=first)
-        self.assertEqual(opened.started_at, receipt.received_at)
-        self.assertEqual(closed.ended_at, receipt.received_at)
-        self.assertIsNone(opened.ended_at)
+        self.assertEqual(opened.started_at, receipt.occurred_at)
+        self.assertEqual(opened.ended_at, closed.started_at)
+        self.assertIsNone(closed.ended_at)
 
-    def test_sent_live_event_is_applied_at_the_server_receipt(self):
-        """Событие ушло сразу после нажатия — время сервера и есть настоящее.
-
-        Отстающие часы телефона в пределах смены иначе проходят как есть и
-        записывают погрузку задним числом.
-        """
+    def test_sent_live_event_preserves_original_occurrence(self):
+        """Факт погрузки сохраняет исходное время при надёжных часах."""
         self._open_shift_two_hours_ago()
         device_time = timezone.now() - timedelta(minutes=30)
         event = self.load_event(occurred_at=device_time)
@@ -2292,12 +2279,12 @@ class OfflineEventSyncTests(TestCase):
         result = self.sync([event]).json()['results'][0]
 
         self.assertEqual(result['status'], 'accepted', result)
-        self.assertTrue(result['device_clock_adjusted'])
+        self.assertFalse(result.get('device_clock_adjusted', False))
         receipt = OfflineFieldEvent.objects.get()
         trip = Trip.objects.get()
         self.assertEqual(receipt.occurred_at, device_time)
-        self.assertEqual(trip.loaded_at, receipt.received_at)
-        self.assertEqual(trip.load_time_source, 'server_receipt')
+        self.assertEqual(trip.loaded_at, device_time)
+        self.assertEqual(trip.load_time_source, 'excavator_device')
 
     def test_clock_unreliable_hint_inside_payload_is_honoured(self):
         """Подсказка принимается и из payload, и с верхнего уровня события.

@@ -491,6 +491,50 @@ class DriverShiftPassportSnapshotTests(TestCase):
             2,
         )
 
+    def test_late_carryover_source_manifest_tracks_loading_fact_and_rebuilds(self):
+        shift = self.create_open_shift()
+        boundary = shift.opened_at + timedelta(hours=1)
+        EmployeeShift.objects.filter(pk=shift.pk).update(closed_at=boundary)
+        shift.refresh_from_db()
+        successor = EmployeeShift.objects.create(
+            employee=self.dispatcher, equipment=self.truck, workplace_code='driver',
+            shift_type=ShiftType.DAY, opened_at=boundary,
+            closed_at=boundary + timedelta(hours=1),
+        )
+        trip = Trip.objects.create(
+            excavator=self.excavator, truck=self.truck, driver=self.driver,
+            driver_control_shift=shift, driver_participation_recorded=True,
+            unloading_shift=successor, rock_type=self.rock,
+            dump_point=self.assigned_dump_point, status=TripStatus.COMPLETED,
+            is_carryover=True, loaded_at=boundary - timedelta(minutes=10),
+            completed_at=boundary + timedelta(minutes=10),
+        )
+
+        def rebuild():
+            with transaction.atomic():
+                request = enqueue_driver_shift_passport_rebuild(shift=shift)
+            snapshot = process_driver_shift_passport_request(request.pk)
+            self.assertIsNotNone(snapshot)
+            self.assertEqual(process_driver_shift_passport_request(request.pk).pk, snapshot.pk)
+            return snapshot
+
+        first = rebuild()
+        self.assertEqual(first.calculator_version, 'driver-shift-passport-v3')
+        sources = first.payload['source_manifest']['trips']
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0]['driver_control_shift_id'], shift.pk)
+        self.assertEqual(sources[0]['driver_control_shift']['employee_id'], self.driver.pk)
+        self.assertIn('loaded_at', sources[0])
+        self.assertEqual(sources[0]['id'], trip.pk)
+
+        Trip.objects.filter(pk=trip.pk).update(loaded_at=boundary - timedelta(minutes=15))
+        second = rebuild()
+        self.assertNotEqual(first.source_fingerprint, second.source_fingerprint)
+        self.assertEqual(second.revision, first.revision + 1)
+        self.assertEqual(DriverShiftPassportSnapshot.objects.filter(shift=shift).count(), 2)
+        first.refresh_from_db()
+        self.assertEqual(first.payload['source_manifest']['trips'], sources)
+
     def test_snapshot_failure_does_not_block_close_and_command_retries(self):
         shift = self.create_open_shift()
         with (

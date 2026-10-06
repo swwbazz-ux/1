@@ -1,0 +1,88 @@
+Creating test database for alias 'default'...
+Foffline_sync: accepted despite discrepancy (Выбор свободного ковша/open_trip_exists) employee=2 role=7 — У самосвала Самосвал 21 был открыт рейс #1, о котором работник не знал. Рейс снят с контроля на 2026-10-04 15:11:31.548903+00:00, действие принято.
+Foffline_sync: accepted despite discrepancy (Переключение причины простоя/downtime_switch_before_start) employee=2 role=7 — Работник переключает причину простоя на 2026-10-04 15:51:31.619826+00:00, раньше начала текущего простоя #1 (2026-10-04 16:51:31.619826+00:00). Принято по фактическому времени начала текущего простоя.
+FFoffline_sync: accepted despite discrepancy (Закрытие простоя/downtime_already_closed) employee=2 role=7 — Простой #1 (Самосвал 21) уже был закрыт на 2026-10-04 16:51:31.741100+00:00, работник закрывает на 2026-10-04 21:51:31.741100+00:00. Принято время работника.
+Foffline_sync: accepted despite discrepancy (driver.shift.closed/driver_shift_close_already_closed) employee=2 role=7 — смена #1 уже закрыта 2026-10-04T17:51:31.796805+00:00
+FFFF
+======================================================================
+FAIL: test_carryover_visible_to_successor_and_survives_background_expiry (core.test_historical_boundaries.HistoricalBoundariesTests.test_carryover_visible_to_successor_and_survives_background_expiry)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 153, in test_carryover_visible_to_successor_and_survives_background_expiry
+    self.assertTrue(Trip.objects.filter(pk=trip.pk).filter(trip_driver_control_filter(shift)).exists())
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_late_free_bucket_selection_does_not_release_newer_trip (core.test_historical_boundaries.HistoricalBoundariesTests.test_late_free_bucket_selection_does_not_release_newer_trip)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 85, in test_late_free_bucket_selection_does_not_release_newer_trip
+    self.assertEqual(trip.status, TripStatus.LOADED_WAITING_UNLOAD, result)
+AssertionError: 'uncontrolled' != TripStatus.LOADED_WAITING_UNLOAD : {'event_id': 'driver-free-select-1', 'status': 'accepted', 'retryable': False, 'code': '', 'message': '', 'server_ids': {'free_bucket_acceptance_id': 1, 'shift_id': 1, 'event_receipt_id': 1}, 'server_received_at': '2026-10-04T22:51:31.556013+00:00', 'version': 27, 'free_bucket_status': 'requested'}
+
+======================================================================
+FAIL: test_late_start_is_inserted_before_newer_downtime_without_changing_it (core.test_historical_boundaries.HistoricalBoundariesTests.test_late_start_is_inserted_before_newer_downtime_without_changing_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 77, in test_late_start_is_inserted_before_newer_downtime_without_changing_it
+    self.assertIsNone(newer.ended_at)
+AssertionError: datetime.datetime(2026, 10, 4, 16, 51, 31, 619826, tzinfo=datetime.timezone.utc) is not None
+
+======================================================================
+FAIL: test_late_unload_does_not_close_a_later_unloading_wait (core.test_historical_boundaries.HistoricalBoundariesTests.test_late_unload_does_not_close_a_later_unloading_wait)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 192, in test_late_unload_does_not_close_a_later_unloading_wait
+    self.assertIsNone(newer.ended_at)
+AssertionError: datetime.datetime(2026, 10, 4, 15, 51, 31, 683796, tzinfo=datetime.timezone.utc) is not None
+
+======================================================================
+FAIL: test_ordinary_late_stop_does_not_extend_a_closed_interval (core.test_historical_boundaries.HistoricalBoundariesTests.test_ordinary_late_stop_does_not_extend_a_closed_interval)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 62, in test_ordinary_late_stop_does_not_extend_a_closed_interval
+    self.assertEqual(event.ended_at, end)
+AssertionError: datetime.datetime(2026, 10, 4, 21, 51, 31, 741100, tzinfo=datetime.timezone.utc) != datetime.datetime(2026, 10, 4, 16, 51, 31, 741100, tzinfo=datetime.timezone.utc)
+
+======================================================================
+FAIL: test_r21_own_earlier_end_and_readings_replace_service_projection_keep_history (core.test_historical_boundaries.HistoricalBoundariesTests.test_r21_own_earlier_end_and_readings_replace_service_projection_keep_history)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 126, in test_r21_own_earlier_end_and_readings_replace_service_projection_keep_history
+    self.assertEqual(self.truck_shift.closed_at, own_time)
+AssertionError: datetime.datetime(2026, 10, 4, 17, 51, 31, 796805, tzinfo=datetime.timezone.utc) != datetime.datetime(2026, 10, 4, 17, 21, 31, 796805, tzinfo=datetime.timezone.utc)
+
+======================================================================
+FAIL: test_reverse_opening_keeps_newer_shift_open_and_closes_historical_at_its_boundary (core.test_historical_boundaries.HistoricalBoundariesTests.test_reverse_opening_keeps_newer_shift_open_and_closes_historical_at_its_boundary)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 107, in test_reverse_opening_keeps_newer_shift_open_and_closes_historical_at_its_boundary
+    self.assertIsNone(newer.closed_at)
+AssertionError: datetime.datetime(2026, 10, 4, 16, 51, 31, 848693, tzinfo=datetime.timezone.utc) is not None
+
+======================================================================
+FAIL: test_sent_live_hint_does_not_change_reliable_original_time (core.test_historical_boundaries.HistoricalBoundariesTests.test_sent_live_hint_does_not_change_reliable_original_time)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 138, in test_sent_live_hint_does_not_change_reliable_original_time
+    self.assertEqual(normalized['occurred_at'], at)
+AssertionError: datetime.datetime(2026, 10, 4, 22, 51, 31, 917977, tzinfo=datetime.timezone.utc) != datetime.datetime(2026, 10, 4, 15, 51, 31, 916346, tzinfo=datetime.timezone.utc)
+
+======================================================================
+FAIL: test_successor_unload_preserves_one_trip_and_original_loading_authorship (core.test_historical_boundaries.HistoricalBoundariesTests.test_successor_unload_preserves_one_trip_and_original_loading_authorship)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/d31f8c8018c5/mechanics-history-baseline/СИСТЕМА_MVP/backend/core/test_historical_boundaries.py", line 171, in test_successor_unload_preserves_one_trip_and_original_loading_authorship
+    self.assertEqual(result['status'], 'accepted', result)
+AssertionError: 'conflict' != 'accepted'
+- conflict
++ accepted
+ : {'event_id': 'history-carryover-unload', 'status': 'conflict', 'retryable': False, 'code': 'trip_driver_shift_changed', 'message': 'Рейс закреплён за другой сменой водителя.', 'server_ids': {}, 'server_received_at': '2026-10-04T22:51:31.975904+00:00', 'version': None}
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.570s
+
+FAILED (failures=9)
+Destroying test database for alias 'default'...
+Found 9 test(s).
+System check identified no issues (0 silenced).

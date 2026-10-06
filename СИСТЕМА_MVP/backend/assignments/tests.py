@@ -33,6 +33,12 @@ from .views import build_excavator_tile, build_truck_tile
 
 
 class MiningMasterAssignmentsViewTests(TestCase):
+    def test_rendered_board_dependencies_reopen_offline(self):
+        from users.test_role_apps import assert_board_dependencies_reopen_offline
+        assert_board_dependencies_reopen_offline(
+            self, 'mining_master', self.client.get(reverse('mining_master_assignments')),
+        )
+
     def setUp(self):
         self.master_role = Role.objects.create(code='mining_master', name='Горный мастер')
         self.master = Employee.objects.create(
@@ -249,7 +255,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'window.initDispatcherThemeControls')
         self.assertContains(response, 'window.initDispatcherRadialClocks')
         self.assertContains(response, 'detailLayer.dataset.gdActiveCardId')
-        self.assertContains(response, 'dispatcherIncomingRefreshQueueGraceMs')
+        self.assertContains(response, 'dispatcherTransport.boardRefreshToken()')
+        self.assertNotContains(response, 'dispatcherIncomingRefreshQueueGraceMs')
         self.assertContains(response, 'isDispatcherSyncQueueBlockingRefresh')
         self.assertNotContains(response, 'return Boolean(document.querySelector(".dispatcher-board")) && !document.querySelector(".mm-mobile-shell");')
 
@@ -644,10 +651,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'syncMiningMasterPwaContractState')
         self.assertContains(response, 'requestManualUpdate')
         self.assertContains(response, 'Установлена последняя версия приложения')
-        self.assertContains(response, 'mining-master-mobile-shell-v165')
-        self.assertContains(response, 'mining-master-mobile-sync-queue-v3')
-        self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v1")')
-        self.assertContains(response, 'window.localStorage.removeItem("mining-master-mobile-sync-queue-v2")')
+        self.assertContains(response, 'mining-master-mobile-shell-v181')
+        self.assertContains(response, 'dispatcher-transport-v1.js')
         self.assertContains(response, 'expected_assignment_state_id')
         self.assertContains(response, 'expected_assignment_states')
         self.assertContains(response, 'queueOnNetworkFailure: false')
@@ -664,7 +669,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<span class="mm-mobile-shell-version" data-mm-pwa-current-shell-version>')
-        self.assertContains(response, '>версия v165</span>')
+        self.assertContains(response, '>версия v181</span>')
         self.assertNotContains(response, '<div class="mm-mobile-version-strip" aria-label="Версия приложения">')
         self.assertContains(response, '<div class="mm-mobile-update-modal" data-mm-pwa-update-modal hidden>')
         self.assertContains(response, '<span class="mm-mobile-update-badge" data-mm-pwa-update-badge')
@@ -721,10 +726,10 @@ class MiningMasterAssignmentsViewTests(TestCase):
         script = response.content.decode('utf-8')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('mining-master-mobile-shell-v165', script)
+        self.assertIn('mining-master-mobile-shell-v181', script)
         self.assertEqual(
             response['X-App-Shell-Version'],
-            'mining-master-mobile-shell-v165',
+            'mining-master-mobile-shell-v181',
         )
         self.assertIn(
             f'const CACHE_NAME = "{response["X-App-Shell-Version"]}";',
@@ -732,7 +737,7 @@ class MiningMasterAssignmentsViewTests(TestCase):
         )
         self.assertEqual(response['Service-Worker-Allowed'], '/mining-master/')
         self.assertIn('const CACHE_PREFIX = "mining-master-mobile-shell-";', script)
-        self.assertIn('key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME', script)
+        self.assertIn('keys.filter(boardIsOlderCache)', script)
         self.assertIn('EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"]', script)
         self.assertIn('EXCLUDED_NAVIGATION_PREFIXES.some(prefix => url.pathname.startsWith(prefix))', script)
         self.assertIn(reverse('mining_master_manifest'), script)

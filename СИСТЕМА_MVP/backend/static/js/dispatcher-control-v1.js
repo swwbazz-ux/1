@@ -69,6 +69,14 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherTransport = window.createDispatcherTransport({
         getCsrfToken: getCsrfToken,
         onServerError: showDispatcherDnDError,
+        onRejected: function () {
+            dispatcherConflictRefreshPending = true;
+            scheduleDispatcherConflictRefresh(0);
+        },
+        onDependenciesBlocked: function () {
+            dispatcherConflictRefreshPending = true;
+            scheduleDispatcherConflictRefresh(0);
+        },
         onStateChange: updateDispatcherSyncIndicator
     });
     var dispatcherSyncQueueKey = dispatcherTransport.queueKey;

@@ -1246,6 +1246,7 @@ class FreeBucketServerIntegrationTests(TestCase):
                 'end_engine_hours': Decimal('2000'),
             },
             client_action_id='driver-close-with-used-free-bucket',
+            occurred_at=trip.loaded_at + timedelta(seconds=1),
         )
 
         self.assertTrue(created)
@@ -1382,7 +1383,7 @@ class FreeBucketServerIntegrationTests(TestCase):
         )
         excavator_trip.refresh_from_db()
         self.assertEqual(excavator_trip.status, TripStatus.UNCONTROLLED)
-        self.assertEqual(excavator_trip.operationally_closed_at, excavator_trip.loaded_at)
+        self.assertEqual(excavator_trip.operationally_closed_at, base + timedelta(minutes=3))
         bucket_trip = Trip.objects.get(pk=results[3]['server_ids']['trip_id'])
         self.assertEqual(bucket_trip.status, TripStatus.COMPLETED)
         self.assertEqual(bucket_trip.excavator_id, self.other_excavator.id)
@@ -1416,9 +1417,11 @@ class FreeBucketServerIntegrationTests(TestCase):
             occurred_at=occurred_at,
         )
         result = self.sync_driver([late]).json()['results'][0]
-        self.assertEqual(result['status'], 'conflict', result)
-        self.assertEqual(result['code'], 'free_bucket_request_stale')
-        self.assertEqual(FreeBucketAcceptance.objects.count(), 0)
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertTrue(result['historical_superseded'])
+        historical = FreeBucketAcceptance.objects.get()
+        self.assertEqual(historical.status, FreeBucketAcceptanceStatus.CANCELLED)
+        self.assertEqual(historical.occurred_at, occurred_at)
 
     def test_selection_after_offline_trip_is_not_stale_because_the_trip_reached_the_server_later(self):
         # Матрица без сети, стенд 30.09.2026: без связи водитель сделал ручной
@@ -1924,8 +1927,10 @@ class FreeBucketServerIntegrationTests(TestCase):
         accepted_result = self.sync([accepted]).json()['results'][0]
         self.assertEqual(accepted_result['status'], 'accepted', accepted_result)
 
+        self.assertEqual(Trip.objects.count(), 1)  # No second load upload needed.
         replayed = self.sync([loaded]).json()['results'][0]
-        self.assertEqual(replayed['status'], 'accepted', replayed)
+        # Accepting the parent already resumed its saved load on the server.
+        self.assertEqual(replayed['status'], 'deduplicated', replayed)
         trip = Trip.objects.get()
         self.assertEqual(trip.loaded_at, timezone.datetime.fromisoformat(loaded['occurred_at']))
         self.assertEqual(trip.excavator_id, self.excavator.id)

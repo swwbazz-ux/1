@@ -1,0 +1,40 @@
+{
+  "captured_for": "F8 placement atomicity",
+  "repository": "swwbazz-ux/1",
+  "pull_request": 159,
+  "candidate_head": "9bdcda669530f595a767f9f154c56debd65ba966",
+  "tested_revision": "0dabb51d2e1f6cc103ed9eeab16a31c30157780a",
+  "tested_ref": "refs/remotes/pull/159/merge",
+  "content_equivalence": {
+    "verified_by": "GitHub compare_commits",
+    "base": "9bdcda669530f595a767f9f154c56debd65ba966",
+    "head": "0dabb51d2e1f6cc103ed9eeab16a31c30157780a",
+    "ahead_by": 1,
+    "behind_by": 0,
+    "changed_files": 0
+  },
+  "run_id": 37242156465,
+  "job_id": 111552895797,
+  "job_name": "PostgreSQL / mechanics-concurrency",
+  "url": "https://github.com/swwbazz-ux/1/actions/runs/37242156465/job/111552895797",
+  "conclusion": "success",
+  "database": "PostgreSQL 16.15",
+  "command": "python manage.py test trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomicityTests trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests",
+  "tests_found": 6,
+  "tests_run": 6,
+  "passed": 6,
+  "skipped": 0,
+  "elapsed_seconds": 1.824,
+  "log_excerpt": [
+    "2026-10-04T23:01:30.7030230Z Creating test database for alias 'default'...",
+    "2026-10-04T23:02:04.8021851Z ......",
+    "2026-10-04T23:02:04.8022650Z ----------------------------------------------------------------------",
+    "2026-10-04T23:02:04.8023427Z Ran 6 tests in 1.824s",
+    "2026-10-04T23:02:04.8023763Z ",
+    "2026-10-04T23:02:04.8023972Z OK",
+    "2026-10-04T23:02:04.8024550Z Destroying test database for alias 'default'...",
+    "2026-10-04T23:02:05.0319955Z Found 6 test(s).",
+    "2026-10-04T23:02:05.0321216Z System check identified no issues (0 silenced)."
+  ],
+  "limits": "Подтверждает указанные два тестовых класса; не заменяет итоговый полный gate нового release-кандидата, полевую проверку или deploy."
+}

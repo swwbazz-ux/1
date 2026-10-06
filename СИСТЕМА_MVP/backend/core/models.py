@@ -99,6 +99,11 @@ class OfflineFieldEvent(models.Model):
     context_snapshot = models.JSONField('Контекст клиента', default=dict, blank=True)
     payload = models.JSONField('Параметры', default=dict, blank=True)
     fingerprint = models.CharField('Отпечаток', max_length=64)
+    # The original request is independent of the mutable application links above.
+    # Empty means a pre-F3 receipt; it cannot be reconstructed from those links.
+    input_envelope = models.JSONField('Исходный серверный конверт', default=dict, editable=False)
+    retry_attempts = models.PositiveIntegerField('Попыток применения', default=0)
+    next_retry_at = models.DateTimeField('Следующая попытка', null=True, blank=True)
     status = models.CharField(
         'Статус', max_length=16, choices=OfflineFieldEventStatus.choices,
         default=OfflineFieldEventStatus.PROCESSING,
@@ -123,6 +128,7 @@ class OfflineFieldEvent(models.Model):
         indexes = [
             models.Index(fields=['actor', 'device_id', 'status'], name='off_evt_actor_dev_status'),
             models.Index(fields=['received_at', 'status'], name='off_evt_received_status'),
+            models.Index(fields=['status', 'next_retry_at'], name='off_evt_retry_due'),
         ]
 
     def __str__(self):
@@ -164,6 +170,48 @@ class OfflineFieldEventConflict(models.Model):
         ]
 
 
+class NotificationIntent(models.Model):
+    """One immutable user-visible effect, written in the domain transaction."""
+
+    effect_key = models.CharField('Ключ эффекта', max_length=192, unique=True)
+    payload = models.JSONField('Снимок уведомления', editable=False)
+    notification = models.OneToOneField(
+        'users.PushNotification', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='delivery_intent', verbose_name='Текст для приложения',
+    )
+    created_at = models.DateTimeField('Создано', default=timezone.now)
+
+    class Meta:
+        verbose_name = 'Намерение уведомления'
+        verbose_name_plural = 'Намерения уведомлений'
+
+
+class NotificationDelivery(models.Model):
+    """Durable per-endpoint retry; a lease fences acknowledgements, not HTTP."""
+
+    intent = models.ForeignKey(NotificationIntent, on_delete=models.CASCADE, related_name='deliveries')
+    channel = models.CharField('Канал', max_length=16, choices=[('web', 'Web Push'), ('native', 'Native Push')])
+    target_id = models.PositiveBigIntegerField('ID подписки')
+    target_fingerprint = models.CharField('Отпечаток адресата', max_length=64)
+    available_at = models.DateTimeField('Следующая попытка', default=timezone.now)
+    lease_token = models.CharField('Владелец попытки', max_length=32, blank=True)
+    leased_until = models.DateTimeField('Аренда до', null=True, blank=True)
+    attempts = models.PositiveIntegerField('Попыток доставки', default=0)
+    delivered_at = models.DateTimeField('Доставлено', null=True, blank=True)
+    terminal_reason = models.CharField('Причина завершения', max_length=64, blank=True)
+    last_error = models.CharField('Последняя ошибка', max_length=128, blank=True)
+
+    class Meta:
+        verbose_name = 'Доставка уведомления'
+        verbose_name_plural = 'Доставки уведомлений'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['intent', 'channel', 'target_id'], name='notification_target_once',
+            ),
+        ]
+        indexes = [models.Index(fields=['available_at', 'leased_until'], name='notification_delivery_due')]
+
+
 def lock_production_state():
     OperationalStateVersion.objects.get_or_create(key='production')
     return OperationalStateVersion.objects.select_for_update().get(key='production')
@@ -197,11 +245,8 @@ def bump_operational_state(
             payload=payload or {},
             created_at=state.updated_at,
         )
-        # Только после успешного commit: push никогда не должен сообщать
-        # о событии, которое база в итоге откатила.
-        from .dispatcher_push import notification_for_event, send_dispatcher_push_for_event
-        if notification_for_event(event):
-            transaction.on_commit(
-                lambda event_id=event.pk: send_dispatcher_push_for_event(event_id)
-            )
+        # Persist the intent with the effect. A separate worker performs HTTP
+        # after commit; losing an on_commit callback cannot lose the notification.
+        from .dispatcher_push import enqueue_dispatcher_push_for_event
+        enqueue_dispatcher_push_for_event(event)
     return state

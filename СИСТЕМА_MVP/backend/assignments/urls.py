@@ -1,4 +1,5 @@
 from django.urls import path
+from .command_receipts import command_receipt_view
 
 from .views import (
     mining_master_assignments_view,
@@ -20,6 +21,7 @@ from .deputy_views import (
 )
 
 urlpatterns = [
+    path('assignments/commands/receipt/', command_receipt_view, name='assignment_command_receipt'),
     path('deputy-mining-manager.webmanifest', deputy_mining_manager_manifest_view, name='deputy_mining_manager_manifest'),
     path('deputy-mining-manager-sw.js', deputy_mining_manager_service_worker_view, name='deputy_mining_manager_service_worker'),
     path(

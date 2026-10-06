@@ -13,7 +13,6 @@
         var transport = options.transport;
         var storageKey = "operational-state-version";
         var hardLagLimit = 150;
-        var incomingRefreshQueueGraceMs = 15000;
         var syncQueueWakeThrottleMs = 1500;
         var lastSyncQueueWakeAt = 0;
 
@@ -79,23 +78,9 @@
         }
 
         function isDispatcherSyncQueueBlockingRefresh() {
-            var syncState = transport.getQueueState();
-            if (syncState.isFlushing || syncState.pendingCount > 0) {
-                return true;
-            }
-            var queue = transport.readQueue();
-            if (!queue.length) {
-                return false;
-            }
+            if (transport.boardRefreshToken() !== null) return false;
             wakeDispatcherSyncQueueForRefresh();
-            if (hostNavigator && hostNavigator.onLine === false) {
-                return true;
-            }
-            var now = Date.now();
-            return queue.some(function (item) {
-                var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-                return !createdAt || now - createdAt < incomingRefreshQueueGraceMs;
-            });
+            return true;
         }
 
         function isElementRendered(node) {
@@ -152,12 +137,15 @@
             var currentBoard = hostDocument.querySelector(".dispatcher-board");
             var desktopState = captureDispatcherDesktopState(currentBoard);
             if (!hostWindow.AppOperationalFragment) return Promise.resolve(false);
+            var commandToken = transport.boardRefreshToken();
+            if (commandToken === null) return Promise.resolve(false);
             var requestedVersion = Number(refreshOptions.version || 0);
             var requestGeneration = ++dispatcherDesktopRefreshGeneration;
             return hostWindow.AppOperationalFragment.request(
                 "dispatcher",
                 requestedVersion
             ).then(function (payload) {
+                if (commandToken !== transport.boardRefreshToken()) return false;
                 var payloadVersion = Number(payload && payload.version);
                 if (!Number.isSafeInteger(payloadVersion) || payloadVersion < requestedVersion) {
                     return false;

@@ -99,6 +99,12 @@ def excavator_screen_script(*module_names):
 
 
 class DispatcherSharedShiftStartTests(TestCase):
+    def test_rendered_board_dependencies_reopen_offline(self):
+        from users.test_role_apps import assert_board_dependencies_reopen_offline
+        assert_board_dependencies_reopen_offline(
+            self, 'dispatcher', self.client.get(reverse('dispatcher_control')),
+        )
+
     def setUp(self):
         self.dispatcher_role = Role.objects.create(code='dispatcher', name='Диспетчер')
         self.current_dispatcher = Employee.objects.create(
@@ -372,7 +378,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'eventsTruncated',
             'function hasDispatcherRelevantEvents',
             'return Array.isArray(events) && events.length > 0;',
-            'incomingRefreshQueueGraceMs',
+            'transport.boardRefreshToken()',
             'DISPATCHER_SYNC_REQUEST_TIMEOUT_MS = 12000',
             'window.DispatcherSyncDebug',
             'isDispatcherSyncQueueBlockingRefresh',
@@ -381,6 +387,7 @@ class DispatcherSharedShiftStartTests(TestCase):
             'type: "release_complex"',
         ):
             self.assertIn(marker, dispatcher_script)
+        self.assertNotIn('incomingRefreshQueueGraceMs', dispatcher_script)
         self.assertNotIn('canTrustLocalDispatcherAssignmentEvents', dispatcher_script)
         self.assertNotIn('localAssignmentAppliedUntil', dispatcher_script)
 
@@ -397,7 +404,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v166')
+        self.assertContains(response, 'dispatcher-desktop-shell-v182')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -408,36 +415,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v166',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v182',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v182',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
@@ -2533,7 +2540,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, f'data-eo-dump-select="{self.dump_point.id}"')
         self.assertContains(response, f'data-eo-dump-select="{second_dump.id}"')
         self.assertContains(response, f'data-eo-dump-target="{self.dump_point.id}"')
-        self.assertNotContains(response, f'data-eo-dump-target="{second_dump.id}"')
+        self.assertNotIn(second_dump.id, [card['point'].id for card in response.context['dump_cards']])
+        self.assertRegex(response.content.decode(), rf'<button[^>]* hidden[^>]*data-eo-dump-target="{second_dump.id}"[^>]*disabled')
         self.assertEqual([card['point'].id for card in response.context['dump_cards']], [self.dump_point.id])
         self.assertEqual(
             {card['point'].id for card in response.context['dump_choice_cards']},
@@ -2795,7 +2803,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             ).exists()
         )
 
-    def test_excavator_work_settings_horizon_or_block_change_starts_transfer(self):
+    def test_excavator_work_settings_horizon_or_block_change_does_not_start_transfer(self):
         placement = ExcavatorPlacement.objects.create(
             excavator=self.excavator,
             work_rock_type=self.rock,
@@ -2828,10 +2836,8 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
                 payload = response.json()
                 self.assertTrue(payload['work_context_changed'])
                 self.assertTrue(payload['face_position_changed'])
-                self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
-                transfer = DowntimeEvent.objects.get(equipment=self.excavator, ended_at__isnull=True)
-                self.assertEqual(transfer.reason.name, 'Перегон экскаватора')
-                self.assertEqual(transfer.employee, self.operator)
+                self.assertEqual(payload['active_downtime_reason'], '')
+                self.assertFalse(DowntimeEvent.objects.filter(equipment=self.excavator, ended_at__isnull=True).exists())
                 placement.refresh_from_db()
 
     def test_excavator_work_settings_uses_persisted_position_not_stale_session(self):
@@ -2870,7 +2876,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         payload = response.json()
         self.assertTrue(payload['work_context_changed'])
         self.assertTrue(payload['face_position_changed'])
-        self.assertEqual(payload['active_downtime_reason'], 'Перегон экскаватора')
+        self.assertEqual(payload['active_downtime_reason'], '')
 
     def test_excavator_work_settings_does_not_infer_move_from_blank_or_leading_zero(self):
         placement = ExcavatorPlacement.objects.create(
@@ -3489,6 +3495,40 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.context['shift_fact_meta'], '4 маш.')
         dump_card = next(card for card in response.context['dump_cards'] if card['point'] == self.dump_point)
         self.assertEqual(dump_card['completed_count'], 3)
+
+    def test_prepared_offline_shell_keeps_assigned_resources_disabled_before_opening(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['open_shift'])
+        self.assertEqual(response.context['current_excavator'], self.excavator)
+        self.assertContains(response, 'data-eo-prepared-can-load=')
+        self.assertContains(response, 'data-eo-can-load="0"')
+        self.assertContains(response, 'excavator-local-shift-v1.js')
+        self.assertContains(response, 'excavator-autonomous-shift-v1.js')
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).exists())
+
+    def test_offline_shell_does_not_prepare_an_excavator_without_assignment(self):
+        EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())
+        EquipmentAssignment.objects.filter(employee=self.operator).delete()
+        response = self.client.get(reverse('excavator_work'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['current_excavator'])
+        self.assertIsNone(response.context['open_shift'])
+
+    def test_offline_shell_prepares_unselected_allowed_destinations_without_enabling_them(self):
+        extra = DumpPoint.objects.create(name='Новая доступная точка')
+        inactive = DumpPoint.objects.create(name='Закрытая точка', is_active=False)
+        response = self.client.get(reverse('excavator_work'))
+        selected = {card['point'].id for card in response.context['dump_cards']}
+        prepared = response.context['prepared_dump_cards']
+        prepared_ids = {card['point'].id for card in prepared}
+        self.assertIn(extra.id, prepared_ids)
+        self.assertFalse(selected & prepared_ids)
+        self.assertNotIn(inactive.id, prepared_ids | selected)
+        self.assertTrue(all(card['is_prepared_hidden'] for card in prepared))
+        self.assertRegex(response.content.decode(), rf'<button[^>]* hidden[^>]*data-eo-dump-target="{extra.id}"[^>]*disabled')
+        self.assertEqual(response.content.decode().count(f'data-eo-dump-target="{extra.id}"'), 1)
 
     def test_excavator_shift_action_opens_shift_when_none_is_open(self):
         EmployeeShift.objects.filter(employee=self.operator, closed_at__isnull=True).update(closed_at=timezone.now())

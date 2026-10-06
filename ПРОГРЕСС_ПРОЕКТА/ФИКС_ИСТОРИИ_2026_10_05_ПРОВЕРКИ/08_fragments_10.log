@@ -1,0 +1,18 @@
+✔ production fragment helper sends a versioned JSON-only request (3.870699ms)
+✔ production fragment helper rejects contract and screen mismatches (2.021004ms)
+✔ production fragment helper times out a hung request and remains reusable (12.024154ms)
+✔ production fragment helper parses only the requested root (1.897998ms)
+✔ Excavator fragment refresh admits only its scoped pending Shift owner (2.925927ms)
+✔ concurrent Excavator refresh triggers share one in-flight request (13.212603ms)
+✔ successful Excavator Shift save clears its draft before owned fragment reconciliation (1.210373ms)
+✔ Driver maps confirmed actions to the required recorded voice announcements (1.990749ms)
+✔ four production refresh handlers use narrow fragments, never a full HTML GET (1.542804ms)
+✔ Mining Master delegates state polling exclusively to the shared realtime client (0.661716ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 178.440334

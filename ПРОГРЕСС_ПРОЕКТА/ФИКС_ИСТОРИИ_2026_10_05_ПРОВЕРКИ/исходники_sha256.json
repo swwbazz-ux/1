@@ -1,0 +1,18 @@
+{
+  "СИСТЕМА_MVP/backend/core/offline_sync.py": "d62ea968540f88e76e53a4091c47666c16da27ddb0c323ecd9111c2586b5d91b",
+  "СИСТЕМА_MVP/backend/core/test_free_bucket_sync.py": "ded0c978043775bddc7419f38841c0885390cb2d922c03014c35c0ac6b6176ef",
+  "СИСТЕМА_MVP/backend/core/test_historical_boundaries.py": "8bd7f709a21596593b6dc585821806ac7303b0ea0c526ae3d0ce2dd9599fb7a0",
+  "СИСТЕМА_MVP/backend/core/test_offline_sync.py": "f5c1156b43e95571a754ae713036890dcfb91d0b144821febd1c0c786a869507",
+  "СИСТЕМА_MVP/backend/downtimes/driver_workflow.py": "0f2f76140e829c4ee88382d0816096627fde4983278f0feb71cb1ef12fcbb2aa",
+  "СИСТЕМА_MVP/backend/reports/driver_shift_passport_snapshots.py": "da8d5c0dc15ac174600eb7c8cb0bd8c70023d8a4a9e3defc1583a3f6aedeacba",
+  "СИСТЕМА_MVP/backend/reports/driver_shift_timeline.py": "de6cfee913f17f8f8c45edc2163e75d480261a4cb30fc315a37ff1e84f363dab",
+  "СИСТЕМА_MVP/backend/reports/driver_watch_observation.py": "34dd6b144eb376f565cae364416e412016737295545a6f7fda895aafcdd4afe0",
+  "СИСТЕМА_MVP/backend/reports/test_driver_shift_passport_snapshots.py": "4e8fbab0cb7234e47d25ed940f0196ee0ba856d345f1b92857626b8647061c48",
+  "СИСТЕМА_MVP/backend/reports/test_driver_shift_timeline.py": "5cb69e38fa807c8f27db8d01391ca9135e6fa2d2b78eb6769ad2244538672c55",
+  "СИСТЕМА_MVP/backend/shifts/services.py": "872b201fbca07eafd516cff32339a1ed8338ad3f9a0db7944bab92ffdf7dccae",
+  "СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py": "f6f5fe8afe1c6c84ef09dba7ccd86ffb04380b84d42d370d8ef2c1238161cd7d",
+  "СИСТЕМА_MVP/backend/trips/manual_loading.py": "d2ba3d9dac2fdf434b9dc52ca05fcb2a87b923d9eeebca9cdbfcee54b6e5f8c6",
+  "СИСТЕМА_MVP/backend/trips/tests.py": "d981432837d20e8d57c7b2fbd55fb7650b46f926af7527e9f92008a1cc20ce0e",
+  "СИСТЕМА_MVP/backend/trips/trip_creation.py": "d68ad6a885347cc18e6bdcdbd8bc4144ad1b6e5c90b88c013062d1bbd11c0d29",
+  "СИСТЕМА_MVP/backend/trips/views.py": "c82176ef4b13894bef708207334530592806b7fdb17a4c52abecb42d954d34de"
+}

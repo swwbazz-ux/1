@@ -873,9 +873,16 @@
             });
         }
 
+        function usesBoundedRegistration() {
+            var role = expectedContract().roleCode;
+            return role === "mining_master" || role === "dispatcher";
+        }
+
         function configuredRegistration() {
             if (registration) return Promise.resolve(registration);
             if (registrationPromise) return registrationPromise;
+            var bounded = usesBoundedRegistration();
+            var active = true;
             var recoveringRegistration = registrationNeedsRecovery;
             var serviceWorker = window.navigator && window.navigator.serviceWorker;
             if (!serviceWorker) return Promise.resolve(null);
@@ -885,12 +892,19 @@
             var workerUrl = document.body
                 ? (document.body.dataset.appServiceWorkerUrl || "")
                 : "";
-            var source = serviceWorker.getRegistration
-                ? serviceWorker.getRegistration(scope)
-                : workerUrl
-                    ? Promise.resolve(null)
-                    : serviceWorker.ready;
-            registrationPromise = Promise.resolve(source).then(function (currentRegistration) {
+            function isCurrent() {
+                return !bounded || (active && registrationPromise === currentFlight);
+            }
+            function lookup() {
+                return serviceWorker.getRegistration
+                    ? serviceWorker.getRegistration(scope)
+                    : workerUrl ? Promise.resolve(null) : serviceWorker.ready;
+            }
+            // Capture synchronous browser errors for the bounded board path;
+            // keep the other roles' existing registration timing unchanged.
+            var source = bounded ? Promise.resolve().then(lookup) : lookup();
+            source = Promise.resolve(source).then(function (currentRegistration) {
+                if (!isCurrent()) return null;
                 if (!workerUrl || !serviceWorker.register) {
                     return currentRegistration || null;
                 }
@@ -904,7 +918,14 @@
                     scope: scope,
                     updateViaCache: "none"
                 });
-            }).then(function (currentRegistration) {
+            });
+            if (bounded) {
+                source = withTimeout(source, REGISTRATION_UPDATE_TIMEOUT_MS, function () {
+                    active = false;
+                });
+            }
+            var currentFlight = source.then(function (currentRegistration) {
+                if (!isCurrent()) return null;
                 if (!currentRegistration) {
                     registrationNeedsRecovery = true;
                     registrationPromise = null;
@@ -916,11 +937,20 @@
                 requestWorkerVersion(registrationWorker(currentRegistration));
                 return currentRegistration;
             }).catch(function () {
-                registrationNeedsRecovery = true;
-                registrationPromise = null;
+                if (!bounded || registrationPromise === currentFlight) {
+                    registrationNeedsRecovery = true;
+                    registrationPromise = null;
+                }
                 return null;
             });
-            return registrationPromise;
+            if (bounded) {
+                currentFlight = currentFlight.finally(function () {
+                    active = false;
+                    if (registrationPromise === currentFlight) registrationPromise = null;
+                });
+            }
+            registrationPromise = currentFlight;
+            return currentFlight;
         }
 
         function updateError(code) {
@@ -929,12 +959,13 @@
             return error;
         }
 
-        function withTimeout(promise, timeoutMs) {
+        function withTimeout(promise, timeoutMs, onTimeout) {
             return new Promise(function (resolve, reject) {
                 var settled = false;
                 var timeout = window.setTimeout(function () {
                     if (settled) return;
                     settled = true;
+                    if (onTimeout) onTimeout();
                     reject(updateError("update-timeout"));
                 }, timeoutMs);
                 Promise.resolve(promise).then(function (value) {
@@ -1154,7 +1185,7 @@
                 return Promise.resolve({status: "native-app", registration: null});
             }
             if (manualUpdatePromise) return manualUpdatePromise;
-            if (registrationNeedsRecovery) {
+            if (registrationNeedsRecovery && !usesBoundedRegistration()) {
                 registrationPromise = null;
             }
             var manualTarget = state.server && !state.serverUnavailable

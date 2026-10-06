@@ -6,12 +6,12 @@
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
     {% else %}
-        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v166">
-        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v166">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-control-v1.css' %}?v=dispatcher-desktop-shell-v182">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-workspace-v1.css' %}?v=dispatcher-desktop-shell-v182">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-v1.css' %}?v=dispatcher-desktop-shell-v182">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-adaptive-v1.css' %}?v=dispatcher-desktop-shell-v182">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-detail-overrides-v1.css' %}?v=dispatcher-desktop-shell-v182">
+        <link rel="stylesheet" href="{% static 'css/dispatcher-canvas-v1.css' %}?v=dispatcher-desktop-shell-v182">
     {% endif %}
 {% endblock %}
 {% block viewport_extra %}{% if mining_master_mobile_enabled %}, viewport-fit=cover{% endif %}{% endblock %}
@@ -25,7 +25,8 @@
         <meta name="apple-mobile-web-app-title" content="Горный мастер">
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
-        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v165" defer></script>
+        <script src="{% static 'js/dispatcher-transport-v1.js' %}?v=mining-master-mobile-shell-v181" defer></script>
+        <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v181" defer></script>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -45,6 +46,10 @@
 <main
     class="dispatcher-shell"
     data-dispatcher-theme
+    data-dispatcher-command-access-id="{{ access.id }}"
+    data-dispatcher-command-actor-id="{{ access.employee_id }}"
+    data-dispatcher-command-role="{{ access.role.code }}"
+    data-dispatcher-command-shift-id="{{ dispatcher_header.active_shift.id|default:'' }}"
     data-static-prefix="{% static '' %}"
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
@@ -64,7 +69,10 @@
     {% include "trips/includes/dispatcher_board.html" %}
 
     {% if mining_master_mobile_enabled %}
-    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" aria-label="Мобильный пульт Горного мастера">
+    <section class="mm-mobile-shell {% if dispatcher_header.shift_status_variant == 'open' %}is-shift-open{% elif dispatcher_header.shift_status_variant == 'blocked' %}is-shift-blocked{% else %}is-shift-closed{% endif %} {% if not dispatcher_header.shift_is_open %}is-readonly{% endif %}" data-mm-mobile-readonly="{% if dispatcher_header.shift_is_open %}false{% else %}true{% endif %}" data-dispatcher-command-access-id="{{ access.id }}"
+    data-dispatcher-command-actor-id="{{ access.employee_id }}"
+    data-dispatcher-command-role="{{ access.role.code }}"
+    data-dispatcher-command-shift-id="{{ dispatcher_header.active_shift.id|default:'' }}" aria-label="Мобильный пульт Горного мастера">
         <div class="mm-mobile-home" data-mm-mobile-view="home">
         <header class="mm-mobile-header">
             <div class="mm-mobile-title">
@@ -579,7 +587,7 @@
 {% endspaceless %}
 {% if not mining_master_mobile_enabled %}
 {# Холст: общий скрипт диспетчерских экранов (static/js/dispatcher-canvas-v1.js). #}
-<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v166"></script>
+<script src="{% static 'js/dispatcher-canvas-v1.js' %}?v=dispatcher-desktop-shell-v182"></script>
 {% else %}
 <script>
 (function () {
@@ -729,292 +737,83 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
     var dispatcherSyncPendingCount = 0;
-    var dispatcherSyncQueueKey = "mining-master-mobile-sync-queue-v3";
-    try {
-        // Старые очереди не содержат версии назначения и могут повторить уже
-        // отменённую команду после восстановления связи.
-        window.localStorage.removeItem("mining-master-mobile-sync-queue-v1");
-        window.localStorage.removeItem("mining-master-mobile-sync-queue-v2");
-    } catch (error) {}
     var dispatcherSyncQueueFlushing = false;
-    var dispatcherSyncFlushTimer = null;
     var dispatcherMobileSyncFlushDelayMs = 300;
-    var dispatcherSyncRequestTimeoutMs = 12000;
-    var dispatcherRefreshRequestTimeoutMs = 12000;
     var dispatcherRealtimeConnected = true;
     var dispatcherRealtimeLastSuccessAt = 0;
     var dispatcherRealtimeLastReason = "";
-    var miningMasterShellVersion = "mining-master-mobile-shell-v165";
-    function readDispatcherSyncQueue() {
-        try {
-            return JSON.parse(window.localStorage.getItem(dispatcherSyncQueueKey) || "[]");
-        } catch (error) {
-            return [];
+    var miningMasterShellVersion = "mining-master-mobile-shell-v181";
+    var dispatcherTransport = window.createDispatcherTransport({
+        getCsrfToken: getCsrfToken,
+        onStateChange: function (state) {
+            dispatcherSyncPendingCount = state.syncQueue.pendingCount;
+            dispatcherSyncQueueFlushing = state.syncQueue.isFlushing;
+            dispatcherRealtimeConnected = state.realtimeConnected;
+            dispatcherRealtimeLastSuccessAt = state.realtimeLastSuccessAt;
+            dispatcherRealtimeLastReason = state.realtimeLastReason;
+            updateDispatcherSyncIndicator();
+        },
+        onServerError: function (error) {
+            markMiningMasterBoardStale();
+            showDispatcherDnDError(error);
+        },
+        onDependenciesBlocked: function () {
+            markMiningMasterBoardStale();
+            scheduleMiningMasterRefreshRetry({preserveScreen: true}, 0);
+        },
+        onRejected: function () {
+            markMiningMasterBoardStale();
+            scheduleMiningMasterRefreshRetry({preserveScreen: true}, 0);
+        },
+        onAcknowledged: function (request, response) {
+            if (request.data && (request.data.action === "release_complex" || request.data.zone === "inactive")) {
+                applyHaulAssignmentStates(response, document.querySelector(".mm-mobile-shell"), massAssignmentStateTokens(request));
+            }
+            if (request.refreshMobileBoard && !readDispatcherSyncQueue().length
+                    && !dispatcherTransport.getQueueState().waitingDependencyCount) {
+                Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
+            }
         }
-    }
-    function writeDispatcherSyncQueue(queue) {
-        try {
-            window.localStorage.setItem(dispatcherSyncQueueKey, JSON.stringify(queue || []));
-        } catch (error) {}
-        updateDispatcherSyncIndicator();
-    }
-    function getDispatcherSyncQueueState() {
-        var queue = readDispatcherSyncQueue();
-        var now = Date.now();
-        var oldestAgeMs = 0;
-        queue.forEach(function (item) {
-            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-            var age = createdAt ? Math.max(0, now - createdAt) : 0;
-            if (!oldestAgeMs || age > oldestAgeMs) oldestAgeMs = age;
-        });
-        return {
-            length: queue.length,
-            oldestAgeMs: oldestAgeMs,
-            isFlushing: dispatcherSyncQueueFlushing,
-            pendingCount: dispatcherSyncPendingCount
-        };
-    }
+    });
+    var dispatcherSyncQueueKey = dispatcherTransport.queueKey;
+    var readDispatcherSyncQueue = dispatcherTransport.readOwnQueue;
+    var getDispatcherSyncQueueState = dispatcherTransport.getQueueState;
+    var setDispatcherSyncPending = dispatcherTransport.setSyncPending;
+    var dispatcherRoleIsReadonly = dispatcherTransport.roleIsReadonly;
+    var dispatcherInactiveRoleError = dispatcherTransport.inactiveRoleError;
+    var enqueueDispatcherSyncRequest = dispatcherTransport.enqueue;
+    var scheduleDispatcherSyncFlush = dispatcherTransport.scheduleFlush;
+    var dispatcherPost = dispatcherTransport.post;
     function updateDispatcherSyncIndicator() {
         var mobileShell = document.querySelector(".mm-mobile-shell");
         var queueState = getDispatcherSyncQueueState();
-        var isPending = dispatcherSyncPendingCount > 0 || queueState.length > 0 || dispatcherSyncQueueFlushing;
+        var ownQueueLength = queueState.length - queueState.heldForAuthorCount;
+        var isPending = dispatcherSyncPendingCount > 0 || ownQueueLength > 0 || dispatcherSyncQueueFlushing;
         if (mobileShell) {
             mobileShell.classList.toggle("is-sync-pending", isPending);
             mobileShell.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
-            mobileShell.dataset.mmSyncQueueLength = String(queueState.length);
+            mobileShell.dataset.mmSyncQueueLength = String(ownQueueLength);
             mobileShell.dataset.mmRealtimeConnected = dispatcherRealtimeConnected ? "true" : "false";
         }
         var desktopBoard = document.querySelector(".dispatcher-board");
-        if (desktopBoard) {
-            desktopBoard.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
-        }
-    }
-    function setDispatcherSyncPending(isPending) {
-        dispatcherSyncPendingCount = Math.max(0, dispatcherSyncPendingCount + (isPending ? 1 : -1));
-        updateDispatcherSyncIndicator();
-    }
-    function dispatcherRoleIsReadonly() {
-        return (
-            typeof window.isAppRoleReadonly === "function"
-            && window.isAppRoleReadonly()
-        );
-    }
-    function dispatcherInactiveRoleError() {
-        var error = new Error("Роль неактивна — доступен только просмотр");
-        error.isServerResponse = true;
-        error.code = "inactive_role";
-        return error;
-    }
-    function enqueueDispatcherSyncRequest(request, delayMs) {
-        if (dispatcherRoleIsReadonly()) {
-            return false;
-        }
-        var queue = readDispatcherSyncQueue();
-        var queuedRequest = Object.assign({
-            id: "sync-" + Date.now() + "-" + Math.random().toString(16).slice(2),
-            createdAt: Date.now(),
-            attempts: 0
-        }, request || {});
-        var replaceIndex = queuedRequest.coalesceKey ? queue.findIndex(function (item, index) {
-            return item.coalesceKey === queuedRequest.coalesceKey && !(dispatcherSyncQueueFlushing && index === 0);
-        }) : -1;
-        if (replaceIndex >= 0) {
-            queuedRequest.createdAt = queue[replaceIndex].createdAt || queuedRequest.createdAt;
-            queue[replaceIndex] = queuedRequest;
-        } else {
-            queue.push(queuedRequest);
-        }
-        writeDispatcherSyncQueue(queue);
-        scheduleDispatcherSyncFlush(delayMs);
-        return true;
-    }
-    function sendDispatcherSyncRequest(request) {
-        if (dispatcherRoleIsReadonly()) {
-            return Promise.reject(dispatcherInactiveRoleError());
-        }
-        var headers = { "X-CSRFToken": getCsrfToken() };
-        var body = null;
-        var controller = window.AbortController ? new AbortController() : null;
-        var timeoutId = null;
-        if (request.kind === "form") {
-            body = new FormData();
-            Object.keys(request.fields || {}).forEach(function (key) {
-                body.append(key, request.fields[key]);
-            });
-        } else {
-            headers["Content-Type"] = "application/json";
-            body = JSON.stringify(request.data || {});
-        }
-        if (controller) {
-            timeoutId = window.setTimeout(function () {
-                try {
-                    controller.abort();
-                } catch (error) {}
-            }, dispatcherSyncRequestTimeoutMs);
-        }
-        return fetch(request.url, {
-            method: "POST",
-            headers: headers,
-            body: body,
-            credentials: "same-origin",
-            cache: "no-store",
-            signal: controller ? controller.signal : undefined
-        }).then(function (response) {
-            if (!response.ok) {
-                return response.json().catch(function () { return {}; }).then(function (payload) {
-                    var error = new Error(payload.error || "Действие не выполнено.");
-                    error.isServerResponse = true;
-                    error.code = payload.code || "";
-                    error.conflict = Boolean(payload.conflict);
-                    error.status = response.status;
-                    throw error;
-                });
-            }
-            return response.json().catch(function () { return { ok: true }; });
-        }).finally(function () {
-            if (timeoutId) {
-                window.clearTimeout(timeoutId);
-            }
-        });
-    }
-    function dispatcherFetchWithTimeout(url, options, timeoutMs) {
-        var controller = window.AbortController ? new AbortController() : null;
-        var timeoutId = null;
-        var fetchOptions = Object.assign({}, options || {});
-        if (controller) {
-            fetchOptions.signal = controller.signal;
-            timeoutId = window.setTimeout(function () {
-                try {
-                    controller.abort();
-                } catch (error) {}
-            }, timeoutMs || dispatcherRefreshRequestTimeoutMs);
-        }
-        return fetch(url, fetchOptions).finally(function () {
-            if (timeoutId) {
-                window.clearTimeout(timeoutId);
-            }
-        });
-    }
-    function flushDispatcherSyncQueue() {
-        if (dispatcherRoleIsReadonly()) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        if (dispatcherSyncQueueFlushing) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        var queue = readDispatcherSyncQueue();
-        if (!queue.length) {
-            updateDispatcherSyncIndicator();
-            return;
-        }
-        dispatcherSyncQueueFlushing = true;
-        setDispatcherSyncPending(true);
-        var request = queue[0];
-        request.attempts = (request.attempts || 0) + 1;
-        sendDispatcherSyncRequest(request).then(function () {
-            var freshQueue = readDispatcherSyncQueue();
-            if (freshQueue.length && freshQueue[0].id === request.id) {
-                freshQueue.shift();
-            } else {
-                freshQueue = freshQueue.filter(function (item) {
-                    return item.id !== request.id;
-                });
-            }
-            writeDispatcherSyncQueue(freshQueue);
-            if (request.refreshMobileBoard && !freshQueue.length) {
-                Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
-            }
-        }).catch(function (error) {
-            if (error && error.isServerResponse) {
-                var freshQueue = readDispatcherSyncQueue().filter(function (item) {
-                    return item.id !== request.id;
-                });
-                writeDispatcherSyncQueue(freshQueue);
-                /* Сервер отверг команду: локально самосвал уже нарисован в
-                   целевом комплексе, а на сервере он там не появился. Само
-                   обновление ниже отложится, пока открыто окно с ошибкой
-                   (isMobileOperationalRefreshUnsafe), поэтому помечаем доску
-                   устаревшей: её перечитает закрытие окна или ближайший тик
-                   таймера. Замер на телефоне: после 409 самосвал №101 висел в
-                   K-1, хотя по базе оставался в K-5. */
-                markMiningMasterBoardStale();
-                showDispatcherDnDError(error);
-                if (request.refreshMobileBoard && !freshQueue.length) {
-                    Promise.resolve(refreshMobileBoardFromServer({ preserveScreen: true })).catch(function () {});
-                }
-            } else {
-                var retryQueue = readDispatcherSyncQueue();
-                if (retryQueue.length && retryQueue[0].id === request.id) {
-                    retryQueue[0].attempts = request.attempts;
-                    writeDispatcherSyncQueue(retryQueue);
-                }
-            }
-        }).finally(function () {
-            dispatcherSyncQueueFlushing = false;
-            setDispatcherSyncPending(false);
-            if (readDispatcherSyncQueue().length) {
-                window.setTimeout(flushDispatcherSyncQueue, 1200);
-            }
-        });
-    }
-    function scheduleDispatcherSyncFlush(delayMs) {
-        updateDispatcherSyncIndicator();
-        if (dispatcherSyncFlushTimer) {
-            window.clearTimeout(dispatcherSyncFlushTimer);
-        }
-        dispatcherSyncFlushTimer = window.setTimeout(function () {
-            dispatcherSyncFlushTimer = null;
-            flushDispatcherSyncQueue();
-        }, typeof delayMs === "number" ? delayMs : 80);
-    }
-    function dispatcherPost(url, data, options) {
-        if (dispatcherRoleIsReadonly()) {
-            return Promise.reject(dispatcherInactiveRoleError());
-        }
-        var payload = Object.assign({}, data || {});
-        options = options || {};
-        if (!payload.client_action_id) {
-            payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-        }
-        var request = {
-            kind: "json",
-            url: url,
-            data: payload
-        };
-        setDispatcherSyncPending(true);
-        return sendDispatcherSyncRequest(request).catch(function (error) {
-            if (error && error.isServerResponse) throw error;
-            if (options.queueOnNetworkFailure === false) throw error;
-            enqueueDispatcherSyncRequest(request);
-            return { queued: true };
-        }).finally(function () {
-            setDispatcherSyncPending(false);
-        });
+        if (desktopBoard) desktopBoard.classList.toggle("is-realtime-stale", !dispatcherRealtimeConnected);
     }
     function dispatcherPostQueued(url, data, delayMs) {
-        if (dispatcherRoleIsReadonly()) {
-            return Promise.reject(dispatcherInactiveRoleError());
-        }
+        if (dispatcherRoleIsReadonly()) return Promise.reject(dispatcherInactiveRoleError());
         var payload = Object.assign({}, data || {});
         if (!payload.client_action_id) {
             payload.client_action_id = "mm-" + Date.now() + "-" + Math.random().toString(16).slice(2);
         }
         if (!enqueueDispatcherSyncRequest({
-            kind: "json",
-            url: url,
-            data: payload,
-            coalesceKey: payload.truck_id ? "haul-truck-" + String(payload.truck_id) : "",
-            refreshMobileBoard: true
+            kind: "json", url: url, data: payload, refreshMobileBoard: true
         }, typeof delayMs === "number" ? delayMs : dispatcherMobileSyncFlushDelayMs)) {
-            return Promise.reject(dispatcherInactiveRoleError());
+            return Promise.reject(dispatcherTransport.storageError());
         }
-        return Promise.resolve({ queued: true });
+        return Promise.resolve({ queued: true, assignment_state_id: "command:" + payload.client_action_id });
     }
     function haulAssignmentStateId(node) {
         var value = node && node.dataset ? node.dataset.haulAssignmentStateId : "";
-        return /^\d+$/.test(String(value || "")) ? String(value) : "0";
+        return /^(?:\d+|command:.{1,128}|bulk:(?:release|disband):.{1,128})$/.test(String(value || "")) ? String(value) : "0";
     }
     function collectComplexAssignmentStates(complexCard) {
         var states = {};
@@ -1032,15 +831,29 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!response || !truckNode || response.assignment_state_id === undefined) return;
         truckNode.dataset.haulAssignmentStateId = String(response.assignment_state_id || 0);
     }
-    function applyHaulAssignmentStates(response, root) {
-        var states = response && response.assignment_state_ids;
-        if (!states || !root) return;
-        root.querySelectorAll("[data-equipment-id], [data-mm-mobile-home-truck-id]").forEach(function (node) {
-            var truckId = node.dataset.equipmentId || node.dataset.mmMobileHomeTruckId || "";
-            if (truckId && Object.prototype.hasOwnProperty.call(states, truckId)) {
-                node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
-            }
+    function applyHaulAssignmentStateMap(states, nodes, expectedStates) {
+        if (!states) return;
+        Array.from(nodes || []).forEach(function (node) {
+            var data = node.dataset || {};
+            var truckId = data.equipmentId || data.mmMobileHomeTruckId || data.mmMobileAssignedTruckId
+                || data.mmMobileFillTruckId || data.equipmentCardId || "";
+            if (!truckId || !Object.prototype.hasOwnProperty.call(states, truckId)) return;
+            if (expectedStates && String(data.haulAssignmentStateId || "0") !== String(expectedStates[truckId])) return;
+            node.dataset.haulAssignmentStateId = String(states[truckId] || 0);
         });
+    }
+    function applyHaulAssignmentStates(response, root, expectedStates) {
+        if (!root) return;
+        applyHaulAssignmentStateMap(response && response.assignment_state_ids, root.querySelectorAll(
+            "[data-equipment-id], [data-mm-mobile-home-truck-id], [data-mm-mobile-assigned-truck-id], " +
+            "[data-mm-mobile-fill-truck-id], [data-equipment-card-id]"
+        ), expectedStates);
+    }
+    function massAssignmentStateTokens(command) {
+        var states = {}, data = command && command.data || {};
+        var token = "bulk:" + (data.zone === "inactive" ? "disband" : "release") + ":" + data.client_action_id;
+        Object.keys(data.expected_assignment_states || {}).forEach(function (truckId) { states[truckId] = token; });
+        return states;
     }
     window.addEventListener("focus", scheduleDispatcherSyncFlush);
     window.addEventListener("pageshow", scheduleDispatcherSyncFlush);
@@ -1101,6 +914,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function storeMiningMasterRealtimeVersion(version) {
         var parsed = parseInt(version || "0", 10);
         if (!Number.isFinite(parsed) || parsed <= 0) return;
+        if (parsed < miningMasterRealtimeLastVersion) return;
         miningMasterRealtimeLastVersion = parsed;
         if (document.body) {
             document.body.dataset.operationalStateVersion = String(parsed);
@@ -1201,6 +1015,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     var miningMasterMobileRefreshPromise = null;
     var miningMasterMobileRefreshFollowUp = null;
+    var miningMasterMobileRefreshFollowUpOptions = null;
     var miningMasterMobileRefreshRetryTimer = null;
     var MINING_MASTER_REFRESH_RETRY_MAX = 5;
     function scheduleMiningMasterRefreshRetry(options, attempt) {
@@ -1213,7 +1028,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 scheduleMiningMasterRefreshRetry(options, attempt + 1);
                 return;
             }
-            Promise.resolve(refreshMobileBoardFromServer(options)).catch(function () {});
+            Promise.resolve(refreshMobileBoardFromServer(Object.assign({}, options, {
+                refreshRetryAttempt: attempt + 1
+            }))).catch(function () {});
         }, 1200);
     }
     function refreshMobileBoardFromServer(options) {
@@ -1225,30 +1042,46 @@ document.addEventListener("DOMContentLoaded", function () {
                доской: на телефоне самосвал «отпрыгивал» в прежний комплекс,
                мастер тянул снова и получал 409 «Состояние изменилось».
                Поэтому вслед за летящим запросом ставим ещё один. */
+            miningMasterMobileRefreshFollowUpOptions = {
+                version: Math.max(Number(options.version || 0), Number(miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.version || 0)),
+                preserveScreen: Boolean(options.preserveScreen || miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.preserveScreen)
+            };
             if (!miningMasterMobileRefreshFollowUp) {
                 miningMasterMobileRefreshFollowUp = miningMasterMobileRefreshPromise
                     .catch(function () { return false; })
                     .then(function () {
+                        var followUpOptions = miningMasterMobileRefreshFollowUpOptions;
+                        miningMasterMobileRefreshFollowUpOptions = null;
                         miningMasterMobileRefreshFollowUp = null;
-                        return refreshMobileBoardFromServer(options);
+                        return refreshMobileBoardFromServer(followUpOptions);
                     });
             }
             return miningMasterMobileRefreshFollowUp;
         }
         var currentShell = document.querySelector(".mm-mobile-shell");
         if (!currentShell || !window.AppOperationalFragment) return Promise.resolve(false);
-        var state = captureMobileShellState(currentShell);
+        var commandToken = dispatcherTransport.boardRefreshToken();
+        if (commandToken === null) {
+            markMiningMasterBoardStale();
+            scheduleMiningMasterRefreshRetry(options, Number(options.refreshRetryAttempt || 0));
+            return Promise.resolve(false);
+        }
+        var requestedVersion = Math.max(Number(options.version || 0), Number(miningMasterRealtimeLastVersion || 0));
         miningMasterMobileRefreshPromise = window.AppOperationalFragment.request(
             "mining_master",
-            Number(options.version || 0)
+            requestedVersion
         ).then(function (payload) {
-            if (isMobileOperationalRefreshUnsafe()) {
-                /* Ответ пришёл посреди жеста — применять нельзя, но и терять
-                   нельзя: иначе доска остаётся с состоянием ДО команды, и
-                   следующий жест уходит с устаревшим id (409). Одна повторная
-                   попытка после жеста; таймер и realtime остаются страховкой. */
+            var freshVersion = Number(payload && payload.version);
+            var requiredVersion = Math.max(requestedVersion, Number(miningMasterRealtimeLastVersion || 0),
+                Number(miningMasterMobileRefreshFollowUpOptions && miningMasterMobileRefreshFollowUpOptions.version || 0));
+            if (commandToken !== dispatcherTransport.boardRefreshToken()
+                    || !Number.isSafeInteger(freshVersion) || freshVersion < requiredVersion
+                    || isMobileOperationalRefreshUnsafe()) {
+                /* За время GET могла завершиться команда, начаться новый жест
+                   или потребоваться более свежая версия. Старый ответ не
+                   меняет доску; повтор ограничен общим бюджетом попыток. */
                 markMiningMasterBoardStale();
-                scheduleMiningMasterRefreshRetry(options, 0);
+                if (!miningMasterMobileRefreshFollowUp) scheduleMiningMasterRefreshRetry(options, Number(options.refreshRetryAttempt || 0));
                 return false;
             }
             var freshShell = window.AppOperationalFragment.parseRoot(
@@ -1257,7 +1090,7 @@ document.addEventListener("DOMContentLoaded", function () {
             );
             var currentShell = document.querySelector(".mm-mobile-shell");
             if (!freshShell || !currentShell) return false;
-            var freshVersion = parseInt(payload.version || "0", 10);
+            var state = captureMobileShellState(currentShell);
             miningMasterBoardStale = false;
             if (Number.isFinite(freshVersion) && freshVersion > 0) {
                 markMiningMasterBoardCurrent(freshVersion);
@@ -1338,7 +1171,6 @@ document.addEventListener("DOMContentLoaded", function () {
     var miningMasterRealtimeHardLagLimit = 150;
     var dispatcherRealtimeHardLagLimit = 150;
     var dispatcherLocalAssignmentAppliedUntil = 0;
-    var dispatcherIncomingRefreshQueueGraceMs = 15000;
     var dispatcherSyncQueueWakeThrottleMs = 1500;
     var dispatcherLastSyncQueueWakeAt = 0;
     function wakeDispatcherSyncQueueForRefresh() {
@@ -1348,22 +1180,9 @@ document.addEventListener("DOMContentLoaded", function () {
         scheduleDispatcherSyncFlush(0);
     }
     function isDispatcherSyncQueueBlockingRefresh() {
-        if (dispatcherSyncQueueFlushing || dispatcherSyncPendingCount > 0) {
-            return true;
-        }
-        var queue = readDispatcherSyncQueue();
-        if (!queue.length) {
-            return false;
-        }
+        if (dispatcherTransport.boardRefreshToken() !== null) return false;
         wakeDispatcherSyncQueueForRefresh();
-        if (navigator && navigator.onLine === false) {
-            return true;
-        }
-        var now = Date.now();
-        return queue.some(function (item) {
-            var createdAt = Number(item && item.createdAt ? item.createdAt : 0);
-            return !createdAt || now - createdAt < dispatcherIncomingRefreshQueueGraceMs;
-        });
+        return true;
     }
     function isElementRendered(node) {
         if (!node) return false;
@@ -1823,7 +1642,8 @@ document.addEventListener("DOMContentLoaded", function () {
             requestMiningMasterWorkerVersion(worker)
         ]).then(function (versions) {
             if (
-                inspectionGeneration !== miningMasterWaitingInspectionGeneration
+                (options && options.isCurrent && !options.isCurrent())
+                || inspectionGeneration !== miningMasterWaitingInspectionGeneration
                 || miningMasterServiceWorkerRegistration !== registration
                 || registration.waiting !== worker
                 || worker === navigator.serviceWorker.controller
@@ -1834,6 +1654,7 @@ document.addEventListener("DOMContentLoaded", function () {
             showMiningMasterUpdateModal(worker, versions[1], versions[0]);
             return true;
         }).catch(function () {
+            if (options && options.isCurrent && !options.isCurrent()) return false;
             if (options && options.manual && miningMasterUpdateStatus) {
                 miningMasterUpdateStatus.textContent = "Не удалось проверить обновление. Проверьте связь и повторите.";
             }
@@ -1850,14 +1671,32 @@ document.addEventListener("DOMContentLoaded", function () {
             ? String(version)
             : "";
     }
+    function miningMasterPwaDeadline(work, timeoutMs, onTimeout) {
+        var timer;
+        var deadline = new Promise(function (resolve, reject) {
+            timer = window.setTimeout(function () {
+                if (onTimeout) onTimeout();
+                reject(new Error("Mining Master update timed out."));
+            }, timeoutMs);
+        });
+        return Promise.race([Promise.resolve().then(work), deadline]).finally(function () {
+            window.clearTimeout(timer);
+        });
+    }
+    function getMiningMasterRegistration() {
+        return miningMasterPwaDeadline(function () {
+            if (miningMasterServiceWorkerRegistration) return miningMasterServiceWorkerRegistration;
+            var guard = window.AppPwaContractGuard;
+            return guard && typeof guard.getRegistration === "function"
+                ? guard.getRegistration()
+                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+        }, 8000);
+    }
     function getMiningMasterCurrentWorkerVersion() {
         if (!("serviceWorker" in navigator)) {
             return Promise.resolve(miningMasterShellVersion);
         }
-        var registrationPromise = miningMasterServiceWorkerRegistration
-            ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        return registrationPromise.then(function (registration) {
+        return getMiningMasterRegistration().then(function (registration) {
             if (registration) {
                 miningMasterServiceWorkerRegistration = registration;
             }
@@ -1934,54 +1773,62 @@ document.addEventListener("DOMContentLoaded", function () {
             miningMasterUpdateStatus.textContent = "Проверяем новую версию приложения...";
         }
         var guard = window.AppPwaContractGuard;
-        var registrationSource = miningMasterServiceWorkerRegistration
-            ? Promise.resolve(miningMasterServiceWorkerRegistration)
-            : guard && typeof guard.getRegistration === "function"
-                ? guard.getRegistration()
-                : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
+        var active = true;
         var currentVersion = "";
-        miningMasterManualUpdatePromise = Promise.resolve(registrationSource).then(function (registration) {
-            if (!registration) throw new Error("Service worker недоступен.");
-            miningMasterServiceWorkerRegistration = registration;
-            return requestMiningMasterWorkerVersion(
-                registration.active || navigator.serviceWorker.controller
-            ).then(function (version) {
-                currentVersion = version || miningMasterShellVersion;
-                var update = guard && typeof guard.requestManualUpdate === "function"
-                    ? guard.requestManualUpdate()
-                    : registration.update
-                        ? registration.update().then(function () {
-                            return {status: "current", registration: registration};
-                        })
-                        : Promise.resolve({status: "unavailable", registration: registration});
-                return Promise.resolve(update);
-            }).then(function (result) {
-                var updateStatus = result && result.status;
-                if (updateStatus === "error" || updateStatus === "unavailable") {
-                    var updateError = new Error("PWA manual update " + updateStatus);
-                    updateError.pwaUpdateStatus = updateStatus;
-                    throw updateError;
-                }
-                registration = result && result.registration
-                    ? result.registration
-                    : registration;
-                if (registration.waiting) {
-                    return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true });
-                }
-                var serverVersion = miningMasterServerContractVersion();
-                if (
-                    !serverVersion
-                    || formatMiningMasterVersion(currentVersion)
-                        === formatMiningMasterVersion(serverVersion)
-                ) {
-                    showMiningMasterNoUpdateModal(currentVersion);
-                    return true;
-                }
-                setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
-                showMiningMasterUpdateModal(null, serverVersion, currentVersion);
-                return false;
+        function isCurrent() {
+            return active && miningMasterManualUpdatePromise === currentFlight;
+        }
+        var work = function () {
+            return getMiningMasterRegistration().then(function (registration) {
+                if (!isCurrent()) return false;
+                if (!registration) throw new Error("Service worker недоступен.");
+                miningMasterServiceWorkerRegistration = registration;
+                return requestMiningMasterWorkerVersion(
+                    registration.active || navigator.serviceWorker.controller
+                ).then(function (version) {
+                    if (!isCurrent()) return false;
+                    currentVersion = version || miningMasterShellVersion;
+                    var update = guard && typeof guard.requestManualUpdate === "function"
+                        ? guard.requestManualUpdate()
+                        : registration.update
+                            ? registration.update().then(function () {
+                                return {status: "current", registration: registration};
+                            })
+                            : Promise.resolve({status: "unavailable", registration: registration});
+                    return Promise.resolve(update);
+                }).then(function (result) {
+                    if (!isCurrent()) return false;
+                    var updateStatus = result && result.status;
+                    if (updateStatus === "error" || updateStatus === "unavailable") {
+                        var updateError = new Error("PWA manual update " + updateStatus);
+                        updateError.pwaUpdateStatus = updateStatus;
+                        throw updateError;
+                    }
+                    registration = result && result.registration
+                        ? result.registration
+                        : registration;
+                    if (registration.waiting) {
+                        return inspectMiningMasterWaitingWorker(registration, registration.waiting, { manual: true, isCurrent: isCurrent });
+                    }
+                    var serverVersion = miningMasterServerContractVersion();
+                    if (
+                        !serverVersion
+                        || formatMiningMasterVersion(currentVersion)
+                            === formatMiningMasterVersion(serverVersion)
+                    ) {
+                        showMiningMasterNoUpdateModal(currentVersion);
+                        return true;
+                    }
+                    setMiningMasterUpdateIndicator(true, serverVersion, currentVersion);
+                    showMiningMasterUpdateModal(null, serverVersion, currentVersion);
+                    return false;
+                });
             });
+        };
+        var currentFlight = miningMasterPwaDeadline(work, 20000, function () {
+            active = false;
         }).catch(function (error) {
+            if (miningMasterManualUpdatePromise !== currentFlight) return false;
             if (miningMasterUpdateStatus) {
                 miningMasterUpdateStatus.textContent = error && error.pwaUpdateStatus === "unavailable"
                     ? "Служба обновления недоступна. Закройте и снова откройте приложение."
@@ -1989,10 +1836,13 @@ document.addEventListener("DOMContentLoaded", function () {
             }
             return false;
         }).finally(function () {
+            active = false;
+            if (miningMasterManualUpdatePromise !== currentFlight) return;
             setMiningMasterCheckUpdateButtonsDisabled(false);
             miningMasterManualUpdatePromise = null;
         });
-        return miningMasterManualUpdatePromise;
+        miningMasterManualUpdatePromise = currentFlight;
+        return currentFlight;
     }
     function applyMiningMasterPwaUpdate() {
         var waitingWorker = miningMasterWaitingWorker;
@@ -3131,46 +2981,59 @@ document.addEventListener("DOMContentLoaded", function () {
             syncMobileGarageNavState();
         }
         function confirmMobileFillScreen(screen) {
-            if (isMiningMasterMobileReadonly()) return;
-            if (!screen) return;
+            if (isMiningMasterMobileReadonly() || !screen) return Promise.resolve(false);
+            if (screen.__mmFillSavePromise) return screen.__mmFillSavePromise;
             var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
-            syncMobileFillAssignmentsToServer(screen);
-            syncMobileHomeComplexFromFill(screen);
-            screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
-            if (zone) {
-                zone.classList.remove("is-finish-ready", "is-shaking-added");
-                zone.style.removeProperty("--mm-mobile-fill-exit-y");
-            }
-            closeDetails();
-            window.requestAnimationFrame(function () {
-                updateMobileHomeComplexGridLayout();
-                scheduleMobileLocalLayoutReconcile();
+            var saving = syncMobileFillAssignmentsToServer(screen).then(function () {
+                syncMobileHomeComplexFromFill(screen);
+                screen.classList.remove("is-save-peeking", "is-save-ready", "is-shake-peeking", "is-shake-ready");
+                if (zone) {
+                    zone.classList.remove("is-finish-ready", "is-shaking-added");
+                    zone.style.removeProperty("--mm-mobile-fill-exit-y");
+                }
+                closeDetails();
+                window.requestAnimationFrame(function () {
+                    updateMobileHomeComplexGridLayout();
+                    scheduleMobileLocalLayoutReconcile();
+                });
+                return true;
+            }).catch(function (error) {
+                showDispatcherDnDError(error);
+                return false;
+            }).finally(function () {
+                if (screen.__mmFillSavePromise === saving) screen.__mmFillSavePromise = null;
             });
+            screen.__mmFillSavePromise = saving;
+            return saving;
         }
         function syncMobileFillAssignmentsToServer(screen) {
-            if (!screen) return;
+            if (!screen) return Promise.resolve();
             var zone = screen.querySelector("[data-mm-mobile-fill-drop]");
             var excavatorId = zone && zone.dataset.mmMobileFillExcavatorId;
+            var writes = [];
             Array.from(screen.querySelectorAll("[data-mm-mobile-assigned-truck-id][data-mm-mobile-fill-added='true']")).forEach(function (mini) {
                 var truckId = mini.dataset.mmMobileAssignedTruckId || "";
                 if (!truckId || !excavatorId) return;
-                dispatcherPostQueued(dispatcherAssignTruckUrl, {
-                    action: "assign",
-                    truck_id: truckId,
-                    excavator_id: excavatorId,
+                writes.push(dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                    action: "assign", truck_id: truckId, excavator_id: excavatorId,
                     expected_assignment_state_id: haulAssignmentStateId(mini)
-                }).catch(showDispatcherDnDError);
+                }).then(function (response) {
+                    applyHaulAssignmentState(response, mini);
+                    delete mini.dataset.mmMobileFillAdded;
+                }));
             });
             Array.from(screen.querySelectorAll(".mm-mobile-fill-truck[data-mm-mobile-fill-was-assigned='true']")).forEach(function (button) {
                 var truckId = button.dataset.mmMobileFillTruckId || "";
                 if (!truckId) return;
-                dispatcherPostQueued(dispatcherAssignTruckUrl, {
-                    action: "release",
-                    truck_id: truckId,
+                writes.push(dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                    action: "release", truck_id: truckId,
                     expected_assignment_state_id: haulAssignmentStateId(button)
-                }).catch(showDispatcherDnDError);
-                delete button.dataset.mmMobileFillWasAssigned;
+                }).then(function (response) {
+                    applyHaulAssignmentState(response, button);
+                    delete button.dataset.mmMobileFillWasAssigned;
+                }));
             });
+            return Promise.all(writes);
         }
         function moveMobileHomeTruckLocal(mini, targetCard) {
             var sourcePreview = mini.closest(".mm-mobile-truck-preview");
@@ -3485,36 +3348,37 @@ document.addEventListener("DOMContentLoaded", function () {
 
         function completeMobileTruckTransfer(targetCard) {
             var transfer = mobileTruckTransfer;
-            if (!transfer || !targetCard || targetCard.classList.contains("status-empty")) return;
+            if (!transfer || transfer.saving || !targetCard || targetCard.classList.contains("status-empty")) return;
             var targetExcavatorId = targetCard.dataset.mmMobileExcavatorId || "";
             if (!targetExcavatorId || targetExcavatorId === transfer.sourceExcavatorId) {
                 pulseMiningMasterInfoTarget(targetCard);
                 return;
             }
             var targetLabel = targetCard.querySelector("h2") ? targetCard.querySelector("h2").textContent.trim() : "комплекс";
-            var rollbackOptimisticMove = transfer.homeMini ? moveMobileHomeTruckLocal(transfer.homeMini, targetCard) : null;
-            var pendingTile = targetCard.querySelector("[data-mm-mobile-home-truck-id='" + CSS.escape(transfer.truckId) + "']");
-            if (pendingTile) {
-                pendingTile.classList.add("is-transfer-pending");
-                pendingTile.dataset.mmTransferLabel = "из " + transfer.sourceLabel + " · до 5 мин";
-            }
-            if (transfer.sourceFillScreen && home) {
-                transfer.sourceFillScreen.hidden = true;
-                home.hidden = false;
-            }
-            finishMobileTruckTransferUi("№" + transfer.truckNumber + " → " + targetLabel + " · до 5 мин");
-            dispatcherPostQueued(dispatcherAssignTruckUrl, {
-                action: "assign",
-                truck_id: transfer.truckId,
-                excavator_id: targetExcavatorId,
+            transfer.saving = true;
+            return dispatcherPostQueued(dispatcherAssignTruckUrl, {
+                action: "assign", truck_id: transfer.truckId, excavator_id: targetExcavatorId,
                 expected_assignment_state_id: transfer.assignmentStateId
-            }).then(function () {
-                if (rollbackOptimisticMove && rollbackOptimisticMove.commit) rollbackOptimisticMove.commit();
+            }).then(function (response) {
+                applyHaulAssignmentState(response, transfer.homeMini);
+                var move = transfer.homeMini ? moveMobileHomeTruckLocal(transfer.homeMini, targetCard) : null;
+                var pendingTile = targetCard.querySelector("[data-mm-mobile-home-truck-id='" + CSS.escape(transfer.truckId) + "']");
+                if (pendingTile) {
+                    applyHaulAssignmentState(response, pendingTile);
+                    pendingTile.classList.add("is-transfer-pending");
+                    pendingTile.dataset.mmTransferLabel = "из " + transfer.sourceLabel + " · до 5 мин";
+                }
+                if (transfer.sourceFillScreen && home) {
+                    transfer.sourceFillScreen.hidden = true;
+                    home.hidden = false;
+                }
+                finishMobileTruckTransferUi("№" + transfer.truckNumber + " → " + targetLabel + " · до 5 мин");
+                if (move && move.commit) move.commit();
+                return true;
             }).catch(function (error) {
-                if (rollbackOptimisticMove) rollbackOptimisticMove();
-                finishMobileTruckTransferUi("");
                 showDispatcherDnDError(error);
-            });
+                return false;
+            }).finally(function () { transfer.saving = false; });
         }
 
         if (mobileTruckTransferCancel) {
@@ -3937,6 +3801,18 @@ document.addEventListener("DOMContentLoaded", function () {
             if (!button || button.disabled || button.classList.contains("is-activating")) return;
             var excavatorId = button.dataset.mmMobileActivateExcavator;
             if (!excavatorId) return;
+            var command;
+            try {
+                if (typeof dispatcherTransport.storePost !== "function") throw dispatcherTransport.storageError();
+                command = dispatcherTransport.storePost(dispatcherMoveExcavatorUrl, {
+                    excavator_id: excavatorId, zone: "active", expected_zone: "inactive"
+                }, { queueOnNetworkFailure: false });
+            } catch (error) {
+                resetMobileGarageExcavatorSwipe(button);
+                showDispatcherDnDError(error);
+                return Promise.resolve(false);
+            }
+            var returnPanelTimer = null;
             button.disabled = true;
             button.classList.remove("is-work-swiping", "is-work-ready");
             button.classList.add("is-activating", "is-removing");
@@ -3958,7 +3834,7 @@ document.addEventListener("DOMContentLoaded", function () {
             createdCard.style.display = "";
             hideMobileGarageExcavatorButton(button);
             if (returnPanel === "home") {
-                window.setTimeout(function () {
+                returnPanelTimer = window.setTimeout(function () {
                     closeDetails();
                     createdCard.hidden = false;
                     createdCard.style.display = "";
@@ -3981,11 +3857,8 @@ document.addEventListener("DOMContentLoaded", function () {
                 } catch (error) {}
             }
             preserveExcavatorReturnPanel();
-            dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: excavatorId,
-                zone: "active",
-                expected_zone: "inactive"
-            }, { queueOnNetworkFailure: false }).catch(function (error) {
+            return dispatcherTransport.send(command).catch(function (error) {
+                if (returnPanelTimer !== null) window.clearTimeout(returnPanelTimer);
                 if (!existingCard && createdCard && createdCard.parentNode) {
                     createdCard.remove();
                 }
@@ -3999,6 +3872,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 updateMobileExcavatorGarageGridLayout();
                 scheduleMobileLocalLayoutReconcile();
                 showDispatcherDnDError(error);
+                return false;
             });
         }
         function bindMobileGarageExcavatorSwipe(button) {
@@ -4165,6 +4039,18 @@ document.addEventListener("DOMContentLoaded", function () {
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing")) return;
             var expectedAssignmentStates = collectComplexAssignmentStates(card);
+            var command;
+            try {
+                if (typeof dispatcherTransport.storePost !== "function") throw dispatcherTransport.storageError();
+                command = dispatcherTransport.storePost(dispatcherMoveExcavatorUrl, {
+                    excavator_id: excavatorId, zone: "inactive", expected_zone: "active",
+                    expected_assignment_states: expectedAssignmentStates
+                }, { queueOnNetworkFailure: false });
+            } catch (error) {
+                resetMobileComplexSwipe(card);
+                showDispatcherDnDError(error);
+                return Promise.resolve(false);
+            }
             card.classList.remove("is-swiping", "is-swipe-ready");
             card.classList.add("is-releasing");
             shell.classList.add("is-excavator-garage-peeking");
@@ -4173,9 +4059,11 @@ document.addEventListener("DOMContentLoaded", function () {
             var flightTime = animateMobileComplexTrucksToGarage(card);
             var preview = card.querySelector(".mm-mobile-truck-preview");
             var removedTrucks = preview ? Array.from(preview.querySelectorAll(".mm-mobile-truck-mini:not(.is-more)")) : [];
+            var pendingAssignmentStates = massAssignmentStateTokens(command);
+            applyHaulAssignmentStateMap(pendingAssignmentStates, removedTrucks);
             removedTrucks.forEach(restoreMobileTruckToGarages);
             var garageReturn = createMobileGarageExcavatorFromHome(card);
-            window.setTimeout(function () {
+            var hideTimer = window.setTimeout(function () {
                 card.hidden = true;
                 card.style.display = "none";
                 resetMobileComplexSwipe(card);
@@ -4184,18 +4072,17 @@ document.addEventListener("DOMContentLoaded", function () {
                 var grid = shell.querySelector(".mm-mobile-complex-grid");
                 if (grid) grid.scrollTop = 0;
             }, Math.min(260, flightTime));
-            dispatcherPost(dispatcherMoveExcavatorUrl, {
-                excavator_id: excavatorId,
-                zone: "inactive",
-                expected_zone: "active",
-                expected_assignment_states: expectedAssignmentStates
-            }, { queueOnNetworkFailure: false })
-                .then(function () {
+            return dispatcherTransport.send(command)
+                .then(function (response) {
+                    applyHaulAssignmentStates(response, shell, pendingAssignmentStates);
+                    applyHaulAssignmentStateMap(response.assignment_state_ids, removedTrucks, pendingAssignmentStates);
                     window.setTimeout(function () {
                         shell.classList.remove("is-truck-garage-peeking");
                     }, flightTime + 160);
                 })
                 .catch(function (error) {
+                    applyHaulAssignmentStateMap(expectedAssignmentStates, removedTrucks, pendingAssignmentStates);
+                    window.clearTimeout(hideTimer);
                     card.hidden = false;
                     card.style.display = "";
                     card.classList.remove("is-releasing");
@@ -4215,6 +4102,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     syncMobileGarageNavState();
                     scheduleMobileLocalLayoutReconcile();
                     showDispatcherDnDError(error);
+                    return false;
                 });
         }
         function animateMobileComplexTrucksToGarage(card) {
@@ -4296,6 +4184,18 @@ document.addEventListener("DOMContentLoaded", function () {
             var excavatorId = card.dataset.mmMobileExcavatorId;
             if (!excavatorId || card.classList.contains("is-releasing-trucks")) return;
             var expectedAssignmentStates = collectComplexAssignmentStates(card);
+            var command;
+            try {
+                if (typeof dispatcherTransport.storePost !== "function") throw dispatcherTransport.storageError();
+                command = dispatcherTransport.storePost(dispatcherAssignTruckUrl, {
+                    action: "release_complex", excavator_id: excavatorId,
+                    expected_assignment_states: expectedAssignmentStates
+                }, { queueOnNetworkFailure: false });
+            } catch (error) {
+                resetMobileComplexTruckSwipe(card);
+                showDispatcherDnDError(error);
+                return Promise.resolve(false);
+            }
             card.classList.remove("is-truck-swiping", "is-truck-swipe-ready");
             card.classList.add("is-releasing-trucks");
             shell.classList.add("is-truck-garage-peeking");
@@ -4306,6 +4206,8 @@ document.addEventListener("DOMContentLoaded", function () {
             var nextNodes = removedTrucks.map(function (truck) {
                 return { truck: truck, next: truck.nextSibling };
             });
+            var pendingAssignmentStates = massAssignmentStateTokens(command);
+            applyHaulAssignmentStateMap(pendingAssignmentStates, removedTrucks);
             removedTrucks.forEach(restoreMobileTruckToGarages);
             removedTrucks.forEach(function (truck) {
                 truck.remove();
@@ -4313,17 +4215,16 @@ document.addEventListener("DOMContentLoaded", function () {
             ensureMobileTruckPreviewEmpty(preview);
             updateMobileHomeTruckPreviewLayout(preview);
             scheduleMobileLocalLayoutReconcile();
-            dispatcherPost(dispatcherAssignTruckUrl, {
-                action: "release_complex",
-                excavator_id: excavatorId,
-                expected_assignment_states: expectedAssignmentStates
-            }, { queueOnNetworkFailure: false })
-                .then(function () {
+            return dispatcherTransport.send(command)
+                .then(function (response) {
+                    applyHaulAssignmentStates(response, shell, pendingAssignmentStates);
+                    applyHaulAssignmentStateMap(response.assignment_state_ids, removedTrucks, pendingAssignmentStates);
                     window.setTimeout(function () {
                         resetMobileComplexTruckSwipe(card);
                     }, 180);
                 })
                 .catch(function (error) {
+                    applyHaulAssignmentStateMap(expectedAssignmentStates, removedTrucks, pendingAssignmentStates);
                     nextNodes.forEach(function (item) {
                         if (!preview || !item.truck) return;
                         removeMobileTruckFromGarages(item.truck.dataset.mmMobileHomeTruckId || "");
@@ -4339,6 +4240,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     resetMobileComplexTruckSwipe(card);
                     scheduleMobileLocalLayoutReconcile();
                     showDispatcherDnDError(error);
+                    return false;
                 });
         }
         function addMobileFillAssignedTruck(screen, truckButton) {
@@ -5634,12 +5536,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 });
             });
         }
-        var miningMasterGuard = window.AppPwaContractGuard;
-        var miningMasterRegistrationSource = miningMasterGuard
-            && typeof miningMasterGuard.getRegistration === "function"
-            ? miningMasterGuard.getRegistration()
-            : navigator.serviceWorker.getRegistration("{% if role_app.role_code == 'mining_master' %}/{% else %}/mining-master/{% endif %}");
-        Promise.resolve(miningMasterRegistrationSource).then(function (registration) {
+        getMiningMasterRegistration().then(function (registration) {
             if (!registration) return;
             miningMasterServiceWorkerRegistration = registration;
             watchMiningMasterRegistration(registration);
@@ -5674,14 +5571,7 @@ document.addEventListener("DOMContentLoaded", function () {
     updateDispatcherSyncIndicator();
     window.addEventListener("online", scheduleDispatcherSyncFlush);
     window.addEventListener("operational-state-connection", function (event) {
-        var detail = event.detail || {};
-        dispatcherRealtimeConnected = detail.connected !== false;
-        dispatcherRealtimeLastReason = detail.reason || "";
-        if (dispatcherRealtimeConnected) {
-            dispatcherRealtimeLastSuccessAt = detail.lastSuccessAt || Date.now();
-            scheduleDispatcherSyncFlush(0);
-        }
-        updateDispatcherSyncIndicator();
+        dispatcherTransport.updateRealtimeConnection(event.detail || {});
     });
     window.addEventListener("storage", function (event) {
         if (event.key === dispatcherSyncQueueKey) updateDispatcherSyncIndicator();
@@ -6820,22 +6710,22 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 </script>
 {% else %}
-<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v166" defer></script>
+<script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-equipment-card-trigger-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-equipment-search-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-board-layout-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-complex-truck-racks-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-haul-assignment-state-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-board-dnd-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-board-mutations-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-board-actions-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v182" defer></script>
 {% endif %}
 {% endblock %}

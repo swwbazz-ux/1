@@ -80,6 +80,9 @@ test("refreshMobileBoardFromServer отдаёт промис, а не undefined"
     };
     const sandbox = {
         miningMasterMobileRefreshPromise: null,
+        miningMasterRealtimeLastVersion: 0,
+        miningMasterMobileRefreshFollowUpOptions: null,
+        dispatcherTransport: {boardRefreshToken: () => "unchanged"},
         document: {
             querySelector: (selector) => (selector === ".mm-mobile-shell" ? shellStub : null),
         },
@@ -203,12 +206,11 @@ test("после отказа сервера доска помечается у�
        сам бы не проснулся, а обновление из обработчика ошибки откладывается,
        пока открыто окно «Действие не выполнено». На телефоне после 409
        самосвал оставался нарисован в комплексе, куда не приехал. */
-    const flush = extractBraceBlock(
+    const errorBranch = extractBraceBlock(
         TEMPLATE_SOURCE,
-        "function flushDispatcherSyncQueue()",
-        "flushDispatcherSyncQueue"
+        "onServerError: function (error)",
+        "callback общего транспорта мастера"
     );
-    const errorBranch = flush.slice(flush.indexOf("error.isServerResponse"));
     assert.ok(
         errorBranch.indexOf("markMiningMasterBoardStale()") !== -1
             && errorBranch.indexOf("markMiningMasterBoardStale()") < errorBranch.indexOf("showDispatcherDnDError(error)"),
@@ -242,6 +244,9 @@ test("обновление, запрошенное во время летяще�
     };
     const sandbox = {
         miningMasterMobileRefreshPromise: null,
+        miningMasterRealtimeLastVersion: 0,
+        miningMasterMobileRefreshFollowUpOptions: null,
+        dispatcherTransport: {boardRefreshToken: () => "unchanged"},
         miningMasterMobileRefreshFollowUp: null,
         document: {querySelector: (s) => (s === ".mm-mobile-shell" ? shellStub : null)},
         window: {AppOperationalFragment: {

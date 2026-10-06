@@ -113,11 +113,16 @@
             {% for card in dump_cards %}
                 {% include "includes/excavator_dashboard_dump_card.html" with driver_manual_dashboard=driver_manual_dashboard %}
             {% empty %}
-                <div class="eo-empty-state eo-empty-state-compact">
+                <div class="eo-empty-state eo-empty-state-compact" data-eo-empty-dumps>
                     <strong>Нет точек</strong>
                     <span>{% if driver_manual_dashboard %}Нет настроенных точек разгрузки{% else %}Настройте забой{% endif %}</span>
                 </div>
             {% endfor %}
+            {% if not driver_manual_dashboard %}
+                {% for card in prepared_dump_cards %}
+                    {% include "includes/excavator_dashboard_dump_card.html" %}
+                {% endfor %}
+            {% endif %}
         </div>
     </div>
 </section>

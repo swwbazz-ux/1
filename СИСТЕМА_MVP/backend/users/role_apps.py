@@ -19,6 +19,303 @@ READY_TRAFFIC_ROLE_CODES = frozenset({
     'driver',
     'manager',
 })
+BOARD_SERVICE_WORKER_JS = r"""
+// Only the Master/Dispatcher workers include these bounded response paths.
+function boardDeadline(work, milliseconds, onTimeout) {
+  let timer;
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error("Board request deadline exceeded."));
+    }, milliseconds);
+  });
+  return Promise.race([Promise.resolve().then(work), deadline])
+    .finally(() => clearTimeout(timer));
+}
+
+function boardShellAssetURLs(response, html) {
+  if (!boardCanCache(APP_SHELL_URL, response) ||
+      !String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html")) {
+    throw new Error("Authenticated board shell unavailable.");
+  }
+  const attribute = (tag, name) => {
+    const match = tag.match(new RegExp("\\s" + name + "\\s*=\\s*([\"'])(.*?)\\1", "i"));
+    return match ? match[2] : "";
+  };
+  const assets = new Set();
+  let expectedRole = false;
+  // Consume entire scripts so strings inside inline code are not HTML tags.
+  const tags = html.replace(/<!--[\s\S]*?-->/g, "").match(
+    /<script\b[^>]*>[\s\S]*?<\/script\s*>|<link\b[^>]*>|<main\b[^>]*>/gi
+  ) || [];
+  for (const token of tags) {
+    const tag = token.slice(0, token.indexOf(">") + 1);
+    if (/^<main\b/i.test(tag)) {
+      if (attribute(tag, "class").split(/\s+/).includes("dispatcher-shell") &&
+          attribute(tag, "data-dispatcher-command-role") === ROLE_CODE) expectedRole = true;
+      continue;
+    }
+    const source = /^<script\b/i.test(tag) ? attribute(tag, "src") :
+      attribute(tag, "rel").toLowerCase().split(/\s+/).includes("stylesheet") ? attribute(tag, "href") : "";
+    if (!source) continue;
+    const url = new URL(source.replace(/&amp;/g, "&"), response.url);
+    if (url.origin !== self.location.origin || !url.pathname.startsWith("/static/")) {
+      throw new Error("Unsupported board dependency.");
+    }
+    assets.add(url.pathname + url.search);
+  }
+  if (!expectedRole || !assets.size) throw new Error("Incomplete board shell.");
+  return Array.from(assets);
+}
+
+function boardInstall() {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const releaseAssets = Array.from(RELEASE_STATIC_PATHS,
+    path => `${path}?v=${encodeURIComponent(STATIC_ASSET_RELEASE)}`);
+  let expired = false;
+  return boardDeadline(async () => {
+    const cache = await boardDeadline(() => caches.open(CACHE_NAME), 2500);
+    const download = async url => {
+      if (expired) throw new Error("Board installation expired.");
+      const options = {cache: "reload"};
+      if (controller) options.signal = controller.signal;
+      const request = new Request(url, options);
+      // Use fetch explicitly: Cache.addAll does not guarantee propagation of
+      // Request.signal to its internal fetches. The deadline covers bodies too.
+      const response = await fetch(request, options);
+      if (!response.ok || response.status === 206) throw new Error("Incomplete board asset.");
+      await response.clone().arrayBuffer();
+      if (new URL(request.url).pathname.startsWith("/static/") && !boardCanCache(request, response)) {
+        throw new Error("Invalid board asset response.");
+      }
+      return {request, response};
+    };
+    const shell = await download(APP_SHELL_URL);
+    const dependencies = boardShellAssetURLs(shell.response, await shell.response.clone().text());
+    if (expired) throw new Error("Board installation expired.");
+    // Cache the exact URLs used by this HTML, including their version queries.
+    // An unversioned CORE entry cannot satisfy a versioned offline request.
+    const assets = Array.from(new Set(CORE_ASSETS.concat(releaseAssets, dependencies)))
+      .filter(url => url !== APP_SHELL_URL);
+    const entries = [shell, ...await Promise.all(assets.map(download))];
+    if (expired) throw new Error("Board installation expired.");
+    // Only the candidate cache is written. It is never promoted unless every
+    // write succeeds; the previous worker/cache stays intact on any failure.
+    await Promise.all(entries.map(entry => cache.put(entry.request, entry.response)));
+  }, 30000, () => {
+    expired = true;
+    if (controller) controller.abort();
+  }).catch(error => {
+    expired = true;
+    if (controller) controller.abort();
+    throw error;
+  });
+}
+
+function boardIsOlderCache(key) {
+  if (!key.startsWith(CACHE_PREFIX)) return false;
+  const previous = key.slice(CACHE_PREFIX.length);
+  const current = CACHE_NAME.slice(CACHE_PREFIX.length);
+  if (!/^v[0-9]+$/.test(previous) || !/^v[0-9]+$/.test(current)) return false;
+  const previousVersion = Number(previous.slice(1));
+  const currentVersion = Number(current.slice(1));
+  return Number.isSafeInteger(previousVersion) && Number.isSafeInteger(currentVersion)
+    && previousVersion < currentVersion;
+}
+
+async function boardActivate() {
+  try {
+    // Cleanup cannot keep a ready worker from controlling its clients.
+    await boardDeadline(() => self.clients.claim(), 2500);
+  } catch (error) {
+    // Keep old caches if claiming clients did not complete. Activation itself
+    // still finishes; subsequent navigations can use the new worker.
+    return;
+  }
+  let expired = false;
+  await boardDeadline(async () => {
+    const keys = await caches.keys();
+    if (expired) return;
+    // An older worker finishing late must never delete a newer worker's cache.
+    await Promise.all(keys.filter(boardIsOlderCache).map(key => caches.delete(key)));
+  }, 2500, () => { expired = true; }).catch(() => undefined);
+}
+
+function boardCanCache(request, response) {
+  if (!response || !response.ok || response.status === 206 || !response.url) return false;
+  const requested = new URL(typeof request === "string" ? request : request.url, self.location.origin);
+  const received = new URL(response.url, self.location.origin);
+  if (received.origin !== self.location.origin || received.pathname !== requested.pathname) return false;
+  if (requested.pathname.startsWith("/static/")) {
+    return requested.search === received.search &&
+      !String(response.headers.get("Content-Type") || "").toLowerCase().includes("text/html");
+  }
+  return true;
+}
+
+function boardCompleteFetch(request, init) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const options = Object.assign({}, init || {});
+  if (controller) options.signal = controller.signal;
+  return boardDeadline(async () => {
+    const response = await fetch(request, options);
+    // Headers alone do not complete navigation, a script or a JSON response.
+    await response.clone().arrayBuffer();
+    return response;
+  }, 8000, () => { if (controller) controller.abort(); });
+}
+
+let boardShellGeneration = 0;
+let boardShellWrite = null;
+
+function boardIsShellRequest(request) {
+  return new URL(request.url).pathname === APP_SHELL_URL;
+}
+
+function boardCacheShellResponse(saved, generation) {
+  let expired = false;
+  const ensureCurrent = () => {
+    if (expired || generation !== boardShellGeneration) throw new Error("Board refresh superseded.");
+  };
+  return boardDeadline(async () => {
+    const dependencies = boardShellAssetURLs(saved, await saved.clone().text());
+    ensureCurrent();
+    const cache = await boardDeadline(() => caches.open(CACHE_NAME), 2500);
+    ensureCurrent();
+    await Promise.all(dependencies.map(async url => {
+      const request = new Request(new URL(url, self.location.origin));
+      const cached = await boardDeadline(() => cache.match(request), 2500);
+      ensureCurrent();
+      if (boardCanCache(request, cached)) {
+        await boardDeadline(() => cached.clone().arrayBuffer(), 2500);
+        ensureCurrent();
+        return;
+      }
+      const response = await boardCompleteFetch(request, {cache: "reload"});
+      ensureCurrent();
+      if (!boardCanCache(request, response)) throw new Error("Board dependency unavailable.");
+      await boardDeadline(() => cache.put(request, response), 2500);
+      ensureCurrent();
+    }));
+    // Cache.put cannot be cancelled. Do not overlap HTML writes: a timed-out
+    // older write must settle before a newer snapshot can replace it.
+    if (boardShellWrite) await boardDeadline(() => boardShellWrite, 2500);
+    ensureCurrent();
+    const write = Promise.resolve(cache.put(APP_SHELL_URL, saved)).finally(() => {
+      if (boardShellWrite === write) boardShellWrite = null;
+    });
+    boardShellWrite = write;
+    await boardDeadline(() => write, 2500);
+  }, 30000, () => { expired = true; }).catch(() => {
+    // All late continuations stop before the next write. Completed assets are
+    // harmless; the previous HTML and its dependencies have not been deleted.
+    expired = true;
+  });
+}
+
+function boardCacheResponse(request, response, fallbackUrl, event, generation) {
+  // Clone before yielding: the browser may consume the returned body immediately.
+  const saved = response.clone();
+  if (boardIsShellRequest(request)) {
+    const work = boardCacheShellResponse(saved, generation);
+    if (event && event.waitUntil) event.waitUntil(work);
+    return work;
+  }
+  const fallback = fallbackUrl && new URL(request.url).pathname === fallbackUrl
+    ? response.clone() : null;
+  let expired = false;
+  const work = boardDeadline(async () => {
+    const cache = await caches.open(CACHE_NAME);
+    if (expired) return;
+    await Promise.all([
+      cache.put(request, saved),
+      fallback ? cache.put(fallbackUrl, fallback) : Promise.resolve()
+    ]);
+  }, 2500, () => { expired = true; }).catch(() => undefined);
+  if (event && event.waitUntil) event.waitUntil(work);
+}
+
+async function boardCachedFallback(request, fallbackUrl) {
+  try {
+    return await boardDeadline(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      // One canonical HTML entry is committed after all exact dependencies.
+      // A stale query-specific entry must not mask the newly prepared shell.
+      let key = boardIsShellRequest(request) ? APP_SHELL_URL : request;
+      let response = await cache.match(key);
+      if (!response && fallbackUrl) {
+        key = fallbackUrl;
+        response = await cache.match(key);
+      }
+      if (!boardCanCache(key, response)) return null;
+      await response.clone().arrayBuffer();
+      return response;
+    }, 2500);
+  } catch (error) {
+    return null;
+  }
+}
+
+function boardUnavailable(message) {
+  return new Response(message, {
+    status: 503,
+    headers: {"Content-Type": "text/plain; charset=utf-8"}
+  });
+}
+
+function boardFetchAndCache(request, fallbackUrl, event, init) {
+  const generation = boardIsShellRequest(request) ? ++boardShellGeneration : null;
+  return boardCompleteFetch(request, init).then(response => {
+    if (response.status >= 500) throw new Error("Board server unavailable.");
+    if (boardCanCache(request, response)) boardCacheResponse(request, response, fallbackUrl, event, generation);
+    return response;
+  });
+}
+
+async function boardNetworkFirst(request, fallbackUrl, event, init) {
+  const network = boardFetchAndCache(request, fallbackUrl, event, init);
+  if (event && event.waitUntil) event.waitUntil(network.catch(() => undefined));
+  try {
+    // Preserve the Master's fast saved-shell path, without letting cache access
+    // block a healthy network response or retaining an unlimited background GET.
+    if (ROLE_CODE === "mining_master" && fallbackUrl) {
+      const delay = self.navigator && self.navigator.onLine === false ? 0 : 2500;
+      return await boardDeadline(() => network, delay);
+    }
+    return await network;
+  } catch (error) {
+    const cached = await boardCachedFallback(request, fallbackUrl);
+    if (cached) return cached;
+    return await network.catch(() => boardUnavailable(
+      "Экран недоступен. Повторите попытку, когда появится связь."
+    ));
+  }
+}
+
+async function boardNetworkOnly(request) {
+  try {
+    return await boardCompleteFetch(request);
+  } catch (error) {
+    return boardUnavailable("Сеть недоступна: свежий фрагмент экрана не получен.");
+  }
+}
+
+function boardCacheFirstReleaseStatic(request, event) {
+  const result = (async () => {
+    const cached = await boardCachedFallback(request);
+    if (cached) return cached;
+    try {
+      return await boardFetchAndCache(request, null, event, {cache: "no-store"});
+    } catch (error) {
+      return boardUnavailable("Ресурс выпуска недоступен. Повторите попытку.");
+    }
+  })();
+  if (event && event.waitUntil) event.waitUntil(result.catch(() => undefined));
+  return result;
+}
+""".strip()
+
+
 RELEASE_STATIC_SERVICE_WORKER_JS = r"""
 const STATIC_ASSET_RELEASE = "__STATIC_ASSET_RELEASE__";
 const RELEASE_STATIC_PATHS = new Set(__RELEASE_STATIC_PATHS__);
@@ -237,7 +534,7 @@ ROLE_APPS = (
         icon_slug='driver',
         manifest_url='/driver.webmanifest',
         service_worker_url='/driver-sw.js',
-        shell_version='driver-mobile-shell-v378',
+        shell_version='driver-mobile-shell-v382',
     ),
     RoleApp(
         role_code='excavator_operator',
@@ -254,7 +551,7 @@ ROLE_APPS = (
         icon_slug='excavator',
         manifest_url='/excavator.webmanifest',
         service_worker_url='/excavator-sw.js',
-        shell_version='excavator-mobile-shell-v264',
+        shell_version='excavator-mobile-shell-v276',
     ),
     RoleApp(
         role_code='mining_master',
@@ -271,7 +568,7 @@ ROLE_APPS = (
         icon_slug='mining-master',
         manifest_url='/mining-master-manifest.webmanifest',
         service_worker_url='/mining-master-sw.js',
-        shell_version='mining-master-mobile-shell-v165',
+        shell_version='mining-master-mobile-shell-v181',
     ),
     RoleApp(
         role_code='deputy_mining_manager',
@@ -308,7 +605,7 @@ ROLE_APPS = (
         icon_slug='dispatcher',
         manifest_url='/dispatcher.webmanifest',
         service_worker_url='/dispatcher-sw.js',
-        shell_version='dispatcher-desktop-shell-v166',
+        shell_version='dispatcher-desktop-shell-v182',
     ),
     RoleApp(
         role_code='settlement_clerk',
@@ -679,7 +976,7 @@ def add_release_static_cache(worker_script, role_code):
         json.dumps(release_static_paths),
     )
     release_install_helper = ''
-    if role_code != 'dispatcher':
+    if role_code not in {'dispatcher', 'mining_master'}:
         release_install_helper = RELEASE_STATIC_INSTALL_JS
     worker_script = worker_script.replace(
         '__STATIC_ASSET_RELEASE__',
@@ -698,11 +995,18 @@ def add_release_static_cache(worker_script, role_code):
         'if (STATIC_ASSET_PATHS.has(url.pathname)) {',
         'if (isReleaseStaticRequest(url) || STATIC_ASSET_PATHS.has(url.pathname)) {',
     )
+    board_worker = role_code in {'mining_master', 'dispatcher'}
+    cache_first = (
+        'boardCacheFirstReleaseStatic(request, event)'
+        if board_worker else 'cacheFirstReleaseStatic(request)'
+    )
     worker_script = worker_script.replace(
         'event.respondWith(networkFirstStatic(request));',
-        'event.respondWith(isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request) : networkFirstStatic(request));',
+        f'event.respondWith(isReleaseStaticRequest(url) ? {cache_first} : networkFirstStatic(request));',
     )
     worker_parts = [release_helper]
+    if board_worker:
+        worker_parts.append(BOARD_SERVICE_WORKER_JS)
     if release_install_helper:
         worker_parts.append(release_install_helper)
     worker_parts.append(worker_script)

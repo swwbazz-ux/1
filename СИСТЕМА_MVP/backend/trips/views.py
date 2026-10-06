@@ -20,6 +20,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from assignments.command_context import bound_command
 from assignments.models import (
     AssignmentStatus,
     EquipmentAssignment,
@@ -105,7 +106,7 @@ from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
 )
-from .excavator_hourly_report import build_excavator_hourly_report
+from .excavator_hourly_report import build_excavator_hourly_report, fleet_code_for_truck
 from .dispatcher_header import build_dispatcher_header_context, get_active_dispatcher_shift
 from .dispatcher_assignment_commands import (
     execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
@@ -586,7 +587,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v264";
+const CACHE_NAME = "excavator-mobile-shell-v276";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -600,26 +601,29 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v276",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v276",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v276",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v276",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v276",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v276",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v276",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-local-shift-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-autonomous-shift-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-shift-archive-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v276",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v276",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v276",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -808,54 +812,95 @@ async function migratePreviousExcavatorCache(cacheNames) {
   return false;
 }
 
-async function networkFirst(request, fallbackUrl, responseValidator) {
-  const cache = await caches.open(CACHE_NAME);
+function excavatorDeadline(work, milliseconds, onTimeout) {
+  let timer;
+  const deadline = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (onTimeout) onTimeout();
+      reject(new Error("Excavator request deadline exceeded."));
+    }, milliseconds);
+  });
+  return Promise.race([Promise.resolve().then(work), deadline])
+    .finally(() => clearTimeout(timer));
+}
+
+function completeExcavatorFetch(request, init, validator) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const options = Object.assign({}, init || {});
+  if (controller) options.signal = controller.signal;
+  return excavatorDeadline(async () => {
+    const response = await fetch(request, options);
+    // A response with headers alone is not a completed request. Drain a clone
+    // so navigation, scripts and JSON cannot stall on a never-ending body.
+    await response.clone().arrayBuffer();
+    const canCache = response.ok && (!validator || await validator(response));
+    return {response, canCache};
+  }, 8000, () => { if (controller) controller.abort(); });
+}
+
+function cacheExcavatorResponse(request, response, fallbackUrl) {
+  // Cache writes never hold screen startup. Only a fully received and validated
+  // network response reaches this function. Timed-out fetches never reach it.
+  return caches.open(CACHE_NAME).then(cache => Promise.all([
+    cache.put(request, response.clone()),
+    fallbackUrl && new URL(request.url).pathname === fallbackUrl
+      ? cache.put(fallbackUrl, response.clone()) : Promise.resolve()
+  ])).catch(() => undefined);
+}
+
+async function excavatorCachedFallback(request, fallbackUrl, validator) {
   try {
-    const response = await fetch(request);
-    const canCache = response && response.ok &&
-      (!responseValidator || await responseValidator(response));
-    if (canCache) {
-      cache.put(request, response.clone()).catch(() => undefined);
-      if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-        cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-      }
-    }
-    return response;
+    return await excavatorDeadline(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const response = (await cache.match(request)) ||
+        (fallbackUrl ? await cache.match(fallbackUrl) : null);
+      if (!response) return null;
+      await response.clone().arrayBuffer();
+      if (validator && !await validator(response)) return null;
+      return response;
+    }, 2500);
   } catch (error) {
-    return (await cache.match(request)) ||
-      (fallbackUrl ? await cache.match(fallbackUrl) : null) ||
-      new Response("Offline: excavator shell is not cached on this device yet.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
+    return null;
+  }
+}
+
+function excavatorUnavailable(message) {
+  return new Response(message, {
+    status: 503,
+    headers: {"Content-Type": "text/plain; charset=utf-8"}
+  });
+}
+
+async function networkFirst(request, fallbackUrl, responseValidator) {
+  try {
+    const result = await completeExcavatorFetch(request, null, responseValidator);
+    if (result.response.status >= 500) throw new Error("Excavator server unavailable.");
+    if (result.canCache) cacheExcavatorResponse(request, result.response, fallbackUrl);
+    return result.response;
+  } catch (error) {
+    return (await excavatorCachedFallback(request, fallbackUrl, responseValidator)) ||
+      excavatorUnavailable("Offline: excavator shell is not cached or could not be read. Retry when access is restored.");
   }
 }
 
 async function networkOnly(request) {
   try {
-    return await fetch(request);
+    return (await completeExcavatorFetch(request)).response;
   } catch (error) {
-    return new Response("Network unavailable: fresh excavator data was not received.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
+    return excavatorUnavailable("Network unavailable: fresh excavator data was not received.");
   }
 }
 
 async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
+  const validator = response => isSafeExcavatorCacheEntry(request, response);
   try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
+    const result = await completeExcavatorFetch(request, {cache: "no-store"}, validator);
+    if (result.response.status >= 500) throw new Error("Static resource unavailable.");
+    if (result.canCache) cacheExcavatorResponse(request, result.response);
+    return result.response;
   } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Resource unavailable offline.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
+    return (await excavatorCachedFallback(request, null, validator)) ||
+      excavatorUnavailable("Resource unavailable offline.");
   }
 }
 
@@ -3432,6 +3477,8 @@ def lock_dispatcher_mutation_access(request, access):
 
 @require_POST
 @transaction.atomic
+@bound_command('dispatcher_move_excavator', shift_getter=lambda access: get_active_dispatcher_shift(access),
+               allowed_roles={'dispatcher', 'admin', 'manager'})
 def dispatcher_move_excavator_view(request):
     return _execute_dispatcher_move_excavator(
         request,
@@ -3443,6 +3490,8 @@ def dispatcher_move_excavator_view(request):
 
 @require_POST
 @transaction.atomic
+@bound_command('dispatcher_assign_truck', shift_getter=lambda access: get_active_dispatcher_shift(access),
+               allowed_roles={'dispatcher', 'admin', 'manager'})
 def dispatcher_assign_truck_view(request):
     return _execute_dispatcher_assign_truck(
         request,
@@ -3705,7 +3754,7 @@ def excavator_auto_downtime_reason(excavator, reason_name):
     )
 
 
-def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False):
+def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_active=False, occurred_at=None):
     reason = excavator_auto_downtime_reason(excavator, reason_name)
     if not reason:
         return None
@@ -3726,7 +3775,9 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
                 return event
         if active_events and not replace_active:
             return None
-        now = timezone.now()
+        now = occurred_at or timezone.now()
+        if any(event.started_at > now for event in active_events):
+            return None
         for event in active_events:
             event.ended_at = now
             event.save(update_fields=['ended_at'])
@@ -3739,10 +3790,10 @@ def start_excavator_auto_downtime(excavator, employee, reason_name, *, replace_a
         )
 
 
-def close_excavator_auto_downtime(excavator, reason_name):
+def close_excavator_auto_downtime(excavator, reason_name, *, occurred_at=None):
     if not excavator:
         return 0
-    now = timezone.now()
+    now = occurred_at or timezone.now()
     closed = 0
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
@@ -3753,6 +3804,7 @@ def close_excavator_auto_downtime(excavator, reason_name):
                 equipment=excavator,
                 reason__name=reason_name,
                 ended_at__isnull=True,
+                started_at__lte=now,
                 comment=EXCAVATOR_AUTO_DOWNTIME_COMMENT,
             )
         )
@@ -3816,32 +3868,46 @@ def excavator_assigned_truck_counts(excavator):
     return len(assignments), loadable, has_inactive_assigned_truck
 
 
-def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
+def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False, occurred_at=None):
     if not excavator:
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
+        if occurred_at is not None:
+            # Текущая расстановка не является снимком прежнего цикла. Старый
+            # факт не должен менять ожидание после более нового действия.
+            if (Trip.objects.filter(excavator=excavator).filter(
+                    Q(loaded_at__gt=occurred_at) | Q(completed_at__gt=occurred_at)
+                    | Q(cancelled_at__gt=occurred_at) | Q(operationally_closed_at__gt=occurred_at)
+                ).exists()
+                or EmployeeShift.objects.filter(equipment=excavator, opened_at__gt=occurred_at).exists()
+                or DowntimeEvent.objects.filter(equipment=excavator, started_at__gt=occurred_at).exists()
+                or HaulAssignment.objects.filter(excavator=excavator).filter(
+                    Q(assigned_at__gt=occurred_at) | Q(ended_at__gt=occurred_at)
+                ).exists()):
+                return None
         assigned_total, loadable, has_inactive_assigned_truck = excavator_assigned_truck_counts(excavator)
         if loadable:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         # Ждать самосвалы можно только тогда, когда они назначены и все уже
         # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
         # ему нечего — это не простой по ожиданию, и открывать его нельзя.
         if assigned_total == 0:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         # Автоматическое «Ожидание самосвалов» отражает только ситуацию,
         # когда весь назначенный парк включён, но уже находится в рейсах.
         # Выключенный самосвал не должен сам запускать этот простой.
         if has_inactive_assigned_truck:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
+            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS, occurred_at=occurred_at)
             return None
         if start_when_empty:
             return start_excavator_auto_downtime(
                 excavator,
                 employee,
                 EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS,
+                occurred_at=occurred_at,
             )
         return None
 
@@ -3976,6 +4042,7 @@ def save_excavator_work_context(
     loading_block,
     transport_distance_km=_EXCAVATOR_DISTANCE_UNSET,
     destination_settings=_EXCAVATOR_DESTINATIONS_UNSET,
+    occurred_at=None,
 ):
     if not current_excavator:
         return None
@@ -3998,7 +4065,7 @@ def save_excavator_work_context(
     placement.work_rock_type = rock_type
     placement.loading_horizon = loading_horizon
     placement.loading_block = loading_block
-    placement.work_context_updated_at = timezone.now()
+    placement.work_context_updated_at = occurred_at or timezone.now()
     placement.changed_by = actor
     update_fields = [
         'work_rock_type',
@@ -4226,7 +4293,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
     # мог перейти сменщику гружёным (см. is_carryover). Перезаписываем только
     # если водителя загрузки почему-то не было зафиксировано вовсе.
     if trip.driver_id is None:
-        trip.driver = driver
+        trip.driver = trip.driver_control_shift.employee if trip.driver_control_shift_id else driver
     trip.unload_received_at = timezone.now()
     trip.completed_at = occurred_at or (None if late_confirmation else trip.unload_received_at)
     trip.unload_time_source = 'driver_device' if occurred_at else ('unknown' if late_confirmation else 'server_receipt')
@@ -4263,7 +4330,7 @@ def finalize_trip_unloaded(trip, *, driver, unloading_shift, occurred_at=None, l
             trip.truck,
             ended_at=trip.completed_at,
         )
-    reconcile_excavator_waiting_for_trucks(trip.excavator)
+    reconcile_excavator_waiting_for_trucks(trip.excavator, occurred_at=trip.completed_at)
     return True
 
 
@@ -4310,47 +4377,37 @@ def trip_loaded_payload(trip, *, client_action_id=''):
     }
 
 
-def notify_driver_truck_loaded(trip):
-    """Сообщает водителю, что его самосвал загружен и куда ехать.
-
-    Главное в уведомлении — точка разгрузки: именно её водитель ждёт от
-    экскаваторщика. Ошибки отправки намеренно проглатываются: уведомление не
-    должно ломать саму погрузку.
-    """
-    from users.webpush import notify_employee
+def notify_driver_truck_loaded(trip, *, source_key=None, version=None):
+    """Сохраняет текст и адресата вместе с погрузкой; сеть выполняет worker."""
+    from core.notification_outbox import enqueue_notification
 
     if trip.driver_participation_recorded and not trip.driver_control_shift_id:
         return
-    try:
-        driver_shift = trip.driver_control_shift if trip.driver_participation_recorded else (
-            EmployeeShift.objects
-            .select_related('employee')
-            .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
-            .filter(
-                Q(workplace_code='driver')
-                | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
-            )
-            .order_by('-opened_at')
-            .first()
+    driver_shift = trip.driver_control_shift if trip.driver_participation_recorded else (
+        EmployeeShift.objects
+        .select_related('employee')
+        .filter(equipment_id=trip.truck_id, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
         )
-        if not driver_shift or not driver_shift.employee_id:
-            return
-        dump_point = trip.assigned_dump_point or trip.dump_point
-        dump_name = getattr(dump_point, 'name', '') or 'не указана'
-        rock_name = getattr(trip.rock_type, 'name', '') or ''
-        body = f'Точка разгрузки: {dump_name}'
-        if rock_name:
-            body = f'{body} · {rock_name}'
-        notify_employee(
-            driver_shift.employee,
-            title='Самосвал загружен',
-            body=body,
-            url='/driver/',
-            tag='driver-trip-loaded',
-            kind='driver_trip_loaded',
-        )
-    except Exception:
-        logger.exception('Не удалось отправить водителю уведомление о погрузке.')
+        .order_by('-opened_at')
+        .first()
+    )
+    if not driver_shift or not driver_shift.employee_id:
+        return
+    dump_point = trip.assigned_dump_point or trip.dump_point
+    dump_name = getattr(dump_point, 'name', '') or 'не указана'
+    rock_name = getattr(trip.rock_type, 'name', '') or ''
+    body = f'Точка разгрузки: {dump_name}'
+    if rock_name:
+        body = f'{body} · {rock_name}'
+    return enqueue_notification(
+        source_key=source_key or f'trip:{trip.pk}:loaded:{trip.loaded_at.isoformat()}',
+        employee_id=driver_shift.employee_id, role_code='driver', version=version,
+        title='Самосвал загружен', body=body, url='/driver/',
+        tag='driver-trip-loaded', kind='driver_trip_loaded',
+    )
 
 
 @require_POST
@@ -4576,7 +4633,7 @@ def excavator_truck_loaded_view(request):
             },
         )
 
-    notify_driver_truck_loaded(trip)
+        notify_driver_truck_loaded(trip, source_key=f'truck_loaded:{client_action_id}', version=state.version)
     response_payload = trip_loaded_payload(trip, client_action_id=client_action_id)
     response_payload['version'] = state.version
     response_payload['downtime_status'] = excavator_downtime_status_payload(current_excavator, open_shift)
@@ -4838,13 +4895,8 @@ def excavator_work_settings_view(request):
             destination_settings=destinations,
         )
         active_downtime = None
-        if face_position_changed:
-            active_downtime = start_excavator_auto_downtime(
-                current_excavator,
-                access.employee,
-                EXCAVATOR_AUTO_DOWNTIME_TRANSFER,
-                replace_active=True,
-            )
+        # R-19: настройка забоя не является началом движения. Перегон
+        # создаётся существующим явным действием начала простоя машиниста.
 
     state = bump_operational_state(
         'ExcavatorWorkSettings:update',
@@ -5106,9 +5158,13 @@ def excavator_work_view(request):
     open_shift = get_excavator_open_shift(access.employee)
     work_assignment = get_active_equipment_assignment(access.employee, 'excavator_operator')
     assignment_state = work_assignment_state(access.employee, work_assignment)
-    current_excavator = open_shift.equipment if open_shift else None
+    # Cache the verified assignment's resources before local opening. Mutating
+    # legacy POSTs still require their existing server-shift checks.
+    current_excavator = (open_shift.equipment if open_shift else
+        work_assignment.equipment if request.method == 'GET'
+        and work_assignment and assignment_state == 'assigned' else None)
     reconcile_excavator_waiting_for_trucks(
-        current_excavator,
+        current_excavator if open_shift else None,
         access.employee,
         start_when_empty=bool(open_shift),
     )
@@ -5956,6 +6012,15 @@ def excavator_work_view(request):
         distance_values=work_settings['destination_distance_values'],
         include_all=True,
     )
+    # Prepare unselected destinations too: the local settings action must not
+    # need a server fragment before the newly selected card can accept a load.
+    selected_dump_ids = {str(point.id) for point in dump_points}
+    prepared_dump_cards = build_excavator_dump_cards(
+        [point for point in work_settings['dump_point_choices'] if str(point.id) not in selected_dump_ids],
+        distance_values=work_settings['destination_distance_values'],
+    )
+    for card in prepared_dump_cards:
+        card['is_prepared_hidden'] = True
     rock_choices = work_settings['rock_choices']
     downtime_equipment_type = current_excavator.equipment_type if current_excavator else None
     downtime_reasons = list(DowntimeReason.for_workplace('excavator_operator', downtime_equipment_type))
@@ -6024,6 +6089,7 @@ def excavator_work_view(request):
     shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
     for card in truck_cards:
+        card['local_fleet_code'] = fleet_code_for_truck(card['assignment'].truck)
         truck_progress = None
         if open_shift:
             truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
@@ -6188,7 +6254,7 @@ def excavator_work_view(request):
         if row['effective_dump_point_id']:
             completed_by_dump_id[row['effective_dump_point_id']] = row['total']
 
-    for card in dump_cards:
+    for card in dump_cards + prepared_dump_cards:
         point_id = card['point'].id
         card['completed_count'] = completed_by_dump_id[point_id]
         card['is_last_sent'] = point_id == last_sent_dump_point_id
@@ -6244,6 +6310,7 @@ def excavator_work_view(request):
             'legacy_trip_client_action_id': legacy_trip_client_action_id,
             'truck_detail_cards': truck_detail_cards,
             'dump_cards': dump_cards,
+            'prepared_dump_cards': prepared_dump_cards,
             'dump_choice_cards': dump_choice_cards,
             'rock_choices': rock_choices,
             'has_applied_settings': work_settings['has_applied_settings'],
@@ -6953,8 +7020,22 @@ def driver_complete_trip_view(request, trip_id):
         if not role_session_state(request, access)['is_active']:
             messages.error(request, 'Роль неактивна — доступен только просмотр.')
             return redirect('driver_shift')
-        reference = Trip.objects.filter(pk=trip_id).first()
-        if reference and reference.driver_participation_recorded:
+        reference = Trip.objects.select_related('driver_control_shift').filter(pk=trip_id).first()
+        raw_time = str(request.POST.get('occurred_at') or '').strip()
+        try:
+            submitted_time = parse_datetime(raw_time) if raw_time else None
+        except ValueError:
+            submitted_time = None
+        original_shift = reference.driver_control_shift if reference else None
+        historical_original_driver = bool(
+            original_shift and original_shift.employee_id == access.employee_id
+            and submitted_time and not timezone.is_naive(submitted_time)
+            and original_shift.closed_at
+            and original_shift.opened_at <= submitted_time <= original_shift.closed_at
+        )
+        if reference and reference.driver_participation_recorded and (
+            not reference.is_carryover or historical_original_driver
+        ):
             shift_query = Q(pk=reference.driver_control_shift_id, employee=access.employee)
         else:
             shift_query = Q(employee=access.employee, closed_at__isnull=True)
@@ -6981,7 +7062,10 @@ def driver_complete_trip_view(request, trip_id):
             )
         trip = (
             Trip.objects
-            .select_for_update()
+            # Фильтр переходящего груза использует nullable JOIN на исходную
+            # смену. PostgreSQL не разрешает FOR UPDATE для nullable-стороны;
+            # изменяем только сам Trip, поэтому блокируем только его строку.
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=(*OPEN_TRIP_STATUSES, TripStatus.UNCONTROLLED))
             .first()
@@ -7091,7 +7175,7 @@ def driver_change_unload_point_view(request, trip_id):
             dump_point_id = 0
         trip = (
             Trip.objects
-            .select_for_update()
+            .select_for_update(of=('self',))
             .filter(trip_driver_control_filter(unloading_shift))
             .filter(id=trip_id, truck=unloading_shift.equipment, status__in=OPEN_TRIP_STATUSES)
             .first()

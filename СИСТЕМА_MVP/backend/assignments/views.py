@@ -29,19 +29,20 @@ from users.models import EmployeeAccess
 from users.role_apps import role_app_manifest_response, role_app_service_worker_response
 from users.session_device import get_session_device_kind, set_session_device_kind
 
+from .command_context import bound_command
 from .command_guards import (
     ClientActionPayloadConflict,
     ClientActionRequired,
     begin_client_action,
+    client_action_response,
     complete_client_action,
 )
 from .models import AssignmentStatus, ExcavatorPlacement, HaulAssignment
 from .services import (
     HaulAssignmentStateConflict,
-    projected_haul_assignments_for_excavator,
     schedule_haul_assignment,
     schedule_haul_release,
-    validate_projected_excavator_state,
+    schedule_projected_haul_releases,
 )
 
 
@@ -93,7 +94,7 @@ MINING_MASTER_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "mining_master";
 const CACHE_PREFIX = "mining-master-mobile-shell-";
-const CACHE_NAME = "mining-master-mobile-shell-v165";
+const CACHE_NAME = "mining-master-mobile-shell-v181";
 const APP_SHELL_URL = "/mining-master/assignments/";
 const LOGIN_URL = "/";
 const MANIFEST_URL = "/mining-master-manifest.webmanifest";
@@ -102,7 +103,6 @@ const EXCLUDED_NAVIGATION_PREFIXES = ["/deputy-mining-manager/"];
    сохранённую доску, а страница сама держит плашку «Загружаем пульт», пока
    не придёт свежая расстановка (см. miningMasterStartupOverlay в шаблоне).
    Без сети сохранённая доска отдаётся без ожидания. */
-const NETWORK_FIRST_TIMEOUT_MS = 2500;
 const CORE_ASSETS = [
   LOGIN_URL,
   APP_SHELL_URL,
@@ -110,6 +110,7 @@ const CORE_ASSETS = [
   "/static/js/realtime-client.js",
   "/static/js/role-readonly.js",
   "/static/js/role-app-install-v1.js",
+  "/static/js/dispatcher-transport-v1.js",
   "/static/css/app.css",
   "/static/favicon.ico",
   "/static/img/pwa/mining-master-180.png",
@@ -121,95 +122,23 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener("install", event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(CORE_ASSETS.map(url => new Request(url, { cache: "reload" }))).catch(() => undefined))
-  );
+  event.waitUntil(boardInstall());
 });
 
 self.addEventListener("activate", event => {
-  event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys
-          .filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil(boardActivate());
 });
 
-function networkDelay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function networkFirst(request, fallbackUrl, event) {
+  return boardNetworkFirst(request, fallbackUrl, event);
 }
 
-async function networkFirst(request, fallbackUrl, event) {
-  const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match(request)) ||
-    (fallbackUrl ? await cache.match(fallbackUrl) : null);
-  const networkRequest = fetch(request)
-    .then(response => {
-      if (response && response.ok) {
-        cache.put(request, response.clone()).catch(() => undefined);
-        if (fallbackUrl && new URL(request.url).pathname === fallbackUrl) {
-          cache.put(fallbackUrl, response.clone()).catch(() => undefined);
-        }
-      }
-      return response;
-    });
-  networkRequest.catch(() => undefined);
-  if (event && event.waitUntil) {
-    event.waitUntil(networkRequest.then(() => undefined).catch(() => undefined));
-  }
-  if (cached) {
-    if (self.navigator && self.navigator.onLine === false) {
-      return cached;
-    }
-    try {
-      return await Promise.race([
-        networkRequest,
-        networkDelay(NETWORK_FIRST_TIMEOUT_MS).then(() => cached)
-      ]);
-    } catch (error) {
-      return cached;
-    }
-  }
-  try {
-    return await networkRequest;
-  } catch (error) {
-    return new Response("Оффлайн: экран еще не сохранен на этом устройстве.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
+function networkOnly(request) {
+  return boardNetworkOnly(request);
 }
 
-async function networkOnly(request) {
-  try {
-    return await fetch(request);
-  } catch (error) {
-    return new Response("Сеть недоступна: свежий фрагмент экрана не получен.", {
-      status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8" }
-    });
-  }
-}
-
-async function networkFirstStatic(request) {
-  const cache = await caches.open(CACHE_NAME);
-  try {
-    const response = await fetch(request, { cache: "no-store" });
-    if (response && response.ok) {
-      cache.put(request, response.clone()).catch(() => undefined);
-    }
-    return response;
-  } catch (error) {
-    return (await cache.match(request)) ||
-      new Response("Ресурс недоступен без сети.", {
-        status: 503,
-        headers: { "Content-Type": "text/plain; charset=utf-8" }
-      });
-  }
+function networkFirstStatic(request) {
+  return boardNetworkFirst(request, null, null, {cache: "no-store"});
 }
 
 self.addEventListener("fetch", event => {
@@ -773,6 +702,8 @@ def build_mining_master_dispatcher_header(request, access, current_shift, blocki
 
 @require_POST
 @transaction.atomic
+@bound_command('mining_master_move_excavator', shift_getter=lambda access: get_shift_state_for_access(access)[0],
+               allowed_roles={'mining_master'})
 def mining_master_move_excavator_view(request):
     access = mining_master_access_from_request(request)
     if not access:
@@ -791,7 +722,7 @@ def mining_master_move_excavator_view(request):
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
     excavator = get_object_or_404(
         Equipment.objects
@@ -826,31 +757,23 @@ def mining_master_move_excavator_view(request):
             ),
             code='state_conflict',
         )
-    if not placement:
-        placement = ExcavatorPlacement.objects.create(excavator=excavator)
-
     scheduled_assignments = []
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         try:
-            expected_states = mining_master_required_projected_states(payload)
-            visible_assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = mining_master_required_projected_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(visible_assignments, expected_states)
-            now = timezone.now()
-            for visible_assignment in visible_assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=visible_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=visible_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return mining_master_client_action_error(payload, error, code='state_conflict')
 
+    # A caught state conflict commits the outer view transaction. Delay the
+    # placement and signal writes until the command has passed validation.
+    if not placement:
+        placement = ExcavatorPlacement.objects.create(excavator=excavator)
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
@@ -877,6 +800,8 @@ def mining_master_move_excavator_view(request):
 
 @require_POST
 @transaction.atomic
+@bound_command('mining_master_assign_truck', shift_getter=lambda access: get_shift_state_for_access(access)[0],
+               allowed_roles={'mining_master'})
 def mining_master_assign_truck_view(request):
     access = mining_master_access_from_request(request)
     if not access:
@@ -897,7 +822,7 @@ def mining_master_assign_truck_view(request):
     except (ClientActionRequired, ClientActionPayloadConflict) as error:
         return mining_master_client_action_error(payload, error)
     if repeated_response is not None:
-        return JsonResponse(repeated_response)
+        return client_action_response(repeated_response)
     lock_production_state()
 
     if action == 'release_complex':
@@ -910,22 +835,13 @@ def mining_master_assign_truck_view(request):
             is_active=True,
         )
         try:
-            expected_states = mining_master_required_projected_states(payload)
-            assignments = projected_haul_assignments_for_excavator(
-                excavator,
-                for_update=True,
+            expected_states = getattr(request, 'resolved_assignment_states', None)
+            if expected_states is None:
+                expected_states = mining_master_required_projected_states(payload)
+            scheduled_assignments = schedule_projected_haul_releases(
+                excavator=excavator, expected_states=expected_states,
+                assigned_by=access.employee, now=timezone.now(),
             )
-            validate_projected_excavator_state(assignments, expected_states)
-            scheduled_assignments = []
-            for visible_assignment in assignments:
-                assignment, _ = schedule_haul_release(
-                    truck=visible_assignment.truck,
-                    assigned_by=access.employee,
-                    now=now,
-                    expected_state_id=visible_assignment.id,
-                )
-                if assignment:
-                    scheduled_assignments.append(assignment)
         except (ClientActionRequired, HaulAssignmentStateConflict) as error:
             return mining_master_client_action_error(payload, error, code='state_conflict')
         response_payload = {
@@ -953,7 +869,9 @@ def mining_master_assign_truck_view(request):
         is_active=True,
     )
     try:
-        expected_state_id = mining_master_required_assignment_state_id(payload)
+        expected_state_id = getattr(request, 'resolved_assignment_state_id', None)
+        if expected_state_id is None:
+            expected_state_id = mining_master_required_assignment_state_id(payload)
     except ClientActionRequired as error:
         return mining_master_client_action_error(payload, error)
 
@@ -969,6 +887,7 @@ def mining_master_assign_truck_view(request):
             return mining_master_client_action_error(payload, error, code='state_conflict')
         response_payload = {
             'ok': True,
+            'truck_id': truck.id,
             'assignment_id': assignment.id if assignment else None,
             'assignment_state_id': assignment.id if assignment else 0,
             'created': created,
@@ -1003,13 +922,16 @@ def mining_master_assign_truck_view(request):
             assigned_by=access.employee,
             now=now,
             expected_state_id=expected_state_id,
+            deadline_origin=getattr(request, 'assignment_deadline_origin', None),
         )
     except HaulAssignmentStateConflict as error:
         return mining_master_client_action_error(payload, error, code='state_conflict')
     response_payload = {
         'ok': True,
+        'truck_id': truck.id,
         'assignment_id': assignment.id,
         'assignment_state_id': assignment.id,
+        'assignment_effective_at': assignment.effective_at.isoformat() if assignment.effective_at else None,
         'created': created,
         'client_action_id': client_action_id,
     }

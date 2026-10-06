@@ -98,6 +98,188 @@ function downtimeEvent(id, type, sequence) {
     };
 }
 
+test('a whole shift with more than 200 accepted facts survives localStorage restart', async () => {
+    const local = storage();
+    const box = createOutbox({localStorage: local, queueKey: 'long-shift', send: async events => ({results: events.map(accepted)})});
+    for (let i = 1; i <= 205; i += 1) await box.queue(loadEvent('large-' + i, i));
+    await box.flush();
+    assert.deepEqual(await box.pending(), []);
+    const restarted = createOutbox({localStorage: local, queueKey: 'long-shift', send: async () => ({})});
+    const archived = await restarted.confirmed();
+    assert.equal(archived.length, 205);
+    assert.equal(archived[0].event.event_id, 'large-1');
+    assert.equal(archived[0].event.occurred_at, '2026-09-13T10:00:00.000Z');
+    assert.deepEqual(await restarted.getServerMapping('large-1'), {trip_id: 101});
+});
+
+test('discarded unsent fact stays in the source journal and is not replayed as a server-confirmed load', async () => {
+    for (const indexedDB of [undefined, fakeIndexedDB()]) {
+        const local = storage();
+        const options = {indexedDB, localStorage: local, queueKey: 'cancelled-source', send: async () => ({})};
+        const box = createOutbox(options);
+        const source = loadEvent('never-sent');
+        await box.queue(source);
+        assert.equal(await box.discardUnsent(source.event_id), true);
+        const restarted = createOutbox(options);
+        assert.deepEqual(await restarted.pending(), []);
+        assert.deepEqual(await restarted.confirmed(), []);
+        const [entry] = await restarted.journal();
+        assert.equal(entry.event.event_id, source.event_id);
+        assert.deepEqual(entry.event.payload, source.payload);
+        assert.equal(entry.result.status, 'cancelled_locally');
+        assert.equal((await restarted.queue(source)).sync_state, 'cancelled_locally');
+    }
+});
+
+test('returning IndexedDB merges fallback facts and confirmations without replacing its existing queue', async () => {
+    const indexedDB = fakeIndexedDB();
+    const primaryStorage = storage();
+    const primary = createOutbox({indexedDB, localStorage: primaryStorage, queueKey: 'migrate-merged', send: async () => ({})});
+    await primary.queue(loadEvent('primary-pending', 1));
+    const fallbackStorage = storage();
+    const fallback = createOutbox({localStorage: fallbackStorage, queueKey: 'migrate-merged', send: async events => ({results: events.map(accepted)})});
+    await fallback.queue(loadEvent('fallback-confirmed', 2));
+    await fallback.flush();
+    await fallback.queue(loadEvent('fallback-pending', 3));
+    const merged = createOutbox({indexedDB, localStorage: fallbackStorage, queueKey: 'migrate-merged', send: async () => ({})});
+    assert.equal(await merged.storageKind(), 'indexedDB');
+    assert.deepEqual((await merged.pending()).map(event => event.event_id), ['primary-pending', 'fallback-pending']);
+    assert.deepEqual((await merged.confirmed()).map(record => record.event.event_id), ['fallback-confirmed']);
+    assert.deepEqual(await fallback.pending(), []);
+    const restarted = createOutbox({indexedDB, localStorage: storage(), queueKey: 'migrate-merged', send: async () => ({})});
+    assert.equal((await restarted.pending()).length, 2);
+    assert.equal((await restarted.confirmed()).length, 1);
+});
+
+test('corrupted fallback JSON preserves its raw source and does not block a valid IndexedDB queue', async () => {
+    for (const suffix of ['', ':confirmed']) {
+        const indexedDB = fakeIndexedDB();
+        const queueKey = 'damaged-legacy';
+        const before = createOutbox({indexedDB, localStorage: storage(), queueKey, send: async () => ({})});
+        await before.queue(loadEvent('existing-idb'));
+        const legacy = storage();
+        const damagedKey = 'excavator-field-outbox-v1:' + queueKey + suffix;
+        legacy.setItem(damagedKey, '{unreadable legacy source');
+        let state;
+        let restarted;
+        assert.doesNotThrow(() => {
+            restarted = createOutbox({indexedDB, localStorage: legacy, queueKey, send: async () => ({}),
+                onChange: summary => { state = summary; }});
+        });
+        const restored = await restarted.ready();
+        assert.equal(await restarted.storageKind(), 'indexedDB');
+        assert.equal(restored[0].event_id, 'existing-idb');
+        assert.equal(state.storage_failed, true);
+        assert.equal(legacy.getItem(damagedKey), '{unreadable legacy source');
+        await restarted.queue(loadEvent('new-idb', 2));
+        assert.equal((await restarted.pending()).length, 2);
+        assert.equal(legacy.getItem(damagedKey), '{unreadable legacy source');
+    }
+});
+
+test('legacy cleanup quota cannot switch away from the already working IndexedDB queue', async () => {
+    const indexedDB = fakeIndexedDB();
+    const queueKey = 'cleanup-quota';
+    const primary = createOutbox({indexedDB, localStorage: storage(), queueKey, send: async () => ({})});
+    await primary.queue(loadEvent('primary-kept', 1));
+    const legacy = storage();
+    const fallback = createOutbox({localStorage: legacy, queueKey, send: async () => ({})});
+    await fallback.queue(loadEvent('legacy-kept', 2));
+    const key = 'excavator-field-outbox-v1:' + queueKey;
+    const raw = legacy.getItem(key);
+    const setItem = legacy.setItem;
+    legacy.setItem = (name, value) => {
+        if (name === key && value === '[]') throw new Error('quota cleanup');
+        return setItem(name, value);
+    };
+    const restored = createOutbox({indexedDB, localStorage: legacy, queueKey, send: async () => ({})});
+    assert.equal(await restored.storageKind(), 'indexedDB');
+    assert.deepEqual((await restored.pending()).map(event => event.event_id), ['primary-kept', 'legacy-kept']);
+    assert.equal(legacy.getItem(key), raw);
+});
+
+test('empty fallback delivery queue keeps its confirmed sequence high-water after IndexedDB recovery', async () => {
+    const localStorage = storage();
+    const queueKey = 'archive-sequence';
+    const old = createOutbox({localStorage, queueKey, send: async events => ({results: events.map(accepted)})});
+    await old.queue(loadEvent('old-confirmed', 205));
+    await old.flush();
+    assert.deepEqual(await old.pending(), []);
+    const recovered = createOutbox({indexedDB: fakeIndexedDB(), localStorage, queueKey, send: async () => ({})});
+    assert.equal(await recovered.allocateSequence(0), 206);
+    await recovered.queue(loadEvent('old-cancelled', 207));
+    await recovered.discardUnsent('old-cancelled');
+    assert.equal(await recovered.allocateSequence(0), 208);
+});
+
+test('quota while saving ACK retains the event and automatically permits same-session retry after storage recovers', async () => {
+    const local = storage();
+    const setItem = local.setItem;
+    let quota = false;
+    local.setItem = (key, value) => {
+        if (quota && key.endsWith(':confirmed')) throw new Error('quota ACK');
+        return setItem(key, value);
+    };
+    let callbacks = 0;
+    const box = createOutbox({localStorage: local, queueKey: 'quota-ack',
+        onConfirmed: () => { callbacks += 1; }, send: async events => ({results: events.map(accepted)})});
+    await box.queue(loadEvent('kept-after-ack', 1));
+    quota = true;
+    await assert.rejects(box.flush(), /quota ACK/);
+    assert.equal(callbacks, 0);
+    assert.equal((await box.pending())[0].event_id, 'kept-after-ack');
+    assert.deepEqual(await box.confirmed(), []);
+    quota = false;
+    await box.flush();
+    assert.equal(callbacks, 1);
+    assert.deepEqual(await box.pending(), []);
+    assert.equal((await box.confirmed())[0].event.event_id, 'kept-after-ack');
+});
+
+test('stalled response body releases excavator queue and a late result cannot replace the retry', async () => {
+    let completeBody;
+    let signal;
+    let calls = 0;
+    const box = createOutbox({localStorage: storage(), queueKey: 'deadline-body', requestTimeoutMs: 15,
+        send: (events, request) => {
+            calls += 1;
+            if (calls > 1) return {results: events.map(accepted)};
+            signal = request.signal;
+            return Promise.resolve({json: () => new Promise(resolve => { completeBody = resolve; })})
+                .then(response => response.json());
+        }});
+    await box.queue(loadEvent('body-pending'));
+    await box.flush();
+    assert.equal(signal.aborted, true);
+    assert.equal((await box.pending())[0].sync_state, 'pending');
+    completeBody({results: [{event_id: 'body-pending', status: 'conflict', code: 'stale-result'}]});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal((await box.pending())[0].sync_state, 'pending');
+    await box.retryNow();
+    assert.deepEqual(await box.pending(), []);
+    assert.equal((await box.confirmed()).length, 1);
+});
+
+test('excavator deadline works without AbortController and UI callback promises do not block delivery', async () => {
+    const previous = globalThis.AbortController;
+    globalThis.AbortController = undefined;
+    try {
+        let calls = 0;
+        const box = createOutbox({localStorage: storage(), queueKey: 'deadline-no-abort', requestTimeoutMs: 15, batchSize: 1,
+            onConfirmed: () => new Promise(() => {}),
+            send: events => {
+                calls += 1;
+                return calls === 1 ? new Promise(() => {}) : {results: events.map(accepted)};
+            }});
+        await box.queue(loadEvent('deadline-one', 1));
+        await box.flush();
+        await box.queue(loadEvent('deadline-two', 2));
+        await box.retryNow();
+        assert.equal(calls, 3);
+        assert.equal((await box.confirmed()).length, 2);
+    } finally { globalThis.AbortController = previous; }
+});
+
 test('durable event survives a failed send and a new outbox instance', async () => {
     const local = storage();
     const first = createOutbox({

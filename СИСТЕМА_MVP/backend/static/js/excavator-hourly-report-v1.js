@@ -6,8 +6,12 @@
     var subtitle = null;
     var opener = null;
     var inFlight = null;
+    var activeRequest = null;
+    var REQUEST_TIMEOUT_MS = 8000;
     var requestGeneration = 0;
+    var projectionGeneration = 0;
     var refreshQueued = false;
+    var refreshTimer = 0;
     var hourTimer = 0;
     var historyOwned = false;
     var closing = false;
@@ -23,16 +27,32 @@
     }
 
     function cacheKey() {
-        return "eo-hourly-report-v2:" + currentExcavatorId();
+        var current = shell();
+        var access = current && current.dataset.eoAccessId;
+        return access ? "eo-hourly-report-v3:" + access + ":" + currentExcavatorId()
+            : "eo-hourly-report-v2:" + currentExcavatorId();
     }
 
     function safeCacheRead() {
         try {
             var value = localStorage.getItem(cacheKey());
-            return value ? JSON.parse(value) : null;
+            var payload = value ? JSON.parse(value) : null;
+            return validPayload(payload) && (!(payload.excavator || {}).id
+                || String(payload.excavator.id) === currentExcavatorId()) ? payload : null;
         } catch (error) {
             return null;
         }
+    }
+
+    function validPayload(payload) {
+        return Boolean(payload && payload.schema_version === 2 && Array.isArray(payload.hours)
+            && payload.hours.length === 2 && payload.hours.every(function (hour, index) {
+                return hour && hour.code === (index === 0 ? "current" : "previous")
+                    && hour.period && typeof hour.period.label === "string"
+                    && Number.isFinite(Date.parse(hour.period.start || ""))
+                    && hour.totals && Array.isArray(hour.rows)
+                    && hour.rows.every(function (row) { return row && typeof row === "object"; });
+            }));
     }
 
     function safeCacheWrite(payload) {
@@ -81,7 +101,9 @@
         var showNhl = nhlTotal > 0;
         var classifiedTotal = Number(hour.totals && hour.totals.trip_count) || 0;
         var unknownTotal = Number(hour.unclassified_trip_count) || 0;
-        var accentClass = hour.code === "current" ? "is-current-hour" : "is-previous-hour";
+        var isShift = hour.code === "shift";
+        var displayTotal = isShift ? Number(hour.source_trip_count || 0) : classifiedTotal;
+        var accentClass = hour.code === "current" ? "is-current-hour" : (isShift ? "is-shift-report" : "is-previous-hour");
         var block = element("section", "eo-hourly-report__hour " + accentClass);
         if (!showNhl) block.classList.add("is-no-nhl");
         block.setAttribute("aria-label", hour.title + " " + period.label);
@@ -96,7 +118,7 @@
         heading.appendChild(element(
             "span",
             "eo-hourly-report__hour-total",
-            classifiedTotal + " " + tripWord(classifiedTotal)
+            displayTotal + " " + tripWord(displayTotal)
         ));
         block.appendChild(heading);
 
@@ -104,7 +126,7 @@
             block.appendChild(element(
                 "p",
                 "eo-hourly-report__hour-empty",
-                "За этот час рейсов нет"
+                isShift ? "За эту смену рейсов нет" : "За этот час рейсов нет"
             ));
         } else if (!rows.length) {
             block.appendChild(element(
@@ -153,8 +175,14 @@
             block.appendChild(element(
                 "p",
                 "eo-hourly-report__unknown",
-                unknownTotal + " " + tripWord(unknownTotal) + " требуют уточнения типа самосвала"
+                unknownTotal + " " + tripWord(unknownTotal)
+                    + (tripWord(unknownTotal) === "рейс" ? " требует" : " требуют") + " уточнения типа самосвала"
             ));
+        }
+        if (isShift) {
+            block.appendChild(element("p", "eo-hourly-report__note", "Погрузки этой смены, сохранённые на этом телефоне."));
+            if (hour.cancelled_trip_count) block.appendChild(element("p", "eo-hourly-report__note",
+                "Отменено: " + hour.cancelled_trip_count + ". В итог не включены."));
         }
         return block;
     }
@@ -170,6 +198,16 @@
             content.appendChild(element("p", "eo-hourly-report__offline", "Нет связи · " + cachedAt.toLowerCase()));
         }
 
+        if (payload.local_projection && payload.local_shift_report) {
+            var shiftReport = payload.local_shift_report;
+            var renderedShiftId = Number((shell() && shell().dataset.eoServerRenderedShiftId) || 0);
+            // Do not show the previous locally closed shift as the total for a
+            // newer shift opened through the server on this equipment.
+            if (!(shiftReport.status === "closed" && renderedShiftId
+                && renderedShiftId !== Number(shiftReport.server_shift_id || 0))) {
+                content.appendChild(renderHourBlock(shiftReport));
+            }
+        }
         payload.hours.forEach(function (hour) {
             content.appendChild(renderHourBlock(hour));
         });
@@ -180,14 +218,37 @@
         freshness.dateTime = payload.generated_at || "";
         meta.appendChild(freshness);
         content.appendChild(meta);
-        if (offline) {
-            content.appendChild(element(
-                "p",
-                "eo-hourly-report__note",
-                "Локально сохранённые, но ещё не синхронизированные погрузки появятся после подтверждения сервера."
-            ));
+        if (payload.local_projection) {
+            content.appendChild(element("p", "eo-hourly-report__note",
+                payload.local_projection.includes_server_snapshot
+                    ? "Включены погрузки, сохранённые на этом телефоне."
+                    : "Показаны погрузки, сохранённые на этом телефоне."));
+        } else if (offline) {
+            content.appendChild(element("p", "eo-hourly-report__note",
+                "Показан последний сохранённый серверный отчёт."));
         }
         scheduleHourRefresh(payload);
+    }
+
+    function renderWithLocal(payload, offline) {
+        var generation = ++projectionGeneration;
+        var equipmentId = currentExcavatorId();
+        var key = cacheKey();
+        var controller = window.eoExcavatorAutonomousShift;
+        if (payload) renderPayload(payload, offline);
+        if (!controller || !controller.ledger) return Promise.resolve(Boolean(payload));
+        return controller.ledger.ready().then(function () {
+            var shift = controller.ledger.currentShift();
+            if (!shift || String(shift.equipment_id) !== equipmentId) return null;
+            return controller.ledger.hourlyReport(payload, Date.now());
+        }).then(function (projected) {
+            if (generation !== projectionGeneration || modal.hidden || key !== cacheKey()
+                || controller !== window.eoExcavatorAutonomousShift) return true;
+            if (!projected) return Boolean(payload);
+            renderPayload(projected, offline);
+            modal.dataset.eoHourlyState = offline ? "offline" : "ready";
+            return true;
+        }).catch(function () { return Boolean(payload); });
     }
 
     function scheduleHourRefresh(payload) {
@@ -207,66 +268,96 @@
 
     function requestReport() {
         if (!modal || modal.hidden) return Promise.resolve(false);
+        renderWithLocal(safeCacheRead(), navigator.onLine === false);
         if (inFlight) {
             refreshQueued = true;
             return inFlight;
         }
+        window.clearTimeout(refreshTimer);
+        refreshTimer = 0;
         var url = modal.dataset.eoHourlyReportUrl;
         if (!url) {
             renderState("Почасовой отчёт временно недоступен");
             return Promise.resolve(false);
         }
         var generation = ++requestGeneration;
+        var requestCacheKey = cacheKey();
+        var requestEquipmentId = currentExcavatorId();
         var controller = typeof AbortController === "function" ? new AbortController() : null;
+        var request = {timer: 0, cancel: null};
+        var retryDelay = 250;
+        activeRequest = request;
         modal._eoHourlyAbortController = controller;
         modal.dataset.eoHourlyLoading = "true";
-        inFlight = fetch(url, {
+        var deadline = new Promise(function (resolve, reject) {
+            request.cancel = function () {
+                var error = new Error("Обновление отчёта задерживается. Повторяем автоматически.");
+                error.name = "TimeoutError";
+                reject(error);
+                if (controller) controller.abort();
+            };
+            request.timer = window.setTimeout(request.cancel, REQUEST_TIMEOUT_MS);
+        });
+        var responseWork = Promise.resolve().then(function () { return fetch(url, {
             method: "GET",
             credentials: "same-origin",
             cache: "no-store",
             headers: {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json"},
             signal: controller ? controller.signal : undefined
-        }).then(function (response) {
+        }); }).then(function (response) {
             return response.json().catch(function () { return {}; }).then(function (payload) {
                 if (!response.ok || !payload.ok) {
                     var error = new Error(payload.error || "Не удалось загрузить отчёт");
                     error.status = response.status;
                     throw error;
                 }
+                if (!validPayload(payload)) {
+                    throw new Error("Получена несовместимая версия почасового отчёта");
+                }
                 return payload;
             });
-        }).then(function (payload) {
-            if (generation !== requestGeneration || modal.hidden) return false;
+        });
+        inFlight = Promise.race([responseWork, deadline]).then(function (payload) {
+            if (generation !== requestGeneration || modal.hidden || requestCacheKey !== cacheKey()) return false;
+            if ((payload.excavator || {}).id && String(payload.excavator.id) !== requestEquipmentId) {
+                throw new Error("Получен отчёт другой техники");
+            }
             if (payload.schema_version !== 2 || !Array.isArray(payload.hours)) {
                 throw new Error("Получена несовместимая версия почасового отчёта");
             }
             safeCacheWrite(payload);
-            renderPayload(payload, false);
+            renderWithLocal(payload, false);
             modal.dataset.eoHourlyState = "ready";
             return true;
         }).catch(function (error) {
             if (error && error.name === "AbortError") return false;
             if (generation !== requestGeneration || modal.hidden) return false;
-            var cached = safeCacheRead();
-            if (cached) {
-                renderPayload(cached, true);
-                modal.dataset.eoHourlyState = "offline";
-            } else {
-                renderState(navigator.onLine === false
-                    ? "Нет связи. Сохранённого отчёта пока нет."
-                    : (error.message || "Почасовой отчёт временно недоступен"));
-                modal.dataset.eoHourlyState = "error";
+            if (error && error.name === "TimeoutError" && !refreshQueued) {
+                refreshQueued = true;
+                retryDelay = 15000;
             }
+            var cached = safeCacheRead();
+            renderWithLocal(cached, true).then(function (rendered) {
+                if (generation !== requestGeneration || modal.hidden) return;
+                if (rendered) modal.dataset.eoHourlyState = "offline";
+                else {
+                    renderState(navigator.onLine === false
+                        ? "Нет связи. Сохранённых погрузок пока нет."
+                        : (error.message || "Почасовой отчёт временно недоступен"));
+                    modal.dataset.eoHourlyState = "error";
+                }
+            });
             return false;
         }).finally(function () {
-            if (generation === requestGeneration) {
-                modal.dataset.eoHourlyLoading = "false";
-                modal._eoHourlyAbortController = null;
-            }
+            window.clearTimeout(request.timer);
+            if (activeRequest !== request) return;
+            modal.dataset.eoHourlyLoading = "false";
+            modal._eoHourlyAbortController = null;
+            activeRequest = null;
             inFlight = null;
             if (refreshQueued && modal && !modal.hidden) {
                 refreshQueued = false;
-                window.setTimeout(requestReport, 250);
+                refreshTimer = window.setTimeout(requestReport, retryDelay);
             }
         });
         return inFlight;
@@ -291,23 +382,39 @@
         }
     }
 
+    function onLocalUpdate() {
+        if (modal && !modal.hidden) renderWithLocal(safeCacheRead(), navigator.onLine === false);
+    }
+
     function bindOpenLifecycle() {
         window.addEventListener("online", onLiveUpdate);
         window.addEventListener("native-connectivity-resume", onLiveUpdate);
         window.addEventListener("operational-state-refresh-applied", onLiveUpdate);
+        window.addEventListener("excavator-local-shift-changed", onLocalUpdate);
     }
 
     function unbindOpenLifecycle() {
         window.removeEventListener("online", onLiveUpdate);
         window.removeEventListener("native-connectivity-resume", onLiveUpdate);
         window.removeEventListener("operational-state-refresh-applied", onLiveUpdate);
+        window.removeEventListener("excavator-local-shift-changed", onLocalUpdate);
     }
 
     function finishClose() {
         if (!modal || modal.hidden) return;
         requestGeneration += 1;
+        projectionGeneration += 1;
         refreshQueued = false;
-        if (modal._eoHourlyAbortController) modal._eoHourlyAbortController.abort();
+        window.clearTimeout(refreshTimer);
+        refreshTimer = 0;
+        if (activeRequest) {
+            window.clearTimeout(activeRequest.timer);
+            activeRequest.cancel();
+        }
+        activeRequest = null;
+        inFlight = null;
+        modal._eoHourlyAbortController = null;
+        modal.dataset.eoHourlyLoading = "false";
         window.clearTimeout(hourTimer);
         hourTimer = 0;
         modal.hidden = true;
@@ -345,7 +452,7 @@
         setUnderlyingBlocked(true);
         bindOpenLifecycle();
         var cached = safeCacheRead();
-        if (cached) renderPayload(cached, navigator.onLine === false);
+        if (cached) renderWithLocal(cached, navigator.onLine === false);
         else renderState("Загружаем рейсы…");
         if (!(history.state && history.state[OPEN_STATE_KEY])) {
             var state = Object.assign({}, history.state || {});

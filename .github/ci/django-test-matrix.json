@@ -2,32 +2,49 @@
   "sqlite": [
     {
       "name": "users",
-      "apps": ["users"],
+      "apps": [
+        "users"
+      ],
       "tests": "users"
     },
     {
       "name": "field-core",
-      "apps": ["core", "trips", "downtimes"],
+      "apps": [
+        "core",
+        "trips",
+        "downtimes"
+      ],
       "tests": "core trips downtimes"
     },
     {
       "name": "planning",
-      "apps": ["shifts", "assignments", "references"],
+      "apps": [
+        "shifts",
+        "assignments",
+        "references"
+      ],
       "tests": "shifts assignments references"
     },
     {
       "name": "reports-and-portal",
-      "apps": ["reports", "portal"],
+      "apps": [
+        "reports",
+        "portal"
+      ],
       "tests": "reports portal"
     },
     {
       "name": "rotations",
-      "apps": ["rotations"],
+      "apps": [
+        "rotations"
+      ],
       "tests": "rotations"
     },
     {
       "name": "settlement-core",
-      "apps": ["settlement"],
+      "apps": [
+        "settlement"
+      ],
       "tests": "settlement.tests"
     },
     {
@@ -56,6 +73,10 @@
     {
       "name": "migration-portability",
       "tests": "settlement.tests.EmployeeBedOccupancyCanonicalIntervalMigrationTests settlement.tests.ResidentSubjectTransitionMigrationTests settlement.tests.M5ShiftSourceMigrationTests"
+    },
+    {
+      "name": "mechanics-concurrency",
+      "tests": "trips.test_dispatcher_topology_commands.DispatcherAssignTruckAtomicityTests trips.test_dispatcher_topology_commands.DispatcherAssignTruckPostgreSQLConcurrencyTests core.test_historical_boundaries.HistoricalCarryoverPostgresTests core.test_offline_durable_replay.OfflineDurableReplayPostgresTests core.test_notification_outbox.NotificationOutboxPostgresTests core.test_historical_boundaries.HistoricalBoundariesTests core.test_excavator_offline_opening.ExcavatorOfflineOpeningTests core.test_excavator_offline_work_context.ExcavatorOfflineWorkContextTests core.test_excavator_offline_close_confirmation.ExcavatorOfflineCloseConfirmationTests core.test_excavator_long_shift_close.ExcavatorLongShiftCloseTests core.test_excavator_shift_archive.ExcavatorShiftArchiveTests core.test_driver_shift_archive.DriverShiftArchiveTests core.test_driver_long_shift_close.DriverLongShiftCloseTests assignments.test_command_context.BoundCommandContextTests assignments.test_command_context.BoundCommandContextPostgreSQLTests assignments.test_command_receipts.CommandReceiptTests assignments.test_command_deadlines.CommandDeadlineTests assignments.test_command_deadlines.CommandDeadlinePostgreSQLTests assignments.test_command_dependencies.CommandDependencyTests assignments.test_command_dependencies.CommandDependencyPostgreSQLTests assignments.test_mass_command_dependencies.MassCommandDependencyTests assignments.test_mass_command_dependencies.MassCommandDependencyPostgreSQLTests assignments.test_bulk_command_successors.BulkCommandSuccessorTests assignments.test_bulk_command_successors.BulkCommandSuccessorPostgreSQLTests assignments.test_command_conflicts.CommandConflictTests assignments.test_command_conflicts.CommandConflictPostgreSQLTests"
     }
   ]
 }

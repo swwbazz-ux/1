@@ -436,3 +436,17 @@ test("Starting a hold releases an active editor before the timer runs", () => {
     assert.equal(button.classList.contains("is-holding"), true);
     assert.equal(runtime.pendingTimers(), 1);
 });
+
+test("Hold reset reads the current shift action label after a local transition", () => {
+    const button = new FakeElement({textContent: "Начать смену"});
+    const runtime = createRuntime();
+    let opened = false;
+    const hold = runtime.window.MobileShiftHold.bind(button, {
+        readyLabel: () => opened ? "Закрыть смену" : "Начать смену",
+    });
+    hold.reset();
+    assert.equal(button.textContent, "Начать смену");
+    opened = true;
+    hold.reset();
+    assert.equal(button.textContent, "Закрыть смену");
+});

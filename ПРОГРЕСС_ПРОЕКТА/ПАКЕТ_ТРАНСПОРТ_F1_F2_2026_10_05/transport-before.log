@@ -1,0 +1,270 @@
+✖ сохраняет production-ключ и исходные legacy v1/v2 без опасного автоповтора (4.001534ms)
+✖ сетевой сбой ставит JSON-команду в совместимую очередь (2.29875ms)
+✖ запрос без optimistic UI сохраняется до сети и возвращает исходную ошибку (1.547419ms)
+✖ серверная ошибка не маскируется успехом и сохраняет команду для восстановления (1.255059ms)
+✔ flush отправляет старую запись с CSRF и удаляет её только после успеха (10.219234ms)
+✔ неактивная роль не отправляет и не изменяет сохранённую очередь (1.217643ms)
+✔ диагностика связи остаётся частью transport API (0.832203ms)
+✖ первая отправка происходит после надёжной записи; ACK оставляет исходную команду в журнале (1.417614ms)
+✖ quota не подтверждает несохранённую команду и не отправляет её в сеть (1.233437ms)
+✖ HTTP 409 сохраняет исходник и освобождает отправителя (4.365551ms)
+✖ HTTP 503 сохраняет исходник и освобождает отправителя (1.699929ms)
+✖ разные команды одного самосвала не объединяются, payload изолирован от дальнейших UI-правок (1.083251ms)
+✖ повтор с тем же ID и другим содержимым не переписывает исходник (0.995238ms)
+✖ сбой mirror очереди не теряет уже записанный журнал при перезапуске (0.998503ms)
+✖ неверный JSON ответа 2xx не удаляет команду (2.850351ms)
+✖ deadline тела без AbortController освобождает очередь; поздний ACK не завершает другую попытку (1.774891ms)
+✖ команда сохраняет автора; новый пользователь и legacy без автора не присваивают её (1.490994ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 3
+ℹ fail 14
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 137.7764
+
+✖ failing tests:
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:67:1
+✖ сохраняет production-ключ и исходные legacy v1/v2 без опасного автоповтора (4.001534ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:79:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:85:1
+✖ сетевой сбой ставит JSON-команду в совместимую очередь (2.29875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:101:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:105:1
+✖ запрос без optimistic UI сохраняется до сети и возвращает исходную ошибку (1.547419ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:115:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:118:1
+✖ серверная ошибка не маскируется успехом и сохраняет команду для восстановления (1.255059ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:132:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:198:1
+✖ первая отправка происходит после надёжной записи; ACK оставляет исходную команду в журнале (1.417614ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:206:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:215:1
+✖ quota не подтверждает несохранённую команду и не отправляет её в сеть (1.233437ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:218:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:225:5
+✖ HTTP 409 сохраняет исходник и освобождает отправителя (4.365551ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:231:16)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:225:5
+✖ HTTP 503 сохраняет исходник и освобождает отправителя (1.699929ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:231:16)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:237:1
+✖ разные команды одного самосвала не объединяются, payload изолирован от дальнейших UI-правок (1.083251ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:245:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:250:1
+✖ повтор с тем же ID и другим содержимым не переписывает исходник (0.995238ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  true !== false
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:254:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:258:1
+✖ сбой mirror очереди не теряет уже записанный журнал при перезапуске (0.998503ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:263:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:267:1
+✖ неверный JSON ответа 2xx не удаляет команду (2.850351ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:273:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:276:1
+✖ deadline тела без AbortController освобождает очередь; поздний ACK не завершает другую попытку (1.774891ms)
+  AssertionError [ERR_ASSERTION]: deadline survives headers even without AbortController
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:284:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at static/js/tests/dispatcher-transport-runtime.test.js:295:1
+✖ команда сохраняет автора; новый пользователь и legacy без автора не присваивают её (1.490994ms)
+  TypeError: Cannot read properties of undefined (reading 'author')
+      at TestContext.<anonymous> (/workspace/scratch/d31f8c8018c5/mechanics-transport/СИСТЕМА_MVP/backend/static/js/tests/dispatcher-transport-runtime.test.js:306:42)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

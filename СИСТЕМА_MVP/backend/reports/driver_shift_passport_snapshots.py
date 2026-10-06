@@ -31,7 +31,7 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 DRIVER_SHIFT_PASSPORT_SCHEMA_VERSION = 1
-DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION = 'driver-shift-passport-v2'
+DRIVER_SHIFT_PASSPORT_CALCULATOR_VERSION = 'driver-shift-passport-v3'
 LEGACY_REQUEST_SUPERSEDED_PREFIX = (
     'superseded_legacy_calculator_request:'
 )
@@ -179,6 +179,8 @@ def _trip_manifest_item(trip):
         'truck_model_id': trip.truck.model_id,
         'excavator_operator_id': trip.excavator_operator_id,
         'driver_id': trip.driver_id,
+        'driver_control_shift_id': trip.driver_control_shift_id,
+        'driver_control_shift': _linked_shift_context(trip.driver_control_shift),
         'loading_shift_id': trip.loading_shift_id,
         'loading_shift': _linked_shift_context(trip.loading_shift),
         'unloading_shift_id': trip.unloading_shift_id,
@@ -201,6 +203,7 @@ def _trip_manifest_item(trip):
         'transport_distance_km': trip.transport_distance_km,
         'status': trip.status,
         'created_at': trip.created_at,
+        'loaded_at': trip.loaded_at,
         'completed_at': trip.completed_at,
         'cancelled_at': trip.cancelled_at,
         'is_carryover': trip.is_carryover,
@@ -310,6 +313,7 @@ def _trip_records_for_manifest(shift):
         .filter(
             Q(truck_id=shift.equipment_id)
             | Q(unloading_shift_id=shift.pk)
+            | Q(is_carryover=True, driver_control_shift_id=shift.pk)
         )
         .filter(
             Q(
@@ -325,6 +329,7 @@ def _trip_records_for_manifest(shift):
                 cancelled_at__lte=window_end,
             )
             | Q(unloading_shift_id=shift.pk)
+            | Q(is_carryover=True, driver_control_shift_id=shift.pk)
             | Q(
                 created_at__lt=window_end,
                 completed_at__isnull=True,
@@ -360,6 +365,7 @@ def _trip_records_for_manifest(shift):
             'actual_dump_point',
             'loading_shift',
             'unloading_shift',
+            'driver_control_shift',
         )
         .order_by('created_at', 'id')
     )

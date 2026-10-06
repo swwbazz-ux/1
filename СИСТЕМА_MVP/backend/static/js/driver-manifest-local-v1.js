@@ -6,8 +6,8 @@
    после перезапуска без сети показывала то, что было в закэшированной
    странице. Теперь телефон ведёт свой журнал смены: каждое действие из
    очереди отправки (driver-offline-outbox-v2.js) записывается сюда в момент
-   нажатия и хранится в localStorage, пока смена не закрыта больше 7 дней
-   назад. Подтверждение сервера добавляет к записи серверные ID, отказ —
+   нажатия. Полный исходный журнал хранит outbox, localStorage здесь —
+   восстанавливаемая проекция. Подтверждение сервера добавляет серверные ID, отказ —
    пометку «не принято сервером» (такие строки не удаляются сами).
 
    Показ — сведение журнала с данными сервера (driver-manifest-data во
@@ -59,7 +59,9 @@
         return "l:" + raw;
     }
     function eventShiftAliases(event) {
-        return [shiftAlias(event && event.shift_id), shiftAlias(event && event.local_shift_id)].filter(Boolean);
+        var result = event && event.server_result;
+        return [shiftAlias(event && event.shift_id), shiftAlias(event && event.local_shift_id),
+            shiftAlias(result && result.server_ids && result.server_ids.shift_id)].filter(Boolean);
     }
 
     /* ---- Журнал ---- */
@@ -68,11 +70,11 @@
 
     function readJournal(storage, accessId) {
         if (!storage || !accessId) return emptyJournal();
-        try {
-            var value = JSON.parse(storage.getItem(KEY_PREFIX + accessId) || "null");
-            if (value && Array.isArray(value.shifts)) return value;
-        } catch (error) {}
-        return emptyJournal();
+        var raw = storage.getItem(KEY_PREFIX + accessId);
+        if (!raw) return emptyJournal();
+        var value = JSON.parse(raw);
+        if (!value || !Array.isArray(value.shifts)) throw new Error("driver_manifest_store_corrupt");
+        return value;
     }
 
     function shiftActivity(shift) {
@@ -82,6 +84,9 @@
     function prune(journal, now, keepAliases) {
         journal.shifts = journal.shifts.filter(function (shift) {
             if (keepAliases && shift.aliases.some(function (alias) { return keepAliases.indexOf(alias) >= 0; })) return true;
+            // Полнота серверного покрытия исходных событий пока не доказана.
+            // Даже confirmed и закрытая смена не разрешают удалить её журнал.
+            if (!shift.closed_at || (shift.log && shift.log.length)) return true;
             return now - shiftActivity(shift) <= RETENTION_MS;
         });
         return journal;
@@ -94,17 +99,7 @@
             storage.setItem(KEY_PREFIX + accessId, payload);
             return true;
         } catch (error) {
-            /* Места нет: убираем самые старые смены, пока запись не пройдёт.
-               Текущую смену (последнюю по активности) не трогаем никогда. */
-            var ordered = journal.shifts.slice().sort(function (a, b) { return shiftActivity(a) - shiftActivity(b); });
-            while (ordered.length > 1) {
-                var oldest = ordered.shift();
-                journal.shifts = journal.shifts.filter(function (shift) { return shift !== oldest; });
-                try {
-                    storage.setItem(KEY_PREFIX + accessId, JSON.stringify(journal));
-                    return true;
-                } catch (retryError) {}
-            }
+            // Quota не даёт права стирать старые неподтверждённые факты.
             return false;
         }
     }
@@ -162,6 +157,7 @@
     function statusOf(event) {
         var state = text(event && event.state);
         if (state === "confirmed") return "confirmed";
+        if (state === "cancelled_locally") return "cancelled_locally";
         if (REJECTED_STATES[state]) return "rejected";
         return "pending";
     }
@@ -188,6 +184,8 @@
     function logEntry(event, reasonLabel) {
         var payload = event.payload || {};
         var snapshot = event.context_snapshot || {};
+        var result = event.state === "confirmed" && event.server_result || {};
+        var serverIds = result.server_ids || {};
         var entry = {
             event_id: text(event.event_id),
             event_type: text(event.event_type),
@@ -206,12 +204,21 @@
             reason_label: text(reasonLabel),
             status: statusOf(event)
         };
+        if (positive(serverIds.trip_id)) entry.server_trip_id = positive(serverIds.trip_id);
+        if (positive(serverIds.downtime_event_id || serverIds.downtime_id)) {
+            entry.server_downtime_id = positive(serverIds.downtime_event_id || serverIds.downtime_id);
+        }
+        if (result.device_clock_adjusted && result.effective_occurred_at) {
+            entry.clock_adjusted = true;
+            entry.effective_at = text(result.effective_occurred_at);
+        }
         if (entry.status === "rejected") {
             entry.reject = {
                 code: text(event.last_error && event.last_error.code),
                 message: text(event.last_error && event.last_error.message)
             };
         }
+        if (entry.status === "confirmed") entry.reject = null;
         return entry;
     }
 
@@ -728,6 +735,44 @@
         var storageOverride = options.storage;
         var nowFn = typeof options.now === "function" ? options.now : function () { return Date.now(); };
         var runningTimer = null;
+        // При quota проекция остаётся видимой в этой сессии и восстанавливается
+        // после restart из долговечного журнала outbox, включая сохранённые ACK.
+        var unsaved = Object.create(null);
+        var protectedCorrupt = Object.create(null);
+
+        function loadForMutation(store, accessId) {
+            if (unsaved[accessId]) return unsaved[accessId];
+            try { return readJournal(store, accessId); }
+            catch (error) {
+                // Это восстанавливаемая проекция. Исходный outbox отдельно;
+                // повреждённый raw защищаем резервом до любой замены ключа.
+                protectedCorrupt[accessId] = true;
+                unsaved[accessId] = emptyJournal();
+                return unsaved[accessId];
+            }
+        }
+
+        function backupCorrupt(store, accessId, journal) {
+            if (!protectedCorrupt[accessId]) return true;
+            if (!store) return false;
+            var key = KEY_PREFIX + accessId;
+            try {
+                var raw = store.getItem(key);
+                var base = key + ":corrupt-backup";
+                var backupKey = base;
+                var suffix = 0;
+                var previous = store.getItem(backupKey);
+                while (previous != null && previous !== raw) {
+                    suffix += 1;
+                    backupKey = base + ":" + suffix;
+                    previous = store.getItem(backupKey);
+                }
+                if (raw != null && previous !== raw) store.setItem(backupKey, raw);
+                journal.recovery = {backup_key: raw == null ? null : backupKey, source: "available_local_events"};
+                delete protectedCorrupt[accessId];
+                return true;
+            } catch (error) { return false; }
+        }
 
         function storage() {
             if (storageOverride) return storageOverride;
@@ -749,10 +794,16 @@
         function mutate(accessId, change) {
             if (!accessId) return false;
             var store = storage();
-            var journal = readJournal(store, accessId);
+            var journal = loadForMutation(store, accessId);
             var changed = change(journal);
-            if (changed) writeJournal(store, accessId, prune(journal, nowFn(), changed === true ? null : changed), nowFn());
-            return !!changed;
+            if (!changed && !unsaved[accessId]) return false;
+            if (!backupCorrupt(store, accessId, journal)) {
+                unsaved[accessId] = journal;
+                return false;
+            }
+            var saved = writeJournal(store, accessId, prune(journal, nowFn(), changed === true ? null : changed), nowFn());
+            if (saved) delete unsaved[accessId]; else unsaved[accessId] = journal;
+            return saved;
         }
 
         function recordEvents(accessId, events, shell) {
@@ -776,6 +827,8 @@
                         changed = true;
                     }
                     var entry = logEntry(event, reasonLabel);
+                    if (entry.clock_adjusted && type === "driver.shift.opened") shift.opened_at = entry.effective_at;
+                    if (entry.clock_adjusted && type === "driver.shift.closed") shift.closed_at = entry.effective_at;
                     if (!reasonLabel) delete entry.reason_label;
                     if (upsertLog(shift, entry)) {
                         shift.updated_at = new Date(nowFn()).toISOString();
@@ -789,14 +842,15 @@
         function observe(events) {
             var shell = currentShell();
             var accessId = accessOf(shell) || text(events && events[0] && events[0].access_id);
-            recordEvents(accessId, events, shell);
+            var saved = recordEvents(accessId, events, shell);
             if (shell) render(shell);
+            return saved;
         }
 
         function confirmed(event, result) {
             if (!event) return false;
             var shell = currentShell();
-            var accessId = accessOf(shell) || text(event.access_id);
+            var accessId = text(event.access_id) || accessOf(shell);
             var serverIds = result && result.server_ids || {};
             var changed = mutate(accessId, function (journal) {
                 var aliases = eventShiftAliases(event);
@@ -827,7 +881,7 @@
         function review(event, result) {
             if (!event) return false;
             var shell = currentShell();
-            var accessId = accessOf(shell) || text(event.access_id);
+            var accessId = text(event.access_id) || accessOf(shell);
             var status = text(result && result.status) || "conflict";
             var changed = mutate(accessId, function (journal) {
                 var shift = ensureShift(journal, eventShiftAliases(event), nowFn());
@@ -1024,7 +1078,8 @@
             review: review,
             render: render,
             model: model,
-            journal: function (accessId) { return readJournal(storage(), accessId); }
+            journal: function (accessId) { return unsaved[accessId] || readJournal(storage(), accessId); },
+            storageFailed: function (accessId) { return !!unsaved[accessId]; }
         };
     }
 

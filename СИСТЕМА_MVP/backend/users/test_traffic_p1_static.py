@@ -86,10 +86,22 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     script,
                 )
                 self.assertIn('async function cacheFirstReleaseStatic(request)', script)
-                self.assertIn(
-                    'isReleaseStaticRequest(url) ? cacheFirstReleaseStatic(request)',
-                    script,
+                board_worker = role_code in {'mining_master', 'dispatcher'}
+                cache_first = (
+                    'boardCacheFirstReleaseStatic(request, event)'
+                    if board_worker else 'cacheFirstReleaseStatic(request)'
                 )
+                self.assertIn(f'isReleaseStaticRequest(url) ? {cache_first}', script)
+                self.assertEqual('function boardDeadline(' in script, board_worker)
+                if board_worker:
+                    from .role_apps import BOARD_SERVICE_WORKER_JS
+                    self.assertIn(BOARD_SERVICE_WORKER_JS, script)
+                    self.assertIn('return boardNetworkFirst(request, fallbackUrl, event);', script)
+                    self.assertIn('return boardNetworkOnly(request);', script)
+                    self.assertEqual(script.count('self.addEventListener("install"'), 1)
+                    self.assertIn('event.waitUntil(boardInstall()', script)
+                    self.assertIn('CORE_ASSETS.concat(releaseAssets, dependencies)', script)
+                    self.assertNotIn('Promise.allSettled', script)
                 core_assets = re.search(
                     r'const CORE_ASSETS = (\[[\s\S]*?\]);',
                     script,
@@ -126,6 +138,8 @@ class StableStaticReleaseTrafficRegressionTests(SimpleTestCase):
                     self.assertIn('/static/js/dispatcher-realtime-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-sounds-v1.js', core_assets.group(1))
                     self.assertIn('/static/js/dispatcher-canvas-v1.js', core_assets.group(1))
+                elif role_code == 'mining_master':
+                    self.assertNotIn('"/static/js/realtime-client.js"', core_assets.group(1))
                 else:
                     self.assertEqual(
                         script.count('self.addEventListener("install"'),
