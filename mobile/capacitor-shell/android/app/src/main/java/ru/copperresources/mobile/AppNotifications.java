@@ -17,6 +17,12 @@ public final class AppNotifications {
 
     private AppNotifications() {}
 
+    private static Intent launchIntent(Context context) {
+        Intent intent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+        return (intent == null ? new Intent(context, MainActivity.class) : intent)
+            .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    }
+
     public static void createChannels(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
@@ -51,8 +57,7 @@ public final class AppNotifications {
     }
 
     public static Notification foregroundNotification(Context context, String statusText) {
-        Intent openIntent = new Intent(context, MainActivity.class)
-            .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent openIntent = launchIntent(context);
         PendingIntent openPendingIntent = PendingIntent.getActivity(
             context,
             0,
@@ -96,8 +101,7 @@ public final class AppNotifications {
         if (!alertsEnabled(context)) {
             return false;
         }
-        Intent openIntent = new Intent(context, MainActivity.class)
-            .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent openIntent = launchIntent(context);
         PendingIntent openPendingIntent = PendingIntent.getActivity(
             context,
             2,

@@ -135,6 +135,7 @@ public class MainActivity extends BridgeActivity {
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)
             );
             startupLoadingOverlay = StartupLoadingOverlay.attach(this, webView);
+            startupLoadingOverlay.setStandaloneReadinessProvider(this::standaloneStartupReadiness);
             startupLoadingOverlay.setPageRevealedListener(
                 () -> notifyWebViewPageRevealed(webView)
             );
@@ -163,8 +164,18 @@ public class MainActivity extends BridgeActivity {
             }
         }
         nativeCoverReady = true;
-        AppNotifications.createChannels(this);
-        requestNotificationPermissionThenBatteryExemption();
+        if (usesBackgroundConnectionService()) {
+            AppNotifications.createChannels(this);
+            requestNotificationPermissionThenBatteryExemption();
+        }
+    }
+
+    /** Opt-in recognition for a profile's authenticated standalone application shell. */
+    protected String standaloneStartupReadiness(String pageUrl) { return ""; }
+
+    /** Dedicated foreground-only workplaces can opt out without changing field profiles. */
+    protected boolean usesBackgroundConnectionService() {
+        return true;
     }
 
     private void configureProfileWebViewTextZoom(WebView webView) {
@@ -250,7 +261,9 @@ public class MainActivity extends BridgeActivity {
         AppVisibility.setForeground(true);
         // Activity могла пережить перезапуск сервиса производителем Android.
         // Повторный start безопасен и возвращает heartbeat в рабочее состояние.
-        ConnectivityForegroundService.reconcileFromForeground(this);
+        if (usesBackgroundConnectionService()) {
+            ConnectivityForegroundService.reconcileFromForeground(this);
+        }
     }
 
     @Override

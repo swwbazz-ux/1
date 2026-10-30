@@ -38,8 +38,10 @@ final class StartupLoadingOverlay {
     private static final long FADE_DURATION_MS = 160L;
     private static final long STARTUP_WATCHDOG_MS = 15_000L;
     private static final long STARTUP_WATCHDOG_RETRY_MS = 3_000L;
+    private static final String STANDALONE_READINESS_EXTENSION = "__COPPER_STANDALONE_READINESS_EXTENSION__";
     private static final String APPLICATION_DOCUMENT_PROBE =
-        "(function(){return !!(document.body&&document.body.hasAttribute('data-app-contract-ready'));})()";
+        "(function(){return !!(document.body&&document.body.hasAttribute('data-app-contract-ready'))"
+            + STANDALONE_READINESS_EXTENSION + ";})()";
 
     private static final String PREPARE_LAYOUT =
         "(function(){" +
@@ -60,7 +62,8 @@ final class StartupLoadingOverlay {
             "var viewport=window.visualViewport;" +
             "var root=document.documentElement;" +
             "var body=document.body;" +
-            "var applicationDocument=!!(body&&body.hasAttribute('data-app-contract-ready'));" +
+            "var applicationDocument=!!(body&&body.hasAttribute('data-app-contract-ready'))"
+                + STANDALONE_READINESS_EXTENSION + ";" +
             "var driverShell=document.querySelector('[data-driver-shell]');" +
             "var excavatorShell=document.querySelector('[data-eo-shell]');" +
             "var roleShell=driverShell||excavatorShell||document.querySelector('main')||body;" +
@@ -175,6 +178,19 @@ final class StartupLoadingOverlay {
     private boolean savedWebViewFocusable;
     private boolean savedWebViewFocusableInTouchMode;
     private Runnable pageRevealedListener;
+    interface StandaloneReadinessProvider { String expressionFor(String pageUrl); }
+    private StandaloneReadinessProvider standaloneReadinessProvider;
+
+    void setStandaloneReadinessProvider(StandaloneReadinessProvider provider) {
+        standaloneReadinessProvider = provider;
+    }
+
+    private String standaloneReadinessExtension(WebView observedWebView) {
+        if (standaloneReadinessProvider == null || observedWebView == null) return "";
+        String expression = standaloneReadinessProvider.expressionFor(observedWebView.getUrl());
+        // The default empty extension reproduces the original probes byte for byte.
+        return expression == null || expression.isEmpty() ? "" : "||(" + expression + ")";
+    }
 
     private StartupLoadingOverlay(Activity activity) {
         this.activity = activity;
@@ -366,7 +382,8 @@ final class StartupLoadingOverlay {
         int generation = pageGeneration;
         armRecoveryWatchdog(generation, DiagnosticReason.ERROR);
         try {
-            loadedWebView.evaluateJavascript(APPLICATION_DOCUMENT_PROBE, result -> {
+            loadedWebView.evaluateJavascript(APPLICATION_DOCUMENT_PROBE.replace(STANDALONE_READINESS_EXTENSION,
+                standaloneReadinessExtension(loadedWebView)), result -> {
                 cancelRecoveryWatchdog(generation);
                 if (!isCurrentVisibleGeneration(generation)) {
                     return;
@@ -495,7 +512,8 @@ final class StartupLoadingOverlay {
            outstanding; some WebView builds can omit its callback on navigation. */
         armRecoveryWatchdog(generation, DiagnosticReason.ERROR);
         try {
-            webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+            webView.evaluateJavascript(READINESS_PROBE.replace(STANDALONE_READINESS_EXTENSION,
+                standaloneReadinessExtension(webView)), encodedResult -> {
                 cancelRecoveryWatchdog(generation);
                 if (!isCurrentVisibleGeneration(generation)) {
                     ensureStartupWatchdogArmed(STARTUP_WATCHDOG_RETRY_MS);
@@ -705,7 +723,8 @@ final class StartupLoadingOverlay {
             }
             boolean nativeLayoutReady = sampleNativeLayoutReadiness();
             try {
-                webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+                webView.evaluateJavascript(READINESS_PROBE.replace(STANDALONE_READINESS_EXTENSION,
+                    standaloneReadinessExtension(webView)), encodedResult -> {
                     if (!isCurrentProbe(generation)) {
                         return;
                     }
@@ -738,7 +757,8 @@ final class StartupLoadingOverlay {
                             return;
                         }
                         try {
-                            webView.evaluateJavascript(READINESS_PROBE, encodedResult -> {
+                            webView.evaluateJavascript(READINESS_PROBE.replace(STANDALONE_READINESS_EXTENSION,
+                                standaloneReadinessExtension(webView)), encodedResult -> {
                                 cancelRecoveryWatchdog(generation);
                                 if (!isCurrentProbe(generation)) {
                                     return;
