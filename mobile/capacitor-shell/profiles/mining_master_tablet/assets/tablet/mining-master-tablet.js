@@ -159,9 +159,19 @@
                 return node.getClientRects().length && global.getComputedStyle(node).visibility !== "hidden";
             });
         }
-        function keyboardOpen() {
-            return global.innerWidth === fullWidth && (global.innerHeight < fullHeight - 120 ||
-                global.visualViewport && global.visualViewport.height < global.innerHeight - 120);
+        function keyboardGeometry() {
+            var viewport = global.visualViewport;
+            var visibleBottom = Math.min(global.innerHeight, viewport ? viewport.offsetTop + viewport.height : global.innerHeight);
+            var inset = global.innerWidth === fullWidth ? Math.max(0, fullHeight - visibleBottom) : 0;
+            /* Both viewport signals can shrink for the same IME. Take their
+               shared visible edge once; small system-bar changes stay ignored. */
+            return inset > 120 ? { reserve: inset, toolbar: Math.max(0, global.innerHeight - visibleBottom) } : { reserve: 0, toolbar: 0 };
+        }
+        function keyboardOpen() { return keyboardGeometry().reserve > 0; }
+        function syncKeyboardInsets() {
+            var geometry = keyboardGeometry();
+            setStyle(root, "--cr-panel-keyboard-inset", geometry.reserve + "px");
+            setStyle(root, "--cr-panel-toolbar-inset", geometry.toolbar + "px");
         }
         function blocked() { return doc.hidden || pointers.size > 0 || !!nativeDrag || editing() || dialogOpen() || keyboardOpen(); }
         function scrollRevealed() {
@@ -281,8 +291,8 @@
             if (dead) return;
             keepCanvasMode();
             /* Android's transient system bars and IME change innerHeight during
-               a gesture. At a fixed landscape width keep the largest viewport
-               already seen; shrinking it must not rearrange the working field. */
+               a gesture. Keep the readable canvas scale at a fixed width; the
+               separate keyboard inset reduces only the visible field track. */
             var height = global.innerWidth === fullWidth ? Math.max(fullHeight, global.innerHeight) : global.innerHeight;
             var key = global.innerWidth + "x" + height;
             if (!force && layoutKey === key) { pendingLayout = false; return; }
@@ -302,10 +312,13 @@
             setStyle(root, "--cr-panel-canvas-vw", width / 100 + "px");
             setStyle(root, "--cr-panel-top-edge", "126px");
             setStyle(root, "--cr-mm-canvas-center", height / 2 + "px");
-            setClass(root, "cr-mm-panels", true); setAttribute(root, "data-cr-panels-ready", "true"); scheduleTiles();
+            setClass(root, "cr-mm-panels", true); setAttribute(root, "data-cr-panels-ready", "true"); syncKeyboardInsets(); scheduleTiles();
         }
         function refresh() {
             if (dead) return;
+            /* Input pauses scale/rack work and panel switching, but its visible
+               field must still end above the toolbar while the IME is open. */
+            syncKeyboardInsets();
             setAttribute(root, "data-cr-panel-modal", dialogOpen() ? "true" : "false");
             var paused = blocked(); machine.pause(paused);
             if (!paused) {
@@ -431,7 +444,8 @@
             } else activity(event);
         }, true);
         function resize() { pendingLayout = true; if (frame !== null) return; frame = global.requestAnimationFrame(function () { frame = null; refresh(); }); }
-        listen(global, "resize", resize); if (global.visualViewport) listen(global.visualViewport, "resize", resize);
+        listen(global, "resize", resize);
+        if (global.visualViewport) { listen(global.visualViewport, "resize", resize); listen(global.visualViewport, "scroll", resize); }
         listen(doc, "visibilitychange", function () { if (doc.hidden) { pointers.clear(); gesture = null; pendingReveal = null; finishNativeDrag(); machine.request(null); } refresh(); });
         var observer = new MutationObserver(refresh);
         observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open", "aria-hidden", "class"] });
@@ -479,7 +493,7 @@
                 setClass(root, "cr-mm-panels", false); setAttribute(root, "data-cr-panel-open", null); setAttribute(root, "data-cr-panels-ready", null); setAttribute(root, "data-cr-panel-modal", null);
                 nativeDrag = null; dragEpoch += 1; if (dragStartTimer !== null) global.clearTimeout(dragStartTimer); setAttribute(root, "data-cr-panel-native-drag", null);
                 ["tile-w", "tile-h", "side-w"].forEach(function (suffix) { owner.style.removeProperty("--cr-panel-" + suffix); });
-                ["top-edge", "side-edge", "canvas-w", "canvas-h", "canvas-vw"].forEach(function (suffix) { root.style.removeProperty("--cr-panel-" + suffix); });
+                ["top-edge", "side-edge", "canvas-w", "canvas-h", "canvas-vw", "keyboard-inset", "toolbar-inset"].forEach(function (suffix) { root.style.removeProperty("--cr-panel-" + suffix); });
             }
         };
     }

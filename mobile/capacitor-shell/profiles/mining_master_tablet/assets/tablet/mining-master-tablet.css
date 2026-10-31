@@ -144,7 +144,8 @@ html.cr-mm-panels .dispatcher-board {
 /* The active track survives the closing animation. It is released only when
    the controller marks the old panel closed; another panel opens afterwards. */
 html.cr-mm-panels[data-cr-panel-open="top"] .dispatcher-board { --cr-field-top: calc(126px / var(--cr-mm-scale)); }
-html.cr-mm-panels[data-cr-panel-open="bottom"] .dispatcher-board { --cr-field-bottom: calc(64px / var(--cr-mm-scale)); }
+html.cr-mm-panels[data-cr-panel-open="bottom"] .dispatcher-board { --cr-field-bottom: calc((64px + var(--cr-panel-keyboard-inset, 0px)) / var(--cr-mm-scale)); }
+html.cr-mm-panels #cr-mm-toolbar { bottom: var(--cr-panel-toolbar-inset, 0px); }
 html.cr-mm-panels[data-cr-panel-open="left"] .dispatcher-board { --cr-field-left: var(--cr-panel-side-w, 110px); }
 html.cr-mm-panels[data-cr-panel-open="right"] .dispatcher-board { --cr-field-right: var(--cr-panel-side-w, 110px); }
 html.cr-mm-panels .dispatcher-complexes {
@@ -245,7 +246,7 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
 .cr-mm-panel-handle[data-cr-panel-side="top"]::before, .cr-mm-panel-handle[data-cr-panel-side="bottom"]::before { width: 38px; height: 3px; }
 .cr-mm-panel-handle[data-cr-panel-side="left"]::before, .cr-mm-panel-handle[data-cr-panel-side="right"]::before { height: 38px; width: 3px; }
 html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { top: var(--cr-panel-top-edge); }
-html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 64px; }
+html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: calc(64px + var(--cr-panel-toolbar-inset, 0px)); }
 html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-side-edge); }
 html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-side-edge); }
 .cr-mm-panel-handle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }

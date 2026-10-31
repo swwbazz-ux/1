@@ -17,7 +17,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage({ viewport: { width: 1333, height: 800 }, hasTouch: true });
   page.setDefaultTimeout(5000);
-  const errors = [], requests = [], checks = [];
+  const errors = [], requests = [], checks = [], keyboardCases = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
@@ -74,6 +74,78 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
       card.appendChild(rack);const grid=document.querySelector('.dispatcher-zone-grid');grid.style.gridAutoRows='220px';grid.style.alignContent='start';fixtureBind();
     });await tick(450);
     const geometry = () => page.evaluate(() => [...document.querySelectorAll('.dispatcher-complex-card,.complex-assigned-trucks,.complex-truck-tile')].map(n => { const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height]; }));
+    async function verifyKeyboard(width, fullHeight, imeHeight) {
+      /* The fake clock advances idle/state timers, not compositor animation.
+         Measure the actual final toolbar transform, not its entry frame. */
+      const settleToolbar = () => page.locator('#cr-mm-toolbar').evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {}))));
+      const capture = () => page.evaluate(() => {
+        const rect = selector => document.querySelector(selector).getBoundingClientRect().toJSON();
+        const clipped = [...document.querySelectorAll('.complex-truck-tile:not([hidden])')].filter(tile => {
+          const r = tile.getBoundingClientRect();
+          return ['.dispatcher-complex-card', '.complex-assigned-trucks'].some(selector => {
+            const box = tile.closest(selector).getBoundingClientRect();
+            return r.left < box.left - .1 || r.right > box.right + .1 || r.top < box.top - .1 || r.bottom > box.bottom + .1;
+          });
+        }).map(tile => tile.dataset.equipmentId);
+        return { field: rect('.dispatcher-complexes'), toolbar: rect('#cr-mm-toolbar'), canvas: rect('.dispatcher-canvas'),
+          handle: rect('.cr-mm-panel-handle[data-cr-panel-side="bottom"]'),
+          scale: document.documentElement.style.getPropertyValue('--cr-mm-scale'),
+          focused: document.activeElement === window.imeSearchInput, query: window.imeSearchInput.value, clipped };
+      });
+      const showIme = async mechanism => {
+        if (mechanism === 'innerHeight+visualViewport') await page.setViewportSize({ width, height: imeHeight });
+        else await page.evaluate(height => {
+          Object.defineProperty(visualViewport, 'height', { configurable: true, get: () => height });
+          visualViewport.dispatchEvent(new Event('resize'));
+        }, imeHeight);
+        await tick(350); await settleToolbar();
+      };
+      const hideIme = async mechanism => {
+        if (mechanism === 'innerHeight+visualViewport') await page.setViewportSize({ width, height: fullHeight });
+        else await page.evaluate(() => { delete visualViewport.height; visualViewport.dispatchEvent(new Event('resize')); });
+        await tick(350); await settleToolbar();
+      };
+      for (const mechanism of ['innerHeight+visualViewport', 'visualViewport-only']) {
+        await page.locator('[data-cr-mm-search]').focus();
+        await page.evaluate(() => { window.imeSearchInput = document.querySelector('[data-cr-mm-search]'); });
+        await settleToolbar();
+        const beforeIme = await capture(), beforeGeometry = await geometry();
+        await showIme(mechanism);
+        const shown = await capture();
+        assert.ok(shown.field.bottom <= shown.toolbar.top + .1, JSON.stringify({ width, mechanism, shown }));
+        assert.ok(Math.abs(shown.field.bottom - shown.toolbar.top) < .1, JSON.stringify({ width, mechanism, shown }));
+        assert.ok(Math.abs(shown.toolbar.bottom - imeHeight) < .1);
+        assert.ok(Math.abs(shown.handle.bottom - shown.toolbar.top) < .1);
+        assert.equal(shown.toolbar.height, 64); assert.equal(shown.scale, beforeIme.scale); assert.deepEqual(shown.canvas, beforeIme.canvas);
+        assert.equal(shown.focused, true); assert.equal(shown.query, beforeIme.query); assert.deepEqual(shown.clipped, []);
+        await page.clock.fastForward(12000); assert.equal(await open(), 'bottom'); assert.equal((await capture()).focused, true);
+        await page.evaluate(() => {
+          window.imeMutations = [];
+          window.imeObserver = new MutationObserver(records => imeMutations.push(...records.map(record => record.attributeName || record.type)));
+          imeObserver.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'disabled'] });
+          for (let i = 0; i < 8; i++) CopperMiningMasterTablet.init();
+        }); await tick(300);
+        assert.deepEqual(await page.evaluate(() => { imeObserver.disconnect(); return imeMutations; }), []);
+        await page.screenshot({ path: path.join(output, 'keyboard-' + mechanism + '-' + width + '.png') });
+        await hideIme(mechanism);
+        const restored = await capture();
+        assert.deepEqual(restored.field, beforeIme.field); assert.deepEqual(restored.toolbar, beforeIme.toolbar);
+        assert.deepEqual(await geometry(), beforeGeometry); assert.equal(restored.focused, true); assert.equal(restored.query, beforeIme.query);
+        checks.push(width + ': ' + mechanism + ' reserves the visible field, keeps tiles/focus/scale, pauses 12s, restores and stays mutation-quiet');
+
+        await showIme(mechanism);
+        await handle('bottom').click(); await tick(250);
+        assert.equal((await capture()).focused, false); assert.equal(await open(), 'bottom');
+        assert.equal((await capture()).query, beforeIme.query);
+        await hideIme(mechanism);
+        assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0);
+        assert.equal((await capture()).query, beforeIme.query);
+        assert.ok(Math.abs((await capture()).field.bottom - fullHeight) < .1);
+        checks.push(width + ': explicit close finishes ' + mechanism + ' input, waits for IME exit and keeps the query');
+        keyboardCases.push({ width, mechanism, before: beforeIme, shown, restored });
+        await handle('bottom').click(); await tick(250); await page.locator('[data-cr-mm-search]').focus();
+      }
+    }
     const closedField = await geometry();
     for (const side of ['top', 'left', 'right', 'bottom']) {
       await handle(side).click(); await tick(450); assert.equal(await open(), side);
@@ -129,12 +201,12 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     assert.equal(await page.evaluate(() => document.activeElement===beforeSearch && document.querySelector('[data-cr-mm-search]')===beforeSearch), true);
     assert.equal(await open(), 'bottom'); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before);
     assert.equal(await page.locator('.cr-mm-panel-backdrop').count(), 0); checks.push('focused search survives a background board fragment');
-    const canvasBeforeKeyboard = await geometry();
+    await verifyKeyboard(1333, 800, 480);
     await page.setViewportSize({width:1333,height:480}); await tick(250); await page.clock.fastForward(15000);
-    assert.equal(await open(), 'bottom'); assert.deepEqual(await geometry(), canvasBeforeKeyboard);
+    assert.equal(await open(), 'bottom');
     await page.locator('[data-cr-mm-search]').press('Enter'); await tick(250); assert.equal(await open(), 'bottom');
     await page.setViewportSize({width:1333,height:800}); await tick(400);
-    checks.push('keyboard resize defers layout and panel switching until input finishes');
+    checks.push('keyboard resize preserves search and defers panel switching until input finishes');
     assert.equal(await open(), 'right'); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before); checks.push('search focus pause and Enter reveal without clearing');
     await handle('bottom').click(); await tick(250); await page.locator('[data-cr-mm-search]').focus();
     await handle('left').click(); await tick(250); assert.equal(await open(), 'left'); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before);
@@ -171,12 +243,17 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     assert.equal(await page.locator('.dispatcher-canvas').getAttribute('data-dispatcher-canvas'),'on');
     const narrowColumns=await page.evaluate(()=>['left','right'].map(side=>{const panel=document.querySelector('.dispatcher-'+side),grid=panel.querySelector('.dispatcher-excavators,.dispatcher-trucks'),first=grid.querySelector('[data-garage-item]'),copy=first.cloneNode(true);copy.removeAttribute('id');grid.appendChild(copy);const a=first.getBoundingClientRect(),b=copy.getBoundingClientRect();copy.remove();return Math.abs(a.x-b.x)<.01&&b.y>a.y&&grid.scrollWidth<=grid.clientWidth+1&&getComputedStyle(grid).overflowY==='auto';}));
     assert.deepEqual(narrowColumns,[true,true]);checks.push('phone CSS cannot turn either garage into a horizontal row');
+    await handle('bottom').click(); await tick(300); await page.locator('[data-cr-mm-search]').fill('58');
+    await verifyKeyboard(1024, 600, 360);
+    await handle('bottom').click(); await tick(300);
     await page.evaluate(()=>{document.body.dataset.appShellVersion='unknown';});await tick(200);
     assert.equal(await page.locator('.dispatcher-canvas').getAttribute('data-dispatcher-canvas'),'off');
     assert.equal(await page.locator('html.cr-mm-panels').count(),0);
     assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--cr-panel-canvas-w')),'');
+    assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--cr-panel-keyboard-inset')),'');
+    assert.equal(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--cr-panel-toolbar-inset')),'');
     checks.push('unknown shell restores the real narrow-screen canvas mode after adapter teardown');
     assert.deepEqual(errors, []); assert.deepEqual(requests, []);
   } catch (error) { process.exitCode = 1; checks.push({ failure: error.message }); }
-  finally { fs.writeFileSync(path.join(output, 'panels-results.json'), JSON.stringify({ checks, errors, requests }, null, 2)); console.log(JSON.stringify({ checks, errors, requests }, null, 2)); await browser.close(); }
+  finally { fs.writeFileSync(path.join(output, 'panels-results.json'), JSON.stringify({ checks, keyboardCases, errors, requests }, null, 2)); console.log(JSON.stringify({ checks, errors, requests }, null, 2)); await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
