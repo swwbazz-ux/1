@@ -53,7 +53,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     }));
     assert.equal(hitZones.every(z=>z.inside&&z.outside),true); checks.push('36px local handle hit zones leave the surrounding field available');
     await page.clock.install();
-    await page.evaluate(() => { window.panelFrames=[]; function frame(){ panelFrames.push([...document.querySelectorAll('[data-cr-panel]')].filter(n=>getComputedStyle(n).visibility==='visible').length); requestAnimationFrame(frame); }requestAnimationFrame(frame); });
+    await page.evaluate(() => { window.panelFrames=[];window.panelOverlap=[];function frame(){const field=document.querySelector('.dispatcher-complexes')?.getBoundingClientRect(),visible=[...document.querySelectorAll('[data-cr-panel]')].filter(n=>getComputedStyle(n).visibility==='visible');panelFrames.push(visible.length);if(field)visible.forEach(n=>{const r=n.getBoundingClientRect();panelOverlap.push(Math.max(0,Math.min(r.right,field.right)-Math.max(r.left,field.left))*Math.max(0,Math.min(r.bottom,field.bottom)-Math.max(r.top,field.top)));});requestAnimationFrame(frame);}requestAnimationFrame(frame); });
     await page.evaluate(()=>{const source=document.querySelector('[data-dispatcher-drop="complex"]');source.dataset.dispatcherDrag='complex';source.dataset.equipmentName='К-2';source.dataset.placementZone='active';source.draggable=true;fixtureBind();});
     for(const side of ['left','right']){
       const source=await page.locator('[data-dispatcher-drag="complex"] h2').boundingBox();
@@ -65,16 +65,43 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
       assert.equal(await page.locator('html').getAttribute('data-cr-panel-native-drag'),null);assert.equal(await page.evaluate(()=>fixturePosts.length),0);
     }
     checks.push('real native drag reveals either edge, pauses idle, and cancellation submits nothing');
+    /* A short, populated rack reproduces the real four-column cut-off. Merely
+       shrinking the card does not resize the rack's intrinsic width. */
+    await page.evaluate(()=>{
+      const card=document.querySelector('[data-equipment-id="2"]'),sample=document.querySelector('.complex-truck-tile'),rack=document.createElement('div');
+      rack.className='complex-assigned-trucks';rack.dataset.truckNeed='7';
+      for(let i=0;i<7;i++){const tile=sample.cloneNode(true);tile.hidden=false;tile.removeAttribute('data-drag-bound');tile.dataset.equipmentId=String(91+i);tile.dataset.equipmentName=String(91+i);tile.dataset.haulAssignmentStateId=String(101+i);tile.querySelector('strong').textContent=String(91+i);rack.appendChild(tile);}
+      card.appendChild(rack);const grid=document.querySelector('.dispatcher-zone-grid');grid.style.gridAutoRows='220px';grid.style.alignContent='start';fixtureBind();
+    });await tick(450);
     const geometry = () => page.evaluate(() => [...document.querySelectorAll('.dispatcher-complex-card,.complex-assigned-trucks,.complex-truck-tile')].map(n => { const r=n.getBoundingClientRect();return [r.x,r.y,r.width,r.height]; }));
+    const closedField = await geometry();
+    for (const side of ['top', 'left', 'right', 'bottom']) {
+      await handle(side).click(); await tick(450); assert.equal(await open(), side);
+      const value=await page.evaluate(side=>{
+        const panel=document.querySelector('[data-cr-panel="'+side+'"]'),r=panel.getBoundingClientRect(),f=document.querySelector('.dispatcher-complexes').getBoundingClientRect();
+        const main=document.querySelector('.complex-truck-tile').getBoundingClientRect(),tile=panel.querySelector('[data-garage-item]')?.getBoundingClientRect(),grid=panel.querySelector('.dispatcher-excavators,.dispatcher-trucks');
+        return {side,p:[r.x,r.y,r.width,r.height],f:[f.x,f.y,f.width,f.height],reserved:side==='top'?f.top>=r.bottom-.1:side==='bottom'?f.bottom<=r.top+.1:side==='left'?f.left>=r.right-.1:f.right<=r.left+.1,columns:grid&&getComputedStyle(grid).gridTemplateColumns,tile:tile&&[tile.width,tile.height],main:[main.width,main.height]};
+      },side);
+      assert.equal(value.reserved,true,JSON.stringify(value));
+      if(value.tile){assert.ok(Math.abs(value.p[1])<1&&Math.abs(value.p[3]-800)<1);assert.equal(value.columns.trim().split(/\s+/).length,1);assert.ok(value.tile.every((n,i)=>Math.abs(n-value.main[i])<.01));}
+      const clipped=await page.evaluate(()=>[...document.querySelectorAll('.complex-truck-tile:not([hidden])')].filter(tile=>{const r=tile.getBoundingClientRect(),c=tile.closest('.dispatcher-complex-card').getBoundingClientRect();return r.left<c.left-.1||r.right>c.right+.1||r.top<c.top-.1||r.bottom>c.bottom+.1;}).map(n=>({id:n.dataset.equipmentId,box:n.getBoundingClientRect().toJSON(),card:n.closest('.dispatcher-complex-card').getBoundingClientRect().toJSON(),rack:n.parentElement.style.cssText})));
+      assert.deepEqual(clipped,[],side+' must reflow every visible truck inside its own card');
+      if(side==='top'){
+        const beforeHeader=await geometry();
+        await page.evaluate(()=>{const header=document.querySelector('.dispatcher-topbar');header.replaceWith(header.cloneNode(true));fixtureBind();});await tick(350);
+        assert.equal(await open(),'top');assert.deepEqual(await geometry(),beforeHeader);
+        checks.push('an open header survives its server fragment replacement with the same reserved track');
+      }
+      await page.screenshot({path:path.join(output,'reserved-'+side+'-1333.png')});
+      const openField=await geometry();await handle(side).click();await tick(100);assert.deepEqual(await geometry(),openField);
+      await tick(300);assert.deepEqual(await geometry(),closedField);
+    }
+    assert.equal(await page.evaluate(() => Math.max(...panelFrames)), 1);assert.ok(await page.evaluate(()=>Math.max(...panelOverlap))<2);
+    checks.push('all four panels reserve space before entry and throughout closing; no frame covers the field');
+    checks.push('side garages remain full-height, one vertical column, with exact live field tile dimensions');
+    checks.push('dense racks recalculate columns through the real control resize hook without clipping visible trucks');
+    assert.equal(await page.locator('.cr-mm-panel-backdrop').count(),0);checks.push('no dimming or pointer-intercepting backdrop remains');
     const fixedField = await geometry();
-    for (const side of ['top', 'left', 'right', 'bottom']) { await handle(side).click(); await tick(250); assert.equal(await open(), side); assert.deepEqual(await geometry(), fixedField); }
-    assert.equal(await page.evaluate(() => Math.max(...panelFrames)), 1); checks.push('strict exclusivity on every animation frame');
-    const matchingTiles=await page.evaluate(()=>{
-      const main=document.querySelector('.complex-truck-tile').getBoundingClientRect();
-      return ['left','right'].map(side=>{const panel=document.querySelector('.dispatcher-'+side),r=panel.getBoundingClientRect(),tile=panel.querySelector('[data-garage-item]').getBoundingClientRect(),grid=panel.querySelector('.dispatcher-excavators,.dispatcher-trucks');return{side,height:r.height,y:r.y,width:r.width,columns:getComputedStyle(grid).gridTemplateColumns,tile:[tile.width,tile.height],main:[main.width,main.height]};});
-    });
-    for(const value of matchingTiles){assert.ok(Math.abs(value.height-800)<1&&Math.abs(value.y)<1&&value.width>value.tile[0]&&value.width-value.tile[0]<22);assert.equal(value.columns.trim().split(/\s+/).length,1);assert.ok(value.tile.every((n,i)=>Math.abs(n-value.main[i])<.01));}
-    checks.push('full-height garages retain one vertical column at the actual main-rack tile size');
     await page.evaluate(()=>{window.dispatchEvent(new Event('resize'));visualViewport.dispatchEvent(new Event('resize'));});await tick(350);
     assert.deepEqual(await geometry(),fixedField);
     await page.setViewportSize({width:1333,height:776});await tick(350);assert.deepEqual(await geometry(),fixedField);
@@ -101,7 +128,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     await tick(300);
     assert.equal(await page.evaluate(() => document.activeElement===beforeSearch && document.querySelector('[data-cr-mm-search]')===beforeSearch), true);
     assert.equal(await open(), 'bottom'); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before);
-    assert.equal(await page.locator('.cr-mm-panel-backdrop').count(), 1); checks.push('focused search survives a background board fragment');
+    assert.equal(await page.locator('.cr-mm-panel-backdrop').count(), 0); checks.push('focused search survives a background board fragment');
     const canvasBeforeKeyboard = await geometry();
     await page.setViewportSize({width:1333,height:480}); await tick(250); await page.clock.fastForward(15000);
     assert.equal(await open(), 'bottom'); assert.deepEqual(await geometry(), canvasBeforeKeyboard);
@@ -112,10 +139,15 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     await handle('bottom').click(); await tick(250); await page.locator('[data-cr-mm-search]').focus();
     await handle('left').click(); await tick(250); assert.equal(await open(), 'left'); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before);
     await handle('bottom').click(); await tick(250); await page.locator('[data-cr-mm-search]').focus();
-    await page.locator('.cr-mm-panel-backdrop').click({position:{x:400,y:200}}); await tick(250);
-    assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before); checks.push('manual switch and outside close finish input without losing query');
+    await handle('bottom').click(); await tick(250);
+    assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0); assert.equal(await page.locator('[data-cr-mm-search]').inputValue(), before); checks.push('manual switch and explicit close finish input without losing query');
+    await handle('left').click();await tick(450);
+    const countBefore=await page.evaluate(()=>fixtureDetails);await page.locator('.complex-truck-tile[data-equipment-id="91"]').click();
+    assert.equal(await page.evaluate(()=>fixtureDetails),countBefore+1);assert.equal(await open(),'left');
+    checks.push('ordinary field clicks reach the existing detail handler while a garage stays open');
     await handle('right').click(); await tick(250);
-    await page.locator('.dispatcher-right [data-garage-item]').click(); assert.equal(await page.evaluate(() => fixtureDetails), 1);
+    const beforeGarageDetails=await page.evaluate(()=>fixtureDetails);
+    await page.locator('.dispatcher-right [data-garage-item]').click(); assert.equal(await page.evaluate(() => fixtureDetails), beforeGarageDetails+1);
     await handle('bottom').click(); await tick(250); await page.locator('[data-cr-mm-action="mode"]').click();
     await tick(250);assert.equal(await page.locator('[data-cr-panel-state="open"]').count(),0);checks.push('mode action closes the bottom panel so the next field tap selects a source');
     await handle('right').click(); await tick(250); await page.locator('.dispatcher-right [data-garage-item]').click(); await tick(250);

@@ -136,16 +136,24 @@ html.cr-mm-panels .dispatcher-canvas[data-dispatcher-canvas] {
 html.cr-mm-panels .dispatcher-canvas > .dispatcher-shell { padding: 0 !important; }
 html.cr-mm-panels .dispatcher-board {
   position: relative !important;
-  grid-template-columns: minmax(0, 1fr) !important;
-  grid-template-rows: minmax(0, 1fr) !important;
-  grid-template-areas: "complexes" !important;
+  grid-template-columns: var(--cr-field-left, 0px) minmax(0, 1fr) var(--cr-field-right, 0px) !important;
+  grid-template-rows: var(--cr-field-top, 0px) minmax(0, 1fr) var(--cr-field-bottom, 0px) !important;
+  grid-template-areas: none !important;
   gap: 0 !important;
 }
+/* The active track survives the closing animation. It is released only when
+   the controller marks the old panel closed; another panel opens afterwards. */
+html.cr-mm-panels[data-cr-panel-open="top"] .dispatcher-board { --cr-field-top: calc(126px / var(--cr-mm-scale)); }
+html.cr-mm-panels[data-cr-panel-open="bottom"] .dispatcher-board { --cr-field-bottom: calc(64px / var(--cr-mm-scale)); }
+html.cr-mm-panels[data-cr-panel-open="left"] .dispatcher-board { --cr-field-left: var(--cr-panel-side-w, 110px); }
+html.cr-mm-panels[data-cr-panel-open="right"] .dispatcher-board { --cr-field-right: var(--cr-panel-side-w, 110px); }
 html.cr-mm-panels .dispatcher-complexes {
-  grid-area: complexes !important; grid-column: 1 !important; grid-row: 1 !important;
+  grid-area: auto !important; grid-column: 2 !important; grid-row: 2 !important;
   width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important;
-  margin: 0 !important;
+  margin: 0 !important; display: flex !important; flex-direction: column; overflow: hidden !important;
 }
+html.cr-mm-panels .dispatcher-zone-head { flex: 0 0 auto; }
+html.cr-mm-panels .dispatcher-zone-grid { flex: 1 1 auto; height: auto !important; min-height: 0; max-width: 100%; overflow: auto !important; }
 html.cr-mm-panels .dispatcher-topbar,
 html.cr-mm-panels .dispatcher-left,
 html.cr-mm-panels .dispatcher-right {
@@ -153,12 +161,12 @@ html.cr-mm-panels .dispatcher-right {
   z-index: 602; margin: 0 !important;
 }
 html.cr-mm-panels .dispatcher-topbar {
-  inset: 0 0 auto !important; width: 100% !important;
+  inset: 0 0 auto !important; width: 100% !important; box-sizing: border-box !important;
   height: calc(126px / var(--cr-mm-scale)) !important; min-height: calc(126px / var(--cr-mm-scale)) !important; max-height: calc(126px / var(--cr-mm-scale)) !important;
 }
 html.cr-mm-panels .dispatcher-left, html.cr-mm-panels .dispatcher-right {
   display: block !important; top: 0 !important; bottom: 0 !important;
-  width: calc(var(--cr-panel-tile-w, 88px) + 22px) !important; height: 100% !important; min-height: 0 !important;
+  width: var(--cr-panel-side-w, 110px) !important; height: 100% !important; min-height: 0 !important;
 }
 html.cr-mm-panels .dispatcher-left { left: 0 !important; right: auto !important; }
 html.cr-mm-panels .dispatcher-right { right: 0 !important; left: auto !important; }
@@ -211,8 +219,6 @@ html.cr-mm-panels [data-cr-panel-state="closed"] { visibility: hidden; pointer-e
 html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-connection-indicator] {
   visibility: hidden !important; pointer-events: none !important;
 }
-.cr-mm-panel-backdrop { position: absolute; z-index: 601; inset: 0; background: rgba(0, 7, 11, .43); touch-action: none; }
-html[data-cr-panel-native-drag="true"] .cr-mm-panel-backdrop { pointer-events: none; }
 .cr-mm-panel-edge { position: fixed; z-index: 1050; touch-action: none; }
 .cr-mm-panel-edge[data-cr-panel-side="top"] { inset: 0 0 auto; height: 8px; }
 .cr-mm-panel-edge[data-cr-panel-side="bottom"] { inset: auto 0 0; height: 8px; }

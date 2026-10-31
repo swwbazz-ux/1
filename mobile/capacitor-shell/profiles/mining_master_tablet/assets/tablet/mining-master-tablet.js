@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.2.1";
+    var VERSION = "1.3.0";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -148,7 +148,9 @@
         var nativeDrag = null, dragEpoch = 0, dragStartTimer = null;
         var fullHeight = global.innerHeight, fullWidth = global.innerWidth, layoutKey = "", frame = null, settle = null;
         var tileFrame = null, tileSample = null, pendingTiles = false;
-        var backdrop = doc.createElement("div"); backdrop.className = "cr-mm-panel-backdrop"; backdrop.hidden = true; owner.appendChild(backdrop);
+        var reflowFrame = null, fieldSize = "", observedField = null, pendingField = false;
+        var reservedSide = null, reservedWidth = 0;
+        owner.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { node.remove(); });
         var labels = { top: "верхнюю панель", bottom: "нижнюю панель", left: "левую панель", right: "правую панель" };
         function listen(node, type, callback, capture) { node.addEventListener(type, callback, capture); listeners.push(function () { node.removeEventListener(type, callback, capture); }); }
         function editing() { return !!doc.activeElement && doc.activeElement.matches("input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable]:not([contenteditable=false])"); }
@@ -170,6 +172,12 @@
             }
         }
         function render(state) {
+            var side = state.active === "left" || state.active === "right" ? state.active : null;
+            if (reservedSide !== side) {
+                reservedSide = side;
+                reservedWidth = (parseFloat(owner.style.getPropertyValue("--cr-panel-tile-w")) || 88) + 22;
+                setStyle(owner, "--cr-panel-side-w", reservedWidth + "px");
+            }
             setAttribute(root, "data-cr-panel-open", state.active || "");
             Object.keys(nodes).forEach(function (side) {
                 var nodeState = state.active === side ? state.phase : "closed";
@@ -180,7 +188,6 @@
                 setAttribute(handles[side], "aria-label", (nodeState === "open" ? "Скрыть " : "Показать ") + labels[side]);
                 setBoolean(edges[side], "hidden", nodeState !== "closed");
             });
-            setBoolean(backdrop, "hidden", !state.active);
             if (pendingReveal && (state.phase === "open" || !pendingReveal.side && state.phase === "closed")) {
                 global.requestAnimationFrame(function () { if (!dead) scrollRevealed(); });
             }
@@ -215,7 +222,9 @@
         function syncTileSize() {
             tileFrame = null;
             if (dead) return;
-            if (blocked()) { pendingTiles = true; return; }
+            /* Native edge reveal intentionally changes available field width.
+               It must also synchronise garage tiles while that drag is held. */
+            if (blocked() && !nativeDrag) { pendingTiles = true; return; }
             pendingTiles = false;
             var sample = owner.querySelector(".dispatcher-complex-card .complex-truck-tile:not([hidden])");
             if (sample !== tileSample) {
@@ -231,15 +240,40 @@
                 height = styles && parseFloat(styles.getPropertyValue("--complex-truck-h")) || 63;
             }
             setStyle(owner, "--cr-panel-tile-w", width + "px"); setStyle(owner, "--cr-panel-tile-h", height + "px");
-            setStyle(root, "--cr-panel-side-edge", (width + 22) * (Number(root.style.getPropertyValue("--cr-mm-scale")) || 1) + "px");
+            /* Reserve once before a side enters. A smaller post-reflow tile does
+               not shrink the reserve again and feed a size/width feedback loop.
+               A wider tile may only grow it so no content is clipped. */
+            reservedWidth = reservedSide ? Math.max(reservedWidth, width + 22) : width + 22;
+            setStyle(owner, "--cr-panel-side-w", reservedWidth + "px");
+            setStyle(root, "--cr-panel-side-edge", reservedWidth * (Number(root.style.getPropertyValue("--cr-mm-scale")) || 1) + "px");
         }
         function scheduleTiles() { if (!dead && tileFrame === null) tileFrame = global.requestAnimationFrame(syncTileSize); }
         var tileResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(scheduleTiles) : null;
         var tileObserver = new MutationObserver(scheduleTiles);
+        /* The server watches each rack, whose intrinsic width is cols × tile-w.
+           A narrower parent card may therefore leave the rack unchanged and
+           never notify it. Reuse the real control runtime's window-resize hook
+           once per field size, so it recalculates columns and its existing +N. */
+        function refreshFieldLayout() {
+            reflowFrame = null;
+            if (dead || !observedField || !observedField.isConnected) return;
+            if (blocked() && !nativeDrag) { pendingField = true; return; }
+            pendingField = false;
+            var size = observedField.clientWidth + "x" + observedField.clientHeight;
+            if (fieldSize === size) return;
+            fieldSize = size; global.dispatchEvent(new global.Event("resize")); scheduleTiles();
+        }
+        function queueFieldLayout() { if (!dead && reflowFrame === null) reflowFrame = global.requestAnimationFrame(refreshFieldLayout); }
+        var fieldResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queueFieldLayout) : null;
         function watchTiles() {
             tileObserver.disconnect(); if (tileResize) tileResize.disconnect(); tileSample = null;
             var grid = owner.querySelector(".dispatcher-zone-grid");
             if (grid) tileObserver.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "hidden"] });
+            var field = owner.querySelector(".dispatcher-complexes");
+            if (observedField !== field) {
+                if (fieldResize) fieldResize.disconnect(); observedField = field; fieldSize = "";
+                if (field && fieldResize) fieldResize.observe(field); queueFieldLayout();
+            }
             if (tileFrame !== null) global.cancelAnimationFrame(tileFrame);
             syncTileSize();
         }
@@ -255,8 +289,8 @@
             if (blocked()) { pendingLayout = true; return; }
             layoutKey = key; pendingLayout = false;
             fullWidth = global.innerWidth; fullHeight = height;
-            /* Preserve readable tablet scale, but give the field the whole
-               viewport permanently. Opening a panel only changes its transform.
+            /* Preserve readable tablet scale. The board reserves the open
+               panel's track and lets the real field/rack layout use the rest.
                Do not remove the panel class to measure the old desktop grid:
                the server's ResizeObserver would recalculate every truck rack. */
             var referenceHeight = height < 640 ? 736 : Math.max(240, height - 64);
@@ -276,6 +310,7 @@
             var paused = blocked(); machine.pause(paused);
             if (!paused) {
                 if (pendingLayout) layout(false);
+                if (pendingField) queueFieldLayout();
                 if (pendingTiles) scheduleTiles();
                 if (pendingManual) { var wanted = pendingManual.side; pendingManual = null; machine.request(wanted); }
                 else if (pendingReveal) { machine.request(pendingReveal.side); scrollRevealed(); }
@@ -312,7 +347,7 @@
                 if (Date.now() < suppressClickUntil || dialogOpen()) return;
                 var side = handle.dataset.crPanelSide, state = machine.state();
                 manualRequest(state.active === side && state.phase === "open" ? null : side);
-            } else if (event.target === backdrop) { stop(event); if (!dialogOpen()) manualRequest(null); }
+            }
         }
         function inward(side, dx, dy) { return side === "left" ? dx : side === "right" ? -dx : side === "top" ? dy : -dy; }
         listen(doc, "pointerdown", function (event) {
@@ -372,9 +407,6 @@
             if (side) {
                 var target = nodes[side].querySelector("[data-dispatcher-drop]");
                 if (canDrop(nativeDrag, target, context())) { event.preventDefault(); machine.request(side); }
-            } else {
-                var sourceSide = sideFor(nativeDrag.source), current = machine.state();
-                if (sourceSide && current.active === sourceSide && !nodes[sourceSide].contains(event.target)) machine.request(null);
             }
         }
         listen(doc, "dragenter", exposeNativeTarget, true); listen(doc, "dragover", exposeNativeTarget, true);
@@ -406,10 +438,11 @@
         return {
             owner: owner, matches: function () { return owner.isConnected && nodes.top === owner.querySelector(":scope > .dispatcher-topbar") && nodes.left === owner.querySelector(":scope > .dispatcher-left") && nodes.right === owner.querySelector(":scope > .dispatcher-right") && nodes.bottom === doc.getElementById("cr-mm-toolbar"); },
             adopt: function (next) {
+                var boardChanged = owner !== next;
                 var nextCanvas = next && next.closest("[data-dispatcher-canvas]");
                 var replacements = next && { top: next.querySelector(":scope > .dispatcher-topbar"), left: next.querySelector(":scope > .dispatcher-left"), right: next.querySelector(":scope > .dispatcher-right") };
                 if (!nextCanvas || nodes.bottom !== doc.getElementById("cr-mm-toolbar") || Object.keys(replacements).some(function (side) { return !replacements[side]; })) return false;
-                ["tile-w", "tile-h"].forEach(function (suffix) {
+                ["tile-w", "tile-h", "side-w"].forEach(function (suffix) {
                     setStyle(next, "--cr-panel-" + suffix, owner.style.getPropertyValue("--cr-panel-" + suffix));
                 });
                 Object.keys(replacements).forEach(function (side) {
@@ -423,10 +456,9 @@
                 var keepInput = machine.state().active === "bottom" && (editing() || keyboardOpen());
                 finishNativeDrag();
                 owner = next; this.owner = next; canvas = nextCanvas; pendingReveal = null;
-                next.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { if (node !== backdrop) node.remove(); });
-                next.appendChild(backdrop);
+                next.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { node.remove(); });
                 watchCanvas(); watchTiles(); render(machine.state());
-                if (!keepInput) machine.request(null);
+                if (boardChanged && !keepInput) machine.request(null);
                 refresh(); return true;
             },
             layout: function () { layout(false); },
@@ -435,17 +467,18 @@
             completeAction: function () { if (machine.state().active === "bottom") { pendingReveal = null; machine.request(null); } },
             escape: function () { return !!machine.state().active; },
             destroy: function () {
-                if (dead) return; keepCanvasMode(); dead = true; machine.destroy(); observer.disconnect(); canvasObserver.disconnect(); tileObserver.disconnect(); if (tileResize) tileResize.disconnect(); listeners.forEach(function (off) { off(); });
+                if (dead) return; keepCanvasMode(); dead = true; machine.destroy(); observer.disconnect(); canvasObserver.disconnect(); tileObserver.disconnect(); if (tileResize) tileResize.disconnect(); if (fieldResize) fieldResize.disconnect(); listeners.forEach(function (off) { off(); });
                 setAttribute(canvas, "data-dispatcher-canvas", serverCanvasMode);
-                global.clearTimeout(settle); if (frame !== null) global.cancelAnimationFrame(frame); backdrop.remove();
+                global.clearTimeout(settle); if (frame !== null) global.cancelAnimationFrame(frame);
                 if (tileFrame !== null) global.cancelAnimationFrame(tileFrame);
+                if (reflowFrame !== null) global.cancelAnimationFrame(reflowFrame);
                 Object.keys(nodes).forEach(function (side) {
                     handles[side].remove(); edges[side].remove(); setAttribute(nodes[side], "data-cr-panel", null); setAttribute(nodes[side], "data-cr-panel-state", null);
                     setAttribute(nodes[side], "aria-hidden", originals[side].aria); setBoolean(nodes[side], "inert", originals[side].inert);
                 });
                 setClass(root, "cr-mm-panels", false); setAttribute(root, "data-cr-panel-open", null); setAttribute(root, "data-cr-panels-ready", null); setAttribute(root, "data-cr-panel-modal", null);
                 nativeDrag = null; dragEpoch += 1; if (dragStartTimer !== null) global.clearTimeout(dragStartTimer); setAttribute(root, "data-cr-panel-native-drag", null);
-                ["tile-w", "tile-h"].forEach(function (suffix) { owner.style.removeProperty("--cr-panel-" + suffix); });
+                ["tile-w", "tile-h", "side-w"].forEach(function (suffix) { owner.style.removeProperty("--cr-panel-" + suffix); });
                 ["top-edge", "side-edge", "canvas-w", "canvas-h", "canvas-vw"].forEach(function (suffix) { root.style.removeProperty("--cr-panel-" + suffix); });
             }
         };
