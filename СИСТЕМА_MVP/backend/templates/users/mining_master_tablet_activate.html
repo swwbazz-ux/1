@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Личный PIN · Горный мастер{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}">
+{% endblock %}
+{% block body_class %}tablet-auth login-page login-fullscreen{% endblock %}
+{% block body %}
+<main class="tablet-auth-panel">
+    <p class="tablet-auth-role">Горный мастер</p>
+    <h1>Создайте личный PIN</h1>
+    <p class="tablet-auth-person">{{ access.employee.full_name }}</p>
+    <p class="tablet-auth-help">Этот код потребуется при начале следующих смен.</p>
+    {% if form.errors %}
+    <div class="tablet-auth-error" role="alert">
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        {% for field in form %}{% for error in field.errors %}<p>{{ error }}</p>{% endfor %}{% endfor %}
+    </div>
+    {% endif %}
+    <form method="post" action="{% url 'mining_master_tablet_activate' %}" autocomplete="off">
+        {% csrf_token %}
+        <div class="tablet-auth-fields">
+            <label for="id_new_access_code">Придумайте PIN
+                {{ form.new_access_code }}
+            </label>
+            <label for="id_confirm_access_code">Повторите PIN
+                {{ form.confirm_access_code }}
+            </label>
+        </div>
+        <p class="tablet-auth-hint" id="activation-new-pin-hint">6 цифр, без простых последовательностей.</p>
+        <span id="activation-confirm-pin-hint" class="tablet-auth-sr">Введите тот же PIN ещё раз.</span>
+        <div class="tablet-auth-actions">
+            <button class="tablet-auth-secondary" name="action" value="cancel" formnovalidate type="submit">Это не я</button>
+            <button class="tablet-auth-primary" type="submit">Сохранить PIN</button>
+        </div>
+    </form>
+</main>
+{% endblock %}

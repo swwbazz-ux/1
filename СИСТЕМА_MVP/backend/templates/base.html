@@ -1668,7 +1668,7 @@
     })(window, document);
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
-    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
+    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v7"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
