@@ -19,17 +19,21 @@ def is_tablet_control_request(request):
 def is_tablet_master_request(request, access=None):
     if not is_tablet_control_request(request):
         return False
-    if access is None:
-        access = (
-            EmployeeAccess.objects.select_related('employee', 'role', 'employee__contractor_organization')
-            .filter(pk=request.session.get('employee_access_id'))
-            .first()
-        )
-    if not access or access.role.code != 'mining_master':
+    access_id = request.session.get('employee_access_id')
+    if access is not None and access.id != access_id:
         return False
-    if access.id != request.session.get('employee_access_id'):
+    # Callers may have fetched access before acquiring the employee lock.
+    # Re-read revocation and generation instead of trusting that old object.
+    fresh_access = (
+        EmployeeAccess.objects.select_related('employee', 'role', 'employee__contractor_organization')
+        .filter(pk=access_id)
+        .first()
+    )
+    if not fresh_access or fresh_access.role.code != 'mining_master':
         return False
-    state = role_session_state(request, access)
+    if access is not None and fresh_access.employee_id != access.employee_id:
+        return False
+    state = role_session_state(request, fresh_access)
     return bool(state['authenticated'] and state['is_active'])
 
 
