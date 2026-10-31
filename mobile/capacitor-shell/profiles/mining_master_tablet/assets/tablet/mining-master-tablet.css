@@ -268,9 +268,7 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
 }
 .cr-mm-panel-edge { position: fixed; z-index: 1050; touch-action: none; }
 .cr-mm-panel-edge[data-cr-panel-side="top"] { inset: 0 0 auto; height: 8px; }
-/* Leave Android's mandatory Home strip untouched. Match the visible grip's
-   raised target instead of intercepting a full-width band over field cards. */
-.cr-mm-panel-edge[data-cr-panel-side="bottom"] { inset: auto auto 32px; left: calc(50% - 66px); width: 132px; height: 36px; }
+.cr-mm-panel-edge[data-cr-panel-side="bottom"] { inset: auto 0 0; height: 8px; }
 .cr-mm-panel-edge[data-cr-panel-side="left"] { inset: 8px auto 8px 0; width: 8px; }
 .cr-mm-panel-edge[data-cr-panel-side="right"] { inset: 8px 0 8px auto; width: 8px; }
 .cr-mm-panel-handle {
@@ -288,7 +286,7 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
 .cr-mm-panel-handle[data-cr-panel-side="top"], .cr-mm-panel-handle[data-cr-panel-side="bottom"] { left: calc(50% - 44px); width: 88px; height: 14px; }
 .cr-mm-panel-handle[data-cr-panel-side="left"], .cr-mm-panel-handle[data-cr-panel-side="right"] { top: calc(50% - 44px); width: 14px; height: 88px; }
 .cr-mm-panel-handle[data-cr-panel-side="top"] { top: 6px; }
-.cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 32px; }
+.cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 6px; }
 .cr-mm-panel-handle[data-cr-panel-side="left"] { left: 4px; }
 .cr-mm-panel-handle[data-cr-panel-side="right"] { right: 4px; }
 .cr-mm-panel-handle[data-cr-panel-side="top"]::before, .cr-mm-panel-handle[data-cr-panel-side="bottom"]::before { width: 38px; height: 3px; }
