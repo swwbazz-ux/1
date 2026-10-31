@@ -200,8 +200,8 @@ html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item
   display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
 }
 /* Empty slots have no number/status rows to distribute around the icon. */
-html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is(.dispatcher-truck-tile, .dispatcher-excavator-garage-tile).is-placeholder:not([hidden]) {
-  justify-content: center; align-content: center; padding: 3px !important;
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-truck-tile.is-placeholder:not([hidden]) {
+  justify-content: center; padding-block: 2.5px !important;
 }
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > span {
   display: block !important; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
