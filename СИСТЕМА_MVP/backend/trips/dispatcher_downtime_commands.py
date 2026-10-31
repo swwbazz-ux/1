@@ -6,7 +6,7 @@ from core.models import bump_operational_state, lock_production_state
 from downtimes.models import DowntimeEvent
 
 from .dispatcher_guards import dispatcher_access_from_request, dispatcher_json_payload
-from .dispatcher_header import get_active_dispatcher_shift
+from .tablet_control import get_control_shift
 
 
 def execute_dispatcher_close_downtime(
@@ -29,7 +29,7 @@ def execute_dispatcher_close_downtime(
             {'ok': False, 'error': 'inactive_role'},
             status=409,
         )
-    if not get_active_dispatcher_shift(access):
+    if not get_control_shift(access, request):
         return response_builder(
             {'ok': False, 'error': 'dispatcher_shift_required'},
             status=409,

@@ -14,6 +14,7 @@ from .dispatcher_guards import (
     get_dispatcher_control_url,
 )
 from .models import DispatcherActionType
+from .tablet_control import control_access_allowed
 
 
 def execute_dispatcher_cancel_assignment(
@@ -32,7 +33,7 @@ def execute_dispatcher_cancel_assignment(
         .filter(id=access_id, is_active=True)
         .first()
     )
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
+    if not control_access_allowed(request, access, role_codes={'dispatcher', 'admin'}):
         return redirect('role_home')
     redirect_url = get_dispatcher_control_url(request)
 
