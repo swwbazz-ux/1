@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.5.0";
+    var VERSION = "1.6.0";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -135,6 +135,82 @@
     function setBoolean(node, name, value) { if (node[name] !== value) node[name] = value; }
     function setStyle(node, name, value) {
         if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
+    }
+    var shiftPresentationBound = false;
+    function bindShiftPresentation() {
+        if (shiftPresentationBound) return;
+        shiftPresentationBound = true;
+        var root = doc.documentElement, layer = doc.createElement("div"), accent = null, frame = null, movingUntil = 0;
+        layer.id = "cr-mm-shift-monochrome"; layer.setAttribute("aria-hidden", "true");
+        doc.body.appendChild(layer);
+        function queue() { if (frame === null) frame = global.requestAnimationFrame(update); }
+        var buttonResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queue) : null;
+        function update() {
+            frame = null;
+            var owner = root.classList.contains("cr-mm-tablet") && doc.querySelector(".dispatcher-board");
+            var closed = owner ? owner.dataset.dispatcherShiftOpen === "false" :
+                root.classList.contains("cr-mm-tablet-page") && !!doc.querySelector(".dispatcher-unified-topbar .dispatcher-active-badge.is-muted");
+            setClass(root, "cr-mm-shift-closed", !!closed);
+            var button = closed && doc.querySelector(".dispatcher-unified-topbar .dispatcher-shift-button[data-shared-shift-login-open], .dispatcher-unified-topbar .dispatcher-shift-button[name='shift_action'][value='start']");
+            if (button && (button.disabled || button.getAttribute("aria-disabled") === "true" || button.classList.contains("is-danger") || button.closest("[inert], [hidden]"))) button = null;
+            var modal = closed && Array.prototype.some.call(doc.querySelectorAll(MODALS + ", dialog[open], [aria-modal=true]"), function (node) {
+                return node.getClientRects().length && global.getComputedStyle(node).visibility !== "hidden";
+            });
+            var rect = button && button.getBoundingClientRect();
+            if (rect) {
+                var x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+                var hit = doc.elementFromPoint(x, y);
+                if (modal || !rect.width || !rect.height || !hit || !(hit === button || button.contains(hit))) button = null;
+            }
+            if (accent !== button) {
+                if (accent) setClass(accent, "cr-mm-shift-start-accent", false);
+                if (buttonResize) buttonResize.disconnect();
+                accent = button;
+                if (accent) {
+                    setClass(accent, "cr-mm-shift-start-accent", true);
+                    if (buttonResize) buttonResize.observe(accent);
+                }
+            }
+            var clip = "none";
+            if (accent) {
+                /* The hole follows the real button, including scaled canvas and
+                   rounded corners. No clone, moved form or synthetic action. */
+                var radius = Math.min(rect.width / 2, rect.height / 2,
+                    (parseFloat(global.getComputedStyle(accent).borderTopLeftRadius) || 0) * rect.width / (accent.offsetWidth || rect.width));
+                var l = rect.left, t = rect.top, r = rect.right, b = rect.bottom, a = radius;
+                clip = 'path(evenodd, "M0 0H' + global.innerWidth + 'V' + global.innerHeight + 'H0Z M' + (l + a) + ' ' + t +
+                    'H' + (r - a) + 'Q' + r + ' ' + t + ' ' + r + ' ' + (t + a) + 'V' + (b - a) + 'Q' + r + ' ' + b + ' ' + (r - a) + ' ' + b +
+                    'H' + (l + a) + 'Q' + l + ' ' + b + ' ' + l + ' ' + (b - a) + 'V' + (t + a) + 'Q' + l + ' ' + t + ' ' + (l + a) + ' ' + t + 'Z")';
+            }
+            setStyle(layer, "clip-path", clip);
+            if (closed && !doc.hidden && global.performance.now() < movingUntil) queue();
+        }
+        var observer = new MutationObserver(function (records) {
+            if (records.some(function (record) {
+                if (record.target === layer) return false;
+                if (record.type === "attributes") return record.oldValue !== record.target.getAttribute(record.attributeName);
+                return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1; }) ||
+                    Array.prototype.some.call(record.removedNodes, function (node) { return node.nodeType === 1; });
+            })) queue();
+        });
+        observer.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true,
+            attributeFilter: ["class", "hidden", "inert", "disabled", "aria-disabled", "style", "data-dispatcher-shift-open", "data-cr-panel-state"] });
+        doc.addEventListener("transitionrun", function (event) {
+            if (root.classList.contains("cr-mm-shift-closed") && event.target.matches &&
+                event.target.matches(".dispatcher-topbar, .dispatcher-header-row, .dispatcher-canvas")) {
+                movingUntil = global.performance.now() + 300; queue();
+            }
+        }, true);
+        doc.addEventListener("transitionend", queue, true);
+        doc.addEventListener("scroll", queue, true);
+        doc.addEventListener("visibilitychange", queue);
+        global.addEventListener("resize", queue);
+        global.addEventListener("pageshow", queue);
+        if (global.visualViewport) {
+            global.visualViewport.addEventListener("resize", queue);
+            global.visualViewport.addEventListener("scroll", queue);
+        }
+        queue();
     }
     function createEdgePanels(owner) {
         var canvas = owner.closest("[data-dispatcher-canvas]");
@@ -860,6 +936,7 @@
     function init() {
         if (!allowedLocation(global.location) && !allowedRelatedLocation(global.location)) return;
         if (!doc.body || doc.readyState === "loading") { doc.addEventListener("DOMContentLoaded", init, { once: true }); return; }
+        bindShiftPresentation();
         if (allowedRelatedLocation(global.location)) {
             if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
             /* Report pages use the real viewport: Android clips the scrolling shell
