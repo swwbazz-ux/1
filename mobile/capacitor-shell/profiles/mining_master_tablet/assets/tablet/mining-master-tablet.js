@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.4.0";
+    var VERSION = "1.5.0";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -11,7 +11,7 @@
         "/reports/customer-daily/", "/reports/volume/", "/reports/templates/", "/reports/downtimes/"
     ];
     var SOURCE = "[data-dispatcher-drag][data-equipment-id]";
-    var EXCAVATORS = ".dispatcher-complex-card[data-dispatcher-drop='complex'][data-equipment-id], [data-dispatcher-drag='excavator'][data-equipment-id]";
+    var EXCAVATORS = ".dispatcher-complex-card[data-dispatcher-drop='complex'][data-equipment-id][data-dispatcher-drop-bound='true']";
     var MODALS = ".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])";
 
     function allowedLocation(location) {
@@ -120,7 +120,7 @@
         return;
     }
     var doc = global.document, board = null, compatible = false;
-    var bound = false, queued = false, busyUntil = 0, edgePanels = null;
+    var bound = false, queued = false, busyUntil = 0, edgePanels = null, foundTruckId = "";
     function setText(node, value) { if (node && node.textContent !== value) node.textContent = value; }
     /* Attribute no-ops still notify DOM observers. In particular, writing an
        unchanged disabled value wakes role-readonly, which republishes access
@@ -489,6 +489,8 @@
             owner: owner, matches: function () { return owner.isConnected && nodes.top === owner.querySelector(":scope > .dispatcher-topbar") && nodes.left === owner.querySelector(":scope > .dispatcher-left") && nodes.right === owner.querySelector(":scope > .dispatcher-right") && nodes.bottom === doc.getElementById("cr-mm-toolbar") && garageLists.every(function (list) { return owner.contains(list); }); },
             adopt: function (next) {
                 var boardChanged = owner !== next;
+                var revealId = pendingReveal && pendingReveal.node.dataset.equipmentId;
+                var revealKind = pendingReveal && pendingReveal.node.dataset.dispatcherDrag;
                 var nextCanvas = next && next.closest("[data-dispatcher-canvas]");
                 var replacements = next && { top: next.querySelector(":scope > .dispatcher-topbar"), left: next.querySelector(":scope > .dispatcher-left"), right: next.querySelector(":scope > .dispatcher-right") };
                 if (!nextCanvas || nodes.bottom !== doc.getElementById("cr-mm-toolbar") || Object.keys(replacements).some(function (side) { return !replacements[side]; })) return false;
@@ -506,6 +508,15 @@
                 var keepInput = machine.state().active === "bottom" && (editing() || keyboardOpen());
                 finishNativeDrag();
                 owner = next; this.owner = next; canvas = nextCanvas; pendingReveal = null;
+                // A fragment can arrive while Find waits for the IME to hide.
+                // Resolve the intended truck in the new board, never its old DOM.
+                if (revealId && revealKind) {
+                    var revealed = Array.prototype.find.call(next.querySelectorAll(SOURCE), function (node) {
+                        return node.dataset.equipmentId === revealId && node.dataset.dispatcherDrag === revealKind &&
+                            !node.classList.contains("is-placeholder") && !node.classList.contains("is-assigned");
+                    });
+                    if (revealed) pendingReveal = { node: revealed, side: sideFor(revealed) };
+                }
                 next.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { node.remove(); });
                 watchCanvas(); watchTiles(); render(machine.state());
                 if (boardChanged && !keepInput) machine.request(null);
@@ -559,35 +570,46 @@
         toolbar.noValidate = true;
         toolbar.setAttribute("aria-label", "Назначение самосвала на экскаватор");
         [
-            { kind: "truck", caption: "Номер самосвала", next: "next" },
-            { kind: "excavator", caption: "Номер экскаватора", next: "go" }
+            { kind: "truck", caption: "Самосвал" },
+            { kind: "excavator", caption: "Экскаватор" }
         ].forEach(function (field) {
+            if (field.kind === "excavator") {
+                var arrow = doc.createElement("span");
+                arrow.className = "cr-mm-assign-arrow"; arrow.textContent = "→"; arrow.setAttribute("aria-hidden", "true");
+                toolbar.appendChild(arrow);
+            }
             var label = doc.createElement("label");
+            label.className = "cr-mm-assign-" + field.kind;
+            var icon = doc.createElement("img");
+            icon.src = "/static/img/equipment/" + field.kind + "-gray.png";
+            icon.alt = "";
+            label.appendChild(icon);
+            var control = doc.createElement("span");
+            control.className = "cr-mm-assign-control";
             var caption = doc.createElement("span");
             caption.textContent = field.caption;
-            var input = doc.createElement("input");
-            input.type = "text";
-            input.inputMode = "decimal";
-            input.enterKeyHint = field.next;
-            input.maxLength = 12;
-            input.autocomplete = "off";
-            input.placeholder = "—";
+            var input = doc.createElement(field.kind === "truck" ? "input" : "select");
+            if (field.kind === "truck") {
+                input.type = "text";
+                input.inputMode = "decimal";
+                input.enterKeyHint = "next";
+                input.maxLength = 12;
+                input.autocomplete = "off";
+                input.placeholder = "Номер";
+            }
             input.setAttribute("data-cr-mm-assign-" + field.kind, "");
             input.setAttribute("data-role-readonly-safe", "");
-            if (field.kind === "excavator") input.setAttribute("list", "cr-mm-excavator-numbers");
-            label.appendChild(caption);
-            label.appendChild(input);
+            control.appendChild(caption);
+            control.appendChild(input);
+            label.appendChild(control);
             toolbar.appendChild(label);
         });
-        // A default submit target lets the Android IME confirm a two-field form.
         var submit = doc.createElement("button");
         submit.type = "submit";
-        submit.hidden = true;
-        submit.textContent = "Назначить";
+        submit.textContent = "Найти";
+        submit.setAttribute("data-cr-mm-assign-submit", "");
+        submit.setAttribute("data-role-readonly-safe", "");
         toolbar.appendChild(submit);
-        var excavators = doc.createElement("datalist");
-        excavators.id = "cr-mm-excavator-numbers";
-        toolbar.appendChild(excavators);
         doc.body.appendChild(toolbar);
     }
     function equipmentName(node) {
@@ -597,54 +619,108 @@
     function equipmentCandidates(selector) {
         var ids = new Set();
         return Array.prototype.filter.call(board.querySelectorAll(selector), function (node) {
-            if (node.classList.contains("is-placeholder") || node.classList.contains("is-assigned") || ids.has(node.dataset.equipmentId)) return false;
+            if (!node.dataset.equipmentId || node.classList.contains("is-placeholder") || node.classList.contains("is-assigned") || ids.has(node.dataset.equipmentId)) return false;
             ids.add(node.dataset.equipmentId);
             return true;
         });
     }
     function refreshExcavatorNumbers() {
-        var list = doc.getElementById("cr-mm-excavator-numbers");
+        var list = doc.querySelector("[data-cr-mm-assign-excavator]");
         if (!list) return;
-        var names = equipmentCandidates(EXCAVATORS).map(equipmentName).filter(Boolean);
-        var source = JSON.stringify(names);
+        var choices = equipmentCandidates(EXCAVATORS).map(function (node) { return [node.dataset.equipmentId, equipmentName(node)]; });
+        var source = JSON.stringify(choices);
         if (list.dataset.source === source) return;
+        var previous = list.value;
         list.dataset.source = source;
         list.replaceChildren();
-        names.forEach(function (name) {
+        var placeholder = doc.createElement("option");
+        placeholder.value = ""; placeholder.textContent = "Выберите";
+        list.appendChild(placeholder);
+        choices.forEach(function (choice) {
             var option = doc.createElement("option");
-            option.value = /^\d+$/.test(name) ? "№ " + name : name;
+            option.value = choice[0]; option.textContent = choice[1];
             list.appendChild(option);
         });
+        list.value = choices.some(function (choice) { return choice[0] === previous; }) ? previous : "";
+        list.setCustomValidity("");
+        syncAssignmentButton();
+    }
+    function syncAssignmentButton() {
+        var list = doc.querySelector("[data-cr-mm-assign-excavator]");
+        var button = doc.querySelector("[data-cr-mm-assign-submit]");
+        if (list && button) {
+            var text = list.value ? "Назначить" : "Найти";
+            if (button.textContent !== text) button.textContent = text;
+        }
+    }
+    function clearFoundTruck() {
+        foundTruckId = "";
+        doc.querySelectorAll(".cr-mm-truck-hit").forEach(function (node) { node.classList.remove("cr-mm-truck-hit"); });
+    }
+    function showFoundTruck(truck, reveal) {
+        var rack = truck.closest(".complex-assigned-trucks");
+        if (rack && truck.hidden) { rack.classList.add("cr-mm-expanded-rack"); updateRackControls(); }
+        setClass(truck, "cr-mm-truck-hit", true);
+        if (reveal && edgePanels) edgePanels.reveal(truck);
+    }
+    function refreshFoundTruck() {
+        if (!foundTruckId) return;
+        var truck = equipmentCandidates("[data-dispatcher-drag='truck'][data-equipment-id]").find(function (node) { return node.dataset.equipmentId === foundTruckId; });
+        if (truck) showFoundTruck(truck, false);
+        else clearFoundTruck();
+    }
+    function previewTruckNumber(input) {
+        clearFoundTruck();
+        if (!compatible || !board || context().modalOpen) return;
+        var matches = equipmentMatches(input.value.trim(), "[data-dispatcher-drag='truck'][data-equipment-id]");
+        if (matches.length !== 1) return;
+        foundTruckId = matches[0].dataset.equipmentId;
+        showFoundTruck(matches[0], false);
+        // Keep the input panel and keyboard while typing. A garage is revealed
+        // only by Find, which can close this panel under the one-panel rule.
+        if (matches[0].closest(".dispatcher-complex-card")) matches[0].scrollIntoView({ block: "nearest", inline: "nearest" });
     }
     function assignmentError(input, text) {
         input.setCustomValidity(text);
         input.reportValidity();
         return null;
     }
-    function equipmentByNumber(input, selector, noun) {
-        var value = input.value.trim();
-        if (!value) return assignmentError(input, "Введите номер " + noun + ".");
+    function equipmentMatches(value, selector) {
+        if (!value) return [];
         var numeric = /^\d+$/.test(value);
         var number = value.replace(/^0+(?=\d)/, "");
-        var matches = equipmentCandidates(selector).filter(function (node) {
+        return equipmentCandidates(selector).filter(function (node) {
             var name = equipmentName(node);
             if (!numeric) return name.toLocaleLowerCase("ru") === value.toLocaleLowerCase("ru") || "№ " + name === value;
             var suffix = name.match(/(\d+)\s*$/);
             return suffix && suffix[1].replace(/^0+(?=\d)/, "") === number;
         });
+    }
+    function equipmentByNumber(input, selector, noun) {
+        var value = input.value.trim();
+        if (!value) return assignmentError(input, "Введите номер " + noun + ".");
+        var number = value.replace(/^0+(?=\d)/, "");
+        var matches = equipmentMatches(value, selector);
         if (!matches.length) return assignmentError(input, "Номер " + number + " не найден на пульте.");
-        if (matches.length > 1) return assignmentError(input, "Номер " + number + " встречается несколько раз. " +
-            (noun === "экскаватора" ? "Выберите полное обозначение в подсказке поля." : "Выберите самосвал на рабочем поле."));
+        if (matches.length > 1) return assignmentError(input, "Номер " + number + " встречается несколько раз. Выберите самосвал на рабочем поле.");
         return matches[0];
     }
     function assignByNumbers(toolbar) {
-        if (Date.now() < busyUntil) return;
         var truckInput = toolbar.querySelector("[data-cr-mm-assign-truck]");
         var excavatorInput = toolbar.querySelector("[data-cr-mm-assign-excavator]");
         truckInput.setCustomValidity("");
         excavatorInput.setCustomValidity("");
         var state = context();
         if (state.modalOpen) return;
+        if (!excavatorInput.value) {
+            var found = equipmentByNumber(truckInput, "[data-dispatcher-drag='truck'][data-equipment-id]", "самосвала");
+            if (!found) return;
+            clearFoundTruck(); foundTruckId = found.dataset.equipmentId;
+            if (toolbar.contains(doc.activeElement)) doc.activeElement.blur();
+            showFoundTruck(found, true);
+            return;
+        }
+        if (Date.now() < busyUntil) return;
         if (!state.compatible || state.observer || doc.body.dataset.roleAccessActive === "false") {
             assignmentError(excavatorInput, "Назначение недоступно в режиме просмотра.");
             return;
@@ -655,10 +731,10 @@
         }
         var truck = equipmentByNumber(truckInput, "[data-dispatcher-drag='truck'][data-equipment-id]", "самосвала");
         if (!truck) return;
-        var excavator = equipmentByNumber(excavatorInput, EXCAVATORS, "экскаватора");
-        if (!excavator) return;
-        if (excavator.dataset.dispatcherDrop !== "complex") {
-            assignmentError(excavatorInput, "Сначала выведите этот экскаватор из гаража на рабочее поле.");
+        var excavator = equipmentCandidates(EXCAVATORS).find(function (node) { return node.dataset.equipmentId === excavatorInput.value; });
+        if (!excavator) {
+            assignmentError(excavatorInput, "Экскаватор больше недоступен. Выберите его заново.");
+            refreshExcavatorNumbers();
             return;
         }
         if (truck.closest("[data-dispatcher-drop='complex']") === excavator) {
@@ -676,7 +752,7 @@
                 assignmentError(excavatorInput, "Назначение недоступно. Проверьте состояние техники.");
                 return;
             }
-            toolbar.reset();
+            toolbar.reset(); syncAssignmentButton(); clearFoundTruck();
             if (toolbar.contains(doc.activeElement)) doc.activeElement.blur();
             if (edgePanels) edgePanels.completeAction();
         } catch (_) {
@@ -734,6 +810,7 @@
         setClass(doc.documentElement, "cr-mm-tablet", true);
         ensureToolbar();
         refreshExcavatorNumbers();
+        refreshFoundTruck();
         if (!edgePanels) edgePanels = createEdgePanels(board);
         fitCanvas();
     }
@@ -756,7 +833,10 @@
             assignByNumbers(event.target);
         });
         doc.addEventListener("input", function (event) {
-            if (event.target.matches("#cr-mm-toolbar input")) event.target.setCustomValidity("");
+            if (event.target.matches("[data-cr-mm-assign-truck]")) { event.target.setCustomValidity(""); previewTruckNumber(event.target); }
+        });
+        doc.addEventListener("change", function (event) {
+            if (event.target.matches("[data-cr-mm-assign-excavator]")) { event.target.setCustomValidity(""); syncAssignmentButton(); }
         });
         doc.addEventListener("keydown", function (event) {
             if ((event.key === "Enter" || event.key === " ") && event.target.matches(".complex-truck-more[role='button']")) { event.preventDefault(); event.stopPropagation(); event.target.click(); }
@@ -795,6 +875,6 @@
         }
         bind(); reconcile();
     }
-    global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); } };
+    global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); syncAssignmentButton(); clearFoundTruck(); } };
     init();
 })(typeof window !== "undefined" ? window : globalThis);

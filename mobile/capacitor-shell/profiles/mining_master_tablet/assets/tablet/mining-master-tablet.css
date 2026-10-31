@@ -84,14 +84,29 @@ html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-t
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more { order: -1; font-size: 0 !important; }
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more::after { content: "Свернуть"; font-size: calc(10px / var(--cr-mm-scale)); }
 #cr-mm-toolbar { position: fixed; inset: auto 0 0; z-index: 1000; display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: 64px; margin: 0; padding: 9px 12px; border-top: 1px solid #48606b; color: #edf4f7; background: #10232e; font: 14px/1.3 system-ui, sans-serif; }
-#cr-mm-toolbar label { position: relative; flex: 1 1 0; min-width: 0; margin: 0; }
-#cr-mm-toolbar label > span { position: absolute; top: 4px; left: 11px; z-index: 1; font: 11px/12px system-ui, sans-serif; color: #c4d6df; pointer-events: none; }
-#cr-mm-toolbar input { box-sizing: border-box; width: 100% !important; min-width: 0; height: 44px; margin: 0; padding: 16px 10px 2px; border: 1px solid #627f8d; border-radius: 7px; background: #071720; color: #fff; font: 18px/22px system-ui, sans-serif; }
+#cr-mm-toolbar label { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; margin: 0; }
+#cr-mm-toolbar label.cr-mm-assign-excavator { flex-grow: 1.25; }
+#cr-mm-toolbar label > img { flex: 0 0 36px; width: 36px; height: 36px; object-fit: contain; }
+#cr-mm-toolbar .cr-mm-assign-control { display: block; position: relative; flex: 1 1 0; min-width: 0; }
+#cr-mm-toolbar .cr-mm-assign-control > span { position: absolute; top: 4px; left: 11px; z-index: 1; font: 11px/12px system-ui, sans-serif; color: #c4d6df; pointer-events: none; }
+#cr-mm-toolbar input, #cr-mm-toolbar select { box-sizing: border-box; width: 100% !important; min-width: 0; height: 44px; margin: 0; padding: 16px 10px 2px; border: 1px solid #627f8d; border-radius: 7px; background: #071720; color: #fff; font: 18px/22px system-ui, sans-serif; }
+#cr-mm-toolbar select { cursor: pointer; }
+#cr-mm-toolbar .cr-mm-assign-arrow { flex: 0 0 auto; font: 28px/1 system-ui, sans-serif; color: #c4d6df; }
+#cr-mm-toolbar button { flex: 0 0 auto; width: auto !important; min-width: 120px; height: 44px; margin: 0 !important; padding: 0 18px; border: 1px solid #ffd200; border-radius: 7px; color: #172129; background: #ffd200; font: 600 16px/1.2 system-ui, sans-serif; cursor: pointer; }
+html.cr-mm-tablet .cr-mm-truck-hit { outline: 3px solid #ffd200 !important; outline-offset: -3px; box-shadow: inset 0 0 0 5px rgba(255,210,0,.25) !important; }
 #cr-mm-toolbar [hidden] { display: none !important; }
-#cr-mm-toolbar input:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+#cr-mm-toolbar input:focus-visible, #cr-mm-toolbar select:focus-visible, #cr-mm-toolbar button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar { background: #eaf0f3; color: #172f3a; border-color: #a5bac5; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar label > span { color: #345260; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input { background: #fff; color: #172f3a; }
+html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar .cr-mm-assign-control > span, html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar .cr-mm-assign-arrow { color: #345260; }
+html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input, html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar select { background: #fff; color: #172f3a; }
+@media (max-width: 600px) {
+    #cr-mm-toolbar label { gap: 4px; }
+    #cr-mm-toolbar label > img { flex-basis: 22px; width: 22px; height: 28px; }
+    #cr-mm-toolbar .cr-mm-assign-arrow { font-size: 20px; }
+    #cr-mm-toolbar button { min-width: 82px; padding-inline: 7px; font-size: 13px; }
+    #cr-mm-toolbar input, #cr-mm-toolbar select { padding-inline: 6px; font-size: 16px; }
+    #cr-mm-toolbar .cr-mm-assign-control > span { left: 7px; font-size: 10px; }
+}
 @media screen and (max-height: 639px) {
     html.cr-mm-tablet .dispatcher-excavators, html.cr-mm-tablet .dispatcher-trucks { grid-template-rows: none !important; grid-auto-rows: calc(58px / var(--cr-mm-scale)) !important; align-content: start !important; overflow-y: auto !important; }
 }
