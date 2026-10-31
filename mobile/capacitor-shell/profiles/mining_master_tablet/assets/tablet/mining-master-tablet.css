@@ -199,6 +199,10 @@ html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > 
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item], .is-placeholder) > img {
   display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
 }
+/* Empty slots have no number/status rows to distribute around the icon. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is(.dispatcher-truck-tile, .dispatcher-excavator-garage-tile).is-placeholder:not([hidden]) {
+  justify-content: center; align-content: center; padding: 3px !important;
+}
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > span {
   display: block !important; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font-size: max(8px, calc(var(--cr-panel-tile-h, 63px) * .155)) !important; font-weight: 700; line-height: 1.1; letter-spacing: .01em; opacity: .9;
