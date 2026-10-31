@@ -1,4 +1,4 @@
-{% if access.role.code == 'dispatcher' %}
+{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}
 <header class="dispatcher-topbar dispatcher-unified-topbar no-print" aria-label="Горный диспетчер — {{ title }}">
     {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen=title %}
 </header>

@@ -38,6 +38,7 @@ from shifts.services import (
     shift_plan_totals_for_dates,
 )
 from trips.dispatcher_header import build_dispatcher_header_context
+from trips.tablet_control import get_control_shift, is_tablet_master_request
 from trips.models import (
     DispatcherActionLog,
     DispatcherActionType,
@@ -394,14 +395,24 @@ def get_report_access(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    return EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
+    if getattr(request, 'mining_master_tablet_control', False) and not is_tablet_master_request(request, access):
+        return None
+    return access
+
+
+def build_report_header_context(access, request=None, *, legacy_request=True):
+    if request is not None and is_tablet_master_request(request, access):
+        from assignments.tablet_views import build_tablet_header
+        return build_tablet_header(request, access)
+    return build_dispatcher_header_context(access, request if legacy_request else None)
 
 
 def require_dispatcher_report_access(request):
     access = get_report_access(request)
     if not access:
         return None, redirect('login')
-    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+    if access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access):
         return None, redirect('role_home')
     return access, None
 
@@ -2358,7 +2369,7 @@ def dispatcher_mining_context(request, access):
 
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -2675,7 +2686,7 @@ def dispatcher_transport_context(request, access):
 
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -2882,7 +2893,7 @@ def dispatcher_downtime_context(request, access):
 
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -3159,7 +3170,7 @@ def dispatcher_shift_log_context(request, access):
     service_actions = [row for row in action_rows if row['status'] in {'danger', 'risk'}]
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -3470,7 +3481,7 @@ def dispatcher_reports_context(request, access):
     query_suffix = f'?{request.GET.urlencode()}' if request.GET.urlencode() else ''
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -3535,8 +3546,8 @@ def dispatcher_shift_report_url(report_kind, selected_date, shift_type):
 
 
 def update_shift_report_trip(request, access, selected_date, shift_type, report_kind):
-    if access.role.code not in {'dispatcher', 'admin'}:
-        return HttpResponseForbidden('Корректировка исходных данных доступна диспетчеру или администратору.')
+    if access.role.code not in {'dispatcher', 'admin'} and not is_tablet_master_request(request, access):
+        return HttpResponseForbidden('Корректировка исходных данных недоступна для этого рабочего места.')
     reason = request.POST.get('correction_reason', '').strip()
     if not reason:
         messages.error(request, 'Укажите причину корректировки.')
@@ -3667,11 +3678,14 @@ def dispatcher_shift_report_view(request, report_kind='trucks'):
     operational_state_version = operational_state.version if operational_state else 0
     response = render(request, 'reports/dispatcher_shift_report.html', {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'report': report,
         'report_kind': report_kind,
         'query_string': query_string,
-        'can_correct': access.role.code in {'dispatcher', 'admin'},
+        'can_correct': access.role.code in {'dispatcher', 'admin'} or (
+            is_tablet_master_request(request, access)
+            and get_control_shift(access, request=request) is not None
+        ),
         'rock_types': RockType.objects.filter(is_active=True).order_by('name'),
         'dump_points': DumpPoint.objects.filter(is_active=True).order_by('name'),
         'operational_state_version': operational_state_version,
@@ -3841,7 +3855,7 @@ def dispatcher_management_context(request, access):
 
     return {
         'access': access,
-        'dispatcher_header': build_dispatcher_header_context(access),
+        'dispatcher_header': build_report_header_context(access, request, legacy_request=False),
         'filters': filters,
         'current_time': timezone.localtime(timezone.now()).strftime('%H:%M'),
         'current_date': timezone.localdate().strftime('%d.%m.%Y'),
@@ -4324,8 +4338,8 @@ def volume_report_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin', 'manager'}:
+    access = get_report_access(request)
+    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4353,7 +4367,7 @@ def volume_report_view(request):
         'reports/volume_report.html',
         {
             'access': access,
-            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'dispatcher_header': build_report_header_context(access, request),
             'export_url': (
                 f"{reverse('volume_report_export')}?{request.GET.urlencode()}"
                 if request.GET.urlencode()
@@ -4377,8 +4391,8 @@ def volume_report_export_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in {'dispatcher', 'admin', 'manager'}:
+    access = get_report_access(request)
+    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4440,7 +4454,7 @@ def shift_analytics_report_view(request):
         'reports/shift_analytics.html',
         {
             'access': access,
-            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'dispatcher_header': build_report_header_context(access, request),
             **shift_analytics_report_context(request),
         },
     )
@@ -4676,7 +4690,7 @@ def downtime_report_view(request):
         'reports/downtime_report.html',
         {
             'access': access,
-            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'dispatcher_header': build_report_header_context(access, request),
             'export_url': (
                 f"{reverse('downtime_report_export')}?{request.GET.urlencode()}"
                 if request.GET.urlencode()
@@ -4830,14 +4844,25 @@ def get_reports_access(request, allowed_roles):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    access = EmployeeAccess.objects.select_related('employee', 'role').filter(id=access_id, is_active=True).first()
-    if not access or access.role.code not in allowed_roles:
+    access = get_report_access(request)
+    if not access:
+        return None
+    if access.role.code not in allowed_roles and not (
+        'dispatcher' in allowed_roles and is_tablet_master_request(request, access)
+    ):
         return None
     return access
 
 
 def reports_mutation_role_barrier(request, access):
     Employee.objects.select_for_update().get(pk=access.employee_id)
+    if getattr(request, 'mining_master_tablet_control', False):
+        # Keep the master's own shift locked until the report transaction ends.
+        # A dispatcher's shift or another master's shift never grants write access.
+        if not is_tablet_master_request(request, access):
+            return HttpResponseForbidden('Доступ горного мастера неактивен.')
+        if get_control_shift(access, request=request, for_update=True) is None:
+            return HttpResponseForbidden('Для изменения отчёта начните собственную смену горного мастера.')
     if role_session_state(request, access)['is_active']:
         return None
     return HttpResponse(
@@ -5468,7 +5493,7 @@ def report_template_builder_view(request):
         'reports/report_template_builder.html',
         {
             'access': access,
-            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'dispatcher_header': build_report_header_context(access, request),
             'report_templates': ReportTemplate.objects.order_by('name'),
             'edit_template': edit_template,
             'column_options': report_template_column_options(selected_columns, column_labels),
@@ -5817,7 +5842,7 @@ def customer_daily_report_view(request):
         'reports/customer_daily_report.html',
         {
             'access': access,
-            'dispatcher_header': build_dispatcher_header_context(access, request),
+            'dispatcher_header': build_report_header_context(access, request),
             'export_url': f"{reverse('customer_daily_report_export')}?date={report_context['date_input']}",
             **report_context,
         },
