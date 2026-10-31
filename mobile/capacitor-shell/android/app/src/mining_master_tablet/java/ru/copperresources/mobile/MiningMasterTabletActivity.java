@@ -11,6 +11,8 @@ import android.webkit.WebView;
 import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -37,6 +39,9 @@ public final class MiningMasterTabletActivity extends MainActivity {
         if (kiosk != null && !isFinishing()) kiosk.showAdminEntry();
     };
     private String tabletScript = "";
+    private boolean systemInsetsKnown;
+    private int systemInsetTopPx;
+    private int systemInsetBottomPx;
 
     @Override
     protected boolean usesBackgroundConnectionService() { return false; }
@@ -57,6 +62,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         kiosk = new TabletKioskController(this);
         reportDownloads = new TabletReportDownloads(this);
+        installSystemInsetsListener();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView view = getBridge().getWebView();
             // Explicit release boundary: no DevTools on the delivered signed APK.
@@ -101,7 +107,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 WebViewCompat.addDocumentStartJavaScript(view, webPrint.script(),
                     Collections.singleton(TabletUrlPolicy.ORIGIN));
-                if (!tabletScript.isEmpty()) WebViewCompat.addDocumentStartJavaScript(view, tabletScript,
+                if (!tabletScript.isEmpty()) WebViewCompat.addDocumentStartJavaScript(view, systemInsetsScript() + tabletScript,
                     Collections.singleton(TabletUrlPolicy.ORIGIN));
             }
             // The initial load may have begun before the document-start hook was installed.
@@ -158,20 +164,83 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     private void injectTablet(WebView view) {
         if (!tabletScript.isEmpty() && TabletUrlPolicy.tabletPage(view.getUrl())) {
-            view.evaluateJavascript(tabletScript, null);
+            recordSystemInsets(ViewCompat.getRootWindowInsets(getWindow().getDecorView()));
+            view.evaluateJavascript(systemInsetsScript() + tabletScript, null);
         }
+    }
+
+    private void installSystemInsetsListener() {
+        android.view.View decor = getWindow().getDecorView();
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (view, insets) -> {
+            if (recordSystemInsets(insets)) publishSystemInsets();
+            // Preserve normal dispatch to Capacitor, startup overlay and the IME layout.
+            return ViewCompat.onApplyWindowInsets(view, insets);
+        });
+        decor.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                refreshSystemInsets();
+            }
+        });
+        refreshSystemInsets();
+        ViewCompat.requestApplyInsets(decor);
+    }
+
+    private boolean recordSystemInsets(WindowInsetsCompat insets) {
+        if (insets == null) return false;
+        // Transient Android bars report hidden while still intercepting edge touches.
+        // Keep only the grips outside their stable area; do not inset the work surface.
+        Insets bars = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars());
+        Insets gestures = insets.getInsets(WindowInsetsCompat.Type.systemGestures()
+            | WindowInsetsCompat.Type.mandatorySystemGestures());
+        int top = Math.max(bars.top, gestures.top);
+        int bottom = Math.max(bars.bottom, gestures.bottom);
+        if (systemInsetsKnown && systemInsetTopPx == top && systemInsetBottomPx == bottom) return false;
+        systemInsetsKnown = true;
+        systemInsetTopPx = top;
+        systemInsetBottomPx = bottom;
+        return true;
+    }
+
+    private void refreshSystemInsets() {
+        recordSystemInsets(ViewCompat.getRootWindowInsets(getWindow().getDecorView()));
+        publishSystemInsets();
+    }
+
+    private void publishSystemInsets() {
+        if (!systemInsetsKnown || getBridge() == null || getBridge().getWebView() == null) return;
+        WebView view = getBridge().getWebView();
+        if (TabletUrlPolicy.tabletPage(view.getUrl())) {
+            view.evaluateJavascript(systemInsetsScript(), null);
+        }
+    }
+
+    private String systemInsetsScript() {
+        if (!systemInsetsKnown) return "";
+        return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
+            + "||" + new JSONArray(TabletUrlPolicy.TABLET_PATHS).toString()
+            + ".indexOf(location.pathname)===-1)return;function apply(){var root=document.documentElement;"
+            + "if(!root)return;var ratio=Number(window.devicePixelRatio);"
+            + "if(!Number.isFinite(ratio)||ratio<=0)ratio=1;"
+            + "root.style.setProperty('--cr-tablet-system-top',(" + systemInsetTopPx + "/ratio)+'px');"
+            + "root.style.setProperty('--cr-tablet-system-bottom',(" + systemInsetBottomPx + "/ratio)+'px');}"
+            + "if(document.documentElement)apply();else document.addEventListener('DOMContentLoaded',apply,{once:true});})();";
     }
 
     @Override public void onResume() {
         super.onResume();
         immersive();
+        refreshSystemInsets();
         if (kiosk != null) kiosk.onResume();
         if (webPrint != null) webPrint.onResume();
     }
 
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
-        if (focused) immersive();
+        if (focused) {
+            immersive();
+            refreshSystemInsets();
+        }
     }
 
     private void immersive() {

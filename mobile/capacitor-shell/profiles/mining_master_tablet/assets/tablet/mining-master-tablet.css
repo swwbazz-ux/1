@@ -285,14 +285,16 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
 .cr-mm-panel-handle[data-cr-panel-side="right"]::after { inset: 0 0 0 auto; width: 36px; }
 .cr-mm-panel-handle[data-cr-panel-side="top"], .cr-mm-panel-handle[data-cr-panel-side="bottom"] { left: calc(50% - 44px); width: 88px; height: 14px; }
 .cr-mm-panel-handle[data-cr-panel-side="left"], .cr-mm-panel-handle[data-cr-panel-side="right"] { top: calc(50% - 44px); width: 14px; height: 88px; }
-.cr-mm-panel-handle[data-cr-panel-side="top"] { top: 6px; }
-.cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 6px; }
+/* Native bars can receive touches while transiently visible in lock task.
+   Keep grips just inside their stable insets without shrinking the field. */
+.cr-mm-panel-handle[data-cr-panel-side="top"] { top: max(6px, calc(var(--cr-tablet-system-top, 0px) + 6px)); }
+.cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: max(6px, calc(var(--cr-tablet-system-bottom, 0px) + 6px)); }
 .cr-mm-panel-handle[data-cr-panel-side="left"] { left: 4px; }
 .cr-mm-panel-handle[data-cr-panel-side="right"] { right: 4px; }
 .cr-mm-panel-handle[data-cr-panel-side="top"]::before, .cr-mm-panel-handle[data-cr-panel-side="bottom"]::before { width: 38px; height: 3px; }
 .cr-mm-panel-handle[data-cr-panel-side="left"]::before, .cr-mm-panel-handle[data-cr-panel-side="right"]::before { height: 38px; width: 3px; }
-html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { top: var(--cr-panel-top-edge); }
-html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: calc(64px + var(--cr-panel-toolbar-inset, 0px)); }
+html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { top: max(var(--cr-panel-top-edge), calc(var(--cr-tablet-system-top, 0px) + 6px)); }
+html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: max(calc(64px + var(--cr-panel-toolbar-inset, 0px)), calc(var(--cr-tablet-system-bottom, 0px) + 6px)); }
 html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-side-edge); }
 html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-side-edge); }
 .cr-mm-panel-handle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
