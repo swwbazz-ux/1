@@ -13,7 +13,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const assets = path.join(__dirname, '../profiles/mining_master_tablet/assets/tablet');
   const css = fs.readFileSync(path.join(assets, 'mining-master-tablet.css'), 'utf8');
   const js = fs.readFileSync(path.join(assets, 'mining-master-tablet.js'), 'utf8');
-  const pages = [['reports', '/dispatcher/reports/'], ['journal', '/dispatcher/shift-log/'], ['analytics', '/dispatcher/management/'], ['truck-report', '/dispatcher/shift-reports/trucks/'], ['volume', '/reports/volume/'], ['customer-daily', '/reports/customer-daily/'], ['templates', '/reports/templates/'], ['common-downtimes', '/reports/downtimes/']];
+  const pages = [['reports', '/mining-master/tablet/dispatcher/reports/'], ['journal', '/mining-master/tablet/dispatcher/shift-log/'], ['analytics', '/mining-master/tablet/dispatcher/management/'], ['truck-report', '/mining-master/tablet/dispatcher/shift-reports/trucks/'], ['volume', '/mining-master/tablet/reports/volume/'], ['customer-daily', '/mining-master/tablet/reports/customer-daily/'], ['templates', '/mining-master/tablet/reports/templates/'], ['common-downtimes', '/mining-master/tablet/reports/downtimes/']];
   const documents = new Map(pages.map(([name, route]) => [route, fs.readFileSync(path.join(fixtureDir, `${name}-sanitized.html`), 'utf8')]));
   fs.mkdirSync(outputDir, { recursive: true });
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -21,7 +21,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const blocked = [], errors = [], reports = [];
   await context.route('**/*', async route => {
     const req = route.request(), url = new URL(req.url());
-    if (req.method() === 'GET' && req.isNavigationRequest() && url.origin === 'https://dispatcher.driverform.ru' && documents.has(url.pathname)) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: documents.get(url.pathname) });
+    if (req.method() === 'GET' && req.isNavigationRequest() && url.origin === 'https://mining-master.driverform.ru' && documents.has(url.pathname)) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: documents.get(url.pathname) });
     if (req.method() === 'GET' && url.pathname.startsWith('/static/')) {
       const local = path.resolve(staticRoot, decodeURIComponent(url.pathname.slice(8)));
       if (local.startsWith(staticRoot + path.sep) && fs.existsSync(local) && fs.statSync(local).isFile()) return route.fulfill({ path: local });
@@ -33,7 +33,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   page.on('pageerror', error => errors.push(error.message));
   for (const [name, route] of pages) {
     await page.setViewportSize({ width: 1333, height: 800 });
-    await page.goto('https://dispatcher.driverform.ru' + route);
+    await page.goto('https://mining-master.driverform.ru' + route);
     // The sanitization removes input nodes. Restore only the known date filter
     // geometry from the server template, with a synthetic date and no submission.
     const syntheticDateFilters = await page.evaluate(() => {

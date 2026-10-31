@@ -8,7 +8,7 @@ final class TabletStandaloneReadiness {
     private static final String RATING_PATH = "/reports/rating/tv/";
     private static final String RATING_EXPRESSION =
         "(function(){"
-        + "if(window.top!==window||location.origin!=='https://dispatcher.driverform.ru'"
+        + "if(window.top!==window||location.origin!=='https://mining-master.driverform.ru'"
         + "||location.pathname!=='/reports/rating/tv/'||!document.body"
         + "||!document.body.classList.contains('rating-tv-body'))return false;"
         + "var shell=document.querySelector('main[data-rating-tv]');"

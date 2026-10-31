@@ -143,6 +143,8 @@ def _finish_login(request, access):
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
 def login_view(request):
+    request.mining_master_tablet_auth = True
+    request.session['mining_master_tablet_device'] = True
     phone = ''
     error = ''
     if request.method == 'POST':
@@ -175,7 +177,10 @@ def login_view(request):
                     access = EmployeeAccess.objects.select_for_update(of=('self',)).select_related(
                         'employee', 'role', 'employee__contractor_organization',
                     ).get(pk=access.pk)
-                    if not _eligible(access) or not constant_time_compare(access.access_code, code):
+                    matched = find_employee_access_by_credentials(phone, code, role_code=ROLE)
+                    if (not _eligible(access) or not constant_time_compare(access.access_code, code)
+                            or normalize_phone(access.employee.phone) != normalize_phone(phone)
+                            or matched is None or matched.pk != access.pk):
                         raise ValidationError(LOGIN_ERROR)
                     access = activate_role_session(request, access)
                 return _finish_login(request, access)
@@ -191,6 +196,8 @@ def login_view(request):
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
 def activate_view(request):
+    request.mining_master_tablet_auth = True
+    request.session['mining_master_tablet_device'] = True
     if request.method == 'POST' and request.POST.get('action') == 'cancel':
         request.session.pop(PENDING_KEY, None)
         request.session.pop(SHIFT_AUTH_KEY, None)

@@ -57,6 +57,18 @@ class MiningMasterTabletAuthTests(TestCase):
         self.access.status = EmployeeAccess.Status.ACTIVATED
         self.access.save(update_fields=['status'])
 
+    def test_phone_change_between_lookup_and_lock_rejects_old_phone(self):
+        self.make_active()
+        from .access_auth import find_employee_access_by_credentials
+        def find_then_change_phone(*args, **kwargs):
+            result = find_employee_access_by_credentials(*args, **kwargs)
+            Employee.objects.filter(pk=self.employee.pk).update(phone='+79001234569')
+            return result
+        with patch('users.mining_master_tablet_auth.find_employee_access_by_credentials', side_effect=find_then_change_phone):
+            response = self.login()
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('employee_access_id', self.client.session)
+
     def proof_request(self):
         request = RequestFactory().post(self.CONTROL)
         request.session = self.client.session

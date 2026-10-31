@@ -295,6 +295,8 @@ def _render_start_result(request, phone):
 @never_cache
 @require_http_methods(['GET', 'POST'])
 def universal_start_view(request):
+    if request.session.get('mining_master_tablet_device'):
+        return redirect('mining_master_tablet')
     if request.method == 'POST':
         phone = with_country_code(request.POST.get('phone', ''))
         result_token = _issue_start_result(phone)

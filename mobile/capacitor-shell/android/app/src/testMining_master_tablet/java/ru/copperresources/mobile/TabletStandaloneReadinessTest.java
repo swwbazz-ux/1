@@ -4,7 +4,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TabletStandaloneReadinessTest {
-    private static final String URL = "https://dispatcher.driverform.ru/reports/rating/tv/";
+    private static final String URL = "https://mining-master.driverform.ru/reports/rating/tv/";
 
     @Test public void onlyTabletProfileMayRecognizeStandaloneRating() {
         assertFalse(TabletStandaloneReadiness.expressionFor("mining_master_tablet", URL).isEmpty());
@@ -16,17 +16,17 @@ public class TabletStandaloneReadinessTest {
 
     @Test public void onlyExactHttpsOriginAndRawPathAllowTheAlternateProbe() {
         String[] rejected = {
-            "http://dispatcher.driverform.ru/reports/rating/tv/",
+            "http://mining-master.driverform.ru/reports/rating/tv/",
             "https://driverform.ru/reports/rating/tv/",
-            "https://dispatcher.driverform.ru.attacker.example/reports/rating/tv/",
-            "https://name@dispatcher.driverform.ru/reports/rating/tv/",
-            "https://dispatcher.driverform.ru:8443/reports/rating/tv/",
-            "https://dispatcher.driverform.ru/reports/rating/%74v/",
-            "https://dispatcher.driverform.ru/reports/rating/tv",
-            "https://dispatcher.driverform.ru/reports/rating/tv/error/",
-            "https://dispatcher.driverform.ru/login/",
-            "https://dispatcher.driverform.ru/dispatcher/control/",
-            "https://dispatcher.driverform.ru/reports/rating/api/",
+            "https://mining-master.driverform.ru.attacker.example/reports/rating/tv/",
+            "https://name@mining-master.driverform.ru/reports/rating/tv/",
+            "https://mining-master.driverform.ru:8443/reports/rating/tv/",
+            "https://mining-master.driverform.ru/reports/rating/%74v/",
+            "https://mining-master.driverform.ru/reports/rating/tv",
+            "https://mining-master.driverform.ru/reports/rating/tv/error/",
+            "https://mining-master.driverform.ru/login/",
+            "https://mining-master.driverform.ru/mining-master/tablet/",
+            "https://mining-master.driverform.ru/reports/rating/api/",
             null
         };
         for (String url : rejected) assertEquals(String.valueOf(url), "",

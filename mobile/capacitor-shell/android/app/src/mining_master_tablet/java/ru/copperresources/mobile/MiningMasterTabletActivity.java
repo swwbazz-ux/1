@@ -96,7 +96,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                     super.onReceivedHttpError(webView, request, response);
                 }
                 @Override public boolean shouldOverrideUrlLoading(WebView webView, WebResourceRequest request) {
-                    if (!TabletUrlPolicy.trusted(request.getUrl().toString())) {
+                    if (!TabletUrlPolicy.workplaceNavigation(request.getUrl().toString())) {
                         Toast.makeText(MiningMasterTabletActivity.this,
                             "На рабочем планшете доступны только страницы Горного мастера", Toast.LENGTH_SHORT).show();
                         return true;
@@ -104,7 +104,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                     return super.shouldOverrideUrlLoading(webView, request);
                 }
                 @Override public boolean shouldOverrideUrlLoading(WebView webView, String url) {
-                    return !TabletUrlPolicy.trusted(url);
+                    return !TabletUrlPolicy.workplaceNavigation(url);
                 }
             });
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -124,7 +124,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                     android.webkit.WebBackForwardList history = webView.copyBackForwardList();
                     int previous = history.getCurrentIndex() - 1;
                     if (!TabletUrlPolicy.controlPage(webView.getUrl()) && previous >= 0
-                        && TabletUrlPolicy.trusted(history.getItemAtIndex(previous).getUrl())) {
+                        && TabletUrlPolicy.workplaceNavigation(history.getItemAtIndex(previous).getUrl())) {
                         webView.goBack();
                         return;
                     }

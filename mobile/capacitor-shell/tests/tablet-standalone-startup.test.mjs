@@ -26,7 +26,7 @@ function fixture() {
   window.top = window;
   const context = {
     window,
-    location: { origin: "https://dispatcher.driverform.ru", pathname: "/reports/rating/tv/" },
+    location: { origin: "https://mining-master.driverform.ru", pathname: "/reports/rating/tv/" },
     document: {
       body: { classList: { contains: name => name === "rating-tv-body" } },
       querySelector: selector => selector === "main[data-rating-tv]" ? shell : null,
@@ -85,8 +85,8 @@ test("standalone rating cannot reveal a hidden or zero-size shell", () => {
 test("standalone rating JavaScript rechecks exact origin, path and main frame", () => {
   const changes = [
     item => { item.context.window.top = {}; },
-    item => { item.context.location.origin = "http://dispatcher.driverform.ru"; },
-    item => { item.context.location.origin = "https://dispatcher.driverform.ru.attacker.example"; },
+    item => { item.context.location.origin = "http://mining-master.driverform.ru"; },
+    item => { item.context.location.origin = "https://mining-master.driverform.ru.attacker.example"; },
     item => { item.context.location.pathname = "/reports/rating/%74v/"; },
     item => { item.context.location.pathname = "/reports/rating/tv/error/"; },
     item => { item.context.location.pathname = "/login/"; },

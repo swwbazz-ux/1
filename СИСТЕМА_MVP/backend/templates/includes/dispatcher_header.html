@@ -57,7 +57,14 @@
             {% endif %}
             <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
             <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
-            <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
+            {% if request.mining_master_tablet_control %}
+                <form method="post" action="{% url 'mining_master_tablet_logout' %}" style="display:contents">
+                    {% csrf_token %}
+                    <button type="submit" class="dispatcher-utility-link dispatcher-utility-exit"><span aria-hidden="true"></span>Выйти</button>
+                </form>
+            {% else %}
+                <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
+            {% endif %}
         </div>
     </section>
 

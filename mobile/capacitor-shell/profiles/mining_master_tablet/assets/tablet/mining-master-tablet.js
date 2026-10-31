@@ -1,26 +1,26 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.6.1";
-    var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
+    var VERSION = "1.7.0";
+    var SUPPORTED_SHELLS = ["mining-master-mobile-shell-v165"];
     var RELATED_PATHS = [
-        "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
-        "/dispatcher/mining-volumes/", "/dispatcher/transport/", "/dispatcher/downtimes/",
-        "/dispatcher/shift-reports/trucks/", "/dispatcher/shift-reports/excavation/",
-        "/dispatcher/shift-reports/hourly/", "/dispatcher/shift-reports/hourly-grid/",
-        "/reports/customer-daily/", "/reports/volume/", "/reports/templates/", "/reports/downtimes/"
+        "/mining-master/tablet/dispatcher/reports/", "/mining-master/tablet/dispatcher/shift-log/", "/mining-master/tablet/dispatcher/management/",
+        "/mining-master/tablet/dispatcher/mining-volumes/", "/mining-master/tablet/dispatcher/transport/", "/mining-master/tablet/dispatcher/downtimes/",
+        "/mining-master/tablet/dispatcher/shift-reports/trucks/", "/mining-master/tablet/dispatcher/shift-reports/excavation/",
+        "/mining-master/tablet/dispatcher/shift-reports/hourly/", "/mining-master/tablet/dispatcher/shift-reports/hourly-grid/",
+        "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
     ];
     var SOURCE = "[data-dispatcher-drag][data-equipment-id]";
     var EXCAVATORS = ".dispatcher-complex-card[data-dispatcher-drop='complex'][data-equipment-id][data-dispatcher-drop-bound='true']";
     var MODALS = ".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])";
 
     function allowedLocation(location) {
-        return location.protocol === "https:" && location.hostname === "dispatcher.driverform.ru" &&
+        return location.protocol === "https:" && location.hostname === "mining-master.driverform.ru" &&
             (!location.port || location.port === "443") &&
-            location.pathname.replace(/\/+$/, "") === "/dispatcher/control";
+            location.pathname.replace(/\/+$/, "") === "/mining-master/tablet";
     }
     function allowedRelatedLocation(location) {
-        return location.protocol === "https:" && location.hostname === "dispatcher.driverform.ru" &&
+        return location.protocol === "https:" && location.hostname === "mining-master.driverform.ru" &&
             (!location.port || location.port === "443") && RELATED_PATHS.indexOf(location.pathname) >= 0;
     }
     function snapshot(source, board) {
@@ -37,7 +37,7 @@
         };
     }
     function canDrop(selection, target, context) {
-        if (!selection || selection.consumed || !context.compatible || !context.shiftOpen || context.observer || context.modalOpen) return false;
+        if (!selection || selection.consumed || !context.compatible || !context.shiftOpen || !context.ownShiftOpen || context.observer || context.modalOpen) return false;
         var source = selection.source;
         if (!source || !source.isConnected || !target || !target.isConnected || !selection.board || !selection.board.isConnected) return false;
         if (context.board !== selection.board || !selection.board.contains(source) || !selection.board.contains(target)) return false;
@@ -162,7 +162,7 @@
             var closed = owner ? owner.dataset.dispatcherShiftOpen === "false" :
                 root.classList.contains("cr-mm-tablet-page") && !!doc.querySelector(".dispatcher-unified-topbar .dispatcher-active-badge.is-muted");
             setClass(root, "cr-mm-shift-closed", !!closed);
-            var button = closed && doc.querySelector(".dispatcher-unified-topbar .dispatcher-shift-button[data-shared-shift-login-open], .dispatcher-unified-topbar .dispatcher-shift-button[name='shift_action'][value='start']");
+            var button = closed && (doc.querySelector(".tablet-personal-login-portal:not([hidden]) button[type=submit]") || doc.querySelector(".dispatcher-unified-topbar .dispatcher-shift-button[data-shared-shift-login-open], .dispatcher-unified-topbar .dispatcher-shift-button[name='action'][value='start_shift']"));
             if (button && (button.disabled || button.getAttribute("aria-disabled") === "true" || button.classList.contains("is-danger") || button.closest("[inert], [hidden]"))) button = null;
             var modal = closed && Array.prototype.some.call(doc.querySelectorAll(MODALS + ", dialog[open], [aria-modal=true]"), function (node) {
                 return node.getClientRects().length && global.getComputedStyle(node).visibility !== "hidden";
@@ -171,7 +171,7 @@
             if (rect) {
                 var x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
                 var hit = doc.elementFromPoint(x, y);
-                if (modal || !rect.width || !rect.height || !hit || !(hit === button || button.contains(hit))) button = null;
+                if ((modal && !button.closest(".tablet-personal-login-portal")) || !rect.width || !rect.height || !hit || !(hit === button || button.contains(hit))) button = null;
             }
             if (accent !== button) {
                 if (accent) setClass(accent, "cr-mm-shift-start-accent", false);
@@ -636,18 +636,19 @@
     }
     function isCompatible() {
         if (!allowedLocation(global.location) || !doc.body.classList.contains("dispatcher-control-screen") || doc.body.classList.contains("mining-master-mobile-screen")) return false;
-        if (doc.body.dataset.appRoleCode !== "dispatcher" || SUPPORTED_SHELLS.indexOf(doc.body.dataset.appShellVersion) < 0) return false;
+        if (doc.body.dataset.appRoleCode !== "mining_master" || SUPPORTED_SHELLS.indexOf(doc.body.dataset.appShellVersion) < 0) return false;
         var shell = doc.querySelector(".dispatcher-shell");
         if (!shell || !doc.querySelector(".dispatcher-board .dispatcher-zone-grid") || !doc.querySelector(".dispatcher-nav a[href]")) return false;
         try {
             var move = new URL(shell.dataset.dispatcherMoveUrl, global.location.href), assign = new URL(shell.dataset.dispatcherAssignUrl, global.location.href);
             if (move.origin !== global.location.origin || assign.origin !== global.location.origin ||
-                move.pathname !== "/dispatcher/control/excavator/move/" || assign.pathname !== "/dispatcher/control/truck/assign/") return false;
+                move.pathname !== "/mining-master/tablet/dispatcher/control/excavator/move/" || assign.pathname !== "/mining-master/tablet/dispatcher/control/truck/assign/") return false;
         } catch (_) { return false; }
         return typeof global.DataTransfer === "function" && typeof global.DragEvent === "function";
     }
     function context() {
         return { compatible: compatible && isCompatible(), board: doc.querySelector(".dispatcher-board"),
+            ownShiftOpen: !!board && board.dataset.dispatcherOwnShiftOpen === "true",
             shiftOpen: !!board && board.dataset.dispatcherShiftOpen === "true" && !board.classList.contains("is-readonly") && doc.body.dataset.roleAccessActive !== "false",
             observer: (doc.body.dataset.observerMode === "true" || doc.body.classList.contains("is-observer-mode")) && doc.body.dataset.observerControl !== "true",
             modalOpen: !!doc.querySelector(MODALS) };
@@ -954,12 +955,10 @@
             if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
             /* Report pages use the real viewport: Android clips the scrolling shell
                when it is nested inside the desktop transform canvas. No board actions. */
-            var pageReady = doc.body.dataset.appRoleCode === "dispatcher" &&
+            var pageReady = doc.body.dataset.appRoleCode === "mining_master" &&
                 SUPPORTED_SHELLS.indexOf(doc.body.dataset.appShellVersion) >= 0 &&
                 doc.body.classList.contains("dispatcher-control-screen") &&
-                !!doc.querySelector(global.location.pathname === "/reports/templates/"
-                    ? "body > .dispatcher-analytics-shell.management-linked-report > .dispatcher-analytics-board"
-                    : "[data-dispatcher-canvas] > .dispatcher-analytics-shell > .dispatcher-analytics-board");
+                !!doc.querySelector(".dispatcher-analytics-shell > .dispatcher-analytics-board");
             setClass(doc.documentElement, "cr-mm-tablet-page", pageReady);
             return;
         }

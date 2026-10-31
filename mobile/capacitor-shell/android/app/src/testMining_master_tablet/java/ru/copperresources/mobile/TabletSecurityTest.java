@@ -4,6 +4,15 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TabletSecurityTest {
+    @Test public void workplaceCannotNavigateIntoLegacyLoginOrPersonalMasterRoute() {
+        assertTrue(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL));
+        assertTrue(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL + "login/"));
+        assertTrue(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL + "activate/"));
+        assertFalse(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.ORIGIN + "/login/"));
+        assertFalse(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.ORIGIN + "/mining-master/assignments/"));
+        assertFalse(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL + "../assignments/"));
+        assertFalse(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL + "%2e%2e/assignments/"));
+    }
     @Test public void pinHashAuthenticatesOnlyMatchingPinAndUsesFreshSalt() throws Exception {
         String first = TabletPinCodec.create("907162");
         String second = TabletPinCodec.create("907162");
@@ -17,14 +26,14 @@ public class TabletSecurityTest {
 
     @Test public void navigationRejectsLookalikeOriginsCredentialsAndExternalSchemes() {
         assertTrue(TabletUrlPolicy.trusted(TabletUrlPolicy.START_URL));
-        assertTrue(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru/login/?next=%2Fdispatcher%2Fcontrol%2F"));
-        assertTrue(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru/reports/shift/?export=excel"));
-        assertTrue(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru/logout/"));
-        assertFalse(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru.attacker.example/dispatcher/control/"));
-        assertFalse(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru@attacker.example/"));
-        assertFalse(TabletUrlPolicy.trusted("https://name@dispatcher.driverform.ru/"));
-        assertFalse(TabletUrlPolicy.trusted("http://dispatcher.driverform.ru/"));
-        assertFalse(TabletUrlPolicy.trusted("https://dispatcher.driverform.ru:8443/"));
+        assertTrue(TabletUrlPolicy.trusted("https://mining-master.driverform.ru/login/?next=%2Fdispatcher%2Fcontrol%2F"));
+        assertTrue(TabletUrlPolicy.trusted("https://mining-master.driverform.ru/reports/shift/?export=excel"));
+        assertTrue(TabletUrlPolicy.trusted("https://mining-master.driverform.ru/logout/"));
+        assertFalse(TabletUrlPolicy.trusted("https://mining-master.driverform.ru.attacker.example/mining-master/tablet/"));
+        assertFalse(TabletUrlPolicy.trusted("https://mining-master.driverform.ru@attacker.example/"));
+        assertFalse(TabletUrlPolicy.trusted("https://name@mining-master.driverform.ru/"));
+        assertFalse(TabletUrlPolicy.trusted("http://mining-master.driverform.ru/"));
+        assertFalse(TabletUrlPolicy.trusted("https://mining-master.driverform.ru:8443/"));
         assertFalse(TabletUrlPolicy.trusted("intent://settings/#Intent;scheme=android;end"));
         assertFalse(TabletUrlPolicy.trusted("javascript:alert(1)"));
         assertFalse(TabletUrlPolicy.trusted(null));
@@ -32,20 +41,20 @@ public class TabletSecurityTest {
 
     @Test public void layoutScopeExcludesLoginOtherRolesAndEncodedPaths() {
         assertTrue(TabletUrlPolicy.tabletPage(TabletUrlPolicy.START_URL + "?shift=1#garage"));
-        assertFalse(TabletUrlPolicy.tabletPage("https://driverform.ru/dispatcher/control/"));
-        assertFalse(TabletUrlPolicy.tabletPage("https://dispatcher.driverform.ru/login/"));
-        assertFalse(TabletUrlPolicy.tabletPage("https://dispatcher.driverform.ru/mining-master/assignments/"));
-        assertFalse(TabletUrlPolicy.tabletPage("https://dispatcher.driverform.ru/dispatcher/%63ontrol/"));
-        assertFalse(TabletUrlPolicy.tabletPage("https://dispatcher.driverform.ru/dispatcher/control/extra"));
+        assertFalse(TabletUrlPolicy.tabletPage("https://driverform.ru/mining-master/tablet/"));
+        assertFalse(TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru/login/"));
+        assertFalse(TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru/mining-master/assignments/"));
+        assertFalse(TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru/dispatcher/%63ontrol/"));
+        assertFalse(TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru/mining-master/tablet/extra"));
     }
 
     @Test public void relatedLayoutsAllowExactRoutesAndFiltersButNeverExportsOrSubpaths() {
         String[] relatedPaths = {
-            "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
-            "/dispatcher/mining-volumes/", "/dispatcher/transport/", "/dispatcher/downtimes/",
-            "/dispatcher/shift-reports/trucks/", "/dispatcher/shift-reports/excavation/",
-            "/dispatcher/shift-reports/hourly/", "/dispatcher/shift-reports/hourly-grid/",
-            "/reports/volume/", "/reports/customer-daily/", "/reports/templates/", "/reports/downtimes/"
+            "/mining-master/tablet/dispatcher/reports/", "/mining-master/tablet/dispatcher/shift-log/", "/mining-master/tablet/dispatcher/management/",
+            "/mining-master/tablet/dispatcher/mining-volumes/", "/mining-master/tablet/dispatcher/transport/", "/mining-master/tablet/dispatcher/downtimes/",
+            "/mining-master/tablet/dispatcher/shift-reports/trucks/", "/mining-master/tablet/dispatcher/shift-reports/excavation/",
+            "/mining-master/tablet/dispatcher/shift-reports/hourly/", "/mining-master/tablet/dispatcher/shift-reports/hourly-grid/",
+            "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
         };
         for (String path : relatedPaths) {
             assertTrue(path, TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + path));
@@ -54,13 +63,13 @@ public class TabletSecurityTest {
             assertFalse(path, TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + path + "extra/"));
             assertFalse(path, TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + path.substring(0, path.length() - 1)));
             assertFalse(path, TabletUrlPolicy.tabletPage("https://driverform.ru" + path));
-            assertFalse(path, TabletUrlPolicy.tabletPage("https://dispatcher.driverform.ru.attacker.example" + path));
-            assertFalse(path, TabletUrlPolicy.tabletPage("http://dispatcher.driverform.ru" + path));
+            assertFalse(path, TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru.attacker.example" + path));
+            assertFalse(path, TabletUrlPolicy.tabletPage("http://mining-master.driverform.ru" + path));
             assertFalse(path, TabletUrlPolicy.controlPage(TabletUrlPolicy.ORIGIN + path));
         }
-        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/dispatcher/%72eports/"));
-        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/dispatcher/shift-reports/"));
-        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/dispatcher/logout/"));
+        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/mining-master/tablet/dispatcher/%72eports/"));
+        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/mining-master/tablet/dispatcher/shift-reports/"));
+        assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/mining-master/tablet/dispatcher/logout/"));
         assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/apps/"));
         assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/reports/%76olume/"));
         assertFalse(TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + "/reports/rating/tv/"));
@@ -70,9 +79,9 @@ public class TabletSecurityTest {
     @Test public void onlyControlPageSuppressesBackNavigationToKeepHomeActivityOpen() {
         assertTrue(TabletUrlPolicy.controlPage(TabletUrlPolicy.START_URL));
         assertTrue(TabletUrlPolicy.controlPage(TabletUrlPolicy.START_URL + "?shift=1#garage"));
-        assertFalse(TabletUrlPolicy.controlPage(TabletUrlPolicy.ORIGIN + "/dispatcher/reports/"));
-        assertFalse(TabletUrlPolicy.controlPage(TabletUrlPolicy.ORIGIN + "/dispatcher/control/extra"));
-        assertFalse(TabletUrlPolicy.controlPage("https://driverform.ru/dispatcher/control/"));
+        assertFalse(TabletUrlPolicy.controlPage(TabletUrlPolicy.ORIGIN + "/mining-master/tablet/dispatcher/reports/"));
+        assertFalse(TabletUrlPolicy.controlPage(TabletUrlPolicy.ORIGIN + "/mining-master/tablet/extra"));
+        assertFalse(TabletUrlPolicy.controlPage("https://driverform.ru/mining-master/tablet/"));
         assertFalse(TabletUrlPolicy.controlPage(null));
     }
 }

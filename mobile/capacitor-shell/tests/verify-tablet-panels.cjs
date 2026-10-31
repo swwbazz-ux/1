@@ -21,8 +21,8 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    if (route.request().method() === 'GET' && url.origin === 'https://dispatcher.driverform.ru') {
-      if (url.pathname === '/dispatcher/control/') return route.fulfill({ contentType: 'text/html', body: fixture.replace('</head>', `<style>${css}</style></head>`) });
+    if (route.request().method() === 'GET' && url.origin === 'https://mining-master.driverform.ru') {
+      if (url.pathname === '/mining-master/tablet/') return route.fulfill({ contentType: 'text/html', body: fixture.replace('</head>', `<style>${css}</style></head>`) });
       if (url.pathname === '/tablet-adapter.js') return route.fulfill({ contentType: 'application/javascript', body: script });
       if (['/static/img/equipment/excavator-gray.png', '/static/img/equipment/truck-gray.png'].includes(url.pathname)) return route.fulfill({ path: path.join(repo, 'СИСТЕМА_MVP/backend', url.pathname.slice(1)) });
       if (['/static/js/role-readonly.js', '/static/js/dispatcher-board-dnd-v1.js', '/static/js/dispatcher-canvas-v1.js', '/static/js/dispatcher-board-layout-v1.js', '/static/js/dispatcher-complex-truck-racks-v1.js'].includes(url.pathname)) return route.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(repo, 'СИСТЕМА_MVP/backend', url.pathname.slice(1)), 'utf8') });
@@ -33,7 +33,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const open = () => page.locator('[data-cr-panel-state="open"]').getAttribute('data-cr-panel');
   async function tick(ms) { await page.clock.runFor(ms); }
   try {
-    await page.goto('https://dispatcher.driverform.ru/dispatcher/control/');
+    await page.goto('https://mining-master.driverform.ru/mining-master/tablet/');
     await page.waitForSelector('html.cr-mm-panels');
     await page.waitForFunction(probe => { const p=eval(probe).split('|');return p[0]==='complete'&&Number(p[2])>=8&&Number(p[3])>=240; },probe);
     const quiet = await page.evaluate(async probe => {
@@ -226,7 +226,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     await handle('right').click(); await tick(250); await page.locator('.dispatcher-right [data-garage-item]').click(); await tick(250);
     assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0);
     await page.locator('[data-dispatcher-drop="complex"][data-equipment-id="2"]').click();
-    const posts = await page.evaluate(() => fixturePosts); assert.equal(posts.length, 1); assert.equal(posts[0].url, '/dispatcher/control/truck/assign/'); assert.equal(posts[0].payload.expected_assignment_state_id, 10);
+    const posts = await page.evaluate(() => fixturePosts); assert.equal(posts.length, 1); assert.equal(posts[0].url, '/mining-master/tablet/dispatcher/control/truck/assign/'); assert.equal(posts[0].payload.expected_assignment_state_id, 10);
     checks.push('normal detail click and real existing DnD assignment after garage closes');
     await handle('top').click(); await tick(250); await page.locator('#fixture-dialog').click();
     await page.clock.fastForward(30000); assert.equal(await open(), 'top');
@@ -237,7 +237,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     await tick(300); assert.equal(await page.locator('.cr-mm-panel-handle').count(), 4); assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0);
     await page.evaluate(() => { document.body.dataset.appShellVersion='unknown'; }); await tick(100);
     assert.equal(await page.locator('.cr-mm-panel-handle').count(), 0); assert.equal(await page.locator('[data-cr-panel]').count(), 0);
-    await page.evaluate(() => { document.body.dataset.appShellVersion='dispatcher-desktop-shell-v166'; }); await tick(300);
+    await page.evaluate(() => { document.body.dataset.appShellVersion='mining-master-mobile-shell-v165'; }); await tick(300);
     assert.equal(await page.locator('.cr-mm-panel-handle').count(), 4); await page.clock.fastForward(30000);
     assert.equal(await page.locator('[data-cr-panel-state="open"]').count(), 0); checks.push('fragment replacement and unknown-shell cleanup with no late timers');
     await page.setViewportSize({width:1024,height:600});await tick(350);

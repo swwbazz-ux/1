@@ -201,6 +201,7 @@ class ActiveRoleSessionMiddleware:
         # Shared tablet must accept the next employee after the old access expired.
         '/mining-master/tablet/login/',
         '/mining-master/tablet/activate/',
+        '/mining-master/tablet/logout/',
         # Taking the session back is the one action an inactive role must still
         # be able to perform — otherwise there is no way out but retyping the PIN.
         '/reclaim-session/',

@@ -26,9 +26,10 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => {
     const req = route.request(), url = new URL(req.url());
-    if (req.method() === 'GET' && url.origin === 'https://dispatcher.driverform.ru') {
-      if (url.pathname === '/dispatcher/control/') return route.fulfill({ contentType: 'text/html', body: fixture.replace('</head>', `<style>${css}</style></head>`) });
+    if (req.method() === 'GET' && url.origin === 'https://mining-master.driverform.ru') {
+      if (url.pathname === '/mining-master/tablet/') return route.fulfill({ contentType: 'text/html', body: fixture.replace('</head>', `<style>${css}</style></head>`) });
       if (url.pathname === '/static/js/role-readonly.js') return route.fulfill({ contentType: 'application/javascript', body: readonly });
+      if (url.pathname.startsWith('/static/img/equipment/')) return route.fulfill({contentType:'image/png',body:fs.readFileSync(path.join(repo,'СИСТЕМА_MVP/backend',url.pathname.slice(1)))});
       if (url.pathname === '/tablet-adapter.js') return route.fulfill({ contentType: 'application/javascript', body: adapter });
     }
     requests.push({ method: req.method(), path: url.pathname });
@@ -58,7 +59,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     return metrics;
   }
   try {
-    await page.goto('https://dispatcher.driverform.ru/dispatcher/control/');
+    await page.goto('https://mining-master.driverform.ru/mining-master/tablet/');
     assert.equal((await sample('closed-shift startup', 1000)).ready, true, 'closed shift must reach the unchanged native readiness gate');
     const repeated = await sample('repeated init', 700, 'for (var i=0;i<12;i++) window.CopperMiningMasterTablet.init();');
     assert.equal(repeated.ready, true);
@@ -76,18 +77,15 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     await page.evaluate(() => {
       clearInterval(window.__fixtureNoopTimer);
       const board = document.querySelector('.dispatcher-board');
-      board.classList.remove('is-readonly'); board.dataset.dispatcherShiftOpen = 'true';
+      board.classList.remove('is-readonly'); board.dataset.dispatcherShiftOpen = 'true'; board.dataset.dispatcherOwnShiftOpen='true';
     });
-    await page.waitForFunction(() => !document.querySelector('[data-cr-mm-action="mode"]').disabled);
+    await page.waitForSelector('[data-cr-mm-assign-truck]');
     assert.equal((await sample('real shift opened')).ready, true);
-    await page.locator('[data-cr-mm-action="mode"]').click();
-    await page.locator('[data-dispatcher-drag="truck"]').click();
-    assert.equal(await page.locator('.cr-mm-selected').count(), 1);
+    await page.locator('[data-cr-mm-assign-truck]').fill('1');
+    assert.equal(await page.locator('.cr-mm-truck-hit').count(), 1);
     await page.evaluate(() => { document.querySelector('[data-dispatcher-drag="truck"]').dataset.haulAssignmentStateId = '11'; });
-    await page.waitForFunction(() => !document.querySelector('.cr-mm-selected') && document.querySelector('[data-cr-mm-action="mode"]').getAttribute('aria-pressed') === 'false');
     assert.equal((await sample('real assignment changed')).ready, true);
-    await page.evaluate(() => { const board = document.querySelector('.dispatcher-board'); board.dataset.dispatcherShiftOpen = 'false'; board.classList.add('is-readonly'); });
-    await page.waitForFunction(() => document.querySelector('[data-cr-mm-action="mode"]').disabled);
+    await page.evaluate(() => { const board = document.querySelector('.dispatcher-board'); board.dataset.dispatcherShiftOpen = 'false'; board.dataset.dispatcherOwnShiftOpen='false'; board.classList.add('is-readonly'); });
     assert.equal((await sample('real shift closed')).ready, true);
     await page.evaluate(() => {
       const board = document.querySelector('.dispatcher-board');

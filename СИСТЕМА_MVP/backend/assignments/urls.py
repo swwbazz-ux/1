@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 
 from .views import (
     mining_master_assignments_view,
@@ -20,6 +20,7 @@ from .deputy_views import (
 )
 
 urlpatterns = [
+    path('', include('assignments.tablet_urls')),
     path('deputy-mining-manager.webmanifest', deputy_mining_manager_manifest_view, name='deputy_mining_manager_manifest'),
     path('deputy-mining-manager-sw.js', deputy_mining_manager_service_worker_view, name='deputy_mining_manager_service_worker'),
     path(

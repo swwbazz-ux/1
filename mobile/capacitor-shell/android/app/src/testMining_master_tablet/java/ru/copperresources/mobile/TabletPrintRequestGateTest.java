@@ -4,7 +4,7 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TabletPrintRequestGateTest {
-    private static final String ORIGIN = "https://dispatcher.driverform.ru";
+    private static final String ORIGIN = "https://mining-master.driverform.ru";
     private static final String REPORT = ORIGIN + "/reports/trucks/?shift=night";
 
     private TabletPrintRequestGate loaded() {
@@ -20,9 +20,9 @@ public class TabletPrintRequestGateTest {
         assertNull(gate.begin("pauseKiosk", ORIGIN, true, REPORT));
         assertNull(gate.begin("requestPrint:" + REPORT, ORIGIN, true, REPORT));
         assertNull(gate.begin(null, ORIGIN, true, REPORT));
-        assertNull(gate.begin("requestPrint", "https://dispatcher.driverform.ru.attacker.example", true, REPORT));
-        assertNull(gate.begin("requestPrint", "http://dispatcher.driverform.ru", true, REPORT));
-        assertNull(gate.begin("requestPrint", "https://name@dispatcher.driverform.ru", true, REPORT));
+        assertNull(gate.begin("requestPrint", "https://mining-master.driverform.ru.attacker.example", true, REPORT));
+        assertNull(gate.begin("requestPrint", "http://mining-master.driverform.ru", true, REPORT));
+        assertNull(gate.begin("requestPrint", "https://name@mining-master.driverform.ru", true, REPORT));
         assertNull(gate.begin("requestPrint", ORIGIN + ":8443", true, REPORT));
         assertNull(gate.begin("requestPrint", ORIGIN + "/reports/", true, REPORT));
         assertNull(gate.begin("requestPrint", ORIGIN + "?command=print", true, REPORT));

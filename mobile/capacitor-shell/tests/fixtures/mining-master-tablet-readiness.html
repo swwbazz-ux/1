@@ -14,13 +14,13 @@
   <script defer src="/static/js/role-readonly.js"></script>
   <script defer src="/tablet-adapter.js"></script>
 </head>
-<body class="dispatcher-control-screen" data-app-role-code="dispatcher" data-app-shell-version="dispatcher-desktop-shell-v166" data-app-contract-ready="true" data-role-access-active="true" data-observer-mode="false" data-observer-control="false">
+<body class="dispatcher-control-screen" data-app-role-code="mining_master" data-app-shell-version="mining-master-mobile-shell-v165" data-app-contract-ready="true" data-role-access-active="true" data-observer-mode="false" data-observer-control="false">
   <!-- Small synthetic board using the existing server DOM/permission contract.
        The regression loads the real role-readonly runtime and native probe. -->
   <div class="dispatcher-canvas" data-dispatcher-canvas="on">
-    <main class="dispatcher-shell" data-dispatcher-move-url="/dispatcher/control/excavator/move/" data-dispatcher-assign-url="/dispatcher/control/truck/assign/">
-      <div class="dispatcher-board is-readonly" data-dispatcher-shift-open="false">
-        <nav class="dispatcher-nav"><a href="/dispatcher/control/">Пульт</a></nav>
+    <main class="dispatcher-shell" data-dispatcher-move-url="/mining-master/tablet/dispatcher/control/excavator/move/" data-dispatcher-assign-url="/mining-master/tablet/dispatcher/control/truck/assign/">
+      <div class="dispatcher-board is-readonly" data-dispatcher-shift-open="false" data-dispatcher-own-shift-open="false">
+        <nav class="dispatcher-nav"><a href="/mining-master/tablet/">Пульт</a></nav>
         <div class="dispatcher-zone-grid">
           <section data-dispatcher-drop="truck-garage" data-dispatcher-drop-bound="true">
             <article data-dispatcher-drag="truck" data-equipment-id="1" data-equipment-name="1" data-haul-assignment-state-id="10" data-drag-bound="true" draggable="true">Самосвал 1</article>

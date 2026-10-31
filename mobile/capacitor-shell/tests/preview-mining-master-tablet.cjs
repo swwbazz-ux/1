@@ -26,7 +26,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     const url = new URL(req.url());
     if (req.method() === 'POST' && /\/dispatcher\/control\/(truck\/assign|excavator\/move)\//.test(url.pathname)) attemptedOperations.push(url.pathname);
     if (req.method() !== 'GET') { preventedRequests++; return route.abort(); }
-    if (req.isNavigationRequest() && url.origin === 'https://dispatcher.driverform.ru' && url.pathname === '/dispatcher/control/') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
+    if (req.isNavigationRequest() && url.origin === 'https://mining-master.driverform.ru' && url.pathname === '/mining-master/tablet/') return route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html });
     if (url.pathname.startsWith('/static/')) {
       const local = path.resolve(staticRoot, decodeURIComponent(url.pathname.slice(8)));
       if (local.startsWith(staticRoot + path.sep) && fs.existsSync(local) && fs.statSync(local).isFile()) return route.fulfill({ path: local });
@@ -34,7 +34,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     preventedRequests++;
     return route.abort();
   });
-  await page.goto('https://dispatcher.driverform.ru/dispatcher/control/', { waitUntil: 'load' });
+  await page.goto('https://mining-master.driverform.ru/mining-master/tablet/', { waitUntil: 'load' });
   await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(outputPath, 'dispatcher-baseline-1333x800.png') });
   const baseline = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, cards: document.querySelectorAll('.dispatcher-complex-card:not(.status-empty)').length, nav: Array.from(document.querySelectorAll('.dispatcher-nav a')).map(a => ({ text: a.textContent.trim(), href: a.getAttribute('href'), height: a.getBoundingClientRect().height })) }));
