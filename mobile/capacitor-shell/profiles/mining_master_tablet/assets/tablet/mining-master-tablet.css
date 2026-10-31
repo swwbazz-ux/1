@@ -327,7 +327,7 @@ html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-settings-fac
 html.cr-mm-panels .gd-equipment-detail .gd-detail-settings :is(label,select,input) { min-width: 0; }
 html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr)); }
 html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row { grid-template-columns: minmax(0,1fr) 76px 44px !important; align-items: end; }
-html.cr-mm-panels .dispatcher-shell .gd-detail-settings .gd-detail-destination-remove { width: 44px !important; min-width: 44px; margin-bottom: 0; }
+html.cr-mm-panels .dispatcher-shell .gd-detail-settings .gd-detail-destination-remove { width: 44px !important; min-width: 44px; margin-bottom: 6px; }
 html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics { grid-template-columns: repeat(auto-fit,minmax(min(100%,132px),1fr)); }
 html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics :is(span,strong) { white-space: normal; overflow-wrap: anywhere; }
 html.cr-mm-panels .gd-equipment-detail .gd-detail-dashboard { min-width: 0; max-width: 100%; overflow-x: auto; }
