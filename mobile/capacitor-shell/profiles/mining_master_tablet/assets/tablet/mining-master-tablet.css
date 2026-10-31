@@ -128,6 +128,12 @@ html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input { background: #fff; 
 
 @media screen {
 /* Four original control panels. Related pages keep their separate layout. */
+html.cr-mm-panels .dispatcher-canvas[data-dispatcher-canvas] {
+  width: var(--cr-panel-canvas-w) !important; height: var(--cr-panel-canvas-h) !important;
+  transform: translate(-50%, -50%) scale(var(--cr-mm-scale)) !important;
+  --gd-vw: var(--cr-panel-canvas-vw) !important; --gd-vh: 10px !important;
+}
+html.cr-mm-panels .dispatcher-canvas > .dispatcher-shell { padding: 0 !important; }
 html.cr-mm-panels .dispatcher-board {
   position: relative !important;
   grid-template-columns: minmax(0, 1fr) !important;
@@ -148,18 +154,51 @@ html.cr-mm-panels .dispatcher-right {
 }
 html.cr-mm-panels .dispatcher-topbar {
   inset: 0 0 auto !important; width: 100% !important;
-  height: var(--cr-panel-top-h) !important; min-height: var(--cr-panel-top-h) !important; max-height: var(--cr-panel-top-h) !important;
+  height: calc(126px / var(--cr-mm-scale)) !important; min-height: calc(126px / var(--cr-mm-scale)) !important; max-height: calc(126px / var(--cr-mm-scale)) !important;
 }
-html.cr-mm-panels .dispatcher-left {
-  left: 0 !important; right: auto !important; bottom: auto !important;
-  top: var(--cr-panel-left-y) !important; width: var(--cr-panel-left-w) !important;
-  height: var(--cr-panel-left-h) !important; min-height: 0 !important;
+html.cr-mm-panels .dispatcher-left, html.cr-mm-panels .dispatcher-right {
+  display: block !important; top: 0 !important; bottom: 0 !important;
+  width: calc(var(--cr-panel-tile-w, 88px) + 22px) !important; height: 100% !important; min-height: 0 !important;
 }
-html.cr-mm-panels .dispatcher-right {
-  right: 0 !important; left: auto !important; bottom: auto !important;
-  top: var(--cr-panel-right-y) !important; width: var(--cr-panel-right-w) !important;
-  height: var(--cr-panel-right-h) !important; min-height: 0 !important;
+html.cr-mm-panels .dispatcher-left { left: 0 !important; right: auto !important; }
+html.cr-mm-panels .dispatcher-right { right: 0 !important; left: auto !important; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-garage-panel { display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 6px !important; border-width: 1px; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-panel-head { flex: 0 0 auto; }
+html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks) {
+  display: grid !important; grid-template-columns: var(--cr-panel-tile-w, 88px) !important;
+  grid-template-rows: none !important; grid-auto-rows: var(--cr-panel-tile-h, 63px) !important;
+  grid-auto-flow: row !important; grid-auto-columns: auto !important; flex: 1 1 auto;
+  align-content: start !important; justify-content: start !important; gap: 6px !important;
+  box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 0 !important;
+  overflow: hidden auto !important; overscroll-behavior: contain; scroll-snap-type: none !important; scrollbar-gutter: stable; scrollbar-width: auto !important;
 }
+html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks)::-webkit-scrollbar { width: 8px; }
+/* Geometry and number/icon scale follow the real field tile. Assigned/hidden
+   garage copies retain the server's visibility; no sources are cloned. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item]:not(.is-assigned):not([hidden]), .dispatcher-truck-tile.is-placeholder:not([hidden])) {
+  display: flex !important; flex-direction: column; align-items: center; justify-content: space-between;
+  box-sizing: border-box; width: var(--cr-panel-tile-w, 88px) !important; height: var(--cr-panel-tile-h, 63px) !important;
+  min-width: 0 !important; min-height: 0 !important; gap: 0; padding: 3px 3px 2px !important; border-radius: 6px;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > :is(strong, img, span) {
+  position: static !important; inset: auto !important; transform: none !important; flex: 0 0 auto; margin: 0;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > strong {
+  color: var(--gd-ink); font-size: max(12px, calc(var(--cr-panel-tile-h, 63px) * .25)) !important;
+  font-weight: 900; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item], .is-placeholder) > img {
+  display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > span {
+  display: block !important; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: max(8px, calc(var(--cr-panel-tile-h, 63px) * .155)) !important; font-weight: 700; line-height: 1.1; letter-spacing: .01em; opacity: .9;
+}
+html.cr-mm-panels [data-garage-item] > .dispatcher-tile-plan-label {
+  position: static !important; inset: auto !important; transform: none !important; flex: 0 0 auto;
+  width: 100%; min-height: 0; font-size: max(7px, calc(var(--cr-panel-tile-h, 63px) * .125)) !important; line-height: 1;
+}
+html.cr-mm-panels [data-garage-item]:has(> .dispatcher-tile-plan-label) > img { flex-shrink: 1; min-height: 0; }
 html.cr-mm-panels [data-cr-panel] { visibility: hidden; pointer-events: none; transition: none; }
 html.cr-mm-panels [data-cr-panel="top"] { transform: translateY(calc(-100% - 24px)) !important; }
 html.cr-mm-panels [data-cr-panel="bottom"] { transform: translateY(100%) !important; }
@@ -173,6 +212,7 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
   visibility: hidden !important; pointer-events: none !important;
 }
 .cr-mm-panel-backdrop { position: absolute; z-index: 601; inset: 0; background: rgba(0, 7, 11, .43); touch-action: none; }
+html[data-cr-panel-native-drag="true"] .cr-mm-panel-backdrop { pointer-events: none; }
 .cr-mm-panel-edge { position: fixed; z-index: 1050; touch-action: none; }
 .cr-mm-panel-edge[data-cr-panel-side="top"] { inset: 0 0 auto; height: 8px; }
 .cr-mm-panel-edge[data-cr-panel-side="bottom"] { inset: auto 0 0; height: 8px; }
@@ -200,8 +240,8 @@ html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-conne
 .cr-mm-panel-handle[data-cr-panel-side="left"]::before, .cr-mm-panel-handle[data-cr-panel-side="right"]::before { height: 38px; width: 3px; }
 html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { top: var(--cr-panel-top-edge); }
 html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 64px; }
-html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-left-edge); }
-html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-right-edge); }
+html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-side-edge); }
+html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-side-edge); }
 .cr-mm-panel-handle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   html.cr-mm-panels[data-cr-panels-ready="true"] [data-cr-panel] { transition: none; }

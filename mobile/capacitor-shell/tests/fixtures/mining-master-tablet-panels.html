@@ -7,11 +7,20 @@ html,body{margin:0;width:100%;height:100%}.dispatcher-shell{padding:8px;box-sizi
 .dispatcher-topbar{grid-column:1/4;grid-row:1;background:#0b151b}.dispatcher-left{grid-column:1;grid-row:2}.dispatcher-right{grid-column:3;grid-row:2}
 .dispatcher-complexes{grid-column:2;grid-row:2;min-height:0}.dispatcher-zone-grid{height:100%;overflow:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .dispatcher-complex-card{min-height:150px;border:2px solid #2aa9d8}.dispatcher-garage-panel{height:100%;background:#10191f}
+.dispatcher-complex-card{display:grid;grid-template-columns:minmax(176px,1fr) max-content;gap:8px;padding:8px;box-sizing:border-box}
+.complex-assigned-trucks{display:grid;grid-template-columns:repeat(var(--complex-truck-cols,1),var(--complex-truck-w,120px));grid-auto-rows:var(--complex-truck-h,97px);height:100%;gap:6px}
+.complex-truck-tile{box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:3px 3px 2px;border:1px solid #788c95}
+.complex-truck-tile strong{font-size:max(12px,calc(var(--complex-truck-h,58px)*.25));line-height:1}.complex-truck-tile img{width:82%;height:46%;object-fit:contain}.complex-truck-tile span{font-size:max(8px,calc(var(--complex-truck-h,58px)*.155))}
+.dispatcher-board.is-excavator-garage-empty .dispatcher-left,.dispatcher-board.is-truck-garage-empty .dispatcher-right{display:none}
 .dispatcher-trucks,.dispatcher-excavators{height:100%;overflow:auto}[data-garage-item]{min-height:80px;border:1px solid #788c95}
+@media(max-width:1180px){.dispatcher-trucks,.dispatcher-excavators{grid-auto-flow:column;grid-auto-columns:92px;overflow:auto hidden}}
 .dispatcher-nav{display:flex;gap:20px}a{color:white}.app-connection-dot{position:fixed;right:8px;top:8px;width:10px;height:10px;background:lime}
 .app-confirm-modal{position:fixed;inset:0;z-index:10000;background:#16232bee}.app-confirm-dialog{margin:100px auto;padding:30px;background:#123;max-width:350px}
 </style>
 <script defer src="/static/js/role-readonly.js"></script>
+<script defer src="/static/js/dispatcher-canvas-v1.js"></script>
+<script defer src="/static/js/dispatcher-board-layout-v1.js"></script>
+<script defer src="/static/js/dispatcher-complex-truck-racks-v1.js"></script>
 <script defer src="/static/js/dispatcher-board-dnd-v1.js"></script>
 <script defer src="/tablet-adapter.js"></script>
 </head><body class="dispatcher-control-screen" data-app-role-code="dispatcher" data-app-shell-version="dispatcher-desktop-shell-v166" data-app-contract-ready="true" data-role-access-active="true" data-observer-mode="false">
@@ -19,15 +28,18 @@ html,body{margin:0;width:100%;height:100%}.dispatcher-shell{padding:8px;box-sizi
 <div class="dispatcher-canvas" data-dispatcher-canvas="on"><main class="dispatcher-shell dispatcher-night" data-dispatcher-move-url="/dispatcher/control/excavator/move/" data-dispatcher-assign-url="/dispatcher/control/truck/assign/">
 <section class="dispatcher-board" data-dispatcher-shift-open="true">
 <header class="dispatcher-topbar"><div class="dispatcher-command-identity">Сотрудник</div><nav class="dispatcher-nav"><a href="/dispatcher/control/">Пульт</a></nav><button type="button" id="fixture-dialog">Показать подтверждение</button></header>
-<aside class="dispatcher-left"><section class="dispatcher-garage-panel" data-dispatcher-drop="excavator-garage"><div class="dispatcher-excavators"><article tabindex="0" role="button" data-garage-item="excavator" data-dispatcher-drag="excavator" data-equipment-id="8" data-equipment-name="ТВИ-9" data-placement-zone="inactive" draggable="true"><strong>ТВИ-9</strong></article></div></section></aside>
-<section class="dispatcher-complexes"><div class="dispatcher-zone-grid"><article class="dispatcher-complex-card" data-dispatcher-drop="complex" data-equipment-id="2"><h2>К-2</h2></article><article class="dispatcher-complex-card" data-dispatcher-drop="complex" data-equipment-id="3"><h2>К-3</h2></article></div></section>
+<aside class="dispatcher-left"><section class="dispatcher-garage-panel" data-dispatcher-excavator-garage data-dispatcher-drop="excavator-garage"><div class="dispatcher-excavators"><article tabindex="0" role="button" data-garage-item="excavator" data-dispatcher-drag="excavator" data-equipment-id="8" data-equipment-name="ТВИ-9" data-placement-zone="inactive" draggable="true"><strong>ТВИ-9</strong></article></div></section></aside>
+<section class="dispatcher-complexes"><div class="dispatcher-zone-grid"><article class="dispatcher-complex-card" data-dispatcher-drop="complex" data-equipment-id="2"><h2>К-2</h2></article><article class="dispatcher-complex-card" data-dispatcher-drop="complex" data-equipment-id="3"><h2>К-3</h2><div class="complex-assigned-trucks" data-truck-need="1"><article class="dispatcher-truck-tile complex-truck-tile" data-dispatcher-drag="truck" data-equipment-id="9" data-equipment-name="9" data-complex-truck="true" data-haul-assignment-state-id="21" draggable="true"><strong>9</strong><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 20'%3E%3Cpath fill='%23788c95' d='M1 1h25v12H1zM28 6h9v7h-9z'/%3E%3C/svg%3E" alt=""><span>Назначена</span></article><em class="complex-truck-empty" hidden></em></div></article></div></section>
 <aside class="dispatcher-right"><section class="dispatcher-garage-panel" data-dispatcher-drop="truck-garage"><div class="dispatcher-trucks"><article tabindex="0" role="button" data-garage-item="truck" data-dispatcher-drag="truck" data-equipment-id="1" data-equipment-name="58" data-haul-assignment-state-id="10" draggable="true"><strong>58</strong></article></div></section></aside>
 </section></main></div>
 <div class="app-confirm-modal" hidden><div class="app-confirm-dialog" role="dialog" aria-modal="true"><input aria-label="Комментарий"><button id="fixture-dialog-close">Закрыть</button></div></div>
 <script>
 document.addEventListener('DOMContentLoaded',function(){
   window.fixturePosts=[];window.fixtureDetails=0;
+  window.fixtureLayout=createDispatcherBoardLayout({document:document});
+  window.fixtureRacks=createDispatcherComplexTruckRacks({sortEquipmentList:fixtureLayout.sortEquipmentList});
   window.fixtureBind=function(){
+    fixtureLayout.refreshExcavatorGarage();fixtureRacks.watch();fixtureRacks.refreshAll();
     window.createDispatcherBoardDnD({document:document,getBoard:function(){return document.querySelector('.dispatcher-board')},getShiftOpen:function(){return document.querySelector('.dispatcher-board').dataset.dispatcherShiftOpen==='true'},
       moveExcavatorUrl:'/dispatcher/control/excavator/move/',assignTruckUrl:'/dispatcher/control/truck/assign/',getAssignmentStateId:function(node){return Number(node.dataset.haulAssignmentStateId||0)},
       post:function(url,payload){window.fixturePosts.push({url:url,payload:payload});return Promise.resolve({ok:true})}
