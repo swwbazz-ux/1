@@ -32,6 +32,7 @@ import org.json.JSONObject;
 /** This class and all device-management code exist only in the tablet flavor. */
 public final class MiningMasterTabletActivity extends MainActivity {
     private TabletKioskController kiosk;
+    private TabletEdgeGuard edgeGuard;
     private TabletReportDownloads reportDownloads;
     private TabletWebPrint webPrint;
     private final Handler adminHandler = new Handler(Looper.getMainLooper());
@@ -61,6 +62,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         kiosk = new TabletKioskController(this);
+        edgeGuard = new TabletEdgeGuard(this,
+            () -> kiosk != null && kiosk.allowsEdgeGuard(), this::edgeGuardChanged);
         reportDownloads = new TabletReportDownloads(this);
         installSystemInsetsListener();
         if (getBridge() != null && getBridge().getWebView() != null) {
@@ -188,8 +191,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     private boolean recordSystemInsets(WindowInsetsCompat insets) {
         if (insets == null) return false;
-        // Transient Android bars report hidden while still intercepting edge touches.
-        // Keep only the grips outside their stable area; do not inset the work surface.
+        // Stable insets remain the fallback on unverified devices. The verified native
+        // edge guard publishes zero only after Android confirms its policy is active.
         Insets bars = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars());
         Insets gestures = insets.getInsets(WindowInsetsCompat.Type.systemGestures()
             | WindowInsetsCompat.Type.mandatorySystemGestures());
@@ -217,13 +220,17 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     private String systemInsetsScript() {
         if (!systemInsetsKnown) return "";
+        boolean guarded = edgeGuard != null && edgeGuard.active();
+        int top = guarded ? 0 : systemInsetTopPx;
+        int bottom = guarded ? 0 : systemInsetBottomPx;
         return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
             + "||" + new JSONArray(TabletUrlPolicy.TABLET_PATHS).toString()
             + ".indexOf(location.pathname)===-1)return;function apply(){var root=document.documentElement;"
             + "if(!root)return;var ratio=Number(window.devicePixelRatio);"
             + "if(!Number.isFinite(ratio)||ratio<=0)ratio=1;"
-            + "root.style.setProperty('--cr-tablet-system-top',(" + systemInsetTopPx + "/ratio)+'px');"
-            + "root.style.setProperty('--cr-tablet-system-bottom',(" + systemInsetBottomPx + "/ratio)+'px');}"
+            + "root.setAttribute('data-cr-tablet-edge-guard','" + (guarded ? "active" : "inactive") + "');"
+            + "root.style.setProperty('--cr-tablet-system-top',(" + top + "/ratio)+'px');"
+            + "root.style.setProperty('--cr-tablet-system-bottom',(" + bottom + "/ratio)+'px');}"
             + "if(document.documentElement)apply();else document.addEventListener('DOMContentLoaded',apply,{once:true});})();";
     }
 
@@ -232,6 +239,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
         immersive();
         refreshSystemInsets();
         if (kiosk != null) kiosk.onResume();
+        if (edgeGuard != null) edgeGuard.onResume();
         if (webPrint != null) webPrint.onResume();
     }
 
@@ -249,6 +257,14 @@ public final class MiningMasterTabletActivity extends MainActivity {
         controller.hide(WindowInsetsCompat.Type.systemBars());
     }
 
+    private void edgeGuardChanged() {
+        if (isFinishing()) return;
+        immersive();
+        refreshSystemInsets();
+    }
+
+    boolean releaseEdgeGuard() { return edgeGuard == null || edgeGuard.release(); }
+
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
@@ -262,6 +278,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     @Override public void onPause() {
         adminHandler.removeCallbacks(adminShortcut);
+        if (edgeGuard != null) edgeGuard.onPause();
         if (webPrint != null) webPrint.onPause();
         if (kiosk != null) kiosk.onPause();
         super.onPause();
@@ -269,6 +286,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     @Override public void onDestroy() {
         adminHandler.removeCallbacksAndMessages(null);
+        if (edgeGuard != null) edgeGuard.destroy();
         if (webPrint != null) webPrint.destroy();
         if (kiosk != null) kiosk.destroy();
         if (reportDownloads != null) reportDownloads.destroy();

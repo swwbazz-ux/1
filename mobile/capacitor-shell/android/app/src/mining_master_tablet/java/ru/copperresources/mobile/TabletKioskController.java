@@ -29,7 +29,8 @@ final class TabletKioskController {
     private static final long LOCK_CONFIRM_POLL_MS = 100L;
     private static final String[] RESTRICTIONS = {
         UserManager.DISALLOW_SAFE_BOOT, UserManager.DISALLOW_ADD_USER,
-        UserManager.DISALLOW_ADD_MANAGED_PROFILE, UserManager.DISALLOW_USER_SWITCH
+        UserManager.DISALLOW_ADD_MANAGED_PROFILE, UserManager.DISALLOW_USER_SWITCH,
+        UserManager.DISALLOW_SYSTEM_ERROR_DIALOGS
     };
     private final MiningMasterTabletActivity activity;
     private final DevicePolicyManager dpm;
@@ -55,6 +56,11 @@ final class TabletKioskController {
     private boolean owner() { return dpm != null && dpm.isDeviceOwnerApp(activity.getPackageName()); }
     private boolean enabled() { return preferences.getBoolean("kiosk_enabled", false); }
     private boolean pinExists() { return !preferences.getString("pin_hash", "").isEmpty(); }
+
+    boolean allowsEdgeGuard() {
+        return resumed && !destroyed && enabled() && lockConfirmation == null
+            && (dialog == null || !dialog.isShowing());
+    }
 
     void offerInitialSetup() {
         if (!pinExists()) showPinSetup(false);
@@ -265,7 +271,8 @@ final class TabletKioskController {
         operationStage = "policy_home";
         dpm.addPersistentPreferredActivity(admin, home, new ComponentName(activity, MiningMasterTabletActivity.class));
         for (String restriction : RESTRICTIONS) {
-            if (Build.VERSION.SDK_INT < 28 && UserManager.DISALLOW_USER_SWITCH.equals(restriction)) continue;
+            if (Build.VERSION.SDK_INT < 28 && (UserManager.DISALLOW_USER_SWITCH.equals(restriction)
+                    || UserManager.DISALLOW_SYSTEM_ERROR_DIALOGS.equals(restriction))) continue;
             operationStage = "policy_" + restriction;
             dpm.addUserRestriction(admin, restriction);
         }
@@ -377,6 +384,12 @@ final class TabletKioskController {
 
     private boolean pauseKiosk() {
         cancelLockConfirmation();
+        // Restore the system before leaving LOCKED or launching external settings.
+        if (!activity.releaseEdgeGuard()) {
+            diagnostic("edge_guard_restore", -1, new IllegalStateException());
+            showFailure("Не удалось восстановить системные настройки. Повторите выход в обслуживание.");
+            return false;
+        }
         // Persist maintenance first so a process restart cannot silently lock the administrator out.
         if (!preferences.edit().putBoolean("kiosk_enabled", false).putBoolean("kiosk_pending", false).commit()) {
             diagnostic("maintenance_persist", -1, new IllegalStateException());
@@ -397,7 +410,8 @@ final class TabletKioskController {
                 if (!dpm.setKeyguardDisabled(admin, false)) throw new IllegalStateException();
             });
             for (String restriction : RESTRICTIONS) {
-                if (Build.VERSION.SDK_INT < 28 && UserManager.DISALLOW_USER_SWITCH.equals(restriction)) continue;
+                if (Build.VERSION.SDK_INT < 28 && (UserManager.DISALLOW_USER_SWITCH.equals(restriction)
+                        || UserManager.DISALLOW_SYSTEM_ERROR_DIALOGS.equals(restriction))) continue;
                 steps.add(() -> dpm.clearUserRestriction(admin, restriction));
             }
         }
@@ -499,6 +513,10 @@ final class TabletKioskController {
     }
     private void showSecure(AlertDialog next) {
         if (destroyed || activity.isFinishing()) return;
+        // Normally restore the ordinary Android state before the PIN keyboard.
+        // Keep the offline recovery dialog available even if restoration fails;
+        // pauseKiosk still requires a successful restore before exiting LOCKED.
+        if (!activity.releaseEdgeGuard()) diagnostic("edge_guard_dialog_restore", -1, null);
         if (next.getWindow() != null) next.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         next.show();
     }

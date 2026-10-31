@@ -297,6 +297,13 @@ html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { t
 html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: max(calc(64px + var(--cr-panel-toolbar-inset, 0px)), calc(var(--cr-tablet-system-bottom, 0px) + 6px)); }
 html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-side-edge); }
 html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-side-edge); }
+/* Native edge protection owns system gestures. Closed grips stay on the
+   physical edge, and their invisible hit area must not cover field cards. */
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="top"]) .cr-mm-panel-handle[data-cr-panel-side="top"] { top: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="bottom"]) .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="left"]) .cr-mm-panel-handle[data-cr-panel-side="left"] { left: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="right"]) .cr-mm-panel-handle[data-cr-panel-side="right"] { right: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"] .cr-mm-panel-handle[aria-expanded="false"]::after { inset: 0; width: auto; height: auto; }
 .cr-mm-panel-handle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) {
   html.cr-mm-panels[data-cr-panels-ready="true"] [data-cr-panel] { transition: none; }
