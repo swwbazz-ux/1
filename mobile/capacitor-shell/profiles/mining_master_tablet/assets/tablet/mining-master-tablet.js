@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.3.1";
+    var VERSION = "1.4.0";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -11,6 +11,7 @@
         "/reports/customer-daily/", "/reports/volume/", "/reports/templates/", "/reports/downtimes/"
     ];
     var SOURCE = "[data-dispatcher-drag][data-equipment-id]";
+    var EXCAVATORS = ".dispatcher-complex-card[data-dispatcher-drop='complex'][data-equipment-id], [data-dispatcher-drag='excavator'][data-equipment-id]";
     var MODALS = ".app-confirm-modal:not([hidden]), .dispatcher-notice-modal:not([hidden]), [data-gd-equipment-detail]:not([hidden]), [data-mm-shift-plan-detail]:not([hidden])";
 
     function allowedLocation(location) {
@@ -118,8 +119,8 @@
         global.CopperMiningMasterTablet.init();
         return;
     }
-    var doc = global.document, board = null, selection = null, editMode = false, compatible = false;
-    var bound = false, queued = false, busyUntil = 0, message = "", edgePanels = null;
+    var doc = global.document, board = null, compatible = false;
+    var bound = false, queued = false, busyUntil = 0, edgePanels = null;
     function setText(node, value) { if (node && node.textContent !== value) node.textContent = value; }
     /* Attribute no-ops still notify DOM observers. In particular, writing an
        unchanged disabled value wakes role-readonly, which republishes access
@@ -134,9 +135,6 @@
     function setBoolean(node, name, value) { if (node[name] !== value) node[name] = value; }
     function setStyle(node, name, value) {
         if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
-    }
-    function button(label, action) {
-        var node = doc.createElement("button"); node.type = "button"; node.dataset.crMmAction = action; node.textContent = label; return node;
     }
     function createEdgePanels(owner) {
         var canvas = owner.closest("[data-dispatcher-canvas]");
@@ -475,8 +473,10 @@
             if (nativeDrag && event.key === "Escape") return;
             if (event.key === "Escape" && machine.state().active && !dialogOpen()) {
                 stop(event); var side = machine.state().active; manualRequest(null); handles[side].focus({ preventScroll: true });
-            } else if (event.key === "Enter" && event.target.matches("[data-cr-mm-search]")) {
-                event.preventDefault(); updateSearch(true); event.target.blur(); refresh();
+            } else if (event.key === "Enter" && event.target.matches("[data-cr-mm-assign-truck]")) {
+                event.preventDefault();
+                doc.querySelector("[data-cr-mm-assign-excavator]").focus();
+                refresh();
             } else activity(event);
         }, true);
         function resize() { pendingLayout = true; if (frame !== null) return; frame = global.requestAnimationFrame(function () { frame = null; refresh(); }); }
@@ -552,64 +552,136 @@
             observer: (doc.body.dataset.observerMode === "true" || doc.body.classList.contains("is-observer-mode")) && doc.body.dataset.observerControl !== "true",
             modalOpen: !!doc.querySelector(MODALS) };
     }
-    function clearSelection(text, endMode) {
-        selection = null; if (endMode) editMode = false; if (text !== undefined) message = text;
-        doc.querySelectorAll(".cr-mm-selected, .cr-mm-target-available").forEach(function (node) {
-            node.classList.remove("cr-mm-selected", "cr-mm-target-available"); setAttribute(node, "data-cr-mm-target-label", null);
-        });
-        updateToolbar();
-    }
-    function updateTargets() {
-        if (!board) return;
-        var state = context();
-        board.querySelectorAll("[data-dispatcher-drop]").forEach(function (zone) {
-            var available = canDrop(selection, zone, state); setClass(zone, "cr-mm-target-available", available);
-            setAttribute(zone, "data-cr-mm-target-label", available ? (zone.dataset.dispatcherDrop === "complex" ? "Назначить сюда" :
-                zone.dataset.dispatcherDrop === "excavator-garage" ? "В резерв экскаваторов" : "В резерв самосвалов") : null);
-        });
-    }
     function ensureToolbar() {
         if (doc.getElementById("cr-mm-toolbar")) return;
-        var toolbar = doc.createElement("section"); toolbar.id = "cr-mm-toolbar"; toolbar.setAttribute("aria-label", "Управление планшетом");
-        var search = doc.createElement("input"); search.type = "search"; search.maxLength = 32;
-        search.placeholder = "Номер техники"; search.setAttribute("aria-label", "Поиск техники по номеру"); search.dataset.crMmSearch = "true";
-        toolbar.appendChild(search);
-        var hint = doc.createElement("span"); hint.dataset.crMmHint = "true"; hint.setAttribute("role", "status"); hint.setAttribute("aria-live", "polite"); toolbar.appendChild(hint);
-        toolbar.appendChild(button("Перестановка", "mode")); toolbar.appendChild(button("Карточка", "detail")); toolbar.appendChild(button("Отмена", "cancel"));
+        var toolbar = doc.createElement("form");
+        toolbar.id = "cr-mm-toolbar";
+        toolbar.noValidate = true;
+        toolbar.setAttribute("aria-label", "Назначение самосвала на экскаватор");
+        [
+            { kind: "truck", caption: "Номер самосвала", next: "next" },
+            { kind: "excavator", caption: "Номер экскаватора", next: "go" }
+        ].forEach(function (field) {
+            var label = doc.createElement("label");
+            var caption = doc.createElement("span");
+            caption.textContent = field.caption;
+            var input = doc.createElement("input");
+            input.type = "text";
+            input.inputMode = "decimal";
+            input.enterKeyHint = field.next;
+            input.maxLength = 12;
+            input.autocomplete = "off";
+            input.placeholder = "—";
+            input.setAttribute("data-cr-mm-assign-" + field.kind, "");
+            input.setAttribute("data-role-readonly-safe", "");
+            if (field.kind === "excavator") input.setAttribute("list", "cr-mm-excavator-numbers");
+            label.appendChild(caption);
+            label.appendChild(input);
+            toolbar.appendChild(label);
+        });
+        // A default submit target lets the Android IME confirm a two-field form.
+        var submit = doc.createElement("button");
+        submit.type = "submit";
+        submit.hidden = true;
+        submit.textContent = "Назначить";
+        toolbar.appendChild(submit);
+        var excavators = doc.createElement("datalist");
+        excavators.id = "cr-mm-excavator-numbers";
+        toolbar.appendChild(excavators);
         doc.body.appendChild(toolbar);
     }
-    function updateToolbar() {
-        var toolbar = doc.getElementById("cr-mm-toolbar"); if (!toolbar) return;
-        var state = context(), mode = toolbar.querySelector("[data-cr-mm-action='mode']");
-        setBoolean(mode, "disabled", !state.compatible || !state.shiftOpen || state.observer);
-        setAttribute(mode, "aria-pressed", editMode ? "true" : "false"); setText(mode, editMode ? "Готово" : "Перестановка");
-        setBoolean(toolbar.querySelector("[data-cr-mm-action='detail']"), "hidden", !selection);
-        setBoolean(toolbar.querySelector("[data-cr-mm-action='cancel']"), "hidden", !selection);
-        var fallback = editMode ? "Выберите технику, затем комплекс или резерв" : state.shiftOpen && !state.observer ?
-            "Нажатие — карточка техники. Для переноса включите «Перестановка»." : "Просмотр · для управления техникой нужна открытая смена";
-        setText(toolbar.querySelector("[data-cr-mm-hint]"), message || fallback);
-        setClass(doc.documentElement, "cr-mm-edit-mode", editMode);
+    function equipmentName(node) {
+        var heading = node.querySelector("h2");
+        return (node.dataset.equipmentName || node.dataset.excavatorSlot || heading && heading.textContent || "").trim();
     }
-    function select(source) {
-        var state = context();
-        if (!editMode || !source || !state.compatible || !state.shiftOpen || state.observer || state.modalOpen || Date.now() < busyUntil) return;
-        if (source.dataset.dragBound !== "true" || source.classList.contains("is-placeholder") || source.classList.contains("is-assigned")) return;
-        if (selection && selection.source === source) { clearSelection(""); return; }
-        clearSelection(""); selection = snapshot(source, board); source.classList.add("cr-mm-selected");
-        var name = source.dataset.equipmentName || source.dataset.equipmentId;
-        message = (selection.kind === "truck" ? "Самосвал " : selection.kind === "complex" ? "Комплекс " : "Экскаватор ") + name + " · нажмите выделенное место назначения";
-        updateTargets(); updateToolbar();
-        if (edgePanels) edgePanels.selected(source);
+    function equipmentCandidates(selector) {
+        var ids = new Set();
+        return Array.prototype.filter.call(board.querySelectorAll(selector), function (node) {
+            if (node.classList.contains("is-placeholder") || node.classList.contains("is-assigned") || ids.has(node.dataset.equipmentId)) return false;
+            ids.add(node.dataset.equipmentId);
+            return true;
+        });
     }
-    function performDrop(target) {
+    function refreshExcavatorNumbers() {
+        var list = doc.getElementById("cr-mm-excavator-numbers");
+        if (!list) return;
+        var names = equipmentCandidates(EXCAVATORS).map(equipmentName).filter(Boolean);
+        var source = JSON.stringify(names);
+        if (list.dataset.source === source) return;
+        list.dataset.source = source;
+        list.replaceChildren();
+        names.forEach(function (name) {
+            var option = doc.createElement("option");
+            option.value = /^\d+$/.test(name) ? "№ " + name : name;
+            list.appendChild(option);
+        });
+    }
+    function assignmentError(input, text) {
+        input.setCustomValidity(text);
+        input.reportValidity();
+        return null;
+    }
+    function equipmentByNumber(input, selector, noun) {
+        var value = input.value.trim();
+        if (!value) return assignmentError(input, "Введите номер " + noun + ".");
+        var numeric = /^\d+$/.test(value);
+        var number = value.replace(/^0+(?=\d)/, "");
+        var matches = equipmentCandidates(selector).filter(function (node) {
+            var name = equipmentName(node);
+            if (!numeric) return name.toLocaleLowerCase("ru") === value.toLocaleLowerCase("ru") || "№ " + name === value;
+            var suffix = name.match(/(\d+)\s*$/);
+            return suffix && suffix[1].replace(/^0+(?=\d)/, "") === number;
+        });
+        if (!matches.length) return assignmentError(input, "Номер " + number + " не найден на пульте.");
+        if (matches.length > 1) return assignmentError(input, "Номер " + number + " встречается несколько раз. " +
+            (noun === "экскаватора" ? "Выберите полное обозначение в подсказке поля." : "Выберите самосвал на рабочем поле."));
+        return matches[0];
+    }
+    function assignByNumbers(toolbar) {
         if (Date.now() < busyUntil) return;
+        var truckInput = toolbar.querySelector("[data-cr-mm-assign-truck]");
+        var excavatorInput = toolbar.querySelector("[data-cr-mm-assign-excavator]");
+        truckInput.setCustomValidity("");
+        excavatorInput.setCustomValidity("");
         var state = context();
-        if (!canDrop(selection, target, state)) { clearSelection("Состояние изменилось. Выберите технику ещё раз.", true); return; }
+        if (state.modalOpen) return;
+        if (!state.compatible || state.observer || doc.body.dataset.roleAccessActive === "false") {
+            assignmentError(excavatorInput, "Назначение недоступно в режиме просмотра.");
+            return;
+        }
+        if (!state.shiftOpen) {
+            assignmentError(excavatorInput, "Для назначения откройте смену.");
+            return;
+        }
+        var truck = equipmentByNumber(truckInput, "[data-dispatcher-drag='truck'][data-equipment-id]", "самосвала");
+        if (!truck) return;
+        var excavator = equipmentByNumber(excavatorInput, EXCAVATORS, "экскаватора");
+        if (!excavator) return;
+        if (excavator.dataset.dispatcherDrop !== "complex") {
+            assignmentError(excavatorInput, "Сначала выведите этот экскаватор из гаража на рабочее поле.");
+            return;
+        }
+        if (truck.closest("[data-dispatcher-drop='complex']") === excavator) {
+            assignmentError(excavatorInput, "Самосвал уже назначен на этот экскаватор.");
+            return;
+        }
+        var assignment = snapshot(truck, board);
+        if (!canDrop(assignment, excavator, state)) {
+            assignmentError(excavatorInput, "Состояние техники изменилось. Повторите назначение.");
+            return;
+        }
         busyUntil = Date.now() + 1200;
         try {
-            var done = dispatchExistingDrop(selection, target, state, global);
-            clearSelection(done ? "Действие передано приложению. Проверьте результат на пульте." : "Действие не выполнено. Проверьте состояние смены.", true);
-        } catch (_) { clearSelection("Не удалось выполнить действие. Выберите технику ещё раз.", true); }
+            if (!dispatchExistingDrop(assignment, excavator, state, global)) {
+                assignmentError(excavatorInput, "Назначение недоступно. Проверьте состояние техники.");
+                return;
+            }
+            toolbar.reset();
+            if (toolbar.contains(doc.activeElement)) doc.activeElement.blur();
+            if (edgePanels) edgePanels.completeAction();
+        } catch (_) {
+            assignmentError(excavatorInput, "Не удалось передать назначение. Проверьте состояние техники.");
+        }
     }
     function fitCanvas() { if (edgePanels) edgePanels.layout(); else fitCanvasBase(); }
     function fitCanvasBase() {
@@ -642,27 +714,12 @@
         doc.querySelectorAll(".cr-mm-expanded-rack").forEach(function (rack) { rack.classList.remove("cr-mm-expanded-rack"); });
         updateRackControls();
     }
-    function updateSearch(scroll) {
-        if (!board) return;
-        var input = doc.querySelector("[data-cr-mm-search]"), needle = input ? input.value.trim().toLocaleLowerCase("ru") : "", first = null;
-        board.querySelectorAll(SOURCE).forEach(function (node) {
-            var hit = !!needle && (node.dataset.equipmentName || "").toLocaleLowerCase("ru").indexOf(needle) !== -1;
-            setClass(node, "cr-mm-search-hit", hit); if (hit && !first) first = node;
-            if (scroll && hit && node.hidden) {
-                var rack = node.closest(".complex-assigned-trucks");
-                if (rack) setClass(rack, "cr-mm-expanded-rack", true);
-            }
-        });
-        updateRackControls();
-        if (scroll && edgePanels) edgePanels.reveal(first);
-        else if (scroll && first) first.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
     function reconcile() {
         queued = false; if (!allowedLocation(global.location)) return;
         compatible = isCompatible();
         if (!compatible) {
             if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
-            clearSelection("", true); collapseRacks(); setClass(doc.documentElement, "cr-mm-tablet", false);
+            collapseRacks(); setClass(doc.documentElement, "cr-mm-tablet", false);
             var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.remove();
             if (!doc.getElementById("cr-mm-compatibility-warning")) {
                 var warning = doc.createElement("div"); warning.id = "cr-mm-compatibility-warning"; warning.setAttribute("role", "alert");
@@ -673,10 +730,10 @@
         var warning = doc.getElementById("cr-mm-compatibility-warning"); if (warning) warning.remove();
         var next = doc.querySelector(".dispatcher-board");
         if (edgePanels && (edgePanels.owner !== next || !edgePanels.matches()) && !edgePanels.adopt(next)) { edgePanels.destroy(); edgePanels = null; }
-        if (board !== next) { var editing = editMode; board = next; collapseRacks(); clearSelection(editing ? "Пульт обновился. При необходимости включите перестановку снова." : "", true); }
-        else if (selection && (!selection.source.isConnected || (selection.source.dataset.haulAssignmentStateId || "") !== selection.assignment || !context().shiftOpen)) clearSelection("Состояние изменилось.", true);
+        if (board !== next) { board = next; collapseRacks(); }
         setClass(doc.documentElement, "cr-mm-tablet", true);
-        ensureToolbar(); updateToolbar(); updateTargets(); updateSearch(false);
+        ensureToolbar();
+        refreshExcavatorNumbers();
         if (!edgePanels) edgePanels = createEdgePanels(board);
         fitCanvas();
     }
@@ -692,28 +749,21 @@
                 if (rack) { rack.classList.toggle("cr-mm-expanded-rack"); updateRackControls(); }
                 return;
             }
-            var control = event.target.closest("[data-cr-mm-action]");
-            if (control && !control.disabled) {
-                event.preventDefault(); event.stopPropagation();
-                var action = control.dataset.crMmAction;
-                if (action === "mode") { var state = context(); if (!state.shiftOpen || state.observer || state.modalOpen) return; clearSelection(""); editMode = !editMode; updateToolbar(); }
-                else if (action === "cancel") clearSelection("", true);
-                else if (action === "detail" && selection) { var node = selection.source; clearSelection("", true); if (node.isConnected) node.click(); }
-                if (edgePanels) edgePanels.completeAction();
-                return;
-            }
-            if (!editMode || !board || !board.contains(event.target) || context().modalOpen || event.target.closest("button, a, input, select, textarea, form")) return;
-            var target = event.target.closest("[data-dispatcher-drop]"), source = event.target.closest(SOURCE);
-            if (selection && target && canDrop(selection, target, context())) { event.preventDefault(); event.stopPropagation(); performDrop(target); }
-            else if (source) { event.preventDefault(); event.stopPropagation(); select(source); }
         }, true);
-        doc.addEventListener("input", function (event) { if (event.target.matches("[data-cr-mm-search]")) updateSearch(true); });
+        doc.addEventListener("submit", function (event) {
+            if (event.target.id !== "cr-mm-toolbar") return;
+            event.preventDefault();
+            assignByNumbers(event.target);
+        });
+        doc.addEventListener("input", function (event) {
+            if (event.target.matches("#cr-mm-toolbar input")) event.target.setCustomValidity("");
+        });
         doc.addEventListener("keydown", function (event) {
             if ((event.key === "Enter" || event.key === " ") && event.target.matches(".complex-truck-more[role='button']")) { event.preventDefault(); event.stopPropagation(); event.target.click(); }
-            if (event.key === "Escape" && !(edgePanels && edgePanels.escape())) { if (editMode) clearSelection("", true); collapseRacks(); }
+            if (event.key === "Escape" && !(edgePanels && edgePanels.escape())) collapseRacks();
         }, true);
-        doc.addEventListener("visibilitychange", function () { if (doc.hidden) { clearSelection("", true); collapseRacks(); } });
-        global.addEventListener("pagehide", function () { clearSelection("", true); collapseRacks(); if (edgePanels) { edgePanels.destroy(); edgePanels = null; } });
+        doc.addEventListener("visibilitychange", function () { if (doc.hidden) collapseRacks(); });
+        global.addEventListener("pagehide", function () { collapseRacks(); if (edgePanels) { edgePanels.destroy(); edgePanels = null; } });
         global.addEventListener("resize", fitCanvas);
         if (global.visualViewport) global.visualViewport.addEventListener("resize", fitCanvas);
         var observer = new MutationObserver(function (records) {
@@ -722,7 +772,7 @@
                 if (node && node.closest("#cr-mm-toolbar, #cr-mm-compatibility-warning")) return false;
                 if (record.type === "attributes") return record.oldValue !== record.target.getAttribute(record.attributeName);
                 return Array.prototype.some.call(record.addedNodes, function (child) { return child.nodeType === 1 && child.id !== "cr-mm-toolbar" && child.id !== "cr-mm-compatibility-warning"; }) ||
-                    Array.prototype.some.call(record.removedNodes, function (child) { return child === board || selection && (child === selection.source || child.contains && child.contains(selection.source)); });
+                    Array.prototype.some.call(record.removedNodes, function (child) { return child === board; });
             })) schedule();
         });
         observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["data-dispatcher-shift-open", "data-role-access-active", "data-observer-mode", "data-observer-control", "data-app-role-code", "data-app-shell-version", "data-drag-bound", "data-dispatcher-drop-bound", "data-haul-assignment-state-id"] });
@@ -745,6 +795,6 @@
         }
         bind(); reconcile();
     }
-    global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { clearSelection("", true); } };
+    global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); } };
     init();
 })(typeof window !== "undefined" ? window : globalThis);

@@ -76,11 +76,6 @@ html.cr-mm-tablet .dispatcher-command-main > .dispatcher-equipment-search { disp
 html.cr-mm-tablet .gd-equipment-detail input, html.cr-mm-tablet .gd-equipment-detail select, html.cr-mm-tablet .gd-equipment-detail button, html.cr-mm-tablet .app-confirm-modal input, html.cr-mm-tablet .app-confirm-modal button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(14px / var(--cr-mm-scale)) !important; }
 html.cr-mm-tablet .gd-detail-close, html.cr-mm-tablet .mm-detail-close, html.cr-mm-tablet .shared-shift-close { min-width: calc(44px / var(--cr-mm-scale)) !important; }
 html.cr-mm-tablet .gd-detail-panel, html.cr-mm-tablet .app-confirm-dialog { max-height: calc(94vh / var(--cr-mm-scale)) !important; overflow: auto !important; }
-html.cr-mm-tablet .cr-mm-selected { outline: calc(3px / var(--cr-mm-scale)) solid #fff !important; outline-offset: calc(-3px / var(--cr-mm-scale)); }
-html.cr-mm-tablet .cr-mm-target-available { box-shadow: inset 0 0 0 calc(3px / var(--cr-mm-scale)) #75c7ff !important; cursor: pointer; }
-html.cr-mm-tablet .cr-mm-search-hit { outline: calc(3px / var(--cr-mm-scale)) solid #ffd46c !important; outline-offset: calc(-3px / var(--cr-mm-scale)); }
-html.cr-mm-tablet .cr-mm-target-available::after { content: attr(data-cr-mm-target-label); position: absolute; inset: auto 3px 3px; z-index: 20; padding: 6px 4px; border-radius: 5px; color: #fff; background: #17527a; font: 700 calc(12px / var(--cr-mm-scale))/1.25 system-ui, sans-serif; text-align: center; pointer-events: none; }
-html.cr-mm-tablet.cr-mm-edit-mode [data-dispatcher-drag] { cursor: pointer; }
 html.cr-mm-tablet .dispatcher-zone-grid { overscroll-behavior: contain; }
 html.cr-mm-tablet .dispatcher-complex-card .complex-truck-more:not([hidden]) { min-width: calc(44px / var(--cr-mm-scale)); min-height: calc(44px / var(--cr-mm-scale)); cursor: pointer; pointer-events: auto !important; touch-action: manipulation; }
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack { align-content: start !important; overflow: auto !important; overscroll-behavior: contain; grid-auto-rows: max(var(--complex-truck-h), calc(44px / var(--cr-mm-scale))) !important; }
@@ -88,16 +83,14 @@ html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-t
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-tile { min-height: calc(44px / var(--cr-mm-scale)) !important; }
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more { order: -1; font-size: 0 !important; }
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more::after { content: "Свернуть"; font-size: calc(10px / var(--cr-mm-scale)); }
-#cr-mm-toolbar { position: fixed; inset: auto 0 0; z-index: 1000; display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: 64px; padding: 9px 12px; border-top: 1px solid #48606b; color: #edf4f7; background: #10232e; font: 14px/1.3 system-ui, sans-serif; }
-#cr-mm-toolbar input { box-sizing: border-box; flex: 0 0 180px !important; width: 180px !important; min-width: 120px; height: 44px; margin: 0; padding: 8px 10px; border: 1px solid #627f8d; border-radius: 7px; background: #071720; color: #fff; font: inherit; }
-#cr-mm-toolbar [data-cr-mm-hint] { flex: 1 1 auto !important; min-width: 160px; font-size: 12px; color: #c4d6df; }
-#cr-mm-toolbar button { display: inline-flex; flex: 0 0 auto !important; width: auto !important; align-items: center; justify-content: center; box-sizing: border-box; min-width: 44px; height: 44px; margin: 0; padding: 8px 16px; border: 1px solid #7794a2; border-radius: 7px; background: #1a3d4f; color: #fff; font: 600 14px/1.2 system-ui, sans-serif; letter-spacing: normal; text-transform: none; white-space: nowrap; touch-action: manipulation; }
-#cr-mm-toolbar button[aria-pressed="true"] { background: #225c80; border-color: #b0e4ff; }
-#cr-mm-toolbar button:disabled { opacity: .5; }
+#cr-mm-toolbar { position: fixed; inset: auto 0 0; z-index: 1000; display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: 64px; margin: 0; padding: 9px 12px; border-top: 1px solid #48606b; color: #edf4f7; background: #10232e; font: 14px/1.3 system-ui, sans-serif; }
+#cr-mm-toolbar label { position: relative; flex: 1 1 0; min-width: 0; margin: 0; }
+#cr-mm-toolbar label > span { position: absolute; top: 4px; left: 11px; z-index: 1; font: 11px/12px system-ui, sans-serif; color: #c4d6df; pointer-events: none; }
+#cr-mm-toolbar input { box-sizing: border-box; width: 100% !important; min-width: 0; height: 44px; margin: 0; padding: 16px 10px 2px; border: 1px solid #627f8d; border-radius: 7px; background: #071720; color: #fff; font: 18px/22px system-ui, sans-serif; }
 #cr-mm-toolbar [hidden] { display: none !important; }
-#cr-mm-toolbar button:focus-visible, #cr-mm-toolbar input:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+#cr-mm-toolbar input:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar { background: #eaf0f3; color: #172f3a; border-color: #a5bac5; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar [data-cr-mm-hint] { color: #345260; }
+html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar label > span { color: #345260; }
 html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input { background: #fff; color: #172f3a; }
 @media screen and (max-height: 639px) {
     html.cr-mm-tablet .dispatcher-excavators, html.cr-mm-tablet .dispatcher-trucks { grid-template-rows: none !important; grid-auto-rows: calc(58px / var(--cr-mm-scale)) !important; align-content: start !important; overflow-y: auto !important; }
@@ -122,8 +115,6 @@ html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input { background: #fff; 
     html.cr-mm-tablet .dispatcher-command-utility { grid-template-columns: repeat(3, calc(44px / var(--cr-mm-scale))) repeat(2, minmax(0, 1fr)) !important; }
     html.cr-mm-tablet .dispatcher-clock { display: none !important; }
     #cr-mm-toolbar { gap: 7px; padding-inline: 8px; }
-    #cr-mm-toolbar input { width: 145px !important; flex-basis: 145px !important; }
-    #cr-mm-toolbar button { padding-inline: 10px; }
 }
 
 @media screen {
