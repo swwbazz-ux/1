@@ -2,6 +2,10 @@
 /* Related dispatcher pages scroll in the real viewport. A transformed scroll
    layer is clipped to the unscaled viewport on the tablet's Android WebView. */
 @media screen {
+/* Touch keeps :hover after a tap. Only the explicit clock mode may spin;
+   otherwise the second tap would stop the mode but leave hover spinning. */
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .dispatcher-radial-clock:not(.is-music):not(.is-music-stopping):hover .dispatcher-radial-clock-face,
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .dispatcher-radial-clock:not(.is-music):not(.is-music-stopping):hover .dispatcher-radial-clock-ring { animation: none; filter: none; }
 html.cr-mm-tablet-page, html.cr-mm-tablet-page body { width: 100%; height: 100%; margin: 0; overflow: hidden !important; -webkit-text-size-adjust: 100%; }
 html.cr-mm-tablet-page .dispatcher-canvas[data-dispatcher-canvas] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; transform: none !important; --gd-vw: 1vw !important; --gd-vh: 1vh !important; }
 html.cr-mm-tablet-page .dispatcher-canvas > .dispatcher-analytics-shell, html.cr-mm-tablet-page body > .dispatcher-analytics-shell.management-linked-report { box-sizing: border-box; width: 100% !important; max-width: 100% !important; height: 100% !important; min-height: 0 !important; transform: none !important; overflow: hidden auto !important; --gd-header-h: 126px; overscroll-behavior: contain; }
