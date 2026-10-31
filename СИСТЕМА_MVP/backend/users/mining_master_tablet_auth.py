@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
-from django.views.decorators.debug import sensitive_post_parameters
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django.views.decorators.http import require_http_methods
 
 from .access_auth import find_employee_access_by_credentials
@@ -74,7 +74,8 @@ def _fresh(payload, ttl):
         return False
 
 
-def _issue_shift_auth(request, access):
+def issue_tablet_shift_auth(request, access):
+    """Issue after server verification only, including a bound handover confirmation."""
     request.session[SHIFT_AUTH_KEY] = {
         'access_id': access.pk,
         'generation': request.session[ACTIVE_ROLE_GENERATION_SESSION_KEY],
@@ -132,11 +133,12 @@ def _finish_login(request, access):
     request.session.cycle_key()
     rotate_token(request)
     set_session_device_kind(request, 'shared')
-    _issue_shift_auth(request, access)
+    issue_tablet_shift_auth(request, access)
     return redirect('mining_master_tablet')
 
 
 @sensitive_post_parameters('access_code')
+@sensitive_variables('code')
 @never_cache
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
@@ -184,6 +186,7 @@ def login_view(request):
 
 
 @sensitive_post_parameters('new_access_code', 'confirm_access_code')
+@sensitive_variables('form', 'locked_form')
 @never_cache
 @csrf_protect
 @require_http_methods(['GET', 'POST'])
