@@ -24,6 +24,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
     if (route.request().method() === 'GET' && url.origin === 'https://dispatcher.driverform.ru') {
       if (url.pathname === '/dispatcher/control/') return route.fulfill({ contentType: 'text/html', body: fixture.replace('</head>', `<style>${css}</style></head>`) });
       if (url.pathname === '/tablet-adapter.js') return route.fulfill({ contentType: 'application/javascript', body: script });
+      if (['/static/img/equipment/excavator-gray.png', '/static/img/equipment/truck-gray.png'].includes(url.pathname)) return route.fulfill({ path: path.join(repo, 'СИСТЕМА_MVP/backend', url.pathname.slice(1)) });
       if (['/static/js/role-readonly.js', '/static/js/dispatcher-board-dnd-v1.js', '/static/js/dispatcher-canvas-v1.js', '/static/js/dispatcher-board-layout-v1.js', '/static/js/dispatcher-complex-truck-racks-v1.js'].includes(url.pathname)) return route.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(repo, 'СИСТЕМА_MVP/backend', url.pathname.slice(1)), 'utf8') });
     }
     requests.push({ method: route.request().method(), url: url.pathname }); return route.abort();

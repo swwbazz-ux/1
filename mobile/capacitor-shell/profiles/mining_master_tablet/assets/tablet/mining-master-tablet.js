@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.3.0";
+    var VERSION = "1.3.1";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -148,6 +148,7 @@
         var nativeDrag = null, dragEpoch = 0, dragStartTimer = null;
         var fullHeight = global.innerHeight, fullWidth = global.innerWidth, layoutKey = "", frame = null, settle = null;
         var tileFrame = null, tileSample = null, pendingTiles = false;
+        var garageLists = [];
         var reflowFrame = null, fieldSize = "", observedField = null, pendingField = false;
         var reservedSide = null, reservedWidth = 0;
         owner.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { node.remove(); });
@@ -229,6 +230,28 @@
             }
             keepCanvasMode();
         }
+        /* Desktop placeholders assume twelve rows. Fill the tablet's actual
+           height with decorative slots; real equipment and drop zones stay
+           server-owned. Reconcile counts only, so readiness can become quiet. */
+        function fillGarages(height) {
+            garageLists.forEach(function (list) {
+                if (!list.clientHeight || !height) return;
+                var gap = parseFloat(global.getComputedStyle(list).rowGap) || 0;
+                var capacity = Math.max(1, Math.floor((list.clientHeight + gap) / (height + gap)));
+                var realCount = Array.prototype.filter.call(list.querySelectorAll("[data-garage-item]:not(.is-placeholder)"), function (tile) { return tile.offsetHeight > 0; }).length;
+                var wanted = Math.max(0, capacity - realCount);
+                var slots = Array.prototype.slice.call(list.querySelectorAll("[data-cr-mm-garage-fill]"));
+                while (slots.length > wanted) slots.pop().remove();
+                var truck = list.classList.contains("dispatcher-trucks");
+                while (slots.length < wanted) {
+                    var slot = doc.createElement("article"), icon = doc.createElement("img");
+                    slot.className = (truck ? "dispatcher-truck-tile" : "dispatcher-excavator-garage-tile") + " is-placeholder";
+                    slot.setAttribute("data-cr-mm-garage-fill", ""); slot.setAttribute("aria-hidden", "true");
+                    icon.src = "/static/img/equipment/" + (truck ? "truck" : "excavator") + "-gray.png"; icon.alt = "";
+                    slot.appendChild(icon); list.appendChild(slot); slots.push(slot);
+                }
+            });
+        }
         function syncTileSize() {
             tileFrame = null;
             if (dead) return;
@@ -256,10 +279,13 @@
             reservedWidth = reservedSide ? Math.max(reservedWidth, width + 22) : width + 22;
             setStyle(owner, "--cr-panel-side-w", reservedWidth + "px");
             setStyle(root, "--cr-panel-side-edge", reservedWidth * (Number(root.style.getPropertyValue("--cr-mm-scale")) || 1) + "px");
+            fillGarages(height);
         }
         function scheduleTiles() { if (!dead && tileFrame === null) tileFrame = global.requestAnimationFrame(syncTileSize); }
         var tileResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(scheduleTiles) : null;
         var tileObserver = new MutationObserver(scheduleTiles);
+        var garageObserver = new MutationObserver(scheduleTiles);
+        var garageResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(scheduleTiles) : null;
         /* The server watches each rack, whose intrinsic width is cols × tile-w.
            A narrower parent card may therefore leave the rack unchanged and
            never notify it. Reuse the real control runtime's window-resize hook
@@ -277,6 +303,16 @@
         var fieldResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queueFieldLayout) : null;
         function watchTiles() {
             tileObserver.disconnect(); if (tileResize) tileResize.disconnect(); tileSample = null;
+            garageObserver.disconnect(); if (garageResize) garageResize.disconnect();
+            var nextLists = Array.prototype.slice.call(owner.querySelectorAll(".dispatcher-excavators, .dispatcher-trucks"));
+            garageLists.forEach(function (list) {
+                if (nextLists.indexOf(list) < 0) list.querySelectorAll("[data-cr-mm-garage-fill]").forEach(function (slot) { slot.remove(); });
+            });
+            garageLists = nextLists;
+            garageLists.forEach(function (list) {
+                garageObserver.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "hidden", "style"] });
+                if (garageResize) garageResize.observe(list);
+            });
             var grid = owner.querySelector(".dispatcher-zone-grid");
             if (grid) tileObserver.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "hidden"] });
             var field = owner.querySelector(".dispatcher-complexes");
@@ -450,7 +486,7 @@
         var observer = new MutationObserver(refresh);
         observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open", "aria-hidden", "class"] });
         return {
-            owner: owner, matches: function () { return owner.isConnected && nodes.top === owner.querySelector(":scope > .dispatcher-topbar") && nodes.left === owner.querySelector(":scope > .dispatcher-left") && nodes.right === owner.querySelector(":scope > .dispatcher-right") && nodes.bottom === doc.getElementById("cr-mm-toolbar"); },
+            owner: owner, matches: function () { return owner.isConnected && nodes.top === owner.querySelector(":scope > .dispatcher-topbar") && nodes.left === owner.querySelector(":scope > .dispatcher-left") && nodes.right === owner.querySelector(":scope > .dispatcher-right") && nodes.bottom === doc.getElementById("cr-mm-toolbar") && garageLists.every(function (list) { return owner.contains(list); }); },
             adopt: function (next) {
                 var boardChanged = owner !== next;
                 var nextCanvas = next && next.closest("[data-dispatcher-canvas]");
@@ -481,7 +517,8 @@
             completeAction: function () { if (machine.state().active === "bottom") { pendingReveal = null; machine.request(null); } },
             escape: function () { return !!machine.state().active; },
             destroy: function () {
-                if (dead) return; keepCanvasMode(); dead = true; machine.destroy(); observer.disconnect(); canvasObserver.disconnect(); tileObserver.disconnect(); if (tileResize) tileResize.disconnect(); if (fieldResize) fieldResize.disconnect(); listeners.forEach(function (off) { off(); });
+                if (dead) return; keepCanvasMode(); dead = true; machine.destroy(); observer.disconnect(); canvasObserver.disconnect(); tileObserver.disconnect(); garageObserver.disconnect(); if (garageResize) garageResize.disconnect(); if (tileResize) tileResize.disconnect(); if (fieldResize) fieldResize.disconnect(); listeners.forEach(function (off) { off(); });
+                garageLists.forEach(function (list) { list.querySelectorAll("[data-cr-mm-garage-fill]").forEach(function (slot) { slot.remove(); }); });
                 setAttribute(canvas, "data-dispatcher-canvas", serverCanvasMode);
                 global.clearTimeout(settle); if (frame !== null) global.cancelAnimationFrame(frame);
                 if (tileFrame !== null) global.cancelAnimationFrame(tileFrame);

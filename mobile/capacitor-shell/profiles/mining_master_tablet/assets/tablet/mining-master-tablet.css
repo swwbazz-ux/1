@@ -177,14 +177,15 @@ html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks) {
   display: grid !important; grid-template-columns: var(--cr-panel-tile-w, 88px) !important;
   grid-template-rows: none !important; grid-auto-rows: var(--cr-panel-tile-h, 63px) !important;
   grid-auto-flow: row !important; grid-auto-columns: auto !important; flex: 1 1 auto;
-  align-content: start !important; justify-content: start !important; gap: 6px !important;
+  align-content: space-between !important; justify-content: start !important; gap: 6px !important;
   box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 0 !important;
   overflow: hidden auto !important; overscroll-behavior: contain; scroll-snap-type: none !important; scrollbar-gutter: stable; scrollbar-width: auto !important;
 }
 html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks)::-webkit-scrollbar { width: 8px; }
+html.cr-mm-panels [data-cr-mm-garage-fill] { pointer-events: none; }
 /* Geometry and number/icon scale follow the real field tile. Assigned/hidden
    garage copies retain the server's visibility; no sources are cloned. */
-html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item]:not(.is-assigned):not([hidden]), .dispatcher-truck-tile.is-placeholder:not([hidden])) {
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item]:not(.is-assigned):not([hidden]), .dispatcher-truck-tile.is-placeholder:not([hidden]), [data-cr-mm-garage-fill]) {
   display: flex !important; flex-direction: column; align-items: center; justify-content: space-between;
   box-sizing: border-box; width: var(--cr-panel-tile-w, 88px) !important; height: var(--cr-panel-tile-h, 63px) !important;
   min-width: 0 !important; min-height: 0 !important; gap: 0; padding: 3px 3px 2px !important; border-radius: 6px;
@@ -200,9 +201,12 @@ html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item
   display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
 }
 /* Empty slots have no number/status rows to distribute around the icon. */
-html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-truck-tile.is-placeholder:not([hidden]) {
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is(.dispatcher-truck-tile, .dispatcher-excavator-garage-tile).is-placeholder:not([hidden]) {
   justify-content: center; padding-block: 2.5px !important;
 }
+/* Keep the desktop placeholders intact for fail-closed fallback. The adapter
+   supplies only the number of full rows that fit the current tablet height. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .is-placeholder:not([data-cr-mm-garage-fill]):not([hidden]) { display: none !important; }
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > span {
   display: block !important; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font-size: max(8px, calc(var(--cr-panel-tile-h, 63px) * .155)) !important; font-weight: 700; line-height: 1.1; letter-spacing: .01em; opacity: .9;
