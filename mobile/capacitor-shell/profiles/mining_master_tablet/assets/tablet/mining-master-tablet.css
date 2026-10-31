@@ -2,6 +2,10 @@
 /* Related dispatcher pages scroll in the real viewport. A transformed scroll
    layer is clipped to the unscaled viewport on the tablet's Android WebView. */
 @media screen {
+/* Shift state is already communicated by the board colour and start button.
+   Retain every other result, warning and error in these message containers. */
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .cr-mm-shift-notice,
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) :is(.dispatcher-messages, .dispatcher-shift-report-messages):not(:has(> :not(.cr-mm-shift-notice))) { display: none !important; }
 /* A non-interactive backdrop leaves the real start button in colour. No
    ancestor filter: that would also desaturate the button and move fixed UI. */
 #cr-mm-shift-monochrome { display: none; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; backdrop-filter: grayscale(1); -webkit-backdrop-filter: grayscale(1); }

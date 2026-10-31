@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.6.0";
+    var VERSION = "1.6.1";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -136,6 +136,16 @@
     function setStyle(node, name, value) {
         if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
     }
+    function syncShiftNotices() {
+        var enabled = doc.documentElement.matches(".cr-mm-tablet, .cr-mm-tablet-page");
+        var successes = ".dispatcher-messages > .message.success, .dispatcher-shift-report-messages > .is-success, .management-linked-report-content > .message.success";
+        doc.querySelectorAll(successes + ", .cr-mm-shift-notice").forEach(function (node) {
+            var text = node.textContent.replace(/\s+/g, " ").trim();
+            var redundant = enabled && node.matches(successes) && !node.matches(".error, .warning, .info, .is-error, .is-warning, .is-info") &&
+                /^Смена горного (?:диспетчера|мастера) (?:открыта|завершена)\.$/.test(text);
+            setClass(node, "cr-mm-shift-notice", redundant);
+        });
+    }
     var shiftPresentationBound = false;
     function bindShiftPresentation() {
         if (shiftPresentationBound) return;
@@ -147,6 +157,7 @@
         var buttonResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queue) : null;
         function update() {
             frame = null;
+            syncShiftNotices();
             var owner = root.classList.contains("cr-mm-tablet") && doc.querySelector(".dispatcher-board");
             var closed = owner ? owner.dataset.dispatcherShiftOpen === "false" :
                 root.classList.contains("cr-mm-tablet-page") && !!doc.querySelector(".dispatcher-unified-topbar .dispatcher-active-badge.is-muted");
@@ -189,11 +200,13 @@
             if (records.some(function (record) {
                 if (record.target === layer) return false;
                 if (record.type === "attributes") return record.oldValue !== record.target.getAttribute(record.attributeName);
+                var target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+                if (target && target.closest(".dispatcher-messages, .dispatcher-shift-report-messages, .management-linked-report-content > .message")) return true;
                 return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1; }) ||
                     Array.prototype.some.call(record.removedNodes, function (node) { return node.nodeType === 1; });
             })) queue();
         });
-        observer.observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true,
+        observer.observe(root, { childList: true, characterData: true, subtree: true, attributes: true, attributeOldValue: true,
             attributeFilter: ["class", "hidden", "inert", "disabled", "aria-disabled", "style", "data-dispatcher-shift-open", "data-cr-panel-state"] });
         doc.addEventListener("transitionrun", function (event) {
             if (root.classList.contains("cr-mm-shift-closed") && event.target.matches &&
