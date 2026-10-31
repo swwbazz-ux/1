@@ -264,4 +264,79 @@ html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"]
 }
 
 html[data-cr-panel-modal="true"] .cr-mm-panel-handle, html[data-cr-panel-modal="true"] .cr-mm-panel-edge { visibility: hidden; pointer-events: none; }
+
+/* The detail dialog lives INSIDE the scaled dispatcher canvas. Cancel that
+   scale for this surface alone: its typography and touch targets use viewport
+   CSS pixels. The original panel remains the scroll/fragment-restore owner. */
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail:not([hidden]) {
+  inset: 0 0 calc(var(--cr-panel-keyboard-inset, 0px) / var(--cr-mm-scale)) !important;
+  padding: 0 !important; place-items: start;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .mm-equipment-detail-panel {
+  zoom: calc(1 / var(--cr-mm-scale)); width: 100vw !important; max-width: none !important;
+  height: calc(var(--cr-panel-canvas-h) * var(--cr-mm-scale) - var(--cr-panel-keyboard-inset, 0px)) !important;
+  max-height: none !important; box-sizing: border-box; margin: 0; padding: 0 !important;
+  border: 0; border-radius: 0; overflow: hidden auto; overscroll-behavior: contain;
+  scroll-padding: 80px 0 20px;
+}
+html.cr-mm-panels .gd-equipment-detail :is(input, select, button) {
+  min-height: 44px !important; font-size: 15px !important; box-sizing: border-box; max-width: 100%;
+}
+/* Both siblings stick to the original panel. The close button occupies its
+   own reserved space at the right of the header, without a separate row. */
+html.cr-mm-panels .gd-equipment-detail .mm-detail-close {
+  position: sticky; top: 8px; right: auto; z-index: 12; width: 44px; height: 44px;
+  min-width: 44px !important; margin: 8px 10px -52px auto; padding: 0; font-size: 0 !important;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero {
+  position: sticky; top: 0; z-index: 10; box-sizing: border-box; min-height: 62px;
+  grid-template-columns: 60px minmax(0, 1fr) auto; gap: 12px;
+  padding: 7px 68px 7px 14px; background: var(--gd-detail-panel);
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot {
+  width: 60px; height: 44px; min-width: 0; overflow: hidden;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot .gd-detail-slot-clone {
+  display: grid; place-items: center; padding: 0; width: 100%; height: 100%; min-width: 0; min-height: 0;
+}
+html.cr-mm-panels .gd-detail-slot-clone > :is(strong,span) { display: none; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot .gd-detail-slot-clone img {
+  position: static; transform: none; width: 46px; height: 34px; object-fit: contain; margin: 0;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero-copy {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero h2 { font-size: 24px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-meta { flex-basis: 100%; margin: 0; font-size: 13px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-tags { margin: 0; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan:not([hidden]) {
+  grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1px 10px; max-width: 280px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan > strong { grid-column: 2; grid-row: 1 / span 2; font-size: 24px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan > small { grid-column: 1; white-space: normal; text-align: right; }
+/* Flatten only the work wrapper; all form, hidden, and event-bound nodes stay
+   in place. Reports and load/retry states can use the entire screen. */
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-columns {
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 0 16px; padding: 12px 14px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-col-people { grid-column: 1; grid-row: 1; gap: 10px; padding-right: 14px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-col-work { display: contents; }
+html.cr-mm-panels .gd-detail-col-work > :is(.gd-detail-settings,.gd-detail-manual-trip) { grid-column: 2; }
+html.cr-mm-panels .gd-detail-col-work > :is(.gd-detail-shift-report,.gd-detail-load-state) { grid-column: 1 / -1; min-width: 0; margin-top: 10px; }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face { grid-template-columns: minmax(76px,.55fr) minmax(72px,.55fr) minmax(0,2fr) !important; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-settings :is(label,select,input) { min-width: 0; }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr)); }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row { grid-template-columns: minmax(0,1fr) 76px 44px !important; align-items: end; }
+html.cr-mm-panels .dispatcher-shell .gd-detail-settings .gd-detail-destination-remove { width: 44px !important; min-width: 44px; margin-bottom: 0; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics { grid-template-columns: repeat(auto-fit,minmax(min(100%,132px),1fr)); }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics :is(span,strong) { white-space: normal; overflow-wrap: anywhere; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-dashboard { min-width: 0; max-width: 100%; overflow-x: auto; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-scroll-hint { bottom: 0; height: 24px; margin: 0; padding: 3px 0; box-sizing: border-box; }
+@media (max-width: 720px) {
+  html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-columns { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-col-people { border: 0; padding: 0; }
+  html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero { grid-template-columns: minmax(0,1fr) minmax(0,100px); gap: 6px; padding-left: 10px; padding-right: 62px; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot { display: none; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan:not([hidden]) { display: flex; flex-direction: column; align-items: end; padding-left: 6px; }
+}
 }
