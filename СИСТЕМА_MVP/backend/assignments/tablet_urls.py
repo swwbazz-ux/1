@@ -48,4 +48,3 @@ for pattern in [*trip_patterns, *report_patterns]:
     urlpatterns.append(path(route, callback, pattern.default_args,
                             name='mining_master_tablet_' + pattern.name))
     reverse_patterns.append(path(route, callback, pattern.default_args, name=pattern.name))
-
