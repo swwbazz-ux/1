@@ -200,7 +200,7 @@ html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > 
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item], .is-placeholder) > img {
   display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
 }
-html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .is-placeholder > img { opacity: .46; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .is-placeholder > img { opacity: .23; }
 /* Empty slots have no number/status rows to distribute around the icon. */
 html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is(.dispatcher-truck-tile, .dispatcher-excavator-garage-tile).is-placeholder:not([hidden]) {
   justify-content: center; padding-block: 2.5px !important;
