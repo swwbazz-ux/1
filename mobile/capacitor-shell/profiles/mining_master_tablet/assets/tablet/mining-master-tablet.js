@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.1.1";
+    var VERSION = "1.2.0";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -74,9 +74,44 @@
         }
     }
 
+    /* A single closing panel retains the screen until its transition completes.
+       Activity only rearms timers; it never republishes unchanged DOM state. */
+    function createPanelState(options) {
+        var active = null, phase = "closed", desired = null, paused = false, dead = false, idle = null, motion = null;
+        function stopIdle() { if (idle !== null) options.clearTimer(idle); idle = null; }
+        function publish() { options.render({ active: active, phase: phase }); }
+        function arm() {
+            stopIdle();
+            if (dead || paused || phase !== "open") return;
+            idle = options.setTimer(function () {
+                idle = null;
+                if (options.blocked && options.blocked()) { setPaused(true); return; }
+                request(null);
+            }, 10000);
+        }
+        function request(side) {
+            if (dead) return;
+            desired = side || null;
+            if (phase === "closing") return;
+            if (active === desired) { arm(); return; }
+            stopIdle();
+            if (active) {
+                phase = "closing"; publish();
+                motion = options.setTimer(function () {
+                    motion = null; active = null; phase = "closed"; publish();
+                    if (desired) { active = desired; phase = "open"; publish(); arm(); }
+                }, 200);
+            } else if (desired) { active = desired; phase = "open"; publish(); arm(); }
+        }
+        function setPaused(value) { if (paused === value || dead) return; paused = value; if (paused) stopIdle(); else arm(); }
+        return { request: request, activity: arm, pause: setPaused,
+            state: function () { return { active: active, phase: phase, paused: paused }; },
+            destroy: function () { dead = true; stopIdle(); if (motion !== null) options.clearTimer(motion); motion = null; } };
+    }
+
     /* Pure adapter exports let tests execute real server DnD handlers without HTTP. */
     if (typeof module !== "undefined" && module.exports) {
-        module.exports = { allowedLocation: allowedLocation, allowedRelatedLocation: allowedRelatedLocation, snapshot: snapshot, canDrop: canDrop, dispatchExistingDrop: dispatchExistingDrop };
+        module.exports = { allowedLocation: allowedLocation, allowedRelatedLocation: allowedRelatedLocation, snapshot: snapshot, canDrop: canDrop, dispatchExistingDrop: dispatchExistingDrop, createPanelState: createPanelState };
         return;
     }
     if (global.CopperMiningMasterTablet) {
@@ -84,7 +119,7 @@
         return;
     }
     var doc = global.document, board = null, selection = null, editMode = false, compatible = false;
-    var bound = false, queued = false, busyUntil = 0, message = "";
+    var bound = false, queued = false, busyUntil = 0, message = "", edgePanels = null;
     function setText(node, value) { if (node && node.textContent !== value) node.textContent = value; }
     /* Attribute no-ops still notify DOM observers. In particular, writing an
        unchanged disabled value wakes role-readonly, which republishes access
@@ -102,6 +137,217 @@
     }
     function button(label, action) {
         var node = doc.createElement("button"); node.type = "button"; node.dataset.crMmAction = action; node.textContent = label; return node;
+    }
+    function createEdgePanels(owner) {
+        var canvas = owner.closest("[data-dispatcher-canvas]");
+        var nodes = { top: owner.querySelector(":scope > .dispatcher-topbar"), bottom: doc.getElementById("cr-mm-toolbar"),
+            left: owner.querySelector(":scope > .dispatcher-left"), right: owner.querySelector(":scope > .dispatcher-right") };
+        if (!canvas || Object.keys(nodes).some(function (side) { return !nodes[side]; })) return null;
+        var root = doc.documentElement, handles = {}, edges = {}, originals = {}, listeners = [], pointers = new Set();
+        var dead = false, gesture = null, suppressClickUntil = 0, pendingReveal = null, pendingManual = null, pendingLayout = false;
+        var fullHeight = global.innerHeight, fullWidth = global.innerWidth, layoutKey = "", frame = null, settle = null, baseCanvasHeight = null, baseCenter = null;
+        var backdrop = doc.createElement("div"); backdrop.className = "cr-mm-panel-backdrop"; backdrop.hidden = true; owner.appendChild(backdrop);
+        var labels = { top: "верхнюю панель", bottom: "нижнюю панель", left: "левую панель", right: "правую панель" };
+        function listen(node, type, callback, capture) { node.addEventListener(type, callback, capture); listeners.push(function () { node.removeEventListener(type, callback, capture); }); }
+        function editing() { return !!doc.activeElement && doc.activeElement.matches("input:not([type=button]):not([type=submit]):not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable]:not([contenteditable=false])"); }
+        function dialogOpen() {
+            return Array.prototype.some.call(doc.querySelectorAll(MODALS + ", dialog[open], [aria-modal=true]"), function (node) {
+                return node.getClientRects().length && global.getComputedStyle(node).visibility !== "hidden";
+            });
+        }
+        function keyboardOpen() {
+            return global.innerWidth === fullWidth && (global.innerHeight < fullHeight - 120 ||
+                global.visualViewport && global.visualViewport.height < global.innerHeight - 120);
+        }
+        function blocked() { return doc.hidden || pointers.size > 0 || editing() || dialogOpen() || keyboardOpen(); }
+        function scrollRevealed() {
+            if (!pendingReveal || !pendingReveal.node.isConnected || !owner.contains(pendingReveal.node)) { pendingReveal = null; return; }
+            var state = machine.state();
+            if (!pendingReveal.side && state.phase === "closed" || pendingReveal.side === state.active && state.phase === "open") {
+                pendingReveal.node.scrollIntoView({ block: "nearest", inline: "nearest" }); pendingReveal = null;
+            }
+        }
+        function render(state) {
+            setAttribute(root, "data-cr-panel-open", state.active || "");
+            Object.keys(nodes).forEach(function (side) {
+                var nodeState = state.active === side ? state.phase : "closed";
+                setAttribute(nodes[side], "data-cr-panel-state", nodeState);
+                setBoolean(nodes[side], "inert", nodeState !== "open");
+                setAttribute(nodes[side], "aria-hidden", nodeState === "open" ? "false" : "true");
+                setAttribute(handles[side], "aria-expanded", nodeState === "open" ? "true" : "false");
+                setAttribute(handles[side], "aria-label", (nodeState === "open" ? "Скрыть " : "Показать ") + labels[side]);
+                setBoolean(edges[side], "hidden", nodeState !== "closed");
+            });
+            setBoolean(backdrop, "hidden", !state.active);
+            if (pendingReveal && (state.phase === "open" || !pendingReveal.side && state.phase === "closed")) {
+                global.requestAnimationFrame(function () { if (!dead) scrollRevealed(); });
+            }
+        }
+        var machine = createPanelState({ render: render, blocked: blocked,
+            setTimer: function (callback, delay) { return global.setTimeout(callback, delay); }, clearTimer: function (id) { global.clearTimeout(id); } });
+        function rect(node) { return node.getBoundingClientRect(); }
+        function layout(force) {
+            if (dead) return;
+            var key = global.innerWidth + "x" + global.innerHeight;
+            if (!force && layoutKey === key) { pendingLayout = false; return; }
+            if (blocked()) { pendingLayout = true; return; }
+            layoutKey = key; pendingLayout = false;
+            if (global.innerWidth !== fullWidth) { fullWidth = global.innerWidth; fullHeight = global.innerHeight; }
+            else fullHeight = Math.max(fullHeight, global.innerHeight);
+            /* Measure the original viewport layout once, not on realtime updates.
+               Only the canvas extent grows: original panel scale remains intact. */
+            setClass(root, "cr-mm-panels", false); setAttribute(root, "data-cr-panels-ready", "false");
+            fitCanvasBase();
+            baseCanvasHeight = canvas.style.getPropertyValue("--dispatcher-canvas-h"); baseCenter = root.style.getPropertyValue("--cr-mm-canvas-center");
+            var scale = Number(root.style.getPropertyValue("--cr-mm-scale")) || 1, b = rect(owner), top = rect(nodes.top);
+            setStyle(owner, "--cr-panel-top-h", top.height / scale + "px");
+            ["left", "right"].forEach(function (side) {
+                var r = rect(nodes[side]);
+                setStyle(owner, "--cr-panel-" + side + "-w", r.width / scale + "px");
+                setStyle(owner, "--cr-panel-" + side + "-h", r.height / scale + "px");
+                setStyle(owner, "--cr-panel-" + side + "-y", (r.y - b.y) / scale + "px");
+                setStyle(root, "--cr-panel-" + side + "-edge", (side === "left" ? r.right : global.innerWidth - r.left) + "px");
+            });
+            setStyle(root, "--cr-panel-top-edge", top.bottom + "px");
+            setStyle(canvas, "--dispatcher-canvas-h", global.innerHeight / scale + "px");
+            setStyle(root, "--cr-mm-canvas-center", global.innerHeight / 2 + "px");
+            setClass(root, "cr-mm-panels", true); owner.getBoundingClientRect(); setAttribute(root, "data-cr-panels-ready", "true");
+        }
+        function refresh() {
+            if (dead) return;
+            setAttribute(root, "data-cr-panel-modal", dialogOpen() ? "true" : "false");
+            var paused = blocked(); machine.pause(paused);
+            if (!paused) {
+                if (pendingLayout) layout(false);
+                if (pendingManual) { var wanted = pendingManual.side; pendingManual = null; machine.request(wanted); }
+                else if (pendingReveal) { machine.request(pendingReveal.side); scrollRevealed(); }
+            }
+        }
+        function manualRequest(side) {
+            pendingReveal = null; pendingManual = { side: side };
+            if (editing()) doc.activeElement.blur();
+            refresh();
+        }
+        function sideFor(node) { return nodes.left.contains(node) ? "left" : nodes.right.contains(node) ? "right" : null; }
+        Object.keys(nodes).forEach(function (side) {
+            var copiedPresentation = nodes[side].hasAttribute("data-cr-panel");
+            originals[side] = { aria: copiedPresentation ? null : nodes[side].getAttribute("aria-hidden"), inert: copiedPresentation ? false : nodes[side].inert };
+            setAttribute(nodes[side], "data-cr-panel", side);
+            var handle = doc.createElement("button"); handle.type = "button"; handle.className = "cr-mm-panel-handle";
+            handle.dataset.crPanelSide = side; handle.setAttribute("data-role-readonly-safe", "");
+            var edge = doc.createElement("div"); edge.className = "cr-mm-panel-edge"; edge.dataset.crPanelSide = side; edge.setAttribute("aria-hidden", "true");
+            handles[side] = handle; edges[side] = edge; doc.body.appendChild(edge); doc.body.appendChild(handle);
+        });
+        render(machine.state()); layout(true);
+        function stop(event) { event.preventDefault(); event.stopImmediatePropagation(); }
+        function click(event) {
+            var handle = event.target.closest && event.target.closest(".cr-mm-panel-handle");
+            if (handle) {
+                stop(event);
+                if (Date.now() < suppressClickUntil || dialogOpen()) return;
+                var side = handle.dataset.crPanelSide, state = machine.state();
+                manualRequest(state.active === side && state.phase === "open" ? null : side);
+            } else if (event.target === backdrop) { stop(event); if (!dialogOpen()) manualRequest(null); }
+        }
+        function inward(side, dx, dy) { return side === "left" ? dx : side === "right" ? -dx : side === "top" ? dy : -dy; }
+        listen(doc, "pointerdown", function (event) {
+            pointers.add(event.pointerId); machine.pause(true);
+            var start = event.target.closest && event.target.closest(".cr-mm-panel-handle, .cr-mm-panel-edge");
+            if (start && event.isPrimary && event.button === 0 && !dialogOpen()) {
+                var side = start.dataset.crPanelSide;
+                gesture = { id: event.pointerId, start: start, side: side, x: event.clientX, y: event.clientY,
+                    closing: machine.state().active === side, locked: false };
+            }
+        }, true);
+        listen(doc, "pointermove", function (event) {
+            if (!gesture || gesture.id !== event.pointerId) return;
+            var dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+            var horizontal = gesture.side === "left" || gesture.side === "right", main = Math.abs(horizontal ? dx : dy), cross = Math.abs(horizontal ? dy : dx);
+            if (!gesture.locked && cross > 12 && cross >= main) { gesture = null; return; }
+            if (!gesture.locked && main > 12 && main > cross * 1.5) {
+                gesture.locked = true; try { gesture.start.setPointerCapture(event.pointerId); } catch (_) { /* Cancelled pointer. */ }
+            }
+            if (gesture && gesture.locked) event.preventDefault();
+        }, { passive: false });
+        listen(doc, "pointerup", function (event) {
+            if (gesture && gesture.id === event.pointerId) {
+                var g = gesture; gesture = null;
+                if (g.locked) {
+                    var distance = inward(g.side, event.clientX - g.x, event.clientY - g.y);
+                    suppressClickUntil = Date.now() + 450;
+                    if (!g.closing && distance >= 40) manualRequest(g.side);
+                    else if (g.closing && distance <= -40) manualRequest(null);
+                    event.preventDefault();
+                }
+            }
+            pointers.delete(event.pointerId); refresh(); machine.activity();
+        }, { passive: false });
+        listen(doc, "pointercancel", function (event) { gesture = null; pointers.delete(event.pointerId); refresh(); machine.activity(); }, true);
+        listen(doc, "click", click, true);
+        function activity(event) {
+            var active = machine.state().active;
+            if (active && nodes[active].contains(event.target)) machine.activity();
+            refresh();
+        }
+        ["click", "input", "change", "wheel", "scroll"].forEach(function (type) { listen(doc, type, activity, true); });
+        listen(doc, "focusin", refresh, true);
+        listen(doc, "focusout", function () { global.clearTimeout(settle); settle = global.setTimeout(refresh, 0); }, true);
+        listen(doc, "keydown", function (event) {
+            if (event.key === "Escape" && machine.state().active && !dialogOpen()) {
+                stop(event); var side = machine.state().active; manualRequest(null); handles[side].focus({ preventScroll: true });
+            } else if (event.key === "Enter" && event.target.matches("[data-cr-mm-search]")) {
+                event.preventDefault(); updateSearch(true); event.target.blur(); refresh();
+            } else activity(event);
+        }, true);
+        function resize() { pendingLayout = true; if (frame !== null) return; frame = global.requestAnimationFrame(function () { frame = null; refresh(); }); }
+        listen(global, "resize", resize); if (global.visualViewport) listen(global.visualViewport, "resize", resize);
+        listen(doc, "visibilitychange", function () { if (doc.hidden) { pointers.clear(); gesture = null; pendingReveal = null; machine.request(null); } refresh(); });
+        var observer = new MutationObserver(refresh);
+        observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open", "aria-hidden", "class"] });
+        return {
+            owner: owner, matches: function () { return owner.isConnected && nodes.top === owner.querySelector(":scope > .dispatcher-topbar") && nodes.left === owner.querySelector(":scope > .dispatcher-left") && nodes.right === owner.querySelector(":scope > .dispatcher-right") && nodes.bottom === doc.getElementById("cr-mm-toolbar"); },
+            adopt: function (next) {
+                var nextCanvas = next && next.closest("[data-dispatcher-canvas]");
+                var replacements = next && { top: next.querySelector(":scope > .dispatcher-topbar"), left: next.querySelector(":scope > .dispatcher-left"), right: next.querySelector(":scope > .dispatcher-right") };
+                if (!nextCanvas || nodes.bottom !== doc.getElementById("cr-mm-toolbar") || Object.keys(replacements).some(function (side) { return !replacements[side]; })) return false;
+                ["top-h", "left-w", "left-h", "left-y", "right-w", "right-h", "right-y"].forEach(function (suffix) {
+                    setStyle(next, "--cr-panel-" + suffix, owner.style.getPropertyValue("--cr-panel-" + suffix));
+                });
+                Object.keys(replacements).forEach(function (side) {
+                    setAttribute(nodes[side], "data-cr-panel", null); setAttribute(nodes[side], "data-cr-panel-state", null);
+                    setAttribute(nodes[side], "aria-hidden", originals[side].aria); setBoolean(nodes[side], "inert", originals[side].inert);
+                    nodes[side] = replacements[side];
+                    var copied = nodes[side].hasAttribute("data-cr-panel");
+                    originals[side] = { aria: copied ? null : nodes[side].getAttribute("aria-hidden"), inert: copied ? false : nodes[side].inert };
+                    setAttribute(nodes[side], "data-cr-panel", side);
+                });
+                if (canvas !== nextCanvas) ["--dispatcher-canvas-w", "--dispatcher-canvas-h", "--dispatcher-canvas-scale", "--gd-vw", "--gd-vh"].forEach(function (name) { setStyle(nextCanvas, name, canvas.style.getPropertyValue(name)); });
+                var keepInput = machine.state().active === "bottom" && (editing() || keyboardOpen());
+                owner = next; this.owner = next; canvas = nextCanvas; pendingReveal = null;
+                next.querySelectorAll(".cr-mm-panel-backdrop").forEach(function (node) { if (node !== backdrop) node.remove(); });
+                next.appendChild(backdrop);
+                layoutKey = ""; pendingLayout = true; render(machine.state());
+                if (!keepInput) machine.request(null);
+                refresh(); return true;
+            },
+            layout: function () { layout(false); },
+            reveal: function (node) { pendingReveal = node ? { node: node, side: sideFor(node) } : null; refresh(); },
+            selected: function (node) { if (sideFor(node)) { pendingReveal = null; machine.request(null); } },
+            escape: function () { return !!machine.state().active; },
+            destroy: function () {
+                if (dead) return; dead = true; machine.destroy(); observer.disconnect(); listeners.forEach(function (off) { off(); });
+                global.clearTimeout(settle); if (frame !== null) global.cancelAnimationFrame(frame); backdrop.remove();
+                Object.keys(nodes).forEach(function (side) {
+                    handles[side].remove(); edges[side].remove(); setAttribute(nodes[side], "data-cr-panel", null); setAttribute(nodes[side], "data-cr-panel-state", null);
+                    setAttribute(nodes[side], "aria-hidden", originals[side].aria); setBoolean(nodes[side], "inert", originals[side].inert);
+                });
+                setClass(root, "cr-mm-panels", false); setAttribute(root, "data-cr-panel-open", null); setAttribute(root, "data-cr-panels-ready", null); setAttribute(root, "data-cr-panel-modal", null);
+                if (baseCanvasHeight) setStyle(canvas, "--dispatcher-canvas-h", baseCanvasHeight);
+                if (baseCenter) setStyle(root, "--cr-mm-canvas-center", baseCenter);
+                ["top-h", "left-w", "left-h", "left-y", "right-w", "right-h", "right-y"].forEach(function (suffix) { owner.style.removeProperty("--cr-panel-" + suffix); });
+                ["top-edge", "left-edge", "right-edge"].forEach(function (suffix) { root.style.removeProperty("--cr-panel-" + suffix); });
+            }
+        };
     }
     function isCompatible() {
         if (!allowedLocation(global.location) || !doc.body.classList.contains("dispatcher-control-screen") || doc.body.classList.contains("mining-master-mobile-screen")) return false;
@@ -168,6 +414,7 @@
         var name = source.dataset.equipmentName || source.dataset.equipmentId;
         message = (selection.kind === "truck" ? "Самосвал " : selection.kind === "complex" ? "Комплекс " : "Экскаватор ") + name + " · нажмите выделенное место назначения";
         updateTargets(); updateToolbar();
+        if (edgePanels) edgePanels.selected(source);
     }
     function performDrop(target) {
         if (Date.now() < busyUntil) return;
@@ -179,7 +426,8 @@
             clearSelection(done ? "Действие передано приложению. Проверьте результат на пульте." : "Действие не выполнено. Проверьте состояние смены.", true);
         } catch (_) { clearSelection("Не удалось выполнить действие. Выберите технику ещё раз.", true); }
     }
-    function fitCanvas() {
+    function fitCanvas() { if (edgePanels) edgePanels.layout(); else fitCanvasBase(); }
+    function fitCanvasBase() {
         if (!compatible) return;
         var canvas = doc.querySelector("[data-dispatcher-canvas]"); if (!canvas) return;
         var height = Math.max(240, global.innerHeight - 64), designHeight = 1000;
@@ -221,12 +469,14 @@
             }
         });
         updateRackControls();
-        if (scroll && first) first.scrollIntoView({ block: "nearest", inline: "nearest" });
+        if (scroll && edgePanels) edgePanels.reveal(first);
+        else if (scroll && first) first.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
     function reconcile() {
         queued = false; if (!allowedLocation(global.location)) return;
         compatible = isCompatible();
         if (!compatible) {
+            if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
             clearSelection("", true); collapseRacks(); setClass(doc.documentElement, "cr-mm-tablet", false);
             var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.remove();
             if (!doc.getElementById("cr-mm-compatibility-warning")) {
@@ -237,10 +487,13 @@
         }
         var warning = doc.getElementById("cr-mm-compatibility-warning"); if (warning) warning.remove();
         var next = doc.querySelector(".dispatcher-board");
+        if (edgePanels && (edgePanels.owner !== next || !edgePanels.matches()) && !edgePanels.adopt(next)) { edgePanels.destroy(); edgePanels = null; }
         if (board !== next) { var editing = editMode; board = next; collapseRacks(); clearSelection(editing ? "Пульт обновился. При необходимости включите перестановку снова." : "", true); }
         else if (selection && (!selection.source.isConnected || (selection.source.dataset.haulAssignmentStateId || "") !== selection.assignment || !context().shiftOpen)) clearSelection("Состояние изменилось.", true);
         setClass(doc.documentElement, "cr-mm-tablet", true);
-        ensureToolbar(); updateToolbar(); updateTargets(); updateSearch(false); fitCanvas();
+        ensureToolbar(); updateToolbar(); updateTargets(); updateSearch(false);
+        if (!edgePanels) edgePanels = createEdgePanels(board);
+        fitCanvas();
     }
     function schedule() { if (!queued) { queued = true; global.requestAnimationFrame(reconcile); } }
     function bind() {
@@ -271,10 +524,10 @@
         doc.addEventListener("input", function (event) { if (event.target.matches("[data-cr-mm-search]")) updateSearch(true); });
         doc.addEventListener("keydown", function (event) {
             if ((event.key === "Enter" || event.key === " ") && event.target.matches(".complex-truck-more[role='button']")) { event.preventDefault(); event.stopPropagation(); event.target.click(); }
-            if (event.key === "Escape") { if (editMode) clearSelection("", true); collapseRacks(); }
+            if (event.key === "Escape" && !(edgePanels && edgePanels.escape())) { if (editMode) clearSelection("", true); collapseRacks(); }
         }, true);
         doc.addEventListener("visibilitychange", function () { if (doc.hidden) { clearSelection("", true); collapseRacks(); } });
-        global.addEventListener("pagehide", function () { clearSelection("", true); collapseRacks(); });
+        global.addEventListener("pagehide", function () { clearSelection("", true); collapseRacks(); if (edgePanels) { edgePanels.destroy(); edgePanels = null; } });
         global.addEventListener("resize", fitCanvas);
         if (global.visualViewport) global.visualViewport.addEventListener("resize", fitCanvas);
         var observer = new MutationObserver(function (records) {
@@ -292,6 +545,7 @@
         if (!allowedLocation(global.location) && !allowedRelatedLocation(global.location)) return;
         if (!doc.body || doc.readyState === "loading") { doc.addEventListener("DOMContentLoaded", init, { once: true }); return; }
         if (allowedRelatedLocation(global.location)) {
+            if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
             /* Report pages use the real viewport: Android clips the scrolling shell
                when it is nested inside the desktop transform canvas. No board actions. */
             var pageReady = doc.body.dataset.appRoleCode === "dispatcher" &&
