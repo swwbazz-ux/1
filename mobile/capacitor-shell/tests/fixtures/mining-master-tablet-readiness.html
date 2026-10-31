@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dispatcher tablet readiness regression</title>
+  <style>
+    html,body { margin:0; width:100%; height:100%; }
+    main { display:block; width:100%; height:100%; }
+    .dispatcher-board { display:grid; grid-template-rows:80px 1fr; height:100%; }
+    .dispatcher-zone-grid { display:flex; gap:20px; }
+    [data-dispatcher-drop], [data-dispatcher-drag] { display:block; min-width:120px; min-height:60px; padding:10px; }
+  </style>
+  <script defer src="/static/js/role-readonly.js"></script>
+  <script defer src="/tablet-adapter.js"></script>
+</head>
+<body class="dispatcher-control-screen" data-app-role-code="dispatcher" data-app-shell-version="dispatcher-desktop-shell-v166" data-app-contract-ready="true" data-role-access-active="true" data-observer-mode="false" data-observer-control="false">
+  <!-- Small synthetic board using the existing server DOM/permission contract.
+       The regression loads the real role-readonly runtime and native probe. -->
+  <div class="dispatcher-canvas" data-dispatcher-canvas="on">
+    <main class="dispatcher-shell" data-dispatcher-move-url="/dispatcher/control/excavator/move/" data-dispatcher-assign-url="/dispatcher/control/truck/assign/">
+      <div class="dispatcher-board is-readonly" data-dispatcher-shift-open="false">
+        <nav class="dispatcher-nav"><a href="/dispatcher/control/">Пульт</a></nav>
+        <div class="dispatcher-zone-grid">
+          <section data-dispatcher-drop="truck-garage" data-dispatcher-drop-bound="true">
+            <article data-dispatcher-drag="truck" data-equipment-id="1" data-equipment-name="1" data-haul-assignment-state-id="10" data-drag-bound="true" draggable="true">Самосвал 1</article>
+          </section>
+          <section data-dispatcher-drop="complex" data-equipment-id="2" data-dispatcher-drop-bound="true">Комплекс 2</section>
+          <div class="complex-assigned-trucks"><b class="complex-truck-more">+2</b></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

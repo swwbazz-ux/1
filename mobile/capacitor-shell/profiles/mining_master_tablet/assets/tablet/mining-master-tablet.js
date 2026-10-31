@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.1.0";
+    var VERSION = "1.1.1";
     var SUPPORTED_SHELLS = ["dispatcher-desktop-shell-v166"];
     var RELATED_PATHS = [
         "/dispatcher/reports/", "/dispatcher/shift-log/", "/dispatcher/management/",
@@ -86,6 +86,20 @@
     var doc = global.document, board = null, selection = null, editMode = false, compatible = false;
     var bound = false, queued = false, busyUntil = 0, message = "";
     function setText(node, value) { if (node && node.textContent !== value) node.textContent = value; }
+    /* Attribute no-ops still notify DOM observers. In particular, writing an
+       unchanged disabled value wakes role-readonly, which republishes access
+       attributes and can otherwise feed straight back into reconcile. */
+    function setClass(node, name, enabled) {
+        if (node.classList.contains(name) !== enabled) node.classList.toggle(name, enabled);
+    }
+    function setAttribute(node, name, value) {
+        if (value === null) { if (node.hasAttribute(name)) node.removeAttribute(name); }
+        else if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+    }
+    function setBoolean(node, name, value) { if (node[name] !== value) node[name] = value; }
+    function setStyle(node, name, value) {
+        if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
+    }
     function button(label, action) {
         var node = doc.createElement("button"); node.type = "button"; node.dataset.crMmAction = action; node.textContent = label; return node;
     }
@@ -110,7 +124,7 @@
     function clearSelection(text, endMode) {
         selection = null; if (endMode) editMode = false; if (text !== undefined) message = text;
         doc.querySelectorAll(".cr-mm-selected, .cr-mm-target-available").forEach(function (node) {
-            node.classList.remove("cr-mm-selected", "cr-mm-target-available"); node.removeAttribute("data-cr-mm-target-label");
+            node.classList.remove("cr-mm-selected", "cr-mm-target-available"); setAttribute(node, "data-cr-mm-target-label", null);
         });
         updateToolbar();
     }
@@ -118,10 +132,9 @@
         if (!board) return;
         var state = context();
         board.querySelectorAll("[data-dispatcher-drop]").forEach(function (zone) {
-            var available = canDrop(selection, zone, state); zone.classList.toggle("cr-mm-target-available", available);
-            if (available) zone.dataset.crMmTargetLabel = zone.dataset.dispatcherDrop === "complex" ? "Назначить сюда" :
-                zone.dataset.dispatcherDrop === "excavator-garage" ? "В резерв экскаваторов" : "В резерв самосвалов";
-            else zone.removeAttribute("data-cr-mm-target-label");
+            var available = canDrop(selection, zone, state); setClass(zone, "cr-mm-target-available", available);
+            setAttribute(zone, "data-cr-mm-target-label", available ? (zone.dataset.dispatcherDrop === "complex" ? "Назначить сюда" :
+                zone.dataset.dispatcherDrop === "excavator-garage" ? "В резерв экскаваторов" : "В резерв самосвалов") : null);
         });
     }
     function ensureToolbar() {
@@ -137,14 +150,14 @@
     function updateToolbar() {
         var toolbar = doc.getElementById("cr-mm-toolbar"); if (!toolbar) return;
         var state = context(), mode = toolbar.querySelector("[data-cr-mm-action='mode']");
-        mode.disabled = !state.compatible || !state.shiftOpen || state.observer;
-        mode.setAttribute("aria-pressed", editMode ? "true" : "false"); setText(mode, editMode ? "Готово" : "Перестановка");
-        toolbar.querySelector("[data-cr-mm-action='detail']").hidden = !selection;
-        toolbar.querySelector("[data-cr-mm-action='cancel']").hidden = !selection;
+        setBoolean(mode, "disabled", !state.compatible || !state.shiftOpen || state.observer);
+        setAttribute(mode, "aria-pressed", editMode ? "true" : "false"); setText(mode, editMode ? "Готово" : "Перестановка");
+        setBoolean(toolbar.querySelector("[data-cr-mm-action='detail']"), "hidden", !selection);
+        setBoolean(toolbar.querySelector("[data-cr-mm-action='cancel']"), "hidden", !selection);
         var fallback = editMode ? "Выберите технику, затем комплекс или резерв" : state.shiftOpen && !state.observer ?
             "Нажатие — карточка техники. Для переноса включите «Перестановка»." : "Просмотр · для управления техникой нужна открытая смена";
         setText(toolbar.querySelector("[data-cr-mm-hint]"), message || fallback);
-        doc.documentElement.classList.toggle("cr-mm-edit-mode", editMode);
+        setClass(doc.documentElement, "cr-mm-edit-mode", editMode);
     }
     function select(source) {
         var state = context();
@@ -176,20 +189,20 @@
         var width = Math.max(1400, Math.round(designHeight * global.innerWidth / referenceHeight));
         var scale = Math.min(global.innerWidth / width, referenceHeight / designHeight);
         var canvasHeight = Math.min(designHeight, height / scale);
-        canvas.dataset.dispatcherCanvas = "on";
-        canvas.style.setProperty("--dispatcher-canvas-w", width + "px"); canvas.style.setProperty("--dispatcher-canvas-h", canvasHeight + "px");
-        canvas.style.setProperty("--dispatcher-canvas-scale", String(scale)); canvas.style.setProperty("--gd-vw", width / 100 + "px"); canvas.style.setProperty("--gd-vh", designHeight / 100 + "px");
-        doc.documentElement.style.setProperty("--cr-mm-scale", String(scale));
-        doc.documentElement.style.setProperty("--cr-mm-canvas-center", height / 2 + "px");
+        setAttribute(canvas, "data-dispatcher-canvas", "on");
+        setStyle(canvas, "--dispatcher-canvas-w", width + "px"); setStyle(canvas, "--dispatcher-canvas-h", canvasHeight + "px");
+        setStyle(canvas, "--dispatcher-canvas-scale", String(scale)); setStyle(canvas, "--gd-vw", width / 100 + "px"); setStyle(canvas, "--gd-vh", designHeight / 100 + "px");
+        setStyle(doc.documentElement, "--cr-mm-scale", String(scale));
+        setStyle(doc.documentElement, "--cr-mm-canvas-center", height / 2 + "px");
     }
     function updateRackControls() {
         if (!board) return;
         board.querySelectorAll(".complex-truck-more").forEach(function (more) {
             var rack = more.closest(".complex-assigned-trucks");
             var expanded = !!rack && rack.classList.contains("cr-mm-expanded-rack");
-            more.setAttribute("role", "button"); more.setAttribute("tabindex", "0");
-            more.setAttribute("aria-expanded", expanded ? "true" : "false");
-            more.setAttribute("aria-label", expanded ? "Свернуть список самосвалов" : "Показать все самосвалы комплекса");
+            setAttribute(more, "role", "button"); setAttribute(more, "tabindex", "0");
+            setAttribute(more, "aria-expanded", expanded ? "true" : "false");
+            setAttribute(more, "aria-label", expanded ? "Свернуть список самосвалов" : "Показать все самосвалы комплекса");
         });
     }
     function collapseRacks() {
@@ -201,10 +214,10 @@
         var input = doc.querySelector("[data-cr-mm-search]"), needle = input ? input.value.trim().toLocaleLowerCase("ru") : "", first = null;
         board.querySelectorAll(SOURCE).forEach(function (node) {
             var hit = !!needle && (node.dataset.equipmentName || "").toLocaleLowerCase("ru").indexOf(needle) !== -1;
-            node.classList.toggle("cr-mm-search-hit", hit); if (hit && !first) first = node;
+            setClass(node, "cr-mm-search-hit", hit); if (hit && !first) first = node;
             if (scroll && hit && node.hidden) {
                 var rack = node.closest(".complex-assigned-trucks");
-                if (rack) rack.classList.add("cr-mm-expanded-rack");
+                if (rack) setClass(rack, "cr-mm-expanded-rack", true);
             }
         });
         updateRackControls();
@@ -214,7 +227,7 @@
         queued = false; if (!allowedLocation(global.location)) return;
         compatible = isCompatible();
         if (!compatible) {
-            clearSelection("", true); collapseRacks(); doc.documentElement.classList.remove("cr-mm-tablet");
+            clearSelection("", true); collapseRacks(); setClass(doc.documentElement, "cr-mm-tablet", false);
             var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.remove();
             if (!doc.getElementById("cr-mm-compatibility-warning")) {
                 var warning = doc.createElement("div"); warning.id = "cr-mm-compatibility-warning"; warning.setAttribute("role", "alert");
@@ -226,7 +239,7 @@
         var next = doc.querySelector(".dispatcher-board");
         if (board !== next) { var editing = editMode; board = next; collapseRacks(); clearSelection(editing ? "Пульт обновился. При необходимости включите перестановку снова." : "", true); }
         else if (selection && (!selection.source.isConnected || (selection.source.dataset.haulAssignmentStateId || "") !== selection.assignment || !context().shiftOpen)) clearSelection("Состояние изменилось.", true);
-        doc.documentElement.classList.add("cr-mm-tablet");
+        setClass(doc.documentElement, "cr-mm-tablet", true);
         ensureToolbar(); updateToolbar(); updateTargets(); updateSearch(false); fitCanvas();
     }
     function schedule() { if (!queued) { queued = true; global.requestAnimationFrame(reconcile); } }
@@ -268,12 +281,12 @@
             if (records.some(function (record) {
                 var node = record.target.nodeType === 1 ? record.target : record.target.parentElement;
                 if (node && node.closest("#cr-mm-toolbar, #cr-mm-compatibility-warning")) return false;
-                if (record.type === "attributes") return true;
+                if (record.type === "attributes") return record.oldValue !== record.target.getAttribute(record.attributeName);
                 return Array.prototype.some.call(record.addedNodes, function (child) { return child.nodeType === 1 && child.id !== "cr-mm-toolbar" && child.id !== "cr-mm-compatibility-warning"; }) ||
                     Array.prototype.some.call(record.removedNodes, function (child) { return child === board || selection && (child === selection.source || child.contains && child.contains(selection.source)); });
             })) schedule();
         });
-        observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-dispatcher-shift-open", "data-role-access-active", "data-observer-mode", "data-observer-control", "data-app-role-code", "data-app-shell-version", "data-drag-bound", "data-dispatcher-drop-bound", "data-haul-assignment-state-id"] });
+        observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["data-dispatcher-shift-open", "data-role-access-active", "data-observer-mode", "data-observer-control", "data-app-role-code", "data-app-shell-version", "data-drag-bound", "data-dispatcher-drop-bound", "data-haul-assignment-state-id"] });
     }
     function init() {
         if (!allowedLocation(global.location) && !allowedRelatedLocation(global.location)) return;
@@ -287,7 +300,7 @@
                 !!doc.querySelector(global.location.pathname === "/reports/templates/"
                     ? "body > .dispatcher-analytics-shell.management-linked-report > .dispatcher-analytics-board"
                     : "[data-dispatcher-canvas] > .dispatcher-analytics-shell > .dispatcher-analytics-board");
-            doc.documentElement.classList.toggle("cr-mm-tablet-page", pageReady);
+            setClass(doc.documentElement, "cr-mm-tablet-page", pageReady);
             return;
         }
         bind(); reconcile();
