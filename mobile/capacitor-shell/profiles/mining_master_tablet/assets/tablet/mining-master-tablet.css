@@ -93,7 +93,21 @@ html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-m
 #cr-mm-toolbar select { cursor: pointer; }
 #cr-mm-toolbar .cr-mm-assign-arrow { flex: 0 0 auto; font: 28px/1 system-ui, sans-serif; color: #c4d6df; }
 #cr-mm-toolbar button { flex: 0 0 auto; width: auto !important; min-width: 200px; height: 44px; margin: 0 !important; padding: 0 18px; border: 1px solid #ffd200; border-radius: 7px; color: #172129; background: #ffd200; font: 600 16px/1.2 system-ui, sans-serif; cursor: pointer; }
-html.cr-mm-tablet .cr-mm-truck-hit { outline: 3px solid #ffd200 !important; outline-offset: -3px; box-shadow: inset 0 0 0 5px rgba(255,210,0,.25) !important; }
+/* Same match presentation as dispatcher-adaptive-v1.css. Keep the tablet's
+   own marker so the independent desktop search cannot clear a found truck. */
+html.cr-mm-tablet .cr-mm-truck-hit { position: relative; z-index: 3; animation: dispatcher-search-blink .7s ease-in-out infinite; }
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit;
+    background: rgba(52, 194, 211, .22);
+    background: color-mix(in srgb, var(--gd-cyan) 22%, transparent);
+    box-shadow: inset 0 0 0 3px #8df3ff; pointer-events: none;
+}
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit img { opacity: 1 !important; filter: grayscale(0); }
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit strong,
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit span { color: #ffffff !important; }
+@media (prefers-reduced-motion: reduce) {
+    html.cr-mm-tablet .cr-mm-truck-hit { animation: none; box-shadow: 0 0 0 3px #8df3ff, 0 0 18px 4px rgba(141, 243, 255, .7); }
+}
 #cr-mm-toolbar [hidden] { display: none !important; }
 #cr-mm-toolbar input:focus-visible, #cr-mm-toolbar select:focus-visible, #cr-mm-toolbar button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar { background: #eaf0f3; color: #172f3a; border-color: #a5bac5; }
