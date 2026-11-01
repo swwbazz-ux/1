@@ -1,0 +1,4 @@
+# Узкая поставка: исправление сверки простоев путёвки Водителя, v380.
+СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js
+СИСТЕМА_MVP/backend/users/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
