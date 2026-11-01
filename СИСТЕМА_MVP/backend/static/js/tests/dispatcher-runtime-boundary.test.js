@@ -99,7 +99,7 @@ const DISPATCHER_PWA = fs.readFileSync(
     "utf8"
 );
 const PRODUCTION_MANIFEST = fs.readFileSync(
-    path.resolve(BACKEND, "..", "..", ".github", "deploy", "production-files.txt"),
+    path.resolve(BACKEND, "..", "..", ".github", "deploy", "fixtures", "dispatcher-release-files.txt"),
     "utf8"
 );
 

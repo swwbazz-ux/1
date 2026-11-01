@@ -15,7 +15,7 @@ const DETAIL_SOURCE = fs.readFileSync(DETAIL_PATH, "utf8");
 const TEMPLATE = dispatcherScreenSource();
 const PWA_SOURCE = fs.readFileSync(path.join(BACKEND, "trips", "dispatcher_pwa.py"), "utf8");
 const PRODUCTION_MANIFEST = fs.readFileSync(
-    path.resolve(BACKEND, "..", "..", ".github", "deploy", "production-files.txt"),
+    path.resolve(BACKEND, "..", "..", ".github", "deploy", "fixtures", "dispatcher-release-files.txt"),
     "utf8"
 );
 

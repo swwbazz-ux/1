@@ -279,7 +279,7 @@ test("the swipe arrow is a fixed slot outside the card, sized from the real gap 
     // Контур — от неподвижных слотов (сцена + размер грани без 3D), не от текущей грани.
     assert.match(drumJs, /var cr = slotRect\(q\("\[data-driver-downtime-drum\]"\), "\[data-driver-drum-card\]"\);/);
     assert.match(drumJs, /var tr0 = slotRect\(q\("\[data-driver-point-drum\]"\), "\.driver-drum-card"\);/);
-    assert.doesNotMatch(drumJs.match(/function syncLinkVars\(\) \{[\s\S]*?\n {4}\}\n/)[0], /centerCard\(\)|\.is-center/);
+    assert.doesNotMatch(drumJs.match(/function syncLinkVars\(\) \{[\s\S]*?\r?\n {4}\}\r?\n/)[0], /centerCard\(\)|\.is-center/);
     // Цвет верхней стрелки мигает той же переменной, что и грань точки.
     const pointCss = fs.readFileSync(path.resolve(__dirname, "../../css/driver-point-drum-v1.css"), "utf8");
     assert.match(pointCss, /html\.is-driver-downtime-active[^{]*\.driver-point-drum \.driver-drum-slot-arrow\s*\{\s*color:\s*var\(--driver-blink-color\);/);
