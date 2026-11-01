@@ -270,7 +270,8 @@ html.cr-mm-panels[data-cr-panels-ready="true"] [data-cr-panel] { transition: tra
 html.cr-mm-panels [data-cr-panel-state="open"] { visibility: visible; pointer-events: auto; transform: translate(0, 0) !important; }
 html.cr-mm-panels [data-cr-panel-state="closing"] { visibility: visible; pointer-events: none; }
 html.cr-mm-panels [data-cr-panel-state="closed"] { visibility: hidden; pointer-events: none; transition: none !important; }
-html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-connection-indicator] {
+html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-connection-indicator],
+html.cr-mm-panels:has([data-gd-equipment-detail]:not([hidden])) .app-connection-dot[data-connection-indicator] {
   visibility: hidden !important; pointer-events: none !important;
 }
 .cr-mm-panel-edge { position: fixed; z-index: 1050; touch-action: none; }

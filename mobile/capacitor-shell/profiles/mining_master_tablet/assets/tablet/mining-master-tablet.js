@@ -238,7 +238,28 @@
         layer.id = "cr-mm-shift-monochrome"; layer.setAttribute("aria-hidden", "true");
         doc.body.appendChild(layer);
         function queue() { if (frame === null) frame = global.requestAnimationFrame(update); }
-        var buttonResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queue) : null;
+        var cutout = null, startConfirmation = null;
+        var confirmLifetime = new MutationObserver(function (records) {
+            // Closing and immediately reopening the shared modal can happen before
+            // the next paint. Its previous purpose ends at the first visible→hidden change.
+            if (records.some(function (record) { return record.oldValue === null; })) {
+                startConfirmation = null;
+                confirmLifetime.disconnect();
+                queue();
+            }
+        });
+        // The common confirmation also serves unrelated actions. Only a real shift-start
+        // submission that opened it synchronously opts that dialog into colour.
+        doc.addEventListener("submit", function (event) {
+            var modal = doc.getElementById("app-confirm-modal");
+            if (!modal || modal.hidden) return;
+            var opener = event.submitter;
+            confirmLifetime.disconnect();
+            startConfirmation = event.defaultPrevented && opener && opener.matches(".dispatcher-shift-button[name='action'][value='start_shift'][data-confirm]") ? modal : null;
+            if (startConfirmation) confirmLifetime.observe(modal, { attributes: true, attributeFilter: ["hidden"], attributeOldValue: true });
+            queue();
+        });
+        var cutoutResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queue) : null;
         function update() {
             frame = null;
             if (root.matches(".cr-mm-tablet, .cr-mm-tablet-page")) syncWorkplaceHeader();
@@ -260,19 +281,28 @@
             }
             if (accent !== button) {
                 if (accent) setClass(accent, "cr-mm-shift-start-accent", false);
-                if (buttonResize) buttonResize.disconnect();
                 accent = button;
                 if (accent) {
                     setClass(accent, "cr-mm-shift-start-accent", true);
-                    if (buttonResize) buttonResize.observe(accent);
                 }
             }
+            if (startConfirmation && startConfirmation.hidden) startConfirmation = null;
+            var common = doc.getElementById("app-confirm-modal");
+            var startModal = common && !common.hidden ? startConfirmation : doc.querySelector(".tablet-personal-login-portal:not([hidden])");
+            var dialog = closed && startModal && !startModal.hidden && startModal.querySelector(".app-confirm-dialog");
+            var nextCutout = dialog || accent;
+            if (cutout !== nextCutout) {
+                if (cutoutResize) cutoutResize.disconnect();
+                cutout = nextCutout;
+                if (cutout && cutoutResize) cutoutResize.observe(cutout);
+            }
             var clip = "none";
-            if (accent) {
-                /* The hole follows the real button, including scaled canvas and
-                   rounded corners. No clone, moved form or synthetic action. */
+            if (cutout) {
+                // Only the visible dialog (or the usual start button) keeps its natural
+                // colours. The board outside its rounded outline remains monochrome.
+                rect = cutout.getBoundingClientRect();
                 var radius = Math.min(rect.width / 2, rect.height / 2,
-                    (parseFloat(global.getComputedStyle(accent).borderTopLeftRadius) || 0) * rect.width / (accent.offsetWidth || rect.width));
+                    (parseFloat(global.getComputedStyle(cutout).borderTopLeftRadius) || 0) * rect.width / (cutout.offsetWidth || rect.width));
                 var l = rect.left, t = rect.top, r = rect.right, b = rect.bottom, a = radius;
                 clip = 'path(evenodd, "M0 0H' + global.innerWidth + 'V' + global.innerHeight + 'H0Z M' + (l + a) + ' ' + t +
                     'H' + (r - a) + 'Q' + r + ' ' + t + ' ' + r + ' ' + (t + a) + 'V' + (b - a) + 'Q' + r + ' ' + b + ' ' + (r - a) + ' ' + b +
