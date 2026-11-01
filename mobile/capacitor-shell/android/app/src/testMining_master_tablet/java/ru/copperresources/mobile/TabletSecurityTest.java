@@ -54,7 +54,7 @@ public class TabletSecurityTest {
             "/mining-master/tablet/dispatcher/mining-volumes/", "/mining-master/tablet/dispatcher/transport/", "/mining-master/tablet/dispatcher/downtimes/",
             "/mining-master/tablet/dispatcher/shift-reports/trucks/", "/mining-master/tablet/dispatcher/shift-reports/excavation/",
             "/mining-master/tablet/dispatcher/shift-reports/hourly/", "/mining-master/tablet/dispatcher/shift-reports/hourly-grid/",
-            "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
+            "/mining-master/tablet/reports/shift-analytics/", "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
         };
         for (String path : relatedPaths) {
             assertTrue(path, TabletUrlPolicy.tabletPage(TabletUrlPolicy.ORIGIN + path));

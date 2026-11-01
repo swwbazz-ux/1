@@ -25,6 +25,7 @@
         <span class="dispatcher-shift-slot">
             {% include "includes/dispatcher_shift_action.html" %}
         </span>
+        {% if not request.mining_master_tablet_control %}
         <div class="dispatcher-command-utility"{% if access.role.code == 'dispatcher' %} style="width: calc(100% + 88px); max-width: 388px; grid-template-columns: 38px 38px 38px repeat(2, minmax(0, 1fr)); column-gap: 8px;"{% endif %}>
             {% if access.role.code == 'dispatcher' %}
                 <a
@@ -57,15 +58,9 @@
             {% endif %}
             <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
             <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
-            {% if request.mining_master_tablet_control %}
-                <form method="post" action="{% url 'mining_master_tablet_logout' %}" style="display:contents">
-                    {% csrf_token %}
-                    <button type="submit" class="dispatcher-utility-link dispatcher-utility-exit"><span aria-hidden="true"></span>Выйти</button>
-                </form>
-            {% else %}
-                <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
-            {% endif %}
+            <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
         </div>
+        {% endif %}
     </section>
 
     <section class="dispatcher-clock dispatcher-radial-clock" aria-label="{% if dispatcher_clock_label %}{{ dispatcher_clock_label }}{% else %}Текущее время{% endif %}">

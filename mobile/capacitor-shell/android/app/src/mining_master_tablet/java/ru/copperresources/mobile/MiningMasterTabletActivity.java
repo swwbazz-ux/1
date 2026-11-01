@@ -48,11 +48,6 @@ public final class MiningMasterTabletActivity extends MainActivity {
     protected boolean usesBackgroundConnectionService() { return false; }
 
     @Override
-    protected String standaloneStartupReadiness(String pageUrl) {
-        return TabletStandaloneReadiness.expressionFor(BuildConfig.APP_PROFILE_ID, pageUrl);
-    }
-
-    @Override
     protected void onCreate(Bundle state) {
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         tabletScript = readTabletScript();

@@ -23,6 +23,7 @@ final class TabletUrlPolicy {
         "/mining-master/tablet/dispatcher/shift-reports/excavation/",
         "/mining-master/tablet/dispatcher/shift-reports/hourly/",
         "/mining-master/tablet/dispatcher/shift-reports/hourly-grid/",
+        "/mining-master/tablet/reports/shift-analytics/",
         "/mining-master/tablet/reports/volume/",
         "/mining-master/tablet/reports/customer-daily/",
         "/mining-master/tablet/reports/templates/",

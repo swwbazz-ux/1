@@ -27,16 +27,13 @@ html.cr-mm-tablet-page, html.cr-mm-tablet-page body { width: 100%; height: 100%;
 html.cr-mm-tablet-page .dispatcher-canvas[data-dispatcher-canvas] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; transform: none !important; --gd-vw: 1vw !important; --gd-vh: 1vh !important; }
 html.cr-mm-tablet-page .dispatcher-canvas > .dispatcher-analytics-shell, html.cr-mm-tablet-page body > .dispatcher-analytics-shell.management-linked-report { box-sizing: border-box; width: 100% !important; max-width: 100% !important; height: 100% !important; min-height: 0 !important; transform: none !important; overflow: hidden auto !important; --gd-header-h: 126px; overscroll-behavior: contain; }
 html.cr-mm-tablet-page .dispatcher-analytics-board { width: 100% !important; min-width: 0 !important; min-height: 100% !important; }
-html.cr-mm-tablet-page .dispatcher-unified-topbar { --gd-header-identity-width: 24%; --gd-header-actions-width: 290px; --gd-header-clock-width: 126px; }
-html.cr-mm-tablet-page .dispatcher-command-actions { display: grid !important; grid-template-rows: auto auto !important; align-content: center !important; gap: 6px !important; height: 100% !important; }
+html.cr-mm-tablet-page .dispatcher-unified-topbar { --gd-header-identity-width: 24%; --gd-header-actions-width: clamp(180px, 20vw, 250px); --gd-header-clock-width: 126px; }
+html.cr-mm-tablet-page .dispatcher-command-actions { display: grid !important; grid-template: auto / minmax(0, 1fr) !important; align-items: center !important; align-content: center !important; gap: 6px !important; height: 100% !important; }
 html.cr-mm-tablet-page .dispatcher-shift-slot, html.cr-mm-tablet-page .dispatcher-shift-form { height: auto !important; margin: 0 !important; padding: 0 !important; }
-html.cr-mm-tablet-page .dispatcher-command-utility { display: grid !important; grid-template-columns: repeat(3, 44px) repeat(2, minmax(0, 1fr)) !important; width: 100% !important; max-width: none !important; height: auto !important; gap: 4px !important; }
-html.cr-mm-tablet-page .dispatcher-nav a, html.cr-mm-tablet-page .dispatcher-subnav a, html.cr-mm-tablet-page .dispatcher-report-actions a, html.cr-mm-tablet-page .dispatcher-report-actions-row a, html.cr-mm-tablet-page .dispatcher-shift-report-tabs a, html.cr-mm-tablet-page .dispatcher-shift-report-back, html.cr-mm-tablet-page button, html.cr-mm-tablet-page input:not([type="checkbox"]):not([type="radio"]), html.cr-mm-tablet-page select, html.cr-mm-tablet-page .dispatcher-utility-link { box-sizing: border-box; min-height: 44px !important; font-size: 14px; }
-html.cr-mm-tablet-page .dispatcher-command-utility > * { font-size: 12px !important; }
+html.cr-mm-tablet-page .dispatcher-nav a, html.cr-mm-tablet-page .dispatcher-subnav a, html.cr-mm-tablet-page .dispatcher-report-actions a, html.cr-mm-tablet-page .dispatcher-report-actions-row a, html.cr-mm-tablet-page .dispatcher-shift-report-tabs a, html.cr-mm-tablet-page .dispatcher-shift-report-back, html.cr-mm-tablet-page button, html.cr-mm-tablet-page input:not([type="checkbox"]):not([type="radio"]), html.cr-mm-tablet-page select { box-sizing: border-box; min-height: 44px !important; font-size: 14px; }
 html.cr-mm-tablet-page .dispatcher-theme-button { min-width: 44px; min-height: 44px !important; }
 html.cr-mm-tablet-page .dispatcher-header-row .dispatcher-nav { gap: 8px; }
 html.cr-mm-tablet-page .dispatcher-nav a { display: inline-flex; justify-content: center; align-items: center; }
-html.cr-mm-tablet-page .dispatcher-utility-link { padding-inline: 4px; }
 html.cr-mm-tablet-page .dispatcher-report-filters, html.cr-mm-tablet-page .dispatcher-report-controlbar-filters { flex-wrap: wrap; }
 html.cr-mm-tablet-page .dispatcher-shift-report-controlbar { flex-wrap: wrap; }
 html.cr-mm-tablet-page .dispatcher-shift-report-switcher { flex: 1 1 600px; }
@@ -83,16 +80,15 @@ html.cr-mm-tablet, html.cr-mm-tablet body { width: 100%; height: 100%; margin: 0
 html.cr-mm-tablet .dispatcher-canvas[data-dispatcher-canvas] { position: fixed !important; top: var(--cr-mm-canvas-center) !important; left: 50% !important; width: var(--dispatcher-canvas-w) !important; height: var(--dispatcher-canvas-h) !important; transform: translate(-50%, -50%) scale(var(--dispatcher-canvas-scale)) !important; }
 html.cr-mm-tablet .dispatcher-canvas > .dispatcher-shell { width: 100% !important; height: 100% !important; min-height: 0 !important; transform: none !important; --gd-header-h: calc(126px / var(--cr-mm-scale)); }
 html.cr-mm-tablet .dispatcher-board { height: 100% !important; }
-html.cr-mm-tablet .dispatcher-nav a, html.cr-mm-tablet .dispatcher-shift-button, html.cr-mm-tablet .dispatcher-theme-button, html.cr-mm-tablet .dispatcher-utility-link { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(12px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .dispatcher-unified-topbar { --gd-header-actions-width: clamp(225px, 18%, 330px); }
+html.cr-mm-tablet .dispatcher-nav a, html.cr-mm-tablet .dispatcher-shift-button, html.cr-mm-tablet .dispatcher-theme-button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(12px / var(--cr-mm-scale)) !important; }
 html.cr-mm-tablet .dispatcher-theme-button { min-width: calc(44px / var(--cr-mm-scale)) !important; }
-html.cr-mm-tablet .dispatcher-command-actions { display: grid !important; grid-template-rows: auto auto !important; align-content: center !important; gap: calc(6px / var(--cr-mm-scale)) !important; height: 100% !important; }
+html.cr-mm-tablet .dispatcher-command-actions { display: grid !important; grid-template: auto / minmax(0, 1fr) !important; align-items: center !important; align-content: center !important; gap: calc(6px / var(--cr-mm-scale)) !important; height: 100% !important; }
 html.cr-mm-tablet .dispatcher-shift-slot, html.cr-mm-tablet .dispatcher-shift-form { height: auto !important; margin: 0 !important; padding: 0 !important; }
-html.cr-mm-tablet .dispatcher-command-utility { display: grid !important; grid-template-columns: repeat(3, calc(44px / var(--cr-mm-scale))) repeat(2, minmax(0, 1fr)) !important; width: 100% !important; max-width: none !important; height: auto !important; gap: calc(4px / var(--cr-mm-scale)) !important; }
-html.cr-mm-tablet .dispatcher-utility-link { padding-inline: 4px !important; }
 html.cr-mm-tablet .dispatcher-command-main > .dispatcher-equipment-search { display: none !important; }
-html.cr-mm-tablet .gd-equipment-detail input, html.cr-mm-tablet .gd-equipment-detail select, html.cr-mm-tablet .gd-equipment-detail button, html.cr-mm-tablet .app-confirm-modal input, html.cr-mm-tablet .app-confirm-modal button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(14px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .gd-equipment-detail input, html.cr-mm-tablet .gd-equipment-detail select, html.cr-mm-tablet .gd-equipment-detail button, html.cr-mm-tablet [data-shared-shift-login-modal] input, html.cr-mm-tablet [data-shared-shift-login-modal] button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(14px / var(--cr-mm-scale)) !important; }
 html.cr-mm-tablet .gd-detail-close, html.cr-mm-tablet .mm-detail-close, html.cr-mm-tablet .shared-shift-close { min-width: calc(44px / var(--cr-mm-scale)) !important; }
-html.cr-mm-tablet .gd-detail-panel, html.cr-mm-tablet .app-confirm-dialog { max-height: calc(94vh / var(--cr-mm-scale)) !important; overflow: auto !important; }
+html.cr-mm-tablet .gd-detail-panel, html.cr-mm-tablet .shared-shift-dialog { max-height: calc(94vh / var(--cr-mm-scale)) !important; overflow: auto !important; }
 html.cr-mm-tablet .dispatcher-zone-grid { overscroll-behavior: contain; }
 html.cr-mm-tablet .dispatcher-complex-card .complex-truck-more:not([hidden]) { min-width: calc(44px / var(--cr-mm-scale)); min-height: calc(44px / var(--cr-mm-scale)); cursor: pointer; pointer-events: auto !important; touch-action: manipulation; }
 html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack { align-content: start !important; overflow: auto !important; overscroll-behavior: contain; grid-auto-rows: max(var(--complex-truck-h), calc(44px / var(--cr-mm-scale))) !important; }
@@ -127,9 +123,6 @@ html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit span { color: #fffff
 }
 #cr-mm-toolbar [hidden] { display: none !important; }
 #cr-mm-toolbar input:focus-visible, #cr-mm-toolbar select:focus-visible, #cr-mm-toolbar button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar { background: #eaf0f3; color: #172f3a; border-color: #a5bac5; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar .cr-mm-assign-control > span, html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar .cr-mm-assign-arrow { color: #345260; }
-html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input, html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar select { background: #fff; color: #172f3a; }
 @media (max-width: 600px) {
     #cr-mm-toolbar label { gap: 4px; }
     #cr-mm-toolbar label > img { flex-basis: 22px; width: 22px; height: 28px; }
@@ -151,14 +144,13 @@ html.cr-mm-tablet:has(.dispatcher-day) #cr-mm-toolbar input, html.cr-mm-tablet:h
     html.cr-mm-tablet .dispatcher-garage-panel { display: flex !important; flex-direction: column !important; flex: 1 !important; height: 100% !important; min-height: 0 !important; }
     html.cr-mm-tablet .dispatcher-excavators, html.cr-mm-tablet .dispatcher-trucks { display: grid !important; flex: 1 !important; grid-template-columns: 1fr !important; grid-auto-rows: calc(58px / var(--cr-mm-scale)) !important; grid-template-rows: none !important; align-content: start !important; width: 100% !important; min-height: 0 !important; overflow: auto !important; }
     html.cr-mm-tablet .dispatcher-zone-grid { min-height: 0 !important; height: 100% !important; overflow-y: auto !important; }
-    html.cr-mm-tablet .dispatcher-header-row { display: grid !important; grid-template-columns: 25% 37% 29% 9% !important; grid-template-rows: 1fr !important; }
+    html.cr-mm-tablet .dispatcher-header-row { display: grid !important; grid-template-columns: 25% minmax(0, 1fr) 22% !important; grid-template-rows: 1fr !important; }
     html.cr-mm-tablet .dispatcher-header-row > section { grid-area: auto !important; width: auto !important; min-width: 0 !important; }
     html.cr-mm-tablet body .dispatcher-command-main { display: flex !important; flex-direction: column !important; justify-content: center !important; gap: calc(8px / var(--cr-mm-scale)) !important; height: 100% !important; overflow: visible !important; }
     html.cr-mm-tablet body .dispatcher-command-context { position: static !important; height: auto !important; min-height: 0 !important; padding: 0 !important; }
     html.cr-mm-tablet body .dispatcher-nav { display: flex !important; position: static !important; flex: 0 0 auto !important; height: auto !important; min-height: calc(44px / var(--cr-mm-scale)) !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
     html.cr-mm-tablet body .dispatcher-nav a { flex: 1 1 auto !important; padding-inline: 4px !important; }
     html.cr-mm-tablet body .dispatcher-left .dispatcher-excavators, html.cr-mm-tablet body .dispatcher-right .dispatcher-trucks { grid-template-columns: 1fr !important; }
-    html.cr-mm-tablet .dispatcher-command-utility { grid-template-columns: repeat(3, calc(44px / var(--cr-mm-scale))) repeat(2, minmax(0, 1fr)) !important; }
     html.cr-mm-tablet .dispatcher-clock { display: none !important; }
     #cr-mm-toolbar { gap: 7px; padding-inline: 8px; }
 }
@@ -191,7 +183,22 @@ html.cr-mm-panels .dispatcher-complexes {
   margin: 0 !important; display: flex !important; flex-direction: column; overflow: hidden !important;
 }
 html.cr-mm-panels .dispatcher-zone-head { flex: 0 0 auto; }
-html.cr-mm-panels .dispatcher-zone-grid { flex: 1 1 auto; height: auto !important; min-height: 0; max-width: 100%; overflow: auto !important; }
+/* The field owns its scroll position; rows use the space left by the open panel. */
+html.cr-mm-panels .dispatcher-zone-grid {
+  --cr-complex-gap: 9px;
+  display: grid; flex: 1 1 0; min-height: 0; max-width: 100%; height: auto !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-rows: none !important;
+  grid-auto-rows: calc((100% - 2 * var(--cr-complex-gap)) / 3) !important;
+  gap: var(--cr-complex-gap) !important; align-content: start;
+  padding: 0 !important; overflow: hidden auto !important;
+  scrollbar-width: none; scrollbar-gutter: auto; overflow-anchor: none;
+}
+html.cr-mm-panels .dispatcher-zone-grid::-webkit-scrollbar { display: none; }
+html.cr-mm-panels .dispatcher-zone-grid > .dispatcher-complex-card {
+  min-height: 0 !important; min-width: 0;
+  order: var(--cr-complex-order, 0);
+}
 html.cr-mm-panels .dispatcher-topbar,
 html.cr-mm-panels .dispatcher-left,
 html.cr-mm-panels .dispatcher-right {
@@ -415,3 +422,60 @@ body > .tablet-personal-login-portal .app-confirm-actions button[type=submit] { 
 body > .tablet-personal-login-portal .app-confirm-content h2 { color: #edf4f7 !important; }
 body > .tablet-personal-login-portal .app-confirm-content p { color: #c4d1d8 !important; }
 body > .tablet-personal-login-portal .shared-shift-close { left: auto !important; right: 12px !important; top: 12px !important; width: 44px; height: 44px; padding: 0; margin: 0; transform: none; border: 1px solid #647a84; border-radius: 10px; background: #253842; color: #edf4f7; font-size: 26px; }
+
+/* The confirmation lives under body, outside the scaled board. Use viewport
+   pixels for both text and actions; a destructive action may have a long name. */
+@media screen {
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal {
+  inset: var(--cr-dialog-top, 0px) 0 var(--cr-dialog-bottom, 0px); box-sizing: border-box; padding: 12px;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-dialog {
+  box-sizing: border-box; width: min(640px, 100%); max-width: 100%; max-height: 100%;
+  overflow: auto; overscroll-behavior: contain; padding: 18px; gap: 12px;
+  grid-template-columns: 44px minmax(0, 1fr) 44px; grid-auto-rows: max-content; align-items: start;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-accent { display: none; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-icon { grid-area: 1 / 1; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content {
+  grid-area: 1 / 2; min-width: 0; padding: 0; overflow-wrap: anywhere;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.is-shift-end-confirm .app-confirm-content { grid-column: 1 / 3; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content h2 { margin: 0 0 8px; font-size: 22px; line-height: 1.15; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content p { max-width: none; margin: 0; font-size: 16px; line-height: 1.4; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-close {
+  position: static; display: grid; grid-area: 1 / 3; width: 44px; min-width: 44px; height: 44px; margin: 0;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-summary { grid-column: 1 / -1; margin: 0; padding-top: 12px; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-grid { grid-template-columns: 1fr 1fr 2fr; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-grid :is(strong, span) {
+  white-space: normal; overflow: visible; overflow-wrap: anywhere;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-actions {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; padding: 0; margin: 4px 0 0; border: 0;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-actions button {
+  box-sizing: border-box; flex: 1 1 180px; width: auto; min-width: 0; min-height: 48px; height: auto;
+  padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; font-size: 17px; line-height: 1.2;
+}
+/* The notice, unlike the confirmation, belongs to the transformed canvas. */
+html.cr-mm-panels .dispatcher-shell .dispatcher-notice-modal {
+  inset: 0 0 calc(var(--cr-panel-keyboard-inset, 0px) / var(--cr-mm-scale)); padding: 0;
+}
+html.cr-mm-panels .dispatcher-shell .dispatcher-notice-dialog {
+  zoom: calc(1 / var(--cr-mm-scale)); box-sizing: border-box; width: min(640px, calc(100vw - 24px));
+  max-height: calc(var(--cr-panel-canvas-h) * var(--cr-mm-scale) - var(--cr-panel-keyboard-inset, 0px) - 24px);
+  overflow: auto; overscroll-behavior: contain; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start;
+}
+html.cr-mm-panels .dispatcher-notice-copy { min-width: 0; overflow-wrap: anywhere; }
+html.cr-mm-panels .dispatcher-notice-copy p { font-size: 16px; line-height: 1.4; }
+html.cr-mm-panels .dispatcher-notice-dialog button { grid-column: 1 / -1; justify-self: end; min-height: 48px; }
+/* The API also returns text such as «План не назначен» for a gauge value. */
+html.cr-mm-panels .gd-detail-gauge-summary .gd-detail-gauge { width: min(88px, 100%); height: auto; aspect-ratio: 1; }
+html.cr-mm-panels .gd-detail-gauge-summary .gd-detail-gauge strong {
+  max-width: 72%; white-space: normal; overflow-wrap: anywhere; overflow: visible; font-size: 12px; line-height: 1.15;
+}
+/* Android can resize just visualViewport while the body still has its old height. */
+body > .tablet-personal-login-portal:not([hidden]) { inset: var(--cr-dialog-top, 0px) 0 var(--cr-dialog-bottom, 0px); }
+body > .tablet-personal-login-portal .shared-shift-dialog { max-height: 100% !important; }
+}

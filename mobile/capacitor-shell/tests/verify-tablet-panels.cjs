@@ -13,7 +13,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const css = fs.readFileSync(path.join(__dirname, '../profiles/mining_master_tablet/assets/tablet/mining-master-tablet.css'), 'utf8');
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/mining-master-tablet-panels.html'), 'utf8');
   const java = fs.readFileSync(path.join(__dirname, '../android/app/src/main/java/ru/copperresources/mobile/StartupLoadingOverlay.java'), 'utf8');
-  const probe = vm.runInNewContext(java.match(/private static final String READINESS_PROBE\s*=([\s\S]*?);\r?\n\r?\n/)[1], { STANDALONE_READINESS_EXTENSION: '' });
+  const probe = vm.runInNewContext(java.match(/private static final String READINESS_PROBE\s*=([\s\S]*?);\r?\n\r?\n/)[1]);
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   const page = await browser.newPage({ viewport: { width: 1333, height: 800 }, hasTouch: true });
   page.setDefaultTimeout(5000);

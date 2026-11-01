@@ -13,7 +13,7 @@ const { chromium } = require(process.env.COPPER_PLAYWRIGHT_MODULE || 'playwright
   const adapter = fs.readFileSync(process.env.COPPER_TABLET_SCRIPT || path.join(__dirname, '../profiles/mining_master_tablet/assets/tablet/mining-master-tablet.js'), 'utf8');
   const java = fs.readFileSync(path.join(__dirname, '../android/app/src/main/java/ru/copperresources/mobile/StartupLoadingOverlay.java'), 'utf8');
   const expression = java.match(/private static final String READINESS_PROBE\s*=([\s\S]*?);\r?\n\r?\n/)[1];
-  const probe = vm.runInNewContext(expression, { STANDALONE_READINESS_EXTENSION: '' });
+  const probe = vm.runInNewContext(expression);
   const requiredFrames = Number(java.match(/REQUIRED_STABLE_FRAMES\s*=\s*(\d+)/)[1]);
   const requiredQuiet = Number(java.match(/REQUIRED_QUIET_WINDOW_MS\s*=\s*(\d+)/)[1]);
   const fixture = fs.readFileSync(path.join(__dirname, 'fixtures/mining-master-tablet-readiness.html'), 'utf8');

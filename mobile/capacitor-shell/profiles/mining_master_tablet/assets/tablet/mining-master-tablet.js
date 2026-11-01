@@ -1,14 +1,14 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.7.0";
+    var VERSION = "1.8.0";
     var SUPPORTED_SHELLS = ["mining-master-mobile-shell-v165"];
     var RELATED_PATHS = [
         "/mining-master/tablet/dispatcher/reports/", "/mining-master/tablet/dispatcher/shift-log/", "/mining-master/tablet/dispatcher/management/",
         "/mining-master/tablet/dispatcher/mining-volumes/", "/mining-master/tablet/dispatcher/transport/", "/mining-master/tablet/dispatcher/downtimes/",
         "/mining-master/tablet/dispatcher/shift-reports/trucks/", "/mining-master/tablet/dispatcher/shift-reports/excavation/",
         "/mining-master/tablet/dispatcher/shift-reports/hourly/", "/mining-master/tablet/dispatcher/shift-reports/hourly-grid/",
-        "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
+        "/mining-master/tablet/reports/customer-daily/", "/mining-master/tablet/reports/shift-analytics/", "/mining-master/tablet/reports/volume/", "/mining-master/tablet/reports/templates/", "/mining-master/tablet/reports/downtimes/"
     ];
     var SOURCE = "[data-dispatcher-drag][data-equipment-id]";
     var EXCAVATORS = ".dispatcher-complex-card[data-dispatcher-drop='complex'][data-equipment-id][data-dispatcher-drop-bound='true']";
@@ -121,6 +121,8 @@
     }
     var doc = global.document, board = null, compatible = false;
     var bound = false, queued = false, busyUntil = 0, edgePanels = null, foundTruckId = "";
+    var truckSearchTimer = null, searchPresented = false;
+    var TRUCKS = "[data-dispatcher-drag='truck'][data-equipment-id]";
     function setText(node, value) { if (node && node.textContent !== value) node.textContent = value; }
     /* Attribute no-ops still notify DOM observers. In particular, writing an
        unchanged disabled value wakes role-readonly, which republishes access
@@ -135,6 +137,27 @@
     function setBoolean(node, name, value) { if (node[name] !== value) node[name] = value; }
     function setStyle(node, name, value) {
         if (node.style.getPropertyValue(name) !== value) node.style.setProperty(name, value);
+    }
+    function syncWorkplaceHeader() {
+        var shell = doc.querySelector("[data-dispatcher-theme]");
+        if (!shell) return;
+        setClass(shell, "dispatcher-day", false);
+        setClass(shell, "dispatcher-night", true);
+    }
+    var complexLabels = new Intl.Collator("ru", { numeric: true });
+    function syncComplexOrder() {
+        // Keep server nodes and their drag handlers intact even when its status sort moves them.
+        var entries = Array.from(board.querySelectorAll(".dispatcher-zone-grid > .dispatcher-complex-card"), function (card) {
+            var label = card.dataset.excavatorSlot || card.dataset.zoneLabel || card.dataset.equipmentName || "";
+            var digits = label.match(/\d+/);
+            return { card: card, empty: card.classList.contains("status-empty"), number: digits ? Number(digits[0]) : Number.MAX_SAFE_INTEGER,
+                label: label, key: card.dataset.equipmentId || card.dataset.zoneId || "" };
+        });
+        entries.sort(function (a, b) {
+            return a.empty - b.empty || a.number - b.number || complexLabels.compare(a.label, b.label) || complexLabels.compare(a.key, b.key);
+        }).forEach(function (entry, index) {
+            setStyle(entry.card, "--cr-complex-order", String(index));
+        });
     }
     function syncShiftNotices() {
         var enabled = doc.documentElement.matches(".cr-mm-tablet, .cr-mm-tablet-page");
@@ -157,6 +180,7 @@
         var buttonResize = typeof global.ResizeObserver === "function" ? new global.ResizeObserver(queue) : null;
         function update() {
             frame = null;
+            if (root.matches(".cr-mm-tablet, .cr-mm-tablet-page")) syncWorkplaceHeader();
             syncShiftNotices();
             var owner = root.classList.contains("cr-mm-tablet") && doc.querySelector(".dispatcher-board");
             var closed = owner ? owner.dataset.dispatcherShiftOpen === "false" :
@@ -220,8 +244,16 @@
         global.addEventListener("resize", queue);
         global.addEventListener("pageshow", queue);
         if (global.visualViewport) {
-            global.visualViewport.addEventListener("resize", queue);
-            global.visualViewport.addEventListener("scroll", queue);
+            // Body-level dialogs also appear on report pages without the board/IME layout.
+            function syncDialogViewport() {
+                var viewport = global.visualViewport;
+                setStyle(root, "--cr-dialog-top", Math.max(0, viewport.offsetTop) + "px");
+                setStyle(root, "--cr-dialog-bottom", Math.max(0, global.innerHeight - viewport.offsetTop - viewport.height) + "px");
+                queue();
+            }
+            global.visualViewport.addEventListener("resize", syncDialogViewport);
+            global.visualViewport.addEventListener("scroll", syncDialogViewport);
+            syncDialogViewport();
         }
         queue();
     }
@@ -453,6 +485,7 @@
             }
         }
         function manualRequest(side) {
+            cancelTruckSearchTimer();
             pendingReveal = null; pendingManual = { side: side };
             if (editing()) doc.activeElement.blur();
             refresh();
@@ -487,6 +520,7 @@
         }
         function inward(side, dx, dy) { return side === "left" ? dx : side === "right" ? -dx : side === "top" ? dy : -dy; }
         listen(doc, "pointerdown", function (event) {
+            cancelTruckSearchTimer();
             pointers.add(event.pointerId); machine.pause(true);
             var start = event.target.closest && event.target.closest(".cr-mm-panel-handle, .cr-mm-panel-edge");
             if (start && event.isPrimary && event.button === 0 && !dialogOpen()) {
@@ -532,6 +566,7 @@
                 dragStartTimer = null;
                 if (dead || epoch !== dragEpoch || event.defaultPrevented || !source.isConnected || !source.classList.contains("dispatcher-dragging")) return;
                 var state = context(); if (!state.compatible || !state.shiftOpen || state.observer || state.modalOpen) return;
+                if (source.matches(TRUCKS) && source.dataset.equipmentId === foundTruckId) dismissTruckSearch();
                 nativeDrag = snapshot(source, owner); pendingReveal = null; pendingManual = null;
                 setAttribute(root, "data-cr-panel-native-drag", "true"); machine.pause(true);
             }, 0);
@@ -613,6 +648,7 @@
             },
             layout: function () { layout(false); },
             reveal: function (node) { pendingReveal = node ? { node: node, side: sideFor(node) } : null; refresh(); },
+            cancelReveal: function () { pendingReveal = null; },
             selected: function (node) { if (sideFor(node)) { pendingReveal = null; machine.request(null); } },
             completeAction: function () { if (machine.state().active === "bottom") { pendingReveal = null; machine.request(null); } },
             escape: function () { return !!machine.state().active; },
@@ -743,9 +779,28 @@
             if (button.textContent !== text) button.textContent = text;
         }
     }
+    function cancelTruckSearchTimer() {
+        if (truckSearchTimer !== null) global.clearTimeout(truckSearchTimer);
+        truckSearchTimer = null;
+    }
     function clearFoundTruck() {
+        cancelTruckSearchTimer();
+        searchPresented = false;
         foundTruckId = "";
         doc.querySelectorAll(".cr-mm-truck-hit").forEach(function (node) { node.classList.remove("cr-mm-truck-hit"); });
+        if (edgePanels) edgePanels.cancelReveal();
+    }
+    function dismissTruckSearch() {
+        var input = doc.querySelector("[data-cr-mm-assign-truck]");
+        if (input) { input.value = ""; input.setCustomValidity(""); }
+        clearFoundTruck();
+    }
+    function presentTruckSearch(truck, input) {
+        clearFoundTruck();
+        foundTruckId = truck.dataset.equipmentId;
+        searchPresented = true;
+        if (input.form.contains(doc.activeElement)) doc.activeElement.blur();
+        showFoundTruck(truck, true);
     }
     function showFoundTruck(truck, reveal) {
         var rack = truck.closest(".complex-assigned-trucks");
@@ -754,21 +809,41 @@
         if (reveal && edgePanels) edgePanels.reveal(truck);
     }
     function refreshFoundTruck() {
+        var truck = foundTruckId && equipmentCandidates(TRUCKS).find(function (node) { return node.dataset.equipmentId === foundTruckId; });
+        board.querySelectorAll(".cr-mm-truck-hit").forEach(function (node) {
+            if (node !== truck) node.classList.remove("cr-mm-truck-hit");
+        });
         if (!foundTruckId) return;
-        var truck = equipmentCandidates("[data-dispatcher-drag='truck'][data-equipment-id]").find(function (node) { return node.dataset.equipmentId === foundTruckId; });
         if (truck) showFoundTruck(truck, false);
+        else if (searchPresented) dismissTruckSearch();
         else clearFoundTruck();
     }
     function previewTruckNumber(input) {
         clearFoundTruck();
         if (!compatible || !board || context().modalOpen) return;
-        var matches = equipmentMatches(input.value.trim(), "[data-dispatcher-drag='truck'][data-equipment-id]");
+        var value = input.value.trim();
+        var matches = equipmentMatches(value, TRUCKS);
         if (matches.length !== 1) return;
         foundTruckId = matches[0].dataset.equipmentId;
         showFoundTruck(matches[0], false);
-        // Keep the input panel and keyboard while typing. A garage is revealed
-        // only by Find, which can close this panel under the one-panel rule.
         if (matches[0].closest(".dispatcher-complex-card")) matches[0].scrollIntoView({ block: "nearest", inline: "nearest" });
+        var destination = input.form.querySelector("[data-cr-mm-assign-excavator]");
+        if (destination.value || !/^\d+$/.test(value)) return;
+        // A complete short number may still be the beginning of another truck's
+        // number. Let the operator finish it at any speed or explicitly tap Find.
+        truckSearchTimer = global.setTimeout(function () {
+            truckSearchTimer = null;
+            if (board !== doc.querySelector(".dispatcher-board")) reconcile();
+            if (!compatible || !input.isConnected || doc.activeElement !== input || destination.value || context().modalOpen || doc.hidden) return;
+            var prefix = value.replace(/^0+(?=\d)/, "");
+            if (equipmentCandidates(TRUCKS).some(function (node) {
+                var suffix = equipmentName(node).match(/(\d+)\s*$/);
+                var number = suffix && suffix[1].replace(/^0+(?=\d)/, "");
+                return number && number !== prefix && number.startsWith(prefix);
+            })) return;
+            var current = equipmentMatches(input.value.trim(), TRUCKS);
+            if (current.length === 1 && current[0].dataset.equipmentId === foundTruckId) presentTruckSearch(current[0], input);
+        }, 900);
     }
     function assignmentError(input, text) {
         input.setCustomValidity(text);
@@ -803,11 +878,9 @@
         var state = context();
         if (state.modalOpen) return;
         if (!excavatorInput.value) {
-            var found = equipmentByNumber(truckInput, "[data-dispatcher-drag='truck'][data-equipment-id]", "самосвала");
+            var found = equipmentByNumber(truckInput, TRUCKS, "самосвала");
             if (!found) return;
-            clearFoundTruck(); foundTruckId = found.dataset.equipmentId;
-            if (toolbar.contains(doc.activeElement)) doc.activeElement.blur();
-            showFoundTruck(found, true);
+            presentTruckSearch(found, truckInput);
             return;
         }
         if (Date.now() < busyUntil) return;
@@ -819,7 +892,7 @@
             assignmentError(excavatorInput, "Для назначения откройте смену.");
             return;
         }
-        var truck = equipmentByNumber(truckInput, "[data-dispatcher-drag='truck'][data-equipment-id]", "самосвала");
+        var truck = equipmentByNumber(truckInput, TRUCKS, "самосвала");
         if (!truck) return;
         var excavator = equipmentCandidates(EXCAVATORS).find(function (node) { return node.dataset.equipmentId === excavatorInput.value; });
         if (!excavator) {
@@ -884,6 +957,7 @@
         queued = false; if (!allowedLocation(global.location)) return;
         compatible = isCompatible();
         if (!compatible) {
+            clearFoundTruck();
             if (edgePanels) { edgePanels.destroy(); edgePanels = null; }
             collapseRacks(); setClass(doc.documentElement, "cr-mm-tablet", false);
             var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.remove();
@@ -898,6 +972,7 @@
         if (edgePanels && (edgePanels.owner !== next || !edgePanels.matches()) && !edgePanels.adopt(next)) { edgePanels.destroy(); edgePanels = null; }
         if (board !== next) { board = next; collapseRacks(); }
         setClass(doc.documentElement, "cr-mm-tablet", true);
+        syncComplexOrder();
         ensureToolbar();
         refreshExcavatorNumbers();
         refreshFoundTruck();
@@ -907,6 +982,24 @@
     function schedule() { if (!queued) { queued = true; global.requestAnimationFrame(reconcile); } }
     function bind() {
         if (bound) return; bound = true;
+        // Dismiss on a completed tap, not pointerdown: a finger can still be
+        // starting a scroll or a drag. Never cancel the control's own event.
+        var tap = null;
+        global.addEventListener("pointerdown", function (event) {
+            tap = foundTruckId && event.isPrimary && event.button === 0 ?
+                { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
+        }, true);
+        global.addEventListener("pointercancel", function () { tap = null; }, true);
+        global.addEventListener("pointerup", function (event) {
+            var start = tap; tap = null;
+            if (!foundTruckId || !start || start.id !== event.pointerId ||
+                Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) return;
+            if (doc.documentElement.dataset.crPanelOpen === "bottom" && event.target.closest("#cr-mm-toolbar")) {
+                // A deliberate swipe back into the form resumes editing the
+                // located truck, so the destination can be chosen without haste.
+                searchPresented = false;
+            } else dismissTruckSearch();
+        }, true);
         doc.addEventListener("click", function (event) {
             if (!compatible || !event.target.closest) return;
             var more = event.target.closest(".complex-truck-more");
@@ -945,7 +1038,7 @@
                     Array.prototype.some.call(record.removedNodes, function (child) { return child === board; });
             })) schedule();
         });
-        observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["data-dispatcher-shift-open", "data-role-access-active", "data-observer-mode", "data-observer-control", "data-app-role-code", "data-app-shell-version", "data-drag-bound", "data-dispatcher-drop-bound", "data-haul-assignment-state-id"] });
+        observer.observe(doc.body, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ["data-dispatcher-shift-open", "data-role-access-active", "data-observer-mode", "data-observer-control", "data-app-role-code", "data-app-shell-version", "data-drag-bound", "data-dispatcher-drop-bound", "data-haul-assignment-state-id", "data-excavator-slot", "data-zone-label"] });
     }
     function init() {
         if (!allowedLocation(global.location) && !allowedRelatedLocation(global.location)) return;

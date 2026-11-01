@@ -135,7 +135,6 @@ public class MainActivity extends BridgeActivity {
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)
             );
             startupLoadingOverlay = StartupLoadingOverlay.attach(this, webView);
-            startupLoadingOverlay.setStandaloneReadinessProvider(this::standaloneStartupReadiness);
             startupLoadingOverlay.setPageRevealedListener(
                 () -> notifyWebViewPageRevealed(webView)
             );
@@ -169,9 +168,6 @@ public class MainActivity extends BridgeActivity {
             requestNotificationPermissionThenBatteryExemption();
         }
     }
-
-    /** Opt-in recognition for a profile's authenticated standalone application shell. */
-    protected String standaloneStartupReadiness(String pageUrl) { return ""; }
 
     /** Dedicated foreground-only workplaces can opt out without changing field profiles. */
     protected boolean usesBackgroundConnectionService() {
