@@ -1,3 +1,4 @@
+{% if not request.mining_master_tablet_control %}
 <aside
     class="dispatcher-push-invite"
     data-push-invite
@@ -16,3 +17,4 @@
         <button type="button" data-push-later>Позже</button>
     </div>
 </aside>
+{% endif %}

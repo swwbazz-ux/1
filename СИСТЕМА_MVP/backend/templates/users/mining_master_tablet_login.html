@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Вход · Горный мастер{% endblock %}
+{% block viewport_extra %}, viewport-fit=cover{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}">
+{% endblock %}
+{% block body_class %}tablet-auth login-page login-fullscreen{% endblock %}
+{% block body %}
+<main class="tablet-auth-panel">
+    <p class="tablet-auth-role">Горный мастер</p>
+    <h1>Вход сотрудника</h1>
+    <p class="tablet-auth-help">Введите телефон и PIN из карточки сотрудника. При первом входе вы создадите личный PIN.</p>
+    {% if error %}<p class="tablet-auth-error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="{% url 'mining_master_tablet_login' %}" autocomplete="off">
+        {% csrf_token %}
+        <div class="tablet-auth-fields">
+            <label for="tablet-phone">Телефон
+                <input id="tablet-phone" name="phone" type="tel" inputmode="tel" autocomplete="off" maxlength="24" value="{{ phone }}" placeholder="+7 999 123-45-67" required>
+            </label>
+            <label for="tablet-pin">PIN
+                <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
+            </label>
+        </div>
+        <p class="tablet-auth-hint" id="tablet-pin-hint">Личный PIN — 6 цифр. Для первого входа — первоначальный PIN.</p>
+        <button class="tablet-auth-primary" type="submit">Продолжить</button>
+    </form>
+</main>
+{% endblock %}

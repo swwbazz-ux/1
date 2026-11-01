@@ -5,6 +5,9 @@
         "/": true,
         "/logout/": true,
         "/activate-access/": true,
+        "/mining-master/tablet/login/": true,
+        "/mining-master/tablet/activate/": true,
+        "/mining-master/tablet/logout/": true,
         // Taking the session back must work while read-only, otherwise the
         // only way out is retyping the PIN.
         "/reclaim-session/": true,

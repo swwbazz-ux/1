@@ -31,6 +31,7 @@ from .dispatcher_header import (
     get_active_dispatcher_shift,
     open_dispatcher_shift,
 )
+from .tablet_control import control_access_allowed
 from .models import (
     DispatcherActionType,
     OPEN_TRIP_STATUSES,
@@ -261,7 +262,7 @@ def execute_dispatcher_service_close_shift(
         .filter(id=access_id, is_active=True)
         .first()
     )
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
+    if not control_access_allowed(request, access, role_codes={'dispatcher', 'admin'}):
         return redirect('role_home')
     redirect_url = get_dispatcher_control_url(request)
 

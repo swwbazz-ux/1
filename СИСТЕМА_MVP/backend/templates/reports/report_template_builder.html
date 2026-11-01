@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
 {% block title %}Конструктор шаблонов отчетов{% endblock %}
-{% block body_class %}{% if access.role.code == 'dispatcher' %}dispatcher-control-screen{% endif %}{% endblock %}
+{% block body_class %}{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}dispatcher-control-screen{% endif %}{% endblock %}
 
 {% block body %}
-{% if access.role.code == 'dispatcher' %}
+{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report is-dispatcher-report" data-dispatcher-theme>
     <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Конструктор шаблонов отчётов">
         <header class="dispatcher-topbar dispatcher-unified-topbar no-print">
@@ -203,7 +203,7 @@
             </div>
         </div>
     </section>
-{% if access.role.code == 'dispatcher' %}
+{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}
         </div>
     </section>
 </main>

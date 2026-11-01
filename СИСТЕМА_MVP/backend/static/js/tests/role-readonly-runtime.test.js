@@ -433,6 +433,31 @@ test("live role switch makes mutations readonly and preserves safe controls", as
     assert.equal(mutationForm.nativeSubmitCount, 1);
 });
 
+test("tablet login and activation remain usable after previous employee loses access", async () => {
+    const runtime = createRuntime();
+    const forms = ["/mining-master/tablet/login/", "/mining-master/tablet/activate/", "/mining-master/tablet/"].map(action => {
+        const form = new FakeFormElement({method: "post", action});
+        form.appendChild(new FakeElement("input"));
+        form.appendChild(new FakeElement("button"));
+        runtime.document.body.appendChild(form);
+        return form;
+    });
+    vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, "..", "role-readonly.js"), "utf8"), {
+        window: runtime.window, document: runtime.document, URL,
+        Request: globalThis.Request, Response: globalThis.Response,
+    });
+    runtime.dispatchDocumentEvent("DOMContentLoaded", runtime.document);
+    runtime.window.dispatchEvent({type: "active-role-state-changed", detail: {active: false}});
+    for (const [index, form] of forms.entries()) {
+        const authenticationForm = index < 2;
+        assert.equal(form.children[0].disabled, !authenticationForm);
+        assert.equal(form.children[1].disabled, !authenticationForm);
+        assert.equal(runtime.dispatchDocumentEvent("submit", form).defaultPrevented, !authenticationForm);
+        const response = await runtime.window.fetch(form.action, {method: "POST"});
+        assert.equal(response.status, authenticationForm ? 200 : 409);
+    }
+});
+
 test("ready confirmation is disarmed when the active role changes", () => {
     const basePath = path.resolve(__dirname, "..", "..", "..", "templates", "base.html");
     const baseSource = fs.readFileSync(basePath, "utf8");

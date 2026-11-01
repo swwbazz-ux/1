@@ -107,6 +107,12 @@ from users.role_apps import (
 )
 from .excavator_hourly_report import build_excavator_hourly_report
 from .dispatcher_header import build_dispatcher_header_context, get_active_dispatcher_shift
+from .tablet_control import (
+    control_access_allowed,
+    get_control_shift,
+    is_tablet_control_request,
+    is_tablet_master_request,
+)
 from .dispatcher_assignment_commands import (
     execute_dispatcher_cancel_assignment as _execute_dispatcher_cancel_assignment,
 )
@@ -6494,7 +6500,9 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
     )
     if not access:
         return dispatcher_equipment_detail_error('authentication_required', status=401)
-    if access.role.code not in {'dispatcher', 'admin', 'manager'}:
+    if not control_access_allowed(
+        request, access, role_codes={'dispatcher', 'admin', 'manager'},
+    ):
         return dispatcher_equipment_detail_error('forbidden', status=403)
     if category not in {'equipment', 'complex'}:
         return dispatcher_equipment_detail_error('card_not_found', status=404)
@@ -6532,7 +6540,11 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
             access,
             equipment,
             active_role_state=role_session_state,
-            active_shift_getter=get_active_dispatcher_shift,
+            active_shift_getter=(
+                (lambda current_access: get_control_shift(current_access, request))
+                if is_tablet_control_request(request)
+                else get_active_dispatcher_shift
+            ),
             json_payload=excavator_json_payload,
             parse_destinations=parse_excavator_destinations,
             normalize_numeric_setting=normalize_excavator_numeric_setting,
@@ -6543,9 +6555,19 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
             protect_response=protect_dispatcher_equipment_detail_response,
         )
 
+    tablet_overrides = {}
+    if is_tablet_master_request(request, access):
+        from assignments.tablet_views import build_tablet_context, build_tablet_header
+
+        tablet_overrides = {
+            'enforce_dispatcher_access': False,
+            'dispatcher_header_override': build_tablet_header(request, access),
+            'context_overrides': build_tablet_context(request, access),
+        }
     return dispatcher_control_view(
         request,
         access_override=access,
+        **tablet_overrides,
         equipment_detail={
             'card_key': card_key,
             'state_version': state_version,

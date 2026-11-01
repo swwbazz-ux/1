@@ -8,12 +8,18 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from users.models import Employee, EmployeeAccess
 
 from .dispatcher_header import get_active_dispatcher_shift
+from .tablet_control import (
+    control_access_allowed,
+    control_shift_closed_error,
+    get_control_shift,
+    is_tablet_control_request,
+    tablet_action_url,
+)
 
 
 DISPATCHER_FILTER_KEYS = (
@@ -45,7 +51,7 @@ def get_dispatcher_control_url(request):
             value = request.GET.get(key, '').strip()
         if value != '':
             query_parts.append((key, value))
-    base_url = reverse('dispatcher_control')
+    base_url = tablet_action_url(request, 'dispatcher_control')
     if not query_parts:
         return base_url
     return f'{base_url}?{urlencode(query_parts)}'
@@ -85,12 +91,15 @@ def dispatcher_access_from_request(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    return (
+    access = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
-        .filter(id=access_id, is_active=True, role__code__in={'dispatcher', 'admin', 'manager'})
+        .filter(id=access_id, is_active=True)
         .first()
     )
+    return access if control_access_allowed(
+        request, access, role_codes={'dispatcher', 'admin', 'manager'},
+    ) else None
 
 
 def lock_dispatcher_mutation_access(
@@ -114,26 +123,42 @@ def lock_dispatcher_mutation_access(
     )
     if (
         not locked_access
-        or locked_access.role.code not in {'dispatcher', 'admin', 'manager'}
+        or not control_access_allowed(
+            request, locked_access, role_codes={'dispatcher', 'admin', 'manager'},
+        )
         or not role_session_state_getter(request, locked_access)['is_active']
+    ):
+        return None
+    if is_tablet_control_request(request) and not get_control_shift(
+        locked_access, request, for_update=True,
     ):
         return None
     return locked_access
 
 
-def dispatcher_shift_required_response(access):
-    if get_active_dispatcher_shift(access):
+def dispatcher_shift_required_response(access, request=None):
+    shift = (
+        get_control_shift(access, request)
+        if is_tablet_control_request(request)
+        else get_active_dispatcher_shift(access)
+    )
+    if shift:
         return None
     return JsonResponse(
-        {'ok': False, 'error': DISPATCHER_SHIFT_CLOSED_ERROR},
+        {'ok': False, 'error': control_shift_closed_error(request)},
         status=409,
     )
 
 
 def dispatcher_shift_required_redirect(request, access, redirect_url):
-    if get_active_dispatcher_shift(access):
+    shift = (
+        get_control_shift(access, request)
+        if is_tablet_control_request(request)
+        else get_active_dispatcher_shift(access)
+    )
+    if shift:
         return None
-    messages.error(request, DISPATCHER_SHIFT_CLOSED_ERROR)
+    messages.error(request, control_shift_closed_error(request))
     return redirect(redirect_url)
 
 

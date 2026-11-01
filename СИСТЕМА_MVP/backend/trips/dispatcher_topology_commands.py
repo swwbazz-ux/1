@@ -27,7 +27,7 @@ from .dispatcher_guards import (
     dispatcher_json_payload,
     dispatcher_shift_required_response,
 )
-from .dispatcher_header import get_active_dispatcher_shift
+from .tablet_control import get_control_shift
 from .models import DispatcherActionType
 
 
@@ -73,7 +73,7 @@ def execute_dispatcher_move_excavator(
             },
             status=409,
         )
-    shift_error = dispatcher_shift_required_response(access)
+    shift_error = dispatcher_shift_required_response(access, request)
     if shift_error:
         return shift_error
     payload = dispatcher_json_payload(request)
@@ -170,7 +170,7 @@ def execute_dispatcher_move_excavator(
     }
     complete_client_action(
         employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
+        shift=get_control_shift(access, request),
         action_type='dispatcher_move_excavator',
         client_action_id=client_action_id,
         signature=signature,
@@ -199,7 +199,7 @@ def execute_dispatcher_assign_truck(
             },
             status=409,
         )
-    shift_error = dispatcher_shift_required_response(access)
+    shift_error = dispatcher_shift_required_response(access, request)
     if shift_error:
         return shift_error
     payload = dispatcher_json_payload(request)
@@ -259,7 +259,7 @@ def execute_dispatcher_assign_truck(
         }
         complete_client_action(
             employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
+            shift=get_control_shift(access, request),
             action_type='dispatcher_assign_truck',
             client_action_id=client_action_id,
             signature=signature,
@@ -301,7 +301,7 @@ def execute_dispatcher_assign_truck(
         }
         complete_client_action(
             employee=access.employee,
-            shift=get_active_dispatcher_shift(access),
+            shift=get_control_shift(access, request),
             action_type='dispatcher_assign_truck',
             client_action_id=client_action_id,
             signature=signature,
@@ -349,7 +349,7 @@ def execute_dispatcher_assign_truck(
     }
     complete_client_action(
         employee=access.employee,
-        shift=get_active_dispatcher_shift(access),
+        shift=get_control_shift(access, request),
         action_type='dispatcher_assign_truck',
         client_action_id=client_action_id,
         signature=signature,

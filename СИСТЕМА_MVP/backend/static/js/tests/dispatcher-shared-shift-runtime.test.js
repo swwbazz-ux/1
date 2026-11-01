@@ -10,16 +10,21 @@ const shiftActionTemplate = fs.readFileSync(
     path.join(backendRoot, "templates/includes/dispatcher_shift_action.html"),
     "utf8",
 );
+const dialogSource = fs.readFileSync(
+    path.join(backendRoot, "templates/includes/tablet-runtime/shared-shift-login.js"),
+    "utf8",
+);
 const realtimeSource = fs.readFileSync(
     path.join(backendRoot, "static/js/dispatcher-realtime-v1.js"),
     "utf8",
 );
 
 test("shared shift dialog exposes an idempotent rebind entrypoint", () => {
-    assert.match(shiftActionTemplate, /global\.initSharedShiftLogin = initSharedShiftLogin/);
-    assert.match(shiftActionTemplate, /dataset\.sharedShiftLoginBound/);
-    assert.match(shiftActionTemplate, /querySelectorAll\("\[data-shared-shift-login-cancel\]"\)/);
-    assert.match(shiftActionTemplate, /initSharedShiftLogin\(document\)/);
+    assert.match(shiftActionTemplate, /includes\/tablet-runtime\/shared-shift-login\.js/);
+    assert.match(dialogSource, /global\.initSharedShiftLogin = initSharedShiftLogin/);
+    assert.match(dialogSource, /dataset\.sharedShiftLoginBound/);
+    assert.match(dialogSource, /querySelectorAll\("\[data-shared-shift-login-cancel\]"\)/);
+    assert.match(dialogSource, /initSharedShiftLogin\(document\)/);
 });
 
 test("dispatcher realtime rebinds the shared shift dialog after DOM reconciliation", () => {
