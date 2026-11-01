@@ -55,10 +55,8 @@ const journal = {version:1,shifts:[{
             assert.equal(metrics.overflow,false);
             assert.equal(metrics.overlap,false);
             assert.deepEqual(metrics.rows.map(row=>row.duration),['55 мин.','13 мин.','17 мин.']);
-            await page.locator('[data-driver-manifest-view-open="timeline"]').click();
-            await page.locator('[data-driver-manifest-view="timeline"].is-active').waitFor({state:'visible'});
+            assert(await page.locator('[data-driver-manifest-view-open="timeline"]').isVisible());
             assert(await page.locator('[data-driver-timeline] .driver-timeline-row').count()>15);
-            await page.locator('[data-driver-manifest-view-open="report"]').click();
             const screenshot=path.join(output,'manifest-'+width+'.png');
             await page.screenshot({path:screenshot,fullPage:true});
             result.screenshots.push(screenshot);

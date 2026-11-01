@@ -26,7 +26,7 @@ const CONTROL_RUNTIME = read("static", "js", "dispatcher-control-v1.js");
 const PWA_SOURCE = read("trips", "dispatcher_pwa.py");
 const STYLES = dispatcherStyleSource();
 const PRODUCTION_MANIFEST = fs.readFileSync(
-    path.resolve(BACKEND, "..", "..", ".github", "deploy", "production-files.txt"),
+    path.resolve(BACKEND, "..", "..", ".github", "deploy", "fixtures", "dispatcher-release-files.txt"),
     "utf8"
 );
 
