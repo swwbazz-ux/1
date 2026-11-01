@@ -283,7 +283,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v378'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v380'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -4159,7 +4159,7 @@ def driver_report_duration_label(seconds, *, total=False):
     return f'{rounded_minutes} мин.'
 
 
-def driver_manifest_payload(*, shift, trips, downtime_events, reasons):
+def driver_manifest_payload(*, shift, trips, downtime_events, reasons, state_version=0):
     """Путёвка смены для телефона: рейсы и простои с серверными и местными ID.
 
     Телефон сводит их со своим журналом смены (driver-manifest-local-v1.js):
@@ -4243,12 +4243,14 @@ def driver_manifest_payload(*, shift, trips, downtime_events, reasons):
             'truck_id': shift.equipment_id,
             'shift_type': shift.shift_type,
         },
+        'state_version': state_version,
         'utc_offset_minutes': int(offset.total_seconds() // 60) if offset else 0,
         'trips': trip_rows,
         'downtimes': downtime_rows,
         'labels': {
             'excavators': excavators,
             'reasons': {str(reason.id): reason.button_label for reason in reasons},
+            'reason_flows': {str(reason.id): driver_downtime_flow(reason) for reason in reasons},
         },
     }
 
@@ -4660,6 +4662,16 @@ def driver_shift_view(request):
         return redirect('role_home')
     registration = getattr(access.employee, 'driver_registration', None)
 
+    # Версия фиксируется ДО чтения источников путёвки: параллельное закрытие
+    # простоя не должно присвоить старым строкам новую версию состояния.
+    operational_state_version = (
+        OperationalStateVersion.objects
+        .filter(key='production')
+        .values_list('version', flat=True)
+        .first()
+        or 0
+    )
+
     posted_client_action_id = request.POST.get('client_action_id', '').strip() if request.method == 'POST' else ''
     if posted_client_action_id and ShiftClientAction.objects.filter(
         action_type='driver_shift_opened',
@@ -4909,13 +4921,6 @@ def driver_shift_view(request):
     active_tab = request.GET.get('tab', 'work' if open_shift else 'shift')
     if active_tab not in {'work', 'shift', 'downtimes', 'manifest'}:
         active_tab = 'work'
-    operational_state_version = (
-        OperationalStateVersion.objects
-        .filter(key='production')
-        .values_list('version', flat=True)
-        .first()
-        or 0
-    )
     # Ручная «точковка» ведёт собственный цикл погрузка→погрузка. Она не должна
     # превращать обычный круг Водителя в кнопку разгрузки: круг принадлежит
     # только фактической погрузке, пришедшей от Машиниста экскаватора.
@@ -5494,6 +5499,7 @@ def driver_shift_view(request):
         trips=shift_trips,
         downtime_events=driver_shift_downtime_events,
         reasons=downtime_reasons,
+        state_version=operational_state_version,
     )
     downtime_calculated_at = timezone.now()
     downtime_reason_totals = driver_shift_downtime_seconds_by_reason(

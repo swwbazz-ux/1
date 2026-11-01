@@ -384,6 +384,18 @@ class SseQaHostKeyPreparationTests(unittest.TestCase):
 
 
 class ReleaseProtocolTests(unittest.TestCase):
+    def dispatcher_release_fixture(self):
+        # Историческую поставку Диспетчера проверяем независимо от состава
+        # текущего узкого исправления другого рабочего контура.
+        return (ROOT / '.github/deploy/fixtures/dispatcher-release-files.txt').read_text(encoding='utf-8').splitlines()
+
+    def test_driver_manifest_release_contains_only_the_three_required_runtime_files(self):
+        self.assertEqual(set(release_audit.read_manifest(ROOT)), {
+            'СИСТЕМА_MVP/backend/static/js/driver-manifest-local-v1.js',
+            'СИСТЕМА_MVP/backend/users/views.py',
+            'СИСТЕМА_MVP/backend/users/role_apps.py',
+        })
+
     def test_production_manifest_paths_are_unique_and_exist(self):
         production_files = release_audit.read_manifest(ROOT)
 
@@ -396,7 +408,7 @@ class ReleaseProtocolTests(unittest.TestCase):
     def test_dispatcher_shell_and_runtime_assets_are_consistent(self):
         result = release_audit.validate_dispatcher_shell(
             ROOT,
-            release_audit.read_manifest(ROOT),
+            self.dispatcher_release_fixture(),
         )
 
         self.assertRegex(
@@ -433,15 +445,11 @@ class ReleaseProtocolTests(unittest.TestCase):
         expected = (
             "СИСТЕМА_MVP/backend/trips/dispatcher_downtime_projection.py"
         )
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def test_dispatcher_canvas_assets_are_packaged_once(self):
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         for expected in (
             "СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css",
             "СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js",
@@ -454,9 +462,7 @@ class ReleaseProtocolTests(unittest.TestCase):
             "СИСТЕМА_MVP/backend/templates/trips/includes/"
             "dispatcher_equipment_detail.html"
         )
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def test_dispatcher_service_lists_include_is_packaged_once(self):
@@ -464,18 +470,14 @@ class ReleaseProtocolTests(unittest.TestCase):
             "СИСТЕМА_MVP/backend/templates/trips/includes/"
             "dispatcher_service_lists.html"
         )
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def test_dispatcher_board_include_is_packaged_once(self):
         expected = (
             "СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_board.html"
         )
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def test_dispatcher_push_include_is_packaged_once(self):
@@ -483,16 +485,12 @@ class ReleaseProtocolTests(unittest.TestCase):
             "СИСТЕМА_MVP/backend/templates/trips/includes/"
             "dispatcher_push_invite.html"
         )
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def test_dispatcher_url_routing_is_packaged_once(self):
         expected = "СИСТЕМА_MVP/backend/trips/urls.py"
-        production_files = (
-            ROOT / ".github" / "deploy" / "production-files.txt"
-        ).read_text(encoding="utf-8").splitlines()
+        production_files = self.dispatcher_release_fixture()
         self.assertEqual(production_files.count(expected), 1)
 
     def diagnostic_metadata(self):

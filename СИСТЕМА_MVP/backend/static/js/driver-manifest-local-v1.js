@@ -12,8 +12,9 @@
 
    Показ — сведение журнала с данными сервера (driver-manifest-data во
    фрагменте экрана, users/views.py driver_manifest_payload): одна строка на
-   рейс или простой, сопоставление по серверному ID или по ID события
-   телефона. Время строки — время нажатия на телефоне; серверное — только
+    рейс или простой, сопоставление по серверному ID или по ID события
+    телефона. Закрытые простои используют подтверждённые серверные границы.
+    Время местного рейса — время нажатия на телефоне; серверное — только
    если сервер доказанно поправил часы телефона (device_clock_adjusted), и
    тогда строка помечена «время сервера». */
 (function (root) {
@@ -217,9 +218,18 @@
 
     /* ---- Сведение журнала в строки путёвки ---- */
 
-    function replay(log) {
+    function replay(log, server) {
         var trips = [];
         var downtimes = [];
+        var serverDowntimes = server && Array.isArray(server.downtimes) ? server.downtimes : [];
+        function downtimeId(entry) {
+            var known = serverDowntimes.find(function (item) {
+                return (entry.server_downtime_id && entry.server_downtime_id === item.id)
+                    || (entry.downtime_id && entry.downtime_id === item.id)
+                    || intersects([entry.event_id, entry.local_downtime_id].filter(Boolean), item.local_ids);
+            });
+            return known ? known.id : (entry.server_downtime_id || entry.downtime_id || null);
+        }
         function tripFor(entry) {
             return trips.find(function (trip) {
                 return (entry.local_trip_id && trip.local_trip_id === entry.local_trip_id)
@@ -241,7 +251,7 @@
         }
         function openDowntime() {
             for (var index = downtimes.length - 1; index >= 0; index -= 1) {
-                if (!downtimes[index].ended_at) return downtimes[index];
+                if (!downtimes[index].ended_at && !downtimes[index].rejected) return downtimes[index];
             }
             return null;
         }
@@ -253,6 +263,8 @@
             var row;
             switch (entry.event_type) {
             case "driver.trip.loaded":
+                var waiting = openDowntime();
+                if (waiting && entry.status !== "rejected" && stamp(waiting.started_at) <= stamp(at)) waiting.ended_at = at;
                 /* Ручной цикл «погрузка → погрузка»: новая отметка завершает
                    предыдущий ручной рейс (core/offline_sync.py, cycle_advanced). */
                 trips.forEach(function (trip) {
@@ -315,16 +327,22 @@
                 break;
             case "driver.downtime.started":
                 var current = openDowntime();
-                /* Та же причина ещё раз — сервер оставляет идущий простой
-                   (downtime_unchanged); другая — закрывает его этим же временем. */
-                if (current && current.reason_id && current.reason_id === entry.reason_id) {
-                    touch(current, entry);
+                var id = downtimeId(entry);
+                /* Погрузка Экскаваторщиком закрывает ожидание на сервере без
+                   местного ended. Одинаковая причина не означает тот же простой.
+                   Повтор downtime_unchanged узнаём только по устойчивому ID. */
+                var existing = downtimes.find(function (item) {
+                    return (id && item.downtime_id === id)
+                        || intersects(item.local_ids, [entry.event_id, entry.local_downtime_id].filter(Boolean));
+                });
+                if (existing) {
+                    touch(existing, entry);
                     break;
                 }
-                if (current) current.ended_at = at;
+                if (current && entry.status !== "rejected") current.ended_at = at;
                 row = {
                     local_downtime_id: entry.local_downtime_id || entry.event_id,
-                    downtime_id: entry.server_downtime_id || null,
+                    downtime_id: id,
                     local_ids: [entry.local_downtime_id || entry.event_id],
                     reason_id: entry.reason_id,
                     reason_label: entry.reason_label,
@@ -336,16 +354,18 @@
                 touch(row, entry);
                 break;
             case "driver.downtime.ended":
-                row = downtimes.find(function (item) {
+                var endId = downtimeId(entry);
+                row = entry.status === "rejected" ? null : downtimes.find(function (item) {
                     return (entry.local_downtime_id && item.local_ids.indexOf(entry.local_downtime_id) >= 0)
-                        || (entry.downtime_id && item.downtime_id === entry.downtime_id);
-                }) || (entry.local_downtime_id || entry.downtime_id ? null : openDowntime());
+                        || (endId && item.downtime_id === endId);
+                }) || (entry.local_downtime_id || endId ? null : openDowntime());
+                if (entry.status === "rejected") row = null;
                 if (!row) {
                     /* Начало простоя телефон не видел (начат до этой версии или
                        записан сервером): строку даст сервер, отсюда — конец. */
                     row = {
                         local_downtime_id: "",
-                        downtime_id: entry.downtime_id,
+                        downtime_id: endId,
                         local_ids: [],
                         reason_id: null,
                         reason_label: "",
@@ -507,24 +527,38 @@
         var downtimes = serverDowntimes.map(function (item, index) {
             var mine = downtimeGroups[index];
             var started = firstWith(mine, "started_at");
-            var ended = lastWith(mine, "ended_at");
+            var ended = lastWith(mine.filter(function (row) { return !row.rejected; }), "ended_at");
+            var closed = !!item.ended_at;
             return {
                 downtime_id: item.id,
+                reason_id: item.reason_id,
+                canonical_closed: closed,
                 local_ids: allIds(item.local_ids, mine),
                 reason: text(item.reason) || text(started && started.reason_label) || "Простой",
-                started_at: started ? started.started_at : item.started_at,
-                ended_at: ended ? ended.ended_at : item.ended_at,
+                /* Закрытый серверный интервал окончателен. Синтетический конец
+                   местного replay не может растянуть его до следующей причины. */
+                started_at: item.started_at,
+                ended_at: closed ? item.ended_at : (ended ? ended.ended_at : null),
                 started_server_time: !!(started && started.started_server_time),
                 ended_server_time: !!(ended && ended.ended_server_time),
-                rejected: mine.some(function (row) { return row.rejected; }),
+                rejected: false,
+                has_rejected: mine.some(function (row) { return row.rejected; }),
                 reject: (mine.find(function (row) { return row.reject; }) || {}).reject || null,
                 source: mine.length ? "both" : "server"
             };
         });
         looseDowntimes.forEach(function (row) {
             if (row.end_only || !row.started_at) return;
+            var same = row.downtime_id && downtimes.find(function (item) { return item.downtime_id === row.downtime_id; });
+            if (same) {
+                same.local_ids = same.local_ids.concat(row.local_ids);
+                if (stamp(row.started_at) < stamp(same.started_at)) same.started_at = row.started_at;
+                if (row.ended_at && (!same.ended_at || stamp(row.ended_at) > stamp(same.ended_at))) same.ended_at = row.ended_at;
+                return;
+            }
             downtimes.push({
                 downtime_id: row.downtime_id || null,
+                reason_id: row.reason_id,
                 local_ids: row.local_ids,
                 reason: text(reasons[String(row.reason_id)]) || text(row.reason_label) || "Простой",
                 started_at: row.started_at,
@@ -540,8 +574,22 @@
         /* Простой без конца, за которым начат другой, закончился его началом —
            так же считает сервер (переключение причины). */
         downtimes.forEach(function (row, index) {
-            var next = downtimes[index + 1];
+            if (row.rejected) return;
+            var next = downtimes.slice(index + 1).find(function (item) { return !item.rejected; });
             if (!row.ended_at && next && next.started_at) row.ended_at = next.started_at;
+            /* Входящая погрузка — подтверждённая граница ожидания даже при
+               устаревшем снимке самого простоя. Закрытую серверную строку не
+               переписываем; новые локальные ожидания после погрузки не трогаем. */
+            var flow = (labels.reason_flows || {})[String(row.reason_id)];
+            if (!row.canonical_closed && flow === "waiting_loading") {
+                var start = stamp(row.started_at);
+                var end = stamp(row.ended_at);
+                var load = trips.find(function (trip) {
+                    var at = stamp(trip.loaded_at);
+                    return !trip.rejected && !trip.cancelled && at !== null && at >= start && (end === null || at < end);
+                });
+                if (load) row.ended_at = load.loaded_at;
+            }
         });
         return {trips: trips, downtimes: downtimes};
     }
@@ -616,10 +664,12 @@
                 total = {reason: row.reason, seconds: 0};
                 reasonTotals.push(total);
             }
-            total.seconds += seconds;
-            downtimeTotal += seconds;
+            if (!row.rejected) {
+                total.seconds += seconds;
+                downtimeTotal += seconds;
+            }
             var marks = [];
-            if (row.rejected) marks.push("не принято сервером");
+            if (row.rejected || row.has_rejected) marks.push("не принято сервером");
             timeline.push({
                 at: overlapStart,
                 kind: "downtime-start",
@@ -668,8 +718,12 @@
             }),
             downtimeTotal: downtimeTotal,
             downtimeTotalLabel: reportDuration(downtimeTotal, true),
-            downtimeRejected: rows.downtimes.filter(function (row) { return row.rejected; }).length,
-            running: rows.downtimes.some(function (row) { return row.started_at && !row.ended_at; }),
+            downtimeRejected: rows.downtimes.filter(function (row) { return row.rejected || row.has_rejected; }).length,
+            provisional: rows.downtimes.some(function (row) {
+                return !row.rejected && (row.source === "phone"
+                    || (row.source === "both" && !row.canonical_closed && !!row.ended_at));
+            }),
+            running: rows.downtimes.some(function (row) { return !row.rejected && row.started_at && !row.ended_at; }),
             timeline: timeline
         };
     }
@@ -700,6 +754,9 @@
         if (report.downtimeRejected) {
             html += '<div class="driver-report-row" data-driver-report-rejected="downtimes"><span>Из них не принято сервером</span><strong>'
                 + report.downtimeRejected + "</strong></div>";
+        }
+        if (report.provisional) {
+            html += '<div class="driver-inline-note" data-driver-manifest-provisional>Предварительные данные · ожидается сверка с сервером</div>';
         }
         return html;
     }
@@ -878,7 +935,8 @@
             var accessId = accessOf(shell);
             var now = nowFn();
             var page = serverData(shell);
-            var version = pageVersion();
+            var version = page && Number.isFinite(Number(page.state_version))
+                ? Number(page.state_version) : pageVersion();
             var local = localShiftAliases(shell);
             var open = text(shell.dataset.driverShiftOpen) === "true";
             var shownAlias = open ? shiftAlias(shell.dataset.driverShiftId) : "";
@@ -891,8 +949,27 @@
                 if (pageAliases.length) {
                     var pageShift = ensureShift(journal, pageAliases, now);
                     if (!pageShift.server || version >= Number(pageShift.server.version || 0)) {
-                        if (JSON.stringify(pageShift.server && pageShift.server.data) !== JSON.stringify(page)) changed = true;
-                        pageShift.server = {version: version, data: page};
+                        var snapshot = page;
+                        if (pageShift.server && version === Number(pageShift.server.version || 0)) {
+                            /* Один и тот же снимок может прийти повторно из кэша.
+                               Уже известное закрытие при этом не откатывается.
+                               Исправления истории с новой версией принимаются. */
+                            var previous = pageShift.server.data;
+                            var rows = (page.downtimes || []).slice();
+                            (previous.downtimes || []).forEach(function (item) {
+                                if (!item.ended_at) return;
+                                var index = rows.findIndex(function (row) { return row.id === item.id; });
+                                if (index < 0) rows.push(item);
+                                else rows[index] = item;
+                            });
+                            snapshot = Object.assign({}, page, {downtimes: rows});
+                            if (previous.shift && previous.shift.closed_at && !page.shift.closed_at) {
+                                snapshot.shift = Object.assign({}, page.shift, {closed_at: previous.shift.closed_at});
+                            }
+                        }
+                        if (!pageShift.server || pageShift.server.version !== version
+                            || JSON.stringify(pageShift.server.data) !== JSON.stringify(snapshot)) changed = true;
+                        pageShift.server = {version: version, data: snapshot};
                     }
                     if (!pageShift.opened_at && page.shift.opened_at) { pageShift.opened_at = page.shift.opened_at; changed = true; }
                     if (page.shift.closed_at && !pageShift.closed_at) { pageShift.closed_at = page.shift.closed_at; changed = true; }
@@ -925,13 +1002,21 @@
                 }
                 if (shown) {
                     var data = shown.server ? shown.server.data : null;
-                    var replayed = replay(shown.log);
+                    var replayed = replay(shown.log, data);
                     /* Подпись причины, не записанная в журнал (событие пришло без
                        экрана), — с кнопки причины на экране. */
                     replayed.downtimes.forEach(function (row) {
                         if (!row.reason_label && row.reason_id) row.reason_label = reasonLabelFor(shell, row.reason_id);
                     });
-                    var rows = merge(replayed, data, page && page.labels, page && page.trips);
+                    var labels = Object.assign({}, (data || page || {}).labels || {});
+                    labels.reason_flows = Object.assign({}, labels.reason_flows || {});
+                    replayed.downtimes.concat(data && data.downtimes || []).forEach(function (row) {
+                        var id = row.reason_id;
+                        var button = id && shell.querySelector('[data-driver-downtime-reason-button][data-driver-downtime-reason-id="' + id + '"]');
+                        if (button) labels.reason_flows[String(id)] = text(button.dataset.driverDowntimeFlow);
+                    });
+                    var enriched = data ? Object.assign({}, data, {labels: labels}) : null;
+                    var rows = merge(replayed, enriched, labels, page && page.trips);
                     var offsetSource = data || page;
                     result = {
                         shift: shown,
