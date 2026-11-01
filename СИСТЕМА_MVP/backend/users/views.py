@@ -1184,6 +1184,8 @@ def login_view(
     target_role_app=None,
     forced_next_url='',
 ):
+    if request.session.get('mining_master_tablet_device'):
+        return redirect('mining_master_tablet_login')
     role_app = get_role_app_for_request(request)
     login_role_app = target_role_app or role_app
     combined_mobile_login = bool(
@@ -1723,6 +1725,8 @@ def reclaim_role_session_view(request):
 
 
 def activate_access_view(request):
+    if request.session.get('mining_master_tablet_device'):
+        return redirect('mining_master_tablet_activate')
     access_id = request.session.get('pending_activation_access_id')
     if not access_id:
         return redirect('login')

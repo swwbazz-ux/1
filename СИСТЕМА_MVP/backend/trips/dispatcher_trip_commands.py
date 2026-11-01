@@ -27,6 +27,7 @@ from .dispatcher_guards import (
 from .free_bucket import close_free_bucket_acceptance_for_trip
 from .models import DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripStatus
 from .trip_creation import resolve_required_trip_measurements
+from .tablet_control import control_access_allowed, is_tablet_control_request
 
 
 DISPATCHER_MANUAL_TRIP_MAX_COUNT = 10
@@ -68,7 +69,7 @@ def execute_dispatcher_cancel_trip(
         .filter(id=access_id, is_active=True)
         .first()
     )
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
+    if not control_access_allowed(request, access, role_codes={'dispatcher', 'admin'}):
         return redirect('role_home')
     redirect_url = get_dispatcher_control_url(request)
 
@@ -146,7 +147,7 @@ def execute_dispatcher_complete_trip(
         .filter(id=access_id, is_active=True)
         .first()
     )
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
+    if not control_access_allowed(request, access, role_codes={'dispatcher', 'admin'}):
         return redirect('role_home')
     redirect_url = get_dispatcher_control_url(request)
 
@@ -287,7 +288,7 @@ def execute_dispatcher_manual_trip(
         .filter(id=access_id, is_active=True)
         .first()
     )
-    if not access or access.role.code not in {'dispatcher', 'admin'}:
+    if not control_access_allowed(request, access, role_codes={'dispatcher', 'admin'}):
         return redirect('role_home')
     redirect_url = get_dispatcher_control_url(request)
     if request.method != 'POST':
@@ -429,7 +430,8 @@ def execute_dispatcher_manual_trip(
         .order_by('-opened_at')
         .first()
     )
-    note = f'Добавлен диспетчером вручную: {reason}'[:1000]
+    actor_label = 'горным мастером' if is_tablet_control_request(request) else 'диспетчером'
+    note = f'Добавлен {actor_label} вручную: {reason}'[:1000]
     created = []
     for index in range(trips_count):
         trip = Trip.objects.create(

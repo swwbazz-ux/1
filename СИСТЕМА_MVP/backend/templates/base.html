@@ -1668,7 +1668,7 @@
     })(window, document);
     /* APP_PWA_CONTRACT_GUARD_END */
     </script>
-    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v6"></script>
+    <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v7"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
@@ -1729,7 +1729,7 @@
     <button type="button" class="app-inactive-role-reclaim" data-inactive-role-reclaim>Продолжить здесь</button>
 </div>
 {% endif %}
-{% if role_session_authenticated and not observer_mode and role_app %}{% include "includes/push_setup.html" %}{% endif %}
+{% if role_session_authenticated and not observer_mode and role_app and not request.mining_master_tablet_control and not request.mining_master_tablet_auth %}{% include "includes/push_setup.html" %}{% endif %}
 {% block body %}{% endblock %}
 
 <div class="app-sync-overlay" data-app-sync-overlay hidden aria-live="polite" aria-busy="true">
@@ -2640,6 +2640,7 @@ window.AppOperationalFragment = (function () {
 
 window.AppRealtimeConfig = {
     stateUrl: "{% url 'operational_state_version' %}",
+    loginUrl: window.location.pathname.indexOf('/mining-master/tablet/') === 0 ? '/mining-master/tablet/login/' : '/',
     initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
     workPollIntervalMs: 5000,
     observerPollIntervalMs: 15000,
@@ -2648,10 +2649,13 @@ window.AppRealtimeConfig = {
     maxSilentMs: 7000,
     mobileQueueKey: "mining-master-mobile-sync-queue-v1",
     screens: [
+        {name: "mining-master-tablet", role: "mining_master", mode: "custom", path: "^/mining-master/tablet/?$", customRefresh: true},
+        {name: "mining-master-tablet-shift-report", role: "mining_master", mode: "custom", path: "^/mining-master/tablet/dispatcher/shift-reports/(?:trucks|excavation|hourly-grid|hourly)/?$", customRefresh: true},
+        {name: "mining-master-tablet-reports", role: "mining_master", mode: "manual", path: "^/mining-master/tablet/(?:dispatcher|reports)/"},
         {name: "dispatcher-control", role: "dispatcher", mode: "custom", path: "^/dispatcher/control/?$", customRefresh: true},
         {name: "dispatcher-shift-report", role: "dispatcher", mode: "custom", path: "^/dispatcher/shift-reports/(?:trucks|excavation|hourly-grid|hourly)/?$", customRefresh: true},
         {name: "dispatcher-reports", role: "dispatcher", mode: "manual", path: "^/dispatcher/"},
-        {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/", customRefresh: true},
+        {name: "mining-master", role: "mining_master", mode: "custom", path: "^/mining-master/(?!tablet/)", customRefresh: true},
         {name: "excavator", role: "excavator_operator", mode: "custom", path: "^/excavator/work/?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
         {name: "driver", role: "driver", mode: "custom", path: "^/driver/(?:shift(?:/close)?/?)?$", customRefresh: true, foregroundReconcile: true, pollIntervalMs: 2000},
         {name: "system-admin", role: "system_admin", mode: "observer", path: "^/system-admin/"},
@@ -2660,7 +2664,9 @@ window.AppRealtimeConfig = {
         {name: "management-reports", role: "management", mode: "manual", path: "^/reports/"}
     ],
     customRefreshPaths: [
-        "^/mining-master/",
+        "^/mining-master/(?!tablet/)",
+        "^/mining-master/tablet/?$",
+        "^/mining-master/tablet/dispatcher/shift-reports/(?:trucks|excavation|hourly-grid|hourly)/?$",
         "^/excavator/work/?$",
         "^/driver/(?:shift(?:/close)?/?)?$",
         "^/reports/shift-analytics/?$",

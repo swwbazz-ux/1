@@ -1025,6 +1025,8 @@ def mining_master_assign_truck_view(request):
 
 
 def mining_master_assignments_view(request):
+    if request.session.get('mining_master_tablet_device'):
+        return redirect('mining_master_tablet')
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')

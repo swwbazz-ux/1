@@ -1,10 +1,10 @@
-{% if access.role.code == 'dispatcher' %}
-<header class="dispatcher-topbar dispatcher-unified-topbar no-print" aria-label="Горный диспетчер — {{ title }}">
+{% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}
+<header class="dispatcher-topbar dispatcher-unified-topbar no-print" aria-label="{% if request.mining_master_tablet_control %}Горный мастер{% else %}Горный диспетчер{% endif %} — {{ title }}">
     {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen=title %}
 </header>
 
 <div class="dispatcher-report-controlbar dispatcher-linked-report-controlbar no-print">
-    <nav class="dispatcher-subnav" aria-label="Разделы отчетов диспетчера">
+    <nav class="dispatcher-subnav" aria-label="Разделы отчетов {% if request.mining_master_tablet_control %}горного мастера{% else %}диспетчера{% endif %}">
         <a href="{% url 'dispatcher_reports' %}">Все отчёты</a>
         <a class="{% if active == 'shift_analytics' %}is-active{% endif %}" href="{% url 'shift_analytics_report' %}">Смена</a>
         <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>

@@ -5,7 +5,9 @@
                 <p>Фильтры пульта, служебные действия, активные рейсы и отчеты.</p>
             </div>
             <div class="dispatcher-tool-actions">
+                {% if not request.mining_master_tablet_control %}
                 <button type="button" class="button-link" data-dispatcher-theme-toggle>День / Ночь</button>
+                {% endif %}
                 <a class="button-link" href="{% url 'volume_report' %}">Открыть отчет по объемам</a>
                 <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}">Суточный отчет заказчику</a>
                 <a class="button-link button-secondary" href="{% url 'mechanic_dashboard' %}">Открыть экран механиков</a>
