@@ -1,7 +1,7 @@
 /* APK-only presentation adapter. All operations stay in the existing role handlers. */
 (function (global) {
     "use strict";
-    var VERSION = "1.8.0";
+    var VERSION = "1.8.1";
     var SUPPORTED_SHELLS = ["mining-master-mobile-shell-v165"];
     var RELATED_PATHS = [
         "/mining-master/tablet/dispatcher/reports/", "/mining-master/tablet/dispatcher/shift-log/", "/mining-master/tablet/dispatcher/management/",
@@ -143,6 +143,67 @@
         if (!shell) return;
         setClass(shell, "dispatcher-day", false);
         setClass(shell, "dispatcher-night", true);
+    }
+    function shiftIdentityKey(badge) {
+        var photo = badge.querySelector("img");
+        return JSON.stringify([badge.textContent.trim(), badge.title, photo && photo.getAttribute("src")]);
+    }
+    function shiftActionKey(slot) {
+        // Compare the server command, not the rotating CSRF mask, a typed PIN or client binding markers.
+        var controls = slot.querySelectorAll("form, button, input:not([name=csrfmiddlewaretoken]), select, option");
+        return JSON.stringify(Array.from(controls, function (el) {
+            return [el.tagName, el.name, el.type, el.getAttribute("action"), el.getAttribute("value"),
+                el.getAttribute("data-confirm"), el.getAttribute("data-confirm-person"),
+                el.getAttribute("data-confirm-date"), el.getAttribute("data-confirm-time"),
+                el.hasAttribute("data-shared-shift-login-open"), el.tagName === "BUTTON" ? el.textContent.trim() : ""];
+        }));
+    }
+    function syncShiftHeader(current, fresh, shiftChanged) {
+        var oldBadge = current.querySelector(".dispatcher-topbar .dispatcher-active-badge");
+        var newBadge = fresh.querySelector(".dispatcher-topbar .dispatcher-active-badge");
+        var identityChanged = oldBadge && newBadge && shiftIdentityKey(oldBadge) !== shiftIdentityKey(newBadge);
+        if (identityChanged) oldBadge.replaceWith(newBadge);
+        var oldContext = current.querySelector(".dispatcher-topbar .dispatcher-command-context");
+        var newContext = fresh.querySelector(".dispatcher-topbar .dispatcher-command-context");
+        if (oldContext && newContext && oldContext.textContent !== newContext.textContent) oldContext.replaceWith(newContext);
+        var oldSlot = current.querySelector(".dispatcher-topbar .dispatcher-shift-slot");
+        var newSlot = fresh.querySelector(".dispatcher-topbar .dispatcher-shift-slot");
+        if (oldSlot && newSlot && (shiftChanged || identityChanged || shiftActionKey(oldSlot) !== shiftActionKey(newSlot))) {
+            oldSlot.replaceWith(newSlot);
+            if (global.initAppConfirmForms) global.initAppConfirmForms();
+            if (global.initSharedShiftLogin) global.initSharedShiftLogin(newSlot);
+        }
+        // Keep the same panel, navigation, search, utility controls and running clock.
+        if (identityChanged) syncWorkplaceHeader();
+    }
+    var headerFragmentRuntime = null;
+    function bindShiftHeaderFragments() {
+        var runtime = global.AppOperationalFragment;
+        if (headerFragmentRuntime === runtime || !runtime || typeof runtime.parseRoot !== "function" || !isCompatible()) return;
+        var parse = runtime.parseRoot;
+        runtime.parseRoot = function (html, selector) {
+            var fresh = parse.apply(this, arguments);
+            if (selector !== ".dispatcher-board" || !fresh) return fresh;
+            var current = doc.querySelector(".dispatcher-board");
+            var newHeader = fresh.querySelector(".dispatcher-topbar");
+            if (!current || !newHeader) return fresh;
+            // Bind shift forms from the trusted bundled binder even on a full board replacement.
+            newHeader.querySelectorAll("script").forEach(function (script) { script.remove(); });
+            var shiftChanged = current.dataset.dispatcherShiftOpen !== fresh.dataset.dispatcherShiftOpen ||
+                current.dataset.dispatcherOwnShiftOpen !== fresh.dataset.dispatcherOwnShiftOpen;
+            // Realtime parses only after checking version and interaction safety; its synchronous
+            // reconcile then copies the accepted board attributes (or installs the entire fresh board).
+            Promise.resolve().then(function () {
+                if (doc.querySelector(".dispatcher-board") === current &&
+                    current.dataset.operationalStateVersion === fresh.dataset.operationalStateVersion &&
+                    current.dataset.dispatcherShiftOpen === fresh.dataset.dispatcherShiftOpen &&
+                    current.dataset.dispatcherOwnShiftOpen === fresh.dataset.dispatcherOwnShiftOpen) {
+                    syncShiftHeader(current, fresh, shiftChanged);
+                }
+            });
+            return fresh;
+        };
+        headerFragmentRuntime = runtime;
     }
     var complexLabels = new Intl.Collator("ru", { numeric: true });
     function syncComplexOrder() {
@@ -1055,6 +1116,7 @@
             setClass(doc.documentElement, "cr-mm-tablet-page", pageReady);
             return;
         }
+        bindShiftHeaderFragments();
         bind(); reconcile();
     }
     global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); syncAssignmentButton(); clearFoundTruck(); } };

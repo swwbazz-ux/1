@@ -138,12 +138,14 @@ public final class MiningMasterTabletActivity extends MainActivity {
         try {
             String css = asset("tablet/mining-master-tablet.css");
             String js = asset("tablet/mining-master-tablet.js");
+            String shiftLogin = asset("shared-shift-login.js");
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
                 + "||" + new JSONArray(TabletUrlPolicy.TABLET_PATHS).toString()
                 + ".indexOf(location.pathname)===-1)return;"
                 + "function boot(){if(!document.head)return;var s=document.getElementById('cr-mining-master-tablet-css');"
                 + "if(!s){s=document.createElement('style');s.id='cr-mining-master-tablet-css';s.textContent="
                 + JSONObject.quote(css) + ";document.head.appendChild(s);}"
+                + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
                 + js + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
         } catch (Exception error) {
             android.util.Log.e("MiningMasterTablet", "Tablet layout assets are unavailable");

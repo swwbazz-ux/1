@@ -240,6 +240,10 @@ android {
                 String resourceProfile = profile.getProperty('resourceProfile', profileDir.name)
                 res.srcDir(new File(profileDirectory, "${resourceProfile}/res"))
                 assets.srcDir(new File(profileDir, 'assets'))
+                if (profileDir.name == 'mining_master_tablet') {
+                    // The installed tablet uses the same trusted PIN bindings as the Django header.
+                    assets.srcDir(new File(rootProject.projectDir, '../../../СИСТЕМА_MVP/backend/templates/includes/tablet-runtime'))
+                }
                 File profileManifest = new File(profileDir, 'AndroidManifest.xml')
                 if (profileManifest.isFile()) {
                     manifest.srcFile(profileManifest)
