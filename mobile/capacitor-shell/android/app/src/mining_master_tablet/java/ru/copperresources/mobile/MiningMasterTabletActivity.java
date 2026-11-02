@@ -64,6 +64,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
         installSystemInsetsListener();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView view = getBridge().getWebView();
+            reportDownloads.install(view);
             // Explicit release boundary: no DevTools on the delivered signed APK.
             WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
             view.getSettings().setAllowFileAccess(false);
@@ -129,6 +130,28 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 if (!tabletScript.isEmpty()) WebViewCompat.addDocumentStartJavaScript(view, systemInsetsScript() + tabletScript,
                     Collections.singleton(TabletUrlPolicy.ORIGIN));
             }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                WebViewCompat.addWebMessageListener(view,"CopperFieldPage",Collections.singleton(TabletUrlPolicy.ORIGIN),
+                    (sender,message,origin,mainFrame,reply) -> {
+                        if (!mainFrame || !TabletUrlPolicy.trusted(sender.getUrl()) || !TabletUrlPolicy.ORIGIN.equals(origin.toString())
+                            || message.getType()!=androidx.webkit.WebMessageCompat.TYPE_STRING) return;
+                        try {
+                            String data=message.getData();
+                            if (data==null || data.length()>28*1024*1024) return;
+                            JSONObject obj=new JSONObject(data);
+                            if ("prepared".equals(obj.optString("op"))) {
+                                getSharedPreferences("field_runtime",MODE_PRIVATE).edit().putBoolean("prepared",true).apply();
+                                return;
+                            }
+                            String path=obj.getString("route");
+                            if (!path.startsWith(TabletUrlPolicy.CONTROL_PATH) || path.startsWith("//") || path.contains("#")) return;
+                            String address=TabletUrlPolicy.ORIGIN+path, html=obj.getString("html");
+                            if (!(TabletUrlPolicy.tabletPage(address)||TabletUrlPolicy.entryPage(address)) ||
+                                !html.startsWith("<!doctype html>") || !html.contains("data-cr-field-local")) return;
+                            sender.post(() -> { if (!isFinishing() && !isDestroyed()) sender.loadDataWithBaseURL(address,html,"text/html","UTF-8",address); });
+                        } catch (org.json.JSONException invalid) { android.util.Log.w("MiningMasterTablet","Invalid field page"); }
+                    });
+            }
             // The initial load may have begun before the document-start hook was installed.
             injectTablet(view);
             if (view.getProgress() == 100) webPrint.pageFinished(view.getUrl());
@@ -136,6 +159,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
             // is attached. With no network, explicitly load the saved document.
             android.net.ConnectivityManager networks = getSystemService(android.net.ConnectivityManager.class);
             if (networks != null && networks.getActiveNetwork() == null) loadSavedBoard(view);
+            else if (getSharedPreferences("field_runtime",MODE_PRIVATE).getBoolean("prepared",false))
+                loadSavedBoard(view,TabletUrlPolicy.CONTROL_PATH,true);
         }
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
@@ -159,19 +184,30 @@ public final class MiningMasterTabletActivity extends MainActivity {
         immersive();
     }
 
-    // Only a failed GET of the original board can display its locally saved copy.
+    // A failed GET of an allowed workplace page restores that employee's local screen.
     private boolean showSavedBoard(WebView view, WebResourceRequest request) {
         if (loadingOfflineCopy || !request.isForMainFrame() || !"GET".equals(request.getMethod())
-                || !TabletUrlPolicy.controlPage(request.getUrl().toString())) return false;
+                || !(TabletUrlPolicy.tabletPage(request.getUrl().toString()) || TabletUrlPolicy.entryPage(request.getUrl().toString()))) return false;
+        String path=request.getUrl().getEncodedPath();
+        String query=request.getUrl().getEncodedQuery();
+        String requested=path+(query==null?"":"?"+query);
         loadingOfflineCopy = true;
         view.post(() -> {
-            if (!isFinishing() && !isDestroyed() && loadingOfflineCopy) loadSavedBoard(view);
+            if (!isFinishing() && !isDestroyed() && loadingOfflineCopy) loadSavedBoard(view,requested);
         });
         return true;
     }
 
     private void loadSavedBoard(WebView view) {
-        String url = TabletUrlPolicy.START_URL + "#cr-saved-board";
+        loadSavedBoard(view,TabletUrlPolicy.CONTROL_PATH);
+    }
+
+    private void loadSavedBoard(WebView view,String requested) {
+        loadSavedBoard(view,requested,false);
+    }
+
+    private void loadSavedBoard(WebView view,String requested,boolean startup) {
+        String url = TabletUrlPolicy.START_URL + "#cr-saved-board="+android.net.Uri.encode(requested)+(startup?"&startup=1":"");
         loadingOfflineCopy = true;
         try {
             String html = asset("tablet/tablet-planning-offline.html");
@@ -195,10 +231,14 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + asset("tablet/tablet-planning-copy.js") + "\n"
                 + asset("tablet/tablet-planning-cache.js") + "\n" + asset("tablet/tablet-planning-entry.js");
             String planningCss = asset("tablet/tablet-planning-copy.css");
+            String field = asset("tablet/field-ledger.js") + "\n" + asset("tablet/field-transport.js") + "\n"
+                + asset("tablet/field-archive.js") + "\n" + asset("tablet/field-reports.js") + "\n" + asset("tablet/field-identity.js") + "\n"
+                + asset("tablet/field-live-actions.js") + "\n";
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
                 + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
                 + ".indexOf(location.pathname)!==-1;"
                 + "if(!workplace&&" + new JSONArray(TabletUrlPolicy.ENTRY_PATHS) + ".indexOf(location.pathname)===-1)return;"
+                + field
                 // Install focus handling before the server-rendered phone field requests autofocus.
                 + entryJs + "\n"
                 + "function addStyle(id,css){if(document.getElementById(id))return;"

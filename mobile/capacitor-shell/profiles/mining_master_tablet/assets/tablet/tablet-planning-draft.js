@@ -149,7 +149,8 @@
     async function request(path,options={}) {
         const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),6000);
         try {
-            const res=await global.fetch(path,{cache:"no-store",credentials:"same-origin",redirect:"follow",...options,signal:controller.signal});
+            const transport=global.FieldTransport?.wireFetch||global.fetch.bind(global);
+            const res=await transport(path,{cache:"no-store",credentials:"same-origin",redirect:"follow",...options,signal:controller.signal});
             if (res.status>=500) throw failure("queued",unavailable);
             return res;
         } catch(e) {
@@ -365,7 +366,68 @@
             return row;
         });
     }
-    global.CopperTabletDraft={load,save,activate,resume,rebase,current:()=>change()};
-    global.addEventListener("online",()=>resume().catch(()=>{}));
+    const legacyAPI={load,save,activate,resume,rebase,current:()=>change()};
+    function sharedRow(s,old){
+        const pending=old?.activation && !["applied","migrated"].includes(old.activation.status);
+        return {...s.draft,base:s.draft.sync_base||s.live,activation:pending?old.activation:s.last_activation||null};
+    }
+    async function sharedState(){
+        const old=await change(),s=await global.FieldLedger.importDraft(old);
+        return {old,s};
+    }
+    async function signedLoad(_live,ctx){
+        context=ctx;
+        const {old,s}=await sharedState();return sharedRow(s,old);
+    }
+    async function signedSave(p,ctx){
+        const {old}=await sharedState();return sharedRow(await global.FieldLedger.saveDraft(p,ctx?.revision),old);
+    }
+    async function signedActivate(ctx){
+        const {old,s}=await sharedState(),a=old?.activation;
+        if(a && !["applied","migrated"].includes(a.status)){
+            if(a.command){
+                // The old server might already have committed this immutable command.
+                // Recover its original receipt. Never substitute a new signed operation.
+                return run(ctx?.document||global.document,true);
+            }
+            if(a.stamp!==ownerStamp(ctx?.document||global.document))
+                return {status:"auth",message:"Предыдущую активацию должен подтвердить подготовивший её мастер."};
+            if(!s.actor?.verified||s.locked||!s.shift.is_open)throw new Error("Сначала войдите в свою смену.");
+            await update(a.id,current=>{current.status="migrating";current.owner=null;});
+            await global.FieldLedger.applyDraft(ctx?.revision,a.id);
+            await update(a.id,current=>{current.status="migrated";});
+        }else{
+            const last=s.last_activation;
+            if(last && !["applied","conflict","auth"].includes(last.status) && equal(last.target,s.draft.payload)){
+                global.FieldTransport?.wake();
+                return {status:"queued",message:"Расстановка применена на планшете и ожидает подтверждения."};
+            }
+            if(last?.status==="conflict" || last?.status==="auth")return {status:last.status,message:last.message};
+            await global.FieldLedger.applyDraft(ctx?.revision);
+        }
+        global.dispatchEvent(new Event("copper-tablet-planning-applied"));
+        global.FieldTransport?.wake();
+        return {status:"queued",message:"Расстановка применена на планшете. Ожидается подтверждение системы."};
+    }
+    async function signedResume(ctx){
+        const {old}=await sharedState();
+        if(old?.activation?.command && old.activation.status==="queued" && old.activation.owner)await resume(ctx);
+        global.FieldTransport?.wake();
+    }
+    async function signedRebase(ctx){
+        const {old,s}=await sharedState();
+        if(old?.activation?.command && old.activation.status==="conflict"){
+            const revised=await rebase(ctx);return sharedRow(await global.FieldLedger.saveDraft(revised.payload,ctx?.revision),null);
+        }
+        if(s.last_activation?.status!=="conflict")throw new Error("Нет подтверждённого конфликта для сверки.");
+        await global.FieldLedger.resolveConflict(s.last_activation.id);
+        global.FieldTransport?.wake();return signedLoad(null,ctx);
+    }
+    // Keep compatibility with older APK callers without a ledger. The new tablet never
+    // dispatches a freshly-created unsigned operation through the old path.
+    const api=()=>global.FieldLedger?{load:signedLoad,save:signedSave,activate:signedActivate,
+        resume:signedResume,rebase:signedRebase,current:()=>signedLoad(null,context)}:legacyAPI;
+    global.CopperTabletDraft=Object.fromEntries(Object.keys(legacyAPI).map(key=>[key,(...args)=>api()[key](...args)]));
+    global.addEventListener("online",()=>global.CopperTabletDraft.resume().catch(()=>{}));
 })(window);
 

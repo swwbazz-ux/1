@@ -22,7 +22,12 @@ final class TabletReportDownloads {
     private final AtomicBoolean busy = new AtomicBoolean(false);
     private volatile boolean destroyed;
 
-    TabletReportDownloads(MiningMasterTabletActivity activity) { this.activity = activity; }
+    private final TabletOfflineReportBridge offline;
+    TabletReportDownloads(MiningMasterTabletActivity activity) {
+        this.activity=activity;
+        this.offline=new TabletOfflineReportBridge(activity.getFilesDir(),worker);
+    }
+    void install(android.webkit.WebView view) { offline.install(view); }
 
     void download(String url, String userAgent, String disposition, String mimeType) {
         if (!TabletUrlPolicy.trusted(url)) { message("Загрузка с внешнего адреса запрещена"); return; }
@@ -131,5 +136,5 @@ final class TabletReportDownloads {
             if (!destroyed && !activity.isFinishing()) Toast.makeText(activity, text, Toast.LENGTH_LONG).show();
         });
     }
-    void destroy() { destroyed = true; worker.shutdownNow(); }
+    void destroy() { destroyed=true;offline.destroy();worker.shutdown(); }
 }

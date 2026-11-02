@@ -77,6 +77,11 @@
         }
     }
     win.CopperTabletPlanningEntry = {install};
-    if (offline) win.CopperTabletPlanningCache.restore().then(install).catch(() => { /* the native retry action stays visible */ });
+    if (offline) {
+        // The older read-only snapshot also remains usable on a tablet that has
+        // yet to perform its first authenticated full sync after this upgrade.
+        const fallback=()=>win.CopperTabletPlanningCache.restore().then(install);
+        win.FieldIdentity.recover().then(opened=>{if(!opened)return fallback();}).catch(()=>fallback().catch(()=>{}));
+    }
     else install();
 })(window, document);
