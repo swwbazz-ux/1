@@ -99,6 +99,10 @@
         canvas.dataset.dispatcherCanvas="on";
         const shell=make(doc,"main");copyAttributes(sourceShell,shell,attrs(sourceShell));
         const board=safeClone(sourceBoard,doc);
+        const title=board.querySelector(".dispatcher-command-context > strong");
+        if(title)title.textContent="Предварительная расстановка";
+        const zoneTitle=board.querySelector(".dispatcher-zone-head h2");
+        if(zoneTitle)zoneTitle.textContent="Предварительная расстановка";
         canvas.appendChild(shell);shell.appendChild(board);doc.body.appendChild(canvas);
         // A cloned HTML form can still react to Enter by itself. Block every submission.
         doc.addEventListener("submit",e=>{e.preventDefault();e.stopImmediatePropagation();},true);
@@ -126,6 +130,11 @@
             }
         }
         const indicator=source.querySelector("body > .app-connection-dot");
+        const topGrip=doc.querySelector(".cr-mm-panel-handle[data-cr-panel-side='top']");
+        if(topGrip){
+            const caption=make(doc,"span","","Черновик");
+            caption.dataset.planGripCaption="";caption.setAttribute("aria-hidden","true");topGrip.appendChild(caption);
+        }
         if(indicator)doc.body.appendChild(safeClone(indicator,doc));
         const standard=source.getElementById("app-confirm-modal");
         state.modal=standard?safeClone(standard,doc):fallbackModal(doc);
@@ -268,6 +277,36 @@
         present.forEach(n=>n.remove());
         for(const id of ids){const tile=create(id);if(tile)list.insertBefore(tile,filler);}
     }
+    function stripLiveReadouts(state) {
+        // projectSavedBoard also renders the live surface when offline. Only
+        // the separate planning document should omit shift performance.
+        if (!state.doc.documentElement.hasAttribute("data-cr-plan-copy")) return;
+        const root=state.board;
+        root.querySelectorAll('.dispatcher-plan-strip,.dispatcher-plan-loop-badge,.dispatcher-tile-plan-percent,.dispatcher-tile-plan-label,.mm-mobile-plan-ring,.complex-kpi[data-kpi="plan"],.complex-kpi[data-kpi="volume"],.complex-downtime-status,[data-gd-downtime-timer]').forEach(node=>node.remove());
+        for(const tile of root.querySelectorAll(".dispatcher-complex-card,.dispatcher-truck-tile,.dispatcher-excavator-garage-tile")){
+            if(tile.classList.contains("is-placeholder")||tile.classList.contains("status-empty"))continue;
+            for(const attr of [...tile.attributes]){
+                if(attr.name.startsWith("data-plan-") && attr.name!=="data-plan-selected" && attr.name!=="data-plan-hit")tile.removeAttribute(attr.name);
+            }
+            for(const prop of ["--tile-progress","--tile-total-progress","--complex-progress","--complex-total-progress"])tile.style.removeProperty(prop);
+            tile.classList.remove("is-plan-overrun","has-plan-progress","is-inactive-plan-fill");
+            for(const name of [...tile.classList])if(name.startsWith("status-"))tile.classList.remove(name);
+            tile.removeAttribute("data-equipment-state");
+            if(tile.matches(".dispatcher-complex-card")){
+                tile.querySelector(".complex-state-chip")?.remove();
+                const count=tile.querySelector('[data-kpi="trucks"]');
+                if(count){
+                    count.classList.remove("is-minus","is-plus");
+                    count.title="Самосвалов в черновике";
+                    const number=count.querySelector("b");
+                    if(number)number.textContent=String(tile.querySelectorAll(truckSelector).length);
+                }
+            }else{
+                const label=tile.querySelector(":scope > span");
+                if(label)label.textContent=tile.closest(".dispatcher-complex-card")?"В комплексе":"В гараже";
+            }
+        }
+    }
     function renderPlan(state) {
         const {board,catalog}=state;
         const rows=new Map(state.value.payload.excavators.map(r=>[r.excavator_id,r.truck_ids]));
@@ -300,6 +339,7 @@
         fillGarage(board.querySelector(".dispatcher-trucks"),idleTrucks,truckSelector,id=>truckTile(state,id,true));
         fillGarage(board.querySelector(".dispatcher-excavators"),idleExcavators,garageSelector,id=>garageExcavator(state,id));
         board.querySelectorAll(sourceSelector).forEach(n=>{n.draggable=false;});
+        stripLiveReadouts(state);
         const activateButton=state.doc.querySelector("[data-plan-activate]");
         if(activateButton)activateButton.disabled=!mayEdit(state);
         showSelection(state);

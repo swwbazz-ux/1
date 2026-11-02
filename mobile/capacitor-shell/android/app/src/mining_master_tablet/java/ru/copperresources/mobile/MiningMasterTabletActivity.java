@@ -132,6 +132,10 @@ public final class MiningMasterTabletActivity extends MainActivity {
             // The initial load may have begun before the document-start hook was installed.
             injectTablet(view);
             if (view.getProgress() == 100) webPrint.pageFinished(view.getUrl());
+            // Capacitor can start the first HTTP request before this WebViewClient
+            // is attached. With no network, explicitly load the saved document.
+            android.net.ConnectivityManager networks = getSystemService(android.net.ConnectivityManager.class);
+            if (networks != null && networks.getActiveNetwork() == null) loadSavedBoard(view);
         }
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
@@ -160,15 +164,23 @@ public final class MiningMasterTabletActivity extends MainActivity {
         if (loadingOfflineCopy || !request.isForMainFrame() || !"GET".equals(request.getMethod())
                 || !TabletUrlPolicy.controlPage(request.getUrl().toString())) return false;
         loadingOfflineCopy = true;
-        String url = TabletUrlPolicy.START_URL + "#cr-saved-board";
         view.post(() -> {
-            if (!isFinishing() && !isDestroyed() && loadingOfflineCopy
-                    && (TabletUrlPolicy.controlPage(view.getUrl()) || "about:blank".equals(view.getUrl()))) {
-                try { view.loadDataWithBaseURL(url, asset("tablet/tablet-planning-offline.html"), "text/html", "UTF-8", url); }
-                catch (java.io.IOException ignored) { view.reload(); }
-            }
+            if (!isFinishing() && !isDestroyed() && loadingOfflineCopy) loadSavedBoard(view);
         });
         return true;
+    }
+
+    private void loadSavedBoard(WebView view) {
+        String url = TabletUrlPolicy.START_URL + "#cr-saved-board";
+        loadingOfflineCopy = true;
+        try {
+            String html = asset("tablet/tablet-planning-offline.html");
+            view.stopLoading();
+            view.loadDataWithBaseURL(url, html, "text/html", "UTF-8", url);
+        } catch (java.io.IOException error) {
+            loadingOfflineCopy = false;
+            android.util.Log.e("MiningMasterTablet", "Saved board shell missing", error);
+        }
     }
 
     private String readTabletScript() {
@@ -199,7 +211,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "op.onsuccess=function(){var db=op.result,tx=db.transaction('board','readwrite');tx.objectStore('board').delete('latest');tx.oncomplete=function(){db.close();};};}return;}"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "addStyle('cr-tablet-planning-copy-css'," + JSONObject.quote(planningCss) + ");"
-                + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + planning + "\nreturn;}"
+                + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + js + "\n" + planning + "\nreturn;}"
                 + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
                 + js + "\n" + planning + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
         } catch (Exception error) {

@@ -115,6 +115,10 @@
         module.exports = { allowedLocation: allowedLocation, allowedRelatedLocation: allowedRelatedLocation, snapshot: snapshot, canDrop: canDrop, dispatchExistingDrop: dispatchExistingDrop, createPanelState: createPanelState };
         return;
     }
+    if (global.document && global.document.documentElement.hasAttribute("data-cr-saved-board")) {
+        global.CopperMiningMasterTablet = { createPanelState: createPanelState };
+        return;
+    }
     if (global.CopperMiningMasterTablet) {
         global.CopperMiningMasterTablet.init();
         return;

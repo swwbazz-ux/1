@@ -1,15 +1,80 @@
 /* All planning overrides live inside the inert copy. The host has only the frame. */
-iframe[data-cr-planning-frame] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: 0 !important; z-index: 2147482000 !important; background: #10191e; }
-html[data-cr-plan-copy] .dispatcher-complexes { background: #112a3c !important; }
-html[data-cr-plan-copy] .dispatcher-zone-grid { background-color: #112a3c !important; }
-html[data-cr-plan-copy] .dispatcher-complex-card { border-color: #365b74; }
-html[data-cr-plan-copy] [data-plan-selected] { outline: 3px solid var(--gd-cyan,#69d0dc); outline-offset: -3px; }
-html[data-cr-plan-copy] [data-plan-hit] { outline: 3px solid var(--gd-cyan,#69d0dc); outline-offset: -3px; }
+iframe[data-cr-planning-frame] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: 0 !important; z-index: 2147483647 !important; background: #211729; }
+/* The color family identifies a draft even when the menu is closed.
+   Existing field geometry, icons and semantic connection colors stay with the board. */
+html[data-cr-plan-copy] {
+  --plan-floor: #211729; --plan-panel: #302038; --plan-card: #442f50;
+  --plan-tile: #563c62; --plan-hover: #62456f; --plan-active: #704783;
+  --plan-line: #805d90; --plan-ink: #fbf2ff; --plan-muted: #dccce3;
+  --plan-accent: #ecbaff; --plan-hit: #89eadb;
+}
+html[data-cr-plan-copy],
+html[data-cr-plan-copy] :is(body,.dispatcher-canvas,.dispatcher-shell,.dispatcher-board,.dispatcher-complexes,.dispatcher-zone-grid) {
+  background: var(--plan-floor) !important; color:var(--plan-ink) !important;
+}
+html[data-cr-plan-copy] .dispatcher-shell {
+  --gd-panel:var(--plan-panel); --gd-card:var(--plan-card); --gd-panel-soft:var(--plan-card);
+  --gd-line:var(--plan-line); --gd-ink:var(--plan-ink); --gd-text:var(--plan-ink); --gd-muted:var(--plan-muted);
+}
+html[data-cr-plan-copy] :is(.dispatcher-left,.dispatcher-right,.dispatcher-garage-panel,.dispatcher-topbar,
+  .dispatcher-header-row,.dispatcher-command-identity,.dispatcher-command-main,.dispatcher-command-actions,
+  .dispatcher-command-context,.dispatcher-active-badge,.dispatcher-clock,.dispatcher-zone-head,#cr-mm-toolbar) {
+  background:var(--plan-panel) !important; border-color:var(--plan-line) !important; color:var(--plan-ink) !important;
+}
+html[data-cr-plan-copy] .dispatcher-complex-card,
+html[data-cr-plan-copy] :is(.complex-work-head,.complex-title-state,.complex-context,.complex-kpis,.complex-assigned-trucks,.dispatcher-panel-head) {
+  background:var(--plan-card) !important; border-color:var(--plan-line) !important; color:var(--plan-ink) !important;
+}
+html[data-cr-plan-copy] :is(.dispatcher-truck-tile,.dispatcher-equipment-tile,.complex-info-chip,.complex-kpi,.dispatcher-nav a,
+  .dispatcher-topbar button:not([data-connection-indicator]),.app-confirm-dialog),
+html[data-cr-plan-copy] #cr-mm-toolbar :is(input,button) {
+  background:var(--plan-tile) !important; color:var(--plan-ink) !important; border-color:var(--plan-line) !important;
+}
+html[data-cr-plan-copy] :is(.dispatcher-complex-card.status-empty,.complex-empty,.dispatcher-truck-tile.is-placeholder,
+  .dispatcher-equipment-tile.is-placeholder,.complex-truck-placeholder) {background:var(--plan-panel) !important;}
+html[data-cr-plan-copy] :is(.dispatcher-complex-card h2,.dispatcher-truck-tile strong,.dispatcher-equipment-tile strong,
+  .complex-kpi b,.dispatcher-active-text strong) {color:var(--plan-ink) !important;}
+html[data-cr-plan-copy] :is(.complex-kpi i,.dispatcher-command-context span,.dispatcher-panel-head span,
+  .dispatcher-equipment-tile > span,.dispatcher-truck-tile > span) {color:var(--plan-muted) !important;}
+html[data-cr-plan-copy] .dispatcher-nav a.is-active,
+html[data-cr-plan-copy] #cr-mm-toolbar [data-plan-activate]:enabled {
+  background:var(--plan-active) !important; border-color:var(--plan-accent) !important; color:var(--plan-ink) !important;
+}
+html[data-cr-plan-copy] .dispatcher-nav a.is-active::after {background:var(--plan-accent) !important;}
+html[data-cr-plan-copy] .dispatcher-command-context > strong {
+  font-size:clamp(12px,1.2vw,15px) !important; text-transform:none; letter-spacing:normal;
+}
+html[data-cr-plan-copy] .dispatcher-radial-clock-progress {stroke:var(--plan-accent) !important;}
+html[data-cr-plan-copy] .dispatcher-radial-clock-dot {background:var(--plan-accent) !important;}
+html[data-cr-plan-copy] .cr-mm-panel-handle {
+  background:var(--plan-panel) !important; color:var(--plan-accent) !important; border-color:var(--plan-line) !important;
+}
+html[data-cr-plan-copy] .cr-mm-panel-handle [data-plan-grip-caption] {display:none;}
+html[data-cr-plan-copy] .cr-mm-panel-handle[data-cr-panel-side="top"][aria-expanded="false"]::before {visibility:hidden;}
+html[data-cr-plan-copy] .cr-mm-panel-handle[data-cr-panel-side="top"][aria-expanded="false"] [data-plan-grip-caption] {
+  display:grid; place-items:center; position:absolute; inset:0; overflow:hidden; pointer-events:none;
+  font:700 10px/1 system-ui,sans-serif; letter-spacing:.02em; color:var(--plan-accent);
+}
+@media (hover:hover) {
+  html[data-cr-plan-copy] :is(.dispatcher-nav a:not(.is-active), #cr-mm-toolbar button:enabled, [data-dispatcher-drag]):hover {
+    background:var(--plan-hover) !important; border-color:var(--plan-accent) !important;
+  }
+}
+html[data-cr-plan-copy] :is(button,a,input,[tabindex]):focus-visible {
+  outline:2px solid var(--plan-accent) !important; outline-offset:-2px;
+}
+html[data-cr-plan-copy] .complex-kpis { grid-template-columns: 1fr !important; }
+html[data-cr-plan-copy] .dispatcher-complex-card::before,
+html[data-cr-plan-copy] .dispatcher-truck-tile::before,
+html[data-cr-plan-copy] .dispatcher-excavator-garage-tile::before { content:none !important; }
+html[data-cr-plan-copy] [data-plan-selected] { outline:3px solid var(--plan-accent) !important; outline-offset:-3px; }
+html[data-cr-plan-copy] [data-plan-hit] { outline:3px dashed var(--plan-hit) !important; outline-offset:-3px; }
+html[data-cr-plan-copy] [data-plan-selected][data-plan-hit] { box-shadow:inset 0 0 0 5px var(--plan-accent) !important; }
 html[data-cr-plan-copy] #cr-mm-toolbar { display:flex; align-items:center; gap:12px; }
 html[data-cr-plan-copy] #cr-mm-toolbar label { flex:0 1 auto; min-width:100px; }
 html[data-cr-plan-copy] #cr-mm-toolbar input { width:clamp(100px,24vw,260px); max-width:100%; min-width:0; }
 html[data-cr-plan-copy] #cr-mm-toolbar button { min-height:44px; padding-inline:clamp(8px,1.5vw,18px); white-space:nowrap; }
-html[data-cr-plan-copy] [data-plan-notice] { position:fixed; top:16px; left:50%; transform:translateX(-50%); max-width:70vw; padding:9px 14px; color:#e9f3f7; background:#162634; border:1px solid #506c7b; border-radius:5px; font:600 14px/1.3 system-ui,sans-serif; pointer-events:none; z-index:2001; }
+html[data-cr-plan-copy] [data-plan-notice] { position:fixed; top:16px; left:50%; transform:translateX(-50%); max-width:70vw; padding:9px 14px; color:var(--plan-ink); background:var(--plan-panel); border:1px solid var(--plan-line); border-radius:5px; font:600 14px/1.3 system-ui,sans-serif; pointer-events:none; z-index:2001; }
 html[data-cr-plan-copy] #app-confirm-message { white-space:pre-line; overflow:auto; max-height:40vh; }
 html[data-cr-plan-copy] #app-confirm-modal .app-confirm-dialog { max-height:95vh; overflow:auto; }
 html[data-cr-plan-copy] .dispatcher-complex-card [data-plan-count] { display:none; }
