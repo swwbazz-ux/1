@@ -208,7 +208,11 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
                 + "if(!workplace){if(document.querySelector('#tablet-phone,[data-tablet-welcome],form[action*=login]')||document.body&&document.body.dataset.appRoleCode==='mining_master'){"
                 + "var op=indexedDB.open('cr-tablet-board-cache',1);op.onupgradeneeded=function(){op.result.createObjectStore('board');};"
-                + "op.onsuccess=function(){var db=op.result,tx=db.transaction('board','readwrite');tx.objectStore('board').delete('latest');tx.oncomplete=function(){db.close();};};}return;}"
+                // Keep a timestamp after logout: a capture still running in the old
+                // document must not put that employee's portrait back in the store.
+                + "op.onsuccess=function(){var db=op.result,tx=db.transaction('board','readwrite'),shelf=tx.objectStore('board'),epoch=performance.timeOrigin;"
+                + "var previous=shelf.get('latest');previous.onsuccess=function(){if(!previous.result||!(previous.result.documentTime>epoch))"
+                + "shelf.put({documentTime:epoch,serverTime:0,cleared:true},'latest');};tx.oncomplete=tx.onabort=function(){db.close();};};}return;}"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "addStyle('cr-tablet-planning-copy-css'," + JSONObject.quote(planningCss) + ");"
                 + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + js + "\n" + planning + "\nreturn;}"

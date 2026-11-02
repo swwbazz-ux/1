@@ -101,6 +101,7 @@
         canvas.dataset.dispatcherCanvas="on";
         const shell=make(doc,"main");copyAttributes(sourceShell,shell,attrs(sourceShell));
         const board=safeClone(sourceBoard,doc);
+        void global.CopperTabletPlanningCache.copyAvatar(sourceBoard,board);
         const title=board.querySelector(".dispatcher-command-context > strong");
         if(title)title.textContent="Предварительная расстановка";
         const zoneTitle=board.querySelector(".dispatcher-zone-head h2");

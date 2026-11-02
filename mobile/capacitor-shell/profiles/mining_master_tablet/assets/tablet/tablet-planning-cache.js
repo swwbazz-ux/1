@@ -16,9 +16,16 @@
     async function record(value){
         const db=await database();
         return new Promise((resolve,reject)=>{
-            const tx=db.transaction("board",value===undefined?"readonly":"readwrite");
+            const tx=value===undefined?db.transaction("board","readonly"):db.transaction("board","readwrite",{durability:"strict"});
             const shelf=tx.objectStore("board");
-            const op=value===undefined?shelf.get(SLOT):value===null?shelf.delete(SLOT):shelf.put(value,SLOT);
+            const op=value===null?shelf.delete(SLOT):shelf.get(SLOT);
+            if(value)op.onsuccess=()=>{
+                const prior=op.result;
+                // A slow capture left by an earlier employee must not replace a newer board.
+                if(prior?.documentTime && (prior.serverTime && value.serverTime && prior.serverTime!==value.serverTime
+                        ? prior.serverTime>value.serverTime : prior.documentTime>value.documentTime))return;
+                shelf.put(value,SLOT);
+            };
             tx.oncomplete=()=>resolve(op.result);tx.onerror=tx.onabort=()=>reject(tx.error);
         });
     }
@@ -26,6 +33,83 @@
         try{const u=new URL(raw,base);
             return u.origin===location.origin&&u.pathname.startsWith("/static/")?u.href:"";
         }catch(_){return "";}
+    }
+    // The header is the only authority for an employee photograph. Its data stays
+    // inside this board's snapshot; the shared static-asset URL cache never sees it.
+    const badgeSelector=".dispatcher-topbar .dispatcher-active-badge";
+    function avatarInfo(board){
+        const badge=board?.querySelector(badgeSelector);
+        const holder=badge?.querySelector(".dispatcher-active-avatar");
+        if(!holder)return null;
+        const name=(badge.querySelector(".dispatcher-active-text strong")?.textContent||"").trim();
+        const image=holder.querySelector("img"), raw=image?.getAttribute("src")?.trim()||"";
+        const muted=badge.classList.contains("is-muted");
+        const initials=muted?"-":(!image && holder.textContent.trim())||
+            name.split(/\s+/).filter(Boolean).slice(0,2).map(word=>Array.from(word)[0]).join("").toLocaleUpperCase("ru")||"--";
+        const owner=board.dataset.dispatcherOwnShiftOpen==="true" && !muted &&
+            board.ownerDocument.body?.dataset.observerMode!=="true";
+        const end=board.querySelector('[data-confirm-variant="shift-end"]')?.dataset;
+        const stamp=JSON.stringify([owner,name,end?.confirmPerson,end?.confirmTime,end?.confirmDate,raw]);
+        return {holder,image,name,initials,raw,owner,stamp};
+    }
+    function photoData(raw){
+        return raw.length<=1600000 && /^data:image\/(?:png|jpeg|webp|gif|avif);base64,/i.test(raw);
+    }
+    function thumbnail(image,width,height){
+        if(!width||!height)return "";
+        const size=Math.min(1,160/Math.max(width,height)),canvas=doc.createElement("canvas");
+        canvas.width=Math.max(1,Math.round(width*size));canvas.height=Math.max(1,Math.round(height*size));
+        const context=canvas.getContext("2d");if(!context)return "";
+        context.drawImage(image,0,0,canvas.width,canvas.height);
+        return canvas.toDataURL("image/png");
+    }
+    async function photoBytes(board,info){
+        if(!info.owner || !info.raw)return "";
+        if(photoData(info.raw))return info.raw;
+        // Saved documents must never recover an identity from another employee,
+        // a guessed URL or the currently logged-in user's photo.
+        if(board.ownerDocument!==doc || doc.documentElement.hasAttribute("data-cr-saved-board"))return "";
+        let url;
+        try{url=new URL(info.raw,doc.baseURI);}catch(_){return "";}
+        if(info.image.complete && info.image.naturalWidth && info.image.currentSrc===url.href){
+            try{
+                const pixels=thumbnail(info.image,info.image.naturalWidth,info.image.naturalHeight);
+                if(pixels)return pixels;
+            }catch(_){/* Cross-origin images cannot be read back from a canvas. */}
+        }
+        if(url.origin!==location.origin || !/^\/(?:media|static)\//.test(url.pathname) || url.username || url.password)return "";
+        try{
+            const response=await fetch(url,{credentials:"same-origin",cache:"no-store",redirect:"error",signal:AbortSignal.timeout(4500)});
+            if(!response.ok || !/^image\/(?:png|jpe?g|webp|gif|avif|bmp)\b/i.test(response.headers.get("content-type")||""))return "";
+            const blob=await response.blob();if(!blob.size||blob.size>8000000)return "";
+            const bitmap=await createImageBitmap(blob);
+            try{return thumbnail(bitmap,bitmap.width,bitmap.height);}finally{bitmap.close();}
+        }catch(_){return "";}
+    }
+    async function copyAvatar(source,target){
+        const info=avatarInfo(source),dest=target?.querySelector(badgeSelector+" .dispatcher-active-avatar");
+        if(!info||!dest)return;
+        // Show the native initials while decoding. Never append an empty or broken <img>.
+        dest.textContent=info.initials;
+        const bytes=await photoBytes(source,info);
+        if(!bytes)return;
+        const replacement=doc.createElement("img");replacement.alt="";replacement.src=bytes;
+        try{await replacement.decode();}catch(_){return;}
+        if(source!==target && avatarInfo(source)?.stamp!==info.stamp)return;
+        dest.replaceChildren(dest.ownerDocument.importNode(replacement,true));
+    }
+    function liveAvatarFallback(image){
+        if(!image?.matches?.(badgeSelector+" .dispatcher-active-avatar > img"))return;
+        const info=avatarInfo(image.closest(".dispatcher-board"));
+        if(!info?.owner || info.image!==image)return;
+        const text=info.holder.querySelector("[data-cr-avatar-initials]");
+        if(image.complete && image.naturalWidth){
+            if(text){text.remove();image.hidden=false;}
+        }else if(!info.raw || (image.complete && !image.naturalWidth)){
+            image.hidden=true;
+            if(text)text.textContent=info.initials;
+            else{const fallback=doc.createElement("span");fallback.dataset.crAvatarInitials="";fallback.textContent=info.initials;info.holder.appendChild(fallback);}
+        }
     }
     const imageCache=new Map();
     function packagedUrl(raw,base){
@@ -48,6 +132,8 @@
         if(cachedStyles)return cachedStyles;
         const parts=[];
         for(const sheet of doc.styleSheets){
+            // The draft stylesheet is delivered by the currently installed APK.
+            if(sheet.ownerNode?.id==="cr-tablet-planning-copy-css")continue;
             let css;
             try {css=Array.from(sheet.cssRules,r=>r.cssText).join("\n");}catch(_){continue;}
             const base=sheet.href||doc.baseURI, values=new Map();
@@ -81,7 +167,9 @@
             canvas=board?.closest(".dispatcher-canvas");
         if(!canvas || !doc.documentElement.classList.contains("cr-mm-tablet") || doc.body.dataset.observerMode==="true")return;
         const version=board.dataset.operationalStateVersion;
-        const signature=[version,board.dataset.dispatcherOwnShiftOpen,board.querySelectorAll("[data-equipment-id]").length].join(":");
+        const avatar=avatarInfo(board);
+        const signature=JSON.stringify([version,board.dataset.dispatcherOwnShiftOpen,board.querySelectorAll("[data-equipment-id]").length,
+            avatar?.stamp,Boolean(avatar?.image?.complete && avatar.image.naturalWidth)]);
         if(signature===lastSignature)return;
         writing=true;
         try{
@@ -91,12 +179,17 @@
             for(const node of doc.body.querySelectorAll(":scope > #cr-mm-toolbar,:scope > .cr-mm-panel-handle,:scope > .cr-mm-panel-edge"))
                 main.append(node.cloneNode(true));
             scrub(clone);
-            const assets=[...clone.querySelectorAll("img")].map(async img=>{
+            const snapshotBoard=clone.querySelector(".dispatcher-board");
+            const avatarJob=copyAvatar(board,snapshotBoard);
+            const assets=[...clone.querySelectorAll("img")].filter(img=>!img.closest(".dispatcher-active-avatar")).map(async img=>{
                 const src=await packagedUrl(img.getAttribute("src"),doc.baseURI);
                 if(src)img.src=src;else img.removeAttribute("src");
             });
-            const [css]=await Promise.all([styles(),...assets]);
-            const saved={markup:clone.outerHTML,css,at:Date.now(),version,root:doc.documentElement.className,
+            const [css]=await Promise.all([styles(),avatarJob,...assets]);
+            if(!board.isConnected || avatarInfo(board)?.stamp!==avatar?.stamp){dirty=true;return;}
+            const saved={markup:clone.outerHTML,css,at:Date.now(),version,
+                serverTime:Date.parse(board.dataset.serverNow||"")||0,documentTime:win.performance.timeOrigin,
+                root:doc.documentElement.className,
                 inline:doc.documentElement.getAttribute("style")||"",body:doc.body.className,
                 attrs:Object.fromEntries([...doc.documentElement.attributes].filter(at=>/^data-cr-/.test(at.name)).map(at=>[at.name,at.value]))};
             await record(saved);lastSignature=signature;
@@ -107,10 +200,21 @@
     function watch(){
         if(watching)return;watching=true;
         const running=doc.querySelector(".dispatcher-shell");if(!running)return;
-        schedule();win.addEventListener("online",schedule);
+        liveAvatarFallback(running.querySelector(badgeSelector+" .dispatcher-active-avatar > img"));
+        schedule();win.addEventListener("online",()=>{
+            const broken=running.querySelector(badgeSelector+" .dispatcher-active-avatar img[hidden]");
+            if(broken?.getAttribute("src") && broken.parentNode.querySelector("[data-cr-avatar-initials]"))
+                broken.src=broken.getAttribute("src");
+            lastSignature="";schedule();
+        });
+        for(const event of ["load","error"])running.addEventListener(event,e=>{
+            if(e.target.closest?.(badgeSelector+" .dispatcher-active-avatar")){liveAvatarFallback(e.target);schedule();}
+        },true);
         new MutationObserver(changes=>{
-            if(changes.some(c=>c.type==="attributes" || [...c.addedNodes].some(n=>n.nodeType===1&&n.matches(".dispatcher-board"))))schedule();
-        }).observe(running,{childList:true,subtree:true,attributes:true,attributeFilter:["data-operational-state-version","data-dispatcher-own-shift-open"]});
+            if(changes.some(c=>c.type==="attributes" && (c.attributeName!=="src" || c.target.closest(badgeSelector)) ||
+                c.target.closest?.(badgeSelector) || [...c.addedNodes].some(n=>n.nodeType===1 &&
+                    (n.matches(".dispatcher-board,.dispatcher-topbar,.dispatcher-active-badge") || n.querySelector(badgeSelector)))))schedule();
+        }).observe(running,{childList:true,subtree:true,attributes:true,attributeFilter:["data-operational-state-version","data-dispatcher-own-shift-open","src"]});
     }
     let savedLayout, savedOwner;
     function layoutKey(rows){
@@ -127,6 +231,22 @@
             if(label)label.textContent="Применено на планшете · Ожидает связи";
         }
     }
+    function boardStyles(css){
+        if(!css.includes("data-cr-plan-copy")&&!css.includes("data-cr-planning-frame"))return css;
+        // Older snapshots combined the previous APK's draft theme with the pult.
+        // Retain original rules, including media queries, but remove those for the draft.
+        const sheet=new CSSStyleSheet();
+        sheet.replaceSync(css);
+        function removeArchivedTheme(group){
+            for(let i=group.cssRules.length-1;i>=0;i--){
+                const rule=group.cssRules[i];
+                if(rule.selectorText && /\[data-cr-(?:plan-copy|planning-frame|planning-tab)\b/.test(rule.selectorText))group.deleteRule(i);
+                else if(rule.cssRules && rule.deleteRule)removeArchivedTheme(rule);
+            }
+        }
+        removeArchivedTheme(sheet);
+        return Array.from(sheet.cssRules,rule=>rule.cssText).join("\n");
+    }
     async function restore(){
         if(!doc.documentElement.hasAttribute("data-cr-saved-board"))return;
         const retry=doc.querySelector("[data-cr-reconnect]");
@@ -134,13 +254,18 @@
         retry?.addEventListener("click",reconnect);
         const saved=await record();
         if(!saved?.markup)return;
-        const style=doc.createElement("style");style.textContent=saved.css;doc.head.append(style);
+        const style=doc.createElement("style");style.textContent=boardStyles(saved.css);doc.head.append(style);
+        const planningStyle=doc.getElementById("cr-tablet-planning-copy-css");
+        if(planningStyle)doc.head.append(planningStyle);
         doc.documentElement.className=saved.root;doc.documentElement.style.cssText=saved.inline;
         for(const [name,value] of Object.entries(saved.attrs||{}))doc.documentElement.setAttribute(name,value);
         doc.body.className=saved.body; doc.body.dataset.appRoleCode="mining_master";
         const parsed=new DOMParser().parseFromString(saved.markup,"text/html"),canvas=parsed.querySelector(".dispatcher-canvas");
         if(!canvas)return;
         const board=canvas.querySelector(".dispatcher-board");
+        // Older snapshots lost the /media/ URL and kept an empty <img>.
+        // Restore only this snapshot's own pixels, otherwise show its own initials.
+        const avatarJob=copyAvatar(board,board);
         // Keep only the authentic header open with the link to the independent draft.
         doc.documentElement.setAttribute("data-cr-panel-open","top");
         for(const el of canvas.querySelectorAll("[data-cr-panel]")){
@@ -150,6 +275,7 @@
         const top=board.querySelector(".dispatcher-topbar");
         if(top){top.inert=false;top.setAttribute("aria-hidden","false");}
         doc.body.replaceChildren(canvas);
+        await avatarJob;
         const tools=doc.createElement("button");tools.type="button";tools.className="cr-copy-reconnect";
         tools.textContent="Без связи · Повторить";tools.addEventListener("click",reconnect);
         doc.body.append(tools);
@@ -170,5 +296,5 @@
             await showActivated();
         }
     }
-    win.CopperTabletPlanningCache={watch,restore,showActivated};
+    win.CopperTabletPlanningCache={watch,restore,showActivated,copyAvatar};
 })(window,document);
