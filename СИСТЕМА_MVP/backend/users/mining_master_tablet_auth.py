@@ -151,6 +151,8 @@ def login_view(request):
         request.session.pop(PENDING_KEY, None)
         request.session.pop(SHIFT_AUTH_KEY, None)
         phone = request.POST.get('phone', '').strip()
+        if len(normalize_phone(phone)) == 10:
+            phone = '+7 ' + phone
         code = request.POST.get('access_code', '').strip()
         access = None
         if is_valid_russian_mobile_phone(phone) and len(code) == 6 and code.isascii() and code.isdigit():

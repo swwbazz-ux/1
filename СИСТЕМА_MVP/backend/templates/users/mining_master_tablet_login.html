@@ -16,7 +16,16 @@
         {% csrf_token %}
         <div class="tablet-auth-fields">
             <label for="tablet-phone">Телефон
-                <input id="tablet-phone" name="phone" type="tel" inputmode="tel" autocomplete="off" maxlength="24" value="{{ phone }}" placeholder="+7 999 123-45-67" required>
+                <span class="shared-shift-phone-shell">
+                    <span class="shared-shift-country-code">+7</span>
+                    <input
+                        id="tablet-phone" name="phone" type="text" inputmode="numeric"
+                        autocomplete="off" maxlength="24"
+                        pattern="[0-9]{3} [0-9]{3} [0-9]{2} [0-9]{2}"
+                        value="{{ phone }}" placeholder="000 000 00 00"
+                        data-shared-shift-phone data-tablet-phone required
+                    >
+                </span>
             </label>
             <label for="tablet-pin">PIN
                 <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
@@ -26,4 +35,7 @@
         <button class="tablet-auth-primary" type="submit">Продолжить</button>
     </form>
 </main>
+<script>
+{% include "includes/tablet-runtime/shared-shift-login.js" %}
+</script>
 {% endblock %}
