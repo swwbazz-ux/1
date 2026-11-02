@@ -3,6 +3,7 @@ iframe[data-cr-planning-frame] { position: fixed !important; inset: 0 !important
 html[data-cr-plan-copy] { --plan-accent: #ac89c4; }
 html[data-cr-plan-copy] .dispatcher-complex-card[data-equipment-id]:not(.status-empty) {
   border-color: var(--plan-accent) !important;
+  background-image: radial-gradient(circle at 45% 30%, color-mix(in srgb, var(--plan-accent) 12%, transparent), transparent 38%) !important;
 }
 html[data-cr-plan-copy] :is(.dispatcher-truck-tile,.dispatcher-excavator-garage-tile)[data-equipment-id]:not(.is-placeholder) {
   border-color: color-mix(in srgb, var(--plan-accent) 74%, var(--gd-line)) !important;
