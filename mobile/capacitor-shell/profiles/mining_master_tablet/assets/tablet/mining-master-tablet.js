@@ -1150,6 +1150,6 @@
         bindShiftHeaderFragments();
         bind(); reconcile();
     }
-    global.CopperMiningMasterTablet = { version: VERSION, init: init, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); syncAssignmentButton(); clearFoundTruck(); } };
+    global.CopperMiningMasterTablet = { version: VERSION, init: init, createPanelState: createPanelState, cancel: function () { var toolbar = doc.getElementById("cr-mm-toolbar"); if (toolbar) toolbar.reset(); syncAssignmentButton(); clearFoundTruck(); } };
     init();
 })(typeof window !== "undefined" ? window : globalThis);

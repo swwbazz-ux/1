@@ -40,6 +40,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
         if (kiosk != null && !isFinishing()) kiosk.showAdminEntry();
     };
     private String tabletScript = "";
+    private boolean loadingOfflineCopy;
     private boolean systemInsetsKnown;
     private int systemInsetTopPx;
     private int systemInsetBottomPx;
@@ -73,6 +74,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
             webPrint = new TabletWebPrint(this, kiosk, view);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public void onPageStarted(WebView webView, String url, android.graphics.Bitmap favicon) {
+                    if (url == null || !url.contains("#cr-saved-board")) loadingOfflineCopy = false;
                     android.util.Log.i("MiningMasterTablet", "main_frame event=started route="
                         + TabletUrlPolicy.diagnosticRoute(url));
                     webPrint.pageStarted();
@@ -86,6 +88,9 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 }
                 @Override public void onReceivedError(WebView webView, WebResourceRequest request,
                         android.webkit.WebResourceError error) {
+                    int code = error.getErrorCode();
+                    if ((code == ERROR_HOST_LOOKUP || code == ERROR_CONNECT || code == ERROR_TIMEOUT)
+                            && showSavedBoard(webView, request)) return;
                     if (request.isForMainFrame()) {
                         android.util.Log.w("MiningMasterTablet", "main_frame event=network_error code="
                             + error.getErrorCode() + " route="
@@ -96,6 +101,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 }
                 @Override public void onReceivedHttpError(WebView webView, WebResourceRequest request,
                         android.webkit.WebResourceResponse response) {
+                    int status = response.getStatusCode();
+                    if ((status == 502 || status == 503 || status == 504) && showSavedBoard(webView, request)) return;
                     if (request.isForMainFrame()) {
                         android.util.Log.w("MiningMasterTablet", "main_frame event=http_error status="
                             + response.getStatusCode() + " route="
@@ -138,7 +145,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                         return;
                     }
                     webView.evaluateJavascript(
-                        "(function(){var open=document.querySelector('[aria-modal=true]:not([hidden])');"
+                        "(function(){var plan=window.CopperTabletPlanning;if(plan&&plan.isOpen()){plan.close();return;}var open=document.querySelector('[aria-modal=true]:not([hidden])');"
                         + "if(open){document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));}})();", null);
                 }
                 // Never finish the HOME activity or leave the workplace via Android Back.
@@ -146,6 +153,22 @@ public final class MiningMasterTabletActivity extends MainActivity {
         });
         adminHandler.postDelayed(() -> { if (!isFinishing()) kiosk.offerInitialSetup(); }, 800L);
         immersive();
+    }
+
+    // Only a failed GET of the original board can display its locally saved copy.
+    private boolean showSavedBoard(WebView view, WebResourceRequest request) {
+        if (loadingOfflineCopy || !request.isForMainFrame() || !"GET".equals(request.getMethod())
+                || !TabletUrlPolicy.controlPage(request.getUrl().toString())) return false;
+        loadingOfflineCopy = true;
+        String url = TabletUrlPolicy.START_URL + "#cr-saved-board";
+        view.post(() -> {
+            if (!isFinishing() && !isDestroyed() && loadingOfflineCopy
+                    && (TabletUrlPolicy.controlPage(view.getUrl()) || "about:blank".equals(view.getUrl()))) {
+                try { view.loadDataWithBaseURL(url, asset("tablet/tablet-planning-offline.html"), "text/html", "UTF-8", url); }
+                catch (java.io.IOException ignored) { view.reload(); }
+            }
+        });
+        return true;
     }
 
     private String readTabletScript() {
@@ -156,6 +179,10 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String dialogScale = asset("tablet/tablet-dialog-scale.css");
             String entryCss = asset("tablet/tablet-entry-fields.css");
             String entryJs = asset("tablet/tablet-entry-fields.js");
+            String planning = asset("tablet/tablet-planning-draft.js") + "\n"
+                + asset("tablet/tablet-planning-copy.js") + "\n"
+                + asset("tablet/tablet-planning-cache.js") + "\n" + asset("tablet/tablet-planning-entry.js");
+            String planningCss = asset("tablet/tablet-planning-copy.css");
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
                 + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
                 + ".indexOf(location.pathname)!==-1;"
@@ -167,10 +194,14 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "function boot(){if(!document.head)return;"
                 + "addStyle('cr-tablet-dialog-scale-css'," + JSONObject.quote(dialogScale) + ");"
                 + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
-                + "if(!workplace)return;"
+                + "if(!workplace){if(document.querySelector('#tablet-phone,[data-tablet-welcome],form[action*=login]')||document.body&&document.body.dataset.appRoleCode==='mining_master'){"
+                + "var op=indexedDB.open('cr-tablet-board-cache',1);op.onupgradeneeded=function(){op.result.createObjectStore('board');};"
+                + "op.onsuccess=function(){var db=op.result,tx=db.transaction('board','readwrite');tx.objectStore('board').delete('latest');tx.oncomplete=function(){db.close();};};}return;}"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
+                + "addStyle('cr-tablet-planning-copy-css'," + JSONObject.quote(planningCss) + ");"
+                + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + planning + "\nreturn;}"
                 + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
-                + js + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
+                + js + "\n" + planning + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
         } catch (Exception error) {
             android.util.Log.e("MiningMasterTablet", "Tablet layout assets are unavailable");
             return "";
