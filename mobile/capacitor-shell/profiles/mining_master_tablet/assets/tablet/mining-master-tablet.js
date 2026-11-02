@@ -226,7 +226,8 @@
         doc.querySelectorAll(successes + ", .cr-mm-shift-notice").forEach(function (node) {
             var text = node.textContent.replace(/\s+/g, " ").trim();
             var redundant = enabled && node.matches(successes) && !node.matches(".error, .warning, .info, .is-error, .is-warning, .is-info") &&
-                /^Смена горного (?:диспетчера|мастера) (?:открыта|завершена)\.$/.test(text);
+                (/^Смена горного (?:диспетчера|мастера) (?:открыта|завершена)\.$/.test(text) ||
+                 /^Смена горного мастера (?:открыта|начата)\. Расстановка унаследована\.$/.test(text));
             setClass(node, "cr-mm-shift-notice", redundant);
         });
     }
