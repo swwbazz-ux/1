@@ -45,6 +45,33 @@ final class StartupLoadingOverlay {
     private boolean applicationDocumentChecked;
     private boolean applicationDocumentReady;
 
+    private static final String DOCUMENT_DIAGNOSTIC_PROBE =
+        "(function(){" +
+            "var body=document.body,main=document.querySelector('main'),kind='other';" +
+            "var browserError=location.protocol==='chrome-error:'" +
+                "||String(document.documentURI||'').indexOf('chrome-error:')===0" +
+                "||!!document.getElementById('main-frame-error');" +
+            "if(location.protocol==='about:'&&location.pathname==='blank'){kind='blank';}" +
+            "else if(browserError){kind='browser_error';}" +
+            "else if(location.protocol==='https:'&&location.hostname==='mining-master.driverform.ru'" +
+                "&&(!location.port||location.port==='443')){" +
+                "var path=location.pathname;" +
+                "if(path==='/mining-master/tablet/'){kind='control';}" +
+                "else if(path==='/mining-master/tablet/login/'){kind='login';}" +
+                "else if(path==='/mining-master/tablet/activate/'){kind='activate';}" +
+                "else if(path.indexOf('/mining-master/tablet/')===0){kind='related';}" +
+            "}" +
+            "function visible(node){if(!node||node.hidden||!node.getBoundingClientRect)return false;" +
+                "var style=getComputedStyle(node),rect=node.getBoundingClientRect();" +
+                "return style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0;}" +
+            "function bit(value){return value?'1':'0';}" +
+            "return [kind,bit(body),bit(body&&body.hasAttribute('data-app-contract-ready'))," +
+                "bit(document.querySelector('#tablet-phone[name=phone]'))," +
+                "bit(document.getElementById('id_new_access_code'))," +
+                "bit(document.querySelector('.dispatcher-board')),bit(browserError),bit(document.documentElement)," +
+                "bit(main),bit(visible(main)),bit(visible(body)),bit(document.querySelector('[name=reauth_phone]'))].join('|');" +
+        "})()";
+
     private static final String PREPARE_LAYOUT =
         "(function(){" +
             "var previous=window.__copperNativeStartupLayout;" +
@@ -953,7 +980,8 @@ final class StartupLoadingOverlay {
             + " reason=" + reason.value
             + " generation=" + generation;
         if ("mining_master_tablet".equals(BuildConfig.APP_PROFILE_ID)) {
-            message += " app_document_checked=" + applicationDocumentChecked
+            message += " webview_route=" + TabletLoadingDiagnostics.pageKind(webView == null ? null : webView.getUrl())
+                + " app_document_checked=" + applicationDocumentChecked
                 + " app_document_ready=" + applicationDocumentReady
                 + " page_loaded=" + pageLoaded
                 + " page_error=" + pageErrorObserved
@@ -975,6 +1003,24 @@ final class StartupLoadingOverlay {
             Log.i(LOG_TAG, message);
         } else {
             Log.w(LOG_TAG, message);
+        }
+        if ("mining_master_tablet".equals(BuildConfig.APP_PROFILE_ID) && webView != null) {
+            WebView diagnosedWebView = webView;
+            try {
+                diagnosedWebView.evaluateJavascript(DOCUMENT_DIAGNOSTIC_PROBE, encodedResult -> {
+                    if (destroyed || webView != diagnosedWebView || pageGeneration != generation) return;
+                    String flags = "probe=invalid";
+                    try {
+                        Object decoded = new JSONTokener(encodedResult).nextValue();
+                        if (decoded instanceof String value) flags = TabletLoadingDiagnostics.documentFlags(value);
+                    } catch (Exception ignored) {
+                        // Malformed diagnostics cannot affect startup or emit arbitrary content.
+                    }
+                    Log.i(LOG_TAG, "startup_document generation=" + generation + " " + flags);
+                });
+            } catch (RuntimeException ignored) {
+                Log.w(LOG_TAG, "startup_document generation=" + generation + " probe=unavailable");
+            }
         }
     }
 
