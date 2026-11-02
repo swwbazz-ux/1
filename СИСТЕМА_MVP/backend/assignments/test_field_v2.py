@@ -595,3 +595,116 @@ class MasterFieldV2Tests(TestCase):
         )
         self.assertEqual(result.json()["code"], "actor_mismatch")
         self.assertNotIn("snapshot", result.json())
+
+    def report_read(self, path, client=None, event_patch=None):
+        client = client or self.client
+        gate = client.get(
+            self.url, {"device_id": self.device, "protocol": PROTOCOL, "challenge": "1"}
+        ).json()
+        event = self.event("report.read", 1)
+        event.update(path=path, occurred_at=gate["server_time"], challenge=gate["challenge"])
+        event.update(event_patch or {})
+        body = {**self.envelope(event), "op": "report"}
+        token = {"HTTP_X_CSRFTOKEN": gate["csrf_token"]}
+        response = client.post(self.url, body, content_type="application/json", **token)
+        return response, body, token
+
+    def test_read_original_report_period_and_export_after_session_loss(self):
+        from io import BytesIO
+        from django.test import Client
+        from openpyxl import load_workbook
+
+        client = Client(enforce_csrf_checks=True)
+        path = "/mining-master/tablet/dispatcher/shift-reports/trucks/"
+        filters = "?date=2026-10-17&shift_type=night"
+        html, body, headers = self.report_read(path + filters, client)
+        self.assertEqual(html.status_code, 200, html.content[:240])
+        self.assertEqual(html["X-Copper-Report-Read"], "1")
+        self.assertContains(html, "2026-10-17")
+        self.assertContains(html, "/mining-master/tablet/")
+        self.assertNotIn("sessionid", client.cookies)
+        again = client.post(self.url, body, content_type="application/json", **headers)
+        self.assertEqual(again.json()["code"], "read_challenge_replayed")
+        xlsx, _, _ = self.report_read(path + "export/" + filters, client)
+        self.assertEqual(xlsx.status_code, 200, xlsx.content[:200])
+        self.assertIn("2026-10-17_night.xlsx", xlsx["Content-Disposition"])
+        self.assertTrue(load_workbook(BytesIO(xlsx.content), read_only=True).sheetnames)
+        self.assertEqual(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).count(), 0)
+
+    def test_report_cookie_does_not_switch_signed_employee_or_privileges(self):
+        from io import BytesIO
+        from django.test import Client
+        from openpyxl import load_workbook
+
+        other = Employee.objects.create(
+            full_name="Чужая сессия", phone="+79994445566", status=Employee.Status.ACTIVE
+        )
+        access = EmployeeAccess.objects.create(
+            employee=other,
+            role=self.role,
+            status=EmployeeAccess.Status.ACTIVATED,
+            access_code="998877",
+        )
+        self.login(access)
+        path = "/mining-master/tablet/reports/volume/export/"
+        response, _, _ = self.report_read(path)
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        rows = list(load_workbook(BytesIO(response.content), read_only=True).active.values)
+        self.assertIn(self.employee.full_name, [cell for row in rows for cell in row])
+        self.assertNotIn(other.full_name, [cell for row in rows for cell in row])
+        self.assertEqual(self.client.session["employee_access_id"], access.pk)
+        resp, _, _ = self.report_read(path, Client(), {"actor_id": other.pk})
+        self.assertEqual(resp.json()["code"], "actor_mismatch")
+        self.access.status = EmployeeAccess.Status.BLOCKED
+        self.access.save(update_fields=["status"])
+        resp, _, _ = self.report_read(path)
+        self.assertEqual(resp.json()["code"], "access_revoked")
+
+    def test_report_allowlist_scope_and_limits(self):
+        from unittest.mock import patch
+
+        path = "/mining-master/tablet/dispatcher/shift-log/"
+        for wrong in (
+            "/admin/",
+            "//example.com" + path,
+            path + "#x",
+            path.replace("shift-log/", "shift-log/../transport/"),
+            "/mining-master/tablet/logout/",
+            "/mining-master/tablet/field-sync/",
+        ):
+            with self.subTest(wrong=wrong):
+                result, _, _ = self.report_read(wrong)
+                self.assertEqual(result.json()["code"], "report_not_allowed")
+        for wrong in (
+            "?next=/admin/",
+            "?date=2026-99-99",
+            "?template=NaN",
+            "?status=a%0D%0Ab",
+            "?_operational_fragment=dispatcher-shift-report",
+            "?" + "&".join(["date="] * 49),
+        ):
+            with self.subTest(wrong=wrong):
+                result, _, _ = self.report_read(path + wrong)
+                self.assertEqual(result.json()["code"], "report_filters_invalid")
+        result, _, _ = self.report_read(path, event_patch={"type": "snapshot.read"})
+        self.assertEqual(result.json()["code"], "invalid_read_request")
+        with patch("assignments.field_reports.MAX_REPORT_BYTES", 16):
+            result, _, _ = self.report_read(path)
+        self.assertEqual(result.status_code, 413)
+        self.assertEqual(result.json()["code"], "report_too_large")
+
+    def test_report_whitelist_matches_original_tablet_permissions(self):
+        from django.urls import reverse
+        from .tablet_urls import REPORT_NAMES
+
+        for name in sorted(REPORT_NAMES):
+            with self.subTest(name=name):
+                url = reverse("mining_master_tablet_" + name) + "?date=2026-10-17"
+                original = self.client.get(url)
+                signed, _, _ = self.report_read(url)
+                if original.status_code == 200:
+                    self.assertEqual(signed.status_code, 200, signed.content[:200])
+                    self.assertEqual(signed["Content-Type"], original["Content-Type"])
+                else:
+                    self.assertEqual(signed.status_code, 403, signed.content[:200])
+                    self.assertEqual(signed.json()["code"], "report_not_allowed")

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from django.core import signing
 from django.core.exceptions import ValidationError
-from . import field_commands, field_signing
+from . import field_commands, field_reports, field_signing
 from django.db import transaction, IntegrityError
 from django.db.models import Q
 from django.http import JsonResponse, Http404
@@ -968,9 +968,9 @@ def _challenge(request, device):
 
 
 @transaction.atomic
-def _pull(ticket, event, key):
+def _pull(ticket, event, key, op, csrf_secret):
     if (
-        event.get("type") != "snapshot.read"
+        event.get("type") != op + ".read"
         or event.get("format_version") != 2
         or not _uuid(event.get("id"))
     ):
@@ -1020,6 +1020,8 @@ def _pull(ticket, event, key):
     fresh[nonce] = now.timestamp()
     key.context_snapshot = {**key.context_snapshot, "used_read_challenges": fresh}
     key.save(update_fields=["context_snapshot", "updated_at"])
+    if op == "report":
+        return field_reports.render_report(access, event.get("path"), csrf_secret)
     return JsonResponse(
         {
             "protocol": field_signing.PROTOCOL,
@@ -1058,8 +1060,10 @@ def field_sync_view(request):
                     request, data.get("device_id", ""), v2=True, enroll_key=data["public_key"]
                 )
             event, key, digest = field_signing.checked_event(data)
-            if data.get("op") == "snapshot":
-                return _pull(data.get("ticket"), event, key)
+            if data.get("op") in {"snapshot", "report"}:
+                return _pull(
+                    data.get("ticket"), event, key, data["op"], request.META.get("CSRF_COOKIE")
+                )
             return JsonResponse(
                 _receive(data.get("ticket"), event, key=key, signed_hash=digest, envelope=data)
             )

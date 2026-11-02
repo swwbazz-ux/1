@@ -1,6 +1,7 @@
-# Подписанный обмен планшета горного мастера с сервером. 13 файлов приложения.
+# Подписанный обмен планшета горного мастера с сервером. 14 файлов приложения.
 СИСТЕМА_MVP/backend/assignments/field_commands.py
 СИСТЕМА_MVP/backend/assignments/field_plan.py
+СИСТЕМА_MVP/backend/assignments/field_reports.py
 СИСТЕМА_MVP/backend/assignments/field_signing.py
 СИСТЕМА_MVP/backend/assignments/field_sync.py
 СИСТЕМА_MVP/backend/assignments/services.py
