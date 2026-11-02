@@ -7,26 +7,26 @@
             });
         });
     }
-    function formatPhone(value) {
+    function formatPhone(value, separator) {
         var digits = String(value || "").replace(/\D/g, "");
-        if (digits.charAt(0) === "8") {
-            digits = "7" + digits.slice(1);
-        }
-        if (digits.charAt(0) === "7") {
+        if (digits.length > 10 && (digits.charAt(0) === "7" || digits.charAt(0) === "8")) {
             digits = digits.slice(1);
         }
         digits = digits.slice(0, 10);
         var result = digits.slice(0, 3);
         if (digits.length > 3) {
-            result += "-" + digits.slice(3, 6);
+            result += separator + digits.slice(3, 6);
         }
         if (digits.length > 6) {
-            result += "-" + digits.slice(6, 8);
+            result += separator + digits.slice(6, 8);
         }
         if (digits.length > 8) {
-            result += "-" + digits.slice(8, 10);
+            result += separator + digits.slice(8, 10);
         }
         return result;
+    }
+    function normalizePhoneInput(input) {
+        if (input) input.value = formatPhone(input.value, input.hasAttribute('data-tablet-phone') ? " " : "-");
     }
     function formatAccessCode(value) {
         var digits = String(value || "").replace(/\D/g, "").slice(0, 6);
@@ -41,6 +41,16 @@
     }
     function initSharedShiftLogin(root) {
         var scope = root && root.querySelectorAll ? root : document;
+        scope.querySelectorAll("[data-shared-shift-phone]").forEach(function (input) {
+            if (input.dataset.sharedShiftLoginBound === "true") return;
+            input.dataset.sharedShiftLoginBound = "true";
+            function normalizePhone() {
+                normalizePhoneInput(input);
+            }
+            input.addEventListener("input", normalizePhone);
+            input.addEventListener("focus", normalizePhone);
+            normalizePhone();
+        });
         var modals = scope.querySelectorAll("[data-shared-shift-login-modal]");
         if (scope.matches && scope.matches("[data-shared-shift-login-modal]")) {
             modals = [scope];
@@ -61,9 +71,6 @@
             function normalizeCode() {
                 if (codeInput) codeInput.value = formatAccessCode(codeInput.value);
             }
-            function normalizePhone() {
-                if (firstInput) firstInput.value = formatPhone(firstInput.value);
-            }
             function closeModal() {
                 modal.hidden = true;
                 if (modal.hasAttribute('data-tablet-personal-login') && codeInput) codeInput.value = '';
@@ -83,18 +90,13 @@
                         document.body.appendChild(modal);
                     }
                     modal.hidden = false;
-                    normalizePhone();
+                    normalizePhoneInput(firstInput);
                     if (firstInput) {
                         firstInput.focus();
                         firstInput.setSelectionRange(firstInput.value.length, firstInput.value.length);
                     }
                 });
             });
-            if (firstInput && firstInput.dataset.sharedShiftLoginBound !== "true") {
-                firstInput.dataset.sharedShiftLoginBound = "true";
-                firstInput.addEventListener("input", normalizePhone);
-                firstInput.addEventListener("focus", normalizePhone);
-            }
             if (codeInput && codeInput.dataset.sharedShiftLoginBound !== "true") {
                 codeInput.dataset.sharedShiftLoginBound = "true";
                 codeInput.addEventListener("input", normalizeCode);
@@ -117,7 +119,7 @@
                     if (event.target === modal) closeModal();
                 });
             }
-            normalizePhone();
+            normalizePhoneInput(firstInput);
             normalizeCode();
         });
         if (document.documentElement.dataset.sharedShiftEscapeBound !== "true") {

@@ -124,6 +124,11 @@ class MiningMasterTabletAuthTests(TestCase):
         self.assertContains(self.login(), 'Проверьте телефон и PIN')
         self.assertNotIn(PENDING_KEY, self.client.session)
 
+    def test_national_phone_with_spaces_can_start_first_activation(self):
+        response = self.login(phone='900 123 45 67')
+        self.assertRedirects(response, self.ACTIVATE)
+        self.assertEqual(self.client.session[PENDING_KEY]['access_id'], self.access.pk)
+
     def test_unissued_pending_code_is_not_accepted(self):
         self.access.primary_code_issued_at = None
         self.access.save(update_fields=['primary_code_issued_at'])

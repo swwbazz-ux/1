@@ -62,9 +62,15 @@
                         <span>Телефон</span>
                         <span class="shared-shift-phone-shell">
                             <span class="shared-shift-country-code">+7 <span aria-hidden="true">⌄</span></span>
-                            <input type="text" name="reauth_phone" inputmode="numeric" autocomplete="tel" maxlength="13" pattern="[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}" placeholder="999-000-00-00" data-shared-shift-phone required>
+                            <input
+                                type="text" name="reauth_phone" inputmode="numeric" autocomplete="tel"
+                                maxlength="{% if request.mining_master_tablet_control %}24{% else %}13{% endif %}"
+                                pattern="{% if request.mining_master_tablet_control %}[0-9]{3} [0-9]{3} [0-9]{2} [0-9]{2}{% else %}[0-9]{3}-[0-9]{3}-[0-9]{2}-[0-9]{2}{% endif %}"
+                                placeholder="{% if request.mining_master_tablet_control %}000 000 00 00{% else %}999-000-00-00{% endif %}"
+                                data-shared-shift-phone{% if request.mining_master_tablet_control %} data-tablet-phone{% endif %} required
+                            >
                         </span>
-                        <small>Введите номер телефона в формате +7 XXX-XXX-XX-XX</small>
+                        <small>Введите номер телефона в формате {% if request.mining_master_tablet_control %}+7 000 000 00 00{% else %}+7 XXX-XXX-XX-XX{% endif %}</small>
                     </label>
                     <label class="shared-shift-login-field">
                         <span>{{ dispatcher_header.shift_reauth_code_label|default:"Код мастера" }}</span>
