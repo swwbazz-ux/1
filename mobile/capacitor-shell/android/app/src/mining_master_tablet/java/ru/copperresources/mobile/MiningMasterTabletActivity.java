@@ -153,12 +153,18 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String css = asset("tablet/mining-master-tablet.css");
             String js = asset("tablet/mining-master-tablet.js");
             String shiftLogin = asset("shared-shift-login.js");
+            String entryCss = asset("tablet/tablet-entry-fields.css");
+            String entryJs = asset("tablet/tablet-entry-fields.js");
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
-                + "||" + new JSONArray(TabletUrlPolicy.TABLET_PATHS).toString()
-                + ".indexOf(location.pathname)===-1)return;"
-                + "function boot(){if(!document.head)return;var s=document.getElementById('cr-mining-master-tablet-css');"
-                + "if(!s){s=document.createElement('style');s.id='cr-mining-master-tablet-css';s.textContent="
-                + JSONObject.quote(css) + ";document.head.appendChild(s);}"
+                + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
+                + ".indexOf(location.pathname)!==-1;"
+                + "if(!workplace&&" + new JSONArray(TabletUrlPolicy.ENTRY_PATHS) + ".indexOf(location.pathname)===-1)return;"
+                + "function addStyle(id,css){if(document.getElementById(id))return;"
+                + "var s=document.createElement('style');s.id=id;s.textContent=css;document.head.appendChild(s);}"
+                + "function boot(){if(!document.head)return;"
+                + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
+                + entryJs + "\nif(!workplace)return;"
+                + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
                 + js + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
         } catch (Exception error) {
@@ -177,7 +183,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
     }
 
     private void injectTablet(WebView view) {
-        if (!tabletScript.isEmpty() && TabletUrlPolicy.tabletPage(view.getUrl())) {
+        if (!tabletScript.isEmpty() && (TabletUrlPolicy.tabletPage(view.getUrl()) || TabletUrlPolicy.entryPage(view.getUrl()))) {
             recordSystemInsets(ViewCompat.getRootWindowInsets(getWindow().getDecorView()));
             view.evaluateJavascript(systemInsetsScript() + tabletScript, null);
         }

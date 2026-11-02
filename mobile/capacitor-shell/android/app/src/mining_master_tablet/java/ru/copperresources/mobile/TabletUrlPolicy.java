@@ -10,6 +10,9 @@ final class TabletUrlPolicy {
     static final String ORIGIN = "https://mining-master.driverform.ru";
     static final String CONTROL_PATH = "/mining-master/tablet/";
     static final String START_URL = ORIGIN + CONTROL_PATH;
+    static final List<String> ENTRY_PATHS = Collections.unmodifiableList(Arrays.asList(
+        CONTROL_PATH + "login/", CONTROL_PATH + "activate/"
+    ));
     // Exact layout routes only. Export endpoints and arbitrary subpaths are not included.
     static final List<String> TABLET_PATHS = Collections.unmodifiableList(Arrays.asList(
         CONTROL_PATH,
@@ -55,9 +58,17 @@ final class TabletUrlPolicy {
     }
 
     static boolean tabletPage(String url) {
+        return matchesPath(url, TABLET_PATHS);
+    }
+
+    static boolean entryPage(String url) {
+        return matchesPath(url, ENTRY_PATHS);
+    }
+
+    private static boolean matchesPath(String url, List<String> paths) {
         if (!trusted(url)) return false;
         try {
-            return TABLET_PATHS.contains(new URI(url).getRawPath());
+            return paths.contains(new URI(url).getRawPath());
         } catch (URISyntaxException ignored) {
             return false;
         }

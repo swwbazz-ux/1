@@ -58,6 +58,16 @@ public class TabletSecurityTest {
         assertFalse(TabletUrlPolicy.tabletPage("https://mining-master.driverform.ru/mining-master/tablet/extra"));
     }
 
+    @Test public void entryFormsUseTheirOwnExactRoutesOnTheTrustedHost() {
+        String login = TabletUrlPolicy.START_URL + "login/?intent=start_shift";
+        assertTrue(TabletUrlPolicy.entryPage(login));
+        assertTrue(TabletUrlPolicy.entryPage(TabletUrlPolicy.START_URL + "activate/"));
+        assertFalse(TabletUrlPolicy.tabletPage(login));
+        assertFalse(TabletUrlPolicy.entryPage(TabletUrlPolicy.START_URL + "login/export/"));
+        assertFalse(TabletUrlPolicy.entryPage(TabletUrlPolicy.START_URL + "%6cogin/"));
+        assertFalse(TabletUrlPolicy.entryPage("https://driverform.ru/mining-master/tablet/login/"));
+    }
+
     @Test public void relatedLayoutsAllowExactRoutesAndFiltersButNeverExportsOrSubpaths() {
         String[] relatedPaths = {
             "/mining-master/tablet/dispatcher/reports/", "/mining-master/tablet/dispatcher/shift-log/", "/mining-master/tablet/dispatcher/management/",
