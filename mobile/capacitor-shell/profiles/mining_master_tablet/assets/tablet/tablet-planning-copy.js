@@ -20,6 +20,8 @@
         const copy = doc.importNode(node, true);
         copy.querySelectorAll("script,iframe,frame,object,embed,link,style,base,meta,template,input[type=hidden]").forEach(n => n.remove());
         for (const child of [copy, ...copy.querySelectorAll("*")]) {
+            // A search in the live pult does not select a truck in this copy.
+            if (child.classList.contains("cr-mm-truck-hit")) child.classList.remove("cr-mm-truck-hit");
             for (const attr of [...child.attributes]) {
                 if (/^on/i.test(attr.name) || /^(action|formaction|target|srcdoc|ping)$/i.test(attr.name) ||
                         /^(href|xlink:href)$/i.test(attr.name) && !attr.value.startsWith("#")) child.removeAttribute(attr.name);
@@ -286,7 +288,7 @@
         for(const tile of root.querySelectorAll(".dispatcher-complex-card,.dispatcher-truck-tile,.dispatcher-excavator-garage-tile")){
             if(tile.classList.contains("is-placeholder")||tile.classList.contains("status-empty"))continue;
             for(const attr of [...tile.attributes]){
-                if(attr.name.startsWith("data-plan-") && attr.name!=="data-plan-selected" && attr.name!=="data-plan-hit")tile.removeAttribute(attr.name);
+                if(attr.name.startsWith("data-plan-") && attr.name!=="data-plan-selected")tile.removeAttribute(attr.name);
             }
             for(const prop of ["--tile-progress","--tile-total-progress","--complex-progress","--complex-total-progress"])tile.style.removeProperty(prop);
             tile.classList.remove("is-plan-overrun","has-plan-progress","is-inactive-plan-fill");
@@ -357,11 +359,14 @@
     }
     function search(state) {
         const digits=state.search.value.replace(/\D/g,"");state.search.value=digits;
-        state.board.querySelectorAll("[data-plan-hit]").forEach(n=>delete n.dataset.planHit);
-        if(!digits)return;
-        const tiles=[...state.board.querySelectorAll(truckSelector)].filter(n=>machineNumber(n).replace(/\D/g,"")===digits);
-        tiles.forEach(n=>{n.dataset.planHit="true";if(n.closest(".dispatcher-complex-card"))n.scrollIntoView({block:"nearest"});});
-        return tiles[0];
+        let first;
+        for(const tile of state.board.querySelectorAll(truckSelector)){
+            const hit=!!digits && machineNumber(tile).replace(/\D/g,"")===digits;
+            tile.classList.toggle("cr-mm-truck-hit",hit);
+            if(hit && !first)first=tile;
+        }
+        if(first?.closest(".dispatcher-complex-card"))first.scrollIntoView({block:"nearest"});
+        return first;
     }
     async function save(state,payload){
         if(!mayEdit(state)){message(state,"Изменять расстановку можно в своей открытой смене.");return;}

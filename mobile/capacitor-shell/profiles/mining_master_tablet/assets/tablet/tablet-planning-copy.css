@@ -6,7 +6,7 @@ html[data-cr-plan-copy] {
   --plan-floor: #211729; --plan-panel: #302038; --plan-card: #442f50;
   --plan-tile: #563c62; --plan-hover: #62456f; --plan-active: #704783;
   --plan-line: #805d90; --plan-ink: #fbf2ff; --plan-muted: #dccce3;
-  --plan-accent: #ecbaff; --plan-hit: #89eadb;
+  --plan-accent: #ecbaff;
 }
 html[data-cr-plan-copy],
 html[data-cr-plan-copy] :is(body,.dispatcher-canvas,.dispatcher-shell,.dispatcher-board,.dispatcher-complexes,.dispatcher-zone-grid) {
@@ -68,8 +68,6 @@ html[data-cr-plan-copy] .dispatcher-complex-card::before,
 html[data-cr-plan-copy] .dispatcher-truck-tile::before,
 html[data-cr-plan-copy] .dispatcher-excavator-garage-tile::before { content:none !important; }
 html[data-cr-plan-copy] [data-plan-selected] { outline:3px solid var(--plan-accent) !important; outline-offset:-3px; }
-html[data-cr-plan-copy] [data-plan-hit] { outline:3px dashed var(--plan-hit) !important; outline-offset:-3px; }
-html[data-cr-plan-copy] [data-plan-selected][data-plan-hit] { box-shadow:inset 0 0 0 5px var(--plan-accent) !important; }
 html[data-cr-plan-copy] #cr-mm-toolbar { display:flex; align-items:center; gap:12px; }
 html[data-cr-plan-copy] #cr-mm-toolbar label { flex:0 1 auto; min-width:100px; }
 html[data-cr-plan-copy] #cr-mm-toolbar input { width:clamp(100px,24vw,260px); max-width:100%; min-width:0; }
