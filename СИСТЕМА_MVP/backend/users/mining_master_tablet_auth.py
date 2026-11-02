@@ -2,6 +2,7 @@
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.http import HttpResponseForbidden
 from django.middleware.csrf import rotate_token
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -29,9 +30,15 @@ SHIFT_AUTH_KEY = 'mining_master_tablet_shift_auth'
 ACTIVATION_TTL = 10 * 60
 SHIFT_AUTH_TTL = 5 * 60
 LOGIN_ERROR = 'Проверьте телефон и PIN. Для входа нужен действующий доступ горного мастера.'
+OBSERVER_START_ERROR = 'Начать личную смену в режиме наблюдения или управления нельзя.'
 
 
 class TabletAccessActivationForm(AccessActivationForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['new_access_code'].widget.attrs['enterkeyhint'] = 'next'
+        self.fields['confirm_access_code'].widget.attrs['enterkeyhint'] = 'done'
+
     def clean_new_access_code(self):
         code = super().clean_new_access_code()
         if not code.isascii():
@@ -128,12 +135,17 @@ def _pending_access(request, *, lock=False):
     return access
 
 
-def _finish_login(request, access):
+def _finish_login(request, access, *, start_shift):
     request.session.pop(PENDING_KEY, None)
     request.session.cycle_key()
     rotate_token(request)
     set_session_device_kind(request, 'shared')
-    issue_tablet_shift_auth(request, access)
+    if start_shift:
+        from assignments.tablet_views import start_or_resume_tablet_shift
+
+        start_or_resume_tablet_shift(request, access)
+    else:
+        issue_tablet_shift_auth(request, access)
     return redirect('mining_master_tablet')
 
 
@@ -147,7 +159,11 @@ def login_view(request):
     request.session['mining_master_tablet_device'] = True
     phone = ''
     error = ''
+    intent = (request.POST if request.method == 'POST' else request.GET).get('intent')
+    start_shift = intent == 'start_shift'
     if request.method == 'POST':
+        if start_shift and getattr(request, 'observer_mode', False):
+            return HttpResponseForbidden(OBSERVER_START_ERROR)
         request.session.pop(PENDING_KEY, None)
         request.session.pop(SHIFT_AUTH_KEY, None)
         phone = request.POST.get('phone', '').strip()
@@ -170,6 +186,7 @@ def login_view(request):
                     'role': ROLE,
                     'version': _version(access),
                     'created_at': timezone.now().timestamp(),
+                    'start_shift': start_shift,
                 }
                 return redirect('mining_master_tablet_activate')
         elif _eligible(access):
@@ -185,11 +202,14 @@ def login_view(request):
                             or matched is None or matched.pk != access.pk):
                         raise ValidationError(LOGIN_ERROR)
                     access = activate_role_session(request, access)
-                return _finish_login(request, access)
+                    return _finish_login(request, access, start_shift=start_shift)
             except (ValidationError, Employee.DoesNotExist, EmployeeAccess.DoesNotExist):
                 pass
         error = LOGIN_ERROR
-    return render(request, 'users/mining_master_tablet_login.html', {'phone': phone, 'error': error})
+    return render(request, 'users/mining_master_tablet_login.html', {
+        'phone': phone, 'error': error, 'shift_start_intent': start_shift,
+        'show_credentials': request.method == 'POST' or intent in ('start_shift', 'login'),
+    })
 
 
 @sensitive_post_parameters('new_access_code', 'confirm_access_code')
@@ -208,6 +228,9 @@ def activate_view(request):
     if access is None:
         request.session.pop(PENDING_KEY, None)
         return redirect('mining_master_tablet_login')
+    start_shift = request.session[PENDING_KEY].get('start_shift') is True
+    if request.method == 'POST' and start_shift and getattr(request, 'observer_mode', False):
+        return HttpResponseForbidden(OBSERVER_START_ERROR)
     form = TabletAccessActivationForm(request.POST if request.method == 'POST' else None, access=access)
     if request.method == 'POST' and form.is_valid():
         try:
@@ -233,10 +256,12 @@ def activate_view(request):
                         locked.employee.status = Employee.Status.ACTIVE
                         locked.employee.save(update_fields=['status', 'updated_at'])
                     access = activate_role_session(request, locked)
-                    return _finish_login(request, access)
+                    return _finish_login(request, access, start_shift=start_shift)
         except (Employee.DoesNotExist, EmployeeAccess.DoesNotExist):
             request.session.pop(PENDING_KEY, None)
             return redirect('mining_master_tablet_login')
         except ValidationError:
             form.add_error(None, 'Доступ изменился. Вернитесь ко входу и проверьте данные.')
-    return render(request, 'users/mining_master_tablet_activate.html', {'access': access, 'form': form})
+    return render(request, 'users/mining_master_tablet_activate.html', {
+        'access': access, 'form': form, 'shift_start_intent': start_shift,
+    })

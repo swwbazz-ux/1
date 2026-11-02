@@ -1,11 +1,14 @@
-# Телефон мастера: постоянный +7 и формат000 000 00 00.
+# Начало и возврат в собственную смену на планшете.
+СИСТЕМА_MVP/backend/assignments/tablet_views.py
+СИСТЕМА_MVP/backend/assignments/views.py
 СИСТЕМА_MVP/backend/static/css/mining-master-tablet-auth-v1.css
 СИСТЕМА_MVP/backend/templates/includes/dispatcher_shift_action.html
 СИСТЕМА_MVP/backend/templates/includes/tablet-runtime/shared-shift-login.js
+СИСТЕМА_MVP/backend/templates/users/mining_master_tablet_activate.html
 СИСТЕМА_MVP/backend/templates/users/mining_master_tablet_login.html
 СИСТЕМА_MVP/backend/users/mining_master_tablet_auth.py
 
-# Неизменённые ресурсы диспетчерского пульта.
+# Проверенные зависимости существующего диспетчерского пульта.
 СИСТЕМА_MVP/backend/static/css/dispatcher-adaptive-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-control-v1.css

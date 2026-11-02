@@ -3,39 +3,51 @@
 {% block title %}Вход · Горный мастер{% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}">
+<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}?v=tablet-shift-start-1">
 {% endblock %}
 {% block body_class %}tablet-auth login-page login-fullscreen{% endblock %}
 {% block body %}
+{% if show_credentials %}
 <main class="tablet-auth-panel">
     <p class="tablet-auth-role">Горный мастер</p>
-    <h1>Вход сотрудника</h1>
-    <p class="tablet-auth-help">Введите телефон и PIN из карточки сотрудника. При первом входе вы создадите личный PIN.</p>
+    <h1>{% if shift_start_intent %}Начало смены{% else %}Вход сотрудника{% endif %}</h1>
     {% if error %}<p class="tablet-auth-error" role="alert">{{ error }}</p>{% endif %}
-    <form method="post" action="{% url 'mining_master_tablet_login' %}" autocomplete="off">
+    <form method="post" action="{% url 'mining_master_tablet_login' %}" autocomplete="off" data-tablet-shift-entry>
         {% csrf_token %}
+        <input type="hidden" name="intent" value="{% if shift_start_intent %}start_shift{% else %}login{% endif %}">
         <div class="tablet-auth-fields">
             <label for="tablet-phone">Телефон
                 <span class="shared-shift-phone-shell">
                     <span class="shared-shift-country-code">+7</span>
                     <input
-                        id="tablet-phone" name="phone" type="text" inputmode="numeric"
+                        id="tablet-phone" name="phone" type="text" inputmode="numeric" enterkeyhint="next"
                         autocomplete="off" maxlength="24"
                         pattern="[0-9]{3} [0-9]{3} [0-9]{2} [0-9]{2}"
                         value="{{ phone }}" placeholder="000 000 00 00"
-                        data-shared-shift-phone data-tablet-phone required
+                        data-shared-shift-phone data-tablet-phone required{% if shift_start_intent and not error %} autofocus{% endif %}
                     >
                 </span>
             </label>
             <label for="tablet-pin">PIN
-                <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
+                <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" enterkeyhint="done" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
             </label>
         </div>
-        <p class="tablet-auth-hint" id="tablet-pin-hint">Личный PIN — 6 цифр. Для первого входа — первоначальный PIN.</p>
-        <button class="tablet-auth-primary" type="submit">Продолжить</button>
+        <p class="tablet-auth-hint" id="tablet-pin-hint">PIN состоит из 6 цифр. При первом входе введите PIN из карточки сотрудника.</p>
+        <div class="tablet-auth-actions">
+            <a class="tablet-auth-secondary" href="{% url 'mining_master_tablet_login' %}">Отмена</a>
+            <button class="tablet-auth-primary" type="submit">Готово</button>
+        </div>
     </form>
 </main>
 <script>
 {% include "includes/tablet-runtime/shared-shift-login.js" %}
 </script>
+{% else %}
+<main class="tablet-auth-panel tablet-auth-welcome">
+    <h1>Горный мастер</h1>
+    <form method="get" action="{% url 'mining_master_tablet_login' %}">
+        <button class="tablet-auth-primary" type="submit" name="intent" value="start_shift">Начать смену</button>
+    </form>
+</main>
+{% endif %}
 {% endblock %}

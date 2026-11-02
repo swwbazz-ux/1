@@ -501,7 +501,7 @@ def build_employee_short_name(employee):
     return f'{surname} {initials}'.strip()
 
 
-def handle_shift_action(request, action, access, current_shift, blocking_shift):
+def handle_shift_action(request, action, access, current_shift, blocking_shift, *, announce_start=True):
     now = timezone.now()
     if action == 'start_shift':
         try:
@@ -540,12 +540,14 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift):
             messages.error(request, '; '.join(error.messages))
             return
         if current_shift:
-            messages.info(request, 'Ваша смена уже открыта.')
+            if announce_start:
+                messages.info(request, 'Ваша смена уже открыта.')
             return
         if blocking_shift:
             messages.error(request, 'Предыдущий горный мастер еще не закрыл смену.')
             return
-        messages.success(request, 'Смена горного мастера открыта. Расстановка унаследована.')
+        if announce_start:
+            messages.success(request, 'Смена горного мастера открыта. Расстановка унаследована.')
         return
 
     if action == 'end_shift':
