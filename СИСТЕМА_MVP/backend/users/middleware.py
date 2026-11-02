@@ -202,6 +202,7 @@ class ActiveRoleSessionMiddleware:
         '/mining-master/tablet/login/',
         '/mining-master/tablet/activate/',
         '/mining-master/tablet/logout/',
+        '/mining-master/tablet/field-sync/',
         # Taking the session back is the one action an inactive role must still
         # be able to perform — otherwise there is no way out but retyping the PIN.
         '/reclaim-session/',

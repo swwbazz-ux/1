@@ -2,7 +2,7 @@
 
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
+from .tablet_control import command_time
 
 from assignments.command_guards import (
     ClientActionPayloadConflict,
@@ -131,12 +131,13 @@ def execute_dispatcher_move_excavator(
                 for_update=True,
             )
             validate_projected_excavator_state(current_assignments, expected_states)
-            now = timezone.now()
+            now = command_time(request)
             for current_assignment in current_assignments:
                 assignment, _ = schedule_haul_release(
                     truck=current_assignment.truck,
                     assigned_by=access.employee,
                     now=now,
+                    **({'recorded_at':request.field_verified_occurred_at} if getattr(request,'field_verified_occurred_at',None) else {}),
                     expected_state_id=current_assignment.id,
                 )
                 if assignment:
@@ -147,6 +148,8 @@ def execute_dispatcher_move_excavator(
     placement.zone = zone
     placement.changed_by = access.employee
     placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
+    if getattr(request,'field_verified_occurred_at',None):
+        ExcavatorPlacement.objects.filter(pk=placement.pk).update(changed_at=request.field_verified_occurred_at)
 
     if zone == ExcavatorPlacement.Zone.INACTIVE:
         scheduled = len(scheduled_assignments)
@@ -204,7 +207,7 @@ def execute_dispatcher_assign_truck(
         return shift_error
     payload = dispatcher_json_payload(request)
     action = payload.get('action')
-    now = timezone.now()
+    now = command_time(request)
     try:
         client_action_id, signature, repeated_response = begin_client_action(
             employee=access.employee,
@@ -237,6 +240,7 @@ def execute_dispatcher_assign_truck(
                     truck=current_assignment.truck,
                     assigned_by=access.employee,
                     now=now,
+                    **({'recorded_at':request.field_verified_occurred_at} if getattr(request,'field_verified_occurred_at',None) else {}),
                     expected_state_id=current_assignment.id,
                 )
                 if assignment:
@@ -283,6 +287,7 @@ def execute_dispatcher_assign_truck(
                 truck=truck,
                 assigned_by=access.employee,
                 now=now,
+                **({'recorded_at':request.field_verified_occurred_at} if getattr(request,'field_verified_occurred_at',None) else {}),
                 expected_state_id=expected_state_id,
             )
         except HaulAssignmentStateConflict as error:
@@ -323,6 +328,8 @@ def execute_dispatcher_assign_truck(
         placement.zone = ExcavatorPlacement.Zone.ACTIVE
         placement.changed_by = access.employee
         placement.save(update_fields=['zone', 'changed_by', 'changed_at'])
+        if getattr(request,'field_verified_occurred_at',None):
+            ExcavatorPlacement.objects.filter(pk=placement.pk).update(changed_at=request.field_verified_occurred_at)
 
     try:
         assignment, created = schedule_haul_assignment(
@@ -330,6 +337,7 @@ def execute_dispatcher_assign_truck(
             excavator=excavator,
             assigned_by=access.employee,
             now=now,
+            **({'recorded_at':request.field_verified_occurred_at} if getattr(request,'field_verified_occurred_at',None) else {}),
             expected_state_id=expected_state_id,
         )
     except HaulAssignmentStateConflict as error:

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.shortcuts import redirect
-from django.utils import timezone
+from .tablet_control import command_time
 
 from assignments.models import (
     AssignmentStatus,
@@ -102,7 +102,7 @@ def execute_dispatcher_cancel_trip(
         return redirect(redirect_url)
 
     trip.status = TripStatus.CANCELLED
-    trip.cancelled_at = timezone.now()
+    trip.cancelled_at = command_time(request)
     trip.save(update_fields=['status', 'cancelled_at'])
     close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
     reconcile_excavator(trip.excavator)
@@ -241,6 +241,7 @@ def execute_dispatcher_complete_trip(
         trip,
         driver=unloading_shift.employee,
         unloading_shift=unloading_shift,
+        **({'occurred_at': request.field_verified_occurred_at} if getattr(request, 'field_verified_occurred_at', None) else {}),
     )
     action_logger(
         actor=access.employee,
@@ -311,7 +312,7 @@ def execute_dispatcher_manual_trip(
             f'Количество рейсов: от 1 до {DISPATCHER_MANUAL_TRIP_MAX_COUNT}.',
         )
         return redirect(redirect_url)
-    now = timezone.now()
+    now = command_time(request)
     try:
         completed_at = parse_dispatcher_manual_trip_time(
             request.POST.get('completed_at'),
