@@ -3,7 +3,7 @@
 {% block title %}Личный PIN · Горный мастер{% endblock %}
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}">
+<link rel="stylesheet" href="{% static 'css/mining-master-tablet-auth-v1.css' %}?v=tablet-shift-start-1">
 {% endblock %}
 {% block body_class %}tablet-auth login-page login-fullscreen{% endblock %}
 {% block body %}
@@ -18,7 +18,7 @@
         {% for field in form %}{% for error in field.errors %}<p>{{ error }}</p>{% endfor %}{% endfor %}
     </div>
     {% endif %}
-    <form method="post" action="{% url 'mining_master_tablet_activate' %}" autocomplete="off">
+    <form method="post" action="{% url 'mining_master_tablet_activate' %}" autocomplete="off" data-tablet-shift-entry>
         {% csrf_token %}
         <div class="tablet-auth-fields">
             <label for="id_new_access_code">Придумайте PIN
@@ -31,9 +31,12 @@
         <p class="tablet-auth-hint" id="activation-new-pin-hint">6 цифр, без простых последовательностей.</p>
         <span id="activation-confirm-pin-hint" class="tablet-auth-sr">Введите тот же PIN ещё раз.</span>
         <div class="tablet-auth-actions">
+            <button class="tablet-auth-primary" type="submit">{% if shift_start_intent %}Готово{% else %}Сохранить PIN{% endif %}</button>
             <button class="tablet-auth-secondary" name="action" value="cancel" formnovalidate type="submit">Это не я</button>
-            <button class="tablet-auth-primary" type="submit">Сохранить PIN</button>
         </div>
     </form>
 </main>
+<script>
+{% include "includes/tablet-runtime/shared-shift-login.js" %}
+</script>
 {% endblock %}

@@ -39,7 +39,69 @@
         }
         return result;
     }
+    function bindTabletEntryKeyboard() {
+        var selector = "form[data-tablet-shift-entry]";
+        if (document.documentElement.dataset.tabletEntryKeyboardBound ||
+            !document.querySelectorAll(selector).length) return;
+        document.documentElement.dataset.tabletEntryKeyboardBound = "true";
+
+        function actionOf(input) {
+            return input && input.form && input.form.matches(selector) ? input.getAttribute("enterkeyhint") : "";
+        }
+        function arm(action) {
+            var keyboard = global.Capacitor && global.Capacitor.Plugins && global.Capacitor.Plugins.NativeKeyboard;
+            if (keyboard && typeof keyboard.setAction === "function") {
+                keyboard.setAction({action: action}).catch(function () {});
+            }
+        }
+        function advance(input, action) {
+            if (!input.reportValidity()) {
+                // NativeImeWebView consumes its armed action on each keyboard tap.
+                arm(action);
+                return;
+            }
+            if (action === "next") {
+                input.form.querySelector('[enterkeyhint="done"]').focus();
+            } else {
+                input.form.querySelector('button[type="submit"]:not([formnovalidate])').click();
+            }
+        }
+        document.addEventListener("focusin", function (event) {
+            var action = actionOf(event.target);
+            if (action) arm(action);
+        });
+        document.addEventListener("focusout", function (event) {
+            if (actionOf(event.target) && !actionOf(event.relatedTarget)) arm("");
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== "Enter" || event.isComposing) return;
+            var action = actionOf(event.target);
+            if (!action) return;
+            event.preventDefault();
+            if (!event.repeat) advance(event.target, action);
+        });
+        global.addEventListener("native-ime-action", function (event) {
+            var input = document.activeElement;
+            var action = actionOf(input);
+            if (action && event.detail && action === event.detail.action) advance(input, action);
+        });
+        document.addEventListener("submit", function (event) {
+            var form = event.target;
+            if (event.defaultPrevented || !form.matches(selector)) return;
+            if (form.dataset.tabletSubmitting) event.preventDefault();
+            else form.dataset.tabletSubmitting = "true";
+        });
+        global.addEventListener("pageshow", function () {
+            document.querySelectorAll(selector).forEach(function (form) {
+                delete form.dataset.tabletSubmitting;
+                form.querySelectorAll('input[type="password"]').forEach(function (input) { input.value = ""; });
+            });
+        });
+        var focusedAction = actionOf(document.activeElement);
+        if (focusedAction) arm(focusedAction);
+    }
     function initSharedShiftLogin(root) {
+        bindTabletEntryKeyboard();
         var scope = root && root.querySelectorAll ? root : document;
         scope.querySelectorAll("[data-shared-shift-phone]").forEach(function (input) {
             if (input.dataset.sharedShiftLoginBound === "true") return;

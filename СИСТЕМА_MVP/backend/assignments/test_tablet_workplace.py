@@ -1,4 +1,5 @@
 from django.test import Client, TestCase
+from django.contrib.messages import get_messages
 from django.urls import reverse
 from django.utils import timezone
 
@@ -29,6 +30,74 @@ class TabletWorkplaceTests(TestCase):
     def test_unauthenticated_tablet_requires_personal_entry(self):
         self.assertRedirects(self.client.get(self.url), reverse('mining_master_tablet_login'),
                              fetch_redirect_response=False)
+
+    def enter_to_start(self, client=None, **data):
+        return (client or self.client).post(reverse('mining_master_tablet_login'), {
+            'phone': '900 123 45 67', 'access_code': '246824', 'intent': 'start_shift', **data,
+        })
+
+    def test_landing_and_opening_credentials_do_not_open_a_shift(self):
+        url = reverse('mining_master_tablet_login')
+        self.assertFalse(self.client.get(url).context['show_credentials'])
+        response = self.client.get(url, {'intent': 'start_shift'})
+        self.assertTrue(response.context['show_credentials'])
+        self.assertTrue(response.context['shift_start_intent'])
+        self.assertNotIn('employee_access_id', self.client.session)
+        # An old sign-in form cannot start a shift from a query string alone.
+        self.client.post(url + '?intent=start_shift', {'phone': self.employee.phone, 'access_code': '246824'})
+        self.assertFalse(self.own_open().exists())
+
+    def test_shift_entry_starts_once_and_resumes_same_row_after_reboot(self):
+        self.assertRedirects(self.enter_to_start(), self.url, fetch_redirect_response=False)
+        original = self.own_open().get()
+        self.assertEqual(original.opened_by_id, self.employee.pk)
+        self.assertRedirects(self.enter_to_start(), self.url, fetch_redirect_response=False)
+        self.assertRedirects(self.enter_to_start(Client()), self.url, fetch_redirect_response=False)
+        actual = self.own_open().get()
+        self.assertEqual((actual.pk, actual.opened_at), (original.pk, original.opened_at))
+        self.assertNotIn('mining_master_tablet_shift_auth', self.client.session)
+
+    def test_start_and_resume_do_not_announce_a_redundant_status(self):
+        self.login()
+        for response in (self.start(), self.enter_to_start()):
+            self.assertFalse(list(get_messages(response.wsgi_request)))
+
+    def test_unverified_pin_stays_on_start_form_and_cannot_resume_or_start(self):
+        self.assertContains(self.enter_to_start(access_code='888888'), 'Проверьте телефон и PIN')
+        self.assertFalse(self.own_open().exists())
+        self.enter_to_start()
+        other_client = Client()
+        response = self.enter_to_start(other_client, access_code='888888')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['shift_start_intent'])
+        self.assertNotIn('employee_access_id', other_client.session)
+        self.assertEqual(self.own_open().count(), 1)
+
+    def test_shift_entry_neither_confirms_a_different_role_nor_closes_it(self):
+        other_shift = EmployeeShift.objects.create(employee=self.employee, opened_by=self.employee,
+            workplace_code='dispatcher', shift_type='day', opened_at=timezone.now())
+        response = self.enter_to_start(close_other_role_shift='1', tablet_handover_token='forged')
+        self.assertRedirects(response, self.url, fetch_redirect_response=False)
+        other_shift.refresh_from_db()
+        self.assertIsNone(other_shift.closed_at)
+        self.assertFalse(self.own_open().exists())
+        self.assertTrue(any('другой роли' in str(m) for m in get_messages(response.wsgi_request)))
+        header = self.client.get(self.url).context['dispatcher_header']
+        self.start(tablet_handover_token=header['tablet_handover_token'],
+                   **{header['other_role_shift_prompt']['field']: '1'})
+        other_shift.refresh_from_db()
+        self.assertIsNotNone(other_shift.closed_at)
+        self.assertEqual(self.own_open().count(), 1)
+
+    def test_shift_entry_reports_another_master_without_taking_over_their_shift(self):
+        previous = Employee.objects.create(full_name='Предыдущий мастер', status=Employee.Status.ACTIVE)
+        shift = EmployeeShift.objects.create(employee=previous, opened_by=previous, workplace_code='mining_master',
+                                            shift_type='day', opened_at=timezone.now())
+        response = self.enter_to_start()
+        self.assertFalse(self.own_open().exists())
+        self.assertTrue(any('Предыдущий горный мастер' in str(m) for m in get_messages(response.wsgi_request)))
+        shift.refresh_from_db()
+        self.assertIsNone(shift.closed_at)
 
     def test_verified_entry_starts_real_master_shift_once_without_retyping(self):
         self.login()

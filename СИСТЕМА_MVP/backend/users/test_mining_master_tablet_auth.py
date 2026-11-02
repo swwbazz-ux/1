@@ -6,7 +6,10 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import include, path
 from django.utils import timezone
 
+from shifts.models import EmployeeShift
+
 from .active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
+from .live_monitor import OBSERVER_MODE_CONTROL, create_observer_token
 from .mining_master_tablet_auth import (
     ACTIVATION_TTL,
     PENDING_KEY,
@@ -101,6 +104,47 @@ class MiningMasterTabletAuthTests(TestCase):
         self.assertNotIn(PENDING_KEY, self.client.session)
         self.assertNotIn('864286', str(dict(self.client.session)))
         self.assertEqual(get_tablet_shift_auth(self.proof_request()).pk, self.access.pk)
+
+    def test_first_activation_finishes_only_the_verified_shift_intent(self):
+        self.login(intent='start_shift')
+        self.assertTrue(self.client.get(self.ACTIVATE).context['shift_start_intent'])
+        self.assertTrue(self.activate(confirm='864287').context['shift_start_intent'])
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.employee).exists())
+        self.assertRedirects(self.activate(), self.CONTROL, fetch_redirect_response=False)
+        shift = EmployeeShift.objects.get(employee=self.employee)
+        self.assertEqual((shift.workplace_code, shift.opened_by_id), ('mining_master', self.employee.pk))
+        self.assertIsNone(shift.closed_at)
+        self.assertNotIn(SHIFT_AUTH_KEY, self.client.session)
+        self.assertNotIn(PENDING_KEY, self.client.session)
+
+    def test_activation_form_cannot_add_unverified_start_intent(self):
+        self.login()
+        self.client.post(self.ACTIVATE, {
+            'new_access_code': '864286', 'confirm_access_code': '864286', 'intent': 'start_shift',
+        })
+        self.assertEqual(self.client.session['employee_access_id'], self.access.pk)
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.employee).exists())
+
+    def test_observer_control_cannot_start_a_shift_with_login_or_pending_activation(self):
+        admin_role, _ = Role.objects.get_or_create(code='admin', defaults={'name': 'Администратор'})
+        admin = Employee.objects.create(full_name='Тестовый администратор', status=Employee.Status.ACTIVE)
+        actor = EmployeeAccess.objects.create(employee=admin, role=admin_role, access_code='563294',
+                                             status=EmployeeAccess.Status.ACTIVATED)
+        master = Employee.objects.create(full_name='Наблюдаемый мастер', status=Employee.Status.ACTIVE)
+        target = EmployeeAccess.objects.create(employee=master, role=self.role, access_code='294653',
+                                              status=EmployeeAccess.Status.ACTIVATED)
+        token = create_observer_token(actor_access=actor, target_access=target, mode=OBSERVER_MODE_CONTROL)
+        response = self.client.post(self.LOGIN, {'phone': self.employee.phone, 'access_code': '246824',
+                                    'intent': 'start_shift'}, HTTP_X_OBSERVER_TOKEN=token)
+        self.assertContains(response, 'Начать личную смену', status_code=403)
+        self.assertNotIn(PENDING_KEY, self.client.session)
+        self.login(intent='start_shift')
+        response = self.client.post(self.ACTIVATE, {'new_access_code': '864286', 'confirm_access_code': '864286'},
+                                    HTTP_X_OBSERVER_TOKEN=token)
+        self.assertContains(response, 'Начать личную смену', status_code=403)
+        self.access.refresh_from_db()
+        self.assertEqual(self.access.status, EmployeeAccess.Status.NOT_ACTIVATED)
+        self.assertFalse(EmployeeShift.objects.filter(employee=self.employee).exists())
 
     def test_activated_employee_uses_existing_pin_without_activation(self):
         self.make_active()

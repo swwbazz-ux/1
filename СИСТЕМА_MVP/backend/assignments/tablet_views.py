@@ -7,6 +7,7 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import redirect
 from django.urls import get_urlconf, reverse, set_urlconf
+from django.utils.crypto import constant_time_compare
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
@@ -105,6 +106,24 @@ def build_tablet_context(request, access=None):
     return context
 
 
+def start_or_resume_tablet_shift(request, access, *, confirm_handover=False):
+    """Called with the verified employee/access locked until the shift command finishes."""
+    other = find_other_role_open_shift(access.employee, workplace_code='mining_master', for_update=True)
+    challenge = request.session.pop('tablet_master_handover', {})
+    if other:
+        confirmed = (confirm_handover and other_role_shift_flag(request.POST)
+                     and challenge.get('employee_id') == access.employee_id
+                     and challenge.get('shift_id') == other.pk
+                     and bool(challenge.get('token'))
+                     and constant_time_compare(challenge['token'], request.POST.get('tablet_handover_token', '')))
+        if not confirmed:
+            issue_tablet_shift_auth(request, access)
+            messages.warning(request, 'У вас открыта смена другой роли. Нажмите «Начать смену» и подтвердите её завершение.')
+            return
+    current_shift, blocking_shift = get_shift_state_for_access(access)
+    handle_shift_action(request, 'start_shift', access, current_shift, blocking_shift, announce_start=False)
+
+
 @tablet_workplace
 @sensitive_post_parameters('reauth_access_code')
 def mining_master_tablet_view(request):
@@ -117,21 +136,7 @@ def mining_master_tablet_view(request):
                 if error:
                     messages.error(request, error)
                     return redirect('mining_master_tablet')
-                other = find_other_role_open_shift(access.employee, workplace_code='mining_master', for_update=True)
-                challenge = request.session.pop('tablet_master_handover', {})
-                confirmed = (other and other_role_shift_flag(request.POST)
-                             and challenge.get('employee_id') == access.employee_id
-                             and challenge.get('shift_id') == other.pk
-                             and secrets.compare_digest(str(challenge.get('token', '')),
-                                                        request.POST.get('tablet_handover_token', ''))
-                             and bool(challenge.get('token')))
-                if other and not confirmed:
-                    # Ask about the newly verified person's shift, never the previous user's.
-                    issue_tablet_shift_auth(request, access)
-                    messages.warning(request, 'У вас открыта смена другой роли. Нажмите «Начать смену» и подтвердите её завершение.')
-                    return redirect('mining_master_tablet')
-                current_shift, blocking_shift = get_shift_state_for_access(access)
-                handle_shift_action(request, action, access, current_shift, blocking_shift)
+                start_or_resume_tablet_shift(request, access, confirm_handover=True)
         elif action == 'end_shift':
             consume_tablet_shift_auth(request)
             with transaction.atomic():

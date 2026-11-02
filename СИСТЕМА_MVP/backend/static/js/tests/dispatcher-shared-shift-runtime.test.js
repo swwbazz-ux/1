@@ -83,3 +83,64 @@ test("tablet entry and next-shift phones use spaces and retain the fixed country
     assert.equal(tabletPhone.inputListenerCount(), 1);
     assert.equal(dispatcherPhone.inputListenerCount(), 1);
 });
+
+test("tablet keyboard Next validates the phone and Done sends one validated submission", () => {
+    const handlers = {};
+    function listen(name, handler) {
+        const previous = handlers[name];
+        handlers[name] = (event) => {
+            if (previous) previous(event);
+            handler(event);
+        };
+    }
+    const actions = [];
+    let posts = 0;
+    const document = {
+        documentElement: {dataset: {}},
+        addEventListener: listen,
+        querySelectorAll(selector) { return selector === "form[data-tablet-shift-entry]" ? [form] : []; },
+    };
+    const window = {
+        addEventListener: listen,
+        Capacitor: {Plugins: {NativeKeyboard: {setAction({action}) {
+            actions.push(action);
+            return Promise.resolve();
+        }}}},
+    };
+    const submit = {click() {
+        if (!phone.valid || !pin.valid) return;
+        const event = {target: form, preventDefault() { this.defaultPrevented = true; }};
+        handlers.submit(event);
+        if (!event.defaultPrevented) posts++;
+    }};
+    const form = {
+        dataset: {},
+        matches(selector) { return selector === "form[data-tablet-shift-entry]"; },
+        querySelector(selector) { return selector.startsWith("button") ? submit : pin; },
+    };
+    function newField(action) {
+        return {
+            form,
+            valid: false,
+            getAttribute() { return action; },
+            reportValidity() { return this.valid; },
+            focus() { document.activeElement = this; handlers.focusin({target: this}); },
+        };
+    }
+    const phone = newField("next");
+    const pin = newField("done");
+    vm.runInNewContext(dialogSource, {window, document});
+    phone.focus();
+    handlers["native-ime-action"]({detail: {action: "next"}});
+    assert.equal(document.activeElement, phone);
+    assert.deepEqual(actions, ["next", "next"]);
+    phone.valid = true;
+    handlers.keydown({target: phone, key: "Enter", preventDefault() {}});
+    assert.equal(document.activeElement, pin);
+    pin.valid = true;
+    handlers["native-ime-action"]({detail: {action: "next"}});
+    assert.equal(posts, 0, "late Next event must not submit");
+    handlers["native-ime-action"]({detail: {action: "done"}});
+    submit.click();
+    assert.equal(posts, 1, "Done and a repeated tap submit only once");
+});
