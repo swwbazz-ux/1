@@ -153,6 +153,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String css = asset("tablet/mining-master-tablet.css");
             String js = asset("tablet/mining-master-tablet.js");
             String shiftLogin = asset("shared-shift-login.js");
+            String dialogScale = asset("tablet/tablet-dialog-scale.css");
             String entryCss = asset("tablet/tablet-entry-fields.css");
             String entryJs = asset("tablet/tablet-entry-fields.js");
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
@@ -164,6 +165,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "function addStyle(id,css){if(document.getElementById(id))return;"
                 + "var s=document.createElement('style');s.id=id;s.textContent=css;document.head.appendChild(s);}"
                 + "function boot(){if(!document.head)return;"
+                + "addStyle('cr-tablet-dialog-scale-css'," + JSONObject.quote(dialogScale) + ");"
                 + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
                 + "if(!workplace)return;"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
