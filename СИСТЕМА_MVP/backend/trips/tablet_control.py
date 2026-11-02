@@ -5,11 +5,17 @@
 """
 
 from django.urls import reverse
+from django.utils import timezone
 
 from users.active_role import role_session_state
 from users.models import EmployeeAccess
 
 from .dispatcher_header import get_active_dispatcher_shift
+
+
+def command_time(request):
+    """The field adapter sets this attribute only after verification of a signed envelope."""
+    return getattr(request, 'field_verified_occurred_at', None) or timezone.now()
 
 
 def is_tablet_control_request(request):

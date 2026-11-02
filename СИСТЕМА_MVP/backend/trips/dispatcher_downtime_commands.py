@@ -1,6 +1,6 @@
 """Команды управления простоями с Диспетчерского пульта."""
 
-from django.utils import timezone
+from .tablet_control import command_time
 
 from core.models import bump_operational_state, lock_production_state
 from downtimes.models import DowntimeEvent
@@ -84,7 +84,7 @@ def execute_dispatcher_close_downtime(
             status=409,
         )
 
-    event.ended_at = timezone.now()
+    event.ended_at = command_time(request)
     event.save(update_fields=['ended_at'])
     state = bump_operational_state(
         'Dispatcher:downtime_closed',

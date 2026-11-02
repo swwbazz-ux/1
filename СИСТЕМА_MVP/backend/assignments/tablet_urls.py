@@ -5,6 +5,7 @@ from trips.urls import urlpatterns as trip_patterns
 from users.mining_master_tablet_auth import login_view, activate_view
 
 from .tablet_views import mining_master_tablet_view, tablet_workplace, tablet_logout_view
+from .field_sync import field_sync_view
 
 PREFIX = 'mining-master/tablet/'
 TRIP_NAMES = {
@@ -34,6 +35,7 @@ urlpatterns = [
     path(PREFIX + 'login/', login_view, name='mining_master_tablet_login'),
     path(PREFIX + 'activate/', activate_view, name='mining_master_tablet_activate'),
     path(PREFIX + 'logout/', tablet_logout_view, name='mining_master_tablet_logout'),
+    path(PREFIX + 'field-sync/', field_sync_view, name='mining_master_field_sync'),
 ]
 # Names exposed only in the per-request resolver. Existing templates and redirects
 # then stay in this workplace without altering legacy routes or stored employee roles.

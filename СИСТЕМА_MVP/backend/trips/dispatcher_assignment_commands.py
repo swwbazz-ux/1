@@ -2,7 +2,7 @@
 
 from django.contrib import messages
 from django.shortcuts import redirect
-from django.utils import timezone
+from .tablet_control import command_time
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from assignments.services import HaulAssignmentStateConflict, schedule_haul_release
@@ -69,7 +69,8 @@ def execute_dispatcher_cancel_assignment(
             pending_release, _ = schedule_haul_release(
                 truck=assignment.truck,
                 assigned_by=access.employee,
-                now=timezone.now(),
+                now=command_time(request),
+                **({'recorded_at':request.field_verified_occurred_at} if getattr(request,'field_verified_occurred_at',None) else {}),
                 expected_state_id=assignment.id,
             )
         except HaulAssignmentStateConflict:
@@ -81,7 +82,7 @@ def execute_dispatcher_cancel_assignment(
         logged_assignment = pending_release or assignment
     else:
         assignment.status = AssignmentStatus.CANCELLED
-        assignment.ended_at = timezone.now()
+        assignment.ended_at = command_time(request)
         assignment.save(update_fields=['status', 'ended_at'])
         logged_assignment = assignment
     action_logger(

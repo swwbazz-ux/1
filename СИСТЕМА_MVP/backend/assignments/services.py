@@ -1611,13 +1611,26 @@ def validate_projected_excavator_state(assignments, expected_states):
         )
 
 
+def _set_device_assignment_time(assignment, recorded_at):
+    if recorded_at is not None:
+        # assigned_at is auto_now_add for legacy callers.
+        HaulAssignment.objects.filter(pk=assignment.pk).update(assigned_at=recorded_at)
+        assignment.assigned_at = recorded_at
+
+
+def _check_device_assignment_history(truck, recorded_at):
+    if recorded_at is None:
+        return
+    newer_history = HaulAssignment.objects.filter(truck=truck).filter(
+        Q(assigned_at__gt=recorded_at) | Q(ended_at__gt=recorded_at)
+    )
+    if newer_history.exists():
+        raise HaulAssignmentStateConflict(expected_state_id=None, actual_state_id=None)
+
+
 @transaction.atomic
-# select_for_update требует активную транзакцию. У соседней schedule_haul_release
-# декоратор уже стоял, а здесь его не было — молчало, пока действие «Назначить
-# самосвал» не сработало на редком стечении данных, и тогда падало 500-й ошибкой
-# ровно на той кнопке, которой горный мастер и диспетчер пользуются каждый день.
 def schedule_haul_assignment(
-    *, truck, excavator, assigned_by=None, now=None, expected_state_id=None,
+    *, truck, excavator, assigned_by=None, now=None, expected_state_id=None, recorded_at=None,
 ):
     now = now or timezone.now()
     lock_production_state()
@@ -1629,6 +1642,7 @@ def schedule_haul_assignment(
         .order_by('-assigned_at', '-id')
     )
     _validate_haul_assignment_state(open_assignments, expected_state_id)
+    _check_device_assignment_history(truck,recorded_at)
     accepted = next((item for item in open_assignments if item.status == AssignmentStatus.ACCEPTED), None)
     current_pending = next((item for item in open_assignments if item.status == AssignmentStatus.PENDING), None)
     if (
@@ -1658,6 +1672,7 @@ def schedule_haul_assignment(
         status=AssignmentStatus.PENDING,
         effective_at=haul_assignment_effective_at(truck, now),
     )
+    _set_device_assignment_time(assignment,recorded_at)
     _preserve_previous_loading_authority(
         previous_assignment=accepted,
         target_assignment=assignment,
@@ -1678,7 +1693,7 @@ def schedule_haul_assignment(
 
 
 @transaction.atomic
-def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_id=None):
+def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_id=None, recorded_at=None):
     now = now or timezone.now()
     lock_production_state()
     truck = Equipment.objects.select_for_update().get(pk=truck.pk)
@@ -1690,6 +1705,7 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_i
         .order_by('-assigned_at', '-id')
     )
     _validate_haul_assignment_state(open_assignments, expected_state_id)
+    _check_device_assignment_history(truck,recorded_at)
     accepted = next((item for item in open_assignments if item.status == AssignmentStatus.ACCEPTED), None)
     pending = [item for item in open_assignments if item.status == AssignmentStatus.PENDING]
     current_pending = pending[0] if pending else None
@@ -1709,6 +1725,7 @@ def schedule_haul_release(*, truck, assigned_by=None, now=None, expected_state_i
         status=AssignmentStatus.PENDING,
         effective_at=haul_assignment_effective_at(truck, now),
     )
+    _set_device_assignment_time(assignment,recorded_at)
     _emit_assignment_changed(
         action='release_pending', truck_id=truck.id,
         excavator_ids=[source.excavator_id], assignment_id=assignment.id,
