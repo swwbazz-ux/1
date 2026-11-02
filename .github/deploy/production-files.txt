@@ -1,40 +1,11 @@
-# Личный вход и собственная смена Горного мастера на общем планшете.
-СИСТЕМА_MVP/backend/assignments/tablet_urlconf.py
-СИСТЕМА_MVP/backend/assignments/tablet_urls.py
-СИСТЕМА_MVP/backend/assignments/tablet_views.py
-СИСТЕМА_MVP/backend/assignments/urls.py
-СИСТЕМА_MVP/backend/assignments/views.py
-СИСТЕМА_MVP/backend/reports/views.py
+# Телефон мастера: постоянный +7 и формат000 000 00 00.
 СИСТЕМА_MVP/backend/static/css/mining-master-tablet-auth-v1.css
-СИСТЕМА_MVP/backend/static/js/role-readonly.js
-СИСТЕМА_MVP/backend/templates/base.html
-СИСТЕМА_MVP/backend/templates/includes/dispatcher_header.html
 СИСТЕМА_MVP/backend/templates/includes/dispatcher_shift_action.html
 СИСТЕМА_MVP/backend/templates/includes/tablet-runtime/shared-shift-login.js
-СИСТЕМА_MVP/backend/templates/reports/customer_daily_report.html
-СИСТЕМА_MVP/backend/templates/reports/downtime_report.html
-СИСТЕМА_MVP/backend/templates/reports/includes/management_report_header.html
-СИСТЕМА_MVP/backend/templates/reports/report_template_builder.html
-СИСТЕМА_MVP/backend/templates/reports/volume_report.html
-СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_push_invite.html
-СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_service_lists.html
-СИСТЕМА_MVP/backend/templates/users/mining_master_tablet_activate.html
 СИСТЕМА_MVP/backend/templates/users/mining_master_tablet_login.html
-СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_guards.py
-СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_topology_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_trip_commands.py
-СИСТЕМА_MVP/backend/trips/tablet_control.py
-СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/middleware.py
 СИСТЕМА_MVP/backend/users/mining_master_tablet_auth.py
-СИСТЕМА_MVP/backend/users/mining_master_tablet_shift_auth.py
-СИСТЕМА_MVP/backend/users/start_views.py
-СИСТЕМА_MVP/backend/users/views.py
 
-# Неизменённые ресурсы действующего диспетчерского пульта.
+# Неизменённые ресурсы диспетчерского пульта.
 СИСТЕМА_MVP/backend/static/css/dispatcher-adaptive-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css
 СИСТЕМА_MVP/backend/static/css/dispatcher-control-v1.css
