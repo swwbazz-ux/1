@@ -73,21 +73,35 @@ public final class MiningMasterTabletActivity extends MainActivity {
             webPrint = new TabletWebPrint(this, kiosk, view);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public void onPageStarted(WebView webView, String url, android.graphics.Bitmap favicon) {
+                    android.util.Log.i("MiningMasterTablet", "main_frame event=started route="
+                        + TabletUrlPolicy.diagnosticRoute(url));
                     webPrint.pageStarted();
                     super.onPageStarted(webView, url, favicon);
                 }
                 @Override public void onPageFinished(WebView webView, String url) {
+                    android.util.Log.i("MiningMasterTablet", "main_frame event=finished route="
+                        + TabletUrlPolicy.diagnosticRoute(url));
                     super.onPageFinished(webView, url);
                     webPrint.pageFinished(url);
                 }
                 @Override public void onReceivedError(WebView webView, WebResourceRequest request,
                         android.webkit.WebResourceError error) {
-                    if (request.isForMainFrame()) webPrint.pageFailed();
+                    if (request.isForMainFrame()) {
+                        android.util.Log.w("MiningMasterTablet", "main_frame event=network_error code="
+                            + error.getErrorCode() + " route="
+                            + TabletUrlPolicy.diagnosticRoute(request.getUrl().toString()));
+                        webPrint.pageFailed();
+                    }
                     super.onReceivedError(webView, request, error);
                 }
                 @Override public void onReceivedHttpError(WebView webView, WebResourceRequest request,
                         android.webkit.WebResourceResponse response) {
-                    if (request.isForMainFrame()) webPrint.pageFailed();
+                    if (request.isForMainFrame()) {
+                        android.util.Log.w("MiningMasterTablet", "main_frame event=http_error status="
+                            + response.getStatusCode() + " route="
+                            + TabletUrlPolicy.diagnosticRoute(request.getUrl().toString()));
+                        webPrint.pageFailed();
+                    }
                     super.onReceivedHttpError(webView, request, response);
                 }
                 @Override public boolean shouldOverrideUrlLoading(WebView webView, WebResourceRequest request) {

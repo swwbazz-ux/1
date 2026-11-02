@@ -4,6 +4,16 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TabletSecurityTest {
+    @Test public void diagnosticsExposeOnlyFixedRouteKinds() {
+        assertEquals("control", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL));
+        assertEquals("login", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL + "login/?phone=70000000000&pin=123456"));
+        assertEquals("activate", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL + "activate/#secret"));
+        assertEquals("other", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL + "employee/123456/"));
+        assertEquals("other", TabletUrlPolicy.diagnosticRoute("https://name:secret@mining-master.driverform.ru/mining-master/tablet/login/"));
+        assertEquals("other", TabletUrlPolicy.diagnosticRoute("https://other.example/mining-master/tablet/login/"));
+        assertEquals("other", TabletUrlPolicy.diagnosticRoute(null));
+    }
+
     @Test public void workplaceCannotNavigateIntoLegacyLoginOrPersonalMasterRoute() {
         assertTrue(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL));
         assertTrue(TabletUrlPolicy.workplaceNavigation(TabletUrlPolicy.START_URL + "login/"));

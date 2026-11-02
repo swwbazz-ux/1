@@ -71,4 +71,17 @@ final class TabletUrlPolicy {
             return false;
         }
     }
+
+    static String diagnosticRoute(String url) {
+        if (!trusted(url)) return "other";
+        try {
+            String path = new URI(url).getRawPath();
+            if (CONTROL_PATH.equals(path)) return "control";
+            if ((CONTROL_PATH + "login/").equals(path)) return "login";
+            if ((CONTROL_PATH + "activate/").equals(path)) return "activate";
+        } catch (URISyntaxException ignored) {
+            return "other";
+        }
+        return "other";
+    }
 }

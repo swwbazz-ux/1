@@ -41,6 +41,10 @@ final class StartupLoadingOverlay {
     private static final String APPLICATION_DOCUMENT_PROBE =
         "(function(){return !!(document.body&&document.body.hasAttribute('data-app-contract-ready'));})()";
 
+    private Readiness lastReadiness = Readiness.invalid();
+    private boolean applicationDocumentChecked;
+    private boolean applicationDocumentReady;
+
     private static final String PREPARE_LAYOUT =
         "(function(){" +
             "var previous=window.__copperNativeStartupLayout;" +
@@ -344,6 +348,9 @@ final class StartupLoadingOverlay {
         pageGeneration += 1;
         pageLoaded = false;
         pageErrorObserved = false;
+        lastReadiness = Readiness.invalid();
+        applicationDocumentChecked = false;
+        applicationDocumentReady = false;
         watchdogGraceUsed = false;
         recoveryVisible = false;
         bindWebView(loadingWebView);
@@ -370,7 +377,9 @@ final class StartupLoadingOverlay {
                 if (!isCurrentVisibleGeneration(generation)) {
                     return;
                 }
-                if (!"true".equals(String.valueOf(result))) {
+                applicationDocumentChecked = true;
+                applicationDocumentReady = "true".equals(String.valueOf(result));
+                if (!applicationDocumentReady) {
                     enterRecovery(generation, DiagnosticReason.ERROR);
                     return;
                 }
@@ -501,6 +510,7 @@ final class StartupLoadingOverlay {
                     return;
                 }
                 Readiness readiness = parseReadiness(encodedResult);
+                lastReadiness = readiness;
                 if (!readiness.valid()) {
                     enterRecovery(generation, DiagnosticReason.ERROR);
                     return;
@@ -709,6 +719,7 @@ final class StartupLoadingOverlay {
                         return;
                     }
                     Readiness readiness = parseReadiness(encodedResult);
+                    lastReadiness = readiness;
                     if (nativeLayoutReady && readiness.isReady()) {
                         awaitCommittedVisualState(generation);
                         return;
@@ -743,6 +754,7 @@ final class StartupLoadingOverlay {
                                     return;
                                 }
                                 Readiness readiness = parseReadiness(encodedResult);
+                                lastReadiness = readiness;
                                 if (!readiness.valid()) {
                                     enterRecovery(generation, DiagnosticReason.ERROR);
                                     return;
@@ -917,6 +929,9 @@ final class StartupLoadingOverlay {
         int generation = ++pageGeneration;
         pageLoaded = false;
         pageErrorObserved = false;
+        lastReadiness = Readiness.invalid();
+        applicationDocumentChecked = false;
+        applicationDocumentReady = false;
         watchdogGraceUsed = false;
         waitForImeClose = false;
         resetNativeLayoutStability();
@@ -937,6 +952,25 @@ final class StartupLoadingOverlay {
         String message = "startup_overlay state=" + state
             + " reason=" + reason.value
             + " generation=" + generation;
+        if ("mining_master_tablet".equals(BuildConfig.APP_PROFILE_ID)) {
+            message += " app_document_checked=" + applicationDocumentChecked
+                + " app_document_ready=" + applicationDocumentReady
+                + " page_loaded=" + pageLoaded
+                + " page_error=" + pageErrorObserved
+                + " js_valid=" + lastReadiness.valid()
+                + " document_complete=" + lastReadiness.documentComplete()
+                + " viewport_ready=" + lastReadiness.hasViewport()
+                + " js_stable_frames=" + lastReadiness.stableFrames()
+                + " js_quiet_ms=" + lastReadiness.quietWindowMs()
+                + " fonts_ready=" + lastReadiness.fontsReady()
+                + " images_ready=" + lastReadiness.imagesReady()
+                + " role_ready=" + lastReadiness.roleReady()
+                + " page_visible=" + lastReadiness.pageVisible()
+                + " native_stable_frames=" + nativeStableFrames
+                + " wait_for_ime_close=" + waitForImeClose
+                + " host_resumed=" + hostResumed
+                + " window_focused=" + windowFocused;
+        }
         if (reason == DiagnosticReason.NORMAL) {
             Log.i(LOG_TAG, message);
         } else {
