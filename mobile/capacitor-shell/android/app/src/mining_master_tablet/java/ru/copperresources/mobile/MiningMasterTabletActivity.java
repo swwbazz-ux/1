@@ -159,11 +159,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
                 + ".indexOf(location.pathname)!==-1;"
                 + "if(!workplace&&" + new JSONArray(TabletUrlPolicy.ENTRY_PATHS) + ".indexOf(location.pathname)===-1)return;"
+                // Install focus handling before the server-rendered phone field requests autofocus.
+                + entryJs + "\n"
                 + "function addStyle(id,css){if(document.getElementById(id))return;"
                 + "var s=document.createElement('style');s.id=id;s.textContent=css;document.head.appendChild(s);}"
                 + "function boot(){if(!document.head)return;"
                 + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
-                + entryJs + "\nif(!workplace)return;"
+                + "if(!workplace)return;"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
                 + js + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";

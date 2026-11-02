@@ -1,74 +1,412 @@
-form[data-tablet-shift-entry] .cr-entry-heading {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+/* The same form can be a standalone page or a dialog portalled outside the
+   scaled board. Values here use viewport pixels, as does the native keyboard. */
+.tablet-auth-panel:not(.tablet-auth-welcome),
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] {
+    --cr-panel: #10191f;
+    --cr-line: #34454e;
+    --cr-field: #19252b;
+    --cr-ink: #edf5f7;
+    --cr-muted: #a4b2b9;
+    --cr-red: #ff524b;
+    --cr-green: #7bd319;
+    --cr-confirm-font: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    --cr-pad-x: clamp(20px, 2.08vw, 34px);
+    --cr-pad-top: clamp(20px, 2.05vw, 34px);
+    --cr-pad-bottom: clamp(16px, 1.42vw, 24px);
+    --cr-heading-size: clamp(25px, 2.21vw, 36px);
+    --cr-label-size: clamp(16px, 1.5vw, 24px);
+    --cr-digit-size: clamp(24px, 2.32vw, 37px);
+    --cr-row-size: clamp(58px, 5.55vw, 90px);
+    --cr-action-size: clamp(48px, 4.1vw, 66px);
+    --cr-title-gap: clamp(12px, 1.02vw, 17px);
+    --cr-field-gap: clamp(12px, 1.2vw, 19px);
+    --cr-button-gap: clamp(12px, 1.16vw, 19px);
+    --cr-row-pad: clamp(10px, 1.32vw, 22px);
+    --cr-pin-cell: clamp(23px, 2.32vw, 38px);
+    --cr-pin-dash: clamp(16px, 2.1vw, 34px);
+    box-sizing: border-box;
+    width: min(100%, clamp(600px, 51vw, 900px));
+    margin: 0;
+    padding: var(--cr-pad-top) var(--cr-pad-x) var(--cr-pad-bottom);
+    border: 1px solid var(--cr-line);
+    border-radius: 8px;
+    background: var(--cr-panel);
+    color: var(--cr-ink);
+    font-family: var(--cr-confirm-font);
+    box-shadow: 0 16px 50px rgb(0 0 0 / 20%);
 }
-form[data-tablet-shift-entry] .cr-entry-counter {
-    flex: none; color: #bccbd3; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+body.tablet-auth:has(form[data-tablet-shift-entry]) {
+    min-height: 100dvh;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+        max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    place-items: center;
+    background: #0c1012;
+}
+body.tablet-auth:has(form[data-tablet-shift-entry]):is([data-connection-state="ok"], [data-connection-state="unknown"]) > .app-connection-dot {
+    opacity: 0;
+    pointer-events: none;
+}
+.tablet-auth-panel:not(.tablet-auth-welcome) {
+    max-height: calc(100dvh - 24px);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+body > .tablet-personal-login-portal[data-tablet-personal-login]:not([hidden]) {
+    background: rgb(4 9 12 / 88%);
+}
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] {
+    grid-template: minmax(0, 1fr) auto / minmax(0, 1fr);
+    gap: var(--cr-button-gap);
+}
+.tablet-auth-panel:not(.tablet-auth-welcome) .tablet-auth-role,
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-close {
+    display: none;
+}
+.tablet-auth-panel:not(.tablet-auth-welcome) h1,
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] h2 {
+    margin: 0 0 var(--cr-title-gap);
+    padding: 0;
+    color: var(--cr-ink);
+    font: 900 var(--cr-heading-size)/1.12 var(--cr-confirm-font);
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+form[data-tablet-shift-entry] .tablet-auth-fields,
+form[data-tablet-shift-entry] .tablet-auth-fields:has(#tablet-phone),
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] .app-confirm-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--cr-field-gap);
+    padding: 0;
+}
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] h2 {
+    margin: 0;
+}
+form[data-tablet-shift-entry] .tablet-auth-fields label,
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-login-field {
+    display: grid;
+    grid-template: auto var(--cr-row-size) / minmax(0, 1fr);
+    position: relative;
+    align-content: start;
+    align-self: stretch;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+    color: var(--cr-muted);
+    font: 600 var(--cr-label-size)/1.2 var(--cr-confirm-font);
+}
+form[data-tablet-shift-entry] .cr-entry-heading {
+    grid-area: 1 / 1;
+    align-self: center;
+}
+form[data-tablet-shift-entry] .cr-digit-hint {
+    grid-area: 1 / 1;
+    justify-self: end;
+    align-self: center;
+    font: 500 14px/1.2 var(--cr-confirm-font);
+    color: #b4c2c8;
+}
+form[data-tablet-shift-entry] .cr-entry-counter,
+form[data-tablet-shift-entry] label[data-cr-complete] > .cr-digit-hint,
+form[data-tablet-shift-entry] .cr-entry-status:not([hidden]),
+.tablet-auth-panel:has(#tablet-phone) #tablet-pin-hint {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+form[data-tablet-shift-entry] .shared-shift-login-field > small {
+    display: none;
+}
+.tablet-auth-panel:not(.tablet-auth-welcome) .tablet-auth-person {
+    margin: 0 0 3px;
+    font-size: 18px;
+    line-height: 1.2;
+}
+.tablet-auth-panel:not(.tablet-auth-welcome) .tablet-auth-help,
+form[data-tablet-shift-entry] .tablet-auth-hint {
+    margin: 4px 0 var(--cr-title-gap);
+    color: var(--cr-muted);
+    font: 500 15px/1.28 var(--cr-confirm-font);
+}
+.tablet-auth-panel:has(#tablet-phone) form[data-cr-entry-state="incomplete"]:has(.cr-cell-pin-label:focus-within) #tablet-pin-hint,
+form[data-cr-entry-state="mismatch"] .cr-entry-status:not([hidden]) {
+    position: static;
+    display: block;
+    width: auto;
+    height: auto;
+    margin: 8px 0 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+}
+form[data-cr-entry-state="mismatch"] .cr-entry-status {
+    color: #ffa59f;
+}
+form[data-tablet-shift-entry] .cr-cell-phone-row.shared-shift-phone-shell,
+form[data-tablet-shift-entry] .cr-cell-pin-label > .cr-cell-strip {
+    grid-area: 2 / 1;
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    height: var(--cr-row-size);
+    border: 1px solid var(--cr-line);
+    border-radius: 6px;
+    background: var(--cr-field);
+    color: var(--cr-ink);
 }
 form[data-tablet-shift-entry] .cr-cell-phone-row.shared-shift-phone-shell {
-    display: grid; grid-template: minmax(48px, auto) / auto minmax(0, 1fr);
-    align-items: stretch; gap: 0; min-width: 0; background: #0c161c;
+    display: grid;
+    grid-template: minmax(0, 1fr) / auto minmax(0, 1fr);
+    align-items: stretch;
+    gap: 0;
+    padding: 0 1px 0 var(--cr-row-pad);
 }
 form[data-tablet-shift-entry] .cr-cell-phone-row .shared-shift-country-code {
-    grid-area: 1 / 1; display: grid; place-items: center; min-width: 0; padding: 0 0 0 5px;
-    border: 0; font-size: 18px; white-space: nowrap;
+    grid-area: 1 / 1;
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    color: #c4d0d5;
+    font: 700 var(--cr-digit-size)/1 var(--cr-confirm-font);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 form[data-tablet-shift-entry] .cr-cell-phone-row .shared-shift-country-code > [aria-hidden] { display: none; }
 form[data-tablet-shift-entry] :is(.cr-cell-phone-row, .cr-cell-pin-label) .cr-cell-input {
-    position: relative; z-index: 1; width: 100%; min-width: 0; height: 100%; min-height: 48px;
-    margin: 0; padding: 0; box-sizing: border-box; opacity: 0; cursor: text; touch-action: pan-y;
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    cursor: text;
+    touch-action: pan-y;
+    user-select: text;
+    -webkit-user-select: text;
 }
 form[data-tablet-shift-entry] .cr-cell-phone-row > :is(.cr-cell-input, .cr-cell-strip) { grid-area: 1 / 2; }
-form[data-tablet-shift-entry] .cr-cell-pin-label > :is(.cr-cell-input, .cr-cell-strip) { grid-area: 2 / 1; }
+form[data-tablet-shift-entry] .cr-cell-pin-label > .cr-cell-input {
+    grid-area: 2 / 1;
+    width: calc(1px + var(--cr-row-pad) + 6 * var(--cr-pin-cell) + 2 * var(--cr-pin-dash));
+}
 form[data-tablet-shift-entry] .cr-cell-strip {
-    display: flex; align-items: center; gap: 1px; pointer-events: none; min-width: 0;
-    box-sizing: border-box; min-height: 48px; padding: 4px; font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 0;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
 }
 form[data-tablet-shift-entry] .cr-cell-pin-label > .cr-cell-strip {
-    border: 1px solid #536672; border-radius: 6px; background: #0c161c;
+    padding-inline: var(--cr-row-pad);
 }
-form[data-tablet-shift-entry] .cr-cell-phone-row:focus-within,
+form[data-tablet-shift-entry] .cr-cell-phone-row.shared-shift-phone-shell:focus-within,
 form[data-tablet-shift-entry] .cr-cell-pin-label:focus-within > .cr-cell-strip {
-    outline: 2px solid #72c9ed; outline-offset: -2px;
+    outline: 0;
+    border-color: #7693a2;
+    box-shadow: inset 0 0 0 1px #7693a2;
 }
 form[data-tablet-shift-entry] .cr-digit-group {
-    display: flex; flex: 1 1 0; min-width: 0; gap: 2px; align-items: center;
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    align-items: center;
 }
 form[data-tablet-shift-entry] .cr-digit-dash {
-    flex: none; color: #c5d5dc; width: .62em; text-align: center; font: 700 18px/1 monospace;
+    flex: none;
+    width: clamp(12px, 1.68vw, 28px);
+    color: #a8b6bd;
+    text-align: center;
+    font: 700 var(--cr-digit-size)/1 var(--cr-confirm-font);
 }
 form[data-tablet-shift-entry] .cr-digit {
-    position: relative; display: grid; place-items: center; flex: 1 1 0; min-width: 0; height: 34px;
-    box-sizing: border-box; border: 1px solid #4d626e; border-radius: 4px;
-    background: #15252e; color: #f4f7f9; font: 600 clamp(15px, 2vw, 21px)/1 monospace;
+    position: relative;
+    display: grid;
+    flex: 1 1 0;
+    place-items: center;
+    min-width: 0;
+    height: 68%;
+    box-sizing: border-box;
+    color: var(--cr-ink);
+    font: 700 var(--cr-digit-size)/1 var(--cr-confirm-font);
 }
-form[data-tablet-shift-entry] .cr-digit.is-empty { color: #93a7b1; }
-form[data-tablet-shift-entry] .cr-digit.is-selected { color: white; background: #37718c; }
+form[data-tablet-shift-entry] .cr-cell-phone-row .cr-digit-group {
+    height: 100%;
+}
+form[data-tablet-shift-entry] .cr-cell-phone-row .cr-digit-dash:first-child {
+    width: clamp(14px, 2.5vw, 39px);
+}
+form[data-tablet-shift-entry] .cr-cell-phone-row .cr-digit + .cr-digit {
+    border-left: 1px solid #35464e;
+}
+form[data-tablet-shift-entry] .cr-cell-pin-label .cr-digit-group {
+    flex: 0 0 calc(2 * var(--cr-pin-cell));
+    max-width: calc(2 * var(--cr-pin-cell));
+    height: 100%;
+}
+form[data-tablet-shift-entry] .cr-cell-pin-label .cr-digit-dash { width: var(--cr-pin-dash); }
+/* PIN marks keep the same diameter on tablets with different font fallbacks. */
+form[data-tablet-shift-entry] .cr-pin-field:not(:has(.cr-pin-toggle[aria-pressed="true"])) .cr-digit {
+    font-size: 0;
+}
+form[data-tablet-shift-entry] .cr-pin-field:not(:has(.cr-pin-toggle[aria-pressed="true"])) .cr-digit::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: clamp(11px, 1.12vw, 18px);
+    aspect-ratio: 1;
+    box-sizing: border-box;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+    background: currentColor;
+}
+form[data-tablet-shift-entry] .cr-pin-field:not(:has(.cr-pin-toggle[aria-pressed="true"])) .cr-digit.is-empty::after {
+    background: transparent;
+}
+form[data-tablet-shift-entry] .cr-digit.is-empty { color: #91a1aa; }
+form[data-tablet-shift-entry] .cr-digit.is-selected { background: #385768; color: white; }
 form[data-tablet-shift-entry] .cr-digit:is(.caret-before, .caret-after)::before {
-    content: ""; position: absolute; top: 4px; bottom: 4px; width: 2px; background: #87dbfc;
+    content: "";
+    position: absolute;
+    inset-block: 8%;
+    width: 2px;
+    background: #acc9d8;
 }
-form[data-tablet-shift-entry] .cr-digit.caret-before::before { left: 0; }
-form[data-tablet-shift-entry] .cr-digit.caret-after::before { right: 0; }
-form[data-tablet-shift-entry] .cr-digit-hint { color: #bfced5; font-size: 14px; font-weight: 500; line-height: 1.2; }
-form[data-tablet-shift-entry] .cr-cell-pin-label > small { display: none; }
-form[data-tablet-shift-entry] .cr-entry-status {
-    display: block; color: #c3d2da; font-size: 16px; font-weight: 600; line-height: 1.3;
+form[data-tablet-shift-entry] .cr-digit.caret-before::before { left: 1px; }
+form[data-tablet-shift-entry] .cr-digit.caret-after::before { right: 1px; }
+
+/* A sibling of the real label: TalkBack gets a separate button, and all
+   remaining space in the field still accepts a single tap to edit the PIN. */
+form[data-tablet-shift-entry] .cr-pin-field { position: relative; min-width: 0; }
+form[data-tablet-shift-entry] .cr-pin-field .cr-pin-toggle {
+    position: absolute;
+    z-index: 2;
+    inset-inline-start: calc(1px + var(--cr-row-pad) + 6 * var(--cr-pin-cell) + 2 * var(--cr-pin-dash) + 4px);
+    inset-block-end: calc((var(--cr-row-size) - 48px) / 2);
+    display: grid;
+    place-items: center;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    box-shadow: none;
+    color: #9aabb4;
+    cursor: pointer;
+    touch-action: manipulation;
 }
-form[data-cr-entry-state="ready"] .cr-entry-status { color: #a7db87; }
-form[data-cr-entry-state="mismatch"] .cr-entry-status { color: #ffaeaa; }
-body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-first-entry { grid-column: 1; }
-body > .tablet-personal-login-portal form[data-tablet-shift-entry] .cr-entry-status { grid-column: 2; align-self: center; }
-.tablet-auth form[data-tablet-shift-entry] .tablet-auth-hint { margin: 8px 0 4px; }
-.tablet-auth form[data-tablet-shift-entry] .cr-entry-status { margin: 0 0 10px; }
-/* Each field already explains its remaining digits. Reserve a full status line
-   for the one error involving both fields, the first-entry PIN mismatch. */
-.tablet-auth form[data-cr-entry-state]:not([data-cr-entry-state="mismatch"]) .cr-entry-status,
-body > .tablet-personal-login-portal form[data-cr-entry-state]:not([data-cr-entry-state="mismatch"]) .cr-entry-status {
-    position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%);
+form[data-tablet-shift-entry] .cr-pin-toggle svg {
+    width: clamp(26px, 2.28vw, 37px);
+    height: auto;
+    pointer-events: none;
 }
-form[data-tablet-shift-entry] button[data-cr-entry-disabled]:disabled {
-    background: #273841 !important; color: #c3cdd2 !important; border-color: #465b66 !important;
-    box-shadow: none !important; animation: none !important; cursor: default;
+form[data-tablet-shift-entry] .cr-pin-toggle[aria-pressed="true"] { color: var(--cr-ink); }
+form[data-tablet-shift-entry] .cr-pin-toggle:focus-visible { outline: 2px solid #9cb7c5; }
+form[data-tablet-shift-entry] .tablet-auth-actions,
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] .app-confirm-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: clamp(8px, 1vw, 16px);
+    margin: 0;
+    padding: 0;
+}
+form[data-tablet-shift-entry] .tablet-auth-actions { margin-top: var(--cr-button-gap); }
+:is(.tablet-auth-panel, .tablet-personal-login-portal) form[data-tablet-shift-entry] :is(.tablet-auth-actions, .app-confirm-actions) > :is(a, button) {
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: var(--cr-action-size);
+    margin: 0;
+    padding: 6px 12px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    font: 900 clamp(17px, 1.55vw, 24px)/1.12 var(--cr-confirm-font);
+    letter-spacing: .025em;
+    text-transform: uppercase;
+    text-decoration: none;
+    text-align: center;
+    white-space: normal;
+}
+:is(.tablet-auth-panel, .tablet-personal-login-portal) form[data-tablet-shift-entry] :is(.tablet-auth-actions, .app-confirm-actions) > :is(.tablet-auth-secondary, .secondary) {
+    grid-area: 1 / 1;
+    color: var(--cr-red);
+    border-color: var(--cr-red);
+    background: rgb(255 82 75 / 16%);
+}
+:is(.tablet-auth-panel, .tablet-personal-login-portal) form[data-tablet-shift-entry] :is(.tablet-auth-actions, .app-confirm-actions) > :is(.tablet-auth-primary, .danger) {
+    grid-area: 1 / 2;
+    border-color: var(--cr-green);
+    background: rgb(123 211 25 / 14%);
+    color: #94e949;
+}
+:is(.tablet-auth-panel, .tablet-personal-login-portal) form[data-tablet-shift-entry] :is(.tablet-auth-actions, .app-confirm-actions) > button:disabled {
+    border-color: #4a6435;
+    background: #192520;
+    color: #829873;
+    box-shadow: none;
+    animation: none;
+    cursor: default;
+}
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-first-entry {
+    justify-self: start;
+    align-self: center;
+    min-height: 40px;
+    color: #b2c3cc;
+}
+/* Only the board's start-shift button pulses when the shift is closed. */
+body > .tablet-personal-login-portal form[data-tablet-shift-entry] button.cr-mm-shift-start-accent {
+    animation: none;
+    box-shadow: none;
+}
+@media (max-height: 520px) {
+    .tablet-auth-panel:not(.tablet-auth-welcome),
+    body > .tablet-personal-login-portal form[data-tablet-shift-entry] {
+        --cr-pad-x: clamp(16px, 2vw, 26px);
+        --cr-pad-top: 13px;
+        --cr-pad-bottom: 13px;
+        --cr-heading-size: 25px;
+        --cr-label-size: 16px;
+        --cr-digit-size: clamp(22px, 2vw, 28px);
+        --cr-row-size: clamp(48px, 12.4dvh, 56px);
+        --cr-action-size: 48px;
+        --cr-title-gap: 7px;
+        --cr-field-gap: 9px;
+        --cr-button-gap: 9px;
+    }
+    form[data-tablet-shift-entry] .tablet-auth-fields label,
+    body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-login-field { gap: 4px; }
+    .tablet-auth-panel:not(.tablet-auth-welcome) .tablet-auth-error { margin-bottom: 8px; padding: 6px 10px; }
+    body > .tablet-personal-login-portal form[data-tablet-shift-entry] .shared-shift-first-entry { min-height: 32px; }
 }
 @media (max-width: 560px) {
-    body > .tablet-personal-login-portal form[data-tablet-shift-entry] .cr-entry-status { grid-column: 1; }
+    .tablet-auth-panel:not(.tablet-auth-welcome),
+    body > .tablet-personal-login-portal form[data-tablet-shift-entry] {
+        --cr-pad-x: 12px;
+        --cr-row-pad: 6px;
+        --cr-digit-size: clamp(18px, 5.4vw, 25px);
+        --cr-pin-cell: clamp(17px, 5vw, 24px);
+        --cr-pin-dash: 12px;
+    }
+    form[data-tablet-shift-entry] .cr-digit-dash { width: 10px; }
+    form[data-tablet-shift-entry] .cr-digit-hint { font-size: 12px; }
 }
