@@ -134,7 +134,7 @@
         label.appendChild(search);toolbar.appendChild(label);
         for(const [key,title] of [["share","В MAX"],["activate","Активировать расстановку"]]){
             const button=make(doc,"button","",title);button.type="button";button.setAttribute("data-plan-"+key,"");
-            if(key==="share"){maxAction(button);button.setAttribute("aria-label","Подготовить расстановку для отправки в MAX");}
+            if(key==="share"){maxAction(button);button.setAttribute("aria-label","Скопировать расстановку и открыть MAX");}
             toolbar.appendChild(button);
         }
         doc.body.appendChild(toolbar);
@@ -174,7 +174,6 @@
         modal.querySelector("#app-confirm-title").textContent=title;
         modal.querySelector("#app-confirm-message").textContent=body;
         const accept=modal.querySelector("[data-confirm-accept]");
-        accept.classList.remove("cr-mm-max-action");
         accept.textContent=action;accept.hidden=false;accept.classList.toggle("danger",!!callback);
         modal.querySelector("[data-confirm-cancel]").hidden=!callback;
         const shut=()=>{modal.hidden=true;state.panels?.pause(false);state.panels?.activity();};
@@ -545,6 +544,7 @@
     }
     async function planText(state) {
         const snapshot=global.FieldLedger?await global.FieldLedger.read():{};
+        if(snapshot.locked || !snapshot.actor?.key)throw Error("Войдите в приложение под своим именем.");
         let cards={};
         try{cards=JSON.parse(state.source.getElementById("gd-equipment-cards-data")?.textContent||"{}");}catch{/* Use the visible original card. */}
         const rows=state.value.payload.excavators.map(row=>{
@@ -559,33 +559,14 @@
                 horizon:cfg?cfg.loading_horizon:original?.querySelector(".chip-horizon")?.textContent,
                 destinations:points,trucks:row.truck_ids.map(id=>machineNumber(state.catalog.trucks.get(id)))};
         });
-        return {text:global.CopperPlacementText.compose(rows,snapshot.actor?.full_name),
-            stamp:JSON.stringify([snapshot.actor?.key,snapshot.actor?.generation,snapshot.shift?.local_shift_id,
-                snapshot.shift?.is_open,snapshot.locked,state.value.revision])};
+        return global.CopperPlacementText.compose(rows,snapshot.actor.full_name);
     }
     async function sharePlacement(state){
         try{
-            const prepared=await planText(state);
+            const text=await planText(state);
             if(current!==state)return;
-            ask(state,"Расстановка для MAX",prepared.text,"В MAX",async()=>{
-                try{
-                    const fresh=await planText(state);
-                    if(current!==state)return;
-                    if(fresh.stamp!==prepared.stamp || fresh.text!==prepared.text){
-                        message(state,"Расстановка изменилась. Проверьте обновлённый текст.");
-                        await sharePlacement(state);return;
-                    }
-                    if(global.CopperFieldPage){
-                        global.CopperFieldPage.postMessage(JSON.stringify({op:"share_placement_max",text:prepared.text}));
-                    }else if(global.navigator.share)await global.navigator.share({text:prepared.text});
-                    else{
-                        await global.navigator.clipboard.writeText(prepared.text);
-                        message(state,"Расстановка скопирована. Вставьте её в MAX.");
-                    }
-                }catch(error){if(error.name!=="AbortError")message(state,error.message||"Не удалось открыть MAX.");}
-            });
-            state.modal.querySelector("[data-confirm-accept]").classList.remove("danger");
-            maxAction(state.modal.querySelector("[data-confirm-accept]"));
+            if(!global.CopperFieldPage)throw Error("Не удалось открыть MAX. Перезапустите приложение.");
+            global.CopperFieldPage.postMessage(JSON.stringify({op:"share_placement_max",text}));
         }catch(error){message(state,error.message||"Не удалось подготовить расстановку.");}
     }
     async function activate(state){

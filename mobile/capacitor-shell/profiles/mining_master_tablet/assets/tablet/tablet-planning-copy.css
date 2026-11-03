@@ -27,7 +27,7 @@ html[data-cr-plan-copy] #cr-mm-toolbar { display:flex; align-items:center; gap:1
 html[data-cr-plan-copy] #cr-mm-toolbar label { flex:0 1 auto; min-width:100px; }
 html[data-cr-plan-copy] #cr-mm-toolbar input { width:clamp(100px,24vw,260px); max-width:100%; min-width:0; }
 html[data-cr-plan-copy] #cr-mm-toolbar button { min-height:44px; padding-inline:clamp(8px,1.5vw,18px); white-space:nowrap; }
-html[data-cr-plan-copy] :is(#cr-mm-toolbar,#app-confirm-modal) button.cr-mm-max-action {
+html[data-cr-plan-copy] #cr-mm-toolbar button.cr-mm-max-action {
   display:inline-flex; align-items:center; justify-content:center; gap:8px;
   color:#fff !important; border-color:#7c62ff !important;
   background:linear-gradient(125deg,#471aff 0%,#6e1aff 55%,#9500ff 100%) !important;

@@ -2,6 +2,8 @@ package ru.copperresources.mobile;
 
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -398,7 +400,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
 
     private void openMaxPlacement(String text) {
         try {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(TabletMaxShare.url(text)));
+            String prepared = TabletMaxShare.preparedText(text);
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(TabletMaxShare.RECIPIENT_URL));
             intent.setPackage(TabletMaxShare.PACKAGE);
             if (intent.resolveActivity(getPackageManager()) == null) {
                 android.widget.Toast.makeText(this, "MAX не установлен. Установите его через RuStore в обслуживании планшета.",
@@ -407,8 +410,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
             }
             if (!releaseEdgeGuard()) throw new IllegalStateException("edge_guard_restore");
             kiosk.allowMaxForShare();
+            ClipboardManager clipboard = getSystemService(ClipboardManager.class);
+            if (clipboard == null) throw new IllegalStateException("clipboard_unavailable");
+            clipboard.setPrimaryClip(ClipData.newPlainText("Расстановка горного мастера", prepared));
             startActivity(intent);
-            android.util.Log.i("MiningMasterTablet", "max_share state=opened");
+            android.widget.Toast.makeText(this, "Расстановка скопирована. Вставьте её в диалог «"
+                + TabletMaxShare.RECIPIENT_NAME + "» и отправьте.", android.widget.Toast.LENGTH_LONG).show();
+            android.util.Log.i("MiningMasterTablet", "max_share state=opened mode=direct");
         } catch (RuntimeException failure) {
             try { kiosk.restoreWorkAppAllowlist(); }
             catch (RuntimeException policyFailure) {
