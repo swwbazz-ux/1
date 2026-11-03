@@ -153,6 +153,15 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             String data=message.getData();
                             if (data==null || data.length()>28*1024*1024) return;
                             JSONObject obj=new JSONObject(data);
+                            if ("portrait_status".equals(obj.optString("op"))) {
+                                String status=obj.optString("state"), source=obj.optString("source");
+                                if ("shown".equals(status) || "source_missing".equals(status) ||
+                                    "needs_session".equals(status) || "retry".equals(status)) {
+                                    if (!("archive".equals(source) || "header".equals(source) || "signed".equals(source))) source="local";
+                                    android.util.Log.i("MiningMasterTablet","field_portrait state="+status+" source="+source);
+                                }
+                                return;
+                            }
                             if ("snapshot_received".equals(obj.optString("op"))) {
                                 String via = obj.optString("via");
                                 if ("master-field/2".equals(obj.optString("protocol")) && ("cookie".equals(via) || "device_ticket".equals(via))) {
@@ -254,7 +263,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String planningCss = asset("tablet/tablet-planning-copy.css");
             String field = asset("tablet/field-ledger.js") + "\n" + asset("tablet/field-transport.js") + "\n"
                 + asset("tablet/field-archive.js") + "\n" + asset("tablet/field-reports.js") + "\n" + asset("tablet/field-identity.js") + "\n"
-                + asset("tablet/field-live-actions.js") + "\n";
+                + asset("tablet/field-portrait.js") + "\n" + asset("tablet/field-live-actions.js") + "\n";
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
                 + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
                 + ".indexOf(location.pathname)!==-1;"

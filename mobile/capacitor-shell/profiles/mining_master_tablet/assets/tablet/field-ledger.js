@@ -450,6 +450,7 @@
         saveDraft:(p,rev)=>savePlan("draft",p,rev),saveLive:p=>savePlan("live",p),applyDraft,flush,retry,journal,
         confirmation:id=>lookup("confirmations",id),remoteSnapshot:()=>stateTx(false,s=>s.deferred),deviceIdentity,
         signSnapshotRead:(actor,nonce,time)=>signRead(actor,nonce,time,"snapshot.read"),
+        signPortraitRead:(actor,nonce,time)=>signRead(actor,nonce,time,"portrait.read"),
         signReportRead:(actor,nonce,time,path)=>signRead(actor,nonce,time,"report.read",{path}),
         setBusy:fn=>{busy=typeof fn==="function"?fn:()=>false;},
         // Tickets are scoped to the exact actor and generation, independently of today's cookie.

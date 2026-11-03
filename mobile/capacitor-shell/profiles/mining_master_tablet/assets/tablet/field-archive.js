@@ -95,14 +95,15 @@
         const assign=[];
         for(const n of page.querySelectorAll("script[src],link[rel~=stylesheet],img[src]")){
             const address=n.getAttribute("src")||n.getAttribute("href"),url=safeStatic(address,base);
+            if(n.matches("img")&&n.closest(".dispatcher-active-avatar")){
+                if(entry||!win.FieldPortrait?.ownHeader(page,actor)){n.remove();continue;}
+                assign.push(async()=>{
+                    try{n.src=await win.FieldPortrait.image(address,base);}
+                    catch{n.replaceWith(page.createTextNode((actor.full_name||"").split(/\s+/).slice(0,2).map(x=>x[0]).join("")));}
+                });
+                continue;
+            }
             if(n.matches("img")&&!url){
-                if(n.closest(".dispatcher-active-avatar") && !entry && actor?.verified){
-                    const u=new URL(address,base);
-                    if(u.origin===location.origin && u.pathname.startsWith("/media/employee_photos/")){
-                        assign.push(async()=>{try{const blob=await (await get(u.href)).blob();if(!/^image\//.test(blob.type)||blob.size>4e6)throw Error();n.src=await dataUrl(blob);}
-                            catch{n.replaceWith(page.createTextNode((actor.full_name||"").split(/\s+/).slice(0,2).map(x=>x[0]).join("")));}});continue;
-                    }
-                }
                 if(!address?.startsWith("data:image/"))n.remove();
                 continue;
             }
@@ -124,6 +125,7 @@
             if(/url\([^)]*(?:\/static\/|\.\.\/)/.test(style.textContent))style.textContent=await styleText(style.textContent,base);
         }
         page.documentElement.dataset.crFieldLocal="true";
+        if(!entry)page.documentElement.dataset.crFieldPortraitOwner=scope(actor);
         const policy=page.createElement("meta");policy.httpEquiv="Content-Security-Policy";
         policy.content="default-src 'none'; script-src 'unsafe-inline' data:; style-src 'unsafe-inline' data:; img-src data:; font-src data:; connect-src 'self'; frame-src 'self' about:; object-src 'none'; base-uri 'none'; form-action 'none'";
         page.head.prepend(policy);
@@ -199,12 +201,37 @@
         const page=await record("pages",pageKey(actor,route));
         if(!page || (page.scope!=="@login" && page.scope!==scope(actor)))return !!(await win.FieldReports?.missing(route,actor));
         if(!win.CopperFieldPage?.postMessage)throw Error("Нативный компонент полевого пульта недоступен.");
+        // Old prepared pages predate the explicit personal owner tag. Their IDB key
+        // and record scope were checked above; stamp that identity before rendering.
+        let html=page.html;
+        if(page.scope!=="@login" && !/^<!doctype html><html\b[^>]*\bdata-cr-field-portrait-owner=/i.test(html)){
+            const owner=page.scope.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+            html=html.replace(/<html\b/i,()=>'<html data-cr-field-portrait-owner="'+owner+'"');
+        }
         rendering=true;
-        try{win.CopperFieldPage.postMessage(JSON.stringify({route,html:page.html}));}
+        try{win.CopperFieldPage.postMessage(JSON.stringify({route,html}));}
         finally{setTimeout(()=>{rendering=false;},400);}
         return true;
     }
     async function has(actor,route=root){return !!(await record("pages",pageKey(actor,route)));}
+    async function findPortrait(actor,pick){
+        const owner=scope(actor);if(!owner)return null;
+        const database=await db(),prefix=JSON.stringify([owner]).slice(0,-1)+",";
+        const keys=await new Promise((resolve,reject)=>{
+            const tx=database.transaction("pages"),req=tx.objectStore("pages").getAllKeys(IDBKeyRange.bound(prefix,prefix+"\uffff"));
+            tx.oncomplete=()=>resolve(req.result);tx.onerror=tx.onabort=()=>reject(tx.error);
+        });
+        const primary=pageKey(actor,root);
+        for(const key of [primary,...keys.filter(k=>k!==primary)]){
+            const page=await record("pages",key);
+            if(page?.scope!==owner)continue;
+            const marker=page.html.indexOf('class="dispatcher-active-avatar"');
+            if(marker<0||!page.html.slice(marker,marker+512).includes('src="data:image/'))continue;
+            const data=await pick(new DOMParser().parseFromString(page.html,"text/html"),actor);
+            if(data)return data;
+        }
+        return null;
+    }
     function notice(msg){if(win.FieldIdentity?.notice)win.FieldIdentity.notice(msg);else console.warn(msg);}
     doc.addEventListener("click",e=>{
         if(!doc.documentElement.hasAttribute("data-cr-field-local"))return;
@@ -214,5 +241,5 @@
         e.preventDefault();e.stopImmediatePropagation();
         void render(route).then(ok=>{if(!ok)notice("Этот разрез ещё не был получен на планшет. Данные будут доступны после синхронизации.");}).catch(err=>notice(err.message));
     },true);
-    win.FieldArchive={capture,prime,render,has,root,login,routeOf,scope};
+    win.FieldArchive={capture,prime,render,has,findPortrait,root,login,routeOf,scope};
 })(window,document);

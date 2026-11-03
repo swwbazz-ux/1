@@ -162,6 +162,28 @@
             throw fail("auth","Во время загрузки отчёта изменился сотрудник или смена.");
         return response;
     }
+    async function readPortrait(actor){
+        const state=await ledger().read();
+        function current(s){
+            return !s.locked && s.shift?.is_open && actor?.verified && actor.role===ROLE &&
+                s.actor?.verified && sameLocal(actor,s.actor) && s.actor.id===actor.id && s.actor.access_id===actor.access_id;
+        }
+        if(!current(state))throw fail("auth","Нет открытой смены этого мастера.");
+        const ticket=await ledger().getTicket(actor.key,actor.generation);
+        if(!ticket)throw fail("auth","Нет персонального допуска для фотографии.");
+        const nonce=await challenge(state.device_id);
+        const proof=await ledger().signPortraitRead(actor,nonce.challenge,nonce.server_time);
+        const res=await post({protocol:PROTOCOL,op:"portrait",ticket,...proof},nonce.csrf_token);
+        if(!res.ok || !jsonResponse(res))throw fail("portrait_unavailable","Не удалось получить фотографию мастера.");
+        const data=await res.json(), photo=data.portrait, after=await ledger().read();
+        if(!current(after) || after.shift.local_shift_id!==state.shift.local_shift_id || data.protocol!==PROTOCOL ||
+            !photo || photo.employee_id!==actor.id || photo.access_id!==actor.access_id ||
+            typeof photo.revision!=="string" || !/^(?:[a-f0-9]{64})?$/.test(photo.revision) ||
+            !(photo.data===null && photo.revision==="" || typeof photo.data==="string" && photo.revision &&
+              photo.data.length<=128*1024 && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(photo.data)))
+            throw fail("portrait_unavailable","Система не подтвердила фотографию этого сотрудника.");
+        return photo;
+    }
     async function cycle(){
         let cap,own;
         const generation=networkGeneration;
@@ -193,6 +215,9 @@
                 if(later.actor?.key===cap.actor.key){cap=later;await ledger().ingest(later.snapshot,{defer:uiBusy()});}
             }
             const settled=uiBusy()?afterFlush:await ledger().reconcile();
+            if(settled.actor?.verified && sameLocal(settled.actor,cap.actor) && settled.shift?.is_open && !settled.locked){
+                Promise.resolve().then(()=>win.FieldPortrait?.observe(cap.actor,cap.snapshot,cap.via)).catch(()=>{});
+            }
             update({last_snapshot_at:new Date().toISOString()});
             const scope=pollScope(settled);
             recentRead=scope && networkGeneration===generation && cap.via==="device_ticket" && sameLocal(cap.actor,settled.actor) &&
@@ -258,7 +283,7 @@
     function wake(){clearTimeout(timer);timer=setTimeout(()=>refresh().catch(()=>{}),180);}
     function setBusy(fn){uiBusy=typeof fn==="function"?fn:()=>false;ledger().setBusy(uiBusy);}
     function idle(){if(!uiBusy())return ledger().reconcile();}
-    win.FieldTransport={identify,refresh,wake,setBusy,idle,status,wireFetch,readReport,personalRealtime,protocol:PROTOCOL};
+    win.FieldTransport={identify,refresh,wake,setBusy,idle,status,wireFetch,readPortrait,readReport,personalRealtime,protocol:PROTOCOL};
     win.addEventListener("online",()=>{networkGeneration++;recentRead=null;reportedSource=null;wake();});
     win.addEventListener("native-resume",wake);
     win.addEventListener("offline",()=>update({connected:false,message:"Нет связи. Действия сохраняются."}));
