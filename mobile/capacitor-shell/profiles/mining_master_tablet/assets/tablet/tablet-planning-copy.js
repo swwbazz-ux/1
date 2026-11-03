@@ -134,7 +134,7 @@
         label.appendChild(search);toolbar.appendChild(label);
         for(const [key,title] of [["share","В MAX"],["activate","Активировать расстановку"]]){
             const button=make(doc,"button","",title);button.type="button";button.setAttribute("data-plan-"+key,"");
-            if(key==="share"){maxAction(button);button.setAttribute("aria-label","Скопировать расстановку и открыть MAX");}
+            if(key==="share"){maxAction(button);button.setAttribute("aria-label","Передать расстановку в MAX");}
             toolbar.appendChild(button);
         }
         doc.body.appendChild(toolbar);

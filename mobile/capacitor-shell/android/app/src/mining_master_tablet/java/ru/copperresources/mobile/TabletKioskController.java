@@ -227,7 +227,7 @@ final class TabletKioskController {
         String[] choices = {
             "Включить рабочий режим", "Приостановить защиту для обслуживания",
             "Настроить Wi-Fi", "Открыть настройки Android", "Сохранённые отчёты", "Изменить служебный PIN",
-            "Снять управление этим планшетом"
+            "Настроить автоотправку в MAX", "Снять управление этим планшетом"
         };
         dialog = new AlertDialog.Builder(activity).setTitle("Обслуживание планшета")
             .setMessage(status).setPositiveButton("Действия", (unused, which) -> {
@@ -239,6 +239,7 @@ final class TabletKioskController {
                         else if (index == 3) openSettings(Settings.ACTION_SETTINGS);
                         else if (index == 4) showReports();
                         else if (index == 5) { if (pauseKiosk()) showPinSetup(true); }
+                        else if (index == 6) openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS);
                         else confirmDeprovision();
                     }).setNegativeButton("Закрыть", null).create();
                 showSecure(dialog);
