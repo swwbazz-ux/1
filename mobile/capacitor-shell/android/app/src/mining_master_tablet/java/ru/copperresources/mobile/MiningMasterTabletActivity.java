@@ -1,10 +1,6 @@
 package ru.copperresources.mobile;
 
 import android.content.pm.ActivityInfo;
-import android.content.Intent;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -399,56 +395,12 @@ public final class MiningMasterTabletActivity extends MainActivity {
     }
 
     private void openMaxPlacement(String text) {
-        try {
-            String prepared = TabletMaxShare.preparedText(text);
-            String recipient = TabletMaxShare.directRecipient(this);
-            boolean prefilled = recipient != null;
-            Intent intent = prefilled
-                ? new Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, prepared).putExtra(Intent.EXTRA_SHORTCUT_ID, recipient)
-                : new Intent(Intent.ACTION_VIEW, Uri.parse(TabletMaxShare.RECIPIENT_URL));
-            intent.setPackage(TabletMaxShare.PACKAGE);
-            if (intent.resolveActivity(getPackageManager()) == null) {
-                android.widget.Toast.makeText(this, "MAX не установлен. Установите его через RuStore в обслуживании планшета.",
-                    android.widget.Toast.LENGTH_LONG).show();
-                return;
-            }
-            boolean automatic = prefilled && TabletMaxSendService.available();
-            if (automatic && !TabletMaxSendService.arm(prepared)) {
-                android.widget.Toast.makeText(this, "Отправка уже началась. Проверьте сообщение в MAX.", android.widget.Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (!releaseEdgeGuard()) throw new IllegalStateException("edge_guard_restore");
-            kiosk.allowMaxForShare();
-            if (!prefilled) {
-                ClipboardManager clipboard = getSystemService(ClipboardManager.class);
-                if (clipboard == null) throw new IllegalStateException("clipboard_unavailable");
-                clipboard.setPrimaryClip(ClipData.newPlainText("Расстановка горного мастера", prepared));
-            }
-            startActivity(intent);
-            String hint = prefilled
-                ? "Получатель и расстановка уже выбраны. Нажмите «Отправить» в MAX."
-                : "Расстановка скопирована. Вставьте её в диалог «" + TabletMaxShare.RECIPIENT_NAME + "» и отправьте.";
-            // An own-app toast must not obscure MAX's Send control during its tap.
-            if (!automatic) android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show();
-            android.util.Log.i("MiningMasterTablet", "max_share state=opened mode="
-                + (automatic ? "automatic" : prefilled ? "direct_share" : "clipboard_fallback"));
-        } catch (RuntimeException failure) {
-            TabletMaxSendService.cancelPending();
-            try { kiosk.restoreWorkAppAllowlist(); }
-            catch (RuntimeException policyFailure) {
-                android.util.Log.w("MiningMasterTablet", "max_share state=restore_failed type=" + policyFailure.getClass().getSimpleName());
-            }
-            if (edgeGuard != null) edgeGuard.onResume();
-            android.widget.Toast.makeText(this, "Не удалось открыть MAX. Расстановка сохранена на планшете.",
-                android.widget.Toast.LENGTH_LONG).show();
-            android.util.Log.w("MiningMasterTablet", "max_share state=failed type=" + failure.getClass().getSimpleName());
-        }
+        TabletMaxBackground.get(this).share(this, text);
     }
 
     @Override public void onResume() {
         super.onResume();
-        TabletMaxSendService.cancelPending();
+        TabletMaxBackground.get(this).attach(this);
         immersive();
         refreshSystemInsets();
         if (kiosk != null) kiosk.onResume();

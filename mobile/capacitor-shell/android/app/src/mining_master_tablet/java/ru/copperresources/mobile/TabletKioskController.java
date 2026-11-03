@@ -227,7 +227,7 @@ final class TabletKioskController {
         String[] choices = {
             "Включить рабочий режим", "Приостановить защиту для обслуживания",
             "Настроить Wi-Fi", "Открыть настройки Android", "Сохранённые отчёты", "Изменить служебный PIN",
-            "Настроить автоотправку в MAX", "Снять управление этим планшетом"
+            "Подключение служебного MAX", "Снять управление этим планшетом"
         };
         dialog = new AlertDialog.Builder(activity).setTitle("Обслуживание планшета")
             .setMessage(status).setPositiveButton("Действия", (unused, which) -> {
@@ -239,7 +239,7 @@ final class TabletKioskController {
                         else if (index == 3) openSettings(Settings.ACTION_SETTINGS);
                         else if (index == 4) showReports();
                         else if (index == 5) { if (pauseKiosk()) showPinSetup(true); }
-                        else if (index == 6) openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                        else if (index == 6) TabletMaxSetup.show(activity, TabletMaxBackground.get(activity));
                         else confirmDeprovision();
                     }).setNegativeButton("Закрыть", null).create();
                 showSecure(dialog);
@@ -259,19 +259,6 @@ final class TabletKioskController {
                 + "Выход: удерживать громкость + 3 секунды и ввести проверенный служебный PIN.")
             .setNegativeButton("Отмена", null).setPositiveButton("Включить", (unused, which) -> enableKiosk()).create();
         showSecure(dialog);
-    }
-
-    void allowMaxForShare() {
-        if (owner() && (enabled() || preferences.getBoolean("kiosk_pending", false))) {
-            dpm.setLockTaskPackages(admin, new String[] {activity.getPackageName(), TabletMaxShare.PACKAGE});
-            if (!dpm.isLockTaskPermitted(TabletMaxShare.PACKAGE)) throw new IllegalStateException("max_not_allowed");
-        }
-    }
-
-    void restoreWorkAppAllowlist() {
-        if (owner() && (enabled() || preferences.getBoolean("kiosk_pending", false))) {
-            dpm.setLockTaskPackages(admin, new String[] {activity.getPackageName()});
-        }
     }
 
     private void applyPolicies() {

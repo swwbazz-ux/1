@@ -270,6 +270,9 @@ repositories {
 
 dependencies {
     mining_master_tabletImplementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    mining_master_tabletImplementation 'org.java-websocket:Java-WebSocket:1.6.0'
+    mining_master_tabletImplementation 'com.google.zxing:core:3.5.3'
+    testMining_master_tabletImplementation 'org.json:json:20240303'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
