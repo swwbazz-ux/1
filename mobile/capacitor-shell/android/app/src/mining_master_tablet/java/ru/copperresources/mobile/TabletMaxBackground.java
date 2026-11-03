@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
@@ -33,6 +34,8 @@ final class TabletMaxBackground {
     private final ExecutorService control = Executors.newSingleThreadExecutor(), network = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private WeakReference<Activity> activity = new WeakReference<>(null);
+    private Toast statusToast;
+    private final java.util.LinkedHashSet<String> completedNotices = new java.util.LinkedHashSet<>();
     private volatile boolean cancelPairing;
     private TabletMaxBackground(Context context) {
         this.context = context; store = new TabletMaxSession(context);
@@ -43,8 +46,35 @@ final class TabletMaxBackground {
     }
     void attach(Activity current) { activity = new WeakReference<>(current); kick(); }
     private void notice(String message) {
-        main.post(() -> { Activity current = activity.get();
-            if (current != null && !current.isFinishing() && current.hasWindowFocus()) Toast.makeText(current, message, Toast.LENGTH_LONG).show(); });
+        main.post(() -> showNotice(message));
+    }
+    private void showNotice(String message) {
+        Activity current = activity.get();
+        if (current == null || current.isFinishing() || !current.hasWindowFocus()) return;
+        // Replace the progress toast immediately rather than queue success behind it.
+        if (statusToast != null) statusToast.cancel();
+        statusToast = Toast.makeText(current, message, Toast.LENGTH_LONG);
+        statusToast.show();
+        android.util.Log.i("MiningMasterTablet", "max_feedback text=" + message);
+    }
+    private boolean internetAvailable() {
+        ConnectivityManager manager = context.getSystemService(ConnectivityManager.class);
+        NetworkCapabilities capabilities = manager == null ? null : manager.getNetworkCapabilities(manager.getActiveNetwork());
+        return capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+    private void jobNotice(String id, String state, boolean existing) {
+        final String message;
+        if ("SENT".equals(state)) message = existing ? "Эта расстановка уже отправлена в MAX." : "✓ Расстановка отправлена в MAX.";
+        else if (!"QUEUED".equals(state)) message = "Проверяем подтверждение отправки в MAX…";
+        else message = internetAvailable() ? "Отправляем расстановку в MAX…"
+            : "Нет интернета. Расстановка отправится автоматически, когда появится связь.";
+        main.post(() -> {
+            if ("SENT".equals(state)) {
+                completedNotices.add(id);
+                if (completedNotices.size() > 100) completedNotices.remove(completedNotices.iterator().next());
+            } else if (completedNotices.contains(id)) return;
+            showNotice(message);
+        });
     }
     private static boolean ready(JSONObject s) { return !s.optString("token").isEmpty() && !s.optBoolean("auth_required"); }
     void cancelPairing() { cancelPairing = true; }
@@ -114,13 +144,13 @@ final class TabletMaxBackground {
                         catch (RuntimeException failure) { diagnostic("setup_failed", failure); notice("Не удалось открыть подключение MAX."); }
                     }); return;
                 }
-                final boolean[] added = {false}; final String[] id = {""};
+                final boolean[] added = {false}; final String[] id = {""}, feedbackState = {"QUEUED"};
                 store.change(s -> {
                     JSONArray jobs = s.getJSONArray("jobs"); long now = System.currentTimeMillis(); String hash = hash(text);
                     for (int i = 0; i < jobs.length(); i++) {
                         JSONObject old = jobs.getJSONObject(i); String status = old.optString("state");
                         if (hash.equals(old.optString("hash")) && !"FAILED".equals(status) && (!"SENT".equals(status) || now - old.optLong("created") < 5_000)) {
-                            id[0] = old.getString("id"); return;
+                            id[0] = old.getString("id"); feedbackState[0] = old.getString("state"); return;
                         }
                     }
                     // Retain recent receipts but keep the encrypted journal bounded.
@@ -137,7 +167,7 @@ final class TabletMaxBackground {
                     s.put("jobs", kept); added[0] = true;
                 });
                 android.util.Log.i("MiningMasterTablet", "max_background event=" + (added[0] ? "queued" : "existing") + " id=" + id[0]);
-                notice(added[0] ? "Расстановка сохранена для отправки в MAX." : "Эта расстановка уже отправляется или отправлена.");
+                jobNotice(id[0], feedbackState[0], !added[0]);
                 schedule(); kick();
             } catch (Exception failure) { diagnostic("enqueue_failed", failure); notice("Не удалось сохранить отправку в MAX. Расстановка осталась на планшете."); }
         });
@@ -185,7 +215,7 @@ final class TabletMaxBackground {
                     if (job.getLong("owner") != self || job.getLong("recipient") != recipient.user) { update(id, "FAILED", null); continue; }
                     if (!"QUEUED".equals(state)) {
                         JSONObject receipt = findReceipt(wire.history(chat), job, chat, self);
-                        if (receipt != null) { update(id, "SENT", receipt); logReceipt(id, receipt, "reconciled"); continue; }
+                        if (receipt != null) { update(id, "SENT", receipt); logReceipt(id, receipt, "reconciled"); jobNotice(id, "SENT", false); continue; }
                         // No blind resend after losing the acknowledgement. Query again on reconnect.
                         update(id, "UNCERTAIN", null); notice("Проверяем подтверждение отправки в MAX."); return;
                     }
@@ -193,12 +223,25 @@ final class TabletMaxBackground {
                     try {
                         JSONObject receipt = wire.send(chat, job.getLong("cid"), job.getString("text"));
                         if (!receiptMatches(receipt, job, chat, self)) throw new IllegalStateException("max_receipt_mismatch");
-                        update(id, "SENT", receipt); logReceipt(id, receipt, "acknowledged"); notice("Расстановка отправлена в MAX.");
+                        update(id, "SENT", receipt); logReceipt(id, receipt, "acknowledged"); jobNotice(id, "SENT", false);
                     } catch (TabletMaxWire.Rejected rejected) { update(id, "QUEUED", null); throw rejected; }
                     catch (Exception ambiguous) { update(id, "UNCERTAIN", null); throw ambiguous; }
                 }
             }
-        } catch (Exception failure) { diagnostic("retry_pending", failure); }
+        } catch (Exception failure) {
+            diagnostic("retry_pending", failure);
+            try {
+                JSONArray jobs = store.read().getJSONArray("jobs");
+                for (int i = 0; i < jobs.length(); i++) {
+                    JSONObject job = jobs.getJSONObject(i); String state = job.getString("state");
+                    if ("SENT".equals(state) || "FAILED".equals(state)) continue;
+                    if ("QUEUED".equals(state) && internetAvailable())
+                        notice("MAX пока недоступен. Расстановка сохранена — отправим автоматически.");
+                    else jobNotice(job.getString("id"), state, false);
+                    break;
+                }
+            } catch (Exception ignored) { /* Preserve the original transport/storage failure. */ }
+        }
         finally {
             try { JSONObject state = store.read(); if (ready(state) && pending(state)) schedule(); }
             catch (Exception ignored) { /* Never replace an unreadable encrypted outbox. */ }
