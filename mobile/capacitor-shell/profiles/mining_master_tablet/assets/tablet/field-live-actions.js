@@ -316,6 +316,9 @@
     win.fetch=function(input,opts){
         const url=new URL(typeof input==="string" || input instanceof URL?input:input.url,location.href);
         const method=String(opts?.method||input?.method||"GET").toUpperCase(), cmd=route(url);
+        if(activeLocal() && doc.body?.dataset.appRoleCode==="mining_master" && method==="GET" &&
+            url.origin===location.origin && url.pathname==="/realtime/state/" && url.searchParams.get("include_events")==="1" &&
+            url.searchParams.get("role_app_code")==="mining_master")return win.FieldTransport.personalRealtime(input,opts);
         if(method==="GET" && cmd?.type==="card.settings" && L())return readCard(cmd,url,input,opts);
         if((!cmd || method!=="POST") && !["GET","HEAD","OPTIONS"].includes(method) && unhandledWorkplaceWrite(url))
             return Promise.resolve(json({ok:false,error:"Это действие не поддерживается полевым журналом. Данные не отправлены."},405));

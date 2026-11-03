@@ -64,6 +64,9 @@
     async function verifyLocalPin(phoneKey,pin){
         const key='grant:'+phoneKey, g=await vault(key);
         if(!g || g.until<Date.now()) throw fail('Для первого входа этого мастера на планшете нужна связь. После проверки можно работать без сети.');
+        const prior=(await ledger().read()).actors[g.actor.key];
+        if(prior && (!prior.verified || prior.generation!==g.actor.generation))
+            throw fail('Система отозвала допуск. Для проверки доступа нужен вход с сетью.');
         if(g.retry>Date.now()) throw fail('Слишком много попыток. Повторите вход позже.');
         if(!same(g.proof,await proof(pin,g.salt))){
             g.failures=(g.failures||0)+1; g.retry=g.failures>=5?Date.now()+Math.min(3600000,30000*2**Math.min(g.failures-5,7)):0;

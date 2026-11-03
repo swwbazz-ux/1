@@ -139,6 +139,12 @@
     }
     const readRaw=()=>stateTx(false,s=>s);
     function selectActor(a){return stateTx(true,s=>{choose(s,a);return summary(s);});}
+    function revokeActor(actor){return stateTx(true,s=>{
+        const a=s.actors[actor.key];
+        if(a?.generation!==actor.generation || a.id!==actor.id || a.access_id!==actor.access_id)return;
+        a.verified=false;
+        if(s.actor?.key===actor.key && s.actor.generation===actor.generation){s.actor=null;s.locked=true;}
+    });}
     function lock(){return stateTx(true,s=>{
         if(shiftOf(s).is_open)throw error("own_shift_open","Сначала завершите смену.");
         s.locked=true;s.actor=null;return summary(s);
@@ -440,7 +446,7 @@
         });
     }
     const journal=id=>lookup("journal",id);
-    win.FieldLedger={read,ingest,reconcile,cacheDetails,selectActor,lock,openShift,closeShift,command,resolveConflict,importDraft,
+    win.FieldLedger={read,ingest,reconcile,cacheDetails,selectActor,revokeActor,lock,openShift,closeShift,command,resolveConflict,importDraft,
         saveDraft:(p,rev)=>savePlan("draft",p,rev),saveLive:p=>savePlan("live",p),applyDraft,flush,retry,journal,
         confirmation:id=>lookup("confirmations",id),remoteSnapshot:()=>stateTx(false,s=>s.deferred),deviceIdentity,
         signSnapshotRead:(actor,nonce,time)=>signRead(actor,nonce,time,"snapshot.read"),

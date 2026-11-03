@@ -243,6 +243,8 @@ android {
                 if (profileDir.name == 'mining_master_tablet') {
                     // The installed tablet uses the same trusted PIN bindings as the Django header.
                     assets.srcDir(new File(rootProject.projectDir, '../../../СИСТЕМА_MVP/backend/templates/includes/tablet-runtime'))
+                    // Keep the original board icons available for WebView requests with all radios off.
+                    assets.srcDir(new File(rootProject.projectDir, '../../../СИСТЕМА_MVP/backend/static/img/equipment'))
                 }
                 File profileManifest = new File(profileDir, 'AndroidManifest.xml')
                 if (profileManifest.isFile()) {

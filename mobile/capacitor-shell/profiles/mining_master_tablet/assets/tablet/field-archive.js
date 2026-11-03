@@ -38,6 +38,7 @@
         if(!address || /^(?:#|data:|blob:)/i.test(address))return "";
         try{const u=new URL(address,base);return u.origin===location.origin && u.pathname.startsWith("/static/")?u.href:"";}catch{return "";}
     }
+    const packagedIcon=url=>/^\/static\/img\/equipment\/(?:truck|excavator)-(?:gray|blue|green|red|yellow)\.png$/.test(new URL(url).pathname);
     async function get(url,timeout=9000){
         const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
         try{
@@ -66,7 +67,7 @@
         const replacements=new Map();
         for(const m of css.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"]+))\s*\)/gi)){
             const uri=safeStatic((m[1]??m[2]??m[3]).trim(),base);
-            if(uri&&!replacements.has(m[0]))replacements.set(m[0],asset(uri).then(value=>'url("'+value+'")').catch(()=>'url("")'));
+            if(uri&&!replacements.has(m[0]))replacements.set(m[0],packagedIcon(uri)?'url("'+uri+'")':asset(uri).then(value=>'url("'+value+'")').catch(()=>'url("")'));
         }
         const resolved=new Map(await Promise.all([...replacements].map(async ([k,v])=>[k,await v])));
         return css.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"]+))\s*\)/gi,m=>resolved.get(m)||m);
@@ -106,6 +107,7 @@
                 continue;
             }
             if(!url){n.remove();continue;}
+            if(n.matches("img")&&packagedIcon(url)){n.src=url;continue;}
             if(n.matches("script")){
                 assign.push(async()=>{n.src=await asset(url);n.removeAttribute("integrity");});
             }else if(n.matches("link")){

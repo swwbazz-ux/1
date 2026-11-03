@@ -4,6 +4,27 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class TabletSecurityTest {
+    @Test public void onlyOriginalEquipmentFilesBypassNetwork() {
+        String base = TabletUrlPolicy.ORIGIN + "/static/img/equipment/";
+        for (String kind : new String[]{"truck","excavator"}) {
+            for (String color : new String[]{"gray","blue","green","red","yellow"}) {
+                String file = kind + "-" + color + ".png";
+                assertEquals(file, TabletUrlPolicy.packagedIcon(base + file + "?v=1"));
+            }
+        }
+        for (String url : new String[]{base+"truck-black.png", base+"truck-gray.png/other",
+                base+"%74ruck-gray.png", base+"../equipment/truck-gray.png", base+"other/truck-gray.png",
+                base.replace("https://","http://")+"truck-gray.png", base.replace("https://","https://x@")+"truck-gray.png",
+                base.replace("driverform.ru","example.org")+"truck-gray.png"}) {
+            assertNull(TabletUrlPolicy.packagedIcon(url));
+        }
+        String html="<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; form-action 'none'\">";
+        String prepared=TabletUrlPolicy.allowPackagedIcons(html);
+        assertTrue(prepared.contains("img-src data: "+base+"truck-gray.png "));
+        assertTrue(prepared.contains("; form-action 'none'"));
+        assertFalse(prepared.contains("'self'"));
+        assertEquals(prepared, TabletUrlPolicy.allowPackagedIcons(prepared));
+    }
     @Test public void diagnosticsExposeOnlyFixedRouteKinds() {
         assertEquals("control", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL));
         assertEquals("login", TabletUrlPolicy.diagnosticRoute(TabletUrlPolicy.START_URL + "login/?phone=70000000000&pin=123456"));

@@ -7,6 +7,7 @@ import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.widget.Toast;
 
@@ -74,6 +75,19 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 reportDownloads.download(url, userAgent, disposition, mimeType));
             webPrint = new TabletWebPrint(this, kiosk, view);
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                @Override public WebResourceResponse shouldInterceptRequest(WebView webView, WebResourceRequest request) {
+                    if (!request.isForMainFrame() && "GET".equals(request.getMethod())) {
+                        String file = TabletUrlPolicy.packagedIcon(request.getUrl().toString());
+                        if (file != null) {
+                            try {
+                                return new WebResourceResponse("image/png", null, getAssets().open(file));
+                            } catch (java.io.IOException missing) {
+                                return new WebResourceResponse("image/png", null, 404, "Not Found", Collections.emptyMap(), null);
+                            }
+                        }
+                    }
+                    return super.shouldInterceptRequest(webView, request);
+                }
                 @Override public void onPageStarted(WebView webView, String url, android.graphics.Bitmap favicon) {
                     if (url == null || !url.contains("#cr-saved-board")) loadingOfflineCopy = false;
                     android.util.Log.i("MiningMasterTablet", "main_frame event=started route="
@@ -139,6 +153,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             String data=message.getData();
                             if (data==null || data.length()>28*1024*1024) return;
                             JSONObject obj=new JSONObject(data);
+                            if ("snapshot_received".equals(obj.optString("op"))) {
+                                String via = obj.optString("via");
+                                if ("master-field/2".equals(obj.optString("protocol")) && ("cookie".equals(via) || "device_ticket".equals(via))) {
+                                    android.util.Log.i("MiningMasterTablet","field_sync event=snapshot_received protocol=master-field/2 via=" + via);
+                                }
+                                return;
+                            }
                             if ("prepared".equals(obj.optString("op"))) {
                                 getSharedPreferences("field_runtime",MODE_PRIVATE).edit().putBoolean("prepared",true).apply();
                                 return;
@@ -148,7 +169,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             String address=TabletUrlPolicy.ORIGIN+path, html=obj.getString("html");
                             if (!(TabletUrlPolicy.tabletPage(address)||TabletUrlPolicy.entryPage(address)) ||
                                 !html.startsWith("<!doctype html>") || !html.contains("data-cr-field-local")) return;
-                            sender.post(() -> { if (!isFinishing() && !isDestroyed()) sender.loadDataWithBaseURL(address,html,"text/html","UTF-8",address); });
+                            sender.post(() -> { if (!isFinishing() && !isDestroyed()) sender.loadDataWithBaseURL(address,TabletUrlPolicy.allowPackagedIcons(html),"text/html","UTF-8",address); });
                         } catch (org.json.JSONException invalid) { android.util.Log.w("MiningMasterTablet","Invalid field page"); }
                     });
             }
@@ -212,7 +233,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
         try {
             String html = asset("tablet/tablet-planning-offline.html");
             view.stopLoading();
-            view.loadDataWithBaseURL(url, html, "text/html", "UTF-8", url);
+            view.loadDataWithBaseURL(url, TabletUrlPolicy.allowPackagedIcons(html), "text/html", "UTF-8", url);
         } catch (java.io.IOException error) {
             loadingOfflineCopy = false;
             android.util.Log.e("MiningMasterTablet", "Saved board shell missing", error);
