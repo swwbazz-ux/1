@@ -45,6 +45,8 @@ final class TabletKioskController {
     private boolean resumed;
     private AlertDialog dialog;
     private boolean destroyed;
+    private String[] tvAllowlist;
+    private android.app.PendingIntent tvDeadline;
 
     TabletKioskController(MiningMasterTabletActivity activity) {
         this.activity = activity;
@@ -227,7 +229,7 @@ final class TabletKioskController {
         String[] choices = {
             "Включить рабочий режим", "Приостановить защиту для обслуживания",
             "Настроить Wi-Fi", "Открыть настройки Android", "Сохранённые отчёты", "Изменить служебный PIN",
-            "Подключение служебного MAX", "Снять управление этим планшетом"
+            "Подключение служебного MAX", "Помощник подключения ТВ", "Снять управление этим планшетом"
         };
         dialog = new AlertDialog.Builder(activity).setTitle("Обслуживание планшета")
             .setMessage(status).setPositiveButton("Действия", (unused, which) -> {
@@ -240,6 +242,7 @@ final class TabletKioskController {
                         else if (index == 4) showReports();
                         else if (index == 5) { if (pauseKiosk()) showPinSetup(true); }
                         else if (index == 6) TabletMaxSetup.show(activity, TabletMaxBackground.get(activity));
+                        else if (index == 7) openSettings(Settings.ACTION_ACCESSIBILITY_SETTINGS);
                         else confirmDeprovision();
                     }).setNegativeButton("Закрыть", null).create();
                 showSecure(dialog);
@@ -259,6 +262,43 @@ final class TabletKioskController {
                 + "Выход: удерживать громкость + 3 секунды и ввести проверенный служебный PIN.")
             .setNegativeButton("Отмена", null).setPositiveButton("Включить", (unused, which) -> enableKiosk()).create();
         showSecure(dialog);
+    }
+
+    boolean beginTvRouting(long duration) {
+        if (!owner() || (!enabled() && !preferences.getBoolean("kiosk_pending", false))) return true;
+        if (tvAllowlist != null) { finishTvRouting(); if (tvAllowlist != null) return false; }
+        try {
+            tvAllowlist = dpm.getLockTaskPackages(admin);
+            java.util.LinkedHashSet<String> allowed = new java.util.LinkedHashSet<>(java.util.Arrays.asList(tvAllowlist));
+            allowed.add(activity.getPackageName()); allowed.add("com.android.settings");
+            Intent deadline = new Intent(activity, TabletTvGuardReceiver.class).setAction("ru.copperresources.mobile.TV_ROUTE_TIMEOUT")
+                .putExtra("priorAllowlist", tvAllowlist);
+            tvDeadline = android.app.PendingIntent.getBroadcast(activity, 85152, deadline,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+            android.app.AlarmManager alarm = activity.getSystemService(android.app.AlarmManager.class);
+            if (alarm == null) throw new IllegalStateException("tv_guard_alarm");
+            alarm.setExactAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                android.os.SystemClock.elapsedRealtime() + duration + 2_000, tvDeadline);
+            dpm.setLockTaskPackages(admin, allowed.toArray(new String[0]));
+            return true;
+        } catch (RuntimeException failure) { finishTvRouting(); return false; }
+    }
+
+    void finishTvRouting() {
+        try {
+            if (tvAllowlist != null && owner()) dpm.setLockTaskPackages(admin, tvAllowlist);
+        } catch (RuntimeException failure) {
+            // Keep the independent deadline armed if immediate restoration failed.
+            diagnostic("tv_allowlist_restore", -1, failure); return;
+        }
+        try {
+            if (tvDeadline != null) {
+                android.app.AlarmManager alarm = activity.getSystemService(android.app.AlarmManager.class);
+                if (alarm != null) alarm.cancel(tvDeadline);
+                tvDeadline.cancel();
+            }
+        } catch (RuntimeException failure) { diagnostic("tv_alarm_cancel", -1, failure); }
+        tvDeadline = null; tvAllowlist = null;
     }
 
     private void applyPolicies() {

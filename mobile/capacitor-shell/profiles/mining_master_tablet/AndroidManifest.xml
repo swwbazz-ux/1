@@ -7,11 +7,20 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" tools:node="remove" />
     <!-- Granted once during dedicated-device provisioning, never exposed to web content. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- Android 11 gates Wi-Fi Display status/discovery behind location permission. No GPS requests. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <queries>
         <package android:name="ru.oneme.app" />
     </queries>
     <application>
+        <service android:name=".TabletTvService" android:label="@string/tablet_tv_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/tablet_tv" />
+        </service>
+        <receiver android:name=".TabletTvGuardReceiver" android:process=":tvguard" android:exported="false" />
         <service android:name=".TabletMaxJobService"
             android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
         <activity android:name=".MainActivity" tools:node="remove" />

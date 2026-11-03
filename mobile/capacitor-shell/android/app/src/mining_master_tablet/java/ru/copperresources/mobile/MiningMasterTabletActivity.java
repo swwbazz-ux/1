@@ -117,6 +117,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                         + TabletUrlPolicy.diagnosticRoute(url));
                     super.onPageFinished(webView, url);
                     webPrint.pageFinished(url);
+                    TabletTvController.get(MiningMasterTabletActivity.this).pageReady();
                 }
                 @Override public void onReceivedError(WebView webView, WebResourceRequest request,
                         android.webkit.WebResourceError error) {
@@ -172,6 +173,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             JSONObject obj=new JSONObject(data);
                             if ("share_placement_max".equals(obj.optString("op"))) {
                                 openMaxPlacement(obj.optString("text", ""));
+                                return;
+                            }
+                            if ("tv_action".equals(obj.optString("op"))) {
+                                String action = obj.optString("action");
+                                TabletTvController tv = TabletTvController.get(this);
+                                if ("state".equals(action)) tv.pageReady();
+                                else if ("toggle".equals(action) || "settings".equals(action)) tv.action(action);
                                 return;
                             }
                             if ("portrait_status".equals(obj.optString("op"))) {
@@ -287,6 +295,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + asset("tablet/tablet-planning-copy.js") + "\n"
                 + asset("tablet/tablet-planning-entry.js");
             String planningCss = asset("tablet/tablet-planning-copy.css");
+            String tv = asset("tablet/tablet-tv.js");
             String field = asset("tablet/field-ledger.js") + "\n" + asset("tablet/field-transport.js") + "\n"
                 + asset("tablet/field-archive.js") + "\n" + asset("tablet/field-reports.js") + "\n" + asset("tablet/field-identity.js") + "\n"
                 + asset("tablet/field-portrait.js") + "\n" + asset("tablet/field-live-actions.js") + "\n"
@@ -307,9 +316,9 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "window.CopperTabletPlanningCache.clearOnLogin().catch(function(){});}return;}"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "addStyle('cr-tablet-planning-copy-css'," + JSONObject.quote(planningCss) + ");"
-                + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + js + "\n" + planning + "\nreturn;}"
+                + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + js + "\n" + planning + "\n" + tv + "\nreturn;}"
                 + "if(typeof window.initSharedShiftLogin!=='function'){" + shiftLogin + "\n}"
-                + js + "\n" + planning + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
+                + js + "\n" + planning + "\n" + tv + "\n}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot,{once:true});}else{boot();}})();";
         } catch (Exception error) {
             android.util.Log.e("MiningMasterTablet", "Tablet layout assets are unavailable");
             return "";
@@ -401,6 +410,8 @@ public final class MiningMasterTabletActivity extends MainActivity {
     @Override public void onResume() {
         super.onResume();
         TabletMaxBackground.get(this).attach(this);
+        TabletTvController.get(this).attach(this);
+        TabletTvController.get(this).returnedToApp();
         immersive();
         refreshSystemInsets();
         if (kiosk != null) kiosk.onResume();
@@ -429,6 +440,16 @@ public final class MiningMasterTabletActivity extends MainActivity {
     }
 
     boolean releaseEdgeGuard() { return edgeGuard == null || edgeGuard.release(); }
+
+    boolean beginTvRoute(long duration) { return releaseEdgeGuard() && kiosk != null && kiosk.beginTvRouting(duration); }
+    void finishTvRoute() { if (kiosk != null) kiosk.finishTvRouting(); }
+    void publishTv(JSONObject value) {
+        if (getBridge() == null || isFinishing()) return;
+        WebView view = getBridge().getWebView();
+        if (view != null && TabletUrlPolicy.trusted(view.getUrl())) view.post(() -> {
+            if (!isFinishing()) view.evaluateJavascript("window.CopperTabletTv&&window.CopperTabletTv.setState(" + value.toString() + ");", null);
+        });
+    }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getKeyCode() == KeyEvent.KEYCODE_VOLUME_UP) {
