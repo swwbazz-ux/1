@@ -1,6 +1,8 @@
 package ru.copperresources.mobile;
 
 import android.content.pm.ActivityInfo;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -170,6 +172,10 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             String data=message.getData();
                             if (data==null || data.length()>28*1024*1024) return;
                             JSONObject obj=new JSONObject(data);
+                            if ("share_placement_max".equals(obj.optString("op"))) {
+                                openMaxPlacement(obj.optString("text", ""));
+                                return;
+                            }
                             if ("portrait_status".equals(obj.optString("op"))) {
                                 String status=obj.optString("state"), source=obj.optString("source");
                                 if ("purged".equals(status) && "storage".equals(source)) {
@@ -279,6 +285,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String entryCss = asset("tablet/tablet-entry-fields.css");
             String entryJs = asset("tablet/tablet-entry-fields.js");
             String planning = asset("tablet/tablet-planning-draft.js") + "\n"
+                + asset("tablet/tablet-placement-text.js") + "\n"
                 + asset("tablet/tablet-planning-copy.js") + "\n"
                 + asset("tablet/tablet-planning-entry.js");
             String planningCss = asset("tablet/tablet-planning-copy.css");
@@ -387,6 +394,31 @@ public final class MiningMasterTabletActivity extends MainActivity {
             + "root.style.setProperty('--cr-tablet-system-top',(" + top + "/ratio)+'px');"
             + "root.style.setProperty('--cr-tablet-system-bottom',(" + bottom + "/ratio)+'px');}"
             + "if(document.documentElement)apply();else document.addEventListener('DOMContentLoaded',apply,{once:true});})();";
+    }
+
+    private void openMaxPlacement(String text) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(TabletMaxShare.url(text)));
+            intent.setPackage(TabletMaxShare.PACKAGE);
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                android.widget.Toast.makeText(this, "MAX не установлен. Установите его через RuStore в обслуживании планшета.",
+                    android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (!releaseEdgeGuard()) throw new IllegalStateException("edge_guard_restore");
+            kiosk.allowMaxForShare();
+            startActivity(intent);
+            android.util.Log.i("MiningMasterTablet", "max_share state=opened");
+        } catch (RuntimeException failure) {
+            try { kiosk.restoreWorkAppAllowlist(); }
+            catch (RuntimeException policyFailure) {
+                android.util.Log.w("MiningMasterTablet", "max_share state=restore_failed type=" + policyFailure.getClass().getSimpleName());
+            }
+            if (edgeGuard != null) edgeGuard.onResume();
+            android.widget.Toast.makeText(this, "Не удалось открыть MAX. Расстановка сохранена на планшете.",
+                android.widget.Toast.LENGTH_LONG).show();
+            android.util.Log.w("MiningMasterTablet", "max_share state=failed type=" + failure.getClass().getSimpleName());
+        }
     }
 
     @Override public void onResume() {

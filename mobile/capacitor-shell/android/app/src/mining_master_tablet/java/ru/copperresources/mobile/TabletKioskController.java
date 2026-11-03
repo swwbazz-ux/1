@@ -260,6 +260,19 @@ final class TabletKioskController {
         showSecure(dialog);
     }
 
+    void allowMaxForShare() {
+        if (owner() && (enabled() || preferences.getBoolean("kiosk_pending", false))) {
+            dpm.setLockTaskPackages(admin, new String[] {activity.getPackageName(), TabletMaxShare.PACKAGE});
+            if (!dpm.isLockTaskPermitted(TabletMaxShare.PACKAGE)) throw new IllegalStateException("max_not_allowed");
+        }
+    }
+
+    void restoreWorkAppAllowlist() {
+        if (owner() && (enabled() || preferences.getBoolean("kiosk_pending", false))) {
+            dpm.setLockTaskPackages(admin, new String[] {activity.getPackageName()});
+        }
+    }
+
     private void applyPolicies() {
         operationStage = "policy_allowlist";
         dpm.setLockTaskPackages(admin, new String[] {activity.getPackageName()});

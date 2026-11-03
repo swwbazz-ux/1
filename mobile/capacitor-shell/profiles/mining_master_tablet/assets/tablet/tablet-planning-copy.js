@@ -390,15 +390,7 @@
         doc.querySelector("[data-plan-activate]").addEventListener("click",()=>{
             ask(state,"Активировать расстановку?","Применить подготовленный состав к действующему пульту смены?","Активировать",()=>activate(state));
         });
-        doc.querySelector("[data-plan-share]").addEventListener("click",()=>{
-            const preview=planText(state);
-            ask(state,"В группу",preview,"Поделиться",async()=>{
-                try{
-                    if(global.navigator.share)await global.navigator.share({text:preview});
-                    else{await global.navigator.clipboard.writeText(preview);message(state,"Текст скопирован для отправки в группу.");}
-                }catch(error){if(error.name!=="AbortError")message(state,"Не удалось открыть отправку. Текст доступен в предпросмотре.");}
-            });
-        });
+        doc.querySelector("[data-plan-share]").addEventListener("click",()=>sharePlacement(state));
         state.search.addEventListener("input",()=>search(state));
         state.search.addEventListener("keydown",e=>{
             if(e.key!=="Enter")return;
@@ -536,12 +528,49 @@
         }else return false;
         void save(state,next);return true;
     }
-    function planText(state) {
-        const name=(map,id)=>machineNumber(map.get(id));
-        const lines=state.value.payload.excavators.map(row=>
-            "К-"+name(state.catalog.excavators,row.excavator_id).replace(/^[КK]-?/iu,"")+" — "+
-            (row.truck_ids.map(id=>name(state.catalog.trucks,id)).join(", ")||"без самосвалов"));
-        return ["Предварительная расстановка",...lines].join("\n");
+    async function planText(state) {
+        const snapshot=global.FieldLedger?await global.FieldLedger.read():{};
+        let cards={};
+        try{cards=JSON.parse(state.source.getElementById("gd-equipment-cards-data")?.textContent||"{}");}catch{/* Use the visible original card. */}
+        const rows=state.value.payload.excavators.map(row=>{
+            const id=row.excavator_id,original=state.catalog.zones.get(id);
+            const keys=["complex:"+id,"equipment:"+id,"complex-equipment-"+id,String(id)];
+            const details=keys.map(key=>snapshot.details?.[key]).find(Boolean)||keys.map(key=>cards[key]).find(Boolean);
+            const cfg=details?.settings;
+            const points=cfg && Array.isArray(cfg.destinations) ?
+                cfg.destinations.map(d=>d.name||cfg.dump_points?.find(p=>Number(p.id)===Number(d.dump_point_id))?.name).filter(Boolean) :
+                [...(original?.querySelectorAll(".chip-unload")||[])].map(n=>n.textContent.trim().replace(/\s+\d+(?:[.,]\d+)?%$/u,""));
+            return {number:machineNumber(state.catalog.excavators.get(id)),
+                horizon:cfg?cfg.loading_horizon:original?.querySelector(".chip-horizon")?.textContent,
+                destinations:points,trucks:row.truck_ids.map(id=>machineNumber(state.catalog.trucks.get(id)))};
+        });
+        return {text:global.CopperPlacementText.compose(rows,snapshot.actor?.full_name),
+            stamp:JSON.stringify([snapshot.actor?.key,snapshot.actor?.generation,snapshot.shift?.local_shift_id,
+                snapshot.shift?.is_open,snapshot.locked,state.value.revision])};
+    }
+    async function sharePlacement(state){
+        try{
+            const prepared=await planText(state);
+            if(current!==state)return;
+            ask(state,"Расстановка для MAX",prepared.text,"В MAX",async()=>{
+                try{
+                    const fresh=await planText(state);
+                    if(current!==state)return;
+                    if(fresh.stamp!==prepared.stamp || fresh.text!==prepared.text){
+                        message(state,"Расстановка изменилась. Проверьте обновлённый текст.");
+                        await sharePlacement(state);return;
+                    }
+                    if(global.CopperFieldPage){
+                        global.CopperFieldPage.postMessage(JSON.stringify({op:"share_placement_max",text:prepared.text}));
+                    }else if(global.navigator.share)await global.navigator.share({text:prepared.text});
+                    else{
+                        await global.navigator.clipboard.writeText(prepared.text);
+                        message(state,"Расстановка скопирована. Вставьте её в MAX.");
+                    }
+                }catch(error){if(error.name!=="AbortError")message(state,error.message||"Не удалось открыть MAX.");}
+            });
+            state.modal.querySelector("[data-confirm-accept]").classList.remove("danger");
+        }catch(error){message(state,error.message||"Не удалось подготовить расстановку.");}
     }
     async function activate(state){
         if(state.busy||!mayEdit(state))return;

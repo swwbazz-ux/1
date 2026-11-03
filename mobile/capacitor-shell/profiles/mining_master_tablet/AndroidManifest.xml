@@ -8,6 +8,9 @@
     <!-- Granted once during dedicated-device provisioning, never exposed to web content. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <queries>
+        <package android:name="ru.oneme.app" />
+    </queries>
     <application>
         <activity android:name=".MainActivity" tools:node="remove" />
         <service android:name=".ConnectivityForegroundService" tools:node="remove" />
