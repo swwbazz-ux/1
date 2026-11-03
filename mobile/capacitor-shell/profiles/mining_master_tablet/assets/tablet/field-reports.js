@@ -27,8 +27,20 @@
     function same(a,b){return a&&b&&a.key===b.key&&a.access===b.access&&a.generation===b.generation&&a.shift===b.shift;}
     function notice(msg){if(win.FieldIdentity?.notice)win.FieldIdentity.notice(msg);else win.dispatchEvent(new CustomEvent("fieldreportnotice",{detail:msg}));}
     function db(){return database||=(new Promise((resolve,reject)=>{
-        const req=indexedDB.open("cr-master-scoped-reports",2);
-        req.onupgradeneeded=()=>{for(const name of ["files","pages","requests","sizes"])if(!req.result.objectStoreNames.contains(name))req.result.createObjectStore(name,{keyPath:"key"});};
+        const req=indexedDB.open("cr-master-scoped-reports",3);
+        req.onupgradeneeded=e=>{
+            for(const name of ["files","pages","requests","sizes"])if(!req.result.objectStoreNames.contains(name))req.result.createObjectStore(name,{keyPath:"key"});
+            if(!e.oldVersion)return;
+            const pages=req.transaction.objectStore("pages").openCursor(),sizes=req.transaction.objectStore("sizes");
+            pages.onsuccess=()=>{const row=pages.result;if(!row)return;
+                const html=win.FieldArchive.withoutPortraits(row.value.html);
+                if(html!==row.value.html){
+                    row.update({...row.value,html});
+                    sizes.put({key:row.key,name:"pages",at:row.value.at,cost:html.length*2});
+                }
+                row.continue();
+            };
+        };
         req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);req.onblocked=()=>reject(Error("Хранилище отчётов занято."));
     })).catch(e=>{database=null;throw e;});}
     async function idb(name,op,arg){
@@ -260,5 +272,6 @@
     win.addEventListener("online",wake);win.addEventListener("native-resume",wake);
     setInterval(()=>{if(!doc.hidden)wake();},30000);
     win.FieldReports={handles:url=>!!route(url),open,remember,missing,wake,scopeId};
+    void db().catch(()=>{}); // Purge older copies even if this worker never opens reports.
     setTimeout(wake,100);
 })(window,document);

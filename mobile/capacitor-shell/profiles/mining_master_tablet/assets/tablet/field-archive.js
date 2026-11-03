@@ -10,12 +10,60 @@
         "reports/shift-analytics/","reports/volume/","reports/customer-daily/","reports/templates/","reports/downtimes/"].map(p=>root+p)]);
     const network=win.fetch.bind(win), active=new Map(), files=new Map(), maxPages=40;
     let database, background, rendering=false;
+    const photoPath="/media/employee_photos/";
+    function removePortraits(page){
+        let changed=false;
+        for(const holder of page.querySelectorAll(".dispatcher-active-avatar")){
+            if(!holder.querySelector("img,picture,source"))continue;
+            const badge=holder.closest(".dispatcher-active-badge");
+            const name=badge?.querySelector(".dispatcher-active-text strong")?.textContent.trim()||"";
+            holder.textContent=badge?.classList.contains("is-muted")?"-":name.split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase();
+            changed=true;
+        }
+        for(const node of page.querySelectorAll('img[src*="/media/employee_photos/"],source[srcset*="/media/employee_photos/"],img[srcset*="/media/employee_photos/"]')){
+            node.remove();changed=true;
+        }
+        return changed;
+    }
+    function withoutPortraits(html,fragment=false){
+        if(typeof html!=="string" || !/<(?:img|source|picture)\b/i.test(html) ||
+            !(html.includes("dispatcher-active-avatar")||html.includes(photoPath)))return html;
+        const page=new DOMParser().parseFromString(html,"text/html");
+        if(!removePortraits(page))return html;
+        return fragment?page.body.innerHTML:"<!doctype html>"+page.documentElement.outerHTML;
+    }
+    async function clearLegacyPhotoResponses(){
+        const done="cr-master-photo-response-cleanup-v1";
+        if(!win.caches||localStorage.getItem(done))return;
+        for(const name of await caches.keys()){
+            const cache=await caches.open(name);
+            for(const request of await cache.keys()){
+                const url=new URL(request.url);
+                if(url.origin===location.origin&&url.pathname.startsWith(photoPath))await cache.delete(request,{ignoreVary:true});
+            }
+        }
+        localStorage.setItem(done,"1");
+    }
     function db(){
         if(!database)database=new Promise((resolve,reject)=>{
-            const q=indexedDB.open("cr-original-master-pages",1);
-            q.onupgradeneeded=()=>{for(const name of ["pages","static"])q.result.createObjectStore(name);};
+            const q=indexedDB.open("cr-original-master-pages",2);
+            q.onupgradeneeded=e=>{
+                for(const name of ["pages","static"])if(!q.result.objectStoreNames.contains(name))q.result.createObjectStore(name);
+                if(!e.oldVersion)return;
+                const rows=q.transaction.objectStore("pages").openCursor();
+                rows.onsuccess=()=>{const row=rows.result;if(!row)return;
+                    const html=withoutPortraits(row.value.html);
+                    if(html!==row.value.html)row.update({...row.value,html});
+                    row.continue();
+                };
+                const shelf=q.transaction.objectStore("static"),keys=shelf.openKeyCursor();
+                keys.onsuccess=()=>{const key=keys.result;if(!key)return;
+                    if(String(key.key).includes(photoPath))shelf.delete(key.key);
+                    key.continue();
+                };
+            };
             q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);
-        });
+        }).catch(err=>{database=null;throw err;});
         return database;
     }
     async function record(shelf,key,value){
@@ -92,17 +140,10 @@
         page.querySelectorAll('input[name=csrfmiddlewaretoken],input[type=password],input[name=phone],input[name=reauth_phone],input[name*=access_code]').forEach(n=>n.setAttribute("value",""));
         page.querySelectorAll("meta[name=csrf-token]").forEach(n=>n.content="");
         page.querySelectorAll("[data-observer-token]").forEach(n=>n.removeAttribute("data-observer-token"));
+        removePortraits(page);
         const assign=[];
         for(const n of page.querySelectorAll("script[src],link[rel~=stylesheet],img[src]")){
             const address=n.getAttribute("src")||n.getAttribute("href"),url=safeStatic(address,base);
-            if(n.matches("img")&&n.closest(".dispatcher-active-avatar")){
-                if(entry||!win.FieldPortrait?.ownHeader(page,actor)){n.remove();continue;}
-                assign.push(async()=>{
-                    try{n.src=await win.FieldPortrait.image(address,base);}
-                    catch{n.replaceWith(page.createTextNode((actor.full_name||"").split(/\s+/).slice(0,2).map(x=>x[0]).join("")));}
-                });
-                continue;
-            }
             if(n.matches("img")&&!url){
                 if(!address?.startsWith("data:image/"))n.remove();
                 continue;
@@ -214,24 +255,6 @@
         return true;
     }
     async function has(actor,route=root){return !!(await record("pages",pageKey(actor,route)));}
-    async function findPortrait(actor,pick){
-        const owner=scope(actor);if(!owner)return null;
-        const database=await db(),prefix=JSON.stringify([owner]).slice(0,-1)+",";
-        const keys=await new Promise((resolve,reject)=>{
-            const tx=database.transaction("pages"),req=tx.objectStore("pages").getAllKeys(IDBKeyRange.bound(prefix,prefix+"\uffff"));
-            tx.oncomplete=()=>resolve(req.result);tx.onerror=tx.onabort=()=>reject(tx.error);
-        });
-        const primary=pageKey(actor,root);
-        for(const key of [primary,...keys.filter(k=>k!==primary)]){
-            const page=await record("pages",key);
-            if(page?.scope!==owner)continue;
-            const marker=page.html.indexOf('class="dispatcher-active-avatar"');
-            if(marker<0||!page.html.slice(marker,marker+512).includes('src="data:image/'))continue;
-            const data=await pick(new DOMParser().parseFromString(page.html,"text/html"),actor);
-            if(data)return data;
-        }
-        return null;
-    }
     function notice(msg){if(win.FieldIdentity?.notice)win.FieldIdentity.notice(msg);else console.warn(msg);}
     doc.addEventListener("click",e=>{
         if(!doc.documentElement.hasAttribute("data-cr-field-local"))return;
@@ -241,5 +264,7 @@
         e.preventDefault();e.stopImmediatePropagation();
         void render(route).then(ok=>{if(!ok)notice("Этот разрез ещё не был получен на планшет. Данные будут доступны после синхронизации.");}).catch(err=>notice(err.message));
     },true);
-    win.FieldArchive={capture,prime,render,has,findPortrait,root,login,routeOf,scope};
+    win.FieldArchive={capture,prime,render,has,withoutPortraits,root,login,routeOf,scope};
+    void db().catch(()=>{}); // Also migrate retired employees' pages on the login screen.
+    void clearLegacyPhotoResponses().catch(()=>{});
 })(window,document);

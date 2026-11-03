@@ -119,6 +119,13 @@
         if(s.actor&&s.actor.key!==a.key&&shiftOf(s).is_open)throw error("shift_handover_required","Сначала завершите открытую смену другого мастера.");
         if(prior && ((prior.id&&a.id&&prior.id!==a.id)||(prior.access_id&&a.access_id&&prior.access_id!==a.access_id)))
             throw error("actor_scope_conflict","Не совпадает подтверждённая личность сотрудника.");
+        // An event receipt confirms the shift but does not issue or renew a personal grant.
+        if(!Object.hasOwn(raw,"grant_until") && prior?.verified && a.id && a.access_id && a.generation &&
+            prior.id===a.id && prior.access_id===a.access_id && prior.generation===a.generation){
+            a.grant_until=prior.grant_until;
+            if(prior.grant_cleared)a.grant_cleared=true;
+        }
+        if(Object.hasOwn(raw,"grant_until") && !a.grant_until)a.grant_cleared=true;
         if(s.deferred?.actor && s.deferred.actor.key!==a.key)s.deferred=null;
         s.actor=s.actors[a.key]=a;s.locked=false;return a;
     }
@@ -135,7 +142,7 @@
         if(!shiftOf(s).is_open)throw error("own_shift_required","Действие доступно в собственной открытой смене.");
     }
     function requireCurrentGrant(a){
-        if(a.grant_until && !(Date.parse(a.grant_until)>Date.now()))throw error("grant_expired","Для продолжения обновите личный допуск при наличии связи.");
+        if(a.grant_cleared || (a.grant_until && !(Date.parse(a.grant_until)>Date.now())))throw error("grant_expired","Для продолжения обновите личный допуск при наличии связи.");
     }
     const readRaw=()=>stateTx(false,s=>s);
     function selectActor(a){return stateTx(true,s=>{choose(s,a);return summary(s);});}
@@ -209,8 +216,8 @@
     }
     function openShift(actor,localId){
         return commit((s,id,time)=>{
-            if(s.locked)throw error("actor_not_verified","Войдите с личным PIN перед началом смены.");
-            choose(s,actor||s.actor);
+            if(s.locked || !actor && !s.actor?.verified)throw error("actor_not_verified","Войдите с личным PIN перед началом смены.");
+            if(actor)choose(s,actor);
             requireCurrentGrant(s.actor);
             if(shiftOf(s).is_open)return null;
             if(!s.snapshot_ready)throw error("initial_snapshot_required","Сначала загрузите парк на планшет.");

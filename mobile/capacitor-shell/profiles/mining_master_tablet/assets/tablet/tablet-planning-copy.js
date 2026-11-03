@@ -101,7 +101,7 @@
         canvas.dataset.dispatcherCanvas="on";
         const shell=make(doc,"main");copyAttributes(sourceShell,shell,attrs(sourceShell));
         const board=safeClone(sourceBoard,doc);
-        void global.CopperTabletPlanningCache.copyAvatar(sourceBoard,board).finally(()=>global.FieldPortrait?.paint());
+        global.CopperTabletPlanningCache.copyInitials(sourceBoard,board);
         const title=board.querySelector(".dispatcher-command-context > strong");
         if(title)title.textContent="Предварительная расстановка";
         const zoneTitle=board.querySelector(".dispatcher-zone-head h2");
@@ -500,7 +500,7 @@
                     state.value=await global.CopperTabletDraft.load(state.catalog.live,state.ctx);
                     if(current!==state){resolve(false);return;}
                     panels(state);renderPlan(state);interactions(state);
-                    frame.dataset.ready="true";resolve(true);
+                    frame.dataset.ready="true";global.FieldPortrait?.paint();resolve(true);
                 }catch(error){if(current===state)close();reject(error);}
             };
             frame.addEventListener("load",render);

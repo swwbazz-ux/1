@@ -127,7 +127,17 @@
         if(data.protocol!==PROTOCOL||!actual?.verified||actual.role!==ROLE||!matches||
             actual.generation!==actor.generation || (actor.id!=null && actual.id!==actor.id) ||
             (actor.access_id!=null && actual.access_id!==actor.access_id))throw fail("auth","Система не подтвердила автора текущей смены.");
-        data.snapshot.actor={...actual,key:actor.key,grant_until:actor.grant_until};
+        const confirmed={...actual,key:actor.key};
+        if(!Object.hasOwn(confirmed,"grant_until")){
+            let expiry=actor.grant_until;
+            if(!expiry && !actor.grant_cleared)expiry=await win.FieldIdentity?.enrolledGrantUntil(actor);
+            if(expiry)confirmed.grant_until=expiry;
+        }
+        const current=await ledger().read(),owner=current.actor;
+        if(current.locked || !owner?.verified || owner.key!==actor.key || owner.generation!==actor.generation ||
+            owner.id!==actor.id || owner.access_id!==actor.access_id)throw fail("read_unavailable","Сотрудник на планшете изменился.");
+        if(!Object.hasOwn(actual,"grant_until") && (owner.grant_cleared || owner.grant_until))confirmed.grant_until=owner.grant_until;
+        data.snapshot.actor=confirmed;
         return {protocol:PROTOCOL,via:"device_ticket",legacy:false,device_id,actor:data.snapshot.actor,snapshot:data.snapshot};
     }
     function sameLocal(actor,confirmed){
@@ -209,7 +219,7 @@
             await ledger().flush(send);
             await ledger().retry(cap.actor.key,cap.actor.generation);
             const afterFlush=await ledger().read();
-            if(afterFlush.sync.needs_reconcile && !afterFlush.outbox.length){
+            if(!afterFlush.outbox.length && (afterFlush.sync.needs_reconcile || afterFlush.server_version>cap.snapshot.server_version)){
                 // Read after the commit(s), never replace the projection with the pre-flush snapshot.
                 const later=own && localTicket ? await readAs(own,localTicket):await identify();
                 if(later.actor?.key===cap.actor.key){cap=later;await ledger().ingest(later.snapshot,{defer:uiBusy()});}
@@ -251,9 +261,9 @@
         if(response.status!==401 && (!response.ok || !jsonResponse(response))){networkGeneration++;recentRead=null;return response;}
         const s=await ledger().read(),a=s.actor;
         const denied=()=>new Response(null,{status:401});
-        if(!a?.verified || s.locked || !s.shift?.is_open || !a.grant_until ||
-            !(Date.parse(a.grant_until)>Date.now()))return denied();
-        if(response.ok){
+        if(!a?.verified || s.locked || !s.shift?.is_open || a.grant_cleared ||
+            (a.grant_until && !(Date.parse(a.grant_until)>Date.now())))return denied();
+        if(response.ok && a.grant_until){
             const remote=await response.clone().json();
             if(remote.authenticated && remote.session_role_code===ROLE && remote.role_app_code===ROLE &&
                 String(remote.session_revision)===a.generation){recentRead=null;return response;}
@@ -265,7 +275,8 @@
         const cap=await refresh(),current=await ledger().read();
         if(!sameLocal(a,current.actor)||!current.actor?.verified||current.locked||!current.shift?.is_open)return denied();
         if(!cap)return status.connected?denied():new Response(null,{status:503});
-        if(cap.protocol!==PROTOCOL||!sameLocal(a,cap.actor)||!Number.isSafeInteger(cap.snapshot.server_version))return denied();
+        if(cap.protocol!==PROTOCOL||!sameLocal(a,cap.actor)||!Number.isSafeInteger(cap.snapshot.server_version)||
+            !(Date.parse(current.actor.grant_until)>Date.now()))return denied();
         if(!cap.snapshot.shift?.is_open){
             // Our signed opening may still be queued for delivery or require a
             // conflict decision. There is no active *server* shift to report.

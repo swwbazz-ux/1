@@ -57,6 +57,17 @@
         const salt=hex(crypto.getRandomValues(new Uint8Array(16)));
         await vault('grant:'+phoneKey,{actor,salt,proof:await proof(pin,salt),until:Date.now()+GRANT_TTL,failures:0,retry:0});
     }
+    // Recover the original server deadline lost by pre-.45 ACKs. The PIN verifier's
+    // local enrollment date is not the server ticket expiry.
+    async function enrolledGrantUntil(actor){
+        if(!actor?.verified || actor.role!==ROLE || !actor.id || !actor.access_id || !actor.generation)return null;
+        const records=[await vault("scope:"+await hash(actor.generation))];
+        if(/^phone:[a-f0-9]{64}$/.test(actor.key))records.push((await vault("grant:"+actor.key.slice(6)))?.actor);
+        const deadlines=records.filter(r=>r?.verified && r.role===ROLE && r.key===actor.key && r.id===actor.id &&
+            r.access_id===actor.access_id && r.generation===actor.generation && Object.hasOwn(r,"grant_until")).map(r=>r.grant_until);
+        if(!deadlines.length || deadlines.some(value=>!(Date.parse(value)>Date.now())))return null;
+        return deadlines.reduce((earlier,value)=>Date.parse(earlier)<=Date.parse(value)?earlier:value);
+    }
     async function localAuth(phoneKey,pin){
         const verify=()=>verifyLocalPin(phoneKey,pin);
         return navigator.locks ? navigator.locks.request("cr-personal-pin:"+phoneKey,verify) : verify();
@@ -65,7 +76,8 @@
         const key='grant:'+phoneKey, g=await vault(key);
         if(!g || g.until<Date.now()) throw fail('Для первого входа этого мастера на планшете нужна связь. После проверки можно работать без сети.');
         const prior=(await ledger().read()).actors[g.actor.key];
-        if(prior && (!prior.verified || prior.generation!==g.actor.generation))
+        if(prior && (!prior.verified || prior.grant_cleared || prior.generation!==g.actor.generation ||
+            prior.grant_until && !(Date.parse(prior.grant_until)>Date.now())))
             throw fail('Система отозвала допуск. Для проверки доступа нужен вход с сетью.');
         if(g.retry>Date.now()) throw fail('Слишком много попыток. Повторите вход позже.');
         if(!same(g.proof,await proof(pin,g.salt))){
@@ -354,7 +366,7 @@
         if(!event.target.closest?.(".app-connection-dot[data-field-pending]"))return;
         event.preventDefault();event.stopImmediatePropagation();queueDialog().catch(e=>notice(e.message));
     },true);
-    win.FieldIdentity={confirmScope,notice,signIn,finish,recover,attach,paint};
+    win.FieldIdentity={confirmScope,enrolledGrantUntil,notice,signIn,finish,recover,attach,paint};
     win.addEventListener("fieldledgerchange",()=>paint().catch(()=>{}));
     win.addEventListener("fieldtransportchange",()=>paint().catch(()=>{}));
     if(doc.readyState==="loading")doc.addEventListener("DOMContentLoaded",()=>attach(),{once:true});else attach();

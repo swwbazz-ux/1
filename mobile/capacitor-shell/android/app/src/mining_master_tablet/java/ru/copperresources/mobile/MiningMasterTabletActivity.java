@@ -65,6 +65,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
         installSystemInsetsListener();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView view = getBridge().getWebView();
+            android.content.SharedPreferences runtime = getSharedPreferences("field_runtime", MODE_PRIVATE);
+            if (!runtime.getBoolean("portrait_http_cache_purged", false)) {
+                // 0.1.44 allowed protected <img> responses into WebView's HTTP cache.
+                // Cookies, IndexedDB, and the offline shift journal are separate from this cache.
+                view.clearCache(true);
+                runtime.edit().putBoolean("portrait_http_cache_purged", true).apply();
+            }
             reportDownloads.install(view);
             // Explicit release boundary: no DevTools on the delivered signed APK.
             WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
@@ -77,6 +84,16 @@ public final class MiningMasterTabletActivity extends MainActivity {
             getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView webView, WebResourceRequest request) {
                     if (!request.isForMainFrame() && "GET".equals(request.getMethod())) {
+                        if (TabletUrlPolicy.trusted(request.getUrl().toString())
+                                && request.getUrl().getPath() != null
+                                && request.getUrl().getPath().startsWith("/media/employee_photos/")
+                                && !request.getRequestHeaders().entrySet().stream().anyMatch(header ->
+                                    "X-Copper-Field-Portrait".equalsIgnoreCase(header.getKey()) && "1".equals(header.getValue()))) {
+                            // The personal loader performs the authenticated, no-store fetch. A
+                            // server-rendered <img> must never create a second disk-cached copy.
+                            return new WebResourceResponse("image/png", null, 404, "Not Found",
+                                Collections.singletonMap("Cache-Control", "no-store"), null);
+                        }
                         String file = TabletUrlPolicy.packagedIcon(request.getUrl().toString());
                         if (file != null) {
                             try {
@@ -155,9 +172,13 @@ public final class MiningMasterTabletActivity extends MainActivity {
                             JSONObject obj=new JSONObject(data);
                             if ("portrait_status".equals(obj.optString("op"))) {
                                 String status=obj.optString("state"), source=obj.optString("source");
+                                if ("purged".equals(status) && "storage".equals(source)) {
+                                    android.util.Log.i("MiningMasterTablet","field_portrait state=purged source=storage");
+                                    return;
+                                }
                                 if ("shown".equals(status) || "source_missing".equals(status) ||
                                     "needs_session".equals(status) || "retry".equals(status)) {
-                                    if (!("archive".equals(source) || "header".equals(source) || "signed".equals(source))) source="local";
+                                    if (!("header".equals(source) || "signed".equals(source))) source="local";
                                     android.util.Log.i("MiningMasterTablet","field_portrait state="+status+" source="+source);
                                 }
                                 return;
@@ -259,11 +280,12 @@ public final class MiningMasterTabletActivity extends MainActivity {
             String entryJs = asset("tablet/tablet-entry-fields.js");
             String planning = asset("tablet/tablet-planning-draft.js") + "\n"
                 + asset("tablet/tablet-planning-copy.js") + "\n"
-                + asset("tablet/tablet-planning-cache.js") + "\n" + asset("tablet/tablet-planning-entry.js");
+                + asset("tablet/tablet-planning-entry.js");
             String planningCss = asset("tablet/tablet-planning-copy.css");
             String field = asset("tablet/field-ledger.js") + "\n" + asset("tablet/field-transport.js") + "\n"
                 + asset("tablet/field-archive.js") + "\n" + asset("tablet/field-reports.js") + "\n" + asset("tablet/field-identity.js") + "\n"
-                + asset("tablet/field-portrait.js") + "\n" + asset("tablet/field-live-actions.js") + "\n";
+                + asset("tablet/field-portrait.js") + "\n" + asset("tablet/field-live-actions.js") + "\n"
+                + asset("tablet/tablet-planning-cache.js") + "\n";
             return "(function(){if(window.top!==window||location.origin!==" + JSONObject.quote(TabletUrlPolicy.ORIGIN)
                 + ")return;var workplace=" + new JSONArray(TabletUrlPolicy.TABLET_PATHS)
                 + ".indexOf(location.pathname)!==-1;"
@@ -277,12 +299,7 @@ public final class MiningMasterTabletActivity extends MainActivity {
                 + "addStyle('cr-tablet-dialog-scale-css'," + JSONObject.quote(dialogScale) + ");"
                 + "addStyle('cr-tablet-entry-fields-css'," + JSONObject.quote(entryCss) + ");"
                 + "if(!workplace){if(document.querySelector('#tablet-phone,[data-tablet-welcome],form[action*=login]')||document.body&&document.body.dataset.appRoleCode==='mining_master'){"
-                + "var op=indexedDB.open('cr-tablet-board-cache',1);op.onupgradeneeded=function(){op.result.createObjectStore('board');};"
-                // Keep a timestamp after logout: a capture still running in the old
-                // document must not put that employee's portrait back in the store.
-                + "op.onsuccess=function(){var db=op.result,tx=db.transaction('board','readwrite'),shelf=tx.objectStore('board'),epoch=performance.timeOrigin;"
-                + "var previous=shelf.get('latest');previous.onsuccess=function(){if(!previous.result||!(previous.result.documentTime>epoch))"
-                + "shelf.put({documentTime:epoch,serverTime:0,cleared:true},'latest');};tx.oncomplete=tx.onabort=function(){db.close();};};}return;}"
+                + "window.CopperTabletPlanningCache.clearOnLogin().catch(function(){});}return;}"
                 + "addStyle('cr-mining-master-tablet-css'," + JSONObject.quote(css) + ");"
                 + "addStyle('cr-tablet-planning-copy-css'," + JSONObject.quote(planningCss) + ");"
                 + "if(document.documentElement.hasAttribute('data-cr-saved-board')){" + js + "\n" + planning + "\nreturn;}"
