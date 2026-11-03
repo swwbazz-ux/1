@@ -609,6 +609,190 @@ class MasterFieldV2Tests(TestCase):
         response = client.post(self.url, body, content_type="application/json", **token)
         return response, body, token
 
+    def portrait_read(self, client, **extra):
+        gate = client.get(
+            self.url,
+            {
+                "device_id": self.device,
+                "protocol": PROTOCOL,
+                "challenge": "1",
+            },
+        ).json()
+        actor = self.grant["snapshot"]["actor"]
+        event = {
+            "id": str(uuid4()),
+            "type": "portrait.read",
+            "format_version": 2,
+            "device_id": self.device,
+            "actor_id": actor["id"],
+            "actor_access_id": actor["access_id"],
+            "actor_key": actor["key"],
+            "actor_generation": actor["generation"],
+            "occurred_at": gate["server_time"],
+            "challenge": gate["challenge"],
+            **extra,
+        }
+        body = {**self.envelope(event), "op": "portrait"}
+        response = client.post(
+            self.url, body, content_type="application/json", HTTP_X_CSRFTOKEN=gate["csrf_token"]
+        )
+        return response, body, gate["csrf_token"]
+
+    def test_personal_portraits_follow_the_signed_owner_and_never_the_web_cookie(self):
+        from io import BytesIO
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+
+        from django.core.files.base import ContentFile
+        from django.test import Client
+        from PIL import Image
+
+        other = Employee.objects.create(
+            full_name="Другой мастер", phone="+79991234568", status=Employee.Status.ACTIVE
+        )
+        other_access = EmployeeAccess.objects.create(
+            employee=other,
+            role=self.role,
+            access_code="333333",
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with TemporaryDirectory() as media, self.settings(MEDIA_ROOT=media):
+            for employee, color in [(self.employee, "red"), (other, "blue")]:
+                source = BytesIO()
+                Image.new("RGB", (320, 80), color).save(source, format="PNG")
+                employee.photo.save("profile.png", ContentFile(source.getvalue()))
+            with patch.object(
+                self.employee.photo.storage,
+                "open",
+                side_effect=AssertionError("snapshot read the file"),
+            ):
+                snapshot = self.client.get(
+                    self.url, {"device_id": self.device, "protocol": PROTOCOL}
+                ).json()["snapshot"]
+            version = snapshot["portrait_revision"]
+            self.assertRegex(version, "^[0-9a-f]{64}$")
+            self.login(other_access)
+            # The normal browser session is B's. The signed portrait request is for A.
+            red, body, csrf = self.portrait_read(self.client)
+            self.assertEqual(red.status_code, 200)
+            self.assertIn("no-store", red["Cache-Control"])
+            picture = red.json()["portrait"]
+            self.assertEqual(
+                (picture["employee_id"], picture["access_id"], picture["revision"]),
+                (self.employee.pk, self.access.pk, version),
+            )
+            self.assertTrue(picture["data"].startswith("data:image/jpeg;base64,"))
+            red_bytes = base64.b64decode(picture["data"].split(",")[1], validate=True)
+            self.assertLessEqual(len(red_bytes), 64 * 1024)
+            with Image.open(BytesIO(red_bytes)) as photo:
+                self.assertEqual(photo.size, (160, 40))
+                self.assertGreater(photo.getpixel((0, 0))[0], 245)
+            again = self.client.post(
+                self.url, body, content_type="application/json", HTTP_X_CSRFTOKEN=csrf
+            )
+            self.assertEqual(again.json()["code"], "read_challenge_replayed")
+            self.grant = self.enroll(self.signer).json()
+            blue, _, _ = self.portrait_read(Client(enforce_csrf_checks=True))
+            self.assertEqual(blue.status_code, 200)
+            picture = blue.json()["portrait"]
+            self.assertEqual(
+                (picture["employee_id"], picture["access_id"]), (other.pk, other_access.pk)
+            )
+            self.assertNotEqual(picture["revision"], version)
+            with Image.open(BytesIO(base64.b64decode(picture["data"].split(",")[1]))) as photo:
+                self.assertGreater(photo.getpixel((0, 0))[2], 245)
+            self.assertFalse(OfflineFieldEvent.objects.exclude(event_type=ENROLLMENT).exists())
+
+    def test_portrait_deletion_storage_failure_and_replacement_are_distinct(self):
+        from io import BytesIO
+        from tempfile import TemporaryDirectory
+
+        from django.core.files.base import ContentFile
+        from django.test import Client
+        from PIL import Image
+
+        no_cookie = Client(enforce_csrf_checks=True)
+        self.assertEqual(self.grant["snapshot"]["portrait_revision"], "")
+        no_photo, _, _ = self.portrait_read(no_cookie)
+        self.assertEqual(
+            no_photo.json()["portrait"],
+            {
+                "employee_id": self.employee.pk,
+                "access_id": self.access.pk,
+                "data": None,
+                "revision": "",
+            },
+        )
+        with TemporaryDirectory() as media, self.settings(MEDIA_ROOT=media):
+            self.employee.photo.save("bad.png", ContentFile(b"truncated picture"))
+            old = self.client.get(
+                self.url, {"device_id": self.device, "protocol": PROTOCOL}
+            ).json()["snapshot"]["portrait_revision"]
+            for attempt in range(2):
+                if attempt:
+                    self.employee.photo.storage.delete(self.employee.photo.name)
+                failure, _, _ = self.portrait_read(no_cookie)
+                self.assertEqual((failure.status_code, failure.json()["status"]), (503, "retry"))
+                self.assertNotIn("portrait", failure.json())
+            source = BytesIO()
+            Image.new("RGB", (20, 20)).save(source, "PNG")
+            # A saved replacement may reuse the filename of a removed file.
+            self.employee.photo.save("bad.png", ContentFile(source.getvalue()))
+            replacement, _, _ = self.portrait_read(no_cookie)
+            self.assertNotEqual(replacement.json()["portrait"]["revision"], old)
+            self.employee.photo.delete(save=True)
+            gone, _, _ = self.portrait_read(no_cookie)
+            self.assertEqual(
+                (gone.json()["portrait"]["revision"], gone.json()["portrait"]["data"]), ("", None)
+            )
+
+    def test_portrait_revision_is_stable_during_normal_shift_login_and_polling(self):
+        self.employee.photo = "employee_photos/stable.jpg"
+        self.employee.save(update_fields=["photo", "updated_at"])
+
+        def current_revision():
+            return self.client.get(
+                self.url, {"device_id": self.device, "protocol": PROTOCOL}
+            ).json()["snapshot"]["portrait_revision"]
+
+        initial = current_revision()
+        self.assertTrue(initial)
+        self.open()
+        heartbeat = self.client.post("/session-heartbeat/", {"path": "/mining-master/tablet/"})
+        self.assertEqual(heartbeat.status_code, 204)
+        self.assertEqual(current_revision(), initial)
+        self.assertEqual(self.post(self.event("shift.close", 2))["status"], "applied")
+        self.assertEqual(current_revision(), initial)
+        login = self.client.post(
+            "/mining-master/tablet/login/",
+            {"phone": self.employee.phone, "access_code": "111222", "intent": "login"},
+        )
+        self.assertEqual(login.status_code, 302)
+        self.assertEqual(current_revision(), initial)
+
+    def test_portrait_requires_own_current_access_and_cannot_select_another_file(self):
+        from django.test import Client
+
+        client = Client(enforce_csrf_checks=True)
+        wrong_id, _, _ = self.portrait_read(client, actor_id=self.employee.pk + 1)
+        self.assertEqual(wrong_id.json()["code"], "actor_mismatch")
+        for field in [
+            {"path": "/media/employee_photos/other.jpeg"},
+            {"url": "https://example.invalid"},
+            {"employee_id": self.employee.pk + 1},
+        ]:
+            with self.subTest(field=field):
+                result, _, _ = self.portrait_read(client, **field)
+                self.assertEqual(
+                    (result.status_code, result.json()["code"]), (400, "invalid_portrait_request")
+                )
+                self.assertNotIn("portrait", result.json())
+        self.access.status = EmployeeAccess.Status.BLOCKED
+        self.access.save(update_fields=["status"])
+        blocked, _, _ = self.portrait_read(client)
+        self.assertEqual((blocked.status_code, blocked.json()["code"]), (403, "access_revoked"))
+        self.assertNotIn("portrait", blocked.json())
+
     def test_read_original_report_period_and_export_after_session_loss(self):
         from io import BytesIO
         from django.test import Client

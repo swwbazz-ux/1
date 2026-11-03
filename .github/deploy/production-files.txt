@@ -1,15 +1,3 @@
-# Подписанный обмен планшета горного мастера с сервером. 14 файлов приложения.
-СИСТЕМА_MVP/backend/assignments/field_commands.py
-СИСТЕМА_MVP/backend/assignments/field_plan.py
-СИСТЕМА_MVP/backend/assignments/field_reports.py
-СИСТЕМА_MVP/backend/assignments/field_signing.py
+# Подписанная миниатюра текущего сотрудника планшета. 2 файла приложения.
+СИСТЕМА_MVP/backend/assignments/field_portrait.py
 СИСТЕМА_MVP/backend/assignments/field_sync.py
-СИСТЕМА_MVP/backend/assignments/services.py
-СИСТЕМА_MVP/backend/assignments/tablet_urls.py
-СИСТЕМА_MVP/backend/trips/dispatcher_assignment_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_downtime_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_shift_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_topology_commands.py
-СИСТЕМА_MVP/backend/trips/dispatcher_trip_commands.py
-СИСТЕМА_MVP/backend/trips/tablet_control.py
-СИСТЕМА_MVP/backend/users/middleware.py

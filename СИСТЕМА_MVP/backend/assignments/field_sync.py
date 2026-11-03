@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from django.core import signing
 from django.core.exceptions import ValidationError
-from . import field_commands, field_reports, field_signing
+from . import field_commands, field_portrait, field_reports, field_signing
 from django.db import transaction, IntegrityError
 from django.db.models import Q
 from django.http import JsonResponse, Http404
@@ -160,6 +160,7 @@ def _snapshot(access, device, *, live=None, v2=False):
     }
 
     if v2:
+        snapshot["portrait_revision"] = field_portrait.revision(access.employee)
         snapshot["live_tokens"] = {"trucks": current[0]["trucks"], "zones": current[0]["zones"]}
         return field_commands.enrich_snapshot(access, snapshot)
     return snapshot
@@ -967,8 +968,7 @@ def _challenge(request, device):
     )
 
 
-@transaction.atomic
-def _pull(ticket, event, key, op, csrf_secret):
+def _consume_personal_read(ticket, event, key, op):
     if (
         event.get("type") != op + ".read"
         or event.get("format_version") != 2
@@ -1020,14 +1020,42 @@ def _pull(ticket, event, key, op, csrf_secret):
     fresh[nonce] = now.timestamp()
     key.context_snapshot = {**key.context_snapshot, "used_read_challenges": fresh}
     key.save(update_fields=["context_snapshot", "updated_at"])
-    if op == "report":
-        return field_reports.render_report(access, event.get("path"), csrf_secret)
-    return JsonResponse(
-        {
-            "protocol": field_signing.PROTOCOL,
-            "snapshot": _snapshot(access, event["device_id"], v2=True),
-        }
-    )
+    return access
+
+
+def _pull(ticket, event, key, op, csrf_secret):
+    with transaction.atomic():
+        access = _consume_personal_read(ticket, event, key, op)
+        if op == "report":
+            return field_reports.render_report(access, event.get("path"), csrf_secret)
+        if op == "snapshot":
+            return JsonResponse(
+                {
+                    "protocol": field_signing.PROTOCOL,
+                    "snapshot": _snapshot(access, event["device_id"], v2=True),
+                }
+            )
+        # A portrait has no destination, employee selector or resource URL.
+        if (
+            set(event)
+            != {
+                "id",
+                "type",
+                "format_version",
+                "device_id",
+                "actor_key",
+                "actor_id",
+                "actor_access_id",
+                "actor_generation",
+                "occurred_at",
+                "challenge",
+            }
+            or event["actor_id"] != access.employee_id
+            or event["actor_access_id"] != access.pk
+        ):
+            return JsonResponse({"code": "invalid_portrait_request"}, status=400)
+    # Do not hold the device journal lock while a storage backend fetches an image.
+    return field_portrait.response(access)
 
 
 @never_cache
@@ -1060,7 +1088,7 @@ def field_sync_view(request):
                     request, data.get("device_id", ""), v2=True, enroll_key=data["public_key"]
                 )
             event, key, digest = field_signing.checked_event(data)
-            if data.get("op") in {"snapshot", "report"}:
+            if data.get("op") in {"snapshot", "report", "portrait"}:
                 return _pull(
                     data.get("ticket"), event, key, data["op"], request.META.get("CSRF_COOKIE")
                 )
