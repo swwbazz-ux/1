@@ -16,6 +16,18 @@
         if (label) element.textContent = label;
         return element;
     }
+    function maxAction(button) {
+        const doc=button.ownerDocument, text=button.textContent;
+        const svg=doc.createElementNS("http://www.w3.org/2000/svg","svg");
+        svg.setAttribute("viewBox","0 0 100 100");svg.setAttribute("aria-hidden","true");
+        svg.classList.add("cr-mm-max-mark");
+        const path=doc.createElementNS(svg.namespaceURI,"path");
+        path.setAttribute("fill","currentColor");path.setAttribute("fill-rule","evenodd");path.setAttribute("clip-rule","evenodd");
+        // The same official MAX mark already used by the project's support link.
+        path.setAttribute("d","M50.7571.2617C78.2929.2617 99.8857 22.5974 99.8857 50.1474S77.6071 99.4903 51.0214 99.4903c-9.4357 0-14.0071-1.3286-21.3714-6.5429-.5071-.3571-1.2-.2643-1.6286.1929C22.3571 99.1831 7.85 103.426 7.1857 95.176c0-14.3857-7.1857-23.7286-7.1857-45.3C0 21.5546 23.2214.2617 50.7571.2617Zm.7715 24.55c-13.0643-.6857-23.2643 8.3857-25.5143 22.5714-1.8643 11.75 1.4357 26.0715 4.2643 26.7929 1.2.3072 4.0785-1.9 6.1785-3.8786.3929-.3714.9929-.4357 1.45-.15 3.2715 2 6.9715 3.5 11.05 3.7143 13.4143.7 25.3-9.8 26.0072-23.2143.7-13.4143-10.0214-25.1428-23.4357-25.8357Z");
+        svg.appendChild(path);button.classList.add("cr-mm-max-action");
+        button.replaceChildren(svg,make(doc,"span","cr-mm-max-label",text));
+    }
     function safeClone(node, doc) {
         const copy = doc.importNode(node, true);
         copy.querySelectorAll("script,iframe,frame,object,embed,link,style,base,meta,template,input[type=hidden]").forEach(n => n.remove());
@@ -120,8 +132,10 @@
         const search=make(doc,"input");search.type="text";search.inputMode="numeric";search.autocomplete="off";
         search.setAttribute("aria-label","Живой поиск самосвала");search.placeholder="№ самосвала";search.dataset.planSearch="";
         label.appendChild(search);toolbar.appendChild(label);
-        for(const [key,title] of [["share","В группу"],["activate","Активировать расстановку"]]){
-            const button=make(doc,"button","",title);button.type="button";button.setAttribute("data-plan-"+key,"");toolbar.appendChild(button);
+        for(const [key,title] of [["share","В MAX"],["activate","Активировать расстановку"]]){
+            const button=make(doc,"button","",title);button.type="button";button.setAttribute("data-plan-"+key,"");
+            if(key==="share"){maxAction(button);button.setAttribute("aria-label","Подготовить расстановку для отправки в MAX");}
+            toolbar.appendChild(button);
         }
         doc.body.appendChild(toolbar);
         for(const grip of source.querySelectorAll(".cr-mm-panel-handle,.cr-mm-panel-edge"))doc.body.appendChild(safeClone(grip,doc));
@@ -160,6 +174,7 @@
         modal.querySelector("#app-confirm-title").textContent=title;
         modal.querySelector("#app-confirm-message").textContent=body;
         const accept=modal.querySelector("[data-confirm-accept]");
+        accept.classList.remove("cr-mm-max-action");
         accept.textContent=action;accept.hidden=false;accept.classList.toggle("danger",!!callback);
         modal.querySelector("[data-confirm-cancel]").hidden=!callback;
         const shut=()=>{modal.hidden=true;state.panels?.pause(false);state.panels?.activity();};
@@ -570,6 +585,7 @@
                 }catch(error){if(error.name!=="AbortError")message(state,error.message||"Не удалось открыть MAX.");}
             });
             state.modal.querySelector("[data-confirm-accept]").classList.remove("danger");
+            maxAction(state.modal.querySelector("[data-confirm-accept]"));
         }catch(error){message(state,error.message||"Не удалось подготовить расстановку.");}
     }
     async function activate(state){
