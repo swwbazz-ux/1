@@ -629,9 +629,39 @@ function bindDriverShiftOpeningForm(shell) {
         );
     }
     var openReadings = Array.from(openShiftForm.querySelectorAll("input[type='number']"));
+    var openingHint = openShiftForm.querySelector("[data-driver-shift-open-hint]");
+    var readingLabels = {
+        start_fuel: "топливо",
+        start_mileage: "одометр",
+        start_engine_hours: "моточасы"
+    };
     var initialReadings = openReadings.map(function (input) {
         return input.value;
     });
+
+    function syncOpeningHint() {
+        if (!openingHint) return;
+        var missing = [];
+        var invalid = [];
+        openReadings.forEach(function (input) {
+            var label = readingLabels[input.name];
+            if (!label) return;
+            if (
+                (input.validity && input.validity.badInput)
+                || (input.value.trim() !== "" && !input.checkValidity())
+            ) {
+                invalid.push(label);
+            } else if (input.value.trim() === "") {
+                missing.push(label);
+            }
+        });
+        var messages = [];
+        if (missing.length) messages.push("Заполните для начала смены: " + missing.join(", ") + ".");
+        if (invalid.length) messages.push("Проверьте показания: " + invalid.join(", ") + ".");
+        var message = messages.join(" ");
+        if (openingHint.textContent !== message) openingHint.textContent = message;
+        openingHint.hidden = !messages.length;
+    }
 
     function requestDeferredRefresh(reason) {
         if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
@@ -652,6 +682,7 @@ function bindDriverShiftOpeningForm(shell) {
         openShiftButton.disabled = !openReadings.length || openReadings.some(function (input) {
             return input.value.trim() === "" || !input.checkValidity();
         });
+        syncOpeningHint();
         if (
             !isDirty &&
             openShiftForm.dataset.driverShiftOpeningPending !== "true" &&
