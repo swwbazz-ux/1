@@ -98,6 +98,9 @@
                 <div class="mobile-shift__cell"><span>Состояние</span><strong>{% if mobile_shift_role == "driver" %}{% if mobile_shift_state == "open" %}{% if active_trip %}В пути{% else %}Свободен{% endif %}{% elif mobile_shift_state == "blocked" %}Недоступен{% else %}Смена закрыта{% endif %}{% else %}{% if open_shift %}{% if active_trips_count %}В работе{% else %}Свободен{% endif %}{% elif equipment_open_shift %}Занят{% elif work_assignment_state == "assigned" %}Смена закрыта{% else %}Недоступен{% endif %}{% endif %}</strong></div>
             </div>
         </section>
+        {% if mobile_shift_role == "driver" and mobile_shift_state == "closed" %}
+            <p class="driver-shift-opening-hint" data-driver-shift-open-hint role="status" aria-live="polite" aria-atomic="true">Заполните для начала смены: топливо, одометр, моточасы.</p>
+        {% endif %}
     </div>
 
     <footer class="mobile-shift__actions">
