@@ -6,20 +6,21 @@ production: телефоны, коды и id ниже пригодны толь�
 
 Команда создания: `core/management/commands/setup_sse_stand.py`.
 Полные команды запуска — `SSE-LOCAL-STAND.md` (realtime) и отчёты
-`D:/CopperAgentTeam/pilot/state/handoffs/T-016-backend-1.md` … `-5.md`.
+`D:/CopperAgentTeam/pilot/state/handoffs/T-016-backend-1.md` … `-6.md`.
 
-> **Данные ниже — после `--reset` №3 QA-2, 12.11.2026 (итерация 2 QA,
-> `handoffs/T-016-qa-2.md` §2–3; до него в `T-016-backend-5.md` §5 были id 9/10,
-> в `T-016-backend-4.md` — 5/6).** **Каждый `--reset` меняет id**; актуальные id —
-> из свежего вывода команды / этого файла на момент последнего reset. Открытые
-> сессии и сохранённые в клиентах id после reset недействительны.
+> **Данные ниже — после двух `--reset` итерации 6, 12.11.2026 11:5x
+> (`handoffs/T-016-backend-6.md`).** До них: QA-2 — id 15/16 (`T-016-qa-2.md`
+> §2–3), `T-016-backend-5.md` §5 — 9/10, `T-016-backend-4.md` — 5/6.
+> **Каждый `--reset` меняет id**; актуальные id — из свежего вывода команды /
+> этого файла на момент последнего reset. Открытые сессии и сохранённые в
+> клиентах id после reset недействительны.
 
 ## Учётные записи
 
 | Роль | Телефон | Код | employee_id | access_id | Открытая смена | Техника |
 |---|---|---|---|---|---|---|
-| `driver` | `+79000000101` | `111111` | 15 | 15 | `shift_id=15`, `workplace_code=driver` | самосвал `SSE-1` (id=17) |
-| `excavator_operator` | `+79000000102` | `222222` | 16 | 16 | `shift_id=16`, `workplace_code=excavator_operator` | экскаватор `SSE-ЭКС-1` (id=18) |
+| `driver` | `+79000000101` | `111111` | 19 | 19 | `shift_id=19`, `workplace_code=driver` | самосвал `SSE-1` (id=21) |
+| `excavator_operator` | `+79000000102` | `222222` | 20 | 20 | `shift_id=20`, `workplace_code=excavator_operator` | экскаватор `SSE-ЭКС-1` (id=22) |
 
 Оба доступа: `status=activated`, `is_active=true`. Вход — `POST /` с полями
 `phone` и `access_code` (ветка `login_action=login`, `users/views.py:1424-1426`);
@@ -29,12 +30,12 @@ production: телефоны, коды и id ниже пригодны толь�
 
 | Что | id | Состояние |
 |---|---|---|
-| Рабочее назначение водителя (`EquipmentAssignment`) | 15 | `accepted`, `shift_type=day`, `shift_id=null` |
-| Рабочее назначение машиниста (`EquipmentAssignment`) | 16 | `accepted`, `shift_type=day`, `shift_id=null` |
-| Путевое назначение самосвала (`HaulAssignment`) | 8 | `accepted`, `action=assign`, `truck=SSE-1`, `excavator=SSE-ЭКС-1` |
-| Исторический рейс (`Trip`) | 121 | `completed` (создан для данных экранов) |
+| Рабочее назначение водителя (`EquipmentAssignment`) | 19 | `accepted`, `shift_type=day`, `shift_id=null` |
+| Рабочее назначение машиниста (`EquipmentAssignment`) | 20 | `accepted`, `shift_type=day`, `shift_id=null` |
+| Путевое назначение самосвала (`HaulAssignment`) | 10 | `accepted`, `action=assign`, `truck=SSE-1`, `excavator=SSE-ЭКС-1` |
+| Исторический рейс (`Trip`) | 123 | `completed` (создан для данных экранов) |
 
-Состояние журнала на момент записи: `key=production`, `version=2141`,
+Состояние журнала на момент записи: `key=production`, `version=2221`,
 `journal_epoch=fd29a711-6e8b-43b9-9c6f-6e4ffba0baa3` (растёт от действий ролей,
 эпоха при `--reset` не меняется; дублей `(key, version)` — 0).
 
@@ -78,17 +79,21 @@ production: телефоны, коды и id ниже пригодны толь�
   снимает PROTECT-зависимости штатной работы (размещение экскаватора и его
   рабочие точки `assignments.ExcavatorPlacement`/`ExcavatorDumpPointSetting`,
   запросы и снимки паспорта смены водителя `reports.*`) **только** для техники,
-  смен и сотрудников стенда; у чужих строк обнуляется ссылка на стендового
-  сотрудника, сами строки не удаляются;
+  смен и сотрудников стенда; у чужих outbox-запросов паспорта обнуляется ссылка на
+  стендового сотрудника, сами строки не удаляются. Чужие **снимки** паспорта не
+  изменяются вовсе: если чужой снимок ссылается на стендового сотрудника, reset
+  честно падает `CommandError`, а не правит аудит-запись (review-1, m-1/m-2);
 - после `--reset` телефоны/коды/id надо брать из свежего вывода команды: таблица
   в начале этого файла описывает стенд до последнего reset;
 - `--reset` не удаляет чужие справочники, созданные другими ролями на стенде:
   например, `DumpPoint` «SSE Dump 2 (T-016 e2e)», id=2, остаётся, удаляется только
   стендовый «SSE Отвал 1» (его id меняется с каждым reset — брать из вывода
   команды);
-- команда выравнивает id-последовательности таблиц стенда перед записью: другие
-  роли вставляли строки с явными id (например, `SSE Dump 2 (T-016 e2e)`), из-за
-  чего `INSERT` падал `duplicate key … pkey`;
+- команда выравнивает id-последовательности таблиц стенда, но **только при
+  `--reset`** и **только вперёд** (берётся `GREATEST(max(id), last_value)`; пустая
+  таблица не трогается): другие роли вставляли строки с явными id (например,
+  `SSE Dump 2 (T-016 e2e)`), из-за чего `INSERT` падал `duplicate key … pkey`.
+  Обычный запуск без `--reset` последовательности не меняет (review-1, m-4/m-5);
 - команда отказывается работать на базе, имя которой не `sse_local`/`test_sse_local`
   (защита от случайного запуска на product-подобной базе; обход —
   `--allow-any-database`, только осознанно);
@@ -100,10 +105,10 @@ production: телефоны, коды и id ниже пригодны толь�
   содержит `data-driver-shell` и `data-driver-shift-open="true"`.
 - `/excavator/work/` — открытая смена на `SSE-ЭКС-1`, карточка самосвала
   `SSE-1`, разметка содержит `data-eo-shell` и
-  `data-eo-current-excavator-id="18"`.
+  `data-eo-current-excavator-id="22"`.
 - Оба экрана наследуют `base.html` и подключают `static/js/realtime-client.js`
   (маркер `realtime-client.js` в HTML).
-- Проверено фактически 12.11.2026 флагом `--verify-login`: три reset подряд и
-  вход обеих ролей — QA (`T-016-qa-2.md` §2–3, id 15/16), два reset —
-  `T-016-backend-5.md` §4 (id 9/10); `POST /` → 302, оба экрана → 200, маркеры на
-  месте.
+- Проверено фактически 12.11.2026 флагом `--verify-login`: итерация 6 — два reset
+  подряд (`T-016-backend-6.md` §4, id 19/20); QA — три reset (`T-016-qa-2.md`
+  §2–3, id 15/16); `T-016-backend-5.md` §4 — два reset (id 9/10). Везде `POST /`
+  → 302, оба экрана → 200, маркеры на месте.

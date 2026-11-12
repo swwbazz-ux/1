@@ -13,13 +13,17 @@
 - команда отказывается работать на чужой базе.
 
 Тесты рассчитаны на PostgreSQL-профиль стенда (``config.settings_sse_local``)
-и запускаются с ``--keepdb`` на базе ``test_sse_local``.
+и запускаются с ``--keepdb`` на базе ``test_sse_local``. На других движках
+(например, SQLite в CI-группе ``core``) модуль целиком пропускается: команда
+``setup_sse_stand`` по своему guard'у работает только на PostgreSQL-базе стенда,
+поэтому запускать её на SQLite бессмысленно (T-016 review-1, M-1).
 """
 
-from unittest import mock
+from unittest import mock, skipUnless
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 
@@ -45,6 +49,7 @@ from core.models import OperationalStateVersion
 from references.models import DumpPoint, Equipment
 from reports.models import (
     DriverShiftPassportCaptureRequest,
+    DriverShiftPassportSnapshot,
     DriverShiftPassportTrigger,
 )
 from shifts.models import EmployeeShift
@@ -52,6 +57,11 @@ from trips.models import Trip
 from users.models import Employee, EmployeeAccess
 
 
+@skipUnless(
+    connection.vendor == 'postgresql',
+    'Стенд SSE проверяется только на PostgreSQL: команда setup_sse_stand '
+    'требует базу sse_local/test_sse_local (T-016 review-1, M-1).',
+)
 class SetupSseStandTests(TestCase):
     def setUp(self):
         call_command('setup_sse_stand', verbosity=0)
@@ -234,6 +244,48 @@ class SetupSseStandTests(TestCase):
             closed_at=timezone.now(),
             captured_by=operator,
         )
+        # Готовый паспорт стендовой смены: модель неизменяема и защищена
+        # (reports/models.py:589-598), но без его удаления EmployeeShift стенда
+        # не снять (PROTECT). Именно этот путь в -5 не был покрыт тестом
+        # (T-016 review-1, m-3).
+        stand_snapshot = DriverShiftPassportSnapshot._base_manager.create(
+            shift=driver_shift,
+            revision=1,
+            schema_version=1,
+            calculator_version='test',
+            source_fingerprint='sse-stand-source',
+            payload_fingerprint='sse-stand-payload',
+            payload={'kind': 'stand'},
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            captured_by=driver,
+        )
+        # Чужие строки, которые reset трогать не должен: сотрудник без маркера
+        # стенда, его закрытая смена и её паспорт (captured_by пуст) и
+        # справочник отвала с чужим именем.
+        foreign_employee = Employee.objects.create(
+            personnel_number='FOREIGN-SSE-TEST-EMP',
+            full_name='Чужой сотрудник стенда',
+            phone='',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        foreign_shift = EmployeeShift.objects.create(
+            employee=foreign_employee,
+            shift_type='day',
+            opened_at=timezone.now(),
+            closed_at=timezone.now(),
+        )
+        foreign_snapshot = DriverShiftPassportSnapshot._base_manager.create(
+            shift=foreign_shift,
+            revision=1,
+            schema_version=1,
+            calculator_version='test',
+            source_fingerprint='foreign-source',
+            payload_fingerprint='foreign-payload',
+            payload={'kind': 'foreign'},
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+        )
+        foreign_dump_point = DumpPoint.objects.create(name='Чужой отвал (не стенд)')
 
         call_command('setup_sse_stand', '--reset', verbosity=0)
 
@@ -251,10 +303,72 @@ class SetupSseStandTests(TestCase):
             .exists()
         )
         self.assertFalse(DriverShiftPassportCaptureRequest.objects.exists())
+        self.assertFalse(
+            DriverShiftPassportSnapshot._base_manager
+            .filter(id=stand_snapshot.id)
+            .exists()
+        )
+        # Чужие данные на месте и не изменены.
+        self.assertTrue(
+            DriverShiftPassportSnapshot._base_manager
+            .filter(id=foreign_snapshot.id)
+            .exists()
+        )
+        self.assertTrue(Employee.objects.filter(id=foreign_employee.id).exists())
+        self.assertTrue(EmployeeShift.objects.filter(id=foreign_shift.id).exists())
+        self.assertTrue(DumpPoint.objects.filter(id=foreign_dump_point.id).exists())
         self.assertTrue(EmployeeShift.objects.filter(
             employee__personnel_number=EXCAVATOR_PERSONNEL_NUMBER,
             closed_at__isnull=True,
         ).exists())
+
+    def test_reset_refuses_to_edit_foreign_passport_snapshot(self):
+        """Чужой готовый паспорт не переписывается: reset падает честно.
+
+        ``DriverShiftPassportSnapshot.captured_by`` — аудит-атрибуция, а сама
+        модель неизменяема. Обнулять её у чужой строки нельзя (T-016 review-1,
+        m-2), поэтому команда упирается в PROTECT при удалении Employee и
+        возвращает CommandError, не меняя данные.
+        """
+        operator = Employee.objects.get(personnel_number=EXCAVATOR_PERSONNEL_NUMBER)
+        foreign_employee = Employee.objects.create(
+            personnel_number='FOREIGN-SSE-TEST-EMP2',
+            full_name='Чужой сотрудник 2',
+            phone='',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        foreign_shift = EmployeeShift.objects.create(
+            employee=foreign_employee,
+            shift_type='day',
+            opened_at=timezone.now(),
+            closed_at=timezone.now(),
+        )
+        foreign_snapshot = DriverShiftPassportSnapshot._base_manager.create(
+            shift=foreign_shift,
+            revision=1,
+            schema_version=1,
+            calculator_version='test',
+            source_fingerprint='foreign-source-2',
+            payload_fingerprint='foreign-payload-2',
+            payload={'kind': 'foreign'},
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            captured_by=operator,
+        )
+
+        with self.assertRaisesMessage(CommandError, 'защищённые ссылки'):
+            call_command('setup_sse_stand', '--reset', verbosity=0)
+
+        saved = (
+            DriverShiftPassportSnapshot._base_manager
+            .filter(id=foreign_snapshot.id)
+            .values('captured_by_id', 'shift_id')
+            .first()
+        )
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved['captured_by_id'], operator.id)
+        self.assertEqual(saved['shift_id'], foreign_shift.id)
+        self.assertTrue(EmployeeShift.objects.filter(id=foreign_shift.id).exists())
 
     def test_screens_require_login(self):
         self.assertEqual(self.client.get('/driver/shift/').status_code, 302)

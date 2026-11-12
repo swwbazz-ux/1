@@ -157,8 +157,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.assert_local_database(options['allow_any_database'])
-        self.resync_stand_sequences()
         report = []
+        if options['reset']:
+            # Выравнивание id-последовательностей нужно только пересозданию:
+            # обычный (идемпотентный) запуск не должен писать в последовательности
+            # таблиц стенда, у него нет ни одной вставки с явным id.
+            self.resync_stand_sequences()
         with transaction.atomic():
             if options['reset']:
                 self.reset_stand(report)
@@ -173,8 +177,14 @@ class Command(BaseCommand):
         Стенд делят несколько ролей: скрипты e2e/QA вставляют строки с явными id
         (например, ``SSE Dump 2 (T-016 e2e)`` с id=2), и последовательность
         остаётся позади. Тогда следующий ``INSERT`` команды падает
-        ``duplicate key ... pkey``. Здесь nextval поднимается до max(id), если
-        он отстал; если последовательность впереди, она не уменьшается.
+        ``duplicate key ... pkey``. Здесь ``nextval`` поднимается до ``max(id)``.
+
+        Правила (T-016 review-1, m-4/m-5):
+        - вызывается только при ``--reset``;
+        - последовательность **никогда не уменьшается**: берётся
+          ``GREATEST(max(id), last_value)``;
+        - пустая таблица не трогается вовсе — выравнивать нечего, а откат к 1
+          менял бы смысл «только вперёд».
         """
         from django.db import connection
 
@@ -202,16 +212,15 @@ class Command(BaseCommand):
                     f'(SELECT last_value FROM {sequence}) FROM {table}',
                 )
                 max_id, last_value = cursor.fetchone()
-            if max_id <= 0 and last_value <= 1:
+            if max_id <= 0:
+                # Пустая таблица: последовательность вперёд не двигаем и не
+                # откатываем — иначе «только вперёд» перестаёт быть правдой.
                 continue
             with connection.cursor() as cursor:
-                if max_id <= 0:
-                    cursor.execute('SELECT setval(%s, 1, false)', [sequence])
-                else:
-                    cursor.execute(
-                        'SELECT setval(%s, GREATEST(%s, %s), true)',
-                        [sequence, int(max_id), int(last_value)],
-                    )
+                cursor.execute(
+                    'SELECT setval(%s, GREATEST(%s, %s), true)',
+                    [sequence, int(max_id), int(last_value)],
+                )
 
     def verify_login(self, summary):
         """Проверяет вход обеих ролей и отдачу экранов на текущей базе."""
@@ -439,19 +448,16 @@ class Command(BaseCommand):
             Q(shift_id__in=shift_ids) | Q(captured_by_id__in=employee_ids)
         )
         request_ids = list(own_requests.values_list('id', flat=True))
-        snapshot_ids = [
-            snapshot_id
-            for snapshot_id in DriverShiftPassportCaptureRequest.objects
-            .filter(id__in=request_ids)
-            .values_list('snapshot_id', flat=True)
-            if snapshot_id
-        ]
-        own_snapshots = DriverShiftPassportSnapshot._base_manager.filter(
-            Q(shift_id__in=shift_ids) | Q(captured_by_id__in=employee_ids)
-        )
+        # Снимок паспорта неизменяем (reports/models.py:589-598) и служит
+        # аудит-записью, поэтому трогаем ТОЛЬКО снимки стендовых смен.
+        # Раньше в отбор попадал ещё ``captured_by__in``: этого мало для
+        # удаления чужого снимка и слишком много для чужой аудит-записи
+        # (review-1, m-1/m-2). Если чужая смена помечена стендовым
+        # сотрудником, reset честно упадёт на PROTECT при удалении Employee.
         snapshot_ids = list(
-            set(snapshot_ids)
-            | set(own_snapshots.values_list('id', flat=True))
+            DriverShiftPassportSnapshot._base_manager
+            .filter(shift_id__in=shift_ids)
+            .values_list('id', flat=True)
         )
         if request_ids:
             self.delete_queryset(
@@ -473,7 +479,7 @@ class Command(BaseCommand):
             # Паспорт смены намеренно неизменяем (reports/models.py:589-598),
             # но строка относится только к стендовой смене: без её удаления
             # EmployeeShift стенда удалить нельзя (PROTECT). Обходим guard
-            # только для id, отобранных по стендовым сменам/сотрудникам.
+            # только для id, отобранных по стендовым сменам.
             deleted, _ = (
                 DriverShiftPassportSnapshot._base_manager
                 .filter(id__in=snapshot_ids)
@@ -483,20 +489,20 @@ class Command(BaseCommand):
                 report.append(
                     f'reset: DriverShiftPassportSnapshot — удалено объектов/строк: {deleted}.'
                 )
-        for model, label in (
-            (DriverShiftPassportCaptureRequest, 'DriverShiftPassportCaptureRequest'),
-            (DriverShiftPassportSnapshot, 'DriverShiftPassportSnapshot'),
-        ):
-            cleared = (
-                model._base_manager
-                .filter(captured_by_id__in=employee_ids)
-                .update(captured_by=None)
+        # У запросов паспорта (изменяемая outbox-строка) ссылку на стендового
+        # сотрудника снимаем, чтобы reset не терял чужую смену. Снимки паспорта
+        # здесь намеренно НЕ обновляются: это аудит-запись, правка чужой строки
+        # недопустима (review-1, m-2).
+        cleared = (
+            DriverShiftPassportCaptureRequest.objects
+            .filter(captured_by_id__in=employee_ids)
+            .update(captured_by=None)
+        )
+        if cleared:
+            report.append(
+                'reset: DriverShiftPassportCaptureRequest — снята ссылка на '
+                f'стендового сотрудника у {cleared} чужой(их) строк(и).'
             )
-            if cleared:
-                report.append(
-                    f'reset: {label} — снята ссылка на стендового сотрудника '
-                    f'у {cleared} чужой(их) строк(и).'
-                )
 
         # Размещение экскаватора и рабочие точки: у стендовой техники удаляем,
         # у чужой — только обнуляем changed_by (PROTECT на сотрудника).
