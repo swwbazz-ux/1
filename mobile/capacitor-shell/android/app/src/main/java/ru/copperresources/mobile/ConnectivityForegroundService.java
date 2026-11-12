@@ -52,6 +52,10 @@ public class ConnectivityForegroundService extends Service {
     private static final String ACTION_PRESENCE_PROBE = "ru.copperresources.mobile.action.PRESENCE_PROBE";
     static final String PREFS_NAME = ConnectionState.PREFS_NAME;
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
+    // One neutral screen-off notice per version growth. Written before the alert
+    // is delivered, so a crash loses at most one notice instead of repeating it
+    // on every poll.
+    static final String LAST_ALERTED_VERSION = "last_alerted_version";
     private static final String CONNECTION_LOSS_ANNOUNCED = ConnectionVoiceGate.LOSS_ANNOUNCED_KEY;
     private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
@@ -129,7 +133,10 @@ public class ConnectivityForegroundService extends Service {
         String action = intent == null ? "" : String.valueOf(intent.getAction());
         if (ACTION_STOP_CONNECTION.equals(action)) {
             if (PendingDriverShiftClose.hasPending(this)) {
-                startAsForeground("Закрытие смены сохранено — ждём связь");
+                if (!tryStartAsForeground("Закрытие смены сохранено — ждём связь")) {
+                    stopServiceAndRemoveNotification();
+                    return START_NOT_STICKY;
+                }
                 registerNetworkCallback();
                 scheduleHeartbeat(0L);
                 return START_STICKY;
@@ -147,9 +154,15 @@ public class ConnectivityForegroundService extends Service {
             return START_NOT_STICKY;
         }
         presenceProbeOnly = presenceProbeRequested && !normalConnectionRequired;
-        startAsForeground(
+        if (!tryStartAsForeground(
             presenceProbeOnly ? "Проверка связи с сервером" : currentStatusText()
-        );
+        )) {
+            // Android 12+ can reject a background promotion after a START_STICKY
+            // restart. Stop quietly: the next foreground reconcile still starts
+            // the service while the shift is active, and no crash loop forms.
+            stopServiceAndRemoveNotification();
+            return START_NOT_STICKY;
+        }
         registerNetworkCallback();
         scheduleHeartbeat(0L);
         // Если Android освободил процесс под давлением памяти, он должен
@@ -195,6 +208,20 @@ public class ConnectivityForegroundService extends Service {
         Log.i("ConnectivityForegroundService", "Task removed; heartbeat service stopped");
         stopServiceAndRemoveNotification();
         super.onTaskRemoved(rootIntent);
+    }
+
+    private boolean tryStartAsForeground(String statusText) {
+        try {
+            startAsForeground(statusText);
+            return true;
+        } catch (RuntimeException error) {
+            // Android 12+ may reject a foreground promotion requested from the
+            // background (for example after a START_STICKY restart). Logging and
+            // stopping is safer than letting the exception kill the process and
+            // form a restart loop.
+            Log.w("ConnectivityForegroundService", "Foreground promotion was rejected", error);
+            return false;
+        }
     }
 
     private void startAsForeground(String statusText) {
@@ -458,13 +485,23 @@ public class ConnectivityForegroundService extends Service {
                     preferences,
                     !appIsForeground
                 );
+                VoiceAttempt addressed;
                 if (dumpPoint.candidate) {
-                    voiceProcessed = dumpPoint.processed;
+                    addressed = dumpPoint;
                 } else {
-                    voiceProcessed = showLatestAssignmentAlert(
+                    addressed = showLatestAssignmentAlert(
                         voiceBody,
                         !appIsForeground
-                    ).processed;
+                    );
+                }
+                voiceProcessed = addressed.processed;
+                // A handler that recognized the event owns it even when it stayed
+                // silent: the operation was already announced by the other channel,
+                // or it must be retried. Only an unclaimed version growth is
+                // generic, otherwise the same growth would beep twice.
+                boolean eventClaimed = dumpPoint.candidate || addressed.candidate;
+                if (voiceProcessed && !eventClaimed && !appIsForeground) {
+                    notifyGenericOperationalEvent(serverVersion);
                 }
             }
             if (caughtUp && voiceProcessed) {
@@ -1461,6 +1498,40 @@ public class ConnectivityForegroundService extends Service {
             }
         }
         return false;
+    }
+
+    /**
+     * Нейтральное оповещение о росте версии, который не забрал ни один
+     * конкретный обработчик. Применение событий остаётся за WebView: курсор
+     * страницы и {@code appliedVersion} здесь не двигаются.
+     */
+    private void notifyGenericOperationalEvent(long serverVersion) {
+        if (serverVersion <= 0L) {
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (preferences.getLong(LAST_ALERTED_VERSION, 0L) >= serverVersion) {
+            return;
+        }
+        // Reserve the version before delivery: one growth is announced once, even
+        // if the process dies right after the marker is written.
+        if (!preferences.edit().putLong(LAST_ALERTED_VERSION, serverVersion).commit()) {
+            Log.w("ConnectivityForegroundService", "Screen-off alert marker was not saved");
+            return;
+        }
+        boolean notificationShown = AppNotifications.showNeutralOperationalAlert(
+            this,
+            "Новое событие в смене",
+            "Откройте приложение, чтобы проверить данные."
+        );
+        boolean cueQueued = OperationalVoicePlayer.playCueOnly(
+            this,
+            OperationalCueCatalog.SHIFT
+        );
+        if (!notificationShown && !cueQueued) {
+            // Nothing reached the worker; allow one retry for the same growth.
+            preferences.edit().remove(LAST_ALERTED_VERSION).apply();
+        }
     }
 
     private String currentStatusText() {
