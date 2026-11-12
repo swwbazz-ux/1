@@ -116,11 +116,23 @@ window.DriverVoiceGuard = (function () {
     var LIMIT = 32;
     var order = [];
     var states = Object.create(null);
+    var waiters = Object.create(null);
 
     function forget(opKey) {
         delete states[opKey];
         var position = order.indexOf(opKey);
         if (position !== -1) order.splice(position, 1);
+    }
+
+    /* Ожидающие решения по уже идущей заявке. Нужны, когда одно событие видят
+       два пути сразу (ранний сигнал и DOM-резерв): проигравший не должен
+       отвечать «не подтверждено» — иначе общий курсор откладывает применение
+       экрана до backoff, хотя операция вот-вот завершится (T-016, e2e-2 §2). */
+    function answerWaiters(opKey, accepted) {
+        var waiter = waiters[opKey];
+        if (!waiter) return;
+        delete waiters[opKey];
+        waiter.resolve(accepted === true);
     }
 
     function claim(opKey) {
@@ -129,8 +141,13 @@ window.DriverVoiceGuard = (function () {
         states[opKey] = "claimed";
         order.push(opKey);
         while (order.length > LIMIT) {
-            delete states[order.shift()];
+            var dropped = order.shift();
+            delete states[dropped];
+            answerWaiters(dropped, false);
         }
+        var resolver = null;
+        var promise = new Promise(function (resolve) { resolver = resolve; });
+        waiters[opKey] = {promise: promise, resolve: resolver};
         return true;
     }
 
@@ -139,17 +156,42 @@ window.DriverVoiceGuard = (function () {
        следующий путь повторит то, что человек уже услышал. */
     function finalize(opKey) {
         if (opKey && states[opKey]) states[opKey] = "announced";
+        if (opKey) answerWaiters(opKey, true);
     }
 
     function release(opKey) {
         if (opKey && states[opKey] === "claimed") forget(opKey);
+        if (opKey) answerWaiters(opKey, false);
+    }
+
+    /* Операция завершилась без звука, но и без явного отказа: заявку отпускаем
+       (следующая доставка попробует снова), а ждущим сообщаем решение «экран не
+       держим». */
+    function abandon(opKey, accepted) {
+        if (opKey && states[opKey] === "claimed") forget(opKey);
+        if (opKey) answerWaiters(opKey, accepted === true);
+    }
+
+    function wait(opKey) {
+        if (!opKey) return Promise.resolve(false);
+        if (states[opKey] === "announced") return Promise.resolve(true);
+        var waiter = waiters[opKey];
+        /* Заявки уже нет вовсе — следующая доставка попробует заново. */
+        return waiter ? waiter.promise : Promise.resolve(false);
     }
 
     function state(opKey) {
         return (opKey && states[opKey]) || "";
     }
 
-    return {claim: claim, finalize: finalize, release: release, state: state};
+    return {
+        claim: claim,
+        finalize: finalize,
+        release: release,
+        abandon: abandon,
+        wait: wait,
+        state: state
+    };
 })();
 
 /* Сроки ожидания голоса.
@@ -191,7 +233,9 @@ function withDriverVoiceDeadline(opKey, pending) {
         var timer = window.setTimeout(function () {
             if (settled) return;
             settled = true;
-            window.DriverVoiceGuard.release(opKey);
+            /* Решение то же, что у владельца заявки: экран не держим, попытка
+               остаётся следующей доставке. Ожидающие получают тот же ответ. */
+            window.DriverVoiceGuard.abandon(opKey, true);
             resolve(true);
         }, DRIVER_VOICE_DEADLINE_MS);
         Promise.resolve(pending).then(function (value) {
@@ -219,11 +263,12 @@ function settleDriverVoiceClaim(opKey, result) {
         window.DriverVoiceGuard.finalize(opKey);
         return true;
     }
-    window.DriverVoiceGuard.release(opKey);
-    /* Срок истёк или канала озвучки нет: заявка освобождена, следующая доставка
-       попробует снова, но экран на этом не стоит. */
-    if (driverVoiceTimedOut(result) || driverVoiceWithoutChannel(result)) return true;
-    return false;
+    /* Срок истёк или канала озвучки нет: заявка освобождается, следующая доставка
+       попробует снова, но экран на этом не стоит. Ожидающие по этому ключу
+       получают то же решение, а не ложный отказ. */
+    var acceptedWithoutVoice = driverVoiceTimedOut(result) || driverVoiceWithoutChannel(result);
+    window.DriverVoiceGuard.abandon(opKey, acceptedWithoutVoice);
+    return acceptedWithoutVoice;
 }
 
 /* Единственная точка обращения к мосту под заявкой.
@@ -338,7 +383,10 @@ function playDriverAssignmentAlert(eventVersion, assignmentKind, excavatorNumber
     /* Заявка ставится до вибрации и до моста: иначе два синхронных вызова
        подряд успевают обратиться к проигрывателю оба. */
     if (opKey && !window.DriverVoiceGuard.claim(opKey)) {
-        return Promise.resolve(window.DriverVoiceGuard.state(opKey) === "announced");
+        /* Операцией уже владеет другой путь (ранний сигнал или DOM-резерв):
+           ждём его решения, а не отвечаем ложным отказом — иначе общий курсор
+           откладывает применение экрана до backoff (T-016, e2e-2 §2). */
+        return window.DriverVoiceGuard.wait(opKey);
     }
     if (navigator.vibrate) {
         try { navigator.vibrate([180, 90, 180]); } catch (error) {}
@@ -494,7 +542,9 @@ function playDriverDumpPointAlert(context) {
        рейс и точку), но если он всё же появится, событие лучше озвучить без
        заявки, чем заглушить весь рейс одной отметкой. */
     if (opKey && !window.DriverVoiceGuard.claim(opKey)) {
-        return Promise.resolve(window.DriverVoiceGuard.state(opKey) === "announced");
+        /* Событие уже озвучивает другой путь: ждём его решения, чтобы не
+           отдавать ложный отказ и не отправлять курсор в backoff. */
+        return window.DriverVoiceGuard.wait(opKey);
     }
     reportDriverAudioDiagnostic("trigger", details, {
         capacitor: !!window.Capacitor,
@@ -523,7 +573,7 @@ function playDriverDumpPointAlert(context) {
             if (!nativeResult || nativeResult.supported !== true) {
                 /* Ни моста, ни веб-звука: озвучивать нечем. Заявку освобождаем,
                    но экран не держим — иначе событие повиснет навсегда. */
-                window.DriverVoiceGuard.release(opKey);
+                window.DriverVoiceGuard.abandon(opKey, true);
                 return true;
             }
             return settleDriverVoiceClaim(opKey, nativeResult);
@@ -543,7 +593,7 @@ function playDriverDumpPointAlert(context) {
             /* Мост не ответил за срок: звук мог прозвучать, мог и нет. Ждать
                дальше и держать экран нельзя; заявку отпускаем, следующая
                доставка события попробует снова. */
-            window.DriverVoiceGuard.release(opKey);
+            window.DriverVoiceGuard.abandon(opKey, true);
             return true;
         }
         if (nativeResult.announced) {

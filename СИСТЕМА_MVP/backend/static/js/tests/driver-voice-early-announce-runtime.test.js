@@ -1046,6 +1046,101 @@ test("a browser without any voice channel does not hold the cursor", async () =>
 });
 
 /* ------------------------------------------------------------------ */
+/* Гонка двух путей одной операции                                     */
+/* ------------------------------------------------------------------ */
+
+test("two concurrent paths share one in-flight dump-point result", async () => {
+    const bridge = {};
+    bridge.promise = new Promise((resolve) => { bridge.resolve = resolve; });
+    const runtime = createDriverVoiceRuntime({announceResult: () => bridge.promise});
+
+    const first = runtime.signal({events: [dumpPointEvent(2000, 9501, 71, "Отвал N")]});
+    const second = runtime.signal({events: [dumpPointEvent(2000, 9501, 71, "Отвал N")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1, "the second path must not reach the bridge again");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9501:id-71"), "claimed");
+
+    bridge.resolve({supported: true, announced: true});
+    assert.equal((await first).accepted, true);
+    assert.equal(
+        (await second).accepted,
+        true,
+        "the waiting path inherits the owner's decision instead of a false refusal"
+    );
+    assert.equal(runtime.bridgeCalls.length, 1, "one operation — one announcement");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9501:id-71"), "announced");
+});
+
+test("two concurrent paths share one in-flight assignment result", async () => {
+    const bridge = {};
+    bridge.promise = new Promise((resolve) => { bridge.resolve = resolve; });
+    const runtime = createDriverVoiceRuntime({announceResult: () => bridge.promise});
+
+    const first = runtime.signal({events: [assignmentEvent(2100, 921, "assignment_pending", "17")]});
+    const second = runtime.signal({events: [assignmentEvent(2100, 921, "assignment_pending", "17")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    bridge.resolve({supported: true, announced: true});
+
+    assert.equal((await first).accepted, true);
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.bridgeCalls.length, 1, "the waiting path must not repeat the announcement");
+    assert.equal(runtime.window.DriverVoiceGuard.state("assign:921"), "announced");
+});
+
+test("a waiting path inherits an explicit refusal and a later delivery may retry", async () => {
+    let attempts = 0;
+    const runtime = createDriverVoiceRuntime({
+        announceResult: () => {
+            attempts += 1;
+            return attempts === 1
+                ? {supported: true, announced: false, reason: "resource_unavailable"}
+                : {supported: true, announced: true};
+        },
+        soundResult: false,
+    });
+
+    const first = runtime.signal({events: [dumpPointEvent(2200, 9502, 72, "Отвал O")]});
+    const second = runtime.signal({events: [dumpPointEvent(2200, 9502, 72, "Отвал O")]});
+    await settlePromises();
+
+    assert.equal((await first).accepted, false, "a device that said no still asks for a retry");
+    assert.equal((await second).accepted, false, "the waiting path inherits the refusal");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9502:id-72"), "");
+
+    const retry = runtime.signal({events: [dumpPointEvent(2201, 9502, 72, "Отвал O")]});
+    assert.equal((await retry).accepted, true, "the released claim allows another attempt");
+    assert.equal(runtime.bridgeCalls.length, 2);
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9502:id-72"), "announced");
+});
+
+test("a waiting path receives the deadline decision and is not sent to backoff", async () => {
+    const runtime = createDriverVoiceRuntime({announceResult: () => new Promise(() => {})});
+
+    const first = runtime.signal({events: [dumpPointEvent(2300, 9503, 73, "Отвал P")]});
+    const second = runtime.signal({events: [dumpPointEvent(2300, 9503, 73, "Отвал P")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    assert.equal(
+        runtime.timeouts.filter(Boolean).filter((timer) => timer.delay === VOICE_DEADLINE_MS).length,
+        1,
+        "the waiting path must not start its own deadline"
+    );
+
+    fireVoiceDeadline(runtime);
+    assert.equal((await first).accepted, true);
+    assert.equal(
+        (await second).accepted,
+        true,
+        "an unanswered bridge must not turn the waiter into a retry"
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9503:id-73"), "");
+});
+
+/* ------------------------------------------------------------------ */
 /* Контракт шаблона и клиента                                          */
 /* ------------------------------------------------------------------ */
 
