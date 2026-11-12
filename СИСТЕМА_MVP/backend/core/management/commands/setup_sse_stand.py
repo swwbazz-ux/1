@@ -38,7 +38,11 @@ from assignments.services import (
     schedule_haul_assignment,
     validate_work_assignment,
 )
-from core.models import OperationalStateVersion
+from core.models import (
+    OfflineFieldEvent,
+    OperationalStateEvent,
+    OperationalStateVersion,
+)
 from downtimes.models import DowntimeEvent
 from references.models import (
     DumpPoint,
@@ -114,6 +118,14 @@ class Command(BaseCommand):
             help='Удалить записи стенда (по маркерам SSE-STAND/SSE-*) и создать их заново.',
         )
         parser.add_argument(
+            '--verify-login',
+            action='store_true',
+            help=(
+                'После создания стенда проверить вход обеих ролей через Django '
+                'test client (POST / -> 302, рабочие экраны -> 200).'
+            ),
+        )
+        parser.add_argument(
             '--allow-any-database',
             action='store_true',
             help=(
@@ -145,12 +157,111 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.assert_local_database(options['allow_any_database'])
+        self.resync_stand_sequences()
         report = []
         with transaction.atomic():
             if options['reset']:
                 self.reset_stand(report)
             summary = self.build_stand(report)
         self.print_summary(summary, report)
+        if options['verify_login']:
+            self.verify_login(summary)
+
+    def resync_stand_sequences(self):
+        """Выравнивает id-последовательности таблиц стенда (только PostgreSQL).
+
+        Стенд делят несколько ролей: скрипты e2e/QA вставляют строки с явными id
+        (например, ``SSE Dump 2 (T-016 e2e)`` с id=2), и последовательность
+        остаётся позади. Тогда следующий ``INSERT`` команды падает
+        ``duplicate key ... pkey``. Здесь nextval поднимается до max(id), если
+        он отстал; если последовательность впереди, она не уменьшается.
+        """
+        from django.db import connection
+
+        if connection.vendor != 'postgresql':
+            return
+        models = (
+            Role, Employee, EmployeeAccess,
+            EquipmentType, EquipmentModel, Equipment, RockType, DumpPoint,
+            TruckCapacityRule, EmployeeShift, ShiftClientAction,
+            ShiftReadingCorrection, HaulAssignment, EquipmentAssignment,
+            Trip, TripClientAction, OfflineFieldEvent, OperationalStateEvent,
+            OperationalStateVersion,
+        )
+        for model in models:
+            table = model._meta.db_table
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'SELECT pg_get_serial_sequence(%s, %s)', [table, 'id'],
+                )
+                sequence = cursor.fetchone()[0]
+                if not sequence:
+                    continue
+                cursor.execute(
+                    f'SELECT COALESCE(MAX(id), 0), '
+                    f'(SELECT last_value FROM {sequence}) FROM {table}',
+                )
+                max_id, last_value = cursor.fetchone()
+            if max_id <= 0 and last_value <= 1:
+                continue
+            with connection.cursor() as cursor:
+                if max_id <= 0:
+                    cursor.execute('SELECT setval(%s, 1, false)', [sequence])
+                else:
+                    cursor.execute(
+                        'SELECT setval(%s, GREATEST(%s, %s), true)',
+                        [sequence, int(max_id), int(last_value)],
+                    )
+
+    def verify_login(self, summary):
+        """Проверяет вход обеих ролей и отдачу экранов на текущей базе."""
+        from django.test import Client
+
+        checks = (
+            (
+                'driver', DRIVER,
+                summary['driver'], '/driver/shift/', 'data-driver-shell',
+            ),
+            (
+                'excavator_operator', EXCAVATOR_OPERATOR,
+                summary['excavator_operator'], '/excavator/work/', 'data-eo-shell',
+            ),
+        )
+        failed = False
+        for label, spec, bundle, url, marker in checks:
+            employee, access, shift, _assignment = bundle
+            client = Client(raise_request_exception=False)
+            login = client.post(
+                '/',
+                {'phone': spec['phone'], 'access_code': spec['access_code']},
+                HTTP_HOST='127.0.0.1',
+            )
+            login_ok = login.status_code == 302
+            page = client.get(url, HTTP_HOST='127.0.0.1') if login_ok else None
+            page_ok = page is not None and page.status_code == 200
+            html = page.content.decode('utf-8', errors='replace') if page_ok else ''
+            markers_ok = page_ok and marker in html and 'realtime-client.js' in html
+            self.stdout.write(
+                f'  вход {label}: POST / -> {login.status_code}, GET {url} -> '
+                f'{getattr(page, "status_code", "—")}, '
+                f'маркеры {marker}+realtime-client.js -> '
+                f'{"есть" if markers_ok else "НЕТ"}'
+            )
+            if not (login_ok and page_ok and markers_ok):
+                failed = True
+            if shift is None or shift.closed_at is not None:
+                self.stdout.write(
+                    self.style.ERROR(
+                        f'  вход {label}: открытая смена не найдена '
+                        f'(employee_id={employee.pk})'
+                    )
+                )
+                failed = True
+        if failed:
+            raise CommandError(
+                'Проверка входа после создания стенда не прошла — см. вывод выше.'
+            )
+        self.stdout.write(self.style.SUCCESS('  вход обеих ролей проверен: 302 -> 200.'))
 
     # ------------------------------------------------------------------ reset
 
@@ -244,11 +355,20 @@ class Command(BaseCommand):
         )
         self.delete_queryset(
             DowntimeEvent.objects.filter(
-                Q(equipment_id__in=equipment_ids) | Q(employee_id__in=employee_ids)
+                Q(equipment_id__in=equipment_ids)
+                | Q(employee_id__in=employee_ids)
+                | Q(subject_employee_id__in=employee_ids)
+                | Q(recorded_by_id__in=employee_ids)
             ),
             'DowntimeEvent',
             report,
         )
+        # Штатная работа экранов оставляет строки с PROTECT на сотрудника и
+        # технику: размещение экскаватора и его рабочие точки (assignments,
+        # changed_by PROTECT) и запросы/снимки паспорта смены водителя
+        # (reports, shift/captured_by PROTECT). Без них удаление Employee(2) и
+        # EmployeeShift падало CommandError после обычного прогона стенда.
+        self.clear_stand_protected_dependencies(employee_ids, equipment_ids, shift_ids, report)
         self.delete_queryset(
             EquipmentAssignment.objects.filter(
                 Q(employee_id__in=employee_ids) | Q(equipment_id__in=equipment_ids)
@@ -287,6 +407,122 @@ class Command(BaseCommand):
         # Породу (канонический справочник) и типы техники «Самосвал»/«Экскаватор»
         # команда намеренно не удаляет: это общие справочные строки, а не
         # учётные записи стенда.
+
+    def clear_stand_protected_dependencies(self, employee_ids, equipment_ids, shift_ids, report):
+        """Снимает PROTECT-ссылки, которые штатная работа стенда оставила.
+
+        Удаляем только строки стендовой техники/смен. Если строка принадлежит
+        чужой технике, но ссылается на стендового сотрудника (PROTECT мешает
+        удалить учётку), сохраняем саму строку и обнуляем ссылку — это не даёт
+        потерять чужие данные и снимает блокировку.
+        """
+        from assignments.models import ExcavatorDumpPointSetting, ExcavatorPlacement
+        from reports.models import (
+            DriverShiftPassportCaptureRequest,
+            DriverShiftPassportSnapshot,
+        )
+        from shifts.models import AchievementUnlock
+
+        self.delete_queryset(
+            AchievementUnlock.objects.filter(
+                Q(user_id__in=employee_ids)
+                | Q(equipment_id__in=equipment_ids)
+                | Q(employee_shift_id__in=shift_ids)
+            ),
+            'AchievementUnlock',
+            report,
+        )
+
+        # Запросы паспорта смены: сначала те, что относятся к стендовым сменам,
+        # затем снимаем PROTECT-ссылку у чужих смен, инициированных стендом.
+        own_requests = DriverShiftPassportCaptureRequest.objects.filter(
+            Q(shift_id__in=shift_ids) | Q(captured_by_id__in=employee_ids)
+        )
+        request_ids = list(own_requests.values_list('id', flat=True))
+        snapshot_ids = [
+            snapshot_id
+            for snapshot_id in DriverShiftPassportCaptureRequest.objects
+            .filter(id__in=request_ids)
+            .values_list('snapshot_id', flat=True)
+            if snapshot_id
+        ]
+        own_snapshots = DriverShiftPassportSnapshot._base_manager.filter(
+            Q(shift_id__in=shift_ids) | Q(captured_by_id__in=employee_ids)
+        )
+        snapshot_ids = list(
+            set(snapshot_ids)
+            | set(own_snapshots.values_list('id', flat=True))
+        )
+        if request_ids:
+            self.delete_queryset(
+                DriverShiftPassportCaptureRequest.objects.filter(id__in=request_ids),
+                'DriverShiftPassportCaptureRequest',
+                report,
+            )
+        if snapshot_ids:
+            cleared = (
+                DriverShiftPassportCaptureRequest.objects
+                .filter(snapshot_id__in=snapshot_ids)
+                .update(snapshot=None)
+            )
+            if cleared:
+                report.append(
+                    f'reset: DriverShiftPassportCaptureRequest — снята ссылка на '
+                    f'снимок стенда у {cleared} чужой(их) запрос(ов).'
+                )
+            # Паспорт смены намеренно неизменяем (reports/models.py:589-598),
+            # но строка относится только к стендовой смене: без её удаления
+            # EmployeeShift стенда удалить нельзя (PROTECT). Обходим guard
+            # только для id, отобранных по стендовым сменам/сотрудникам.
+            deleted, _ = (
+                DriverShiftPassportSnapshot._base_manager
+                .filter(id__in=snapshot_ids)
+                .delete()
+            )
+            if deleted:
+                report.append(
+                    f'reset: DriverShiftPassportSnapshot — удалено объектов/строк: {deleted}.'
+                )
+        for model, label in (
+            (DriverShiftPassportCaptureRequest, 'DriverShiftPassportCaptureRequest'),
+            (DriverShiftPassportSnapshot, 'DriverShiftPassportSnapshot'),
+        ):
+            cleared = (
+                model._base_manager
+                .filter(captured_by_id__in=employee_ids)
+                .update(captured_by=None)
+            )
+            if cleared:
+                report.append(
+                    f'reset: {label} — снята ссылка на стендового сотрудника '
+                    f'у {cleared} чужой(их) строк(и).'
+                )
+
+        # Размещение экскаватора и рабочие точки: у стендовой техники удаляем,
+        # у чужой — только обнуляем changed_by (PROTECT на сотрудника).
+        for model, scope, label in (
+            (
+                ExcavatorPlacement,
+                Q(excavator_id__in=equipment_ids),
+                'ExcavatorPlacement',
+            ),
+            (
+                ExcavatorDumpPointSetting,
+                Q(placement__excavator_id__in=equipment_ids),
+                'ExcavatorDumpPointSetting',
+            ),
+        ):
+            self.delete_queryset(model.objects.filter(scope), label, report)
+            cleared = (
+                model.objects
+                .filter(changed_by_id__in=employee_ids)
+                .update(changed_by=None)
+            )
+            if cleared:
+                report.append(
+                    f'reset: {label} — снята ссылка на стендового сотрудника '
+                    f'у {cleared} чужой(их) строк(и).'
+                )
 
     def delete_queryset(self, queryset, label, report, *, strict=True):
         from django.db.models import ProtectedError

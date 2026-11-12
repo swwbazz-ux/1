@@ -21,12 +21,20 @@ from unittest import mock
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.utils import timezone
 
-from assignments.models import AssignmentStatus, EquipmentAssignment, HaulAssignment
+from assignments.models import (
+    AssignmentStatus,
+    EquipmentAssignment,
+    ExcavatorDumpPointSetting,
+    ExcavatorPlacement,
+    HaulAssignment,
+)
 from core.management.commands.setup_sse_stand import (
     Command,
     DRIVER,
     DRIVER_PERSONNEL_NUMBER,
+    DUMP_POINT_NAME,
     EXCAVATOR_GARAGE_NUMBER,
     EXCAVATOR_OPERATOR,
     EXCAVATOR_PERSONNEL_NUMBER,
@@ -34,6 +42,11 @@ from core.management.commands.setup_sse_stand import (
     TRUCK_GARAGE_NUMBER,
 )
 from core.models import OperationalStateVersion
+from references.models import DumpPoint, Equipment
+from reports.models import (
+    DriverShiftPassportCaptureRequest,
+    DriverShiftPassportTrigger,
+)
 from shifts.models import EmployeeShift
 from trips.models import Trip
 from users.models import Employee, EmployeeAccess
@@ -185,6 +198,63 @@ class SetupSseStandTests(TestCase):
             closed_at__isnull=True,
         ).equipment
         self.assertIn(f'data-eo-current-excavator-id="{excavator.pk}"', html)
+
+    def test_reset_removes_stand_rows_that_protect_employee(self):
+        """Штатная работа экранов оставляет PROTECT-ссылки; reset их снимает.
+
+        Без правки команда падала на ``Employee`` (QA, T-016-qa-1 §2.1):
+        экран экскаваторщика сохраняет ``ExcavatorPlacement.changed_by``, а
+        закрытие смены водителем — запрос паспорта смены; оба поля
+        ``on_delete=PROTECT``.
+        """
+        operator = Employee.objects.get(personnel_number=EXCAVATOR_PERSONNEL_NUMBER)
+        driver = Employee.objects.get(personnel_number=DRIVER_PERSONNEL_NUMBER)
+        excavator = Equipment.objects.get(garage_number=EXCAVATOR_GARAGE_NUMBER)
+        dump_point = DumpPoint.objects.get(name=DUMP_POINT_NAME)
+
+        placement = ExcavatorPlacement.objects.create(
+            excavator=excavator,
+            zone=ExcavatorPlacement.Zone.ACTIVE,
+            work_dump_point=dump_point,
+            changed_by=operator,
+        )
+        ExcavatorDumpPointSetting.objects.create(
+            placement=placement,
+            dump_point=dump_point,
+            changed_by=operator,
+        )
+        driver_shift = EmployeeShift.objects.get(
+            employee=driver, closed_at__isnull=True,
+        )
+        DriverShiftPassportCaptureRequest.objects.create(
+            shift=driver_shift,
+            request_key='sse-stand-test-passport',
+            trigger=DriverShiftPassportTrigger.DRIVER_CLOSE,
+            calculator_version='test',
+            closed_at=timezone.now(),
+            captured_by=operator,
+        )
+
+        call_command('setup_sse_stand', '--reset', verbosity=0)
+
+        self.assertEqual(self.stand_counts(), {
+            'employees': 2,
+            'accesses': 2,
+            'open_shifts': 2,
+            'work_assignments': 2,
+            'haul_assignments': 1,
+            'trips': 1,
+        })
+        self.assertFalse(
+            ExcavatorPlacement.objects
+            .filter(excavator__garage_number=EXCAVATOR_GARAGE_NUMBER)
+            .exists()
+        )
+        self.assertFalse(DriverShiftPassportCaptureRequest.objects.exists())
+        self.assertTrue(EmployeeShift.objects.filter(
+            employee__personnel_number=EXCAVATOR_PERSONNEL_NUMBER,
+            closed_at__isnull=True,
+        ).exists())
 
     def test_screens_require_login(self):
         self.assertEqual(self.client.get('/driver/shift/').status_code, 302)
