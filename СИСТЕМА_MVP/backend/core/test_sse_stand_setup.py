@@ -16,15 +16,25 @@
 и запускаются с ``--keepdb`` на базе ``test_sse_local``. На других движках
 (например, SQLite в CI-группе ``core``) модуль целиком пропускается: команда
 ``setup_sse_stand`` по своему guard'у работает только на PostgreSQL-базе стенда,
-поэтому запускать её на SQLite бессмысленно (T-016 review-1, M-1).
+Требуется не только PostgreSQL, но и **имя базы стенда**: команда
+``setup_sse_stand`` по своему guard'у работает только на ``sse_local``/
+``test_sse_local``. Поэтому класс пропускается и на SQLite (CI-группа ``core``),
+и на PostgreSQL с чужим именем БД (ночной полный прогон `nightly-quality.yml` с
+``POSTGRES_DB=accounting_mvp_ci``), иначе ``setUp`` даёт 9 errors вместо skip
+(T-016 review-1 M-1, review-2 M-2).
+
+Проверка самого guard'а ``assert_local_database`` вынесена в отдельный класс
+``SetupSseStandGuardTests`` без пропуска: она мокает настройки и должна идти
+всегда, в том числе на SQLite (review-2, m-10).
 """
 
 from unittest import mock, skipUnless
 
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from assignments.models import (
@@ -42,6 +52,7 @@ from core.management.commands.setup_sse_stand import (
     EXCAVATOR_GARAGE_NUMBER,
     EXCAVATOR_OPERATOR,
     EXCAVATOR_PERSONNEL_NUMBER,
+    STAND_DATABASES,
     STAND_PREFIX,
     TRUCK_GARAGE_NUMBER,
 )
@@ -58,9 +69,11 @@ from users.models import Employee, EmployeeAccess
 
 
 @skipUnless(
-    connection.vendor == 'postgresql',
-    'Стенд SSE проверяется только на PostgreSQL: команда setup_sse_stand '
-    'требует базу sse_local/test_sse_local (T-016 review-1, M-1).',
+    connection.vendor == 'postgresql'
+    and settings.DATABASES['default']['NAME'] in STAND_DATABASES,
+    'Стенд SSE проверяется только на PostgreSQL с базой sse_local/test_sse_local: '
+    'команда setup_sse_stand отвергает другое имя базы '
+    '(T-016 review-1 M-1, review-2 M-2).',
 )
 class SetupSseStandTests(TestCase):
     def setUp(self):
@@ -373,6 +386,15 @@ class SetupSseStandTests(TestCase):
     def test_screens_require_login(self):
         self.assertEqual(self.client.get('/driver/shift/').status_code, 302)
         self.assertEqual(self.client.get('/excavator/work/').status_code, 302)
+
+
+class SetupSseStandGuardTests(SimpleTestCase):
+    """Guard ``assert_local_database`` проверяется всегда, без PG-пропуска.
+
+    Тест не ходит в БД (мокает ``settings``), поэтому обязан идти и на SQLite,
+    и на PostgreSQL с любым именем базы: иначе защита «команда не работает на
+    чужой базе» выпадает из CI (T-016 review-2, m-10).
+    """
 
     def test_refuses_foreign_database(self):
         command = Command()
