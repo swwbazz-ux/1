@@ -15,7 +15,7 @@ public class CopperFirebaseMessagingService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage message) {
         super.onMessageReceived(message);
-        if (!NativeFieldProfile.supportsPushAndHaptics()) {
+        if (!BuildConfig.NATIVE_PUSH_ENABLED || !NativeFieldProfile.supportsPushAndHaptics()) {
             return;
         }
         String kind = message.getData().get("kind");

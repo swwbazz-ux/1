@@ -41,7 +41,7 @@ public class NativePushPlugin extends Plugin {
 
     @PluginMethod
     public void getToken(PluginCall call) {
-        if (!NativeFieldProfile.supportsPushAndHaptics()) {
+        if (!BuildConfig.NATIVE_PUSH_ENABLED || !NativeFieldProfile.supportsPushAndHaptics()) {
             call.resolve(unavailablePayload());
             return;
         }
@@ -94,7 +94,8 @@ public class NativePushPlugin extends Plugin {
     }
 
     static void publishToken(Context context, String token) {
-        if (!NativeFieldProfile.supportsPushAndHaptics() || token == null || token.trim().isEmpty()) {
+        if (!BuildConfig.NATIVE_PUSH_ENABLED || !NativeFieldProfile.supportsPushAndHaptics()
+                || token == null || token.trim().isEmpty()) {
             return;
         }
         String normalizedToken = token.trim();

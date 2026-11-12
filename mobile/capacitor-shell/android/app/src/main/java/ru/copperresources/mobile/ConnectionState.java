@@ -77,6 +77,15 @@ final class ConnectionState {
     }
 
     static void recordTransport(Context context, NativeTransportState state) {
+        recordTransport(context, state, false, "", 0L);
+    }
+
+    static void recordTransport(
+            Context context,
+            NativeTransportState state,
+            boolean operationalResetRequired,
+            String operationalResetReason,
+            long operationalResetToVersion) {
         JSObject evidence = new JSObject()
             .put("status", state.status)
             .put("transportState", state.transportState)
@@ -84,7 +93,10 @@ final class ConnectionState {
             .put("occurredAtMs", state.occurredAtMs)
             .put("failureCount", state.failureCount)
             .put("reason", state.reason)
-            .put("serverVersion", state.serverVersion);
+            .put("serverVersion", state.serverVersion)
+            .put("operationalResetRequired", operationalResetRequired)
+            .put("operationalResetReason", operationalResetReason == null ? "" : operationalResetReason)
+            .put("operationalResetToVersion", Math.max(0L, operationalResetToVersion));
         // One preference value makes a listener snapshot coherent across all fields.
         preferences(context).edit().putString(TRANSPORT_EVIDENCE, evidence.toString()).apply();
     }
@@ -99,7 +111,10 @@ final class ConnectionState {
                 .put("occurredAtMs", stored.optLong("occurredAtMs", 0L))
                 .put("failureCount", stored.optInt("failureCount", 0))
                 .put("reason", stored.optString("reason", "initial"))
-                .put("serverVersion", stored.optLong("serverVersion", 0L));
+                .put("serverVersion", stored.optLong("serverVersion", 0L))
+                .put("operationalResetRequired", stored.optBoolean("operationalResetRequired", false))
+                .put("operationalResetReason", stored.optString("operationalResetReason", ""))
+                .put("operationalResetToVersion", stored.optLong("operationalResetToVersion", 0L));
         } catch (Exception ignored) {
             return new JSObject();
         }

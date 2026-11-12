@@ -58,6 +58,23 @@ class DriverShiftCloseIdempotencyConflict(ValidationError):
     pass
 
 
+def driver_open_shift_queryset(employee):
+    """Open driver shifts accepted by both the work screen and recovery truth.
+
+    ``workplace_code`` was added after the first driver shifts existed. Keep
+    the explicit driver code and the legacy empty-code truck shape in one
+    domain helper so the screen and background voice recovery cannot drift.
+    """
+    return (
+        EmployeeShift.objects
+        .filter(employee=employee, closed_at__isnull=True)
+        .filter(
+            Q(workplace_code='driver')
+            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
+        )
+    )
+
+
 def _canonical_driver_close_reading(value):
     try:
         number = Decimal(str(value))

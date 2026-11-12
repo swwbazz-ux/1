@@ -173,4 +173,5 @@ def role_app(request):
         'current_absolute_url': request.build_absolute_uri() if is_yandex_android else '',
         'qa_environment_enabled': getattr(settings, 'EXCAVATOR_QA_ENABLED', False),
         'qa_environment_label': getattr(settings, 'EXCAVATOR_QA_LABEL', ''),
+        'sse_pilot_enabled': bool(getattr(settings, 'SSE_PILOT_ENABLED', False)),
     }
