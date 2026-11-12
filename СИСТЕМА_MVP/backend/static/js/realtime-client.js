@@ -243,12 +243,17 @@
             return currentVersion === null ? Math.max(0, Number(config.initialVersion || 0)) : Number(currentVersion);
         }
 
+        function isNativeShell() {
+            return !!(document.body && document.body.dataset.nativeApp === "true");
+        }
+
         function isPageActive() {
+            if (isNativeShell()) return true;
             return !pagePaused && document.hidden !== true && (visibilityOnlyActivity || pageFocused);
         }
 
         function resumePageActivity() {
-            if (document.hidden === true) return;
+            if (document.hidden === true && !isNativeShell()) return;
             if (pagePaused || !isPageActive()) activeSince = Date.now();
             pagePaused = false;
         }
@@ -1975,6 +1980,13 @@
         }, 2000);
         document.addEventListener("visibilitychange", function () {
             if (document.hidden) {
+                if (isNativeShell()) {
+                    pagePaused = false;
+                    schedulePendingUpdate(0);
+                    pollOperationalState({force: true});
+                    scheduleNextPoll();
+                    return;
+                }
                 pauseRealtimeConnection("visibility_hidden");
                 return;
             }
@@ -1991,6 +2003,10 @@
         });
         window.addEventListener("blur", function () {
             pageFocused = false;
+            if (isNativeShell()) {
+                scheduleNextPoll();
+                return;
+            }
             if (visibilityOnlyActivity && document.hidden !== true) {
                 scheduleNextPoll();
                 return;
@@ -1999,6 +2015,7 @@
         });
         window.addEventListener("pagehide", function () {
             pageFocused = false;
+            if (isNativeShell()) return;
             pauseRealtimeConnection("pagehide");
         });
         window.addEventListener("pageshow", function (event) {
