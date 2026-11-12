@@ -77,9 +77,15 @@
         if (roleCode === "driver") {
             var driverShift = document.querySelector("[data-driver-shift-close-form]");
             var driverShell = document.querySelector("[data-driver-shell]");
+            // Скрытая форма закрытия рисуется и без открытой смены (пустой
+            // data-native-shift-id): смена считается активной только с непустым id,
+            // иначе сервис стартует и гаснет по ответу background_connection_required=false.
+            var driverShiftId = driverShift
+                ? String(driverShift.dataset.nativeShiftId || "").trim()
+                : "";
             return {
-                required: !!driverShift,
-                shiftId: driverShift ? String(driverShift.dataset.nativeShiftId || "") : "",
+                required: driverShiftId !== "",
+                shiftId: driverShiftId,
                 authGeneration: driverShell ? String(driverShell.dataset.driverAuthGeneration || "") : ""
             };
         }
@@ -184,7 +190,13 @@
             if (roleCode !== "driver" || typeof plugin.queueDriverShiftClose !== "function") {
                 return Promise.reject(new Error("Фоновая очередь недоступна"));
             }
-            return Promise.resolve(plugin.queueDriverShiftClose(payload || {}));
+            payload = payload || {};
+            // Пустой id — смены нет: не ставим закрытие в очередь и не выдаём это
+            // за успешно принятое закрытие (H1: скрытая форма закрытия).
+            if (String(payload.shiftId || "").trim() === "") {
+                return Promise.reject(new Error("Смена не открыта: закрытие не поставлено в очередь"));
+            }
+            return Promise.resolve(plugin.queueDriverShiftClose(payload));
         },
         acknowledgeDriverShiftClose: function (clientActionId) {
             if (roleCode !== "driver" || typeof plugin.acknowledgeDriverShiftClose !== "function") {

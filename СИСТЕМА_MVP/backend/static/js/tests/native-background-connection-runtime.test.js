@@ -26,6 +26,8 @@ function createRuntime(roleCode, options = {}) {
     let snapshot = options.snapshot || {};
     const listeners = new Map();
     const timers = [];
+    const closeFormId = options.closeFormId === undefined ? "driver-17" : options.closeFormId;
+    const closeFormAlways = options.closeFormAlways === true;
     let shiftActive = false;
     let observerCallback = null;
 
@@ -69,6 +71,10 @@ function createRuntime(roleCode, options = {}) {
         querySelector(selector) {
             if (roleCode === "driver" && selector === "[data-driver-shell]") {
                 return {dataset: {driverAuthGeneration: "driver-auth-7"}};
+            }
+            if (roleCode === "driver" && selector === "[data-driver-shift-close-form]") {
+                if (!closeFormAlways && !shiftActive) return null;
+                return {dataset: {nativeShiftId: closeFormId}};
             }
             if (!shiftActive) return null;
             if (roleCode === "driver" && selector === "[data-driver-shift-close-form]") {
@@ -169,6 +175,60 @@ for (const roleCode of ["driver", "excavator_operator"]) {
         assert.equal(runtime.calls.at(-1).options.required, false);
     });
 }
+
+test("hidden driver close form without a shift id never starts the native service", async () => {
+    // Скриншот дефекта H1: сервер рисует скрытую форму закрытия с пустым
+    // data-native-shift-id, когда смена не открыта, но самосвал закреплён.
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: ""});
+    await runtime.flush();
+    assert.deepEqual(runtime.calls[0], {
+        method: "sync",
+        options: {
+            required: false,
+            shiftId: "",
+            authGeneration: "driver-auth-7",
+            reason: "initial_render",
+        },
+    });
+
+    await runtime.setShiftActive(true);
+    assert.equal(runtime.calls.length, 1, "empty id must not change the desired state");
+    assert.equal(runtime.calls[0].options.required, false);
+});
+
+test("driver close form with a whitespace-only shift id counts as no shift", async () => {
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: "   "});
+    await runtime.flush();
+    assert.equal(runtime.calls[0].options.required, false);
+    assert.equal(runtime.calls[0].options.shiftId, "");
+});
+
+test("driver close form with a real shift id keeps the native service required", async () => {
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: " 17 "});
+    await runtime.flush();
+    assert.equal(runtime.calls[0].options.required, true);
+    assert.equal(runtime.calls[0].options.shiftId, "17");
+});
+
+test("native shift-close outbox rejects an empty shift id instead of masking it", async () => {
+    const runtime = createRuntime("driver");
+    await runtime.flush();
+    await assert.rejects(
+        runtime.connection.queueDriverShiftClose({
+            shiftId: "  ",
+            clientActionId: "driver-close-empty",
+            endFuel: "90",
+        }),
+        /Смена не открыта/
+    );
+    assert.equal(
+        runtime.calls.some((call) => call.method === "queueDriverShiftClose"),
+        false,
+        "empty shift id must never reach the native queue"
+    );
+    await runtime.connection.queueDriverShiftClose({shiftId: "17", clientActionId: "driver-close-17"});
+    assert.equal(runtime.calls.at(-1).method, "queueDriverShiftClose");
+});
 
 test("native bridge stops immediately on logout and rechecks after resume", async () => {
     const runtime = createRuntime("driver");
