@@ -247,6 +247,42 @@
             return !!(document.body && document.body.dataset.nativeApp === "true");
         }
 
+        /* The server invalidates older sessions of the same access on every new
+           login (session generation = access.last_login_at). Until the role is
+           restored the stream answers 409 role_context_inactive and operational
+           data is not applicable. Retrying the stream in a tight loop helps
+           nobody, so the client parks itself and probes rarely. */
+        var roleInactive = false;
+        var roleInactiveProbeId = null;
+
+        function markRoleInactive(reason) {
+            if (roleInactive) return;
+            roleInactive = true;
+            pagePaused = false;
+            closeSse(reason || "role_context_inactive", false);
+            clearPollSchedule();
+            clearSseReconnect();
+            clearPendingUpdateSchedule();
+            updateConnectionState("role_inactive");
+            if (roleInactiveProbeId !== null) window.clearTimeout(roleInactiveProbeId);
+            roleInactiveProbeId = window.setTimeout(function () {
+                roleInactiveProbeId = null;
+                if (!roleInactive) return;
+                roleInactive = false;
+                pollOperationalState({force: true});
+                scheduleNextPoll();
+            }, 60000);
+        }
+
+        function clearRoleInactive() {
+            if (!roleInactive) return;
+            roleInactive = false;
+            if (roleInactiveProbeId !== null) {
+                window.clearTimeout(roleInactiveProbeId);
+                roleInactiveProbeId = null;
+            }
+        }
+
         function isPageActive() {
             if (isNativeShell()) return true;
             return !pagePaused && document.hidden !== true && (visibilityOnlyActivity || pageFocused);
@@ -1456,7 +1492,7 @@
 
         function scheduleSseReconnect(reason, options) {
             options = options || {};
-            if (!sseEligible || authEnded || !isPageActive() || sseReconnectTimer !== null) return;
+            if (!sseEligible || authEnded || roleInactive || !isPageActive() || sseReconnectTimer !== null) return;
             var exponent = Math.min(sseFailureCount, 5);
             var base = Math.min(config.sseReconnectMaxMs, 1000 * Math.pow(2, exponent));
             /* The watchdog re-arms a stream whose retry timer was lost (background
@@ -1727,7 +1763,7 @@
         function pollOperationalState(options) {
             options = options || {};
             if (options.reconcile === true) requestForegroundReconcile(options.reconcileReason || "foreground");
-            if (authEnded || !isPageActive()) return;
+            if (authEnded || roleInactive || !isPageActive()) return;
             // force means prompt catch-up, never replacing a healthy in-flight owner.
             if (realtimePollInFlight) return;
             if (navigator && navigator.onLine === false) {
@@ -1792,6 +1828,13 @@
                     // A UI/contract callback failure is not a failed HTTP request.
                     requestForegroundReconcile("role_state_apply_failed");
                 }
+                if (payload.role_active === false) {
+                    /* Server truth says this session is read-only. Nothing from
+                       this payload may be treated as applied. */
+                    markRoleInactive("state_role_context_inactive");
+                    return;
+                }
+                clearRoleInactive();
                 var version = payload.version;
                 observedVersion = Math.max(observedVersion, version);
                 if (pendingJournalReplayRequired && capturedAfterVersion > appliedCursor()) {

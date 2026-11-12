@@ -1251,9 +1251,6 @@
                     if (!root.document.hidden || isNativeShell()) retryNow().catch(function () {});
                 });
             }
-            if (isNativeShell() && root.setInterval) {
-                root.setInterval(function () { retryNow().catch(function () {}); }, 15000);
-            }
         }
         async function initialize() {
             await migrateLegacyUnload();
