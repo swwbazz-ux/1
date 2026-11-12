@@ -254,8 +254,15 @@
            nobody, so the client parks itself and probes rarely. */
         var roleInactive = false;
         var roleInactiveProbeId = null;
+        /* The minute-long probe below briefly clears roleInactive so the next
+           /realtime/state/ request is allowed. The stream must stay parked until
+           the server itself reports role_active=true, so this flag outlives the
+           probe window: otherwise every fragment refresh reopened EventSource
+           and collected another 409. */
+        var roleParked = false;
 
         function markRoleInactive(reason) {
+            roleParked = true;
             if (roleInactive) return;
             roleInactive = true;
             pagePaused = false;
@@ -275,6 +282,7 @@
         }
 
         function clearRoleInactive() {
+            roleParked = false;
             if (!roleInactive) return;
             roleInactive = false;
             if (roleInactiveProbeId !== null) {
@@ -1492,7 +1500,7 @@
 
         function scheduleSseReconnect(reason, options) {
             options = options || {};
-            if (!sseEligible || authEnded || roleInactive || !isPageActive() || sseReconnectTimer !== null) return;
+            if (!sseEligible || authEnded || roleInactive || roleParked || !isPageActive() || sseReconnectTimer !== null) return;
             var exponent = Math.min(sseFailureCount, 5);
             var base = Math.min(config.sseReconnectMaxMs, 1000 * Math.pow(2, exponent));
             /* The watchdog re-arms a stream whose retry timer was lost (background
@@ -1755,7 +1763,10 @@
         }
 
         function maybeStartSse(reason) {
-            if (!sseEligible || authEnded || !isPageActive()) return;
+            /* Single choke point for every "start the stream" call, including
+               snapshot_applied after a fragment refresh: a parked role must not
+               reopen EventSource until /realtime/state/ reports role_active=true. */
+            if (!sseEligible || authEnded || roleParked || !isPageActive()) return;
             if (sseSource || sseState === "connecting") return;
             connectSse(reason || "poll_sync_complete");
         }
@@ -1973,6 +1984,8 @@
                 foregroundReconcileReason: foregroundReconcileReason,
                 foregroundReconcileRevision: foregroundReconcileRevision,
                 authEnded: authEnded,
+                roleInactive: roleInactive,
+                roleParked: roleParked,
                 wakeHintVersion: wakeHintVersion,
                 deliveryContextKey: deliveryContextKey,
                 journalEpoch: journalEpoch,

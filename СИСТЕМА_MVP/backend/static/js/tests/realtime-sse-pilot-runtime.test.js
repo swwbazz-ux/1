@@ -922,3 +922,88 @@ test("T-016 §8.2: the 60s truth refresh is fragment-only, does not poll state a
     assert.ok(refreshes.length >= 1, "the 60s truth refresh must still re-read the screen fragment");
     assert.equal(runtime.window.AppRealtime.getDebugState().appliedVersion, 9);
 });
+
+test("T-019: a parked role does not reopen SSE from a fragment that finishes after role_active=false", async () => {
+    let finishRefresh = null;
+    const refreshes = [];
+    const runtime = createRuntime({
+        refresh(ctx) {
+            refreshes.push(ctx);
+            return new Promise((resolve) => { finishRefresh = resolve; });
+        },
+    });
+
+    // 1. Здоровый поток открыт, роль активна.
+    runtime.success(0, context(7));
+    await settle();
+    assert.equal(runtime.sources.length, 1);
+    const stream = runtime.sources[0];
+    stream.emit("open", {});
+    stream.emit("heartbeat", context(7));
+    assert.equal(runtime.window.AppRealtime.getDebugState().ssePrimaryActive, true);
+
+    // 2. Пришла версия 8: применение снимка (fragment) ещё в работе.
+    runtime.window.AppRealtime.poll({force: true});
+    runtime.success(1, { ...context(8), relevant: true, events: [] });
+    await settle();
+    assert.equal(refreshes.length, 1, "the pending version must start one fragment refresh");
+    assert.equal(runtime.sources.length, 1, "the running stream must not be duplicated");
+
+    // 3. Сервер отвечает role_active=false: клиент паркуется, поток закрыт.
+    runtime.window.AppRealtime.poll({force: true});
+    runtime.success(2, { ...context(8), relevant: false, role_active: false });
+    await settle();
+    assert.equal(
+        runtime.window.AppRealtime.getDebugState().roleParked,
+        true,
+        "role_active=false must park the stream"
+    );
+    assert.equal(stream.closed, true, "parking must close the current EventSource");
+    assert.equal(runtime.document.body.dataset.roleAccessActive, "false");
+
+    // 4. Старый fragment завершается уже после парковки. Здесь завершение
+    //    приложения снимка вызывало maybeStartSse("snapshot_applied"), поток
+    //    открывался заново и сервер отвечал 409 role_context_inactive.
+    finishRefresh({applied: true, version: 8});
+    await settle();
+    assert.equal(runtime.window.AppRealtime.getDebugState().appliedVersion, 8);
+    assert.equal(
+        runtime.sources.length,
+        1,
+        "a parked role must not open the stream, even from the snapshot_applied path"
+    );
+
+    // 5. Возврат роли: проба через 60 с получает role_active=true, поток снова разрешён.
+    runtime.advance(60000);
+    runtime.runDelay(60000);
+    assert.equal(runtime.requests.length, 4, "the parked client must probe /realtime/state/ once per minute");
+    runtime.success(3, context(8));
+    await settle();
+    const state = runtime.window.AppRealtime.getDebugState();
+    assert.equal(runtime.sources.length, 2, "a restored role must start the stream again");
+    assert.equal(state.sseState, "connecting");
+});
+
+test("T-019: role_active=false closes the open stream and does not reconnect", async () => {
+    const runtime = createRuntime();
+    runtime.success(0, context(7));
+    await settle();
+    assert.equal(runtime.sources.length, 1);
+    const stream = runtime.sources[0];
+    stream.emit("open", {});
+    stream.emit("heartbeat", context(7));
+    assert.equal(runtime.window.AppRealtime.getDebugState().ssePrimaryActive, true);
+
+    runtime.window.AppRealtime.poll({force: true});
+    runtime.success(1, { ...context(7), relevant: false, role_active: false });
+    await settle();
+    assert.equal(stream.closed, true, "parking must close the current EventSource");
+    assert.equal(runtime.window.AppRealtime.getDebugState().sseState, "standby");
+    assert.equal(runtime.window.AppRealtime.getDebugState().ssePrimaryActive, false);
+    assert.equal(runtime.document.body.dataset.realtimeTransport, "poll");
+
+    // Оставшиеся таймеры (в том числе минутная проба) не открывают новый поток.
+    runtime.runAllTimers(40);
+    await settle();
+    assert.equal(runtime.sources.length, 1, "parking must not open a replacement stream");
+});
