@@ -1239,13 +1239,16 @@
                 .map(function (item) { return update(item, {next_retry_at: 0}); }));
             return flush();
         }
+        function isNativeShell() {
+            return !!(root.document && root.document.body && root.document.body.dataset.nativeApp === "true");
+        }
         function bindLifecycle() {
             if (!root.addEventListener) return;
             root.addEventListener("online", function () { retryNow().catch(function () {}); });
             root.addEventListener("pageshow", function () { retryNow().catch(function () {}); });
             if (root.document && root.document.addEventListener) {
                 root.document.addEventListener("visibilitychange", function () {
-                    if (!root.document.hidden) retryNow().catch(function () {});
+                    if (!root.document.hidden || isNativeShell()) retryNow().catch(function () {});
                 });
             }
         }
