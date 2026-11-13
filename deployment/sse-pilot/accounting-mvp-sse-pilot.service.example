@@ -1,0 +1,32 @@
+[Unit]
+Description=Accounting MVP isolated SSE pilot (EXAMPLE ONLY)
+After=network.target redis-sse-pilot.service
+
+[Service]
+Type=simple
+User=deploy
+Group=www-data
+WorkingDirectory=/srv/accounting-mvp-sse-pilot
+EnvironmentFile=/srv/accounting-mvp-sse-pilot/.env.sse-pilot
+RuntimeDirectory=accounting-mvp-sse-pilot
+RuntimeDirectoryMode=0750
+
+# uvicorn is an explicit pilot dependency; it is not present in the f99c baseline.
+# Bind a private Unix socket. Nginx is the only intended caller.
+ExecStart=/srv/accounting-mvp-sse-pilot/.venv/bin/uvicorn config.sse_asgi:application --uds /run/accounting-mvp-sse-pilot/asgi.sock --workers 2 --proxy-headers --forwarded-allow-ips=127.0.0.1
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/accounting-mvp-sse-pilot
+UMask=0027
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

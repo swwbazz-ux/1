@@ -42,6 +42,10 @@ function createRuntime(roleCode, options = {}) {
             calls.push({method: "getState"});
             return Promise.resolve({...snapshot, pendingDriverShiftClose: null});
         },
+        syncOperationalState(options) {
+            calls.push({method: "syncOperationalState", options: {...options}});
+            return Promise.resolve({resetAccepted: options.authoritativeReset === true});
+        },
         queueDriverShiftClose(options) {
             calls.push({method: "queueDriverShiftClose", options: {...options}});
             return Promise.resolve({pendingDriverShiftClose: {...options}});
@@ -264,6 +268,47 @@ test("native bridge rejects stale future out-of-order and invalid evidence", asy
     runtime.emitNative(nativeSuccess());
     runtime.emitNative(nativeSuccess({occurredAtMs: 999_800, lastSuccessAtMs: 999_800}));
     assert.equal(runtime.events.length, 1);
+});
+
+test("native bridge preserves authoritative reset diagnostics for the visible WebView", async () => {
+    const runtime = createRuntime("driver", {newBridge: true});
+    await runtime.flush();
+    runtime.emitNative(nativeSuccess({
+        serverVersion: 0,
+        operationalResetRequired: true,
+        operationalResetReason: "cursor_ahead",
+        operationalResetToVersion: 0,
+    }));
+    assert.equal(runtime.events.length, 1);
+    assert.deepEqual(
+        {
+            required: runtime.events[0].detail.operationalResetRequired,
+            reason: runtime.events[0].detail.operationalResetReason,
+            resetTo: runtime.events[0].detail.operationalResetToVersion,
+        },
+        {required: true, reason: "cursor_ahead", resetTo: 0}
+    );
+});
+
+test("WebView forwards exact authoritative reset zero to the native ledger", async () => {
+    const runtime = createRuntime("driver");
+    await runtime.flush();
+    const result = await runtime.connection.syncOperationalState({
+        contextKey: "scope-1",
+        journalEpoch: "epoch-2",
+        appliedVersion: 7,
+        pendingVersion: 0,
+        authoritativeReset: true,
+        resetVersion: 0,
+        reason: "authoritative_reset_cursor_ahead",
+    });
+    const call = runtime.calls.at(-1);
+    assert.equal(call.method, "syncOperationalState");
+    assert.equal(call.options.authoritativeReset, true);
+    assert.equal(call.options.resetVersion, 0);
+    assert.equal(call.options.contextKey, "scope-1");
+    assert.equal(call.options.journalEpoch, "epoch-2");
+    assert.equal(result.resetAccepted, true);
 });
 
 test("old APK lastAliveAt remains lifecycle-compatible without invented heartbeat", async () => {

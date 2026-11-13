@@ -1677,7 +1677,7 @@
     {% if role_session_authenticated and not observer_mode and role_app and not is_native_app %}<script src="{% static 'js/push-notifications.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-connection-state="unknown" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
+<body class="{% block body_class %}{% endblock %}{% if observer_mode %} is-observer-mode{% if observer_control %} is-observer-control{% endif %}{% if observer_is_self %} is-observer-self{% endif %}{% endif %}" data-connection-state="unknown" data-realtime-screen="{% block realtime_screen %}{% endblock %}" data-realtime-mode="{% block realtime_mode %}{% endblock %}" data-realtime-role="{% block realtime_role %}{% endblock %}" data-operational-state-version="{{ operational_state_version|default:0 }}" data-role-access-active="{{ role_access_is_active|yesno:'true,false' }}" data-native-app="{{ is_native_app|yesno:'true,false' }}" data-native-client-version="{{ native_app_version }}" data-app-contract-version="{{ app_contract_version }}" data-app-shell-version="{{ app_shell_version }}" data-app-role-code="{{ app_role_code }}" data-app-service-worker-url="{{ app_service_worker_url }}" data-app-service-worker-scope="{{ app_service_worker_scope }}" data-app-contract-ready="false" data-sse-pilot-enabled="{% if sse_pilot_enabled %}true{% else %}false{% endif %}" data-observer-mode="{{ observer_mode|yesno:'true,false' }}" data-observer-control="{{ observer_control|yesno:'true,false' }}" data-observer-token="{{ observer_token }}">
 <div class="app-screen-boot" data-app-screen-boot aria-hidden="true"><span class="app-screen-boot__spinner"></span><span>Готовим экран</span></div>
 <script>
 (function () {
@@ -2507,12 +2507,27 @@ window.AppOperationalFragment = (function () {
 
     function request(screen, version, options) {
         options = options || {};
-        var url = new URL(window.location.href);
+        var snapshotMode = options.snapshot === true || !!options.snapshotUrl;
+        var url;
+        try {
+            url = new URL(options.snapshotUrl || window.location.href, window.location.origin);
+        } catch (error) {
+            url = new URL(window.location.href);
+        }
+        /* snapshot_url comes from the authenticated SSE endpoint, but keep the
+           fragment helper same-origin even if a malformed payload reaches it. */
+        if (url.origin !== window.location.origin) {
+            url = new URL(window.location.href);
+        }
         ["_driver_refresh", "_eo_refresh", "_mm_refresh"].forEach(function (name) {
             url.searchParams.delete(name);
         });
+        url.searchParams.delete("_operational_snapshot");
         url.searchParams.set("_operational_fragment", String(screen || ""));
         url.searchParams.set("_operational_version", String(Number(version || 0)));
+        if (snapshotMode) {
+            url.searchParams.set("_operational_snapshot", "1");
+        }
         var controller = window.AbortController ? new window.AbortController() : null;
         var timeoutMs = Number(options.timeoutMs) > 0
             ? Number(options.timeoutMs)
@@ -2572,6 +2587,7 @@ window.AppOperationalFragment = (function () {
                 contractError.code = "OPERATIONAL_FRAGMENT_INVALID_PAYLOAD";
                 throw contractError;
             }
+            if (snapshotMode) payload.snapshot_version = Number(payload.version || 0);
             return payload;
         });
         return Promise.race([requestPromise, timeoutPromise]).catch(function (error) {
@@ -2640,6 +2656,11 @@ window.AppOperationalFragment = (function () {
 
 window.AppRealtimeConfig = {
     stateUrl: "{% url 'operational_state_version' %}",
+    sseUrl: "/realtime/stream/",
+    sseEnabled: document.body.dataset.ssePilotEnabled === "true",
+    sseHeartbeatTimeoutMs: 30000,
+    sseReconnectMaxMs: 30000,
+    sseTruthRefreshIntervalMs: 60000,
     loginUrl: window.location.pathname.indexOf('/mining-master/tablet/') === 0 ? '/mining-master/tablet/login/' : '/',
     initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
     workPollIntervalMs: 5000,

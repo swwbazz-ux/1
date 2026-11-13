@@ -596,8 +596,10 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
   assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
-  assert.match(announcer, /lastScheduledTripId/);
-  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.claimOperation/);
+  assert.match(announcer, /"driver-dump:" \+ tripId \+ ":"/);
+  assert.match(announcer, /dumpPointId > 0L[\s\S]*?displayName\.toLowerCase/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.commitOperation/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?0L,[\s\S]*?playCue/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
   assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);

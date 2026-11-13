@@ -20,7 +20,11 @@ from openpyxl import load_workbook
 from PIL import Image
 
 from assignments.models import AssignmentStatus, EquipmentAssignment, ExcavatorDumpPointSetting, ExcavatorPlacement, HaulAssignment, WorkShiftType
-from core.models import OperationalStateEvent
+from core.models import (
+    OperationalStateEvent,
+    OperationalStateVersion,
+    bump_operational_state,
+)
 from core.production_time import production_work_date
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -920,13 +924,13 @@ class AccessLoginTests(TestCase):
             started_at=timezone.now() - timedelta(minutes=20),
             ended_at=timezone.now(),
         )
-        OperationalStateEvent.objects.create(
-            key='production',
-            version=1,
+        bump_operational_state(
+            'Trip:test_reset_fixture',
             event_type='trip_changed',
             object_type='Trip',
-            object_id=str(trip.id),
+            object_id=trip.id,
         )
+        old_journal_epoch = OperationalStateVersion.objects.get(key='production').journal_epoch
 
         session = self.client.session
         session['employee_access_id'] = admin_access.id
@@ -947,6 +951,10 @@ class AccessLoginTests(TestCase):
         self.assertTrue(EmployeeShift.objects.filter(id=shift.id).exists())
         self.assertTrue(ShiftPlan.objects.filter(id=plan.id).exists())
         self.assertTrue(OperationalStateEvent.objects.filter(event_type='test_shift_data_reset').exists())
+        self.assertNotEqual(
+            OperationalStateVersion.objects.get(key='production').journal_epoch,
+            old_journal_epoch,
+        )
         self.assertTrue(AdminActionLog.objects.filter(action='Сброшены тестовые показатели смены').exists())
 
     def test_admin_employee_list_can_filter_by_access_status(self):

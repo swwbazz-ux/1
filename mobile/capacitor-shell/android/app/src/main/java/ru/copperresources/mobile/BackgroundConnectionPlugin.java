@@ -64,6 +64,44 @@ public class BackgroundConnectionPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void syncOperationalState(PluginCall call) {
+        String contextKey = call.getString("contextKey", "").trim();
+        String journalEpoch = call.getString("journalEpoch", "").trim();
+        long pendingVersion = numericLong(call.getData().opt("pendingVersion"));
+        boolean authoritativeReset = Boolean.TRUE.equals(call.getBoolean("authoritativeReset", false));
+        boolean resetAccepted = false;
+        OperationalDeliveryLedger.Snapshot state;
+        if (authoritativeReset) {
+            // Establishing a new scope already discards its old cursor. Lowering
+            // an existing scope is accepted only when both server-bound identity
+            // fields match the durable native ledger.
+            state = OperationalDeliveryLedger.prepareWebViewHandoff(
+                getContext(), contextKey, journalEpoch, pendingVersion
+            );
+            Object resetValue = call.getData().opt("resetVersion");
+            long resetVersion = numericLong(resetValue);
+            if (!contextKey.isEmpty()
+                    && !journalEpoch.isEmpty()
+                    && contextKey.equals(state.contextKey)
+                    && journalEpoch.equals(state.journalEpoch)
+                    && isNonNegativeInteger(resetValue)
+                    && resetVersion >= 0L) {
+                state = OperationalDeliveryLedger.resetApplied(getContext(), resetVersion);
+                resetAccepted = true;
+            }
+        } else {
+            state = OperationalDeliveryLedger.syncFromWebView(
+                getContext(),
+                contextKey,
+                journalEpoch,
+                numericLong(call.getData().opt("appliedVersion")),
+                pendingVersion
+            );
+        }
+        call.resolve(state.toJsObject().put("resetAccepted", resetAccepted));
+    }
+
+    @PluginMethod
     public void queueDriverShiftClose(PluginCall call) {
         if (!"driver".equals(BuildConfig.APP_PROFILE_ID)) {
             call.reject("Driver shift close is unavailable for this application");
@@ -108,6 +146,26 @@ public class BackgroundConnectionPlugin extends Plugin {
         return 0L;
     }
 
+    static boolean isNonNegativeInteger(Object value) {
+        if (value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long) {
+            return ((Number) value).longValue() >= 0L;
+        }
+        if (value instanceof Number) {
+            double number = ((Number) value).doubleValue();
+            return Double.isFinite(number)
+                && number >= 0D
+                && number <= Long.MAX_VALUE
+                && number == Math.rint(number);
+        }
+        if (value instanceof String) {
+            try {
+                return Long.parseLong(((String) value).trim()) >= 0L;
+            } catch (NumberFormatException ignored) {}
+        }
+        return false;
+    }
+
     @PluginMethod
     public void acknowledgeDriverShiftClose(PluginCall call) {
         if (!PendingDriverShiftClose.clear(
@@ -128,6 +186,7 @@ public class BackgroundConnectionPlugin extends Plugin {
             .put("lastAliveAt", ConnectionState.lastAliveAt(getContext()))
             .put("lastStopReason", ConnectionState.lastStopReason(getContext()));
         result.put("transport", ConnectionState.transportSnapshot(getContext()));
+        result.put("operational", OperationalDeliveryLedger.snapshot(getContext()).toJsObject());
         result.put("pendingDriverShiftClose", pending == null ? null : pending.toJsObject());
         return result;
     }

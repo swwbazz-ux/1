@@ -1,3 +1,6 @@
+import uuid
+
+from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -9,6 +12,11 @@ class OperationalStateVersion(models.Model):
     version = models.PositiveBigIntegerField('Версия', default=0)
     reason = models.CharField('Причина изменения', max_length=128, blank=True)
     updated_at = models.DateTimeField('Обновлено', default=timezone.now)
+    journal_epoch = models.UUIDField(
+        'Поколение журнала',
+        default=uuid.uuid4,
+        editable=False,
+    )
 
     class Meta:
         verbose_name = 'Версия оперативного состояния'
@@ -38,6 +46,12 @@ class OperationalStateEvent(models.Model):
         indexes = [
             models.Index(fields=['key', 'version']),
             models.Index(fields=['key', 'event_type']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['key', 'version'],
+                name='unique_operational_event_key_version',
+            ),
         ]
 
     def __str__(self):
@@ -169,6 +183,16 @@ def lock_production_state():
     return OperationalStateVersion.objects.select_for_update().get(key='production')
 
 
+def rotate_operational_journal_epoch():
+    """Invalidate durable cursors when the journal is deliberately reset."""
+    with transaction.atomic():
+        state = lock_production_state()
+        state.journal_epoch = uuid.uuid4()
+        state.updated_at = timezone.now()
+        state.save(update_fields=['journal_epoch', 'updated_at'])
+    return state.journal_epoch
+
+
 def bump_operational_state(
     reason='',
     *,
@@ -203,5 +227,13 @@ def bump_operational_state(
         if notification_for_event(event):
             transaction.on_commit(
                 lambda event_id=event.pk: send_dispatcher_push_for_event(event_id)
+            )
+        if getattr(settings, 'SSE_PILOT_ENABLED', False):
+            # Pub/Sub — только wake accelerator. Ошибка Redis не меняет
+            # результат commit: SSE догонит событие safety-scan из БД.
+            from .sse_wakeup import publish_operational_wakeup
+
+            transaction.on_commit(
+                lambda version=event.version: publish_operational_wakeup(version)
             )
     return state

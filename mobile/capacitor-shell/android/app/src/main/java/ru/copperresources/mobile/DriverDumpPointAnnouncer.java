@@ -3,6 +3,8 @@ package ru.copperresources.mobile;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.Locale;
+
 /**
  * Единый владелец голосового оповещения о точке разгрузки.
  *
@@ -16,8 +18,6 @@ public final class DriverDumpPointAnnouncer {
     public static final String REASON_INVALID_EVENT = "invalid_event";
 
     private static DriverVoicePlayer sharedPlayer;
-    private static long lastScheduledVersion;
-    private static long lastScheduledTripId;
 
     private DriverDumpPointAnnouncer() {}
 
@@ -42,20 +42,24 @@ public final class DriverDumpPointAnnouncer {
             ConnectivityForegroundService.PREFS_NAME,
             Context.MODE_PRIVATE
         );
-        long persistedVersion = preferences.getLong(
-            ConnectivityForegroundService.LAST_DRIVER_DUMP_POINT_ALERT_VERSION,
-            0L
+        String operationKey = "driver-dump:" + tripId + ":" + (
+                dumpPointId > 0L
+                    ? "id-" + dumpPointId
+                    : "name-" + displayName.toLowerCase(Locale.ROOT).replaceAll("\\s+", "_")
+            );
+        String claimToken = OperationalVoiceAnnouncer.claimOperation(
+            appContext,
+            operationKey,
+            false
         );
-        long persistedTripId = preferences.getLong(
-            "last_driver_dump_point_alert_trip_id",
-            0L
-        );
-        if (
-            eventVersion <= Math.max(persistedVersion, lastScheduledVersion)
-            || tripId == persistedTripId
-            || tripId == lastScheduledTripId
-        ) {
-            return Result.rejected(REASON_ALREADY_ANNOUNCED);
+        if (claimToken.isEmpty()) {
+            return OperationalVoiceAnnouncer.isOperationCommitted(
+                appContext,
+                operationKey,
+                false
+            )
+                ? Result.rejected(REASON_ALREADY_ANNOUNCED, true)
+                : Result.rejected(OperationalVoiceAnnouncer.REASON_IN_PROGRESS, false);
         }
 
         if (sharedPlayer == null) {
@@ -68,16 +72,22 @@ public final class DriverDumpPointAnnouncer {
         );
         /* Сначала гарантированно ставим звук в общий проигрыватель и только
            после этого публикуем dedupe-маркер для второго канала. */
-        sharedPlayer.announce(
-            dumpPointId,
-            displayName,
-            0L,
-            playCue,
-            eventVersion,
-            tripId
-        );
-        lastScheduledVersion = eventVersion;
-        lastScheduledTripId = tripId;
+        try {
+            sharedPlayer.announce(
+                dumpPointId,
+                displayName,
+                0L,
+                playCue,
+                eventVersion,
+                tripId
+            );
+        } catch (RuntimeException error) {
+            OperationalVoiceAnnouncer.releaseOperation(appContext, claimToken, true);
+            return Result.rejected("resource_unavailable", false);
+        }
+        if (!OperationalVoiceAnnouncer.commitOperation(appContext, claimToken, true)) {
+            return Result.queuedButUncommitted(notificationShown, playCue);
+        }
         preferences.edit()
             .putLong(ConnectivityForegroundService.LAST_DRIVER_DUMP_POINT_ALERT_VERSION, eventVersion)
             .putLong("last_driver_dump_point_alert_trip_id", tripId)
@@ -90,21 +100,42 @@ public final class DriverDumpPointAnnouncer {
         public final boolean announced;
         public final boolean notificationShown;
         public final boolean cuePlayed;
+        public final boolean processed;
         public final String reason;
 
-        private Result(boolean announced, boolean notificationShown, boolean cuePlayed, String reason) {
+        private Result(
+                boolean announced,
+                boolean notificationShown,
+                boolean cuePlayed,
+                boolean processed,
+                String reason) {
             this.announced = announced;
             this.notificationShown = notificationShown;
             this.cuePlayed = cuePlayed;
+            this.processed = processed;
             this.reason = reason;
         }
 
         static Result announced(boolean notificationShown, boolean cuePlayed) {
-            return new Result(true, notificationShown, cuePlayed, "");
+            return new Result(true, notificationShown, cuePlayed, true, "");
+        }
+
+        static Result queuedButUncommitted(boolean notificationShown, boolean cuePlayed) {
+            return new Result(
+                true,
+                notificationShown,
+                cuePlayed,
+                false,
+                OperationalVoiceAnnouncer.REASON_PERSISTENCE_UNAVAILABLE
+            );
         }
 
         static Result rejected(String reason) {
-            return new Result(false, false, false, reason);
+            return rejected(reason, true);
+        }
+
+        static Result rejected(String reason, boolean processed) {
+            return new Result(false, false, false, processed, reason);
         }
     }
 }

@@ -144,6 +144,9 @@ android {
             boolean inAppUpdaterEnabled = Boolean.parseBoolean(
                     profile.getProperty('inAppUpdaterEnabled', 'true')
             )
+            boolean nativePushEnabled = Boolean.parseBoolean(
+                    profile.getProperty('nativePushEnabled', 'true')
+            )
             String updateManifestUrl = profile.getProperty('updateManifestUrl', '').trim()
             boolean driverVoiceAlertsEnabled = Boolean.parseBoolean(profile.getProperty('driverVoiceAlertsEnabled', 'false'))
             long alertCueDurationMs = Long.parseLong(profile.getProperty('alertCueDurationMs', '720'))
@@ -209,6 +212,7 @@ android {
                 buildConfigField "long", "HEARTBEAT_INTERVAL_MS", "${heartbeatIntervalMs}L"
                 buildConfigField "String", "UPDATE_MANIFEST_URL", javaStringLiteral(updateManifestUrl)
                 buildConfigField "boolean", "IN_APP_UPDATER_ENABLED", inAppUpdaterEnabled.toString()
+                buildConfigField "boolean", "NATIVE_PUSH_ENABLED", nativePushEnabled.toString()
                 buildConfigField "long", "UPDATE_CHECK_INTERVAL_MS", "${updateCheckIntervalMs}L"
                 buildConfigField "String", "SYNC_AUTH_HEADER", javaStringLiteral(profile.getProperty('syncAuthHeader', 'Authorization'))
                 buildConfigField "String", "SYNC_AUTH_TOKEN", javaStringLiteral(syncToken)

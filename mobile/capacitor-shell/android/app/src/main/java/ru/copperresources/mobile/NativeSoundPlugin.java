@@ -87,8 +87,9 @@ public class NativeSoundPlugin extends Plugin {
 
     @PluginMethod
     public void announceDumpPoint(PluginCall call) {
+        syncDeliveryContext(call);
         if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED || !"driver".equals(BuildConfig.APP_PROFILE_ID)) {
-            call.resolve(new JSObject().put("announced", false));
+            call.resolve(new JSObject().put("announced", false).put("processed", false));
             return;
         }
         long eventVersion = readNumericLong(call, "eventVersion");
@@ -112,6 +113,7 @@ public class NativeSoundPlugin extends Plugin {
             if (!result.announced) {
                 call.resolve(new JSObject()
                     .put("announced", false)
+                    .put("processed", result.processed)
                     .put("reason", result.reason)
                     .put("eventVersion", eventVersion)
                     .put("tripId", tripId));
@@ -119,12 +121,16 @@ public class NativeSoundPlugin extends Plugin {
             }
             call.resolve(new JSObject()
                 .put("announced", true)
+                .put("processed", result.processed)
+                .put("eventVersion", eventVersion)
+                .put("tripId", tripId)
                 .put("cuePlayed", result.cuePlayed));
         });
     }
 
     @PluginMethod
     public void announceOperational(PluginCall call) {
+        syncDeliveryContext(call);
         String requestedCueName = call.getString("cue", "");
         String voiceName = call.getString("voice", "");
         if (!ALLOWED_SOUNDS.contains(requestedCueName) || !ALLOWED_VOICES.contains(voiceName)) {
@@ -137,6 +143,7 @@ public class NativeSoundPlugin extends Plugin {
             : OperationalCueCatalog.forOperational(requestedCueName, voiceName);
         long eventVersion = readNumericLong(call, "eventVersion");
         String eventKey = call.getString("eventKey", "");
+        String operationKey = call.getString("operationKey", "").trim();
         boolean excavatorConnectionLoss = "excavator".equals(BuildConfig.APP_PROFILE_ID)
             && "voice_connection_lost".equals(voiceName);
         boolean excavatorConnectionRecovery = "excavator".equals(BuildConfig.APP_PROFILE_ID)
@@ -146,20 +153,26 @@ public class NativeSoundPlugin extends Plugin {
                 || (excavatorConnectionRecovery && !ConnectionVoiceGate.confirmRecovery(getContext()))) {
             call.resolve(new JSObject()
                 .put("announced", false)
+                .put("processed", true)
                 .put("reason", OperationalVoiceAnnouncer.REASON_ALREADY_ANNOUNCED)
                 .put("eventVersion", eventVersion));
             return;
         }
-        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announce(
-            getContext(),
-            cueName,
-            voiceName,
-            eventVersion,
-            eventKey,
-            false,
-            "",
-            ""
-        );
+        OperationalVoiceAnnouncer.Result result = operationKey.isEmpty()
+            ? OperationalVoiceAnnouncer.announce(
+                getContext(), cueName, voiceName, eventVersion, eventKey, false, "", ""
+            )
+            : OperationalVoiceAnnouncer.announceOperations(
+                getContext(),
+                cueName,
+                Arrays.asList(new OperationalVoiceAnnouncer.Operation(
+                    operationKey,
+                    new String[] {voiceName}
+                )),
+                false,
+                "",
+                ""
+            );
         if (!result.announced && excavatorConnectionLoss) {
             ConnectionVoiceGate.rollbackLoss(getContext(), connectionAttemptAt);
         } else if (!result.announced && excavatorConnectionRecovery) {
@@ -167,12 +180,14 @@ public class NativeSoundPlugin extends Plugin {
         }
         call.resolve(new JSObject()
             .put("announced", result.announced)
+            .put("processed", result.processed)
             .put("reason", result.reason)
             .put("eventVersion", eventVersion));
     }
 
     @PluginMethod
     public void announceEquipment(PluginCall call) {
+        syncDeliveryContext(call);
         String requestedCueName = call.getString("cue", "truck_assigned");
         if (!ALLOWED_SOUNDS.contains(requestedCueName)) {
             call.reject("Unknown equipment cue");
@@ -195,32 +210,42 @@ public class NativeSoundPlugin extends Plugin {
         if (voices.length == 0) {
             call.resolve(new JSObject()
                 .put("announced", false)
+                .put("processed", false)
                 .put("reason", OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE));
             return;
         }
         long eventVersion = readNumericLong(call, "eventVersion");
-        String eventKey = call.getString("eventKey", "");
-        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceSequence(
+        String operationKey = call.getString("operationKey", "").trim();
+        if (operationKey.isEmpty()) {
+            call.resolve(new JSObject()
+                .put("announced", false)
+                .put("processed", false)
+                .put("reason", OperationalVoiceAnnouncer.REASON_SEMANTIC_KEY_REQUIRED)
+                .put("eventVersion", eventVersion));
+            return;
+        }
+        OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
             getContext(),
             cueName,
-            voices,
-            eventVersion,
-            eventKey,
+            Arrays.asList(new OperationalVoiceAnnouncer.Operation(operationKey, voices)),
             false,
             "",
             ""
         );
         call.resolve(new JSObject()
             .put("announced", result.announced)
+            .put("processed", result.processed)
             .put("reason", result.reason)
             .put("eventVersion", eventVersion));
     }
 
     @PluginMethod
     public void announceEquipmentBatch(PluginCall call) {
+        syncDeliveryContext(call);
         if (!"excavator".equals(BuildConfig.APP_PROFILE_ID)) {
             call.resolve(new JSObject()
                 .put("announced", false)
+                .put("processed", false)
                 .put("reason", OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE));
             return;
         }
@@ -232,10 +257,15 @@ public class NativeSoundPlugin extends Plugin {
         JSArray items = call.getArray("items", new JSArray());
         List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
         List<String> actions = new ArrayList<>();
+        Set<String> operationKeys = new HashSet<>();
         long latestEventVersion = 0L;
+        String invalidReason = items.length() == 0
+            ? OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE
+            : "";
         for (int index = 0; index < items.length(); index += 1) {
             JSONObject item = items.optJSONObject(index);
             if (item == null) {
+                invalidReason = OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE;
                 continue;
             }
             String action = item.optString("action", "");
@@ -248,12 +278,29 @@ public class NativeSoundPlugin extends Plugin {
                     ? new String[] {fallbackVoice}
                     : new String[0];
             }
-            if (operationKey.isEmpty() || voices.length == 0) {
+            if (operationKey.isEmpty()) {
+                invalidReason = OperationalVoiceAnnouncer.REASON_SEMANTIC_KEY_REQUIRED;
+                continue;
+            }
+            if (voices.length == 0 || !operationKeys.add(operationKey)) {
+                invalidReason = OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE;
                 continue;
             }
             latestEventVersion = Math.max(latestEventVersion, item.optLong("eventVersion", 0L));
             actions.add(action);
             operations.add(new OperationalVoiceAnnouncer.Operation(operationKey, voices));
+        }
+        if (!invalidReason.isEmpty() || operations.size() != items.length()) {
+            call.resolve(new JSObject()
+                .put("announced", false)
+                .put("processed", false)
+                .put("reason", invalidReason.isEmpty()
+                    ? OperationalVoiceAnnouncer.REASON_RESOURCE_UNAVAILABLE
+                    : invalidReason)
+                .put("eventVersion", latestEventVersion)
+                .put("operationCount", operations.size())
+                .put("requestedOperationCount", items.length()));
+            return;
         }
         String cueName = OperationalCueCatalog.forEquipmentBatch(requestedCueName, actions);
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
@@ -266,9 +313,11 @@ public class NativeSoundPlugin extends Plugin {
         );
         call.resolve(new JSObject()
             .put("announced", result.announced)
+            .put("processed", result.processed)
             .put("reason", result.reason)
             .put("eventVersion", latestEventVersion)
-            .put("operationCount", operations.size()));
+            .put("operationCount", operations.size())
+            .put("requestedOperationCount", items.length()));
     }
 
     private String[] equipmentVoiceSequence(
@@ -314,6 +363,15 @@ public class NativeSoundPlugin extends Plugin {
      */
     private long readNumericLong(PluginCall call, String name) {
         return numericLong(call.getData().opt(name));
+    }
+
+    private void syncDeliveryContext(PluginCall call) {
+        OperationalDeliveryLedger.prepareWebViewHandoff(
+            getContext(),
+            call.getString("contextKey", ""),
+            call.getString("journalEpoch", ""),
+            readNumericLong(call, "pendingVersion")
+        );
     }
 
     static long numericLong(Object value) {
