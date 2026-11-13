@@ -67,9 +67,9 @@ Backend является основным рабочим приложением.
 - Маршруты: `/driver/`, `/driver/shift/`.
 - Manifest: `/driver.webmanifest`.
 - Service worker: `/driver-sw.js`.
-- Shell: `driver-mobile-shell-v381` (версия в коде HEAD `63dc191e`; прежняя
-  пометка «опубликован на production 03.09.2026» относится к старой версии и
-  отдельно не подтверждена).
+- Shell: `driver-mobile-shell-v382` (версия в рабочем дереве T-019, bump T-026;
+  в HEAD `0f2c2d63` — v381; прежняя пометка «опубликован на production
+  03.09.2026» относится к старой версии и отдельно не подтверждена).
 
 ### Машинист экскаватора
 
@@ -78,18 +78,18 @@ Backend является основным рабочим приложением.
 - Маршрут: `/excavator/work/`.
 - Manifest: `/excavator.webmanifest`.
 - Service worker: `/excavator-sw.js`.
-- Shell: `excavator-mobile-shell-v264` (версия в коде HEAD `63dc191e`;
-  прежняя пометка «опубликован в production 03.09.2026» относится к старой
-  версии и отдельно не подтверждена).
+- Shell: `excavator-mobile-shell-v266` (версия в рабочем дереве T-019, bump T-026;
+  в HEAD `0f2c2d63` — v265; прежняя пометка «опубликован в production 03.09.2026»
+  относится к старой версии и отдельно не подтверждена).
 
 #### Изолированный контур RuStore QA
 
 - Публичный тестовый хост: `https://qa-excavator.driverform.ru/`.
 - Текущий QA web-shell: `excavator-mobile-shell-v193` (отдельный QA-контур; по
   документации QA-контура, в коде HEAD этой строки нет — версия не проверялась).
-  Рабочая версия экскаваторщика в коде HEAD — `excavator-mobile-shell-v264`;
-  release SHA не подтверждён. `v192` — историческая версия, не текущая
-  production.
+  Рабочая версия экскаваторщика в рабочем дереве T-019 — `excavator-mobile-shell-v266`
+  (в HEAD `0f2c2d63` — v265); release SHA не подтверждён. `v192` — историческая
+  версия, не текущая production.
 - Код развёрнут отдельно от production в `/srv/accounting-mvp-excavator-qa`.
 - Используются отдельные PostgreSQL-база и пользователь, Redis DB `2`, свой
   cache prefix и два systemd-сервиса: Django-приложение и симулятор рейсов.

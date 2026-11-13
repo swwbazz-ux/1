@@ -444,6 +444,73 @@
             && (/data-mobile-role-login/.test(String(body || "")) || /data-validated-login/.test(String(body || "")));
         return (response.redirected === true && isLoginPath) || isLoginHtml;
     }
+    /* 409 inactive_role приходит от ActiveRoleSessionMiddleware (users/middleware.py:197-251)
+       раньше view: в теле только {ok:false, code, error}, без results. Раньше клиент
+       считал это сетевым отказом, повторял каждые 5-8 с и никогда не переходил в
+       «на сверке» — работа водителя не доходила до сервера, а экран показывал
+       «Действие сохранено». Это состояние роли, а не связи: повтор без смены
+       состояния роли ничего не изменит. */
+    var INACTIVE_ROLE_MESSAGE = "Роль неактивна — доступен только просмотр";
+    function isDriverSyncInactiveRoleResponse(response, body) {
+        response = response || {};
+        var payload = body;
+        if (typeof payload === "string") {
+            try { payload = JSON.parse(payload || "{}"); } catch (error) { return false; }
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+        if (payload.role_active === false) return true;
+        return Number(response.status) === 409 && String(payload.code || "") === "inactive_role";
+    }
+    /* Отправка пачки на /offline-events/sync/ — общий код водителя. Вынесен сюда,
+       чтобы тест проверял именно тот путь, который работает на телефоне, а не его
+       копию в тесте. */
+    function createDriverSyncSend(options) {
+        options = options || {};
+        function authResponse(response, body) {
+            var classifier = typeof options.isAuthResponse === "function"
+                ? options.isAuthResponse
+                : root.isDriverSyncAuthResponse;
+            return typeof classifier === "function"
+                ? classifier(response, body, options.baseUrl)
+                : false;
+        }
+        return function send(batch) {
+            var events = Array.isArray(batch && batch.events) ? batch.events : [];
+            var request = typeof options.fetch === "function"
+                ? options.fetch
+                : function (url, init) { return root.fetch(url, init); };
+            return request(options.url || "/offline-events/sync/", {
+                method: "POST",
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-CSRFToken": String(options.csrfToken || ""),
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify(batch)
+            }).then(function (response) {
+                return response.text().then(function (body) {
+                    var payload = {};
+                    try { payload = JSON.parse(body || "{}"); } catch (error) {}
+                    if (response.status >= 500) throw new Error("server_unavailable");
+                    if (authResponse(response, body)) {
+                        return {results: events.map(function (event) {
+                            return {event_id: event.event_id, status: "auth_required", code: "auth_required", message: "Требуется повторный вход."};
+                        })};
+                    }
+                    if (isDriverSyncInactiveRoleResponse(response, body)) {
+                        return {results: events.map(function (event) {
+                            return {event_id: event.event_id, status: "auth_required", code: "inactive_role", message: INACTIVE_ROLE_MESSAGE};
+                        })};
+                    }
+                    if (!response.ok && !Array.isArray(payload.results)) throw new Error("sync_rejected");
+                    return payload;
+                });
+            });
+        };
+    }
     function createDriverDowntimeEndEvent(options) {
         options = options || {};
         var pendingStartId = String(options.pendingStartId || "");
@@ -742,7 +809,11 @@
             var kept = [];
             for (var item of mine) {
                 var stamp = Date.parse(item.updated_at || item.occurred_at || "") || 0;
-                if (TERMINAL_STATES.has(item.state) && stamp && now - stamp > reviewRetentionMs) {
+                /* Очередь, оставленная из-за неактивной роли, не удаляем по возрасту:
+                   это не отказ сервера, а состояние допуска — работа обязана уйти
+                   после возврата роли, сколько бы она ни ждала. */
+                var roleInactive = String(item.last_error && item.last_error.code || "") === "inactive_role";
+                if (TERMINAL_STATES.has(item.state) && !roleInactive && stamp && now - stamp > reviewRetentionMs) {
                     try { await repo.remove(item.event_id); } catch (error) {}
                     continue;
                 }
@@ -1283,6 +1354,8 @@
     root.createDriverFreeBucketSelectedEvent = createDriverFreeBucketSelectedEvent;
     root.createDriverFreeBucketCancelledEvent = createDriverFreeBucketCancelledEvent;
     root.isDriverSyncAuthResponse = isDriverSyncAuthResponse;
+    root.isDriverSyncInactiveRoleResponse = isDriverSyncInactiveRoleResponse;
+    root.createDriverSyncSend = createDriverSyncSend;
     root.createDriverDowntimeEndEvent = createDriverDowntimeEndEvent;
     root.selectDriverDowntimeProjection = selectDriverDowntimeProjection;
     if (typeof module !== "undefined" && module.exports) {
@@ -1297,6 +1370,8 @@
             createDriverFreeBucketSelectedEvent: createDriverFreeBucketSelectedEvent,
             createDriverFreeBucketCancelledEvent: createDriverFreeBucketCancelledEvent,
             isDriverSyncAuthResponse: isDriverSyncAuthResponse,
+            isDriverSyncInactiveRoleResponse: isDriverSyncInactiveRoleResponse,
+            createDriverSyncSend: createDriverSyncSend,
             createDriverDowntimeEndEvent: createDriverDowntimeEndEvent,
             selectDriverDowntimeProjection: selectDriverDowntimeProjection,
             backoff: backoff

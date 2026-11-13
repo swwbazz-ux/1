@@ -975,6 +975,70 @@ test('offline restart retains auth review until a fresh authenticated page resum
     assert.deepEqual(await afterLogin.pending(), []);
 });
 
+/* OF-01 (T-020). Роль переведена в просмотр: middleware (users/middleware.py:197-251)
+   отклоняет POST /offline-events/sync/ до view ответом 409 без results. Отправитель
+   экрана отдаёт только текст отказа, поэтому клиент раньше считал это сетью и
+   повторял пачку бесконечно, не переходя в «Нужна сверка». */
+test('an inactive role parks the queue instead of retrying it forever', async () => {
+    let calls = 0;
+    const attention = [];
+    const box = createOutbox({
+        localStorage: storage(),
+        queueKey: 'access-7',
+        onAttention: (event, result) => attention.push([event.event_id, result.status, result.code]),
+        send: async () => {
+            calls += 1;
+            throw new Error('Роль неактивна — доступен только просмотр');
+        },
+    });
+    await box.queue(loadEvent('one'));
+    await box.flush();
+    const parked = await box.pending();
+    assert.equal(calls, 1);
+    assert.equal(parked.length, 1, 'запись не удалена');
+    assert.equal(parked[0].sync_state, 'auth_required');
+    assert.equal(parked[0].last_error_code, 'inactive_role');
+    assert.equal(parked[0].next_retry_at, 0, 'повтор по таймеру не назначен');
+    assert.deepEqual(attention, [['one', 'auth_required', 'inactive_role']], 'работник видит причину');
+
+    await box.flush();
+    await box.retryNow();
+    assert.equal(calls, 1, 'бесконечного повтора нет');
+    assert.equal((await box.pending()).length, 1, 'запись осталась на телефоне');
+});
+
+test('a structured inactive_role refusal parks the queue and resumes with a fresh page', async () => {
+    const local = storage();
+    const before = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async () => {
+            const refused = new Error('События не приняты.');
+            refused.code = 'inactive_role';
+            throw refused;
+        },
+    });
+    await before.queue(loadEvent('one'));
+    await before.flush();
+    assert.equal((await before.pending())[0].sync_state, 'auth_required');
+
+    let calls = 0;
+    const after = createOutbox({
+        localStorage: local,
+        queueKey: 'access-7',
+        send: async events => {
+            calls += 1;
+            return {ok: true, results: events.map(accepted)};
+        },
+    });
+    await after.ready();
+    assert.equal(calls, 0, 'пока роль неактивна, очередь не трогаем');
+    await after.ready({resumeAuthRequired: true});
+    await after.flush();
+    assert.equal(calls, 1);
+    assert.deepEqual(await after.pending(), []);
+});
+
 test('confirmation callback observes the already updated queue count', async () => {
     let visibleCount = null;
     const summaries = [];
