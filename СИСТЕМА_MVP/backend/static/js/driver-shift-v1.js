@@ -669,6 +669,14 @@ window.bindDriverMobileShell = function () {
         var closeButton = shell.querySelector("[data-driver-shift-close-button]");
         var logoutButton = shell.querySelector("[data-driver-shift-logout]");
         var shiftScroll = form ? form.querySelector("[data-driver-shift-scroll]") : null;
+        var closeReadingsBlockedAt = 0;
+
+        /* Показания на конец смены сразу заполнены значениями начала (водитель
+           может изменить): пустые обязательные поля молча останавливали
+           отправку, очередь не создавалась (живой тест T-020, 13.11.2026). */
+        if (form && closeButton && typeof prefillDriverShiftCloseReadings === "function") {
+            prefillDriverShiftCloseReadings(form);
+        }
 
         if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {
             closeButton.dataset.driverShiftBound = "true";
@@ -696,7 +704,23 @@ window.bindDriverMobileShell = function () {
             bindDriverShiftHoldAction(form, closeButton, {
                 holdMs: 1000,
                 readyLabel: "Закрыть смену",
-                progressProperty: "--driver-shift-hold"
+                progressProperty: "--driver-shift-hold",
+                /* Проверка до requestSubmit: пустое/неверное поле — сообщение и
+                   сброс «ДЕРЖИТЕ», а не молчаливый отказ браузера. */
+                beforeSubmit: function (target) {
+                    if (typeof reportDriverShiftCloseReadings !== "function") return true;
+                    if (reportDriverShiftCloseReadings(target)) return true;
+                    closeReadingsBlockedAt = Date.now();
+                    return false;
+                },
+                onShortPress: function () {
+                    /* Отпускание того же удержания после отказа не должно
+                       перекрывать сообщение «заполните показания»: окно чуть
+                       больше тоста (3,6 с), чтобы поздний click на медленном
+                       WebView тоже не подменил точный текст (QA T-025, 8.3). */
+                    if (closeReadingsBlockedAt && Date.now() - closeReadingsBlockedAt < 3000) return;
+                    if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
+                }
             });
 
             var firstError = form.querySelector(".mobile-shift__field .errorlist");
