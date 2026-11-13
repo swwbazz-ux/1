@@ -3059,7 +3059,21 @@ window.initExcavatorWorkShell = function () {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             return;
         }
-        if (!card || !dumpTarget || !fieldOutbox) return;
+        // Погрузка не должна «тихо» пропадать: без карточки, точки разгрузки или
+        // локальной очереди работник видит причину и может повторить действие.
+        if (!card || !dumpTarget) {
+            playExcavatorSound("action_error");
+            showExcavatorNotice(!card
+                ? "Самосвал не определён. Обновите экран и повторите погрузку."
+                : "Точка разгрузки не определена. Обновите экран и повторите погрузку.");
+            return;
+        }
+        if (!fieldOutbox) {
+            playExcavatorVoice("action_error", "voice_truck_send_failed");
+            renderExcavatorOfflineStatus({storage_failed: true, total: 0});
+            showExcavatorNotice("Локальное сохранение недоступно. Погрузка не сохранена — обновите экран и повторите.");
+            return;
+        }
         if (!canTruckLoad(card)) {
             playExcavatorSound("action_error");
             showExcavatorNotice(truckLoadBlockReason(card));

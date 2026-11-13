@@ -1790,35 +1790,19 @@ window.bindDriverMobileShell = function () {
             indexedDB: window.indexedDB,
             localStorage: window.localStorage,
             context: driverOfflineContext,
-            send: function (batch) {
-                return fetch("/offline-events/sync/", {
-                    method: "POST",
-                    credentials: "same-origin",
-                    cache: "no-store",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "X-CSRFToken": csrf ? csrf.content : "",
-                        "X-Requested-With": "XMLHttpRequest"
-                    },
-                    body: JSON.stringify(batch)
-                }).then(function (response) {
-                    return response.text().then(function (body) {
-                        var payload = {};
-                        try { payload = JSON.parse(body || "{}"); } catch (error) {}
-                        if (response.status >= 500) throw new Error("server_unavailable");
-                        var needsAuthentication = typeof window.isDriverSyncAuthResponse === "function"
-                            && window.isDriverSyncAuthResponse(response, body, window.location.href);
-                        if (needsAuthentication) {
-                            return {results: batch.events.map(function (event) {
-                                return {event_id: event.event_id, status: "auth_required", code: "auth_required", message: "Требуется повторный вход."};
-                            })};
-                        }
-                        if (!response.ok && !Array.isArray(payload.results)) throw new Error("sync_rejected");
-                        return payload;
-                    });
-                });
-            },
+            send: typeof window.createDriverSyncSend === "function"
+                ? window.createDriverSyncSend({
+                    fetch: function (url, init) { return window.fetch(url, init); },
+                    url: "/offline-events/sync/",
+                    csrfToken: csrf ? csrf.content : "",
+                    baseUrl: window.location.href,
+                    isAuthResponse: window.isDriverSyncAuthResponse
+                })
+                : function () {
+                    /* Смешанная сборка (старый отправитель в кэше): очередь
+                       остаётся, повтор как раньше — без потери событий. */
+                    return Promise.reject(new Error("sync_sender_unavailable"));
+                },
             onState: driverOfflineBindings().onState,
             onConfirmed: driverOfflineBindings().onConfirmed,
             onReview: driverOfflineBindings().onReview

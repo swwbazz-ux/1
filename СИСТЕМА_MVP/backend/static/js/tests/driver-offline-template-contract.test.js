@@ -172,8 +172,12 @@ test("dump-point projection helper updates the tile, dial, dataset and sync labe
 });
 
 test("sync uses canonical batch endpoint and distinguishes pending review and storage failure", () => {
-    assert.match(template, /fetch\("\/offline-events\/sync\/"/);
-    assert.match(template, /status: "auth_required"/);
+    // Отправку пачки теперь собирает общий отправитель очереди: 409 inactive_role
+    // обязан распознаваться там же, где и ответ на /offline-events/sync/.
+    assert.match(template, /createDriverSyncSend/);
+    assert.match(offlineRuntime, /"\/offline-events\/sync\/"/);
+    assert.match(offlineRuntime, /isDriverSyncInactiveRoleResponse/);
+    assert.match(offlineRuntime, /status: "auth_required"/);
     assert.match(template, /isDriverSyncAuthResponse/);
     assert.match(offlineRuntime, /responseUrl\.pathname === "\/"/);
     assert.match(offlineRuntime, /data-mobile-role-login/);
