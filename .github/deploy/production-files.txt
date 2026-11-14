@@ -1,4 +1,4 @@
-# T-021 (скрытие ПИН в журнале админки, отзыв сессий) + T-030 (FOR UPDATE на nullable стороне outer join в отчётах). База: 63dc191e. 11 файлов.
+# T-021 (скрытие ПИН в журнале админки, отзыв сессий) + T-030 (FOR UPDATE на nullable стороне outer join в отчётах). База: 63dc191e. 11 продуктовых файлов + 24 runtime-ассета диспетчера, которые требуются release-audit (dispatcher CORE_ASSETS), итого 35.
 СИСТЕМА_MVP/backend/users/views.py
 СИСТЕМА_MVP/backend/users/admin.py
 СИСТЕМА_MVP/backend/users/middleware.py
@@ -10,3 +10,27 @@
 СИСТЕМА_MVP/backend/users/management/commands/scrub_admin_log_pins.py
 СИСТЕМА_MVP/backend/assignments/deputy_views.py
 СИСТЕМА_MVP/backend/reports/views.py
+СИСТЕМА_MVP/backend/static/css/dispatcher-adaptive-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-canvas-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-control-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-detail-overrides-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-detail-v1.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-workspace-v1.css
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-actions-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-dnd-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-layout-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-mutations-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-board-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-canvas-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-complex-truck-racks-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-control-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-detail-charts-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-detail-settings-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-detail-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-equipment-card-trigger-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-equipment-search-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-fragment-reconciler-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-haul-assignment-state-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-realtime-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-sounds-v1.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-transport-v1.js
