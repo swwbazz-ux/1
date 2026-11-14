@@ -1184,7 +1184,10 @@ class AccessLoginTests(TestCase):
         self.assertEqual(employee_access.access_code, '654321')
         self.assertEqual(employee_access.status, EmployeeAccess.Status.ACTIVATED)
         self.assertEqual(employee_access.activated_at, activated_at)
-        self.assertEqual(employee_access.last_login_at, last_login_at)
+        # T-021: смена прав отзывает прежний вход, поэтому поколение сессии
+        # (last_login_at) осознанно сдвигается вперёд, а не сохраняется.
+        self.assertIsNotNone(employee_access.last_login_at)
+        self.assertGreater(employee_access.last_login_at, last_login_at)
         self.assertTrue(employee_access.is_active)
         self.assertEqual(lock_order[:2], ['employee', 'access'])
         self.assertEqual(EmployeeAccess.objects.filter(employee=employee).count(), 1)

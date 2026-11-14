@@ -1,6 +1,12 @@
-# Подсказка начальных показаний Водителя и обновление веб-экрана v381. 5 файлов.
-СИСТЕМА_MVP/backend/templates/includes/mobile_shift_screen.html
-СИСТЕМА_MVP/backend/static/css/driver-shift-v1.css
-СИСТЕМА_MVP/backend/static/js/driver-shift-close-v1.js
+# T-021 (скрытие ПИН в журнале админки, отзыв сессий) + T-030 (FOR UPDATE на nullable стороне outer join в отчётах). База: 63dc191e. 11 файлов.
 СИСТЕМА_MVP/backend/users/views.py
-СИСТЕМА_MVP/backend/users/role_apps.py
+СИСТЕМА_MVP/backend/users/admin.py
+СИСТЕМА_MVP/backend/users/middleware.py
+СИСТЕМА_MVP/backend/users/oup_services.py
+СИСТЕМА_MVP/backend/users/oup_views.py
+СИСТЕМА_MVP/backend/users/session_device.py
+СИСТЕМА_MVP/backend/users/work_profiles.py
+СИСТЕМА_MVP/backend/users/redaction.py
+СИСТЕМА_MVP/backend/users/management/commands/scrub_admin_log_pins.py
+СИСТЕМА_MVP/backend/assignments/deputy_views.py
+СИСТЕМА_MVP/backend/reports/views.py

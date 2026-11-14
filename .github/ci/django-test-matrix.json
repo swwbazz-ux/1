@@ -43,7 +43,7 @@
     },
     {
       "name": "users-and-reports",
-      "tests": "users.test_employee_access_lock_order reports.test_driver_rating_materialization_postgresql reports.test_rating_period_generation_postgresql"
+      "tests": "users.test_employee_access_lock_order users.test_session_revocation_postgresql reports.test_driver_rating_materialization_postgresql reports.test_rating_period_generation_postgresql reports.test_shift_report_trip_correction_postgresql"
     },
     {
       "name": "settlement",

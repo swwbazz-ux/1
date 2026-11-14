@@ -23,6 +23,7 @@ from .employee_access_locks import (
     lock_employee_access_plan,
 )
 from .models import AdminActionLog, Employee, EmployeeAccess, Role
+from .live_monitor import force_end_access_sessions
 from .work_profiles import PRODUCTION_APP_ROLE_CODES, employee_has_effective_access_role
 from .oup_undo import (
     OUP_ACTION_ACCESS_DEACTIVATED,
@@ -235,7 +236,7 @@ def issue_employee_access(*, employee, role, actor):
         'выдан первичный PIN' if created else 'перевыпущен первичный PIN',
         employee_access,
         action_code=OUP_ACTION_ACCESS_ISSUED if created else OUP_ACTION_ACCESS_REISSUED,
-        new_value=f'Сотрудник: {employee.full_name}; роль: {role.name}; первичный PIN: {code}',
+        new_value=f'Сотрудник: {employee.full_name}; роль: {role.name}; первичный PIN выдан',
         object_repr=f'{employee.full_name} — {role.name}',
         undo_payload={
             'version': 1,
@@ -259,6 +260,7 @@ def deactivate_employee_access(*, employee_access, actor):
     employee_access.is_active = False
     employee_access.deactivated_at = timezone.now()
     employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+    force_end_access_sessions(access=employee_access)
     log_oup_action(
         actor,
         'отключён доступ сотрудника',
@@ -581,6 +583,8 @@ def dismiss_employee(*, employee, actor, dismissed_at, reason=''):
             employee_accesses,
             ['status', 'is_active', 'deactivated_at'],
         )
+        for employee_access in employee_accesses:
+            force_end_access_sessions(access=employee_access)
 
     affected_plan_ids = list(
         CrewPlanSlot.objects.filter(plan_id__in=draft_plan_ids)

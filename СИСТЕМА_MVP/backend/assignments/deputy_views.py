@@ -18,6 +18,7 @@ from openpyxl.worksheet.page import PageMargins
 from references.models import Equipment
 from shifts.models import WatchPeriod
 from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
+from users.active_role import role_session_state
 from users.role_apps import (
     APP_CONTRACT_VERSION,
     get_role_app,
@@ -320,22 +321,19 @@ def _deputy_service_worker_script():
 
 
 def deputy_access_from_request(request):
-    access_id = request.session.get('employee_access_id')
-    if not access_id:
+    """Доступ депутата: только действующий статус и текущее поколение сессии.
+
+    Раньше здесь исключались лишь blocked/deactivated, поэтому доступ в статусе
+    not_activated и сессия, выданная до повторного входа, продолжали открывать
+    расстановку. Проверяем те же правила, что и остальные рабочие экраны.
+    """
+    state = role_session_state(request)
+    access = state.get('access')
+    if not access or not state.get('is_active'):
         return None
-    return (
-        EmployeeAccess.objects
-        .select_related('employee', 'role')
-        .filter(
-            id=access_id,
-            is_active=True,
-            employee__is_active=True,
-            role__is_active=True,
-            role__code=DEPUTY_ROLE_CODE,
-        )
-        .exclude(status__in=[EmployeeAccess.Status.BLOCKED, EmployeeAccess.Status.DEACTIVATED])
-        .first()
-    )
+    if access.role.code != DEPUTY_ROLE_CODE:
+        return None
+    return access
 
 
 def _employee_short_name(employee):
