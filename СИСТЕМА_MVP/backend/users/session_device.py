@@ -11,7 +11,7 @@ MOBILE_USER_AGENT_TOKENS = (
     'mobile',
     'windows phone',
 )
-PERSONAL_SESSION_MAX_RENEW_INTERVAL_SECONDS = 60 * 60 * 24 * 30
+PERSONAL_SESSION_MAX_RENEW_INTERVAL_SECONDS = 60 * 60 * 24 * 7
 # T-021: эффективный срок личной сессии — не больше 30 дней, независимо от
 # значения в настройках. Полевая работа ежедневная; старая годовая cookie
 # должна перестать действовать, даже если её выдали раньше.

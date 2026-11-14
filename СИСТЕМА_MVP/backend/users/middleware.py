@@ -164,14 +164,16 @@ class PersonalSessionRenewalMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
-        device_kind = request.session.get('device_kind') or 'personal'
-        if (
-            device_kind == 'personal'
-            and request.session.get('employee_access_id')
-            and not self._renewal_is_exempt(request)
-            and self._renewal_is_due(request.session)
-        ):
-            request.session.set_expiry(personal_session_expiry())
+        session = request.session
+        if not session.get('employee_access_id') or self._renewal_is_exempt(request):
+            return response
+        # Длинную старую cookie укорачиваем только на изменяющем запросе:
+        # read-only GET не должен писать django_session вообще.
+        if request.method not in SAFE_ROLE_SWITCH_METHODS and self._session_expiry_is_too_long(session):
+            session.set_expiry(personal_session_expiry())
+        elif session.get('device_kind') == 'personal' and self._renewal_is_due(session):
+            # Продление — только для явно личных сессий и не чаще интервала.
+            session.set_expiry(personal_session_expiry())
         return response
 
     @classmethod
@@ -183,20 +185,39 @@ class PersonalSessionRenewalMiddleware:
         )
 
     @staticmethod
-    def _renewal_is_due(session):
+    def _remaining_seconds(session):
+        try:
+            return session.get_expiry_age(modification=timezone.now())
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _stored_relative_expiry(session):
         stored_expiry = session.get('_session_expiry')
         if isinstance(stored_expiry, int) and not isinstance(stored_expiry, bool):
-            # Previous releases stored a relative integer. Convert it once on
-            # an ordinary page so subsequent checks use a real absolute date.
-            return True
-        try:
-            remaining = session.get_expiry_age(modification=timezone.now())
-        except (TypeError, ValueError):
+            return stored_expiry
+        return None
+
+    @classmethod
+    def _session_expiry_is_too_long(cls, session):
+        """Срок больше действующего: старая годовая cookie (clamp один раз)."""
+        stored_expiry = cls._stored_relative_expiry(session)
+        if stored_expiry is not None:
+            # 0 — сессия до закрытия браузера, её не трогаем.
+            return stored_expiry > personal_session_age_seconds()
+        remaining = cls._remaining_seconds(session)
+        return remaining is not None and remaining > personal_session_age_seconds()
+
+    @classmethod
+    def _renewal_is_due(cls, session):
+        stored_expiry = cls._stored_relative_expiry(session)
+        if stored_expiry is not None:
+            # Старый относительный срок (например, год в секундах) конвертируем
+            # один раз; 0 — до закрытия браузера, это не legacy-срок.
+            return stored_expiry > personal_session_age_seconds()
+        remaining = cls._remaining_seconds(session)
+        if remaining is None:
             return False
-        # Старая (годовая) cookie: срок больше действующего — переписываем один
-        # раз на обычной странице, чтобы серверная сессия стала короче.
-        if remaining > personal_session_age_seconds():
-            return True
         return remaining <= personal_session_renew_interval_seconds()
 
 

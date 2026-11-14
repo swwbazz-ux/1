@@ -49,13 +49,19 @@ class PersonalSessionAgeTests(TestCase):
             PERSONAL_SESSION_MAX_AGE_SECONDS - 5,
         )
 
-    def test_previously_issued_year_long_cookie_is_shortened_on_next_page(self):
+    def test_previously_issued_year_long_cookie_is_shortened_on_next_state_change(self):
         session = self.client.session
         session.set_expiry(timezone.now() + timedelta(days=365))
         session.save()
         self.assertGreater(session.get_expiry_age(), PERSONAL_SESSION_MAX_AGE_SECONDS)
 
-        response = self.client.get('/interfaces/', HTTP_HOST='localhost')
+        # Read-only GET не пишет сессию (CI-гейт); clamp — на изменяющем запросе.
+        response = self.client.post(
+            '/push/shown/',
+            data='{}',
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(
@@ -65,13 +71,18 @@ class PersonalSessionAgeTests(TestCase):
 
     def test_legacy_session_without_device_kind_is_shortened(self):
         # Сессии, выданные до появления отметки device_kind: срок всё равно
-        # должен укорачиваться на обычном экране (T-021, review 2.2).
+        # должен укорачиваться на изменяющем запросе (T-021, review 2.2).
         session = self.client.session
         session.pop('device_kind', None)
         session.set_expiry(timezone.now() + timedelta(days=365))
         session.save()
 
-        response = self.client.get('/interfaces/', HTTP_HOST='localhost')
+        response = self.client.post(
+            '/push/shown/',
+            data='{}',
+            content_type='application/json',
+            HTTP_HOST='localhost',
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(
