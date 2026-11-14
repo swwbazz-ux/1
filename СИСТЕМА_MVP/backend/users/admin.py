@@ -18,6 +18,7 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
+from .redaction import redact_access_codes
 
 
 class EmployeeAdminForm(forms.ModelForm):
@@ -171,7 +172,7 @@ class TemporaryWorkTransferAdmin(admin.ModelAdmin):
 @admin.register(EmployeeAccess)
 class EmployeeAccessAdmin(admin.ModelAdmin):
     list_display = ('employee', 'role', 'status', 'is_active', 'last_login_at', 'created_at', 'deactivated_at')
-    search_fields = ('employee__full_name', 'role__name', 'access_code')
+    search_fields = ('employee__full_name', 'role__name')
     list_filter = ('role', 'status', 'is_active')
 
 
@@ -211,10 +212,32 @@ class AdminActionLogAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'actor', 'action', 'action_code', 'object_type', 'object_repr', 'reversal_of')
     search_fields = ('actor__full_name', 'action', 'object_repr', 'comment')
     list_filter = ('action', 'action_code', 'object_type')
+    # Сырые значения и снимок отмены содержат код доступа: в карточке их
+    # показывают только маскированные *_display-методы ниже. Без exclude Django
+    # добавляет эти редактируемые поля модели в fieldsets и на read-only
+    # странице печатает их как есть.
+    exclude = ('old_value', 'new_value', 'undo_payload')
     readonly_fields = (
         'created_at', 'actor', 'action', 'action_code', 'object_type', 'object_id', 'object_repr',
-        'old_value', 'new_value', 'comment', 'undo_payload', 'reversal_of',
+        'old_value_display', 'new_value_display', 'comment', 'undo_payload_display', 'reversal_of',
     )
+
+    def old_value_display(self, obj):
+        return redact_access_codes(obj.old_value) or '—'
+
+    old_value_display.short_description = 'Старое значение'
+
+    def new_value_display(self, obj):
+        return redact_access_codes(obj.new_value) or '—'
+
+    new_value_display.short_description = 'Новое значение'
+
+    def undo_payload_display(self, obj):
+        # Снимок нужен только для отмены ОУП и может содержать код доступа:
+        # в карточке журнала он не показывается.
+        return '— снимок скрыт —' if obj.undo_payload else ''
+
+    undo_payload_display.short_description = 'Снимок для отмены'
 
     def has_add_permission(self, request):
         return False
