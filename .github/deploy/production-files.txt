@@ -1,27 +1,4 @@
-# T-033 полный RC для вахты: T-016 (SSE), T-019 (Android native), T-020/T-025 (offline), T-021 (PIN/сессии), T-030 (отчёты). База: 63dc191e. 70 изменённых production-файлов + 24 runtime-ассетов диспетчера, которые требует release-audit, итого 94. Тесты, tools, docs и .github в выпуск не входят.
-deployment/sse-pilot/accounting-mvp-sse-pilot.service.example
-deployment/sse-pilot/asgi-pilot.env.example
-deployment/sse-pilot/nginx-sse-location.conf.example
-deployment/sse-pilot/redis-sse-pilot.acl.example
-deployment/sse-pilot/redis-sse-pilot.conf.example
-deployment/sse-pilot/requirements-sse-pilot.txt
-mobile/capacitor-shell/android/app/build.gradle
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/AppNotifications.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/BackgroundConnectionPlugin.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/ConnectionState.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/ConnectivityForegroundService.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/CopperFirebaseMessagingService.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/DriverDumpPointAnnouncer.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/NativePushPlugin.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/NativeSoundPlugin.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/OperationalDeliveryLedger.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/OperationalRecoveryBuffer.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/OperationalVoiceAnnouncer.java
-mobile/capacitor-shell/android/app/src/main/java/ru/copperresources/mobile/OperationalVoicePlayer.java
-mobile/capacitor-shell/android/app/src/test/java/ru/copperresources/mobile/OperationalDeliveryContractTest.java
-mobile/capacitor-shell/package.json
-mobile/capacitor-shell/profiles/driver_sse_pilot/app.properties
-mobile/capacitor-shell/profiles/excavator_sse_pilot/app.properties
+# T-033 полный RC для вахты: T-016 (SSE), T-019 (Android native), T-020/T-025 (offline), T-021 (PIN/сессии), T-030 (отчёты). База: 63dc191e. Только пути внутри СИСТЕМА_MVP/backend: 47 изменённых продуктовых файлов + 24 runtime-ассетов диспетчера, итого 71. Вне backend намеренно не деплоится: mobile/capacitor-shell (APK собирается отдельным режимом) и deployment/sse-pilot (example-конфиги, не рантайм). Тесты, tools, docs и .github в выпуск не входят.
 СИСТЕМА_MVP/backend/.env.stand.example
 СИСТЕМА_MVP/backend/assignments/deputy_views.py
 СИСТЕМА_MVP/backend/config/settings_sse_local.py
