@@ -7,6 +7,7 @@ from django.utils import timezone
 from .active_role import SAFE_ROLE_SWITCH_METHODS, role_session_state
 from .context_processors import NATIVE_APP_COOKIE, native_app_marker_in_user_agent
 from .session_device import (
+    personal_session_age_seconds,
     personal_session_expiry,
     personal_session_renew_interval_seconds,
 )
@@ -163,8 +164,9 @@ class PersonalSessionRenewalMiddleware:
 
     def __call__(self, request):
         response = self.get_response(request)
+        device_kind = request.session.get('device_kind') or 'personal'
         if (
-            request.session.get('device_kind') == 'personal'
+            device_kind == 'personal'
             and request.session.get('employee_access_id')
             and not self._renewal_is_exempt(request)
             and self._renewal_is_due(request.session)
@@ -191,6 +193,10 @@ class PersonalSessionRenewalMiddleware:
             remaining = session.get_expiry_age(modification=timezone.now())
         except (TypeError, ValueError):
             return False
+        # Старая (годовая) cookie: срок больше действующего — переписываем один
+        # раз на обычной странице, чтобы серверная сессия стала короче.
+        if remaining > personal_session_age_seconds():
+            return True
         return remaining <= personal_session_renew_interval_seconds()
 
 

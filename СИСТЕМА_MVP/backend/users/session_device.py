@@ -12,10 +12,20 @@ MOBILE_USER_AGENT_TOKENS = (
     'windows phone',
 )
 PERSONAL_SESSION_MAX_RENEW_INTERVAL_SECONDS = 60 * 60 * 24 * 30
+# T-021: эффективный срок личной сессии — не больше 30 дней, независимо от
+# значения в настройках. Полевая работа ежедневная; старая годовая cookie
+# должна перестать действовать, даже если её выдали раньше.
+PERSONAL_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
+
+def personal_session_age_seconds():
+    """Действующий срок личной сессии: настройка, но не больше 30 дней."""
+    configured = max(1, int(settings.ROLE_APP_PERSONAL_SESSION_AGE))
+    return min(configured, PERSONAL_SESSION_MAX_AGE_SECONDS)
 
 
 def personal_session_renew_interval_seconds():
-    session_age = max(1, int(settings.ROLE_APP_PERSONAL_SESSION_AGE))
+    session_age = personal_session_age_seconds()
     return max(
         1,
         min(PERSONAL_SESSION_MAX_RENEW_INTERVAL_SECONDS, session_age // 2),
@@ -24,7 +34,7 @@ def personal_session_renew_interval_seconds():
 
 def personal_session_expiry(*, now=None):
     now = now or timezone.now()
-    return now + timedelta(seconds=int(settings.ROLE_APP_PERSONAL_SESSION_AGE))
+    return now + timedelta(seconds=personal_session_age_seconds())
 
 
 def is_mobile_request(request):
