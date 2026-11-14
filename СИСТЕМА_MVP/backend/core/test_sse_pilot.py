@@ -4,8 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from asgiref.sync import sync_to_async
 from django.core.management import call_command
-from django.db import IntegrityError, connection
+from django.db import IntegrityError, connection, connections
 from django.http import JsonResponse
 from django.test import (
     Client,
@@ -42,7 +43,36 @@ from .sse import (
 )
 
 
-class SseProtocolUnitTests(SimpleTestCase):
+class _StreamConnectionCleanupMixin:
+    """Закрывает соединения, которые SSE-поток открыл вне потока теста.
+
+    ORM внутри стрима выполняется через
+    ``sync_to_async(..., thread_sensitive=True)``, поэтому asgiref уводит его
+    в отдельный долгоживущий поток (``SyncToAsync.single_thread_executor``) со
+    своим соединением к PostgreSQL. Django при завершении теста закрывает
+    соединения только текущего потока, поэтому без явного закрытия
+    ``DROP DATABASE`` тестовой базы получает ``ObjectInUse`` — тот же класс
+    проблемы, который T-021 закрыл для revocation-теста.
+    """
+
+    def tearDown(self):
+        self._close_stream_connections()
+        super().tearDown()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._close_stream_connections()
+        super().tearDownClass()
+
+    @staticmethod
+    def _close_stream_connections():
+        connections.close_all()
+        asyncio.run(
+            sync_to_async(connections.close_all, thread_sensitive=True)(),
+        )
+
+
+class SseProtocolUnitTests(_StreamConnectionCleanupMixin, SimpleTestCase):
     databases = {'default'}
 
     def test_explicit_applied_then_after_precede_last_event_id(self):
@@ -661,7 +691,7 @@ class SseProtocolUnitTests(SimpleTestCase):
     ROLE_APP_BASE_DOMAINS=('localhost',),
     ALLOWED_HOSTS=['localhost', 'testserver'],
 )
-class SseStreamDatabaseTests(TransactionTestCase):
+class SseStreamDatabaseTests(_StreamConnectionCleanupMixin, TransactionTestCase):
     # NB: `reset_sequences = True` нельзя включать в этом классе. На PostgreSQL
     # Django сбрасывает КАЖДУЮ последовательность в 1
     # (django/db/backends/postgresql/operations.py:216-233), а тестовая база после
@@ -761,8 +791,15 @@ class SseStreamDatabaseTests(TransactionTestCase):
 
     def test_long_lived_scan_connection_reopens_before_reading_external_commit(self):
         def scan():
-            refresh_stream_database_snapshot()
-            return operational_journal_status()['max_version']
+            try:
+                refresh_stream_database_snapshot()
+                return operational_journal_status()['max_version']
+            finally:
+                # Соединение рабочего потока пула закрывается явно: при
+                # CONN_MAX_AGE=60 close_old_connections() его не закрывает,
+                # а Django в teardown закрывает только соединения текущего
+                # потока (образец — T-021, users/test_session_revocation_postgresql.py).
+                connections.close_all()
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             self.assertEqual(executor.submit(scan).result(), 0)
