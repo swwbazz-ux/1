@@ -37,7 +37,15 @@
             || occurredAt > now + 1000 || now - occurredAt > 15000
             || !Number.isFinite(lastSuccessAt) || lastSuccessAt < 0 || lastSuccessAt > occurredAt) return;
         if (evidence.status === "success" && (lastSuccessAt <= 0 || now - lastSuccessAt > 15000)) return;
-        var key = evidence.status + ":" + occurredAt + ":" + lastSuccessAt;
+        var operationalResetRequired = evidence.operationalResetRequired === true;
+        var operationalResetReason = String(evidence.operationalResetReason || "");
+        if (!/^[a-z0-9_]{0,64}$/.test(operationalResetReason)) operationalResetReason = "invalid_reset";
+        var operationalResetToVersion = Number(evidence.operationalResetToVersion);
+        if (!Number.isSafeInteger(operationalResetToVersion) || operationalResetToVersion < 0) {
+            operationalResetToVersion = 0;
+        }
+        var key = evidence.status + ":" + occurredAt + ":" + lastSuccessAt
+            + ":" + (operationalResetRequired ? operationalResetReason + ":" + operationalResetToVersion : "");
         if (key === lastEvidenceKey) return;
         var failureCount = Number(evidence.failureCount);
         var serverVersion = Number(evidence.serverVersion);
@@ -51,7 +59,10 @@
             lastSuccessAtMs: lastSuccessAt,
             failureCount: Number.isSafeInteger(failureCount) && failureCount >= 0 ? failureCount : 0,
             reason: allowedReason.test(reason) ? reason : "local_processing",
-            serverVersion: Number.isSafeInteger(serverVersion) && serverVersion >= 0 ? serverVersion : 0
+            serverVersion: Number.isSafeInteger(serverVersion) && serverVersion >= 0 ? serverVersion : 0,
+            operationalResetRequired: operationalResetRequired,
+            operationalResetReason: operationalResetReason,
+            operationalResetToVersion: operationalResetToVersion
         };
         lastEvidenceKey = key;
         lastEvidenceAt = occurredAt;
@@ -66,9 +77,15 @@
         if (roleCode === "driver") {
             var driverShift = document.querySelector("[data-driver-shift-close-form]");
             var driverShell = document.querySelector("[data-driver-shell]");
+            // Скрытая форма закрытия рисуется и без открытой смены (пустой
+            // data-native-shift-id): смена считается активной только с непустым id,
+            // иначе сервис стартует и гаснет по ответу background_connection_required=false.
+            var driverShiftId = driverShift
+                ? String(driverShift.dataset.nativeShiftId || "").trim()
+                : "";
             return {
-                required: !!driverShift,
-                shiftId: driverShift ? String(driverShift.dataset.nativeShiftId || "") : "",
+                required: driverShiftId !== "",
+                shiftId: driverShiftId,
                 authGeneration: driverShell ? String(driverShell.dataset.driverAuthGeneration || "") : ""
             };
         }
@@ -156,11 +173,30 @@
                 return snapshot;
             }).catch(function () { return {}; });
         },
+        syncOperationalState: function (state) {
+            if (typeof plugin.syncOperationalState !== "function") return Promise.resolve({supported: false});
+            state = state || {};
+            return Promise.resolve(plugin.syncOperationalState({
+                contextKey: String(state.contextKey || ""),
+                journalEpoch: String(state.journalEpoch || ""),
+                appliedVersion: Number(state.appliedVersion || 0),
+                pendingVersion: Number(state.pendingVersion || 0),
+                authoritativeReset: state.authoritativeReset === true,
+                resetVersion: Number(state.resetVersion || 0),
+                reason: String(state.reason || "webview_sync")
+            }));
+        },
         queueDriverShiftClose: function (payload) {
             if (roleCode !== "driver" || typeof plugin.queueDriverShiftClose !== "function") {
                 return Promise.reject(new Error("Фоновая очередь недоступна"));
             }
-            return Promise.resolve(plugin.queueDriverShiftClose(payload || {}));
+            payload = payload || {};
+            // Пустой id — смены нет: не ставим закрытие в очередь и не выдаём это
+            // за успешно принятое закрытие (H1: скрытая форма закрытия).
+            if (String(payload.shiftId || "").trim() === "") {
+                return Promise.reject(new Error("Смена не открыта: закрытие не поставлено в очередь"));
+            }
+            return Promise.resolve(plugin.queueDriverShiftClose(payload));
         },
         acknowledgeDriverShiftClose: function (clientActionId) {
             if (roleCode !== "driver" || typeof plugin.acknowledgeDriverShiftClose !== "function") {

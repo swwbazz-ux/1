@@ -15,13 +15,17 @@ from users.role_apps import (
     get_role_app_for_request,
 )
 
-from .models import OperationalStateEvent, OperationalStateVersion
+from .models import OperationalStateEvent
 from .offline_sync import (
     OfflineEventProblem,
     SYNC_FORMAT_VERSION,
     process_offline_batch,
 )
-from .realtime import relevant_event_delta, worker_equipment_ids_for_access
+from .realtime import (
+    relevant_event_page,
+    selected_equipment_ids_for_access,
+    worker_equipment_ids_for_access,
+)
 
 
 def parse_positive_int(value, default, maximum=None):
@@ -204,26 +208,54 @@ def operational_state_version_view(request):
 
         reconcile_expired_manual_trips_throttled()
 
-    state = OperationalStateVersion.objects.filter(key='production').first()
+    from .sse import build_cursor_context, operational_journal_status
+
+    journal = operational_journal_status()
     after = parse_positive_int(request.GET.get('after'), 0)
     limit = parse_positive_int(request.GET.get('limit'), 50, maximum=200)
     include_events = parse_bool_param(request.GET.get('include_events'), True)
     events = []
     events_truncated = False
-    state_version = state.version if state else 0
-    if include_events and state_version > after:
+    state_version = int(journal['max_version'])
+    journal_min_version = journal['min_version']
+    reset_reason = ''
+    if after > state_version:
+        reset_reason = 'cursor_ahead'
+    elif (
+        after < state_version
+        and (
+            journal_min_version is None
+            or after < int(journal_min_version) - 1
+        )
+    ):
+        reset_reason = 'journal_gap'
+    reset_required = bool(reset_reason)
+    scanned_through_version = after
+    if include_events and state_version > after and not reset_required:
         events_queryset = OperationalStateEvent.objects.filter(
             key='production',
             version__lte=state_version,
         )
         if after:
             events_queryset = events_queryset.filter(version__gt=after)
-        events, events_truncated = relevant_event_delta(
+        events, events_truncated, scanned_version = relevant_event_page(
             events_queryset.order_by('version'),
             access,
             limit=limit,
         )
+        if scanned_version is not None:
+            scanned_through_version = scanned_version
+    page_cursor = (
+        after if reset_required
+        else min(scanned_through_version, state_version)
+    )
+    caught_up = not reset_required and page_cursor >= state_version
     relevant = bool(events) or events_truncated
+    worker_equipment_ids = (
+        sorted(worker_equipment_ids_for_access(access))
+        if role_is_active_for_app and access.role.code in {'driver', 'excavator_operator'}
+        else []
+    )
     payload = {
         'authenticated': True,
         'role_active': role_is_active_for_app,
@@ -241,20 +273,59 @@ def operational_state_version_view(request):
         'app_contract_version': APP_CONTRACT_VERSION,
         'role_shell_version': role_app.shell_version if role_app else '',
         'role_app_code': role_app.role_code if role_app else access.role.code,
-        'worker_equipment_ids': (
-            sorted(worker_equipment_ids_for_access(access))
-            if role_is_active_for_app and access.role.code in {'driver', 'excavator_operator'}
-            else []
-        ),
+        'worker_equipment_ids': worker_equipment_ids,
         'key': 'production',
         'version': state_version,
         'events': events,
         'events_truncated': events_truncated,
         'relevant': relevant if include_events else None,
+        'page_cursor': page_cursor,
+        'scanned_through_version': page_cursor,
+        'high_water_version': state_version,
+        'caught_up': caught_up,
+        'reset_required': reset_required,
+        'snapshot_required': reset_required,
+        'reset_reason': reset_reason,
+        'reset_to_version': state_version if reset_required else None,
     }
+    if (
+        reset_required
+        and role_is_active_for_app
+        and role_app is not None
+        and role_app.role_code in {'driver', 'excavator_operator'}
+    ):
+        from .voice_state import build_current_voice_state
+
+        payload['current_voice_state'] = build_current_voice_state(
+            access,
+            role_app.role_code if role_app else access.role.code,
+            observed_at_version=state_version,
+        )
+    if access.role.code in {'driver', 'excavator_operator'}:
+        # Additive metadata shared by foreground SSE and native heartbeat. Old
+        # APKs ignore it; new clients partition durable cursors by the actual
+        # user/role/technique scope and journal generation.
+        cursor_context = build_cursor_context(
+            access=access,
+            role_app_code=role_app.role_code if role_app else access.role.code,
+            worker_equipment_ids=worker_equipment_ids,
+            cursor_equipment_ids=selected_equipment_ids_for_access(access),
+            active_shift_id=active_shift.id if active_shift else '',
+            session_revision=role_state.get('session_revision', ''),
+        )
+        payload.update({
+            'journal_epoch': journal['epoch'],
+            'context': cursor_context,
+            'journal': {
+                'generation': journal['epoch'],
+                'epoch': journal['epoch'],
+                'min_version': journal['min_version'],
+                'max_version': journal['max_version'],
+            },
+        })
     if state_version > after:
         payload.update({
-            'reason': state.reason if state else '',
-            'updated_at': state.updated_at.isoformat() if state else '',
+            'reason': journal['reason'],
+            'updated_at': journal['updated_at'],
         })
     return JsonResponse(payload)

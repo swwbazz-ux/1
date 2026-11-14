@@ -194,7 +194,16 @@
         }
     }
 
-    function resetClosingForm(form, state) {
+    /* Форма закрытия живёт на экране между сменами: после «закрыл → открыл»
+       в полях оставались показания прошлой смены, а подписи «Начало» уже новые
+       (QA T-025, 8.2) — устаревшее топливо сервер не проверяет и оно прошло бы
+       молча. Помним, для какой смены форма подготовлена; в атрибут формы это
+       не пишем — послойное обновление снимает клиентские атрибуты. */
+    var closingPreparedForm = null;
+    var closingPreparedShiftRef = "";
+
+    function resetClosingForm(form, state, options) {
+        options = options || {};
         form.dataset.driverInPlacePending = "false";
         form.classList.remove("is-sync-pending");
         var pendingPanel = form.querySelector("[data-driver-shift-sync-pending]");
@@ -211,6 +220,23 @@
                 var value = text(state.readings[node.dataset.driverShiftStart]);
                 node.textContent = value || "—";
             });
+        }
+        /* Показания готовим один раз на смену — при первой подготовке формы или
+           для новой местной смены. Повторное применение той же смены (фрагмент,
+           подтверждение сервера) ввод водителя не трогает: очищенное им поле не
+           заполняется заново. */
+        if (options.prepareReadings) {
+            /* Новая смена: показания прошлой снимаем целиком, иначе
+               предзаполнение ниже их не тронет (оно заполняет только пустые). */
+            if (options.resetReadings && typeof root.clearDriverShiftCloseReadings === "function") {
+                try { root.clearDriverShiftCloseReadings(form); } catch (error) {}
+            }
+            /* Подписи «Начало» обновлены — поля конца смены получают эти же
+               показания (driver-shift-close-v1.js, prefillDriverShiftCloseReadings),
+               иначе три обязательных поля держат отправку (T-024). */
+            if (typeof root.prefillDriverShiftCloseReadings === "function") {
+                try { root.prefillDriverShiftCloseReadings(form); } catch (error) {}
+            }
         }
     }
 
@@ -241,8 +267,33 @@
             closeForm.dataset.nativeShiftId = serverId;
             var shiftInput = closeForm.querySelector('input[name="shift_id"]');
             if (shiftInput) shiftInput.value = serverId;
-            if (open && decision.local) resetClosingForm(closeForm, state);
-            else if (open && state && state.status === "open") resetClosingForm(closeForm, state);
+            if (open) {
+                /* Помним, для какой смены форма закрытия уже подготовлена, — в том
+                   числе для серверной. Иначе первая же местная смена после
+                   серверной шла без очистки и оставляла в полях показания
+                   серверной смены при новых подписях «Начало» (QA T-025,
+                   итерация 2). */
+                if (closingPreparedForm !== closeForm) {
+                    closingPreparedForm = closeForm;
+                    closingPreparedShiftRef = "";
+                }
+                var readingsRef = text(decision.shiftRef);
+                var knownShift = readingsRef !== "";
+                var newShiftForForm = knownShift && closingPreparedShiftRef !== readingsRef;
+                /* Показания готовит телефон только для местной смены: серверную
+                   смену рисует и заполняет сервер. */
+                var prepareReadings = decision.local === true && newShiftForForm;
+                /* Стирать прошлые значения можно, если форму уже готовили для
+                   другой смены, — серверную разметку с ошибками отправки не трогаем. */
+                var resetReadings = prepareReadings && closingPreparedShiftRef !== "";
+                if (knownShift) closingPreparedShiftRef = readingsRef;
+                if (decision.local || (state && state.status === "open")) {
+                    resetClosingForm(closeForm, state, {
+                        prepareReadings: prepareReadings,
+                        resetReadings: resetReadings
+                    });
+                }
+            }
         }
         if (openForm && open) clearOpeningBusy(openForm);
         if (closeForm && !open) clearClosingBusy(closeForm);

@@ -47,6 +47,7 @@ from core.models import (
     OperationalStateVersion,
     bump_operational_state,
     lock_production_state,
+    rotate_operational_journal_epoch,
 )
 from core.operational_fragments import operational_fragment_response
 from downtimes.driver_workflow import (
@@ -93,6 +94,7 @@ from shifts.services import (
     DriverShiftCloseConfirmationRequired,
     DriverShiftCloseIdempotencyConflict,
     driver_close_request_signature,
+    driver_open_shift_queryset,
     ensure_driver_close_action_matches,
     find_other_role_open_shift,
     open_driver_shift,
@@ -288,7 +290,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v381'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v382'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -811,6 +813,15 @@ self.addEventListener("message", (event) => {{
     }}
 }});
 """.strip()
+
+
+def _session_generation_is_stale(request, access):
+    """Поколение сессии не совпадает с текущим у доступа (сессия отозвана)."""
+    session_generation = request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+    if not access.last_login_at or not session_generation:
+        return False
+    parsed_generation = parse_datetime(str(session_generation))
+    return bool(parsed_generation and parsed_generation != access.last_login_at)
 
 
 def get_current_access(request):
@@ -1998,6 +2009,7 @@ def system_admin_reset_shift_test_data_view(request):
         Trip.objects.all().delete()
         DowntimeEvent.objects.all().delete()
         OperationalStateEvent.objects.all().delete()
+        rotate_operational_journal_epoch()
         bump_operational_state(
             'SystemAdmin:test_shift_data_reset',
             event_type='test_shift_data_reset',
@@ -4641,17 +4653,6 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
     return catalog, state, active_acceptance
 
 
-def driver_open_shift_queryset(employee):
-    return (
-        EmployeeShift.objects
-        .filter(employee=employee, closed_at__isnull=True)
-        .filter(
-            Q(workplace_code='driver')
-            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
-        )
-    )
-
-
 def driver_assignment_countdown_label(assignment):
     if not assignment:
         return '05:00'
@@ -6176,6 +6177,10 @@ def driver_downtime_action_view(request):
 
     payload = driver_json_payload(request)
     action = (payload.get('action') or '').strip()
+    # Порядок блокировок: журнал производства, затем техника (как в
+    # завершении рейса, trips/views.py:6998). Обратный порядок давал дедлок с
+    # опросом состояния/reconciler (T-016, PostgreSQL).
+    lock_production_state()
     locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     open_shift.equipment = locked_equipment
     if action == 'close':
