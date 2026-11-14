@@ -62,7 +62,13 @@ window.applyOperationalStateRefresh = function (context) {
        подтвердил хоть одно событие очереди, ответ мог его не видеть: не применяем,
        через секунду просим свежий. */
     var acceptedAtRequest = Number(window.driverOutboxAcceptedCount) || 0;
-    var refreshPromise = window.AppOperationalFragment.request("driver", targetVersion).then(function (payload) {
+    var refreshPromise = window.AppOperationalFragment.request("driver", targetVersion, {
+        snapshot: !!(context && context.snapshotRequired),
+        snapshotUrl: context && context.snapshotUrl ? String(context.snapshotUrl) : ""
+    }).then(function (payload) {
+        var snapshotIsCurrent = !context || !context.snapshotRequired
+            || typeof context.isCurrentSnapshot !== "function"
+            || context.isCurrentSnapshot(Number(payload.snapshot_version || payload.version || 0));
         var oldShell = document.querySelector("[data-driver-shell]");
         if (!oldShell || oldShell !== requestShell || isDriverOperationalRefreshUnsafe(oldShell)) {
             return {deferred: true, reason: "driver_busy"};
@@ -175,7 +181,12 @@ window.applyOperationalStateRefresh = function (context) {
                 }
                 var acceptedVersion = Number(payload.version || 0);
                 document.body.dataset.operationalStateVersion = String(acceptedVersion);
-                return {applied: true, version: acceptedVersion, skipped: unchanged ? "unchanged" : "own_downtime"};
+                return {
+                    applied: true,
+                    version: acceptedVersion,
+                    snapshotVersion: Number(payload.snapshot_version || acceptedVersion),
+                    skipped: unchanged ? "unchanged" : "own_downtime"
+                };
             }
         }
         var previousDowntimeCard = oldShell.querySelector("[data-driver-active-downtime-flow]");
@@ -254,7 +265,7 @@ window.applyOperationalStateRefresh = function (context) {
         if (typeof window.checkAchievementPrize === "function") {
             window.checkAchievementPrize(context);
         }
-        if (becameLoaded) {
+        if (becameLoaded && snapshotIsCurrent) {
             playDriverDumpPointAlert({events: [{
                 version: targetVersion,
                 type: "trip_changed",
@@ -275,7 +286,7 @@ window.applyOperationalStateRefresh = function (context) {
            Предложение снять назначение отсюда только пикает: голос ждёт
            фактического «release_applied». Иначе маркер записался бы на
            меньшей версии, и снятие прозвучало бы дважды. */
-        if (nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
+        if (snapshotIsCurrent && nextAssignmentKey && nextAssignmentKey !== previousAssignmentKey) {
             var fallbackAssignmentId = String(nextAssignmentForm.dataset.driverAssignmentId || "").trim();
             if (String(nextAssignmentForm.dataset.driverAssignmentKind || "") === "assign") {
                 playDriverAssignmentAlert(
@@ -296,7 +307,11 @@ window.applyOperationalStateRefresh = function (context) {
         window.driverAppliedFragmentSnapshot = freshSnapshot;
         window.driverDomBehindBaseline = false;
         window.driverForceFragmentApply = false;
-        return {applied: true, version: appliedVersion};
+        return {
+            applied: true,
+            version: appliedVersion,
+            snapshotVersion: Number(payload.snapshot_version || appliedVersion)
+        };
     }).catch(function () {
         return {deferred: true, reason: "driver_refresh_failed"};
     });

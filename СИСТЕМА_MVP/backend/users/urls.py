@@ -1,5 +1,7 @@
 from django.urls import path
 
+from core.snapshot import operational_snapshot_view
+
 from .pwa_views import (
     management_manifest_view,
     management_service_worker_view,
@@ -128,9 +130,9 @@ urlpatterns = [
     path('system-admin-sw.js', system_admin_service_worker_view, name='system_admin_service_worker'),
     path('driver.webmanifest', driver_manifest_view, name='driver_manifest'),
     path('driver-sw.js', driver_service_worker_view, name='driver_service_worker'),
-    path('driver/', driver_shift_view, name='driver_work'),
+    path('driver/', operational_snapshot_view(driver_shift_view), name='driver_work'),
     path('driver/registration/', driver_registration_view, name='driver_registration'),
-    path('driver/shift/', driver_shift_view, name='driver_shift'),
+    path('driver/shift/', operational_snapshot_view(driver_shift_view), name='driver_shift'),
     path('driver/shift/close/', driver_close_shift_view, name='driver_close_shift'),
     path('driver/downtime/', driver_downtime_action_view, name='driver_downtime_action'),
     path('driver/quick-reasons/', driver_quick_reasons_view, name='driver_quick_reasons'),

@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -989,3 +990,50 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(detail_payload['plan']['status'], CrewPlanStatus.PUBLISHED)
         self.assertFalse(detail_payload['plan']['editable'])
         self.assertEqual(detail_payload['employees'], [])
+
+    def test_deputy_rejects_not_activated_access(self):
+        _, access = self.create_employee_with_access(
+            'Депутат без активации T-021',
+            self.deputy_role,
+            phone='+79000000031',
+            access_code='610031',
+        )
+        access.status = EmployeeAccess.Status.NOT_ACTIVATED
+        access.save(update_fields=['status'])
+
+        deputy_client = Client()
+        self.authenticate(deputy_client, access)
+        response = deputy_client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )
+
+    def test_deputy_rejects_stale_session_generation(self):
+        deputy_client = Client()
+        self.authenticate(deputy_client, self.deputy_access)
+        session = deputy_client.session
+        session['active_role_access_id'] = self.deputy_access.id
+        session['active_role_code'] = self.deputy_role.code
+        session['active_role_login_at'] = (
+            timezone.now() - timedelta(days=2)
+        ).isoformat()
+        session.save()
+        self.deputy_access.last_login_at = timezone.now()
+        self.deputy_access.save(update_fields=['last_login_at'])
+
+        response = deputy_client.get(
+            reverse('deputy_mining_manager_placement'),
+            HTTP_HOST='localhost',
+        )
+
+        self.assertRedirects(
+            response,
+            reverse('role_home'),
+            fetch_redirect_response=False,
+        )

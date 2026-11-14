@@ -47,6 +47,7 @@ from core.models import (
     OperationalStateVersion,
     bump_operational_state,
     lock_production_state,
+    rotate_operational_journal_epoch,
 )
 from core.operational_fragments import operational_fragment_response
 from downtimes.driver_workflow import (
@@ -93,6 +94,7 @@ from shifts.services import (
     DriverShiftCloseConfirmationRequired,
     DriverShiftCloseIdempotencyConflict,
     driver_close_request_signature,
+    driver_open_shift_queryset,
     ensure_driver_close_action_matches,
     find_other_role_open_shift,
     open_driver_shift,
@@ -169,8 +171,13 @@ from .models import (
     WatchComposition,
     WorkSchedule,
 )
-from .live_monitor import attach_application_presence, application_presence_by_employee_ids
+from .live_monitor import (
+    attach_application_presence,
+    application_presence_by_employee_ids,
+    force_end_access_sessions,
+)
 from .registration_dashboard import build_registration_dashboard
+from .redaction import redact_log_values
 from .oup_undo import (
     get_oup_action_undo_state,
     undo_oup_action,
@@ -283,7 +290,7 @@ DEMO_ACCESS_CODES = [
 ]
 
 
-DRIVER_SHELL_VERSION = 'driver-mobile-shell-v381'
+DRIVER_SHELL_VERSION = 'driver-mobile-shell-v382'
 
 DRIVER_MANIFEST = {
     'id': '/driver/',
@@ -808,12 +815,21 @@ self.addEventListener("message", (event) => {{
 """.strip()
 
 
+def _session_generation_is_stale(request, access):
+    """Поколение сессии не совпадает с текущим у доступа (сессия отозвана)."""
+    session_generation = request.session.get(ACTIVE_ROLE_GENERATION_SESSION_KEY)
+    if not access.last_login_at or not session_generation:
+        return False
+    parsed_generation = parse_datetime(str(session_generation))
+    return bool(parsed_generation and parsed_generation != access.last_login_at)
+
+
 def get_current_access(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return None
-    expire_due_temporary_work_transfers()
-    access_queryset = (
+    expired_transfers = expire_due_temporary_work_transfers()
+    access = (
         EmployeeAccess.objects
         .select_related('employee', 'role')
         .filter(
@@ -824,11 +840,24 @@ def get_current_access(request):
             employee__status=Employee.Status.ACTIVE,
             role__is_active=True,
         )
+        .first()
     )
+    if (
+        access
+        and expired_transfers
+        and any(
+            transfer.employee_id == access.employee_id
+            for transfer in expired_transfers
+        )
+    ):
+        # Истечение перевода только что пересобрало доступ этого сотрудника и
+        # отозвало его сессии. Текущую сессию закрываем, иначе ответ на этот
+        # запрос сохранит её заново со старым поколением.
+        request.session.flush()
+        return None
     role_app = get_role_app_for_request(request)
-    if role_app:
-        access_queryset = access_queryset.filter(role__code=role_app.role_code)
-    access = access_queryset.first()
+    if access and role_app and access.role.code != role_app.role_code:
+        access = None
     if access and not employee_has_effective_access_role(access.employee, access.role.code):
         return None
     return access
@@ -1980,6 +2009,7 @@ def system_admin_reset_shift_test_data_view(request):
         Trip.objects.all().delete()
         DowntimeEvent.objects.all().delete()
         OperationalStateEvent.objects.all().delete()
+        rotate_operational_journal_epoch()
         bump_operational_state(
             'SystemAdmin:test_shift_data_reset',
             event_type='test_shift_data_reset',
@@ -3054,6 +3084,7 @@ def system_admin_logs_view(request):
     oup_total = AdminActionLog.objects.filter(action__startswith='ОУП:').count()
     logs = list(logs[:200])
     for log in logs:
+        redact_log_values(log)
         action_text = f'{log.action} {log.object_type}'.lower()
         if log.action.startswith('ОУП:'):
             log.type_label = 'ОУП'
@@ -3336,7 +3367,7 @@ def system_admin_employee_create_view(request):
                         employee,
                         new_value=(
                             f'Доступ: {role or "не требуется"}; '
-                            f'назначение: {assignment_label}; пинкод: {code}'
+                            f'назначение: {assignment_label}; пинкод выдан'
                         ),
                     )
                     messages.success(
@@ -3571,7 +3602,7 @@ def system_admin_generate_access_view(request, employee_id):
                         'block_reason': '',
                     },
                 )
-                log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value=code)
+                log_admin_action(access.employee, 'Выдан новый первичный пинкод', employee_access, new_value='PIN изменён')
             messages.success(request, f'Новый первичный пинкод: {code}')
     return redirect_after_admin_action(request, 'system_admin_employee_detail', employee_id=employee.id)
 
@@ -3643,6 +3674,8 @@ def system_admin_change_access_role_view(request, access_id):
         )
         employee_access.role = new_role
         employee_access.save(update_fields=['role'])
+        # Смена прав — новый вход: старые сессии этого доступа больше не действуют.
+        force_end_access_sessions(access=employee_access)
 
     log_admin_action(
         admin_access.employee,
@@ -3745,6 +3778,7 @@ def system_admin_access_action_view(request, access_id, action):
                     employee_access.blocked_at = timezone.now()
                     employee_access.block_reason = form.cleaned_data['reason']
                     employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason'])
+                    force_end_access_sessions(access=employee_access)
                     log_admin_action(admin_access.employee, 'Заблокирован доступ', employee_access, comment=employee_access.block_reason)
                     messages.success(request, 'Доступ заблокирован.')
             elif action == 'unblock':
@@ -3764,6 +3798,9 @@ def system_admin_access_action_view(request, access_id, action):
                 employee_access.block_reason = ''
                 employee_access.deactivated_at = None
                 employee_access.save(update_fields=['status', 'is_active', 'blocked_at', 'block_reason', 'deactivated_at'])
+                # Исторические блокировки не удаляли строки сессий: не даём
+                # старой cookie ожить после разблокировки.
+                force_end_access_sessions(access=employee_access)
                 if employee.status in {
                     Employee.Status.NOT_ACTIVATED,
                     Employee.Status.DEACTIVATED,
@@ -3778,6 +3815,7 @@ def system_admin_access_action_view(request, access_id, action):
                 employee_access.is_active = False
                 employee_access.deactivated_at = timezone.now()
                 employee_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+                force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(
                     employee=employee,
                     assigned_by=admin_access.employee,
@@ -3849,6 +3887,8 @@ def restore_employee_access(employee, requested_access_id=None):
             'block_reason',
         ]
     )
+    # Восстановление старого доступа — тоже новый вход: снимаем прежние сессии.
+    force_end_access_sessions(access=employee_access)
     return employee_access, 'restored'
 
 
@@ -3977,6 +4017,8 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                 employee.status = Employee.Status.DEACTIVATED
                 employee.is_active = False
                 employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                for employee_access in employee.accesses.select_related('role'):
+                    force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
                 messages.success(request, 'Сотрудник деактивирован.')
                 log_admin_action(access.employee, 'Сотрудник деактивирован', employee)
@@ -3984,6 +4026,8 @@ def system_admin_employee_status_action_view(request, employee_id, action):
                 employee.status = Employee.Status.ARCHIVED
                 employee.is_active = False
                 employee.accesses.update(status=EmployeeAccess.Status.DEACTIVATED, is_active=False, deactivated_at=timezone.now())
+                for employee_access in employee.accesses.select_related('role'):
+                    force_end_access_sessions(access=employee_access)
                 clear_active_equipment_assignment(employee=employee, assigned_by=access.employee)
                 messages.success(request, 'Сотрудник отправлен в архив.')
                 log_admin_action(access.employee, 'Сотрудник отправлен в архив', employee)
@@ -4607,17 +4651,6 @@ def driver_free_bucket_payload(*, current_truck, current_assignment, version, op
         'selection': active_item,
     }
     return catalog, state, active_acceptance
-
-
-def driver_open_shift_queryset(employee):
-    return (
-        EmployeeShift.objects
-        .filter(employee=employee, closed_at__isnull=True)
-        .filter(
-            Q(workplace_code='driver')
-            | Q(workplace_code='', equipment__equipment_type__name='Самосвал')
-        )
-    )
 
 
 def driver_assignment_countdown_label(assignment):
@@ -6144,6 +6177,10 @@ def driver_downtime_action_view(request):
 
     payload = driver_json_payload(request)
     action = (payload.get('action') or '').strip()
+    # Порядок блокировок: журнал производства, затем техника (как в
+    # завершении рейса, trips/views.py:6998). Обратный порядок давал дедлок с
+    # опросом состояния/reconciler (T-016, PostgreSQL).
+    lock_production_state()
     locked_equipment = Equipment.objects.select_for_update().get(pk=open_shift.equipment_id)
     open_shift.equipment = locked_equipment
     if action == 'close':

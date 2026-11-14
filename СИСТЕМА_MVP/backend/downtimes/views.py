@@ -4,6 +4,7 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from core.models import lock_production_state
 from references.models import Equipment
 from trips.models import OPEN_TRIP_STATUSES, Trip
 from users.models import EmployeeAccess
@@ -142,6 +143,10 @@ def mechanic_create_downtime_view(request, trip_id):
         messages.error(request, 'Не удалось открыть простой механической службы. Проверьте заполнение формы.')
         return redirect('mechanic_dashboard')
 
+    # Порядок блокировок: журнал производства, затем техника — как в
+    # экранах простоя и в отправке рейса. Обратный порядок даёт дедлок с
+    # опросом состояния и с экраном машиниста (T-016, PostgreSQL).
+    lock_production_state()
     equipment = Equipment.objects.select_for_update().get(pk=trip.excavator_id)
     open_event = DowntimeEvent.objects.select_for_update().filter(
         equipment=equipment,
@@ -176,6 +181,8 @@ def mechanic_close_downtime_view(request, event_id):
         DowntimeEvent.objects.only('equipment_id'),
         id=event_id,
     )
+    # Тот же порядок, что у открытия простоя: журнал → техника.
+    lock_production_state()
     equipment = get_object_or_404(
         Equipment.objects.select_for_update(),
         id=event_reference.equipment_id,

@@ -31,6 +31,7 @@ import java.net.SocketTimeoutException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,10 @@ public class ConnectivityForegroundService extends Service {
     private static final String ACTION_PRESENCE_PROBE = "ru.copperresources.mobile.action.PRESENCE_PROBE";
     static final String PREFS_NAME = ConnectionState.PREFS_NAME;
     static final String LAST_DRIVER_DUMP_POINT_ALERT_VERSION = "last_driver_dump_point_alert_version";
+    // One neutral screen-off notice per version growth. Written before the alert
+    // is delivered, so a crash loses at most one notice instead of repeating it
+    // on every poll.
+    static final String LAST_ALERTED_VERSION = "last_alerted_version";
     private static final String CONNECTION_LOSS_ANNOUNCED = ConnectionVoiceGate.LOSS_ANNOUNCED_KEY;
     private static final long MAX_BACKOFF_MS = 60_000L;
     private static final int MAX_CAPTURED_RESPONSE_BYTES = 64 * 1024;
@@ -128,7 +133,10 @@ public class ConnectivityForegroundService extends Service {
         String action = intent == null ? "" : String.valueOf(intent.getAction());
         if (ACTION_STOP_CONNECTION.equals(action)) {
             if (PendingDriverShiftClose.hasPending(this)) {
-                startAsForeground("Закрытие смены сохранено — ждём связь");
+                if (!tryStartAsForeground("Закрытие смены сохранено — ждём связь")) {
+                    stopServiceAndRemoveNotification();
+                    return START_NOT_STICKY;
+                }
                 registerNetworkCallback();
                 scheduleHeartbeat(0L);
                 return START_STICKY;
@@ -146,9 +154,15 @@ public class ConnectivityForegroundService extends Service {
             return START_NOT_STICKY;
         }
         presenceProbeOnly = presenceProbeRequested && !normalConnectionRequired;
-        startAsForeground(
+        if (!tryStartAsForeground(
             presenceProbeOnly ? "Проверка связи с сервером" : currentStatusText()
-        );
+        )) {
+            // Android 12+ can reject a background promotion after a START_STICKY
+            // restart. Stop quietly: the next foreground reconcile still starts
+            // the service while the shift is active, and no crash loop forms.
+            stopServiceAndRemoveNotification();
+            return START_NOT_STICKY;
+        }
         registerNetworkCallback();
         scheduleHeartbeat(0L);
         // Если Android освободил процесс под давлением памяти, он должен
@@ -194,6 +208,20 @@ public class ConnectivityForegroundService extends Service {
         Log.i("ConnectivityForegroundService", "Task removed; heartbeat service stopped");
         stopServiceAndRemoveNotification();
         super.onTaskRemoved(rootIntent);
+    }
+
+    private boolean tryStartAsForeground(String statusText) {
+        try {
+            startAsForeground(statusText);
+            return true;
+        } catch (RuntimeException error) {
+            // Android 12+ may reject a foreground promotion requested from the
+            // background (for example after a START_STICKY restart). Logging and
+            // stopping is safer than letting the exception kill the process and
+            // form a restart loop.
+            Log.w("ConnectivityForegroundService", "Foreground promotion was rejected", error);
+            return false;
+        }
     }
 
     private void startAsForeground(String statusText) {
@@ -315,12 +343,25 @@ public class ConnectivityForegroundService extends Service {
                 stopBecauseConnectionIsNotRequired("authentication_ended");
                 return;
             }
+            boolean operationalResetRequired = isAuthoritativeStateReset(result.body);
+            String operationalResetReason = operationalResetRequired
+                ? readResetReason(result.body)
+                : "";
+            long operationalResetToVersion = operationalResetRequired
+                ? readResetToVersion(result.body)
+                : 0L;
             heartbeatSucceeded = true;
             synchronized (scheduleLock) { heartbeatSchedule.responseSucceeded(); }
             long transportSuccessAt = System.currentTimeMillis();
-            transport.success(transportSuccessAt, response.optLong("version", 0L));
+            transport.success(transportSuccessAt, readHighWaterVersion(result.body));
             ConnectionState.recordAlive(this, transport.lastSuccessAtMs);
-            ConnectionState.recordTransport(this, transport);
+            ConnectionState.recordTransport(
+                this,
+                transport,
+                operationalResetRequired,
+                operationalResetReason,
+                operationalResetToVersion
+            );
             PresenceProbeState.clearIfEquals(this, sentPresenceProbeId);
             if (response.has("background_connection_required")) {
                 boolean connectionRequired = response.optBoolean("background_connection_required", false);
@@ -343,9 +384,11 @@ public class ConnectivityForegroundService extends Service {
             }
             SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             boolean connectionLossWasAnnounced = preferences.getBoolean(CONNECTION_LOSS_ANNOUNCED, false);
-            long previousVersion = preferences.getLong("last_server_version", 0L);
-            long serverVersion = readServerVersion(result.body);
-            boolean relevant = readRelevantFlag(result.body);
+            long previousVersion = OperationalDeliveryLedger.appliedVersion(this);
+            long serverVersion = readHighWaterVersion(result.body);
+            OperationalDeliveryLedger.Snapshot deliveryState =
+                OperationalDeliveryLedger.prepareServerResponse(this, result.body, serverVersion);
+            previousVersion = deliveryState.appliedVersion;
             SharedPreferences.Editor successEditor = preferences.edit()
                 .putLong("last_transport_success_at", System.currentTimeMillis())
                 .putInt("last_http_status", result.statusCode)
@@ -386,26 +429,97 @@ public class ConnectivityForegroundService extends Service {
                     0L
                 );
             }
-            if (previousVersion > 0L && serverVersion > previousVersion && relevant) {
-                boolean appIsForeground = AppVisibility.isForeground();
-                boolean dumpPointAnnounced = showLatestDriverDumpPointAlert(
+            if (operationalResetRequired) {
+                // A reset (journal gap, cursor ahead, or a future server reset)
+                // can never be reconstructed safely from event replay. Discard
+                // replay before looking at any event and baseline only from the
+                // server's authoritative domain-table projection.
+                OperationalRecoveryBuffer.clear(this);
+                String resetReason = operationalResetReason;
+                preferences.edit().putString("last_operational_reset_reason", resetReason).apply();
+                Log.w("ConnectivityForegroundService", "Operational reset: " + resetReason);
+                boolean truthApplied = applyAuthoritativeVoiceState(
                     result.body,
+                    previousVersion > 0L,
+                    !AppVisibility.isForeground()
+                );
+                long resetToVersion = operationalResetToVersion;
+                if (truthApplied && resetToVersion >= 0L && resetToVersion == serverVersion) {
+                    OperationalDeliveryLedger.resetApplied(this, resetToVersion);
+                }
+                if (shiftCloseFlush == FlushResult.ATTENTION || shiftCloseFlush == FlushResult.AUTH_REQUIRED) {
+                    publishStatus("Откройте приложение — проверьте закрытие смены");
+                } else {
+                    publishStatus("Связь работает во время смены");
+                }
+                // ConnectionState already published this response's high-water,
+                // so a visible WebView reconciles its fragment independently.
+                // An invalid truth snapshot is retried without advancing after.
+                scheduleHeartbeat(truthApplied ? BuildConfig.HEARTBEAT_INTERVAL_MS : 2_000L);
+                return;
+            }
+            boolean eventsTruncated = readEventsTruncated(result.body);
+            boolean caughtUp = readCaughtUp(result.body, eventsTruncated);
+            long pageCursor = readPageCursor(result.body);
+            boolean hadRecoveryBuffer = OperationalRecoveryBuffer.hasPending(this);
+            if (!caughtUp) {
+                OperationalRecoveryBuffer.append(this, result.body, previousVersion > 0L);
+                if (pageCursor > previousVersion && pageCursor <= serverVersion) {
+                    // A truncated page is not voice-safe, but its global scan
+                    // cursor is safe to resume from. Never commit high-water here.
+                    OperationalDeliveryLedger.commitApplied(this, pageCursor);
+                }
+            }
+            String voiceBody = hadRecoveryBuffer && caughtUp
+                ? OperationalRecoveryBuffer.merge(this, result.body)
+                : result.body;
+            boolean voiceEligible = hadRecoveryBuffer
+                ? OperationalRecoveryBuffer.isVoiceEligible(this)
+                : previousVersion > 0L;
+            boolean relevant = readRelevantFlag(voiceBody);
+            boolean voiceProcessed = true;
+            if (voiceEligible && serverVersion > previousVersion && relevant && caughtUp) {
+                boolean appIsForeground = AppVisibility.isForeground();
+                VoiceAttempt dumpPoint = showLatestDriverDumpPointAlert(
+                    voiceBody,
                     preferences,
                     !appIsForeground
                 );
-                if (!dumpPointAnnounced) {
-                    showLatestAssignmentAlert(
-                        result.body,
+                VoiceAttempt addressed;
+                if (dumpPoint.candidate) {
+                    addressed = dumpPoint;
+                } else {
+                    addressed = showLatestAssignmentAlert(
+                        voiceBody,
                         !appIsForeground
                     );
                 }
+                voiceProcessed = addressed.processed;
+                // A handler that recognized the event owns it even when it stayed
+                // silent: the operation was already announced by the other channel,
+                // or it must be retried. Only an unclaimed version growth is
+                // generic, otherwise the same growth would beep twice.
+                boolean eventClaimed = dumpPoint.candidate || addressed.candidate;
+                if (voiceProcessed && !eventClaimed && !appIsForeground) {
+                    notifyGenericOperationalEvent(serverVersion);
+                }
+            }
+            if (caughtUp && voiceProcessed) {
+                // The native owner has now parsed/claimed every addressed voice
+                // operation in this response. A transport high-water mark alone
+                // never advances this processed cursor.
+                OperationalDeliveryLedger.commitApplied(this, serverVersion);
+                if (hadRecoveryBuffer) OperationalRecoveryBuffer.clear(this);
             }
             if (shiftCloseFlush == FlushResult.ATTENTION || shiftCloseFlush == FlushResult.AUTH_REQUIRED) {
                 publishStatus("Откройте приложение — проверьте закрытие смены");
             } else {
                 publishStatus("Связь работает во время смены");
             }
-            scheduleHeartbeat(BuildConfig.HEARTBEAT_INTERVAL_MS);
+            boolean pageAdvanced = pageCursor > previousVersion && pageCursor <= serverVersion;
+            scheduleHeartbeat(caughtUp && voiceProcessed
+                ? BuildConfig.HEARTBEAT_INTERVAL_MS
+                : (pageAdvanced ? 250L : 2_000L));
         } catch (Exception error) {
             // Service shutdown/cookie-thread interruption is planned cancellation, never network loss.
             if (stopping || error instanceof InterruptedException || Thread.currentThread().isInterrupted()) {
@@ -498,7 +612,7 @@ public class ConnectivityForegroundService extends Service {
 
     private HeartbeatResult requestHeartbeat(String presenceProbeId) throws Exception {
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        long lastServerVersion = preferences.getLong("last_server_version", 0L);
+        long lastServerVersion = OperationalDeliveryLedger.appliedVersion(this);
         Uri.Builder heartbeatUri = Uri.parse(BuildConfig.HEARTBEAT_URL).buildUpon();
         if (lastServerVersion > 0L) {
             heartbeatUri.appendQueryParameter("after", Long.toString(lastServerVersion));
@@ -729,11 +843,35 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
-    private static long readServerVersion(String body) {
+    private static long readHighWaterVersion(String body) {
         try {
-            return new JSONObject(body).optLong("version", 0L);
+            JSONObject root = new JSONObject(body);
+            return root.optLong("high_water_version", root.optLong("version", 0L));
         } catch (Exception ignored) {
             return 0L;
+        }
+    }
+
+    private static long readPageCursor(String body) {
+        try {
+            JSONObject root = new JSONObject(body);
+            return root.optLong(
+                "page_cursor",
+                root.optLong("scanned_through_version", 0L)
+            );
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
+    private static boolean readCaughtUp(String body, boolean eventsTruncated) {
+        try {
+            JSONObject root = new JSONObject(body);
+            return root.has("caught_up")
+                ? root.optBoolean("caught_up", false)
+                : !eventsTruncated;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
@@ -745,23 +883,267 @@ public class ConnectivityForegroundService extends Service {
         }
     }
 
-    private boolean showLatestDriverDumpPointAlert(
+    private static boolean readEventsTruncated(String body) {
+        try {
+            return new JSONObject(body).optBoolean("events_truncated", false);
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private static boolean isAuthoritativeStateReset(String body) {
+        try {
+            JSONObject root = new JSONObject(body);
+            return root.optBoolean("reset_required", false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static String readResetReason(String body) {
+        try {
+            return new JSONObject(body).optString("reset_reason", "unknown_reset");
+        } catch (Exception ignored) {
+            return "invalid_reset";
+        }
+    }
+
+    private static long readResetToVersion(String body) {
+        try {
+            return new JSONObject(body).optLong("reset_to_version", 0L);
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
+    /**
+     * Applies a reset baseline exclusively from current domain truth.
+     * Surviving/pruned OperationalStateEvent rows are deliberately not accepted
+     * here: a cancellation or replacement may have lived only in the removed gap.
+     */
+    private boolean applyAuthoritativeVoiceState(
+            String body,
+            boolean voiceEligible,
+            boolean showNotification) {
+        try {
+            JSONObject root = new JSONObject(body);
+            long resetToVersion = root.optLong("reset_to_version", 0L);
+            JSONObject current = root.optJSONObject("current_voice_state");
+            if (!root.has("reset_to_version")
+                    || !root.has("high_water_version")
+                    || resetToVersion < 0L
+                    || resetToVersion != root.optLong("high_water_version", 0L)
+                    || current == null
+                    || current.optInt("schema_version", 0) != 1
+                    || !current.optBoolean("authoritative", false)
+                    || !"domain_tables".equals(current.optString("source", ""))
+                    || current.optLong("observed_at_version", 0L) != resetToVersion) {
+                Log.w("ConnectivityForegroundService", "Reset truth snapshot was incomplete");
+                return false;
+            }
+            JSONArray operations = current.optJSONArray("voice_operations");
+            if (operations == null) {
+                Log.w("ConnectivityForegroundService", "Reset truth operations were absent");
+                return false;
+            }
+            String roleCode = current.optString(
+                "role_app_code",
+                root.optString("role_app_code", BuildConfig.APP_PROFILE_ID)
+            );
+            boolean expectedDriver = "driver".equals(BuildConfig.APP_PROFILE_ID)
+                && "driver".equals(roleCode);
+            boolean expectedExcavator = "excavator".equals(BuildConfig.APP_PROFILE_ID)
+                && "excavator_operator".equals(roleCode);
+            if (!expectedDriver && !expectedExcavator) {
+                Log.w("ConnectivityForegroundService", "Reset truth role did not match APK");
+                return false;
+            }
+            if (!voiceEligible || operations.length() == 0) {
+                // Initial/new-context bootstrap is intentionally silent, but an
+                // authoritative empty set still safely establishes the baseline.
+                return true;
+            }
+            if (expectedDriver) {
+                return announceCurrentDriverTruth(operations, resetToVersion, showNotification);
+            }
+            return announceCurrentExcavatorTruth(operations, resetToVersion, showNotification);
+        } catch (Exception error) {
+            Log.w("ConnectivityForegroundService", "Reset truth was not parsed", error);
+            return false;
+        }
+    }
+
+    private boolean announceCurrentDriverTruth(
+            JSONArray operations,
+            long observedAtVersion,
+            boolean showNotification) {
+        JSONObject dumpPoint = null;
+        List<OperationalVoiceAnnouncer.Operation> assignments = new ArrayList<>();
+        String assignmentBody = "";
+        boolean invalidKnownOperation = false;
+        for (int index = 0; index < operations.length(); index += 1) {
+            JSONObject operation = operations.optJSONObject(index);
+            if (operation == null) {
+                continue;
+            }
+            String kind = operation.optString("kind", "");
+            if (operation.optLong("observed_at_version", 0L) != observedAtVersion) {
+                if ("driver_dump_point".equals(kind) || "driver_assignment".equals(kind)) {
+                    invalidKnownOperation = true;
+                }
+                continue;
+            }
+            String operationKey = operation.optString("operation_key", "").trim();
+            if ("driver_dump_point".equals(kind)) {
+                long tripId = operation.optLong("trip_id", 0L);
+                long dumpPointId = operation.optLong("dump_point_id", 0L);
+                String expectedKey = "dump:" + tripId + ":id-" + dumpPointId;
+                if (tripId > 0L && dumpPointId > 0L && expectedKey.equals(operationKey)) {
+                    dumpPoint = operation;
+                } else {
+                    invalidKnownOperation = true;
+                }
+            } else if ("driver_assignment".equals(kind)) {
+                String assignmentId = operation.optString("assignment_id", "").trim();
+                String state = operation.optString("assignment_state", "");
+                if (assignmentId.isEmpty()
+                        || !("pending".equals(state) || "active".equals(state))
+                        || !("assign:" + assignmentId).equals(operationKey)) {
+                    invalidKnownOperation = true;
+                    continue;
+                }
+                String excavatorNumber = operation.optString("excavator_number", "");
+                String assignmentVoice = EquipmentVoiceCatalog.driverExcavatorAssignmentVoice(
+                    excavatorNumber
+                );
+                assignments.add(new OperationalVoiceAnnouncer.Operation(
+                    operationKey,
+                    new String[] {
+                        assignmentVoice.isEmpty() ? "voice_excavator_assigned" : assignmentVoice
+                    }
+                ));
+                if (!excavatorNumber.isBlank()) {
+                    assignmentBody = "Экскаватор № " + excavatorNumber;
+                }
+            }
+        }
+        if (invalidKnownOperation) return false;
+        if (dumpPoint != null && BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
+            DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
+                this,
+                observedAtVersion,
+                dumpPoint.optLong("trip_id", 0L),
+                dumpPoint.optLong("dump_point_id", 0L),
+                dumpPoint.optString("dump_point_name", ""),
+                showNotification,
+                true
+            );
+            if (!result.processed) return false;
+            if (result.announced) return true;
+        }
+        if (!assignments.isEmpty()) {
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
+                this,
+                OperationalCueCatalog.ASSIGNMENT,
+                assignments,
+                showNotification,
+                "Новое назначение",
+                assignmentBody.isBlank()
+                    ? "Проверьте назначенный экскаватор."
+                    : assignmentBody
+            );
+            return result.processed;
+        }
+        return true;
+    }
+
+    private boolean announceCurrentExcavatorTruth(
+            JSONArray operations,
+            long observedAtVersion,
+            boolean showNotification) {
+        List<OperationalVoiceAnnouncer.Operation> assignments = new ArrayList<>();
+        String latestTruckNumber = "";
+        boolean invalidKnownOperation = false;
+        for (int index = 0; index < operations.length(); index += 1) {
+            JSONObject operation = operations.optJSONObject(index);
+            if (operation == null
+                    || !"excavator_truck_assigned".equals(operation.optString("kind", ""))) {
+                continue;
+            }
+            if (operation.optLong("observed_at_version", 0L) != observedAtVersion) {
+                invalidKnownOperation = true;
+                continue;
+            }
+            String assignmentId = operation.optString("assignment_id", "").trim();
+            long excavatorId = operation.optLong("excavator_id", 0L);
+            String operationKey = operation.optString("operation_key", "").trim();
+            String expectedKey = "excavator-assignment:assign:" + assignmentId + ":" + excavatorId;
+            if (assignmentId.isEmpty() || excavatorId <= 0L || !expectedKey.equals(operationKey)) {
+                invalidKnownOperation = true;
+                continue;
+            }
+            String truckNumber = operation.optString("truck_number", "");
+            String numberVoice = EquipmentVoiceCatalog.truckNumberVoice(truckNumber);
+            assignments.add(new OperationalVoiceAnnouncer.Operation(
+                operationKey,
+                numberVoice.isEmpty()
+                    ? new String[] {"voice_truck_assigned"}
+                    : new String[] {"voice_truck_assigned_prefix", numberVoice}
+            ));
+            if (!truckNumber.isBlank()) latestTruckNumber = truckNumber;
+        }
+        if (invalidKnownOperation) return false;
+        if (!assignments.isEmpty()) {
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
+                this,
+                OperationalCueCatalog.ASSIGNMENT,
+                assignments,
+                showNotification,
+                assignments.size() > 1 ? "Назначены самосвалы" : "Назначен самосвал",
+                assignments.size() > 1
+                    ? "Назначений: " + assignments.size()
+                    : (latestTruckNumber.isBlank()
+                        ? "Проверьте назначение на экране."
+                        : "Самосвал № " + latestTruckNumber)
+            );
+            return result.processed;
+        }
+        return true;
+    }
+
+    private VoiceAttempt showLatestDriverDumpPointAlert(
             String body,
             SharedPreferences preferences,
             boolean showNotification) {
         if (!BuildConfig.DRIVER_VOICE_ALERTS_ENABLED) {
-            return false;
+            return VoiceAttempt.noCandidate();
         }
         try {
             JSONArray events = new JSONObject(body).optJSONArray("events");
             if (events == null) {
-                return false;
+                return VoiceAttempt.noCandidate();
             }
             long lastAnnouncedVersion = preferences.getLong(LAST_DRIVER_DUMP_POINT_ALERT_VERSION, 0L);
             long selectedVersion = lastAnnouncedVersion;
             long selectedTripId = 0L;
             long selectedDumpPointId = 0L;
             String selectedDumpPointName = "";
+            Map<Long, Long> latestTripVersion = new LinkedHashMap<>();
+            Map<Long, String> latestTripAction = new LinkedHashMap<>();
+
+            for (int index = 0; index < events.length(); index += 1) {
+                JSONObject event = events.optJSONObject(index);
+                JSONObject payload = event == null ? null : event.optJSONObject("payload");
+                if (event == null || payload == null || !"trip_changed".equals(event.optString("type"))) {
+                    continue;
+                }
+                long tripId = payload.optLong("trip_id", 0L);
+                long version = event.optLong("version", 0L);
+                if (tripId > 0L && version > latestTripVersion.getOrDefault(tripId, 0L)) {
+                    latestTripVersion.put(tripId, version);
+                    latestTripAction.put(tripId, payload.optString("action", ""));
+                }
+            }
 
             for (int index = 0; index < events.length(); index += 1) {
                 JSONObject event = events.optJSONObject(index);
@@ -775,6 +1157,10 @@ public class ConnectivityForegroundService extends Service {
                     continue;
                 }
                 long tripId = payload.optLong("trip_id", 0L);
+                if (!"truck_loaded".equals(latestTripAction.getOrDefault(tripId, ""))) {
+                    // A later cancellation/unload in the same catch-up batch wins.
+                    continue;
+                }
                 long dumpPointId = payload.optLong("assigned_dump_point_id", 0L);
                 if (dumpPointId <= 0L) {
                     dumpPointId = payload.optLong("dump_point_id", 0L);
@@ -790,14 +1176,14 @@ public class ConnectivityForegroundService extends Service {
             }
 
             if (selectedVersion <= lastAnnouncedVersion || selectedTripId <= 0L) {
-                return false;
+                return VoiceAttempt.noCandidate();
             }
             String displayName = DriverVoiceCatalog.displayNameFor(
                 selectedDumpPointId,
                 selectedDumpPointName
             );
             if (displayName.isEmpty()) {
-                return false;
+                return VoiceAttempt.processed(false);
             }
 
             DriverDumpPointAnnouncer.Result result = DriverDumpPointAnnouncer.announce(
@@ -809,19 +1195,19 @@ public class ConnectivityForegroundService extends Service {
                 showNotification,
                 true
             );
-            return result.announced;
+            return VoiceAttempt.candidate(result.processed, result.announced);
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Driver dump-point alert was not parsed", error);
-            return false;
+            return VoiceAttempt.retry();
         }
     }
 
-    private boolean showLatestAssignmentAlert(String body, boolean showNotification) {
+    private VoiceAttempt showLatestAssignmentAlert(String body, boolean showNotification) {
         try {
             JSONObject root = new JSONObject(body);
             JSONArray events = root.optJSONArray("events");
             if (events == null) {
-                return false;
+                return VoiceAttempt.noCandidate();
             }
             String roleCode = root.optString("role_app_code", BuildConfig.APP_PROFILE_ID);
             JSONArray workerEquipmentIds = root.optJSONArray("worker_equipment_ids");
@@ -837,6 +1223,8 @@ public class ConnectivityForegroundService extends Service {
             String selectedCue = OperationalCueCatalog.ASSIGNMENT;
             String selectedTitle = "";
             String selectedBody = "";
+            String selectedOperationKey = "";
+            boolean selectedOperationInvalid = false;
 
             for (int index = 0; index < events.length(); index += 1) {
                 JSONObject event = events.optJSONObject(index);
@@ -852,12 +1240,17 @@ public class ConnectivityForegroundService extends Service {
                     continue;
                 }
                 String action = payload.optString("action", "");
+                String assignmentId = event.optString("object_id", "").trim();
                 String[] voices = new String[0];
                 String title = "";
                 String message = "";
+                String operationKey = "";
+                boolean operationInvalid = false;
 
                 if ("driver".equals(roleCode)) {
                     if ("assignment_pending".equals(action)) {
+                        operationKey = assignmentId.isEmpty() ? "" : "assign:" + assignmentId;
+                        operationInvalid = assignmentId.isEmpty();
                         selectedCue = OperationalCueCatalog.ASSIGNMENT;
                         String assignmentVoice = EquipmentVoiceCatalog.driverExcavatorAssignmentVoice(
                             payload.optString("target_excavator_number", "")
@@ -871,6 +1264,8 @@ public class ConnectivityForegroundService extends Service {
                             ? "Проверьте назначенный экскаватор."
                             : "Экскаватор № " + excavatorNumber;
                     } else if ("release_applied".equals(action)) {
+                        operationKey = assignmentId.isEmpty() ? "" : "release:" + assignmentId;
+                        operationInvalid = assignmentId.isEmpty();
                         selectedCue = OperationalCueCatalog.ASSIGNMENT_REMOVED;
                         voices = new String[] {"voice_assignment_removed"};
                         title = "Назначение снято";
@@ -878,35 +1273,45 @@ public class ConnectivityForegroundService extends Service {
                     }
                 }
 
-                if (voices.length > 0) {
+                /* Every newer Driver assignment action owns arbitration.
+                   Terminal pending_cancelled/assignment_applied/release_pending
+                   therefore clears an older audible candidate, while a still
+                   newer assignment_pending replacement can establish a new one. */
+                if ("driver".equals(roleCode)) {
                     selectedVersion = version;
                     selectedVoices = voices;
                     selectedTitle = title;
                     selectedBody = message;
+                    selectedOperationKey = operationKey;
+                    selectedOperationInvalid = operationInvalid;
                 }
             }
 
             if (selectedVersion <= 0L || selectedVoices.length == 0) {
-                return false;
+                return VoiceAttempt.noCandidate();
             }
-            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceSequence(
+            if (selectedOperationInvalid || selectedOperationKey.isEmpty()) {
+                return VoiceAttempt.retry();
+            }
+            OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
                 this,
                 selectedCue,
-                selectedVoices,
-                selectedVersion,
-                roleCode + "_assignment",
+                Arrays.asList(new OperationalVoiceAnnouncer.Operation(
+                    selectedOperationKey,
+                    selectedVoices
+                )),
                 showNotification,
                 selectedTitle,
                 selectedBody
             );
-            return result.announced;
+            return VoiceAttempt.candidate(result.processed, result.announced);
         } catch (Exception error) {
             Log.w("ConnectivityForegroundService", "Assignment voice was not parsed", error);
-            return false;
+            return VoiceAttempt.retry();
         }
     }
 
-    private boolean showLatestExcavatorAssignmentAlerts(
+    private VoiceAttempt showLatestExcavatorAssignmentAlerts(
             JSONArray events,
             JSONArray workerEquipmentIds,
             boolean showNotification) {
@@ -986,7 +1391,7 @@ public class ConnectivityForegroundService extends Service {
             }
         }
         if (latestByTruck.isEmpty()) {
-            return false;
+            return VoiceAttempt.noCandidate();
         }
 
         List<ExcavatorAssignmentVoice> selected = new ArrayList<>(latestByTruck.values());
@@ -1018,7 +1423,7 @@ public class ConnectivityForegroundService extends Service {
             notificationTitle,
             notificationBody
         );
-        return result.announced;
+        return VoiceAttempt.candidate(result.processed, result.announced);
     }
 
     private static long firstCommonId(JSONArray left, JSONArray right) {
@@ -1032,6 +1437,34 @@ public class ConnectivityForegroundService extends Service {
             }
         }
         return 0L;
+    }
+
+    private static final class VoiceAttempt {
+        final boolean candidate;
+        final boolean processed;
+        final boolean announced;
+
+        private VoiceAttempt(boolean candidate, boolean processed, boolean announced) {
+            this.candidate = candidate;
+            this.processed = processed;
+            this.announced = announced;
+        }
+
+        static VoiceAttempt noCandidate() {
+            return new VoiceAttempt(false, true, false);
+        }
+
+        static VoiceAttempt processed(boolean announced) {
+            return new VoiceAttempt(true, true, announced);
+        }
+
+        static VoiceAttempt candidate(boolean processed, boolean announced) {
+            return new VoiceAttempt(true, processed, announced);
+        }
+
+        static VoiceAttempt retry() {
+            return new VoiceAttempt(true, false, false);
+        }
     }
 
     private static final class ExcavatorAssignmentVoice {
@@ -1065,6 +1498,40 @@ public class ConnectivityForegroundService extends Service {
             }
         }
         return false;
+    }
+
+    /**
+     * Нейтральное оповещение о росте версии, который не забрал ни один
+     * конкретный обработчик. Применение событий остаётся за WebView: курсор
+     * страницы и {@code appliedVersion} здесь не двигаются.
+     */
+    private void notifyGenericOperationalEvent(long serverVersion) {
+        if (serverVersion <= 0L) {
+            return;
+        }
+        SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        if (preferences.getLong(LAST_ALERTED_VERSION, 0L) >= serverVersion) {
+            return;
+        }
+        // Reserve the version before delivery: one growth is announced once, even
+        // if the process dies right after the marker is written.
+        if (!preferences.edit().putLong(LAST_ALERTED_VERSION, serverVersion).commit()) {
+            Log.w("ConnectivityForegroundService", "Screen-off alert marker was not saved");
+            return;
+        }
+        boolean notificationShown = AppNotifications.showNeutralOperationalAlert(
+            this,
+            "Новое событие в смене",
+            "Откройте приложение, чтобы проверить данные."
+        );
+        boolean cueQueued = OperationalVoicePlayer.playCueOnly(
+            this,
+            OperationalCueCatalog.SHIFT
+        );
+        if (!notificationShown && !cueQueued) {
+            // Nothing reached the worker; allow one retry for the same growth.
+            preferences.edit().remove(LAST_ALERTED_VERSION).apply();
+        }
     }
 
     private String currentStatusText() {

@@ -14,6 +14,9 @@ import androidx.core.app.NotificationManagerCompat;
 public final class AppNotifications {
     public static final int FOREGROUND_NOTIFICATION_ID = 1201;
     private static final int OPERATIONAL_ALERT_NOTIFICATION_ID = 1202;
+    // Separate id so a neutral screen-off notice never replaces a specific
+    // operational alert that is still waiting to be read.
+    private static final int NEUTRAL_ALERT_NOTIFICATION_ID = 1203;
 
     private AppNotifications() {}
 
@@ -121,6 +124,44 @@ public final class AppNotifications {
             return true;
         } catch (SecurityException ignored) {
             // Android 13+: пользователь может явно запретить уведомления.
+            return false;
+        }
+    }
+
+    /**
+     * Нейтральное операционное уведомление для роста версии, который не забрал
+     * ни один конкретный обработчик. Текст не содержит персональных данных и
+     * номеров техники, поэтому на заблокированном экране показывается только
+     * сам факт события ({@link NotificationCompat#VISIBILITY_PRIVATE}).
+     */
+    public static boolean showNeutralOperationalAlert(Context context, String title, String message) {
+        if (!alertsEnabled(context)) {
+            return false;
+        }
+        Intent openIntent = new Intent(context, MainActivity.class)
+            .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent openPendingIntent = PendingIntent.getActivity(
+            context,
+            3,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        Notification notification = new NotificationCompat.Builder(context, BuildConfig.ALERT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_alert)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+            .setContentIntent(openPendingIntent)
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE | NotificationCompat.DEFAULT_LIGHTS)
+            .build();
+        try {
+            NotificationManagerCompat.from(context).notify(NEUTRAL_ALERT_NOTIFICATION_ID, notification);
+            return true;
+        } catch (SecurityException ignored) {
             return false;
         }
     }

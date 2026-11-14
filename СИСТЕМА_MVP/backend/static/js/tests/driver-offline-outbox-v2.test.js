@@ -11,6 +11,8 @@ const {
     createDriverFreeBucketSelectedEvent,
     createDriverFreeBucketCancelledEvent,
     isDriverSyncAuthResponse,
+    isDriverSyncInactiveRoleResponse,
+    createDriverSyncSend,
     createDriverDowntimeEndEvent,
     selectDriverDowntimeProjection,
     localRepository,
@@ -1493,4 +1495,113 @@ test("restart resends v376 refusals: load during downtime, changed face, cancel 
     await restarted.initialize();
     assert.deepEqual(delivered, ["v376-load-downtime", "v376-load-face", "v376-cancel", "v376-next-load"]);
     assert.equal((await restarted.pending()).length, 0);
+});
+
+/* OF-01 (T-020). Роль переведена в просмотр: middleware отвечает 409
+   {"code":"inactive_role"} без results, ещё до view. Раньше клиент считал это
+   сетью и повторял пачку каждые 5-8 с бесконечно, в «на сверке» не переходил,
+   а работник видел «Действие сохранено». Теперь это состояние роли. */
+test("409 inactive_role is a role state, not a network failure", () => {
+    const inactiveBody = '{"ok":false,"error":"Роль неактивна — доступен только просмотр","code":"inactive_role"}';
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 409}, inactiveBody), true);
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 409}, '{"ok":false,"role_active":false}'), true, "role_active:false тоже состояние роли");
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 409}, '{"ok":false,"code":"event_id_reused"}'), false, "другой конфликт остаётся конфликтом");
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 500}, '{"code":"inactive_role"}'), false, "5xx — по-прежнему сбой сервера");
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 200}, '{"ok":true}'), false);
+    assert.equal(isDriverSyncInactiveRoleResponse({status: 409}, "не json"), false);
+});
+
+test("the driver sender keeps its old answers for 401, 5xx and a refused batch", async () => {
+    function sendWith(status, body) {
+        return createDriverSyncSend({
+            fetch: async () => ({
+                status,
+                ok: status >= 200 && status < 300,
+                redirected: false,
+                url: "https://driverform.ru/offline-events/sync/",
+                headers: {get() { return "application/json"; }},
+                text: async () => body,
+            }),
+            url: "/offline-events/sync/",
+            csrfToken: "token",
+            baseUrl: "https://driverform.ru/driver/",
+            isAuthResponse: isDriverSyncAuthResponse,
+        });
+    }
+    const batch = {events: [{event_id: "one"}]};
+    const unauthorized = await sendWith(401, "{}")(batch);
+    assert.deepEqual(unauthorized.results.map(result => [result.status, result.code]), [["auth_required", "auth_required"]]);
+    await assert.rejects(sendWith(500, "{}")(batch), /server_unavailable/);
+    const refusedBatch = await sendWith(400, '{"ok":false}');
+    await assert.rejects(refusedBatch(batch), /sync_rejected/);
+});
+
+test("an inactive role parks the driver queue instead of retrying it forever", async () => {
+    const local = storage();
+    const batches = [];
+    let roleActive = false;
+    const send = createDriverSyncSend({
+        fetch: async (url, init) => {
+            const batch = JSON.parse(init.body);
+            batches.push(batch.events.map(event => event.event_id));
+            if (!roleActive) {
+                return {
+                    status: 409,
+                    ok: false,
+                    redirected: false,
+                    url: "https://driverform.ru/offline-events/sync/",
+                    headers: {get() { return "application/json"; }},
+                    text: async () => '{"ok":false,"error":"Роль неактивна — доступен только просмотр","code":"inactive_role"}',
+                };
+            }
+            return {
+                status: 200,
+                ok: true,
+                redirected: false,
+                url: "https://driverform.ru/offline-events/sync/",
+                headers: {get() { return "application/json"; }},
+                text: async () => JSON.stringify({ok: true, results: batch.events.map(event => ({event_id: event.event_id, status: "accepted"}))}),
+            };
+        },
+        url: "/offline-events/sync/",
+        csrfToken: "token",
+        baseUrl: "https://driverform.ru/driver/",
+        isAuthResponse: isDriverSyncAuthResponse,
+    });
+    const reviews = [];
+    const box = createDriverOfflineOutbox({
+        repository: localRepository(local, 7),
+        localStorage: local,
+        accessId: 7,
+        context: {actorId: 11, accessId: 7, shiftId: 23, equipmentId: 58, deviceId: "install-uuid-1", authGeneration: "generation-1"},
+        send,
+        onReview: (event, result) => reviews.push([event.event_id, result.code, result.message]),
+    });
+    await box.enqueue({
+        event_id: "inactive-role-unload",
+        event_type: "driver.trip.unloaded",
+        occurred_at: "2026-11-13T08:00:00.000Z",
+        trip_id: 91,
+        payload: {trip_id: 91},
+    });
+    await box.flush();
+
+    assert.deepEqual(batches, [["inactive-role-unload"]], "пачка ушла один раз");
+    const parked = await box.pending();
+    assert.equal(parked.length, 1, "запись не удалена и не потеряна");
+    assert.equal(parked[0].state, "auth_required");
+    assert.equal(parked[0].last_error.code, "inactive_role");
+    assert.equal(parked[0].next_retry_at, 0, "повтор по таймеру не назначен");
+    assert.deepEqual(reviews.map(([, code]) => code), ["inactive_role"], "работник видит причину");
+    assert.match(reviews[0][2], /Роль неактивна/);
+
+    await box.flush();
+    await box.retryNow();
+    assert.equal(batches.length, 1, "бесконечного повтора нет");
+
+    roleActive = true;
+    await box.resumeAuthRequired("generation-2");
+    await box.flush();
+    assert.equal(batches.length, 2, "после восстановления роли очередь уходит сама");
+    assert.equal((await box.pending()).length, 0);
 });

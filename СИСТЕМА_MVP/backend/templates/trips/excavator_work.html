@@ -6,28 +6,28 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v264">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v264">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v264" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v266">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v266">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v266" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v264">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v264" defer></script>
-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v264"></script>
-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v264"></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v266">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v266" defer></script>
+<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v266"></script>
+<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v266"></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -397,7 +397,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v264";
+var excavatorShellVersion = "excavator-mobile-shell-v266";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -490,7 +490,8 @@ function playExcavatorEquipmentVoice(action, equipmentNumber, options) {
         dumpPointName: String(options.dumpPointName || ""),
         fallbackVoice: String(options.fallbackVoice || "voice_truck_assigned"),
         eventVersion: Number(options.eventVersion || 0),
-        eventKey: String(options.eventKey || "")
+        eventKey: String(options.eventKey || ""),
+        operationKey: String(options.operationKey || "")
     });
 }
 
@@ -531,6 +532,55 @@ window.ExcavatorVoiceGuard = (function () {
     return {claim: claim, finalize: finalize, release: release, state: state};
 })();
 
+/* Сроки ожидания голоса.
+
+   Та же семантика, что на экране водителя (static/js/driver-shift-voice-v1.js):
+   голосовой ответ подтверждает общий курсор realtime, поэтому ожидание
+   ограничено. Звуковой слой отвечает за 1500 мс
+   (static/js/mobile-operational-sounds-v1.js); 2500 мс — рубеж на случай, если
+   он окажется старее этого экрана и зависнет (T-016, e2e §10.1). */
+var EXCAVATOR_VOICE_DEADLINE_MS = 2500;
+var EXCAVATOR_VOICE_TIMEOUT_REASONS = {audio_timeout: true, bridge_timeout: true};
+
+function excavatorVoiceTimedOut(result) {
+    return !!(result && EXCAVATOR_VOICE_TIMEOUT_REASONS[String(result.reason || "")]);
+}
+
+function excavatorVoiceWithoutChannel(result) {
+    return !!result && typeof result === "object" && result.supported === false && result.announced !== true;
+}
+
+function clearExcavatorVoiceTimer(timer) {
+    if (typeof window !== "undefined" && typeof window.clearTimeout === "function") {
+        window.clearTimeout(timer);
+    }
+}
+
+function withExcavatorVoiceDeadline(operationKeys, pending) {
+    return new Promise(function (resolve) {
+        var settled = false;
+        var timer = window.setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            (operationKeys || []).forEach(function (operationKey) {
+                window.ExcavatorVoiceGuard.release(operationKey);
+            });
+            resolve(true);
+        }, EXCAVATOR_VOICE_DEADLINE_MS);
+        Promise.resolve(pending).then(function (value) {
+            if (settled) return;
+            settled = true;
+            clearExcavatorVoiceTimer(timer);
+            resolve(value === true);
+        }, function () {
+            if (settled) return;
+            settled = true;
+            clearExcavatorVoiceTimer(timer);
+            resolve(false);
+        });
+    });
+}
+
 function settleExcavatorVoiceClaims(operationKeys, result) {
     var announced = result === true || !!(result && result.announced === true);
     var ownedElsewhere = !!(result && String(result.reason || "") === "already_announced");
@@ -541,6 +591,10 @@ function settleExcavatorVoiceClaims(operationKeys, result) {
             window.ExcavatorVoiceGuard.release(operationKey);
         }
     });
+    /* Ответа за срок нет или канала озвучки нет: заявки освобождены, поэтому
+       следующая доставка попробует снова, но общий курсор таким событием не
+       держим — иначе недоступный звук останавливает экран (T-016, e2e §10.1). */
+    return announced || ownedElsewhere || excavatorVoiceTimedOut(result) || excavatorVoiceWithoutChannel(result);
 }
 
 function excavatorAssignmentOperationKey(kind, assignmentId, excavatorId) {
@@ -621,11 +675,14 @@ function latestExcavatorAssignmentOperations(context) {
 }
 
 function playExcavatorAssignmentAlerts(operations) {
+    var blocked = false;
     var claimed = (operations || []).filter(function (operation) {
-        return operation && operation.operationKey
-            && window.ExcavatorVoiceGuard.claim(operation.operationKey);
+        if (!operation || !operation.operationKey) return false;
+        if (window.ExcavatorVoiceGuard.claim(operation.operationKey)) return true;
+        if (window.ExcavatorVoiceGuard.state(operation.operationKey) !== "announced") blocked = true;
+        return false;
     });
-    if (!claimed.length) return;
+    if (!claimed.length) return Promise.resolve(!blocked);
 
     if (typeof window.excavatorHaptic === "function") {
         window.excavatorHaptic([180, 90, 180], 255);
@@ -655,18 +712,20 @@ function playExcavatorAssignmentAlerts(operations) {
                 cue: "truck_assigned",
                 fallbackVoice: first.fallbackVoice,
                 eventVersion: Number(first.eventVersion || 0),
-                eventKey: "excavator_operator_assignment"
+                eventKey: "excavator_operator_assignment",
+                operationKey: first.operationKey
             });
         }
     } catch (error) {
         operationKeys.forEach(window.ExcavatorVoiceGuard.release);
-        return;
+        return Promise.resolve(false);
     }
-    Promise.resolve(pending).then(function (result) {
-        settleExcavatorVoiceClaims(operationKeys, result);
+    return withExcavatorVoiceDeadline(operationKeys, Promise.resolve(pending).then(function (result) {
+        return settleExcavatorVoiceClaims(operationKeys, result) && !blocked;
     }, function () {
         operationKeys.forEach(window.ExcavatorVoiceGuard.release);
-    });
+        return false;
+    }));
 }
 
 var excavatorPickupAudioContext = null;
@@ -731,7 +790,13 @@ function playExcavatorAssignmentAlert(action, truckNumber, voice, eventVersion, 
 }
 
 window.handleOperationalStateSignals = function (context) {
-    playExcavatorAssignmentAlerts(latestExcavatorAssignmentOperations(context));
+    /* Признак «принято» нужен общему курсору realtime: пока роль не подтвердила
+       голосовую работу, версия дельты остаётся неподтверждённой (realtime-client.js).
+       Пакетная озвучка ограничена сроком (withExcavatorVoiceDeadline), поэтому
+       этот промис разрешается всегда: зависший звук не держит экран. */
+    return playExcavatorAssignmentAlerts(latestExcavatorAssignmentOperations(context)).then(function (accepted) {
+        return {accepted: accepted === true};
+    });
 };
 /* EXCAVATOR_VOICE_GUARD_END */
 
@@ -841,14 +906,15 @@ function announceExcavatorAssignmentChanges(previousSnapshot, nextSnapshot, even
     showExcavatorNotice(parts.join(" "));
 }
 
-function syncExcavatorAssignmentSnapshot(root, previousSnapshot, eventVersion) {
+function syncExcavatorAssignmentSnapshot(root, previousSnapshot, eventVersion, options) {
+    options = options || {};
     if (!root) return;
     var nextSnapshot = readExcavatorAssignmentSnapshot(root);
     var baseline = previousSnapshot;
     if (baseline === undefined) {
         baseline = readStoredExcavatorAssignments(root);
     }
-    if (baseline) {
+    if (baseline && options.announce !== false) {
         announceExcavatorAssignmentChanges(baseline, nextSnapshot, eventVersion);
     }
     storeExcavatorAssignments(root, nextSnapshot);
@@ -1096,7 +1162,11 @@ function refreshExcavatorWorkFromServer(options) {
     var minimumVersion = requestedMinimumVersion;
     var refreshPromise = window.AppOperationalFragment.request(
         "excavator",
-        minimumVersion
+        minimumVersion,
+        {
+            snapshot: options.snapshot === true,
+            snapshotUrl: options.snapshotUrl ? String(options.snapshotUrl) : ""
+        }
     ).then(function (payload) {
         if (mutationGeneration !== excavatorWorkMutationGeneration || isExcavatorRefreshUnsafe(options)) return false;
         var payloadVersion = Number(payload.version || 0);
@@ -1160,7 +1230,16 @@ function refreshExcavatorWorkFromServer(options) {
                не является реальным назначением или снятием самосвала. */
             storeExcavatorAssignments(newShell, readExcavatorAssignmentSnapshot(newShell));
         } else {
-            syncExcavatorAssignmentSnapshot(newShell, previousAssignments, Number(options.version || 0));
+            var snapshotIsCurrent = !options.snapshot
+                || !options.achievementContext
+                || typeof options.achievementContext.isCurrentSnapshot !== "function"
+                || options.achievementContext.isCurrentSnapshot(Number(payload.snapshot_version || payload.version || 0));
+            syncExcavatorAssignmentSnapshot(
+                newShell,
+                previousAssignments,
+                Number(options.version || 0),
+                {announce: snapshotIsCurrent}
+            );
         }
         scheduleExcavatorViewportHeightSync();
         if (window.AppOperationalFragment.restoreView) {
@@ -1297,7 +1376,13 @@ window.applyOperationalStateRefresh = function (context) {
     }
     var targetVersion = Number(context && context.version || 0);
     // Даже пустая/усечённая дельта не доказывает, что текущий DOM отражает сервер.
-    return refreshExcavatorWorkFromServer({preserveTab: true, version: targetVersion, achievementContext: context}).then(function (applied) {
+    return refreshExcavatorWorkFromServer({
+        preserveTab: true,
+        version: targetVersion,
+        achievementContext: context,
+        snapshot: !!(context && context.snapshotRequired),
+        snapshotUrl: context && context.snapshotUrl ? String(context.snapshotUrl) : ""
+    }).then(function (applied) {
         if (!applied) return {deferred: true, reason: "excavator_refresh_failed"};
         return {applied: true, version: Number(document.body.dataset.operationalStateVersion || 0)};
     }).catch(function () {
@@ -2974,7 +3059,21 @@ window.initExcavatorWorkShell = function () {
         if (typeof window.isAppRoleReadonly === "function" && window.isAppRoleReadonly()) {
             return;
         }
-        if (!card || !dumpTarget || !fieldOutbox) return;
+        // Погрузка не должна «тихо» пропадать: без карточки, точки разгрузки или
+        // локальной очереди работник видит причину и может повторить действие.
+        if (!card || !dumpTarget) {
+            playExcavatorSound("action_error");
+            showExcavatorNotice(!card
+                ? "Самосвал не определён. Обновите экран и повторите погрузку."
+                : "Точка разгрузки не определена. Обновите экран и повторите погрузку.");
+            return;
+        }
+        if (!fieldOutbox) {
+            playExcavatorVoice("action_error", "voice_truck_send_failed");
+            renderExcavatorOfflineStatus({storage_failed: true, total: 0});
+            showExcavatorNotice("Локальное сохранение недоступно. Погрузка не сохранена — обновите экран и повторите.");
+            return;
+        }
         if (!canTruckLoad(card)) {
             playExcavatorSound("action_error");
             showExcavatorNotice(truckLoadBlockReason(card));

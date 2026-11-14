@@ -8675,7 +8675,7 @@ th {
 }
 
 .dnd-zone::before {
-    content: "вњ“";
+    content: "✓";
     display: grid;
     grid-row: 1 / span 2;
     place-items: center;
@@ -8728,7 +8728,7 @@ th {
 }
 
 .dnd-zone.danger::before {
-    content: "Г—";
+    content: "×";
     border-color: rgba(232, 75, 75, .44);
     background: rgba(232, 75, 75, .14);
     color: #a72f2f;
@@ -8776,7 +8776,7 @@ th {
 }
 
 .dnd-zone.success::before {
-    content: "вњ“";
+    content: "✓";
     border-color: rgba(32, 184, 148, .44);
     background: rgba(32, 184, 148, .14);
     color: #08766c;
@@ -9145,14 +9145,14 @@ th {
 }
 
 .dashboard-action-panel .dnd-zone.neutral::before {
-    content: "в‡©";
+    content: "⇩";
     border-color: rgba(126, 143, 157, .36);
     background: rgba(126, 143, 157, .12);
     color: #526170;
 }
 
 .dashboard-action-panel .dnd-zone.info::before {
-    content: "в†»";
+    content: "↻";
 }
 
 .conflicts-dashboard-card {

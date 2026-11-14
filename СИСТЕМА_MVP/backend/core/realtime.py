@@ -90,7 +90,13 @@ def _event_role_codes(payload):
     return set(values)
 
 
-def _worker_equipment_ids(access):
+def selected_equipment_ids_for_access(access):
+    """Return equipment selected directly for this employee/role.
+
+    Unlike the effective realtime set, this intentionally excludes equipment
+    linked only through a ``HaulAssignment``. Those links are operational
+    events, not a change of the authenticated cursor identity.
+    """
     role_code = access.role.code
     equipment_ids = set(
         EmployeeShift.objects.filter(
@@ -108,6 +114,12 @@ def _worker_equipment_ids(access):
             ended_at__isnull=True,
         ).values_list('equipment_id', flat=True)
     )
+    return equipment_ids
+
+
+def _worker_equipment_ids(access):
+    equipment_ids = selected_equipment_ids_for_access(access)
+    role_code = access.role.code
     if role_code == 'driver':
         equipment_ids.update(
             HaulAssignment.objects.filter(
@@ -281,10 +293,11 @@ def serialize_event(event):
     }
 
 
-def relevant_event_delta(events_queryset, access, *, limit):
+def relevant_event_page(events_queryset, access, *, limit):
     scanned_events = list(events_queryset[:MAX_EVENT_SCAN + 1])
     scan_truncated = len(scanned_events) > MAX_EVENT_SCAN
-    events = collapse_duplicate_business_events(scanned_events[:MAX_EVENT_SCAN])
+    scan_window = scanned_events[:MAX_EVENT_SCAN]
+    events = collapse_duplicate_business_events(scan_window)
     equipment_ids = None
     if access.role.code in {'driver', 'excavator_operator'}:
         equipment_ids = _worker_equipment_ids(access)
@@ -301,7 +314,32 @@ def relevant_event_delta(events_queryset, access, *, limit):
         for event in events
         if event_is_relevant(event, access, equipment_ids=equipment_ids, driver_shift_ids=driver_shift_ids)
     ]
+    returned_events = relevant[:limit]
+    relevant_truncated = len(relevant) > limit
+    if relevant_truncated:
+        first_unsent_version = relevant[limit].version
+        scanned_through_version = max(
+            (
+                event.version
+                for event in scan_window
+                if event.version < first_unsent_version
+            ),
+            default=None,
+        )
+    else:
+        scanned_through_version = scan_window[-1].version if scan_window else None
     return (
-        [serialize_event(event) for event in relevant[:limit]],
-        scan_truncated or len(relevant) > limit,
+        [serialize_event(event) for event in returned_events],
+        scan_truncated or relevant_truncated,
+        scanned_through_version,
     )
+
+
+def relevant_event_delta(events_queryset, access, *, limit):
+    """Backward-compatible two-value wrapper for existing callers/tests."""
+    events, truncated, _scanned_through_version = relevant_event_page(
+        events_queryset,
+        access,
+        limit=limit,
+    )
+    return events, truncated
