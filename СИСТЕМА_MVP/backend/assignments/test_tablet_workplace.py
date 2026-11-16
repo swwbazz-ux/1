@@ -160,6 +160,16 @@ class TabletWorkplaceTests(TestCase):
         self.assertEqual(reverse('dispatcher_control'), original)
         self.assertEqual(original, '/dispatcher/control/')
 
+    def test_tablet_html_is_never_cached(self):
+        self.login()
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+
+        anonymous = Client().get(self.url)
+        self.assertEqual(anonymous.status_code, 302)
+        self.assertIn('no-store', anonymous['Cache-Control'])
+
     def test_csrf_is_required_even_with_fresh_login_proof(self):
         self.login()
         csrf_client = Client(enforce_csrf_checks=True)

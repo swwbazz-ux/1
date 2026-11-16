@@ -1,5 +1,7 @@
-# T-033 полный RC для вахты: T-016 (SSE), T-019 (Android native), T-020/T-025 (offline), T-021 (PIN/сессии), T-030 (отчёты). База: 63dc191e. Только пути внутри СИСТЕМА_MVP/backend: 46 изменённых продуктовых файлов + 24 runtime-ассетов диспетчера, итого 70. T-039 добавляет 3 пути (диспетчерские шаблоны и dispatcher_pwa.py для bump shell v166→v167), итого 73. Корневые файлы (.env.stand.example) не деплоятся: receiver разрешает в корне только manage.py и requirements.txt. Вне backend намеренно не деплоится: mobile/capacitor-shell (APK собирается отдельным режимом) и deployment/sse-pilot (example-конфиги, не рантайм). Тесты, tools, docs и .github в выпуск не входят.
+# T-033 полный RC для вахты: T-016 (SSE), T-019 (Android native), T-020/T-025 (offline), T-021 (PIN/сессии), T-030 (отчёты). База: 63dc191e. Только пути внутри СИСТЕМА_MVP/backend: 46 изменённых продуктовых файлов + 24 runtime-ассетов диспетчера, итого 70. T-039 добавляет 3 пути (диспетчерские шаблоны и dispatcher_pwa.py для bump shell v166→v167). T-040 добавляет 2 пути (assignments/views.py и assignments/tablet_views.py: bump оболочки горного мастера v165→v166 и @never_cache на планшет), итого 75. Корневые файлы (.env.stand.example) не деплоятся: receiver разрешает в корне только manage.py и requirements.txt. Вне backend намеренно не деплоится: mobile/capacitor-shell (APK собирается отдельным режимом) и deployment/sse-pilot (example-конфиги, не рантайм). Тесты, tools, docs и .github в выпуск не входят.
 СИСТЕМА_MVP/backend/assignments/deputy_views.py
+СИСТЕМА_MVP/backend/assignments/tablet_views.py
+СИСТЕМА_MVP/backend/assignments/views.py
 СИСТЕМА_MVP/backend/config/settings_sse_local.py
 СИСТЕМА_MVP/backend/config/sse_asgi.py
 СИСТЕМА_MVP/backend/config/sse_load_settings.py
