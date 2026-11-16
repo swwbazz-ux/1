@@ -6,8 +6,11 @@
    Поэтому на одном экране (/mining-master/tablet) мы сами просим
    регистрацию проверить обновление и сразу отдаём ожидающему воркеру
    SKIP_WAITING. После активации нового воркера браузер шлёт
-   controllerchange — и страница перезагружается один раз за сессию,
-   чтобы уже отдавать разметку новой версии.
+   controllerchange — и страница перезагружается один раз на версию
+   оболочки, чтобы уже отдавать разметку новой версии. Ключ защиты от
+   петли включает версию (data-app-shell-version у <body>): после
+   выпуска следующей версии перезагрузка снова возможна, иначе
+   механизм сработал бы один раз за всё время жизни вкладки.
 
    Блок намеренно стоит первым в файле и ничего не ждёт от остального
    кода холста. На других экранах он выходит сразу по проверке пути. */
@@ -15,7 +18,24 @@
     if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
     var path = (location.pathname || "").replace(/\/+$/, "");
     if (path !== "/mining-master/tablet") return;
-    var reloadKey = "mm-sw-forced-reload";
+    var shellVersion = (document.body && document.body.dataset
+        && document.body.dataset.appShellVersion) || "0";
+    var reloadKey = "mm-sw-forced-reload:" + shellVersion;
+
+    /* Пока оператор вводит PIN или открыт диалог/подтверждение, страницу
+       не трогаем: перезагрузка сотрёт ввод. Проверка та же, что у штатного
+       AppPwaContractGuard (templates/base.html, hasUnsafeWorkInProgress):
+       активное поле ввода, открытые модальные окна, незавершённые действия. */
+    function hasUnfinishedWork() {
+        var guard = window.AppPwaContractGuard;
+        if (guard && typeof guard.hasUnsafeWorkInProgress === "function") {
+            try {
+                if (guard.hasUnsafeWorkInProgress()) return true;
+            } catch (error) {}
+        }
+        return Boolean(document.querySelector("dialog[open]"));
+    }
+
     navigator.serviceWorker.getRegistration().then(function (registration) {
         if (!registration) return;
         registration.update().catch(function () {});
@@ -26,6 +46,9 @@
     navigator.serviceWorker.addEventListener("controllerchange", function () {
         try {
             if (sessionStorage.getItem(reloadKey)) return;
+        } catch (error) {}
+        if (hasUnfinishedWork()) return;
+        try {
             sessionStorage.setItem(reloadKey, "1");
         } catch (error) {}
         location.reload();
