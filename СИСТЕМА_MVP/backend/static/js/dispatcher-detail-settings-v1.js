@@ -24,6 +24,16 @@
         var detailDestinationCount = document.querySelector("[data-gd-destination-count]");
         var detailSettingSave = document.querySelector("[data-gd-setting-save]");
         var detailDumpPointOptions = [];
+        var detailDestinationLabels = Object.create(null);
+
+        function rememberDetailDestinationLabel(id, name) {
+            var key = String(id || "");
+            if (key && name) detailDestinationLabels[key] = String(name);
+        }
+
+        function detailDestinationLabel(id) {
+            return detailDestinationLabels[String(id || "")] || "";
+        }
 
         function fillDetailSettingSelect(select, items, selectedId) {
             if (!select) return;
@@ -41,27 +51,71 @@
             });
         }
 
+        function fillDetailDestinationSelect(select, selectedId, takenIds) {
+            if (!select) return;
+            var currentId = String(selectedId || "");
+            var taken = takenIds || Object.create(null);
+            var listed = Object.create(null);
+            select.innerHTML = "";
+            var placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Выберите";
+            placeholder.selected = !currentId;
+            select.appendChild(placeholder);
+            (detailDumpPointOptions || []).forEach(function (item) {
+                var id = String(item.id || "");
+                if (!id || listed[id]) return;
+                listed[id] = true;
+                rememberDetailDestinationLabel(id, item.name);
+                // Уже назначенная в другой строке точка не должна предлагаться
+                // к выбору; своя точка текущей строки остаётся на месте.
+                if (id !== currentId && taken[id]) return;
+                var option = document.createElement("option");
+                option.value = id;
+                option.textContent = item.name || "";
+                option.selected = id === currentId;
+                select.appendChild(option);
+            });
+            if (currentId && !listed[currentId]) {
+                var kept = document.createElement("option");
+                kept.value = currentId;
+                kept.textContent = detailDestinationLabel(currentId) || currentId;
+                kept.selected = true;
+                select.appendChild(kept);
+            }
+            select.value = currentId;
+        }
+
         function detailDestinationRows() {
             return detailDestinationList
                 ? Array.prototype.slice.call(detailDestinationList.querySelectorAll("[data-gd-destination-row]"))
                 : [];
         }
 
+        function detailDestinationTakenIds(exceptRow) {
+            var taken = Object.create(null);
+            detailDestinationRows().forEach(function (row) {
+                if (row === exceptRow) return;
+                var select = row.querySelector("[data-gd-destination-select]");
+                var id = select ? String(select.value || "") : "";
+                if (id) taken[id] = true;
+            });
+            return taken;
+        }
+
         function refreshDetailDestinationRows() {
             var rows = detailDestinationRows();
-            var selectedIds = rows.map(function (row) {
-                var select = row.querySelector("[data-gd-destination-select]");
-                return select ? String(select.value || "") : "";
-            }).filter(Boolean);
             rows.forEach(function (row) {
                 var select = row.querySelector("[data-gd-destination-select]");
                 var remove = row.querySelector("[data-gd-destination-remove]");
                 if (select) {
-                    Array.prototype.forEach.call(select.options, function (option) {
-                        option.disabled = !!option.value
-                            && option.value !== select.value
-                            && selectedIds.indexOf(String(option.value)) !== -1;
-                    });
+                    // Список пересобирается: точки, занятые другими строками,
+                    // в него не попадают, своя точка строки сохраняется.
+                    fillDetailDestinationSelect(
+                        select,
+                        select.value,
+                        detailDestinationTakenIds(row)
+                    );
                 }
                 if (remove) remove.disabled = rows.length <= 1;
             });
@@ -88,7 +142,14 @@
             selectCaption.textContent = "Точка";
             var select = document.createElement("select");
             select.setAttribute("data-gd-destination-select", "");
-            fillDetailSettingSelect(select, detailDumpPointOptions, destination && destination.dump_point_id);
+            if (destination && destination.dump_point_id) {
+                rememberDetailDestinationLabel(destination.dump_point_id, destination.name);
+            }
+            fillDetailDestinationSelect(
+                select,
+                destination && destination.dump_point_id,
+                detailDestinationTakenIds(null)
+            );
             selectLabel.appendChild(selectCaption);
             selectLabel.appendChild(select);
 
