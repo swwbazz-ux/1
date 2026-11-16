@@ -24,6 +24,12 @@ from .views import (
 )
 
 
+# The tablet WebView keeps an old copy of the page for the bare path, so GETs are
+# served from a versioned URL: "?v=<TABLET_PAGE_VERSION>". The APK only checks
+# location.pathname, so the query string does not break its compatibility gate.
+TABLET_PAGE_VERSION = '1'
+
+
 def tablet_access(request):
     state = role_session_state(request)
     access = state.get('access')
@@ -128,6 +134,10 @@ def start_or_resume_tablet_shift(request, access, *, confirm_handover=False):
 @tablet_workplace
 @sensitive_post_parameters('reauth_access_code')
 def mining_master_tablet_view(request):
+    if request.method != 'POST' and request.GET.get('v') != TABLET_PAGE_VERSION:
+        # Temporary redirect, never permanent: a cached 301 would pin the devices
+        # to a dead version. The target is a fixed constant, so this is one hop.
+        return redirect(f'{request.path}?v={TABLET_PAGE_VERSION}')
     access = tablet_access(request)
     if request.method == 'POST':
         action = request.POST.get('action', '')

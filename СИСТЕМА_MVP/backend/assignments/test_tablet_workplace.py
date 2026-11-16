@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
+from users.role_apps import get_role_app
 
 
 class TabletWorkplaceTests(TestCase):
@@ -15,6 +16,8 @@ class TabletWorkplaceTests(TestCase):
         self.access = EmployeeAccess.objects.create(employee=self.employee, role=role,
             access_code='246824', status=EmployeeAccess.Status.ACTIVATED)
         self.url = reverse('mining_master_tablet')
+        # The tablet page is only served from the versioned URL (cache busting).
+        self.page_url = f'{self.url}?v=1'
 
     def login(self, client=None):
         return (client or self.client).post(reverse('mining_master_tablet_login'),
@@ -82,7 +85,7 @@ class TabletWorkplaceTests(TestCase):
         self.assertIsNone(other_shift.closed_at)
         self.assertFalse(self.own_open().exists())
         self.assertTrue(any('другой роли' in str(m) for m in get_messages(response.wsgi_request)))
-        header = self.client.get(self.url).context['dispatcher_header']
+        header = self.client.get(self.page_url).context['dispatcher_header']
         self.start(tablet_handover_token=header['tablet_handover_token'],
                    **{header['other_role_shift_prompt']['field']: '1'})
         other_shift.refresh_from_db()
@@ -101,7 +104,7 @@ class TabletWorkplaceTests(TestCase):
 
     def test_verified_entry_starts_real_master_shift_once_without_retyping(self):
         self.login()
-        response = self.client.get(self.url)
+        response = self.client.get(self.page_url)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context['dispatcher_header']['requires_shift_reauth'])
         self.start()
@@ -111,14 +114,14 @@ class TabletWorkplaceTests(TestCase):
         self.client.post(self.url, {'action': 'end_shift'})
         self.start(device_kind='personal')
         self.assertFalse(self.own_open().exists())
-        self.assertTrue(self.client.get(self.url).context['dispatcher_header']['requires_shift_reauth'])
+        self.assertTrue(self.client.get(self.page_url).context['dispatcher_header']['requires_shift_reauth'])
 
     def test_next_shift_accepts_phone_pin_and_stays_shared(self):
         self.login(); self.start()
         self.client.post(self.url, {'action': 'end_shift'})
         self.start(reauth_phone=self.employee.phone, reauth_access_code='246824', device_kind='personal')
         self.assertEqual(self.own_open().count(), 1)
-        self.assertEqual(self.client.get(self.url).context['dispatcher_header']['session_device_kind'], 'shared')
+        self.assertEqual(self.client.get(self.page_url).context['dispatcher_header']['session_device_kind'], 'shared')
 
     def test_wrong_pin_cannot_use_saved_identity_after_close(self):
         self.login(); self.start()
@@ -141,7 +144,7 @@ class TabletWorkplaceTests(TestCase):
         shift = EmployeeShift.objects.create(employee=other, opened_by=other,
             workplace_code='mining_master', shift_type='day', opened_at=timezone.now())
         self.login()
-        response = self.client.get(self.url)
+        response = self.client.get(self.page_url)
         self.assertContains(response, 'data-dispatcher-shift-open="false"')
         self.assertFalse(response.context['dispatcher_header']['shift_is_open'])
         self.start()
@@ -152,7 +155,7 @@ class TabletWorkplaceTests(TestCase):
     def test_scoped_urls_and_tablet_geometry_preserve_legacy_reverse(self):
         original = reverse('dispatcher_control')
         self.login()
-        response = self.client.get(self.url)
+        response = self.client.get(self.page_url)
         self.assertContains(response, 'data-app-role-code="mining_master"')
         self.assertNotContains(response, 'dispatcher-control-screen mining-master-mobile-screen')
         self.assertContains(response, 'href="/mining-master/tablet/dispatcher/reports/"')
@@ -162,13 +165,54 @@ class TabletWorkplaceTests(TestCase):
 
     def test_tablet_html_is_never_cached(self):
         self.login()
-        response = self.client.get(self.url)
+        response = self.client.get(self.page_url)
         self.assertEqual(response.status_code, 200)
         self.assertIn('no-store', response['Cache-Control'])
 
         anonymous = Client().get(self.url)
         self.assertEqual(anonymous.status_code, 302)
         self.assertIn('no-store', anonymous['Cache-Control'])
+
+    def test_bare_tablet_url_redirects_to_versioned_page_once(self):
+        self.login()
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], f'{self.url}?v=1')
+        # A permanent redirect would pin the tablets to a dead version.
+        self.assertIn('no-store', response['Cache-Control'])
+
+        followed = self.client.get(self.url, follow=True)
+        self.assertEqual(followed.status_code, 200)
+        self.assertEqual([status for _, status in followed.redirect_chain], [302])
+
+        stale = self.client.get(f'{self.url}?v=0')
+        self.assertEqual(stale.status_code, 302)
+        self.assertEqual(stale['Location'], f'{self.url}?v=1')
+
+    def test_versioned_tablet_url_keeps_the_master_contract(self):
+        self.login()
+        response = self.client.get(self.page_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app-role-code="mining_master"')
+        self.assertContains(
+            response,
+            f'data-app-shell-version="{get_role_app("mining_master").shell_version}"',
+        )
+        self.assertContains(
+            response,
+            'data-dispatcher-move-url="/mining-master/tablet/dispatcher/control/excavator/move/"',
+        )
+
+    def test_version_param_never_blocks_shift_actions(self):
+        self.login()
+        response = self.start()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], self.url)
+        self.assertTrue(self.own_open().exists())
+
+        response = self.client.post(self.page_url, {'action': 'end_shift'})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(self.own_open().exists())
 
     def test_csrf_is_required_even_with_fresh_login_proof(self):
         self.login()
@@ -180,7 +224,7 @@ class TabletWorkplaceTests(TestCase):
     def test_closed_dispatcher_does_not_block_master_shift(self):
         self.login(); self.start()
         self.assertTrue(self.own_open().exists())
-        self.assertTrue(self.client.get(self.url).context['dispatcher_header']['shift_is_open'])
+        self.assertTrue(self.client.get(self.page_url).context['dispatcher_header']['shift_is_open'])
 
     def test_disabled_access_cannot_reuse_entry_proof(self):
         self.login()
@@ -195,7 +239,7 @@ class TabletWorkplaceTests(TestCase):
         # Even valid credentials cannot silently close a shift using a forged flag.
         self.start(reauth_phone=self.employee.phone, reauth_access_code='246824', close_other_role_shift='1')
         other.refresh_from_db(); self.assertIsNone(other.closed_at)
-        response = self.client.get(self.url)
+        response = self.client.get(self.page_url)
         header = response.context['dispatcher_header']
         self.assertFalse(header['requires_shift_reauth'])
         token = header['tablet_handover_token']
