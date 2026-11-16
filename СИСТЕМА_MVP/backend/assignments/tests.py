@@ -746,6 +746,13 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertIn('/static/img/pwa/mining-master-maskable-512.png', script)
         self.assertIn('SKIP_WAITING', script)
         self.assertIn('GET_VERSION', script)
+        mining_master_script = script.split(
+            'const ROLE_CODE = "mining_master";', 1
+        )[1]
+        install_handler = mining_master_script.split(
+            'self.addEventListener("install"', 1
+        )[1].split('self.addEventListener("activate"', 1)[0]
+        self.assertIn('self.skipWaiting();', install_handler)
 
     def test_mining_master_mobile_shell_renders_closed_shift_status(self):
         self.shift.closed_at = timezone.now()
