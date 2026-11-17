@@ -973,6 +973,50 @@ class ReleaseProtocolTests(unittest.TestCase):
             with self.assertRaises(receiver.ReleaseError):
                 receiver.validate_diagnostic_metadata({"operation": "infra_capacity_v1", "command": "id"})
 
+    def test_production_sse_preflight_has_no_free_form_parameters(self):
+        operation = "sse_production_preflight_v1"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "event.json"
+            path.write_text(json.dumps({"inputs": {"diagnostic_operation": operation}}), encoding="utf-8")
+            metadata = builder.load_diagnostic_metadata(path)
+            self.assertEqual(metadata, {"operation": operation})
+            self.assertEqual(receiver.validate_diagnostic_metadata(metadata), metadata)
+            receiver.validate_mode_contract({
+                "schema": 2, "mode": "diagnose", "commit": "a" * 40,
+                "files": [], "metadata": metadata,
+            }, {})
+            path.write_text(json.dumps({"inputs": {
+                "diagnostic_operation": operation, "diagnostic_equipment": "EXC-1",
+            }}), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                builder.load_diagnostic_metadata(path)
+            with self.assertRaises(receiver.ReleaseError):
+                receiver.validate_diagnostic_metadata({**metadata, "path": "/etc/shadow"})
+
+    def test_production_sse_preflight_exports_inventory_without_configuration(self):
+        site = (
+            b"server {\n    server_name driver.driverform.ru excavator.driverform.ru;\n"
+            b"    # location = /realtime/stream/ {\n"
+            b"    proxy_set_header X-Internal invalid-test-secret;\n}"
+        )
+        with (
+            mock.patch.object(receiver, "read_sse_site_config", return_value=site),
+            mock.patch.object(receiver, "inspect_sse_unit", return_value="inactive") as inspect,
+            mock.patch.object(receiver.subprocess, "run") as command,
+        ):
+            report = receiver.run_diagnostic({"metadata": {"operation": "sse_production_preflight_v1"}})
+        self.assertEqual(report["nginx_site_sha256"], hashlib.sha256(site).hexdigest())
+        self.assertTrue(report["driver_host_declared"])
+        self.assertTrue(report["excavator_host_declared"])
+        self.assertFalse(report["stream_location_declared"])
+        self.assertNotIn("invalid-test-secret", json.dumps(report))
+        self.assertEqual(inspect.call_args_list, [
+            mock.call("accounting-mvp.service"),
+            mock.call("accounting-mvp-sse-pilot.service"),
+            mock.call("accounting-mvp-sse-reconcile.service"),
+        ])
+        command.assert_not_called()
+
     def test_sse_qa_http_503_metadata_has_no_free_form_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
@@ -1812,10 +1856,11 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn("production-diagnostic-envelope.json", workflow)
         self.assertIn("production_diagnostic_ciphertext", workflow)
         self.assertIn("- infra_capacity_v1", workflow)
+        self.assertIn("- sse_production_preflight_v1", workflow)
         self.assertIn("- sse_qa_http_503_v1", workflow)
         self.assertIn("- sse_qa_http_403_v1", workflow)
         self.assertIn(
-            '{"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}',
+            '"trip_accounting_incident_v1", "infra_capacity_v1", "sse_production_preflight_v1"',
             workflow,
         )
         self.assertIn('expected_keys.add("public_evidence")', workflow)

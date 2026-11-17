@@ -75,6 +75,7 @@ on:
           - none
           - trip_accounting_incident_v1
           - infra_capacity_v1
+          - sse_production_preflight_v1
           - sse_qa_http_503_v1
           - sse_qa_http_403_v1
       diagnostic_equipment:
@@ -610,7 +611,10 @@ jobs:
           if report.get("kind") != "production_diagnostic_ciphertext":
               raise SystemExit("invalid diagnostic envelope kind")
           summary = report.get("summary") or {}
-          if operation not in {"trip_accounting_incident_v1", "infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}:
+          if operation not in {
+              "trip_accounting_incident_v1", "infra_capacity_v1", "sse_production_preflight_v1",
+              "sse_qa_http_503_v1", "sse_qa_http_403_v1",
+          }:
               raise SystemExit("unexpected diagnostic operation")
           if report.get("ciphertext_format") != "CMS-DER":
               raise SystemExit("unexpected diagnostic ciphertext format")
