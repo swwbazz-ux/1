@@ -167,7 +167,8 @@ public class NativeSoundPlugin extends Plugin {
                 cueName,
                 Arrays.asList(new OperationalVoiceAnnouncer.Operation(
                     operationKey,
-                    new String[] {voiceName}
+                    new String[] {voiceName},
+                    eventVersion
                 )),
                 false,
                 "",
@@ -227,7 +228,7 @@ public class NativeSoundPlugin extends Plugin {
         OperationalVoiceAnnouncer.Result result = OperationalVoiceAnnouncer.announceOperations(
             getContext(),
             cueName,
-            Arrays.asList(new OperationalVoiceAnnouncer.Operation(operationKey, voices)),
+            Arrays.asList(new OperationalVoiceAnnouncer.Operation(operationKey, voices, eventVersion)),
             false,
             "",
             ""
@@ -288,7 +289,7 @@ public class NativeSoundPlugin extends Plugin {
             }
             latestEventVersion = Math.max(latestEventVersion, item.optLong("eventVersion", 0L));
             actions.add(action);
-            operations.add(new OperationalVoiceAnnouncer.Operation(operationKey, voices));
+            operations.add(new OperationalVoiceAnnouncer.Operation(operationKey, voices, item.optLong("eventVersion", 0L)));
         }
         if (!invalidReason.isEmpty() || operations.size() != items.length()) {
             call.resolve(new JSObject()

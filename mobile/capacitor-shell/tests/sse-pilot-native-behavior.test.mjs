@@ -108,6 +108,7 @@ public final class OperationalVoiceBehaviorHarness {
             reproduceScopeHistoryCorruption();
             return;
         }
+        checkQuietResume();
         Map<String, MemoryPreferences> stores = new HashMap<>();
         MemoryContext firstProcess = new MemoryContext(stores);
         OperationalDeliveryLedger.syncFromWebView(firstProcess, "user:1|driver|truck:7", "epoch:a", 5L, 0L);
@@ -373,6 +374,41 @@ public final class OperationalVoiceBehaviorHarness {
             + " processed=" + replayedA.processed + " queued=" + OperationalVoicePlayer.queued);
     }
 
+    private static void checkQuietResume() {
+        Map<String, MemoryPreferences> stores = new HashMap<>();
+        MemoryContext context = new MemoryContext(stores);
+        OperationalDeliveryLedger.syncFromWebView(context, "test|excavator:99", "epoch:resume", 50L, 0L);
+        OperationalVoicePlayer.queued = 0;
+        check(AssignmentVoiceResumeGate.dismissed(context), "dismissal must persist");
+        ResultPair pending = announceBatch(context, new OperationalVoiceAnnouncer.Operation(
+            "excavator-assignment:remove:78:67", new String[] {"voice"}, 80L));
+        check(!pending.announced && !pending.processed, "WebView before snapshot must defer old voice");
+        MemoryContext reopened = new MemoryContext(stores);
+        check(AssignmentVoiceResumeGate.pending(reopened), "process restart must retain quiet resume");
+        check(AssignmentVoiceResumeGate.observeServer(reopened, 100L), "snapshot must persist high-water");
+        ResultPair old = announceBatch(reopened,
+            new OperationalVoiceAnnouncer.Operation("excavator-assignment:remove:78:67", new String[] {"voice"}, 80L),
+            new OperationalVoiceAnnouncer.Operation("excavator-assignment:assign:79:67", new String[] {"voice"}, 100L));
+        check(old.processed && !old.announced && OperationalVoicePlayer.queued == 0,
+            "closed-period remove/add must be processed without audio");
+        ResultPair mixed = announceBatch(reopened,
+            new OperationalVoiceAnnouncer.Operation("release:old", new String[] {"voice"}, 90L),
+            new OperationalVoiceAnnouncer.Operation("assign:new", new String[] {"voice"}, 101L));
+        check(mixed.processed && mixed.announced && OperationalVoicePlayer.queued == 1,
+            "new assignment after baseline must remain audible in mixed page");
+        check(!announceBatch(reopened, new OperationalVoiceAnnouncer.Operation(
+            "assign:new", new String[] {"voice"}, 101L)).announced, "new event remains deduplicated");
+        ResultPair lateOld = announceBatch(new MemoryContext(stores), new OperationalVoiceAnnouncer.Operation(
+            "assign:late-old", new String[] {"voice"}, 99L));
+        check(lateOld.processed && !lateOld.announced, "late WebView replay must stay silent after restart");
+        ResultPair dump = announceBatch(reopened, new OperationalVoiceAnnouncer.Operation(
+            "dump-point:trip", new String[] {"voice"}, 90L));
+        check(dump.announced, "resume rule must not mute loading/dump operations");
+        OperationalDeliveryLedger.syncFromWebView(reopened, "other|driver:1", "epoch:new", 0L, 0L);
+        check(announceBatch(reopened, new OperationalVoiceAnnouncer.Operation(
+            "assign:other", new String[] {"voice"}, 10L)).announced, "cutoff must not cross worker/journal scope");
+    }
+
     private static ResultPair concurrentAnnounce(
             Context context, CountDownLatch ready, CountDownLatch start, String key) {
         try {
@@ -485,6 +521,7 @@ test("real native ledger and announcer enforce semantic exactly-once queue owner
         collect(work);
         javaFiles.push(
             resolve(javaRoot, "OperationalDeliveryLedger.java"),
+            resolve(javaRoot, "AssignmentVoiceResumeGate.java"),
             resolve(javaRoot, "OperationalVoiceAnnouncer.java")
         );
         execFileSync("javac", ["-encoding", "UTF-8", "-d", classes, ...javaFiles], {stdio: "pipe"});

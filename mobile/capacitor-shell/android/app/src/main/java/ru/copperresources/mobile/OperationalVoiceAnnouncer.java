@@ -53,6 +53,14 @@ public final class OperationalVoiceAnnouncer {
             String notificationTitle,
             String notificationBody) {
         Context appContext = context.getApplicationContext();
+        if (AssignmentVoiceResumeGate.isAssignment(eventKey)) {
+            if (AssignmentVoiceResumeGate.pending(appContext)) {
+                return Result.rejected("assignment_resume_pending", false);
+            }
+            if (AssignmentVoiceResumeGate.silent(appContext, eventKey, eventVersion)) {
+                return Result.rejected("assignment_resume_silent", true);
+            }
+        }
         String normalizedKey = OperationalDeliveryLedger.qualifyOperationKey(appContext, eventKey);
         SharedPreferences preferences = appContext.getSharedPreferences(
             ConnectivityForegroundService.PREFS_NAME,
@@ -120,6 +128,13 @@ public final class OperationalVoiceAnnouncer {
             ConnectivityForegroundService.PREFS_NAME,
             Context.MODE_PRIVATE
         );
+        if (operations != null && AssignmentVoiceResumeGate.pending(appContext)) {
+            for (Operation operation : operations) {
+                if (operation != null && AssignmentVoiceResumeGate.isAssignment(operation.operationKey)) {
+                    return Result.rejected("assignment_resume_pending", false);
+                }
+            }
+        }
         List<String> operationOrder = readOperationOrder(appContext, preferences);
         Set<String> announcedKeys = new LinkedHashSet<>(operationOrder);
         List<String> pendingKeys = new ArrayList<>();
@@ -145,6 +160,15 @@ public final class OperationalVoiceAnnouncer {
                     continue;
                 }
                 if (announcedKeys.contains(qualifiedKey)) continue;
+                if (AssignmentVoiceResumeGate.silent(appContext, operation.operationKey, operation.eventVersion)) {
+                    if (!commitOperation(appContext, qualifiedKey, true)) {
+                        for (String key : pendingKeys) releaseOperation(appContext, key, true);
+                        return Result.rejected(REASON_PERSISTENCE_UNAVAILABLE, false);
+                    }
+                    operationOrder.remove(qualifiedKey);
+                    operationOrder.add(qualifiedKey);
+                    continue;
+                }
                 String claimToken = claimOperation(appContext, qualifiedKey, true);
                 if (!claimToken.isEmpty()) {
                     pendingKeys.add(claimToken);
@@ -306,7 +330,14 @@ public final class OperationalVoiceAnnouncer {
         public final String operationKey;
         public final String[] voiceNames;
 
+        public final long eventVersion;
+
         public Operation(String operationKey, String[] voiceNames) {
+            this(operationKey, voiceNames, 0L);
+        }
+
+        public Operation(String operationKey, String[] voiceNames, long eventVersion) {
+            this.eventVersion = Math.max(0L, eventVersion);
             this.operationKey = operationKey == null ? "" : operationKey.trim();
             this.voiceNames = voiceNames == null ? new String[0] : voiceNames.clone();
         }

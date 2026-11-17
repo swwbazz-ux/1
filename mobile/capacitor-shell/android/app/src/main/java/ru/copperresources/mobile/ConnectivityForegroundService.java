@@ -204,6 +204,7 @@ public class ConnectivityForegroundService extends Service {
             super.onTaskRemoved(rootIntent);
             return;
         }
+        AssignmentVoiceResumeGate.dismissed(this);
         ConnectionState.disable(this, "task_removed");
         Log.i("ConnectivityForegroundService", "Task removed; heartbeat service stopped");
         stopServiceAndRemoveNotification();
@@ -389,6 +390,9 @@ public class ConnectivityForegroundService extends Service {
             OperationalDeliveryLedger.Snapshot deliveryState =
                 OperationalDeliveryLedger.prepareServerResponse(this, result.body, serverVersion);
             previousVersion = deliveryState.appliedVersion;
+            if (!AssignmentVoiceResumeGate.observeServer(this, serverVersion)) {
+                throw new HeartbeatFailure("resume_baseline_not_saved");
+            }
             SharedPreferences.Editor successEditor = preferences.edit()
                 .putLong("last_transport_success_at", System.currentTimeMillis())
                 .putInt("last_http_status", result.statusCode)
@@ -1022,7 +1026,8 @@ public class ConnectivityForegroundService extends Service {
                     operationKey,
                     new String[] {
                         assignmentVoice.isEmpty() ? "voice_excavator_assigned" : assignmentVoice
-                    }
+                    },
+                    observedAtVersion
                 ));
                 if (!excavatorNumber.isBlank()) {
                     assignmentBody = "Экскаватор № " + excavatorNumber;
@@ -1090,7 +1095,8 @@ public class ConnectivityForegroundService extends Service {
                 operationKey,
                 numberVoice.isEmpty()
                     ? new String[] {"voice_truck_assigned"}
-                    : new String[] {"voice_truck_assigned_prefix", numberVoice}
+                    : new String[] {"voice_truck_assigned_prefix", numberVoice},
+                observedAtVersion
             ));
             if (!truckNumber.isBlank()) latestTruckNumber = truckNumber;
         }
@@ -1300,7 +1306,8 @@ public class ConnectivityForegroundService extends Service {
                 selectedCue,
                 Arrays.asList(new OperationalVoiceAnnouncer.Operation(
                     selectedOperationKey,
-                    selectedVoices
+                    selectedVoices,
+                    selectedVersion
                 )),
                 showNotification,
                 selectedTitle,
@@ -1401,7 +1408,7 @@ public class ConnectivityForegroundService extends Service {
         List<OperationalVoiceAnnouncer.Operation> operations = new ArrayList<>();
         boolean onlyRemovals = true;
         for (ExcavatorAssignmentVoice item : selected) {
-            operations.add(new OperationalVoiceAnnouncer.Operation(item.operationKey, item.voiceNames));
+            operations.add(new OperationalVoiceAnnouncer.Operation(item.operationKey, item.voiceNames, item.eventVersion));
             if (!"remove".equals(item.kind)) {
                 onlyRemovals = false;
             }
