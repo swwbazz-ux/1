@@ -3229,8 +3229,34 @@ def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[
     return validate_trip_diagnostic_report(raw, metadata)
 
 
+SSE_PRODUCTION_SITE = Path("/etc/nginx/sites-available/accounting-mvp")
+SSE_ROLE_HOSTS = frozenset({b"driver.driverform.ru", b"excavator.driverform.ru"})
+NGINX_DUMP_SECTION = re.compile(rb"(?m)^# configuration file (/[^\r\n]+):\r?$")
+NGINX_DIRECTIVE_TOKEN = re.compile(
+    rb"""[ \t\r\n]+|\#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[;{}]|"""
+    rb"""(?:\\.|\$\{[A-Za-z_][A-Za-z_0-9]*\}|[^\s\\;{}"'#])+"""
+)
+SSE_PRODUCTION_LOCATION = b"""
+    location = /realtime/stream/ {
+        if ($host !~ ^(driver|excavator)\\.driverform\\.ru$) { return 404; }
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+        send_timeout 35s;
+        proxy_pass http://unix:/run/accounting-mvp-sse-pilot/asgi.sock;
+    }
+"""
+
+
 def read_sse_site_config() -> bytes | None:
-    path = "/etc/nginx/sites-available/accounting-mvp"
+    path = SSE_PRODUCTION_SITE
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as handle:
@@ -3241,6 +3267,133 @@ def read_sse_site_config() -> bytes | None:
             return content if 0 < len(content) <= 262144 else None
     except OSError:
         return None
+
+
+def parse_sse_production_vhosts(site: bytes) -> list[dict[str, Any]]:
+    """Read only top-level vhosts and their direct directives from one site."""
+    depth = 0
+    offset = 0
+    directive: list[bytes] = []
+    server = None
+    servers = []
+    for match in NGINX_DIRECTIVE_TOKEN.finditer(site):
+        if match.start() != offset:
+            raise ValueError("unsupported nginx site syntax")
+        offset = match.end()
+        token = match[0]
+        if token.startswith(b"#") or token.isspace():
+            continue
+        if token == b"{":
+            if depth == 0 and directive == [b"server"]:
+                server = {
+                    "names": set(), "tls": False, "includes": 0,
+                    "stream": False, "server_rewrite": False, "insert_at": match.end(),
+                }
+            if server is not None and depth == 1 and directive[:1] == [b"location"]:
+                server["stream"] |= any(
+                    b"/realtime/stream/" in value for value in directive[1:]
+                )
+            if server is not None and depth == 1 and directive[:1] == [b"if"]:
+                server["server_rewrite"] = True
+            depth += 1
+            directive.clear()
+        elif token == b"}":
+            if directive or depth == 0:
+                raise ValueError("unbalanced nginx site syntax")
+            depth -= 1
+            if depth == 0 and server is not None:
+                servers.append(server)
+                server = None
+        elif token == b";":
+            if not directive:
+                raise ValueError("empty nginx directive")
+            if server is not None and depth == 1:
+                name, *values = directive
+                if name == b"server_name":
+                    server["names"].update(value.strip(b"\"'") for value in values)
+                if name == b"listen":
+                    server["tls"] |= b"ssl" in values[1:]
+                if name == b"include":
+                    server["includes"] += 1
+                if name in {b"return", b"rewrite"}:
+                    server["server_rewrite"] = True
+            directive.clear()
+        else:
+            directive.append(token)
+    if depth or directive or offset != len(site):
+        raise ValueError("incomplete nginx site syntax")
+    return servers
+
+
+def plan_sse_production_site(site: bytes, expected_sha256: str) -> bytes:
+    """Render the exact-location patch while retaining all original config bytes."""
+    if digest(site) != expected_sha256:
+        raise ValueError("nginx site differs from the reviewed configuration")
+    servers = parse_sse_production_vhosts(site)
+    selected = [
+        server for server in servers
+        if server["tls"] and server["names"] & SSE_ROLE_HOSTS
+    ]
+    if any(sum(host in server["names"] for server in selected) != 1 for host in SSE_ROLE_HOSTS):
+        raise ValueError("each role requires one unambiguous TLS vhost")
+    if any(server["stream"] or server["server_rewrite"] for server in selected):
+        raise ValueError("TLS vhost has a stream route or server rewrite to review")
+    planned = site
+    for server in reversed(selected):
+        offset = server["insert_at"]
+        planned = planned[:offset] + SSE_PRODUCTION_LOCATION + planned[offset:]
+    return planned
+
+
+def inspect_sse_effective_nginx(site: bytes | None) -> dict[str, Any]:
+    report: dict[str, Any] = {"status": "unavailable"}
+    try:
+        result = subprocess.run(
+            ["/usr/sbin/nginx", "-T"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, timeout=15,
+        )
+        if result.returncode or not 0 < len(result.stdout) <= 2 * 1024 * 1024:
+            return report
+        report["config_sha256"] = digest(result.stdout)
+        matches = list(NGINX_DUMP_SECTION.finditer(result.stdout))
+        active_sections = []
+        for match, next_match in zip(matches, [*matches[1:], None]):
+            path = Path(os.fsdecode(match[1]))
+            if path.resolve(strict=False) == SSE_PRODUCTION_SITE:
+                end = next_match.start() if next_match else len(result.stdout)
+                active_sections.append(result.stdout[match.end():end].strip())
+        report["status"] = "ok"
+        report["matched_site"] = (
+            site is not None and len(active_sections) == 1 and active_sections[0] == site.strip()
+        )
+        if report["matched_site"]:
+            servers = parse_sse_production_vhosts(site)
+            for role, host in (("driver", b"driver.driverform.ru"), ("excavator", b"excavator.driverform.ru")):
+                vhosts = [server for server in servers if host in server["names"]]
+                report[role] = {
+                    "http_blocks": sum(not server["tls"] for server in vhosts),
+                    "tls_blocks": sum(server["tls"] for server in vhosts),
+                    "tls_with_includes": sum(server["tls"] and server["includes"] > 0 for server in vhosts),
+                    "tls_with_stream": sum(server["tls"] and server["stream"] for server in vhosts),
+                    "tls_with_server_rewrite": sum(server["tls"] and server["server_rewrite"] for server in vhosts),
+                }
+            report["shared_tls_vhost"] = any(
+                server["tls"] and SSE_ROLE_HOSTS <= server["names"] for server in servers
+            )
+            report["tls_with_other_hosts"] = any(
+                server["tls"] and server["names"] & SSE_ROLE_HOSTS and server["names"] - SSE_ROLE_HOSTS
+                for server in servers
+            )
+            try:
+                report["site_candidate_sha256"] = digest(
+                    plan_sse_production_site(site, digest(site))
+                )
+            except ValueError:
+                report["site_candidate_sha256"] = None
+        return report
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+        return {"status": "unavailable"}
 
 
 def inspect_sse_unit(unit: str) -> str:
@@ -3254,6 +3407,35 @@ def inspect_sse_unit(unit: str) -> str:
         return "unknown"
     value = result.stdout.strip()
     return value if result.returncode == 0 and value in {"active", "inactive", "failed"} else "unknown"
+
+
+def inspect_sse_wsgi_topology() -> dict[str, Any]:
+    properties = ("User", "Group", "WorkingDirectory", "FragmentPath", "DropInPaths")
+    try:
+        result = subprocess.run(
+            ["/usr/bin/systemctl", "show", *(f"--property={key}" for key in properties),
+             "accounting-mvp.service"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, text=True, timeout=5,
+        )
+        if result.returncode or len(result.stdout) > 16384:
+            return {"status": "unavailable"}
+        values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        if set(values) != set(properties):
+            return {"status": "unavailable"}
+        user = values["User"]
+        group = values["Group"]
+        return {
+            "status": "ok",
+            "working_directory_matches": values["WorkingDirectory"] == str(APP),
+            "runs_as_root": not user or user in {"root", "0"},
+            "user": user if user in {"deploy", "www-data", "accounting-mvp"} else "other",
+            "group": group if group in {"deploy", "www-data", "accounting-mvp"} else "default_or_other",
+            "has_existing_overrides": bool(values["DropInPaths"]),
+            "unit_properties_sha256": digest(result.stdout.encode("utf-8")),
+        }
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        return {"status": "unavailable"}
 
 
 def collect_sse_production_preflight() -> dict[str, Any]:
@@ -3270,6 +3452,8 @@ def collect_sse_production_preflight() -> dict[str, Any]:
         "schema": 1,
         "operation": "sse_production_preflight_v1",
         "nginx_site_sha256": digest(site) if site is not None else None,
+        "effective_nginx": inspect_sse_effective_nginx(site),
+        "wsgi_topology": inspect_sse_wsgi_topology(),
         "driver_host_declared": b"driver.driverform.ru" in names,
         "excavator_host_declared": b"excavator.driverform.ru" in names,
         "stream_location_declared": bool(re.search(
