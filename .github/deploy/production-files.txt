@@ -1,5 +1,1 @@
-СИСТЕМА_MVP/backend/static/js/realtime-client.js
-СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
-СИСТЕМА_MVP/backend/trips/views.py
-СИСТЕМА_MVP/backend/users/role_apps.py
-СИСТЕМА_MVP/backend/users/views.py
+СИСТЕМА_MVP/backend/assignments/services.py
