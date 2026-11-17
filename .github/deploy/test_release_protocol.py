@@ -1002,6 +1002,8 @@ class ReleaseProtocolTests(unittest.TestCase):
         with (
             mock.patch.object(receiver, "read_sse_site_config", return_value=site),
             mock.patch.object(receiver, "inspect_sse_unit", return_value="inactive") as inspect,
+            mock.patch.object(receiver, "inspect_sse_effective_nginx", return_value={"status": "unavailable"}),
+            mock.patch.object(receiver, "inspect_sse_wsgi_topology", return_value={"status": "unavailable"}),
             mock.patch.object(receiver.subprocess, "run") as command,
         ):
             report = receiver.run_diagnostic({"metadata": {"operation": "sse_production_preflight_v1"}})
@@ -1016,6 +1018,85 @@ class ReleaseProtocolTests(unittest.TestCase):
             mock.call("accounting-mvp-sse-reconcile.service"),
         ])
         command.assert_not_called()
+
+    def test_production_sse_patches_only_the_reviewed_tls_blocks(self):
+        first = b"server { listen 443 ssl; server_name driver.driverform.ru driverform.ru; }"
+        second = (
+            b'server { listen 443 ssl; server_name "excavator.driverform.ru"; '
+            b"include proxy_params; location / { proxy_set_header Host ${host}; } }"
+        )
+        redirect = b"server { listen 80; server_name driver.driverform.ru; return 301 https://$host$request_uri; }"
+        other = b"server { listen 443 ssl; server_name sse-qa.driverform.ru; }"
+        site = b"\n".join((redirect, first, second, other))
+        candidate = receiver.plan_sse_production_site(site, receiver.digest(site))
+        self.assertEqual(candidate.count(receiver.SSE_PRODUCTION_LOCATION), 2)
+        self.assertEqual(candidate.replace(receiver.SSE_PRODUCTION_LOCATION, b""), site)
+        self.assertIn(redirect, candidate)
+        self.assertIn(other, candidate)
+        self.assertIn(b"location = /realtime/stream/", receiver.SSE_PRODUCTION_LOCATION)
+        for unsafe in (
+            first + second + first,
+            first + second.replace(b"location /", b"location ^~ /realtime/stream/"),
+            first + second.replace(b"include proxy_params;", b"return 301 https://example.com;"),
+            first + second[:-1],
+        ):
+            with self.subTest(unsafe=unsafe):
+                with self.assertRaises(ValueError):
+                    receiver.plan_sse_production_site(unsafe, receiver.digest(unsafe))
+        with self.assertRaises(ValueError):
+            receiver.plan_sse_production_site(site, "0" * 64)
+
+    def test_production_sse_effective_nginx_sanitizes_dump_and_refuses_mismatch(self):
+        site = (
+            b"server { listen 443 ssl; "
+            b"server_name driver.driverform.ru excavator.driverform.ru; "
+            b"include secret-config-name; }"
+        )
+        dump = (
+            b"# configuration file /etc/nginx/sites-enabled/accounting-mvp:\n"
+            + site + b"\n\n# configuration file /etc/nginx/secret-config-name:\n"
+            b"proxy_set_header X-Internal invalid-test-secret;\n"
+        )
+        def resolved_path(path, *, strict=False):
+            if path.name == "accounting-mvp":
+                return receiver.SSE_PRODUCTION_SITE
+            return path
+
+        with (
+            mock.patch.object(receiver.Path, "resolve", resolved_path),
+            mock.patch.object(receiver.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=dump)) as run,
+        ):
+            report = receiver.inspect_sse_effective_nginx(site)
+            mismatch = receiver.inspect_sse_effective_nginx(site + b"# changed")
+        self.assertTrue(report["matched_site"])
+        self.assertTrue(report["shared_tls_vhost"])
+        self.assertEqual(report["driver"]["tls_with_includes"], 1)
+        self.assertEqual(report["config_sha256"], receiver.digest(dump))
+        self.assertIsNotNone(report["site_candidate_sha256"])
+        self.assertNotIn("secret", json.dumps(report))
+        self.assertFalse(mismatch["matched_site"])
+        self.assertNotIn("driver", mismatch)
+        self.assertEqual(run.call_args.args, (["/usr/sbin/nginx", "-T"],))
+        self.assertEqual(run.call_args.kwargs["timeout"], 15)
+
+    def test_production_sse_wsgi_topology_masks_unit_paths_and_owners(self):
+        rendered = (
+            f"WorkingDirectory={receiver.APP}\n"
+            "User=private-deploy-user\nGroup=www-data\n"
+            "FragmentPath=/etc/systemd/system/private-location.service\n"
+            "DropInPaths=/etc/systemd/system/private-override.conf\n"
+        )
+        with mock.patch.object(
+            receiver.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=rendered),
+        ) as run:
+            report = receiver.inspect_sse_wsgi_topology()
+        self.assertTrue(report["working_directory_matches"])
+        self.assertTrue(report["has_existing_overrides"])
+        self.assertFalse(report["runs_as_root"])
+        self.assertEqual(report["user"], "other")
+        self.assertEqual(report["group"], "www-data")
+        self.assertNotIn("private-", json.dumps(report))
+        self.assertNotIn("Environment", " ".join(run.call_args.args[0]))
 
     def test_sse_qa_http_503_metadata_has_no_free_form_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
