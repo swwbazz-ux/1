@@ -646,6 +646,7 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
     if existing_shift:
         return existing_shift, False
     from references.models import Equipment
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift
     try:
         with transaction.atomic():
             lock_idempotency_key('driver_shift_opened', client_action_id)
@@ -734,6 +735,7 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 **readings,
             )
             assign_shift_plan_snapshot(shift)
+            attach_pending_excavator_trip_to_driver_shift(shift)
             corrections = []
             if previous_shift:
                 for start_field, end_field, metric in DRIVER_SHIFT_READING_FIELDS:
@@ -810,6 +812,7 @@ def open_driver_shift_from_device(
     if existing_shift:
         return existing_shift, False, []
     from references.models import Equipment
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift
     from users.models import Employee
 
     notes = []
@@ -872,6 +875,7 @@ def open_driver_shift_from_device(
             **readings,
         )
         assign_shift_plan_snapshot(shift)
+        attach_pending_excavator_trip_to_driver_shift(shift)
         corrections = []
         if previous_shift:
             for start_field, end_field, metric in DRIVER_SHIFT_READING_FIELDS:

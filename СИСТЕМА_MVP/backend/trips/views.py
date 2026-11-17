@@ -3593,6 +3593,7 @@ def excavator_truck_load_block(
     has_driver_assignment=None,
     manual_control=False,
     participation=None,
+    allow_missing_driver_shift=False,
 ):
     if not assignment or not assignment.truck_id:
         return excavator_truck_load_block_payload('missing_truck')
@@ -3629,7 +3630,7 @@ def excavator_truck_load_block(
             equipment=truck,
             closed_at__isnull=True,
         ).exists()
-    if not has_open_truck_shift and not manual_control:
+    if not has_open_truck_shift and not manual_control and not allow_missing_driver_shift:
         if has_driver_assignment is None:
             has_driver_assignment = excavator_truck_has_driver_assignment(truck)
         if has_driver_assignment:
@@ -4441,7 +4442,8 @@ def excavator_truck_loaded_view(request):
             .first()
         )
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
-        manual_control = payload.get('manual_control') is True
+        without_driver_shift = participation['shift'] is None
+        manual_control = payload.get('manual_control') is True or without_driver_shift
         if open_trip and may_replace_open_trip(open_trip, participation):
             if str(payload.get('expected_open_trip_id') or '') != str(open_trip.pk):
                 return JsonResponse({'ok': False, 'error': 'Рейс изменился. Обновите экран.', 'code': 'trip_changed'}, status=409)
@@ -4451,6 +4453,7 @@ def excavator_truck_loaded_view(request):
             active_trip=open_trip or False,
             manual_control=manual_control,
             participation=participation,
+            allow_missing_driver_shift=without_driver_shift,
         )
         if load_block:
             return JsonResponse({
@@ -4498,6 +4501,7 @@ def excavator_truck_loaded_view(request):
                 downtime_text=payload.get('downtime_text'),
                 note=payload.get('note'),
                 participation=participation,
+                driver_participation_recorded=True if without_driver_shift else None,
                 supersede_trip=open_trip,
             )
         except ValidationError as error:

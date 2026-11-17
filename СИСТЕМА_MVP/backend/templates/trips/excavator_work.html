@@ -2941,6 +2941,17 @@ window.initExcavatorWorkShell = function () {
         );
     }
 
+    var truckLoadProjections = new WeakMap();
+
+    function rememberTruckLoadProjection(card, eventId, snapshot) {
+        var current = truckLoadProjections.get(card);
+        if (current && current.eventId === eventId) return;
+        truckLoadProjections.set(card, {
+            eventId: eventId,
+            snapshot: snapshot || snapshotTruckCard(card)
+        });
+    }
+
     function snapshotTruckCard(card) {
         return {
             className: card.className,
@@ -2949,6 +2960,10 @@ window.initExcavatorWorkShell = function () {
             loadBlockReasonCode: card.dataset.eoLoadBlockReasonCode || "",
             loadBlockReasonLabel: card.dataset.eoLoadBlockReasonLabel || "",
             equipmentState: card.dataset.eoEquipmentState || "",
+            hidden: card.hidden,
+            openTripId: card.dataset.eoOpenTripId,
+            offlineEventId: card.dataset.eoOfflineEventId,
+            localOpenTripId: card.dataset.eoLocalOpenTripId,
             draggable: card.getAttribute("draggable") || "true",
             statusText: card.querySelector("span") ? card.querySelector("span").textContent : "",
             targetText: card.querySelector("em") ? card.querySelector("em").textContent : "",
@@ -3012,8 +3027,17 @@ window.initExcavatorWorkShell = function () {
         pickFirstActiveTruck();
     }
 
-    function restoreTruckCard(card, snapshot) {
+    function restoreTruckCard(card, snapshot, select) {
         card.className = snapshot.className;
+        card.hidden = snapshot.hidden;
+        [
+            ["eoOpenTripId", snapshot.openTripId],
+            ["eoOfflineEventId", snapshot.offlineEventId],
+            ["eoLocalOpenTripId", snapshot.localOpenTripId]
+        ].forEach(function (entry) {
+            if (entry[1] === undefined) delete card.dataset[entry[0]];
+            else card.dataset[entry[0]] = entry[1];
+        });
         if (snapshot.inactive) {
             card.dataset.eoTruckInactive = snapshot.inactive;
         } else {
@@ -3052,7 +3076,7 @@ window.initExcavatorWorkShell = function () {
                 targetText.remove();
             }
         }
-        selectTruck(card);
+        if (select !== false) selectTruck(card);
     }
 
     function postTruckLoaded(card, dumpTarget) {
@@ -3158,6 +3182,7 @@ window.initExcavatorWorkShell = function () {
             });
         }).then(function (event) {
             invalidateExcavatorWorkRefresh();
+            rememberTruckLoadProjection(card, event.event_id, snapshot);
             applyTruckPending(card, dumpTarget);
             var optimisticBadge = addPendingTruckBadge(dumpTarget, card, "");
             if (optimisticBadge) {
@@ -3244,6 +3269,7 @@ window.initExcavatorWorkShell = function () {
                 return;
             }
             if (!card) return;
+            rememberTruckLoadProjection(card, event.event_id);
             card.dataset.eoOfflineEventId = event.event_id;
             card.dataset.eoLocalOpenTripId = event.local_trip_id || "";
             card.classList.add("is-saved-on-device");
@@ -3306,10 +3332,15 @@ window.initExcavatorWorkShell = function () {
                 }
             }
             var confirmedCard = cardByTruckId(event.payload && event.payload.truck_id);
-            if (confirmedCard && tripId) {
+            if (confirmedCard && tripId && (
+                !confirmedCard.dataset.eoOfflineEventId || confirmedCard.dataset.eoOfflineEventId === event.event_id
+            )) {
                 confirmedCard.dataset.eoOpenTripId = String(tripId);
-                delete confirmedCard.dataset.eoOfflineEventId;
-                delete confirmedCard.dataset.eoLocalOpenTripId;
+                if (confirmedCard.dataset.eoOfflineEventId === event.event_id) {
+                    truckLoadProjections.delete(confirmedCard);
+                    delete confirmedCard.dataset.eoOfflineEventId;
+                    delete confirmedCard.dataset.eoLocalOpenTripId;
+                }
             }
         }
         if (event.event_type === "excavator.downtime.started") {
@@ -3335,9 +3366,31 @@ window.initExcavatorWorkShell = function () {
 
     window.attendExcavatorFieldEvent = function (event, result) {
         if (freeBucketController) freeBucketController.markAttention(event, result || {});
+        if (event && result && (result.status === "conflict" || result.status === "invalid") &&
+            (event.event_type === "excavator.trip.loaded" || event.event_type === "excavator.free_bucket.loaded")) {
+            var card = cardByTruckId(event.payload && event.payload.truck_id);
+            var projection = card && truckLoadProjections.get(card);
+            if (projection && projection.eventId === event.event_id && card.dataset.eoOfflineEventId === event.event_id) {
+                truckLoadProjections.delete(card);
+                restoreTruckCard(card, projection.snapshot, false);
+            }
+            shell.querySelectorAll("[data-eo-queue-truck][data-eo-offline-event-id]").forEach(function (badge) {
+                if (badge.dataset.eoOfflineEventId !== event.event_id || badge.dataset.tripId) return;
+                var list = badge.parentElement;
+                badge.remove();
+                if (list) {
+                    markLatestPendingTruckBadge(list);
+                    ensureMutedPendingBadge(list);
+                }
+            });
+        }
         var message = result && (result.message || result.error);
         showExcavatorNotice(message || "Одно из сохранённых действий требует сверки.");
         invalidateExcavatorWorkRefresh();
+        if (window.AppRealtime && typeof window.AppRealtime.requestReconcile === "function") {
+            window.AppRealtime.requestReconcile("offline_excavator_event_needs_review");
+            return;
+        }
         window.setTimeout(function () {
             refreshExcavatorWorkFromServer({preserveTab: true});
         }, 120);

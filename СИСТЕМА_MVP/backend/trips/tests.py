@@ -6115,34 +6115,42 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(Trip.objects.count(), 1)
 
-    def test_truck_loaded_rejects_assigned_truck_without_open_driver_shift(self):
+    @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=False)
+    def test_truck_loaded_records_fact_without_assigned_driver(self):
+        from trips.manual_loading import MANUAL_DUMP_CARD_VISIBILITY, reconcile_expired_manual_trips
+
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save(update_fields=['closed_at'])
 
         response = self.post_truck_loaded(client_action_id='no-driver-shift')
 
-        self.assertEqual(response.status_code, 409)
-        payload = json.loads(response.content.decode('utf-8'))
-        self.assertFalse(payload['ok'])
-        self.assertEqual(payload['load_block_reason_code'], 'no_driver')
-        self.assertEqual(payload['load_block_reason_label'], 'Водитель не назначен')
-        self.assertEqual(payload['error'], 'Водитель не назначен')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        trip = Trip.objects.get()
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.assertIsNone(trip.actual_dump_point_id)
+        self.assertEqual(
+            reconcile_expired_manual_trips(now=trip.created_at + MANUAL_DUMP_CARD_VISIBILITY),
+            [trip.pk],
+        )
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+        self.assertIsNone(trip.completed_at)
 
-    def test_truck_loaded_rejects_assigned_driver_without_open_shift(self):
+    def test_truck_loaded_records_fact_when_assigned_driver_has_no_open_shift(self):
         self.create_driver_assignment(self.truck, driver=self.driver, shift=self.truck_shift)
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save(update_fields=['closed_at'])
 
         response = self.post_truck_loaded(client_action_id='driver-shift-not-started')
 
-        self.assertEqual(response.status_code, 409)
-        payload = json.loads(response.content.decode('utf-8'))
-        self.assertFalse(payload['ok'])
-        self.assertEqual(payload['load_block_reason_code'], 'driver_shift_not_started')
-        self.assertEqual(payload['load_block_reason_label'], 'Смена водителя не начата')
-        self.assertEqual(payload['error'], 'Смена водителя не начата')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
 
     def test_truck_loaded_rejects_assigned_truck_with_active_downtime(self):
         DowntimeEvent.objects.create(

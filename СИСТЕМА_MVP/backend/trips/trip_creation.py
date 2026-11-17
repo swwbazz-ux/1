@@ -152,12 +152,14 @@ def create_loaded_waiting_unload_trip(
         from .manual_loading import truck_driver_participation
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
     from .manual_loading import manual_loading_enabled
+    manual_loading = manual_loading_enabled()
     participation_recorded = (
-        manual_loading_enabled()
+        manual_loading
         if driver_participation_recorded is None
         else bool(driver_participation_recorded)
     )
     control_shift = participation['control_shift'] if participation_recorded else participation['shift']
+    without_driver_control = participation_recorded and control_shift is None
     resolved_load_time_source = load_time_source or (
         'excavator_device' if occurred_at else 'server_receipt'
     )
@@ -170,7 +172,7 @@ def create_loaded_waiting_unload_trip(
         rock_type=rock_type,
         dump_point=dump_point,
         assigned_dump_point=dump_point,
-        actual_dump_point=None if manual_loading_enabled() else dump_point,
+        actual_dump_point=None if manual_loading or without_driver_control else dump_point,
         driver_participation_recorded=participation_recorded,
         driver_control_shift=control_shift,
         planned_volume_m3=planned_volume_m3,
