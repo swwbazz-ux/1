@@ -235,6 +235,10 @@ android {
         }
     }
     sourceSets {
+        if (rootProject.hasProperty('fcmUrgentPilot')) {
+            main.java.srcDir('src/fcmUrgentPilot/java')
+            release.manifest.srcFile('src/fcmUrgentPilot/AndroidManifest.xml')
+        }
         profileFiles.each { profileDir ->
             Properties profile = new Properties()
             new File(profileDir, 'app.properties').withReader('UTF-8') { reader ->
@@ -272,7 +276,11 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation platform('com.google.firebase:firebase-bom:34.19.0')
-    implementation 'com.google.firebase:firebase-messaging'
+    if (rootProject.hasProperty('fcmUrgentPilot')) {
+        implementation 'com.google.firebase:firebase-messaging:26.1.0-eap01'
+    } else {
+        implementation 'com.google.firebase:firebase-messaging'
+    }
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

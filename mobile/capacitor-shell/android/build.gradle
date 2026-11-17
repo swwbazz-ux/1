@@ -19,6 +19,9 @@ apply from: "variables.gradle"
 
 allprojects {
     repositories {
+        if (rootProject.hasProperty('fcmUrgentPilot')) {
+            maven { url uri(System.getenv('FCM_PILOT_MAVEN_DIR')) }
+        }
         google()
         mavenCentral()
     }

@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver android:name=".FcmUrgentPilotCleanupReceiver" android:exported="true" android:permission="android.permission.DUMP" />
+        <service android:name=".CopperFirebaseMessagingService" android:enabled="false" />
+        <service android:name=".FcmUrgentPilotMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
