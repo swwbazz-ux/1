@@ -1044,8 +1044,8 @@ window.bindDriverMobileShell = function () {
         }
     }
     /* Форма начала смены привязывается отдельно, за пределами этой области. */
-    window.showDriverToast = function (message) { showDriverToast(message); };
-    function showDriverToast(message) {
+    window.showDriverToast = showDriverToast;
+    function showDriverToast(message, durationMs) {
         var toast = shell.querySelector("[data-driver-toast]");
         if (!toast) {
             return;
@@ -1057,7 +1057,7 @@ window.bindDriverMobileShell = function () {
         }
         window.driverToastTimerId = window.setTimeout(function () {
             toast.hidden = true;
-        }, 3600);
+        }, typeof durationMs === "number" ? durationMs : 3600);
     }
     function openDriverTab(tab) {
         var allowedTabs = ["work", "shift", "downtimes", "manifest"];
@@ -2653,6 +2653,10 @@ window.bindDriverMobileShell = function () {
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
         function submitDriverUnloadOnce() {
+            if (shell.dataset.driverShiftOpen !== "true") {
+                showDriverToast("Сначала начните смену", 4000);
+                return false;
+            }
             /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание или
                одно касание завершает его через очередь ручного режима; круг гаснет сам,
                когда движок ручного рейса сообщит о завершении. */
