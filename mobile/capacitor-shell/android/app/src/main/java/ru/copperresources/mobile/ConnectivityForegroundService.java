@@ -518,7 +518,9 @@ public class ConnectivityForegroundService extends Service {
             }
             boolean pageAdvanced = pageCursor > previousVersion && pageCursor <= serverVersion;
             scheduleHeartbeat(caughtUp && voiceProcessed
-                ? BuildConfig.HEARTBEAT_INTERVAL_MS
+                ? FieldDeliveryPolicy.nextCheck(
+                    android.os.SystemClock.elapsedRealtime(), AppVisibility.isForeground(),
+                    PendingDriverShiftClose.hasPending(this), BuildConfig.HEARTBEAT_INTERVAL_MS)
                 : (pageAdvanced ? 250L : 2_000L));
         } catch (Exception error) {
             // Service shutdown/cookie-thread interruption is planned cancellation, never network loss.

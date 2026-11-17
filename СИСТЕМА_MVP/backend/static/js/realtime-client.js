@@ -292,7 +292,7 @@
         }
 
         function isPageActive() {
-            if (isNativeShell()) return true;
+            if (isNativeShell()) return !pagePaused;
             return !pagePaused && document.hidden !== true && (visibilityOnlyActivity || pageFocused);
         }
 
@@ -1635,6 +1635,7 @@
                 return;
             }
             recordSseData(payload, "sse_heartbeat");
+            if (ssePrimaryActive) syncNativeOperationalState("sse_heartbeat");
             var serverVersion = Number(payload.version || 0);
             if (Number.isSafeInteger(serverVersion) && serverVersion >= 0) {
                 sseServerHighWater = Math.max(sseServerHighWater, serverVersion);
@@ -2037,6 +2038,7 @@
         document.addEventListener("visibilitychange", function () {
             if (document.hidden) {
                 if (isNativeShell()) {
+                    if (pagePaused) return;
                     pagePaused = false;
                     schedulePendingUpdate(0);
                     pollOperationalState({force: true});
@@ -2098,6 +2100,9 @@
            not emit a DOM focus event when that cover disappears, so consume
            the native signal as a foreground catch-up as well. Browser pages
            never dispatch this event and keep their ordinary focus contract. */
+        window.addEventListener("native-connectivity-pause", function () {
+            if (isNativeShell()) pauseRealtimeConnection("native_background");
+        });
         window.addEventListener("native-connectivity-resume", function () {
             resumePageActivity();
             pageFocused = true;

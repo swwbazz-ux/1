@@ -277,6 +277,10 @@ public class MainActivity extends BridgeActivity {
     public void onStop() {
         CookieManager.getInstance().flush();
         AppVisibility.setForeground(false);
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('native-connectivity-pause'));", null);
+        }
         super.onStop();
     }
 

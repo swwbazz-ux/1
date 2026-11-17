@@ -1007,3 +1007,39 @@ test("T-019: role_active=false closes the open stream and does not reconnect", a
     await settle();
     assert.equal(runtime.sources.length, 1, "parking must not open a replacement stream");
 });
+
+test("native background closes SSE and web polling until foreground resume", async () => {
+    const runtime = createRuntime();
+    runtime.document.body.dataset.nativeApp = "true";
+    runtime.success(0, context(7));
+    await settle();
+    const stream = runtime.sources[0];
+    stream.emit("open", {});
+    stream.emit("heartbeat", context(7));
+    assert.equal(runtime.window.AppRealtime.getDebugState().ssePrimaryActive, true);
+    runtime.window.dispatchEvent({type:"native-connectivity-pause"});
+    assert.equal(stream.closed, true);
+    const requests = runtime.requests.length;
+    runtime.advance(90000);
+    runtime.watchdog();
+    runtime.runAllTimers(10);
+    await settle();
+    assert.equal(runtime.requests.length, requests);
+    runtime.window.dispatchEvent({type:"native-connectivity-resume"});
+    runtime.runAllTimers(3);
+    await settle();
+    assert.ok(runtime.requests.length > requests);
+});
+
+test("only a synchronized SSE heartbeat renews native transport ownership", async () => {
+    const calls = [];
+    const runtime = createRuntime({nativeSync: d => {calls.push(d); return Promise.resolve({});}});
+    runtime.success(0, context(7));
+    await settle();
+    const stream = runtime.sources[0];
+    stream.emit("open", {});
+    stream.emit("heartbeat", context(7));
+    stream.emit("heartbeat", context(7));
+    assert.ok(calls.some(d => d.reason === "sse_handoff_complete"));
+    assert.ok(calls.some(d => d.reason === "sse_heartbeat"));
+});

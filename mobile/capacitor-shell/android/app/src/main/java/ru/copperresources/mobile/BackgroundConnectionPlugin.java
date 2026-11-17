@@ -68,6 +68,10 @@ public class BackgroundConnectionPlugin extends Plugin {
         String contextKey = call.getString("contextKey", "").trim();
         String journalEpoch = call.getString("journalEpoch", "").trim();
         long pendingVersion = numericLong(call.getData().opt("pendingVersion"));
+        String transportReason = call.getString("reason", "");
+        if ("sse_handoff_complete".equals(transportReason) || "sse_heartbeat".equals(transportReason)) {
+            FieldDeliveryPolicy.recordSse(android.os.SystemClock.elapsedRealtime());
+        }
         boolean authoritativeReset = Boolean.TRUE.equals(call.getBoolean("authoritativeReset", false));
         boolean resetAccepted = false;
         OperationalDeliveryLedger.Snapshot state;
