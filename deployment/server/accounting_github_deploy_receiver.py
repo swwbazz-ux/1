@@ -3232,6 +3232,9 @@ def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[
 SSE_PRODUCTION_SITE = Path("/etc/nginx/sites-available/accounting-mvp")
 SSE_ROLE_HOSTS = frozenset({b"driver.driverform.ru", b"excavator.driverform.ru"})
 NGINX_DUMP_SECTION = re.compile(rb"(?m)^# configuration file (/[^\r\n]+):\r?$")
+NGINX_MANAGED_SECTION_PATH = re.compile(
+    rb"/etc/nginx/(?:nginx\.conf|(?:sites-(?:enabled|available)|conf\.d)/[a-zA-Z0-9_.-]{1,100})"
+)
 NGINX_DIRECTIVE_TOKEN = re.compile(
     rb"""[ \t\r\n]+|\#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[;{}]|"""
     rb"""(?:\\.|\$\{[A-Za-z_][A-Za-z_0-9]*\}|[^\s\\;{}"'#])+"""
@@ -3325,16 +3328,20 @@ def parse_sse_production_vhosts(site: bytes) -> list[dict[str, Any]]:
     return servers
 
 
-def plan_sse_production_site(site: bytes, expected_sha256: str) -> bytes:
+def plan_sse_production_site(
+    site: bytes, expected_sha256: str, role_hosts: frozenset[bytes] = SSE_ROLE_HOSTS,
+) -> bytes:
     """Render the exact-location patch while retaining all original config bytes."""
     if digest(site) != expected_sha256:
         raise ValueError("nginx site differs from the reviewed configuration")
+    if not role_hosts or not role_hosts <= SSE_ROLE_HOSTS:
+        raise ValueError("nginx site has an unsupported role scope")
     servers = parse_sse_production_vhosts(site)
     selected = [
         server for server in servers
-        if server["tls"] and server["names"] & SSE_ROLE_HOSTS
+        if server["tls"] and server["names"] & role_hosts
     ]
-    if any(sum(host in server["names"] for server in selected) != 1 for host in SSE_ROLE_HOSTS):
+    if any(sum(host in server["names"] for server in selected) != 1 for host in role_hosts):
         raise ValueError("each role requires one unambiguous TLS vhost")
     if any(server["stream"] or server["server_rewrite"] for server in selected):
         raise ValueError("TLS vhost has a stream route or server rewrite to review")
@@ -3343,6 +3350,42 @@ def plan_sse_production_site(site: bytes, expected_sha256: str) -> bytes:
         offset = server["insert_at"]
         planned = planned[:offset] + SSE_PRODUCTION_LOCATION + planned[offset:]
     return planned
+
+
+def locate_sse_role_sections(rendered: bytes) -> dict[str, Any]:
+    """Locate declarations in the rendered config, even if the old site is inactive."""
+    headers = list(NGINX_DUMP_SECTION.finditer(rendered))
+    scope = {"driver": [], "excavator": []}
+    extra_sources: set[bytes] = set()
+    for header, next_header in zip(headers, [*headers[1:], None]):
+        filename = header[1]
+        end = next_header.start() if next_header else len(rendered)
+        source = rendered[header.end():end].strip()
+        declarations = re.sub(rb"(?m)#.*$", b"", source)
+        names = {
+            token.strip(b"\"'")
+            for group in re.findall(rb"(?m)\bserver_name\s+([^;{}]+);", declarations)
+            for token in group.split()
+        }
+        if not names & SSE_ROLE_HOSTS:
+            continue
+        if not NGINX_MANAGED_SECTION_PATH.fullmatch(filename) or filename.split(b"/")[-1] in {b".", b".."}:
+            extra_sources.add(filename)
+            continue
+        item = {"file": filename.decode("ascii"), "rendered_sha256": digest(source)}
+        try:
+            vhosts = parse_sse_production_vhosts(source)
+            item["tls_roles"] = sorted(
+                name.decode("ascii")
+                for name in SSE_ROLE_HOSTS
+                if any(host["tls"] and name in host["names"] for host in vhosts)
+            )
+        except ValueError:
+            item["tls_roles"] = None
+        for role, host in (("driver", b"driver.driverform.ru"), ("excavator", b"excavator.driverform.ru")):
+            if host in names and len(scope[role]) < 8:
+                scope[role].append(item)
+    return {**scope, "other_role_sources": len(extra_sources)}
 
 
 def inspect_sse_effective_nginx(site: bytes | None) -> dict[str, Any]:
@@ -3356,6 +3399,7 @@ def inspect_sse_effective_nginx(site: bytes | None) -> dict[str, Any]:
         if result.returncode or not 0 < len(result.stdout) <= 2 * 1024 * 1024:
             return report
         report["config_sha256"] = digest(result.stdout)
+        report["role_sections"] = locate_sse_role_sections(result.stdout)
         matches = list(NGINX_DUMP_SECTION.finditer(result.stdout))
         active_sections = []
         for match, next_match in zip(matches, [*matches[1:], None]):
