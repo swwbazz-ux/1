@@ -21,6 +21,9 @@ on:
           - update_receiver
           - verify_fcm
           - configure_fcm
+          - verify_sse_production
+          - enable_sse_production
+          - rollback_sse_production
           - verify_sse_qa
           - prepare_sse_qa_host_key
           - install_sse_qa
@@ -59,7 +62,7 @@ on:
         required: false
         type: string
       rollback_id:
-        description: "Exact github-... rollback directory for rollback mode"
+        description: "Exact github-... backup for rollback, or enabled full SHA for rollback_sse_production"
         required: false
         type: string
       sse_qa_allow_cidr:
@@ -135,7 +138,7 @@ jobs:
           set -euo pipefail
           umask 077
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* ]]; then
+          if [[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* || "$MODE" == *sse_production ]]; then
             test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
           fi
           case "$MODE" in
@@ -151,6 +154,9 @@ jobs:
             update_receiver) expected=UPDATE_RECEIVER ;;
             verify_fcm) expected=VERIFY_FCM ;;
             configure_fcm) expected=CONFIGURE_FCM ;;
+            verify_sse_production) expected=VERIFY_SSE_PRODUCTION ;;
+            enable_sse_production) expected=ENABLE_SSE_PRODUCTION ;;
+            rollback_sse_production) expected=ROLLBACK_SSE_PRODUCTION ;;
             verify_sse_qa) expected=VERIFY_SSE_QA ;;
             prepare_sse_qa_host_key) expected=PREPARE_SSE_QA_HOST_KEY ;;
             install_sse_qa) expected=INSTALL_SSE_QA ;;
@@ -446,6 +452,13 @@ jobs:
             args+=(--event-file "$GITHUB_EVENT_PATH")
           elif [[ "$MODE" == "repair_sse_qa_seed" ]]; then
             :
+          elif [[ "$MODE" == "verify_sse_production" || "$MODE" == "enable_sse_production" ]]; then
+            wheelhouse="$RUNNER_TEMP/sse-production-wheels"
+            python -m pip download --require-hashes --no-deps --only-binary=:all: \
+              -r deployment/sse-production/requirements.lock -d "$wheelhouse"
+            args+=(--sse-production-wheels "$wheelhouse")
+          elif [[ "$MODE" == "rollback_sse_production" ]]; then
+            args+=(--rollback-id "$ROLLBACK_ID")
           elif [[ "$MODE" == *sse_qa* ]]; then
             qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
             mkdir -p "$qa_candidate_root"

@@ -10,6 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 import re
+import runpy
 import signal
 import shutil
 import stat
@@ -43,6 +44,24 @@ DATA_MODES = {"verify_data", "apply_data"}
 RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
+SSE_PRODUCTION_MODES = {"verify_sse_production", "enable_sse_production", "rollback_sse_production"}
+SSE_PRODUCTION_PREFIX = "deploy/sse-production/"
+SSE_PRODUCTION_WHEELS = {
+    "click-8.5.0-py3-none-any.whl": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+    "h11-0.16.0-py3-none-any.whl": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+    "uvicorn-0.37.0-py3-none-any.whl": "913b2b88672343739927ce381ff9e2ad62541f9f8289664fa1d1d3803fa2ce6c",
+}
+SSE_PRODUCTION_HASHES = {
+    **SSE_PRODUCTION_WHEELS,
+    "file_transaction.py": "a4c246881718dedb04faeb56967b70ca972e8f05094cf4390aa3b4111d3ad5e7",
+    "requirements.lock": "2669d3f9259809ff6fd5b49380b1b12b1eff74c0680df6e56b485860209898b9",
+    "asgi.service.in": "d443b613ee02355dd0f9cdf308c66792bb5816f9910575f6d5573fb37e62b357",
+    "reconcile.service.in": "ceb955ee687d7745275024e220b68515fc6aa93f03abfc638692a5dab3f3f8a0",
+    "wsgi.conf": "38d30df1e19e13153e786aef033377aafa3665c61b04c2088e2f034d70b0860e",
+    "settings.py": "bf3e9d96297efdb91fecfd422d2a34a23f0c70206f9ab6b34f30a00fd44fa92b",
+    "stream.py": "aa25a2888d6e183b98c6be2a903f49a10b4f7c7926f7fa263aadde819215549f",
+}
+SSE_PRODUCTION_PAYLOADS = frozenset(SSE_PRODUCTION_PREFIX + name for name in SSE_PRODUCTION_HASHES)
 SSE_QA_SEED_FIX_MODES = {"repair_sse_qa_seed"}
 SSE_QA_NGINX_LIMIT_FIX_MODES = {
     "apply_sse_qa_nginx_limit",
@@ -60,7 +79,10 @@ SSE_QA_MODES = {
     *SSE_QA_HTTPS_MODES,
     "enable_sse_qa", "smoke_sse_qa", "disable_sse_qa", "remove_sse_qa",
 } | SSE_QA_SEED_FIX_MODES
-ALL_MODES = CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES | DIAGNOSTIC_MODES | SSE_QA_MODES | {"rollback"}
+ALL_MODES = (
+    CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES
+    | DIAGNOSTIC_MODES | SSE_QA_MODES | SSE_PRODUCTION_MODES | {"rollback"}
+)
 VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
 RECEIVER_PATH = Path("/usr/local/sbin/accounting-github-deploy-receiver")
@@ -3691,6 +3713,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         raise ReleaseError(f"unsafe target path: {value}")
     if mode in DIAGNOSTIC_MODES:
         raise ReleaseError("diagnostic mode does not accept payload targets")
+    if mode in SSE_PRODUCTION_MODES:
+        if mode == "rollback_sse_production" or value not in SSE_PRODUCTION_PAYLOADS:
+            raise ReleaseError("production SSE target is not allowed")
+        return path
     if mode in RECEIVER_MODES:
         if path.as_posix() != RECEIVER_PAYLOAD:
             raise ReleaseError(f"receiver update target is not allowed: {value}")
@@ -3833,6 +3859,23 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             compile(payload[RECEIVER_PAYLOAD], RECEIVER_PAYLOAD, "exec")
         except SyntaxError as exc:
             raise ReleaseError("receiver source is not valid Python") from exc
+    elif mode in SSE_PRODUCTION_MODES:
+        expected = set() if mode == "rollback_sse_production" else SSE_PRODUCTION_PAYLOADS
+        if set(payload) != expected:
+            raise ReleaseError("invalid production SSE package contract")
+        if mode == "rollback_sse_production":
+            if set(metadata) != {"enabled_commit"} or not re.fullmatch(
+                r"[0-9a-f]{40}", str(metadata["enabled_commit"]),
+            ):
+                raise ReleaseError("production SSE rollback requires the enabled release SHA")
+        elif metadata:
+            raise ReleaseError("invalid production SSE package contract")
+        if payload:
+            for name, fingerprint in SSE_PRODUCTION_HASHES.items():
+                if digest(payload[SSE_PRODUCTION_PREFIX + name]) != fingerprint:
+                    raise ReleaseError(f"production SSE payload hash mismatch: {name}")
+            for name in ("file_transaction.py", "settings.py", "stream.py"):
+                compile(payload[SSE_PRODUCTION_PREFIX + name], name, "exec")
     elif mode in FCM_MODES:
         validate_fcm_payload(manifest, payload)
     elif mode in SSE_QA_SEED_FIX_MODES:
@@ -5058,6 +5101,270 @@ def run_sse_qa_seed_fix(payload: dict[str, bytes]) -> str:
         return summary
 
 
+SSE_PRODUCTION_NGINX_BASE = "c564c22fa808e6a2b40080b11d189443103603d87e38fdfbbb0d048d6d0eda0f"
+SSE_PRODUCTION_STREAM_BASE = "167ddef602456ab3424e6e2f19c158da1879cb821aef20cec5ddaed26441af9f"
+SSE_PRODUCTION_STATE = Path("/var/lib/accounting-mvp-sse-production")
+SSE_PRODUCTION_WHEEL_DIR = Path("/opt/accounting-mvp-sse/wheels")
+SSE_PRODUCTION_UNITS = ("accounting-mvp-sse-pilot.service", "accounting-mvp-sse-reconcile.service")
+SSE_PRODUCTION_SETTINGS_MOUNT = Path("/etc/accounting-mvp")
+SSE_PRODUCTION_WSGI_DIR = Path("/etc/systemd/system/accounting-mvp.service.d")
+SSE_PRODUCTION_SYSTEMD = Path("/etc/systemd/system")
+SSE_PRODUCTION_PROXY_GUARD = re.compile(
+    rb"(?m)(?:^|[;{}])\s*(?:auth_basic|auth_request|satisfy|allow|deny|"
+    rb"limit_conn|limit_req|internal|proxy_set_header\s+Cookie)\b"
+)
+
+
+def run_sse_production_command(command: list[str], step: str, *, timeout: int = 25) -> bytes:
+    try:
+        result = subprocess.run(
+            command, cwd="/", check=False, timeout=timeout, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseError(f"production SSE failed at {step}") from exc
+    if result.returncode:
+        raise ReleaseError(f"production SSE failed at {step} (exit {result.returncode})")
+    return result.stdout
+
+
+def assert_sse_root_directory(path: Path, *, create: bool = False) -> None:
+    if create:
+        path.mkdir(mode=0o755, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid or info.st_mode & 0o022:
+        raise ReleaseError("production SSE managed directory has unsafe ownership or permissions")
+
+
+def resolve_sse_production_nginx(rendered: bytes) -> dict[Path, tuple[bytes, bytes]]:
+    if digest(rendered) != SSE_PRODUCTION_NGINX_BASE:
+        raise ReleaseError("effective nginx configuration differs from the inspected state")
+    if not re.search(rb"(?m)^\s*user\s+www-data(?:\s+www-data)?\s*;", rendered):
+        raise ReleaseError("nginx worker group differs from the reviewed configuration")
+    sections = locate_sse_role_sections(rendered)
+    if sections["other_role_sources"]:
+        raise ReleaseError("production SSE vhost source falls outside the managed nginx scope")
+    by_path: dict[Path, set[bytes]] = {}
+    snapshots: dict[Path, bytes] = {}
+    for role in ("driver", "excavator"):
+        host = f"{role}.driverform.ru"
+        tls = [row for row in sections[role] if row["tls_roles"] is not None and host in row["tls_roles"]]
+        if len(tls) != 1:
+            raise ReleaseError("production SSE requires one active TLS source for each role")
+        path = Path(tls[0]["file"]).resolve(strict=True)
+        if path.parent not in {Path("/etc/nginx/conf.d"), Path("/etc/nginx/sites-available"),
+                               Path("/etc/nginx/sites-enabled")}:
+            raise ReleaseError("production SSE vhost resolves outside the managed nginx scope")
+        assert_sse_root_directory(path.parent)
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid or info.st_mode & 0o022:
+            raise ReleaseError("production SSE vhost has unsafe ownership or permissions")
+        source = path.read_bytes()
+        if len(source) > 262144 or digest(source.strip()) != tls[0]["rendered_sha256"]:
+            raise ReleaseError("production SSE vhost changed after nginx rendered it")
+        uncommented = re.sub(rb"(?m)#.*$", b"", source)
+        if SSE_PRODUCTION_PROXY_GUARD.search(uncommented):
+            raise ReleaseError("production SSE vhost contains access or rate controls to review")
+        includes = re.findall(rb"\binclude\s+([^;]+);", uncommented)
+        approved = {
+            b"proxy_params", b"/etc/nginx/proxy_params", b"/etc/letsencrypt/options-ssl-nginx.conf",
+        }
+        if any(value.strip().strip(b"\"'") not in approved for value in includes):
+            raise ReleaseError("production SSE vhost contains unreviewed includes")
+        snapshots[path] = source
+        by_path.setdefault(path, set()).add(host.encode("ascii"))
+    return {
+        path: (snapshots[path], plan_sse_production_site(
+            snapshots[path], digest(snapshots[path]), frozenset(roles),
+        ))
+        for path, roles in sorted(by_path.items())
+    }
+
+
+def probe_sse_production(expected_error: str) -> None:
+    expected_code = "401" if expected_error == "authentication_required" else "404"
+    for role in ("driver", "excavator"):
+        host = f"{role}.driverform.ru"
+        command = [
+            "/usr/bin/curl", "-sS",
+            "--noproxy", "*", "--max-time", "8", "--resolve", f"{host}:443:127.0.0.1",
+            "-H", "Accept: text/event-stream", "-w", "\n%{http_code}",
+            f"https://{host}/realtime/stream/",
+        ]
+        for attempt in range(3):
+            try:
+                response = run_sse_production_command(command, f"{role}-stream-health")
+                content, _, code = response.rpartition(b"\n")
+                if code == expected_code.encode() and json.loads(content).get("error") == expected_error:
+                    break
+            except (ReleaseError, UnicodeError, ValueError):
+                pass
+            if attempt < 2:
+                time.sleep(0.5)
+        else:
+            raise ReleaseError(f"production SSE {role} stream health did not match")
+
+
+def run_sse_production(
+    mode: str, payload: dict[str, bytes], commit: str, metadata: dict[str, Any],
+) -> str:
+    state = SSE_PRODUCTION_STATE
+    if mode == "rollback_sse_production":
+        assert_sse_root_directory(state)
+        install = json.loads((state / "state.json").read_bytes())
+        if install.get("commit") != metadata["enabled_commit"]:
+            raise ReleaseError("production SSE rollback revision differs from enabled release")
+        sources = {key: Path(value) for key, value in install["targets"].items()}
+        module_path = state / "file_transaction.py"
+        if digest(module_path.read_bytes()) != SSE_PRODUCTION_HASHES["file_transaction.py"]:
+            raise ReleaseError("production SSE rollback code changed")
+        transaction = runpy.run_path(str(module_path))
+        restore_sse_production_services(transaction, sources)
+        return str(state / "before")
+
+    topology = inspect_sse_wsgi_topology()
+    if not (
+        topology["status"] == "ok" and topology["working_directory_matches"]
+        and topology["user"] == "deploy" and topology["group"] == "www-data"
+        and not topology["has_existing_overrides"] and not topology["runs_as_root"]
+        and inspect_sse_unit("accounting-mvp.service") == "active"
+    ):
+        raise ReleaseError("production WSGI does not match the reviewed service")
+    if state.exists() or state.is_symlink() or SSE_PRODUCTION_WHEEL_DIR.parent.exists():
+        raise ReleaseError("production SSE install already has state that requires review")
+    stream_path = APP / "core/sse.py"
+    if not stream_path.is_file() or digest(stream_path.read_bytes()) != SSE_PRODUCTION_STREAM_BASE:
+        raise ReleaseError("production stream code differs from the reviewed application base")
+    for unit in SSE_PRODUCTION_UNITS:
+        value = run_sse_production_command(
+            ["/usr/bin/systemctl", "show", "-p", "LoadState", "--value", unit], "service-inventory",
+        ).strip()
+        if value != b"not-found":
+            raise ReleaseError("production SSE service name is already in use")
+    if run_sse_production_command(["/usr/bin/redis-cli", "-h", "127.0.0.1", "ping"], "redis").strip() != b"PONG":
+        raise ReleaseError("production Redis did not answer on the reviewed listener")
+    changes = resolve_sse_production_nginx(
+        run_sse_production_command(["/usr/sbin/nginx", "-T"], "nginx-inventory")
+    )
+    probe_sse_production("sse_pilot_disabled")
+    if mode == "verify_sse_production":
+        return f"nginx_files={len(changes)} rollback=verified-plan"
+
+    for directory in (SSE_PRODUCTION_SETTINGS_MOUNT, SSE_PRODUCTION_WSGI_DIR, SSE_PRODUCTION_SYSTEMD,
+                      SSE_PRODUCTION_WHEEL_DIR.parent.parent, state.parent):
+        assert_sse_root_directory(directory, create=directory == SSE_PRODUCTION_WSGI_DIR)
+    state.mkdir(mode=0o700)
+    staged = state / "payload"
+    staged.mkdir(mode=0o700)
+    for target, content in payload.items():
+        (staged / PurePosixPath(target).name).write_bytes(content)
+    (state / "file_transaction.py").write_bytes((staged / "file_transaction.py").read_bytes())
+    transaction = runpy.run_path(str(state / "file_transaction.py"))
+    image_type = transaction["FileImage"]
+    targets = {
+        "stream": stream_path,
+        "settings": APP / "config/settings_sse_production.py",
+        "env": SSE_PRODUCTION_SETTINGS_MOUNT / "sse-production.env",
+        "wsgi-env": SSE_PRODUCTION_SETTINGS_MOUNT / "sse-wsgi.env",
+        "asgi": SSE_PRODUCTION_SYSTEMD / SSE_PRODUCTION_UNITS[0],
+        "reconcile": SSE_PRODUCTION_SYSTEMD / SSE_PRODUCTION_UNITS[1],
+        "wsgi": SSE_PRODUCTION_WSGI_DIR / "50-sse-production.conf",
+    }
+    config_data = {
+        "stream": (staged / "stream.py").read_bytes(),
+        "settings": (staged / "settings.py").read_bytes(),
+        "env": b"DJANGO_SETTINGS_MODULE=config.settings_sse_production\nSSE_REDIS_URL=redis://127.0.0.1:6379/0\n",
+        "wsgi-env": b"SSE_PILOT_ENABLED=true\n",
+        "asgi": (staged / "asgi.service.in").read_bytes().replace(b"@APP_USER@", b"deploy").replace(b"@NGINX_GROUP@", b"www-data"),
+        "reconcile": (staged / "reconcile.service.in").read_bytes().replace(b"@APP_USER@", b"deploy").replace(b"@APP_GROUP@", b"www-data"),
+        "wsgi": (staged / "wsgi.conf").read_bytes(),
+    }
+    nginx_before = {}
+    for index, (path, (original, data)) in enumerate(changes.items()):
+        name = f"nginx-{index}"
+        targets[name] = path
+        nginx_before[name] = original
+        config_data[name] = data
+    before = {name: transaction["read_image"](path) for name, path in targets.items()}
+    if (
+        before["stream"] is None or digest(before["stream"].content) != SSE_PRODUCTION_STREAM_BASE
+        or any(before[name] is not None for name in ("settings", "env", "wsgi-env", "asgi", "reconcile", "wsgi"))
+        or any(before[name] is None or before[name].content != content for name, content in nginx_before.items())
+    ):
+        raise ReleaseError("one or more production SSE targets changed during staging")
+    planned = {
+        name: image_type(
+            data,
+            before[name].mode if before[name] else (0o600 if name in {"env", "wsgi-env"} else 0o644),
+            before[name].uid if before[name] else 0,
+            before[name].gid if before[name] else 0,
+        )
+        for name, data in config_data.items()
+    }
+    (state / "state.json").write_text(json.dumps({
+        "commit": commit, "targets": {name: str(path) for name, path in targets.items()},
+    }), encoding="utf-8")
+    wheels_created = False
+    try:
+        SSE_PRODUCTION_WHEEL_DIR.parent.mkdir(mode=0o755)
+        wheels_created = True
+        run_sse_production_command([
+            str(APP / ".venv/bin/python"), "-m", "pip", "install", "--no-deps", "--no-index",
+            "--require-hashes", "--only-binary=:all:", "--find-links", str(staged),
+            "--target", str(SSE_PRODUCTION_WHEEL_DIR), "-r", str(staged / "requirements.lock"),
+        ], "offline-wheels", timeout=90)
+        transaction["apply_file_plan"](state / "before", targets, before, planned)
+        run_sse_production_command(["/usr/sbin/nginx", "-t"], "nginx-syntax")
+        run_sse_production_command(
+            ["/usr/bin/systemd-analyze", "verify", *(str(SSE_PRODUCTION_SYSTEMD / unit) for unit in SSE_PRODUCTION_UNITS)],
+            "units-syntax",
+        )
+        run_sse_production_command(["/usr/bin/systemctl", "daemon-reload"], "systemd-reload")
+        run_sse_production_command(["/usr/bin/systemctl", "start", SSE_PRODUCTION_UNITS[0]], "start-asgi")
+        for _ in range(20):
+            if Path("/run/accounting-mvp-sse-pilot/asgi.sock").is_socket():
+                break
+            time.sleep(0.5)
+        else:
+            raise ReleaseError("production SSE socket did not become ready")
+        run_sse_production_command(["/usr/bin/systemctl", "reload", "nginx"], "nginx-reload")
+        probe_sse_production("authentication_required")
+        run_sse_production_command(["/usr/bin/systemctl", "restart", "accounting-mvp"], "restart-wsgi")
+        wait_for_service()
+        run_sse_production_command(
+            ["/usr/bin/systemctl", "enable", "--now", *SSE_PRODUCTION_UNITS], "persist-and-reconcile",
+        )
+        if any(inspect_sse_unit(unit) != "active" for unit in SSE_PRODUCTION_UNITS):
+            raise ReleaseError("production SSE systemd services are not both active")
+        probe_sse_production("authentication_required")
+    except BaseException:
+        if (state / "before/manifest.json").is_file():
+            restore_sse_production_services(transaction, targets)
+        else:
+            if wheels_created:
+                shutil.rmtree(SSE_PRODUCTION_WHEEL_DIR.parent)
+            shutil.rmtree(state)
+        raise
+    return str(state / "before")
+
+
+def restore_sse_production_services(transaction: dict[str, Any], targets: dict[str, Path]) -> None:
+    # A manual rollback must never overwrite a subsequent infrastructure release.
+    transaction["restore_backup"](SSE_PRODUCTION_STATE / "before", targets)
+    run_sse_production_command(["/usr/sbin/nginx", "-t"], "rollback-nginx-syntax")
+    run_sse_production_command(["/usr/bin/systemctl", "reload", "nginx"], "rollback-nginx")
+    for unit in SSE_PRODUCTION_UNITS:
+        if inspect_sse_unit(unit) in {"active", "failed"}:
+            run_sse_production_command(["/usr/bin/systemctl", "stop", unit], "rollback-unit")
+        link = Path("/etc/systemd/system/multi-user.target.wants") / unit
+        if link.is_symlink() and link.resolve() == SSE_PRODUCTION_SYSTEMD / unit:
+            link.unlink()
+    run_sse_production_command(["/usr/bin/systemctl", "daemon-reload"], "rollback-systemd")
+    run_sse_production_command(["/usr/bin/systemctl", "restart", "accounting-mvp"], "rollback-wsgi")
+    wait_for_service()
+    probe_sse_production("sse_pilot_disabled")
+
+
 def run_sse_qa(mode: str, payload: dict[str, bytes]) -> str:
     """Run one fixed QA operation from a strictly validated package."""
     if mode in {
@@ -5291,6 +5598,11 @@ def main() -> int:
                     f"runtime_sha256={SSE_QA_RUNTIME_SHA256} "
                     f"files={len(payload)} package_sha256={package_sha} summary={summary}"
                 )
+                return 0
+            if mode in SSE_PRODUCTION_MODES:
+                outcome = run_sse_production(mode, payload, manifest["commit"], manifest["metadata"])
+                marker = "VERIFY_OK" if mode == "verify_sse_production" else "RELEASE_OK"
+                print(f"{marker} mode={mode} commit={manifest['commit']} files={len(payload)} {outcome}")
                 return 0
             if mode in VERIFY_MODES:
                 print(f"VERIFY_OK mode={mode} commit={manifest['commit']} files={len(payload)} package_sha256={package_sha}")

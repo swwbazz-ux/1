@@ -29,6 +29,9 @@ MODES = {
     "update_receiver",
     "verify_fcm",
     "configure_fcm",
+    "verify_sse_production",
+    "enable_sse_production",
+    "rollback_sse_production",
     "verify_sse_qa",
     "prepare_sse_qa_host_key",
     "install_sse_qa",
@@ -46,6 +49,21 @@ MODES = {
     "diagnose",
     "rollback",
 }
+
+SSE_PRODUCTION_FILES = {
+    "file_transaction.py": "deployment/sse-production/file_transaction.py",
+    "requirements.lock": "deployment/sse-production/requirements.lock",
+    "asgi.service.in": "deployment/sse-production/accounting-mvp-sse-pilot.service.in",
+    "reconcile.service.in": "deployment/sse-production/accounting-mvp-sse-reconcile.service.in",
+    "wsgi.conf": "deployment/sse-production/50-sse-production.conf",
+    "settings.py": "deployment/sse-production/settings.py",
+    "stream.py": "deployment/sse-production/stream.py",
+}
+SSE_PRODUCTION_WHEELS = (
+    "click-8.5.0-py3-none-any.whl",
+    "h11-0.16.0-py3-none-any.whl",
+    "uvicorn-0.37.0-py3-none-any.whl",
+)
 
 SSE_QA_NGINX_LIMIT_FIX_MODES = {
     "apply_sse_qa_nginx_limit",
@@ -138,6 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rollback-id")
     parser.add_argument("--event-file", type=Path)
     parser.add_argument("--sse-qa-package", type=Path)
+    parser.add_argument("--sse-production-wheels", type=Path)
     parser.add_argument("--sse-qa-secrets", type=Path)
     parser.add_argument("--sse-qa-secrets-stdin", action="store_true")
     parser.add_argument("--sse-qa-candidate-commit")
@@ -347,6 +366,23 @@ def main() -> None:
             raise SystemExit("APK mode requires --apk-dist and --apk-profile")
         paths = load_apk_paths(args.apk_dist.resolve(), args.apk_profile)
         metadata["apk_profile"] = args.apk_profile
+    elif args.mode in {"verify_sse_production", "enable_sse_production", "rollback_sse_production"}:
+        paths = []
+        if args.mode == "rollback_sse_production":
+            if not args.rollback_id or not re.fullmatch(r"[0-9a-f]{40}", args.rollback_id):
+                raise SystemExit("production SSE rollback requires the exact enabled release SHA")
+            metadata["enabled_commit"] = args.rollback_id
+        else:
+            if not args.sse_production_wheels:
+                raise SystemExit("production SSE release requires its verified wheelhouse")
+            inline_payload = [
+                (PurePosixPath("deploy/sse-production", name), (root / source).read_bytes().replace(b"\r\n", b"\n"))
+                for name, source in SSE_PRODUCTION_FILES.items()
+            ]
+            paths.extend(
+                (PurePosixPath("deploy/sse-production", name), args.sse_production_wheels / name)
+                for name in SSE_PRODUCTION_WHEELS
+            )
     elif args.mode in {"verify_receiver", "update_receiver"}:
         if not args.receiver_source:
             raise SystemExit("receiver mode requires --receiver-source")

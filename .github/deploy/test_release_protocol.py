@@ -1126,6 +1126,38 @@ class ReleaseProtocolTests(unittest.TestCase):
         })
         self.assertNotIn("private-", json.dumps(report))
 
+    def test_production_sse_rollback_accepts_only_the_enabled_commit(self):
+        mode = "rollback_sse_production"
+        manifest = {"schema": 2, "mode": mode, "commit": "a" * 40,
+                    "metadata": {"enabled_commit": "b" * 40}}
+        receiver.validate_mode_contract(manifest, {})
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_mode_contract({**manifest, "metadata": {"path": "/etc/nginx"}}, {})
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_target("deploy/sse-production/stream.py", mode)
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_target("deploy/sse-production/systemd/custom.service", "enable_sse_production")
+
+    def test_production_sse_activation_payload_rejects_incomplete_or_modified_wheels(self):
+        mode = "enable_sse_production"
+        manifest = {"schema": 2, "mode": mode, "commit": "a" * 40, "metadata": {}}
+        with self.assertRaisesRegex(receiver.ReleaseError, "contract"):
+            receiver.validate_mode_contract(manifest, {})
+        payload = {name: b"invalid" for name in receiver.SSE_PRODUCTION_PAYLOADS}
+        with self.assertRaisesRegex(receiver.ReleaseError, "payload hash"):
+            receiver.validate_mode_contract(manifest, payload)
+
+    def test_production_sse_drift_rejected_before_opening_a_managed_file(self):
+        with mock.patch.object(receiver.Path, "read_bytes") as read:
+            with self.assertRaisesRegex(receiver.ReleaseError, "differs"):
+                receiver.resolve_sse_production_nginx(b"another config")
+        read.assert_not_called()
+
+    def test_production_sse_file_transaction(self):
+        script = ROOT / "deployment" / "sse-production" / "test_file_transaction.py"
+        result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_sse_qa_http_503_metadata_has_no_free_form_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
             event_path = Path(directory) / "event.json"
@@ -2124,7 +2156,7 @@ class ReleaseProtocolTests(unittest.TestCase):
 
     def test_sensitive_modes_require_control_branch_and_actions_are_sha_pinned(self):
         workflow = (ROOT / ".github" / "workflows" / "production-deploy.yml").read_text(encoding="utf-8")
-        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* ]]', workflow)
+        self.assertIn('[[ "$MODE" == "update_receiver" || "$MODE" == "diagnose" || "$MODE" == *fcm || "$MODE" == *sse_qa* || "$MODE" == *sse_production ]]', workflow)
         self.assertIn('test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"', workflow)
         uses_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses:")]
         self.assertTrue(uses_lines)
