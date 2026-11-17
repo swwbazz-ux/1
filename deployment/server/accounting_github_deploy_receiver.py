@@ -248,6 +248,7 @@ APP_ENV_PATH = APP / ".env"
 DIAGNOSTIC_OPERATIONS = {
     "trip_accounting_incident_v1",
     "infra_capacity_v1",
+    "sse_production_preflight_v1",
     "sse_qa_http_503_v1",
     "sse_qa_http_403_v1",
 }
@@ -1293,9 +1294,13 @@ def validate_diagnostic_metadata(metadata: object) -> dict[str, object]:
     operation = metadata.get("operation")
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise ReleaseError("diagnostic operation is not allowlisted")
-    if operation in {"infra_capacity_v1", "sse_qa_http_503_v1", "sse_qa_http_403_v1"}:
+    if operation in {
+        "infra_capacity_v1", "sse_production_preflight_v1",
+        "sse_qa_http_503_v1", "sse_qa_http_403_v1",
+    }:
         expected_keys = {
             "infra_capacity_v1": INFRA_DIAGNOSTIC_METADATA_KEYS,
+            "sse_production_preflight_v1": {"operation"},
             "sse_qa_http_503_v1": SSE_QA_HTTP_503_METADATA_KEYS,
             "sse_qa_http_403_v1": SSE_QA_HTTP_403_METADATA_KEYS,
         }[operation]
@@ -3224,6 +3229,64 @@ def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[
     return validate_trip_diagnostic_report(raw, metadata)
 
 
+def read_sse_site_config() -> bytes | None:
+    path = "/etc/nginx/sites-available/accounting-mvp"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                return None
+            content = handle.read(262145)
+            return content if 0 < len(content) <= 262144 else None
+    except OSError:
+        return None
+
+
+def inspect_sse_unit(unit: str) -> str:
+    try:
+        result = subprocess.run(
+            ["/usr/bin/systemctl", "show", "--property=ActiveState", "--value", unit],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False, text=True, timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and value in {"active", "inactive", "failed"} else "unknown"
+
+
+def collect_sse_production_preflight() -> dict[str, Any]:
+    site = read_sse_site_config()
+    # Inventory the declarations in a fixed site file. Later activation must
+    # validate the effective nginx configuration, including all includes.
+    declarations = re.sub(rb"(?m)#.*$", b"", site or b"")
+    names = {
+        name
+        for group in re.findall(rb"(?m)^\s*server_name\s+([^;]+);", declarations)
+        for name in group.split()
+    }
+    return {
+        "schema": 1,
+        "operation": "sse_production_preflight_v1",
+        "nginx_site_sha256": digest(site) if site is not None else None,
+        "driver_host_declared": b"driver.driverform.ru" in names,
+        "excavator_host_declared": b"excavator.driverform.ru" in names,
+        "stream_location_declared": bool(re.search(
+            rb"\blocation\s+(?:=\s+|\^~\s+)?/realtime/stream/\s*\{", declarations,
+        )),
+        "uvicorn_executable_present": (APP / ".venv/bin/uvicorn").is_file(),
+        "asgi_entrypoint_present": (APP / "config/sse_asgi.py").is_file(),
+        "reconciliation_command_present": (
+            APP / "core/management/commands/run_operational_reconciliation.py"
+        ).is_file(),
+        "web_service": inspect_sse_unit("accounting-mvp.service"),
+        "sse_service": inspect_sse_unit("accounting-mvp-sse-pilot.service"),
+        "reconciliation_service": inspect_sse_unit("accounting-mvp-sse-reconcile.service"),
+        "summary": {"row_count": 0, "truncated": False},
+    }
+
+
 def encrypt_diagnostic_report(report: dict[str, Any]) -> dict[str, Any]:
     plaintext = json.dumps(
         report,
@@ -3879,6 +3942,8 @@ def apply_data(manifest: dict[str, Any], payload: dict[str, bytes]) -> Path:
 
 def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
     metadata = validate_diagnostic_metadata(manifest["metadata"])
+    if metadata["operation"] == "sse_production_preflight_v1":
+        return collect_sse_production_preflight()
     if metadata["operation"] == "sse_qa_http_503_v1":
         return collect_sse_qa_http_503_report()
     if metadata["operation"] == "sse_qa_http_403_v1":
