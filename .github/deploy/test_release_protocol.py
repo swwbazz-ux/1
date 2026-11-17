@@ -1034,6 +1034,10 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertIn(redirect, candidate)
         self.assertIn(other, candidate)
         self.assertIn(b"location = /realtime/stream/", receiver.SSE_PRODUCTION_LOCATION)
+        split = receiver.plan_sse_production_site(
+            second, receiver.digest(second), frozenset({b"excavator.driverform.ru"}),
+        )
+        self.assertEqual(split.replace(receiver.SSE_PRODUCTION_LOCATION, b""), second)
         for unsafe in (
             first + second + first,
             first + second.replace(b"location /", b"location ^~ /realtime/stream/"),
@@ -1097,6 +1101,30 @@ class ReleaseProtocolTests(unittest.TestCase):
         self.assertEqual(report["group"], "www-data")
         self.assertNotIn("private-", json.dumps(report))
         self.assertNotIn("Environment", " ".join(run.call_args.args[0]))
+
+    def test_production_sse_discovers_role_vhosts_outside_expected_site(self):
+        driver = b"server { listen 443 ssl; server_name driver.driverform.ru; }"
+        excavator = b"server { listen 443 ssl; server_name excavator.driverform.ru; }"
+        dump = (
+            b"# configuration file /etc/nginx/conf.d/driver.conf:\n"
+            + driver
+            + b"\n\n# configuration file /etc/nginx/sites-enabled/excavator:\n"
+            + excavator
+            + b"\n\n# configuration file /outside/nginx/private-path:\n"
+            + driver
+            + b"\n\n# configuration file /etc/nginx/conf.d/unrelated.conf:\n"
+            + b"# server_name driver.driverform.ru;\nset $mock private-config-value;\n"
+        )
+        report = receiver.locate_sse_role_sections(dump)
+        self.assertEqual(report, {
+            "driver": [{"file": "/etc/nginx/conf.d/driver.conf", "rendered_sha256": receiver.digest(driver),
+                        "tls_roles": ["driver.driverform.ru"]}],
+            "excavator": [{"file": "/etc/nginx/sites-enabled/excavator",
+                           "rendered_sha256": receiver.digest(excavator),
+                           "tls_roles": ["excavator.driverform.ru"]}],
+            "other_role_sources": 1,
+        })
+        self.assertNotIn("private-", json.dumps(report))
 
     def test_sse_qa_http_503_metadata_has_no_free_form_parameters(self):
         with tempfile.TemporaryDirectory() as directory:
