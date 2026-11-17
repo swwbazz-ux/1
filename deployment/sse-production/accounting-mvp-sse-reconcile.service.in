@@ -1,0 +1,21 @@
+[Unit]
+Description=Copper Resources operational reconciliation
+After=network.target accounting-mvp.service
+
+[Service]
+Type=simple
+User=@APP_USER@
+Group=@APP_GROUP@
+WorkingDirectory=/srv/accounting-mvp
+EnvironmentFile=/etc/accounting-mvp/sse-production.env
+EnvironmentFile=/etc/accounting-mvp/sse-wsgi.env
+ExecStart=/srv/accounting-mvp/.venv/bin/python manage.py run_operational_reconciliation --tick-seconds 5
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

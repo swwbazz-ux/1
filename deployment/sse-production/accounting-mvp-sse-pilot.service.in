@@ -1,0 +1,26 @@
+[Unit]
+Description=Copper Resources production SSE
+After=network.target accounting-mvp.service
+
+[Service]
+Type=simple
+User=@APP_USER@
+Group=@NGINX_GROUP@
+WorkingDirectory=/srv/accounting-mvp
+EnvironmentFile=/etc/accounting-mvp/sse-production.env
+Environment=SSE_ASGI_PROCESS=true SSE_PILOT_ENABLED=true
+Environment=PYTHONPATH=/opt/accounting-mvp-sse/wheels
+RuntimeDirectory=accounting-mvp-sse-pilot
+RuntimeDirectoryMode=0750
+ExecStart=/srv/accounting-mvp/.venv/bin/python -m uvicorn config.sse_asgi:application --uds /run/accounting-mvp-sse-pilot/asgi.sock --http h11 --ws none --lifespan off --no-proxy-headers --no-access-log --limit-concurrency 128 --timeout-graceful-shutdown 10
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target
