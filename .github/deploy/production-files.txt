@@ -1,1 +1,7 @@
+СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/shifts/services.py
+СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/trips/manual_loading.py
+СИСТЕМА_MVP/backend/trips/trip_creation.py
 СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
