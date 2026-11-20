@@ -771,7 +771,7 @@
         }
 
         function deliveryStorageKey(contextKey, epoch) {
-            if (!contextKey) return "";
+            if (!contextKey || screen.persistDeliveryCursor === false) return "";
             return deliveryStoragePrefix + encodeURIComponent(contextKey) + ":" + encodeURIComponent(epoch || "legacy");
         }
 
@@ -812,7 +812,7 @@
             document.body.dataset.operationalCursorScope = deliveryContextKey;
             document.body.dataset.operationalJournalEpoch = journalEpoch;
             var scopedStorageKey = deliveryStorageKey(deliveryContextKey, journalEpoch);
-            if (!changed && !epochChanged && deliveryContextHydratedKey !== scopedStorageKey) {
+            if (scopedStorageKey && !changed && !epochChanged && deliveryContextHydratedKey !== scopedStorageKey) {
                 deliveryContextHydratedKey = scopedStorageKey;
                 try {
                     var stored = JSON.parse(window.localStorage.getItem(
