@@ -322,6 +322,33 @@ class UniversalStartTests(TestCase):
         response = self.post()
         self.assertEqual(response.context['apps'][0]['app'].role_code, 'mining_master')
 
+    def test_public_catalog_uses_current_release_without_login(self):
+        self.add_driver_release()
+        self.add_excavator_release()
+        catalog = reverse('app_catalog')
+        response = self.client.get(catalog)
+        self.assertContains(response, 'class="app-catalog-download"', count=2)
+        self.assertContains(response, 'href="/media/apk/driver-0.1.10.apk" download')
+        self.assertContains(response, 'href="/media/apk/excavator-0.1.18.apk" download')
+
+        self.add_driver_release(version_code=13, version_name='0.1.11')
+        response = self.client.get(catalog)
+        self.assertContains(response, 'href="/media/apk/driver-0.1.11.apk" download')
+        self.assertContains(response, 'href="/media/apk/excavator-0.1.18.apk" download')
+        self.assertNotContains(response, '/media/apk/driver-0.1.10.apk')
+        self.assertIn('no-cache', response.headers['Cache-Control'])
+
+    def test_public_catalog_hides_unavailable_release(self):
+        self.add_driver_release()
+        self.add_excavator_release()
+        media = Path(self.media_directory.name) / 'apk'
+        (media / 'driver-0.1.10.apk').unlink()
+        (media / 'excavator-update.json').write_text('null', encoding='utf-8')
+        with self.assertLogs('users.app_catalog', level='ERROR'):
+            response = self.client.get(reverse('app_catalog'))
+        self.assertNotContains(response, 'class="app-catalog-download"')
+        self.assertContains(response, 'data-app-card')
+
     def test_android_sees_configured_apk_buttons_for_its_roles(self):
         self.add_driver_release()
         self.add_excavator_release()

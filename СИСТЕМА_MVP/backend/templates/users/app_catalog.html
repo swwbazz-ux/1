@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0b1722">
     <title>Рабочие приложения · Коппер Рисорсез</title>
     <link rel="icon" href="{% static 'favicon.ico' %}">
-    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=6">
+    <link rel="stylesheet" href="{% static 'css/app-catalog-v1.css' %}?v=7">
     <script src="{% static 'js/app-catalog-v1.js' %}?v=6" defer></script>
 </head>
 <body class="app-catalog-page">
@@ -39,27 +39,34 @@
 
     <section class="app-catalog-grid" aria-label="Доступные рабочие приложения">
         {% for app in catalog_apps %}
-        <a
-            class="app-catalog-card"
-            href="?app={{ app.role_code }}#connect"
-            data-app-card
-            data-role-code="{{ app.role_code }}"
-            data-app-name="{{ app.label }}"
-            data-app-url="{{ app.target_url }}"
-            data-app-qr="{{ app.qr_asset_url }}"
-            data-app-qr-target="{{ app.qr_target_url }}"
-            style="--app-accent: {{ app.theme_color }}"
-            aria-label="Показать способы подключения к приложению {{ app.label }}"
-        >
-            <span class="app-catalog-card__icon-wrap" aria-hidden="true">
-                <img class="app-catalog-card__icon" src="{{ app.icon_url }}" width="112" height="112" alt="">
-            </span>
-            <span class="app-catalog-card__name">{{ app.label }}</span>
-            <span class="app-catalog-card__action">
-                <span>Подключить</span>
-                <span aria-hidden="true">→</span>
-            </span>
-        </a>
+        <div class="app-catalog-item" style="--app-accent: {{ app.theme_color }}">
+            <a
+                class="app-catalog-card"
+                href="?app={{ app.role_code }}#connect"
+                data-app-card
+                data-role-code="{{ app.role_code }}"
+                data-app-name="{{ app.label }}"
+                data-app-url="{{ app.target_url }}"
+                data-app-qr="{{ app.qr_asset_url }}"
+                data-app-qr-target="{{ app.qr_target_url }}"
+                aria-label="Показать способы подключения к приложению {{ app.label }}"
+            >
+                <span class="app-catalog-card__icon-wrap" aria-hidden="true">
+                    <img class="app-catalog-card__icon" src="{{ app.icon_url }}" width="112" height="112" alt="">
+                </span>
+                <span class="app-catalog-card__name">{{ app.label }}</span>
+                <span class="app-catalog-card__action">
+                    <span>Подключить</span>
+                    <span aria-hidden="true">→</span>
+                </span>
+            </a>
+            {% if app.apk %}
+            <a class="app-catalog-download" href="{{ app.apk.url }}" download
+               aria-label="Скачать APK приложения {{ app.label }}, версия {{ app.apk.version }}">
+                Скачать APK <span>{{ app.apk.version }}</span>
+            </a>
+            {% endif %}
+        </div>
         {% endfor %}
     </section>
 
