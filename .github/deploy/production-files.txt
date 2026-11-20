@@ -1,1 +1,4 @@
-СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/static/css/app-catalog-v1.css
+СИСТЕМА_MVP/backend/templates/users/app_catalog.html
+СИСТЕМА_MVP/backend/users/app_catalog.py
+СИСТЕМА_MVP/backend/users/start_views.py
