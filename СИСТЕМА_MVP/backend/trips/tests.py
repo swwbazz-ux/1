@@ -699,7 +699,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             is_critical=True,
         )
 
-    def build_dashboard(self):
+    def build_dashboard(self, *, reporting_period=None):
         active_trips = Trip.objects.filter(status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD))
         return build_dispatcher_dashboard_context(
             dispatcher_shift=self.shift,
@@ -712,6 +712,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
             excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
             recent_dispatcher_actions=[],
+            reporting_period=reporting_period,
         )
 
     def create_plan_group(self, *, equipment, mode, value, name='Группа плана', is_active=True):
@@ -1227,6 +1228,27 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
         self.assertIn('--tile-progress: 53%;', tile_tag.group(0))
         self.assertIn('data-plan-percent="53"', tile_tag.group(0))
+
+        # The tablet uses a master reporting period, even though the complex
+        # progress itself comes from the excavator's own shift.
+        with patch('trips.views.timezone.now', return_value=excavator_shift.opened_at + timedelta(hours=1)):
+            tablet_dashboard = self.build_dashboard(reporting_period={
+                'starts_at': excavator_shift.opened_at,
+                'ends_at': excavator_shift.opened_at + timedelta(hours=12),
+            })
+        complex_card = next(
+            card for card in tablet_dashboard['complex_cards']
+            if card.get('card_id') == f'complex-equipment-{self.excavator.pk}'
+        )
+        self.assertEqual(complex_card['percent'], 53)
+        tablet_tile = next(tile for tile in complex_card['active_truck_tiles'] if tile['name'] == '13')
+        self.assertFalse(tablet_tile['has_current_shift'])
+        self.assertTrue(tablet_tile['plan_inactive_fill'])
+        self.assertEqual(tablet_tile['plan_visual']['loop_progress'], 53)
+        self.assertEqual(
+            tablet_dashboard['equipment_cards'][str(self.assigned_truck.pk)]['plan']['progress_loop_percent'],
+            53,
+        )
 
     def test_assigned_truck_with_open_shift_keeps_its_own_snapshot_plan(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT

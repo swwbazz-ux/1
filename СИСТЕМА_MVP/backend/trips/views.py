@@ -2042,14 +2042,12 @@ def build_dispatcher_dashboard_context(
                 )
             elif (
                 not shift
-                and not is_mining_master_reporting_period
                 and equipment_id in truck_equipment_ids
                 and (complex_progress := assigned_complex_progress_for_truck(equipment_id))
             ):
                 # Без смены водителя рейсы не могут попасть в личный
-                # snapshot самосвала. Назначенная машина показывает
-                # авторитетный прогресс работающего комплекса, а UI окрашивает
-                # его серым как неактивную технику.
+                # snapshot самосвала. На обоих пультах назначенная машина
+                # показывает прогресс работающего комплекса серым цветом.
                 progress = complex_progress
             elif (
                 not shift
