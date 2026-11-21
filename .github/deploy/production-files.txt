@@ -1,1 +1,1 @@
-СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/assignments/field_sync.py

@@ -161,6 +161,7 @@ def _snapshot(access, device, *, live=None, v2=False):
 
     if v2:
         snapshot["portrait_revision"] = field_portrait.revision(access.employee)
+        snapshot["can_archive_duplicate_shift"] = True
         snapshot["live_tokens"] = {"trucks": current[0]["trucks"], "zones": current[0]["zones"]}
         return field_commands.enrich_snapshot(access, snapshot)
     return snapshot
@@ -532,6 +533,8 @@ def _process(access, proof, event, occurred):
             opened_at=occurred,
         )
         return shift, {}
+    if event["type"] == "shift.close" and _is_archived_duplicate_close(access, event):
+        return None, {"reconciliation": "unbound_duplicate_close"}
     shift = _shift_for_event(access, proof, event, occurred)
     if event["type"] in field_commands.COMMANDS:
         return shift, field_commands.execute(access, event, occurred)
@@ -648,9 +651,43 @@ def _advance_sequence(key):
         key.save(update_fields=["result_payload", "updated_at"])
 
 
+def _is_archived_duplicate_close(access, event):
+    deps = event.get("depends_on", [])
+    if event.get("format_version") != 2:
+        return False
+    prior = OfflineFieldEvent.objects.filter(
+        actor=access.employee,
+        access=access,
+        role_code=ROLE,
+        device_id=event["device_id"],
+        sequence=event["sequence"] - 1,
+        event_type=EVENT_PREFIX + "shift.open",
+        status=OfflineFieldEventStatus.CONFLICT,
+        error_code="shift_occupied",
+        shift__isnull=True,
+        result_payload__archive_close_event_id__isnull=False,
+    ).first()
+    if not prior:
+        return False
+    if not (
+        deps == [prior.event_id]
+        and not event.get("server_shift_id")
+        and not event["payload"]
+        and prior.result_payload.get("archive_close_event_id") == event["id"]
+        and prior.result_payload.get("resolved_by")
+        and prior.context_snapshot.get("local_shift_id") == event["local_shift_id"]
+        and prior.context_snapshot.get("actor_key") == event["actor_key"]
+        and prior.context_snapshot.get("actor_generation") == event["actor_generation"]
+    ):
+        raise FieldProblem("resolution_scope", "Завершение не соответствует отклонённой локальной смене.")
+    return True
+
+
 def _resolve(access, event):
     data = event["payload"]
-    if not _uuid(data.get("event_id")) or data.get("decision") != "accept_server":
+    decision = data.get("decision")
+    archival = decision == "archive_duplicate_shift"
+    if not _uuid(data.get("event_id")) or decision not in ("accept_server", "archive_duplicate_shift"):
         raise FieldProblem("invalid_resolution", "Не выбран конфликт и способ сверки.")
     prior = (
         OfflineFieldEvent.objects.select_for_update()
@@ -667,6 +704,22 @@ def _resolve(access, event):
     )
     if not prior:
         raise FieldProblem("resolution_target", "Указанное действие не находится на сверке.")
+    if archival:
+        close_id = data.get("close_event_id")
+        if (
+            event.get("format_version") != 2
+            or set(data) != {"event_id", "decision", "close_event_id"}
+            or not _uuid(close_id)
+            or close_id in {event["id"], prior.event_id}
+            or prior.sequence != event["sequence"] - 2
+            or prior.event_type != EVENT_PREFIX + "shift.open"
+            or prior.error_code != "shift_occupied"
+            or prior.shift_id is not None
+            or prior.context_snapshot.get("local_shift_id") != event["local_shift_id"]
+            or prior.result_payload.get("resolved_by")
+        ):
+            raise FieldProblem("resolution_scope", "Указанная пара не относится к отклонённой локальной смене.")
+        prior.result_payload = {**prior.result_payload, "archive_close_event_id": close_id}
     if not prior.result_payload.get("resolved_by"):
         prior.result_payload = {**prior.result_payload, "resolved_by": event["id"]}
         prior.save(update_fields=["result_payload", "updated_at"])
@@ -836,6 +889,7 @@ def _receive(ticket, event, *, key=None, signed_hash=None, envelope=None):
                 if (
                     lock_production_state().version == state_version
                     and event["type"] != "conflict.resolve"
+                    and extra.get("reconciliation") != "unbound_duplicate_close"
                 ):
                     bump_operational_state(
                         "MasterField:" + event["type"],
