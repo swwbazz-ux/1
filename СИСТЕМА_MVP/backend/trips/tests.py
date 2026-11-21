@@ -1154,64 +1154,105 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
 
-    def test_assigned_truck_without_open_shift_inherits_active_complex_plan(self):
+    def test_truck_without_open_shift_keeps_its_own_plan_when_reassigned(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
         self.shift.save(update_fields=['opened_at'])
-        self.create_plan_group(
-            equipment=self.assigned_truck,
+        truck_plan = self.create_plan_group(
+            equipment=self.free_truck,
             mode=PlanCalculationMode.TRIPS,
-            value='20.00',
-            name='Самосвалы БелАЗ тест комплекса',
+            value='4.00',
+            name='Сменный план самосвалов',
         )
+        truck_plan.equipment.add(self.assigned_truck)
         self.create_plan_group(
             equipment=self.excavator,
             mode=PlanCalculationMode.VOLUME,
             value='5000.00',
-            name='Экскаваторы тест активного комплекса',
+            name='Сменный план экскаваторов',
         )
-        ExcavatorPlacement.objects.create(
-            excavator=self.excavator,
-            zone=ExcavatorPlacement.Zone.ACTIVE,
-        )
-        HaulAssignment.objects.create(
-            truck=self.assigned_truck,
-            excavator=self.excavator,
-            status=AssignmentStatus.ACCEPTED,
-        )
+        for excavator in (self.excavator, self.idle_excavator):
+            ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+        for truck in (self.free_truck, self.assigned_truck):
+            HaulAssignment.objects.create(truck=truck, excavator=self.excavator, status=AssignmentStatus.ACCEPTED)
         excavator_shift = self.open_equipment_shift(
             self.excavator,
-            employee_name='Машинист экскаватора',
+            employee_name='Машинист первого экскаватора',
         )
-        self.create_completed_trip(
+        next_excavator_shift = self.open_equipment_shift(
+            self.idle_excavator,
+            employee_name='Машинист второго экскаватора',
+        )
+        loaded_at = self.shift.opened_at + timedelta(minutes=5)
+        Trip.objects.create(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            loading_shift=excavator_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='50.00',
+            loaded_at=loaded_at,
+            status=TripStatus.UNCONTROLLED,
+        )
+        # Опоздавшая запись с разгрузкой в текущей смене всё равно
+        # относится к предыдущей смене по времени погрузки.
+        previous_trip = self.create_completed_trip(truck=self.free_truck, excavator=self.excavator)
+        Trip.objects.filter(pk=previous_trip.pk).update(
+            loaded_at=self.shift.opened_at.replace(hour=6, minute=59),
+            created_at=loaded_at,
+        )
+        Trip.objects.create(
             truck=self.assigned_truck,
             excavator=self.excavator,
             loading_shift=excavator_shift,
-            volume='2652.00',
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            loaded_at=loaded_at,
+            status=TripStatus.CANCELLED,
+        )
+
+        def complexes_by_excavator(dashboard):
+            return {card['card_id']: card for card in dashboard['complex_cards']}
+
+        def percentages_by_truck(card):
+            return {tile['name']: tile['percent'] for tile in card['active_truck_tiles']}
+
+        first_key = f'complex-equipment-{self.excavator.pk}'
+        next_key = f'complex-equipment-{self.idle_excavator.pk}'
+        complexes = complexes_by_excavator(self.build_dashboard())
+        self.assertEqual(percentages_by_truck(complexes[first_key]), {'10': 25, '13': 0})
+        self.assertEqual(complexes[first_key]['percent'], 1)
+
+        HaulAssignment.objects.filter(truck=self.free_truck).update(status=AssignmentStatus.CANCELLED)
+        HaulAssignment.objects.create(
+            truck=self.free_truck,
+            excavator=self.idle_excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        complexes = complexes_by_excavator(self.build_dashboard())
+        self.assertEqual(percentages_by_truck(complexes[next_key]), {'10': 25})
+
+        Trip.objects.create(
+            truck=self.free_truck,
+            excavator=self.idle_excavator,
+            loading_shift=next_excavator_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='50.00',
+            loaded_at=loaded_at + timedelta(minutes=30),
+            status=TripStatus.LOADED_WAITING_UNLOAD,
         )
 
         dashboard = self.build_dashboard()
-        assigned_tile = next(
-            tile
-            for card in dashboard['complex_cards']
-            for tile in card['active_truck_tiles']
-            if tile['name'] == '13'
-        )
-        detail_card = dashboard['equipment_cards'][str(self.assigned_truck.id)]
-
+        complexes = complexes_by_excavator(dashboard)
+        self.assertEqual(percentages_by_truck(complexes[first_key]), {'13': 0})
+        self.assertEqual(percentages_by_truck(complexes[next_key]), {'10': 50})
+        self.assertEqual(complexes[first_key]['percent'], 1)
+        self.assertFalse(complexes[next_key]['plan_has_plan'])
+        assigned_tile = complexes[next_key]['active_truck_tiles'][0]
         self.assertFalse(assigned_tile['has_current_shift'])
-        self.assertEqual(assigned_tile['plan_status'], PlanAssignmentStatus.ASSIGNED)
-        self.assertEqual(
-            assigned_tile['plan_group_name'],
-            'Экскаваторы тест активного комплекса',
-        )
-        self.assertEqual(assigned_tile['plan_calculation_mode'], PlanCalculationMode.VOLUME)
-        self.assertEqual(assigned_tile['plan_value'], '5 000')
-        self.assertEqual(assigned_tile['plan_fact_value'], '2 652')
-        self.assertEqual(assigned_tile['percent'], 53)
-        self.assertEqual(assigned_tile['plan_visual']['loop_progress'], 53)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
-        self.assertEqual(detail_card['percent'], 53)
-        self.assertEqual(detail_card['plan']['fact_plan_label'], '2 652 / 5 000 м³')
+        self.assertEqual(assigned_tile['plan_group_name'], truck_plan.name)
+        self.assertEqual(dashboard['equipment_cards'][str(self.free_truck.pk)]['plan']['fact_plan_label'], '2 / 4 рейса')
         board_html = render_to_string(
             'trips/includes/dispatcher_board.html',
             {
@@ -1219,35 +1260,30 @@ class DispatcherGarageCurrentStateTests(TestCase):
                 'mining_master_mobile_enabled': False,
             },
         )
-        tile_tag = re.search(
-            r'<article class="dispatcher-truck-tile complex-truck-tile[^>]*'
-            r'data-equipment-name="13"[^>]*>',
-            board_html,
-        )
-        self.assertIsNotNone(tile_tag)
-        self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
-        self.assertIn('--tile-progress: 53%;', tile_tag.group(0))
-        self.assertIn('data-plan-percent="53"', tile_tag.group(0))
+        for number, percent in (('10', 50), ('13', 0)):
+            with self.subTest(truck=number):
+                tile_tag = re.search(
+                    r'<article class="dispatcher-truck-tile complex-truck-tile[^>]*'
+                    rf'data-equipment-name="{number}"[^>]*>',
+                    board_html,
+                )
+                self.assertIsNotNone(tile_tag)
+                self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
+                self.assertIn(f'--tile-progress: {percent}%;', tile_tag.group(0))
+                self.assertIn(f'data-plan-percent="{percent}"', tile_tag.group(0))
 
-        # The tablet uses a master reporting period, even though the complex
-        # progress itself comes from the excavator's own shift.
+        # Смена мастера началась после первой погрузки. План самосвала
+        # по-прежнему учитывает её в том же производственном периоде.
         with patch('trips.views.timezone.now', return_value=excavator_shift.opened_at + timedelta(hours=1)):
             tablet_dashboard = self.build_dashboard(reporting_period={
-                'starts_at': excavator_shift.opened_at,
-                'ends_at': excavator_shift.opened_at + timedelta(hours=12),
+                'starts_at': loaded_at + timedelta(minutes=10),
             })
-        complex_card = next(
-            card for card in tablet_dashboard['complex_cards']
-            if card.get('card_id') == f'complex-equipment-{self.excavator.pk}'
-        )
-        self.assertEqual(complex_card['percent'], 53)
-        tablet_tile = next(tile for tile in complex_card['active_truck_tiles'] if tile['name'] == '13')
-        self.assertFalse(tablet_tile['has_current_shift'])
-        self.assertTrue(tablet_tile['plan_inactive_fill'])
-        self.assertEqual(tablet_tile['plan_visual']['loop_progress'], 53)
+        tablet_complexes = complexes_by_excavator(tablet_dashboard)
+        self.assertEqual(percentages_by_truck(tablet_complexes[first_key]), {'13': 0})
+        self.assertEqual(percentages_by_truck(tablet_complexes[next_key]), {'10': 50})
         self.assertEqual(
-            tablet_dashboard['equipment_cards'][str(self.assigned_truck.pk)]['plan']['progress_loop_percent'],
-            53,
+            tablet_dashboard['equipment_cards'][str(self.free_truck.pk)]['plan']['progress_loop_percent'],
+            50,
         )
 
     def test_assigned_truck_with_open_shift_keeps_its_own_snapshot_plan(self):

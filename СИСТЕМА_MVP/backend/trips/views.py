@@ -319,6 +319,19 @@ def calculate_dispatcher_snapshot_progress(shift, equipment=None):
     return calculate_open_shift_progress(shift)
 
 
+def dispatcher_trip_facts_by_truck(trips):
+    rows = (
+        trips.order_by()
+        .values('truck_id')
+        .annotate(
+            trip_count=Count('id'),
+            volume_m3=Sum('volume_m3'),
+            tonnage=Sum('tonnage'),
+        )
+    )
+    return {row['truck_id']: row for row in rows}
+
+
 def format_dispatcher_plan_number(value):
     if value in {None, ''}:
         return ''
@@ -1880,9 +1893,9 @@ def build_dispatcher_dashboard_context(
             )
             .order_by('-created_at')
         )
-    if not is_mining_master_reporting_period and dispatcher_plan_date is None:
-        # Даже без открытой смены диспетчера плановый период не
-        # исчезает: день 07:00–19:00, ночь 19:00–07:00.
+    if dispatcher_plan_date is None:
+        # Без диспетчерской смены план техники относится к текущему
+        # производственному периоду: день 07:00–19:00, ночь 19:00–07:00.
         current_production_context = production_shift_context()
         dispatcher_plan_date = current_production_context.production_date
         dispatcher_plan_shift_type = current_production_context.shift_type
@@ -1891,48 +1904,10 @@ def build_dispatcher_dashboard_context(
             dispatcher_plan_shift_type,
         )
     shift_trips = list(shift_trip_queryset[:500])
-    period_plan_facts_by_truck = {}
-    if is_mining_master_reporting_period or dispatcher_plan_date is not None:
-        # Для техники без собственной открытой смены факт всё равно относится
-        # к текущему периоду пульта. Это позволяет назначенному самосвалу без
-        # смены водителя выполнять план по реально завершённым рейсам.
-        if is_mining_master_reporting_period:
-            period_plan_trip_queryset = shift_trip_queryset
-        else:
-            period_plan_trip_queryset = Trip.objects.filter(
-                Q(
-                    status=TripStatus.COMPLETED,
-                    completed_at__gte=production_shift_start,
-                    completed_at__lt=production_shift_end,
-                )
-                | Q(
-                    status=TripStatus.COMPLETED,
-                    completed_at__isnull=True,
-                    created_at__gte=production_shift_start,
-                    created_at__lt=production_shift_end,
-                )
-            )
-
-        truck_fact_rows = (
-            period_plan_trip_queryset
-            .filter(status=TripStatus.COMPLETED)
-            .order_by()
-            .values('truck_id')
-            .annotate(
-                trip_count=Count('id'),
-                volume_m3=Sum('volume_m3'),
-                tonnage=Sum('tonnage'),
-            )
-        )
-        period_plan_facts_by_truck = {
-            row['truck_id']: {
-                'trip_count': row['trip_count'],
-                'volume_m3': row['volume_m3'],
-                'tonnage': row['tonnage'],
-            }
-            for row in truck_fact_rows
-            if row['truck_id']
-        }
+    master_period_facts_by_truck = (
+        dispatcher_trip_facts_by_truck(shift_trip_queryset.filter(status=TripStatus.COMPLETED))
+        if is_mining_master_reporting_period else {}
+    )
     first_open_shift_by_equipment_id = {}
     latest_open_shift_by_equipment_id = {}
     for shift in open_shifts:
@@ -1968,19 +1943,37 @@ def build_dispatcher_dashboard_context(
 
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
+    inactive_truck_ids = truck_equipment_ids.difference(open_shift_by_equipment_id)
     plan_group_by_equipment_id = {}
-    if not is_mining_master_reporting_period:
-        plan_groups = (
-            EquipmentPlanGroup.objects
-            .filter(equipment__id__in=truck_equipment_ids)
-            .prefetch_related('equipment')
-            .order_by('-is_active', '-active_from', 'name')
-            .distinct()
+    plan_groups = (
+        EquipmentPlanGroup.objects
+        .filter(equipment__id__in=inactive_truck_ids)
+        .prefetch_related('equipment')
+        .order_by('-is_active', '-active_from', 'name')
+        .distinct()
+    )
+    for plan_group in plan_groups:
+        for planned_equipment in plan_group.equipment.all():
+            if planned_equipment.id in inactive_truck_ids:
+                plan_group_by_equipment_id.setdefault(planned_equipment.id, plan_group)
+
+    # Без смены водителя учитываем погрузки по самосвалу за весь производственный
+    # период. Переназначение и смена экскаватора не влияют на этот факт.
+    inactive_truck_facts = (
+        dispatcher_trip_facts_by_truck(
+            Trip.objects.filter(truck_id__in=plan_group_by_equipment_id.keys())
+            .exclude(status=TripStatus.CANCELLED)
+            .filter(
+                Q(loaded_at__gte=production_shift_start, loaded_at__lt=production_shift_end)
+                | Q(
+                    loaded_at__isnull=True,
+                    created_at__gte=production_shift_start,
+                    created_at__lt=production_shift_end,
+                )
+            )
         )
-        for plan_group in plan_groups:
-            for planned_equipment in plan_group.equipment.all():
-                if planned_equipment.id in truck_equipment_ids:
-                    plan_group_by_equipment_id.setdefault(planned_equipment.id, plan_group)
+        if plan_group_by_equipment_id else {}
+    )
     selected_equipment_shifts = list(open_shift_by_equipment_id.values())
     snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
         unloading_shift_ids=(
@@ -1997,30 +1990,6 @@ def build_dispatcher_dashboard_context(
         ),
     )
 
-    def assigned_complex_progress_for_truck(truck_id):
-        """Use the working complex plan when an assigned truck has no shift."""
-        assignment = assignment_by_truck.get(truck_id)
-        if (
-            not assignment
-            or assignment.status != AssignmentStatus.ACCEPTED
-            or assignment.action == HaulAssignmentAction.RELEASE
-            or not assignment.excavator_id
-        ):
-            return None
-        excavator_shift = open_shift_by_equipment_id.get(assignment.excavator_id)
-        if not excavator_shift or not excavator_shift.plan_status:
-            return None
-        progress = calculate_progress_from_snapshot_facts(
-            excavator_shift,
-            snapshot_trip_facts['loading'].get(excavator_shift.id),
-        )
-        if (
-            progress.get('plan_status') != PlanAssignmentStatus.ASSIGNED
-            or progress.get('progress_percent') is None
-        ):
-            return None
-        return progress
-
     plan_by_equipment_id = {}
     def dispatcher_plan_for_equipment(equipment):
         equipment_id = getattr(equipment, 'id', None)
@@ -2029,7 +1998,7 @@ def build_dispatcher_dashboard_context(
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
             if shift and equipment_id in truck_equipment_ids and is_mining_master_reporting_period:
-                progress = calculate_progress_from_snapshot_facts(shift, period_plan_facts_by_truck.get(equipment_id))
+                progress = calculate_progress_from_snapshot_facts(shift, master_period_facts_by_truck.get(equipment_id))
             elif shift and equipment_id in truck_equipment_ids:
                 progress = calculate_progress_from_snapshot_facts(
                     shift,
@@ -2040,29 +2009,13 @@ def build_dispatcher_dashboard_context(
                     shift,
                     snapshot_trip_facts['loading'].get(shift.id),
                 )
-            elif (
-                not shift
-                and equipment_id in truck_equipment_ids
-                and (complex_progress := assigned_complex_progress_for_truck(equipment_id))
-            ):
-                # Без смены водителя рейсы не могут попасть в личный
-                # snapshot самосвала. На обоих пультах назначенная машина
-                # показывает прогресс работающего комплекса серым цветом.
-                progress = complex_progress
-            elif (
-                not shift
-                and not is_mining_master_reporting_period
-                and dispatcher_plan_date is not None
-                and dispatcher_plan_shift_type is not None
-                and equipment_id in truck_equipment_ids
-                and equipment_id in plan_group_by_equipment_id
-            ):
+            elif equipment_id in plan_group_by_equipment_id:
                 progress = calculate_plan_group_progress_from_facts(
                     equipment,
                     plan_group_by_equipment_id[equipment_id],
                     dispatcher_plan_date,
                     dispatcher_plan_shift_type,
-                    period_plan_facts_by_truck.get(equipment_id),
+                    inactive_truck_facts.get(equipment_id),
                 )
             else:
                 progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
