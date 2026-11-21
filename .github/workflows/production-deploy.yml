@@ -57,6 +57,7 @@ on:
           - none
           - driver
           - excavator
+          - mining_master_tablet
       data_operation:
         description: "Target path deploy/data_updates/name.py for data modes"
         required: false
@@ -177,7 +178,10 @@ jobs:
           esac
           test "$CONFIRMATION" = "$expected"
           if [[ "$MODE" == *apk ]]; then
-            [[ "$APK_PROFILE" == "driver" || "$APK_PROFILE" == "excavator" ]]
+            [[ "$APK_PROFILE" == "driver" || "$APK_PROFILE" == "excavator" || "$APK_PROFILE" == "mining_master_tablet" ]]
+          fi
+          if [[ "$APK_PROFILE" == "mining_master_tablet" ]]; then
+            test "$GITHUB_REF_NAME" = "codex/github-production-deploy-20260916"
           fi
           if [[ "$MODE" == *data ]]; then
             [[ "$DATA_OPERATION" =~ ^deploy/data_updates/[A-Za-z0-9._-]+\.py$ ]]
@@ -378,10 +382,18 @@ jobs:
           actual_cert="$($apksigner verify --print-certs "$apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
           current_manifest="$RUNNER_TEMP/$APK_PROFILE-current-update.json"
           current_apk="$RUNNER_TEMP/$APK_PROFILE-current.apk"
-          curl --fail --silent --show-error "https://driverform.ru/media/apk/$APK_PROFILE-update.json" -o "$current_manifest"
-          current_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["apkUrl"])' "$current_manifest")"
-          curl --fail --silent --show-error --location "$current_url" -o "$current_apk"
-          expected_cert="$($apksigner verify --print-certs "$current_apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          if [[ "$APK_PROFILE" == "mining_master_tablet" ]]; then
+            # Public signing fingerprint of the installed device-owner APK.
+            expected_cert=15CB7E9EDF500212939178D220AC26BDCDF39E8094E41A9203AB69D0343008CB
+            aapt="$(dirname "$apksigner")/aapt"
+            "$aapt" dump badging "$apk" > "$RUNNER_TEMP/tablet-apk-badging.txt"
+            grep -F "package: name='ru.copperresources.miningmaster.tablet'" "$RUNNER_TEMP/tablet-apk-badging.txt"
+          else
+            curl --fail --silent --show-error "https://driverform.ru/media/apk/$APK_PROFILE-update.json" -o "$current_manifest"
+            current_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["apkUrl"])' "$current_manifest")"
+            curl --fail --silent --show-error --location "$current_url" -o "$current_apk"
+            expected_cert="$($apksigner verify --print-certs "$current_apk" | sed -n 's/.*SHA-256 digest: //p' | head -1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          fi
           echo "Built certificate: $actual_cert"
           echo "Production certificate: $expected_cert"
           test -n "$actual_cert"
@@ -395,11 +407,16 @@ jobs:
           APK_PROFILE: ${{ inputs.apk_profile }}
         run: |
           python - <<'PY'
-          import json, os, urllib.request
+          import json, os, urllib.error, urllib.request
           profile = os.environ["APK_PROFILE"]
           new = json.load(open(f"dist/{profile}-update.json", encoding="utf-8"))
-          with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json") as response:
-              current = json.load(response)
+          try:
+              with urllib.request.urlopen(f"https://driverform.ru/media/apk/{profile}-update.json", timeout=20) as response:
+                  current = json.load(response)
+          except urllib.error.HTTPError as error:
+              if profile != "mining_master_tablet" or error.code != 404:
+                  raise
+              current = {"versionCode": 68}  # Initial USB enrollment.
           if int(new["versionCode"]) <= int(current["versionCode"]):
               raise SystemExit(
                   f"versionCode must increase: current={current['versionCode']} new={new['versionCode']}"
