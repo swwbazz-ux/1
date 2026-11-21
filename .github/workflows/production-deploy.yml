@@ -24,6 +24,9 @@ on:
           - verify_sse_production
           - enable_sse_production
           - rollback_sse_production
+          - verify_master_sse_production
+          - enable_master_sse_production
+          - rollback_master_sse_production
           - verify_sse_qa
           - prepare_sse_qa_host_key
           - install_sse_qa
@@ -63,7 +66,7 @@ on:
         required: false
         type: string
       rollback_id:
-        description: "Exact github-... backup for rollback, or enabled full SHA for rollback_sse_production"
+        description: "Rollback backup or release SHA, or the reviewed plan fingerprint for enable_master_sse_production"
         required: false
         type: string
       sse_qa_allow_cidr:
@@ -158,6 +161,9 @@ jobs:
             verify_sse_production) expected=VERIFY_SSE_PRODUCTION ;;
             enable_sse_production) expected=ENABLE_SSE_PRODUCTION ;;
             rollback_sse_production) expected=ROLLBACK_SSE_PRODUCTION ;;
+            verify_master_sse_production) expected=VERIFY_MASTER_SSE_PRODUCTION ;;
+            enable_master_sse_production) expected=ENABLE_MASTER_SSE_PRODUCTION ;;
+            rollback_master_sse_production) expected=ROLLBACK_MASTER_SSE_PRODUCTION ;;
             verify_sse_qa) expected=VERIFY_SSE_QA ;;
             prepare_sse_qa_host_key) expected=PREPARE_SSE_QA_HOST_KEY ;;
             install_sse_qa) expected=INSTALL_SSE_QA ;;
@@ -476,6 +482,18 @@ jobs:
             args+=(--sse-production-wheels "$wheelhouse")
           elif [[ "$MODE" == "rollback_sse_production" ]]; then
             args+=(--rollback-id "$ROLLBACK_ID")
+          elif [[ "$MODE" == "rollback_master_sse_production" ]]; then
+            args+=(--rollback-id "$ROLLBACK_ID")
+          elif [[ "$MODE" == *master_sse_production ]]; then
+            master_sse_source=ce1068bbd5f08ddcc84bd61c528147cc438b48fa
+            master_sse_root="$RUNNER_TEMP/master-sse-production"
+            mkdir -p "$master_sse_root"
+            git fetch --no-tags --depth=1 origin "$master_sse_source"
+            test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$master_sse_source"
+            git archive --format=tar "$master_sse_source" -- deployment/sse-production/stream.py \
+              'СИСТЕМА_MVP/backend/assignments/field_sync.py' 'СИСТЕМА_MVP/backend/users/middleware.py' | \
+              tar -xf - -C "$master_sse_root"
+            args+=(--master-sse-source "$master_sse_root" --rollback-id "$ROLLBACK_ID")
           elif [[ "$MODE" == *sse_qa* ]]; then
             qa_candidate_root="$RUNNER_TEMP/sse-qa-candidate"
             mkdir -p "$qa_candidate_root"

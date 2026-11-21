@@ -45,6 +45,20 @@ RECEIVER_MODES = {"verify_receiver", "update_receiver"}
 FCM_MODES = {"verify_fcm", "configure_fcm"}
 DIAGNOSTIC_MODES = {"diagnose"}
 SSE_PRODUCTION_MODES = {"verify_sse_production", "enable_sse_production", "rollback_sse_production"}
+MASTER_SSE_MODES = {"verify_master_sse_production", "enable_master_sse_production", "rollback_master_sse_production"}
+MASTER_SSE_PREFIX = "deploy/master-sse/"
+MASTER_SSE_FILES = {
+    "stream.py": ("core/sse.py",
+                  "aa25a2888d6e183b98c6be2a903f49a10b4f7c7926f7fa263aadde819215549f",
+                  "621a71a2146c05d83c343e4ed7650c588624788c7f50240ef95e9dd15d3b2432"),
+    "field_sync.py": ("assignments/field_sync.py",
+                      "89bb56e53369aca6f391d844ccf10cab7bbeab8e5dcbf754b7aad12d96df417f",
+                      "aac1abce388a17917ab951102f872e4531c323916aab75815c6d48798964d960"),
+    "middleware.py": ("users/middleware.py",
+                      "b2a805464314169d1ba78df82d5ae37ba3ef9eb131b6a8d0b279d54703e68eae",
+                      "8815f07e216db259a5ea3ae0a45ec97a4ba43b35db5bbd38443c1885521c7ce4"),
+}
+MASTER_SSE_PAYLOADS = {MASTER_SSE_PREFIX + name for name in MASTER_SSE_FILES}
 SSE_PRODUCTION_PREFIX = "deploy/sse-production/"
 SSE_PRODUCTION_WHEELS = {
     "click-8.5.0-py3-none-any.whl": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
@@ -81,7 +95,7 @@ SSE_QA_MODES = {
 } | SSE_QA_SEED_FIX_MODES
 ALL_MODES = (
     CODE_MODES | MIGRATION_MODES | APK_MODES | DATA_MODES | RECEIVER_MODES | FCM_MODES
-    | DIAGNOSTIC_MODES | SSE_QA_MODES | SSE_PRODUCTION_MODES | {"rollback"}
+    | DIAGNOSTIC_MODES | SSE_QA_MODES | SSE_PRODUCTION_MODES | MASTER_SSE_MODES | {"rollback"}
 )
 VERIFY_MODES = {"verify", "verify_migrations", "verify_apk", "verify_data", "verify_receiver", "verify_fcm"}
 RECEIVER_PAYLOAD = "deploy/receiver/accounting_github_deploy_receiver.py"
@@ -3327,6 +3341,7 @@ def parse_sse_production_vhosts(site: bytes) -> list[dict[str, Any]]:
                 raise ValueError("unbalanced nginx site syntax")
             depth -= 1
             if depth == 0 and server is not None:
+                server["end_at"] = match.start()
                 servers.append(server)
                 server = None
         elif token == b";":
@@ -3713,6 +3728,10 @@ def validate_target(value: str, mode: str) -> PurePosixPath:
         raise ReleaseError(f"unsafe target path: {value}")
     if mode in DIAGNOSTIC_MODES:
         raise ReleaseError("diagnostic mode does not accept payload targets")
+    if mode in MASTER_SSE_MODES:
+        if mode == "rollback_master_sse_production" or value not in MASTER_SSE_PAYLOADS:
+            raise ReleaseError("master SSE target is not allowed")
+        return path
     if mode in SSE_PRODUCTION_MODES:
         if mode == "rollback_sse_production" or value not in SSE_PRODUCTION_PAYLOADS:
             raise ReleaseError("production SSE target is not allowed")
@@ -3808,9 +3827,10 @@ def load_release(package: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
         entries = manifest.get("files")
         if not isinstance(entries, list) or len(entries) > 750:
             raise ReleaseError("invalid release file list")
-        if mode not in {"rollback", "diagnose"} and not entries:
+        empty_modes = {"rollback", "diagnose", "rollback_sse_production", "rollback_master_sse_production"}
+        if mode not in empty_modes and not entries:
             raise ReleaseError("release file list is empty")
-        if mode in {"rollback", "diagnose"} and entries:
+        if mode in empty_modes and entries:
             raise ReleaseError(f"{mode} package cannot contain files")
         payload: dict[str, bytes] = {}
         expected_names = {"release-manifest.json"}
@@ -3859,6 +3879,22 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
             compile(payload[RECEIVER_PAYLOAD], RECEIVER_PAYLOAD, "exec")
         except SyntaxError as exc:
             raise ReleaseError("receiver source is not valid Python") from exc
+    elif mode in MASTER_SSE_MODES:
+        requirements = {
+            "verify_master_sse_production": (MASTER_SSE_PAYLOADS, {}),
+            "enable_master_sse_production": (MASTER_SSE_PAYLOADS, {"plan_sha256": r"[0-9a-f]{64}"}),
+            "rollback_master_sse_production": (set(), {"enabled_commit": r"[0-9a-f]{40}"}),
+        }
+        expected, fields = requirements[mode]
+        if set(payload) != expected or set(metadata) != set(fields) or any(
+            not isinstance(metadata[key], str) or not re.fullmatch(pattern, metadata[key])
+            for key, pattern in fields.items()
+        ):
+            raise ReleaseError("invalid master SSE package contract")
+        for target, content in payload.items():
+            if digest(content) != MASTER_SSE_FILES[PurePosixPath(target).name][2]:
+                raise ReleaseError(f"master SSE payload differs from reviewed source: {target}")
+            compile(content, target, "exec")
     elif mode in SSE_PRODUCTION_MODES:
         expected = set() if mode == "rollback_sse_production" else SSE_PRODUCTION_PAYLOADS
         if set(payload) != expected:
@@ -5205,6 +5241,167 @@ def probe_sse_production(expected_error: str) -> None:
             raise ReleaseError(f"production SSE {role} stream health did not match")
 
 
+MASTER_SSE_HOST = b"mining-master.driverform.ru"
+MASTER_SSE_NGINX_DIRS = {
+    Path("/etc/nginx/conf.d"), Path("/etc/nginx/sites-available"), Path("/etc/nginx/sites-enabled"),
+}
+SSE_STREAM_HOST_FILTER = rb"^(driver|excavator)\.driverform\.ru$"
+
+
+def master_sse_nginx_change(site: bytes, vhost: dict[str, Any]) -> bytes:
+    start, end = vhost["insert_at"], vhost["end_at"]
+    block = site[start:end]
+    declarations = re.sub(rb"(?m)#.*$", b"", block)
+    includes = re.findall(rb"\binclude\s+([^;]+);", declarations)
+    permitted = {
+        b"proxy_params", b"/etc/nginx/proxy_params", b"/etc/letsencrypt/options-ssl-nginx.conf",
+    }
+    if vhost["server_rewrite"] or SSE_PRODUCTION_PROXY_GUARD.search(declarations) or any(
+        value.strip().strip(b"\"'") not in permitted for value in includes
+    ):
+        raise ReleaseError("master TLS vhost contains overrides that require separate review")
+    if vhost["stream"]:
+        if not vhost["names"] & SSE_ROLE_HOSTS or block.count(SSE_PRODUCTION_LOCATION) != 1:
+            raise ReleaseError("master TLS vhost already contains an unreviewed stream location")
+        route = SSE_PRODUCTION_LOCATION.replace(
+            SSE_STREAM_HOST_FILTER, rb"^(driver|excavator|mining-master)\.driverform\.ru$",
+        )
+        return site[:start] + block.replace(SSE_PRODUCTION_LOCATION, route, 1) + site[end:]
+    if vhost["names"] & SSE_ROLE_HOSTS:
+        raise ReleaseError("the existing role stream is missing from the shared TLS vhost")
+    route = SSE_PRODUCTION_LOCATION.replace(
+        SSE_STREAM_HOST_FILTER, rb"^mining-master\.driverform\.ru$",
+    )
+    return site[:start] + route + site[start:]
+
+
+def resolve_master_sse_nginx(rendered: bytes) -> tuple[Path, bytes, bytes]:
+    if not 0 < len(rendered) <= 2 * 1024 * 1024:
+        raise ReleaseError("invalid size of the effective nginx configuration")
+    headers = list(NGINX_DUMP_SECTION.finditer(rendered))
+    candidates = []
+    for header, following in zip(headers, [*headers[1:], None]):
+        end = following.start() if following else len(rendered)
+        section = rendered[header.end():end].strip()
+        declarations = re.sub(rb"(?m)#.*$", b"", section)
+        names = {
+            token.strip(b"\"'")
+            for group in re.findall(rb"(?m)\bserver_name\s+([^;{}]+);", declarations)
+            for token in group.split()
+        }
+        if MASTER_SSE_HOST not in names:
+            continue
+        if not NGINX_MANAGED_SECTION_PATH.fullmatch(header[1]):
+            raise ReleaseError("master nginx vhost is outside the reviewed directories")
+        for vhost in parse_sse_production_vhosts(section):
+            if vhost["tls"] and MASTER_SSE_HOST in vhost["names"]:
+                candidates.append((header[1], section, vhost))
+    if len(candidates) != 1:
+        raise ReleaseError("master SSE requires exactly one active TLS vhost")
+    source, rendered_site, _ = candidates[0]
+    path = Path(os.fsdecode(source)).resolve(strict=True)
+    if path.parent not in MASTER_SSE_NGINX_DIRS:
+        raise ReleaseError("master TLS vhost resolves outside the managed configuration")
+    assert_sse_root_directory(path.parent)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid or info.st_mode & 0o022:
+        raise ReleaseError("master TLS vhost has unsafe file permissions")
+    site = path.read_bytes()
+    if site.strip() != rendered_site:
+        raise ReleaseError("master TLS vhost changed after nginx inventory")
+    vhost, = (x for x in parse_sse_production_vhosts(site) if
+              x["tls"] and MASTER_SSE_HOST in x["names"])
+    return path, site, master_sse_nginx_change(site, vhost)
+
+
+def probe_master_sse() -> None:
+    host = MASTER_SSE_HOST.decode("ascii")
+    output = run_sse_production_command([
+        "/usr/bin/curl", "-sS", "--noproxy", "*", "--max-time", "8", "--resolve", f"{host}:443:127.0.0.1",
+        "-H", "Accept: text/event-stream", "-w", "\n%{http_code}", f"https://{host}/realtime/stream/",
+    ], "master-stream-health")
+    content, _, code = output.rpartition(b"\n")
+    if code != b"405" or json.loads(content).get("error") != "signed_tablet_post_required":
+        raise ReleaseError("master stream is not served by the signed ASGI endpoint")
+
+
+def master_sse_reload(label: str) -> None:
+    run_sse_production_command(["/usr/sbin/nginx", "-t"], f"{label}-nginx-syntax")
+    run_sse_production_command(["/usr/bin/systemctl", "restart", SSE_PRODUCTION_UNITS[0]], f"{label}-asgi")
+    for _ in range(20):
+        if Path("/run/accounting-mvp-sse-pilot/asgi.sock").is_socket():
+            break
+        time.sleep(0.5)
+    else:
+        raise ReleaseError("production SSE socket did not become ready")
+    run_sse_production_command(["/usr/bin/systemctl", "reload", "nginx"], f"{label}-nginx")
+    probe_sse_production("authentication_required")
+
+
+def run_master_sse(mode: str, payload: dict[str, bytes], commit: str, metadata: dict[str, Any]) -> str:
+    assert_sse_root_directory(SSE_PRODUCTION_STATE)
+    module = SSE_PRODUCTION_STATE / "file_transaction.py"
+    if digest(module.read_bytes()) != SSE_PRODUCTION_HASHES["file_transaction.py"]:
+        raise ReleaseError("SSE backup module differs from the reviewed revision")
+    transaction = runpy.run_path(str(module))
+    targets = {name.removesuffix(".py"): APP / values[0] for name, values in MASTER_SSE_FILES.items()}
+    version = metadata.get("enabled_commit", commit)
+    state = SSE_PRODUCTION_STATE / f"master-{version}"
+    backup = state / "before"
+    if mode == "rollback_master_sse_production":
+        assert_sse_root_directory(state)
+        saved = json.loads((state / "state.json").read_bytes())
+        nginx_path = Path(saved["nginx"])
+        if saved["commit"] != version or nginx_path.parent not in MASTER_SSE_NGINX_DIRS:
+            raise ReleaseError("master rollback differs from the recorded release")
+        targets["nginx"] = nginx_path
+        transaction["restore_backup"](backup, targets)
+        master_sse_reload("master-rollback")
+        return f"backup={backup}"
+
+    if (any(inspect_sse_unit(unit) != "active" for unit in SSE_PRODUCTION_UNITS)
+            or inspect_sse_unit("accounting-mvp.service") != "active"):
+        raise ReleaseError("master SSE requires the existing production SSE and WSGI services")
+    probe_sse_production("authentication_required")
+    rendered = run_sse_production_command(["/usr/sbin/nginx", "-T"], "master-nginx-inventory")
+    nginx_path, site, planned_site = resolve_master_sse_nginx(rendered)
+    targets["nginx"] = nginx_path
+    before = {name: transaction["read_image"](path) for name, path in targets.items()}
+    if any(before[name.removesuffix(".py")] is None or
+           digest(before[name.removesuffix(".py")].content) != values[1]
+           for name, values in MASTER_SSE_FILES.items()):
+        raise ReleaseError("master SSE application files differ from the reviewed production base")
+    if before["nginx"] is None or before["nginx"].content != site:
+        raise ReleaseError("master SSE nginx source changed during review")
+    image = transaction["FileImage"]
+    new_bytes = {name.removesuffix(".py"): payload[MASTER_SSE_PREFIX + name] for name in MASTER_SSE_FILES}
+    new_bytes["nginx"] = planned_site
+    planned = {name: image(new_bytes[name], previous.mode, previous.uid, previous.gid)
+               for name, previous in before.items()}
+    fingerprint = digest(json.dumps({
+        "commit": commit,
+        "nginx": digest(rendered),
+        "targets": {name: [str(path), before[name].metadata(), planned[name].metadata()]
+                    for name, path in targets.items()},
+    }, sort_keys=True).encode("utf-8"))
+    if mode == "verify_master_sse_production":
+        return f"plan_sha256={fingerprint} rollback=verified-plan"
+    if metadata["plan_sha256"] != fingerprint:
+        raise ReleaseError("master SSE plan changed since verification")
+    state.mkdir(mode=0o700)
+    write_atomic(state / "state.json", json.dumps({"commit": commit, "nginx": str(nginx_path)}).encode(), 0, 0, 0o600)
+    try:
+        transaction["apply_file_plan"](backup, targets, before, planned)
+        master_sse_reload("master-enable")
+        probe_master_sse()
+    except BaseException:
+        if (backup / "manifest.json").is_file():
+            transaction["restore_backup"](backup, targets)
+            master_sse_reload("master-automatic-rollback")
+        raise
+    return f"backup={backup} plan_sha256={fingerprint}"
+
+
 def run_sse_production(
     mode: str, payload: dict[str, bytes], commit: str, metadata: dict[str, Any],
 ) -> str:
@@ -5598,6 +5795,11 @@ def main() -> int:
                     f"runtime_sha256={SSE_QA_RUNTIME_SHA256} "
                     f"files={len(payload)} package_sha256={package_sha} summary={summary}"
                 )
+                return 0
+            if mode in MASTER_SSE_MODES:
+                outcome = run_master_sse(mode, payload, manifest["commit"], manifest["metadata"])
+                marker = "VERIFY_OK" if mode.startswith("verify_") else "RELEASE_OK"
+                print(f"{marker} mode={mode} commit={manifest['commit']} files={len(payload)} {outcome}")
                 return 0
             if mode in SSE_PRODUCTION_MODES:
                 outcome = run_sse_production(mode, payload, manifest["commit"], manifest["metadata"])
