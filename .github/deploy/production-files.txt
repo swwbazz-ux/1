@@ -1,11 +1,1 @@
-СИСТЕМА_MVP/backend/assignments/field_sync.py
-СИСТЕМА_MVP/backend/assignments/views.py
-СИСТЕМА_MVP/backend/shifts/migrations/0021_owner_parallel_role_shifts.py
-СИСТЕМА_MVP/backend/shifts/models.py
-СИСТЕМА_MVP/backend/shifts/services.py
-СИСТЕМА_MVP/backend/trips/achievement_views.py
-СИСТЕМА_MVP/backend/trips/dispatcher_header.py
-СИСТЕМА_MVP/backend/users/live_monitor_views.py
-СИСТЕМА_MVP/backend/users/migrations/0027_owner_parallel_role_shifts.py
-СИСТЕМА_MVP/backend/users/models.py
-СИСТЕМА_MVP/backend/users/oup_services.py
+СИСТЕМА_MVP/backend/deploy/data_updates/grant_owner_parallel_shifts_20261121.py
