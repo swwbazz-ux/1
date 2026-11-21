@@ -194,6 +194,23 @@ def production_access_is_out_of_sync(employee, *, as_of=None):
     return not any(access.role_id == target_role.id for access in active_accesses)
 
 
+def _revoke_sessions_for_changed_accesses(accesses):
+    """Гасит вход для доступов, которые только что изменились.
+
+    Сдвига поколения мало: `reclaim-session` его не сверяет и перевыдал бы
+    сессию без PIN. Поэтому удаляем строки `django_session` и двигаем
+    поколение через общий механизм отзыва. Импорт ленивый — чтобы не тянуть
+    цепочку `live_monitor` при импорте профилей.
+    """
+    unique = {access.pk: access for access in accesses if access.pk}
+    if not unique:
+        return
+    from .live_monitor import force_end_access_sessions
+
+    for access in unique.values():
+        force_end_access_sessions(access=access)
+
+
 def sync_employee_production_access(*, employee, as_of=None):
     """Keep exactly one production app access aligned with effective specialization.
 
@@ -216,6 +233,7 @@ def sync_employee_production_access(*, employee, as_of=None):
         .order_by('id')
     )
     active_accesses = [access for access in production_accesses if access.is_active]
+    changed_accesses = []
 
     if not target_role:
         now = timezone.now()
@@ -224,6 +242,8 @@ def sync_employee_production_access(*, employee, as_of=None):
             access.is_active = False
             access.deactivated_at = now
             access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+            changed_accesses.append(access)
+        _revoke_sessions_for_changed_accesses(changed_accesses)
         return None
 
     target_access = next((access for access in production_accesses if access.role_id == target_role.id), None)
@@ -233,6 +253,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         reusable_access.role = target_role
         reusable_access.save(update_fields=['role'])
         target_access = reusable_access
+        # Смена роли на месте — новый вход: старые сессии этого доступа мертвы.
+        changed_accesses.append(reusable_access)
 
     if target_access is None:
         target_access = EmployeeAccess.objects.create(
@@ -251,6 +273,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         )
         target_access.deactivated_at = None
         target_access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+        # Реактивация не должна оживлять cookie, выданную до отключения.
+        changed_accesses.append(target_access)
 
     now = timezone.now()
     for access in production_accesses:
@@ -260,6 +284,8 @@ def sync_employee_production_access(*, employee, as_of=None):
         access.is_active = False
         access.deactivated_at = now
         access.save(update_fields=['status', 'is_active', 'deactivated_at'])
+        changed_accesses.append(access)
+    _revoke_sessions_for_changed_accesses(changed_accesses)
     return target_access
 
 

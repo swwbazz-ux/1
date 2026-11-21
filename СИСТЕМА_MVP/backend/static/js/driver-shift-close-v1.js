@@ -596,6 +596,125 @@ window.addEventListener("online", function () {
 });
 /* DRIVER_SHIFT_CLOSE_OUTBOX_END */
 
+/* Показания на конец смены. У смены, открытой на телефоне, серверных end_*
+   ещё нет, а форма закрытия требует все три поля (users/forms.py:1175-1176):
+   пустые поля молча останавливали отправку браузером, событие submit не
+   возникало, подпись кнопки оставалась «ДЕРЖИТЕ» (живой тест T-020,
+   13.11.2026). Поэтому при открытии формы подставляем показания начала —
+   они видны в подписи «Начало» (data-driver-shift-start), водитель может их
+   изменить, — и говорим вслух, если поле всё-таки пустое или неверное. */
+var DRIVER_SHIFT_END_READING_LABELS = {
+    end_fuel: "топливо",
+    end_mileage: "одометр",
+    end_engine_hours: "моточасы"
+};
+
+function driverShiftEndReadingInputs(form) {
+    var inputs = [];
+    if (!form || typeof form.querySelector !== "function") return inputs;
+    Object.keys(DRIVER_SHIFT_END_READING_LABELS).forEach(function (name) {
+        var input = form.querySelector('[name="' + name + '"]');
+        if (input) inputs.push(input);
+    });
+    return inputs;
+}
+
+/* Значение подписи «Начало» рядом с полем; сервер рисует её из открытой
+   смены (templates/includes/mobile_shift_screen.html:53-61). */
+function driverShiftStartReading(form, name) {
+    if (!form || typeof form.querySelector !== "function") return "";
+    var node = form.querySelector('[data-driver-shift-start="' + String(name).replace(/^end_/, "start_") + '"]');
+    var value = node && node.textContent ? String(node.textContent).trim() : "";
+    return value && value !== "—" && value !== "-" ? value : "";
+}
+
+/* Нативная установка значения плюс событие input: так поле проходит
+   checkValidity и экран узнаёт об изменении (bindInvalidation ниже).
+   Пустое значение — тоже значение (снятие показаний прошлой смены). */
+function setDriverShiftReadingValue(input, value) {
+    if (!input) return false;
+    if (String(input.value == null ? "" : input.value) === String(value)) return false;
+    var descriptor = null;
+    try {
+        descriptor = window.HTMLInputElement
+            ? Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")
+            : null;
+    } catch (error) {
+        descriptor = null;
+    }
+    try {
+        if (descriptor && typeof descriptor.set === "function") descriptor.set.call(input, String(value));
+        else input.value = String(value);
+        if (typeof input.dispatchEvent === "function" && typeof window.Event === "function") {
+            input.dispatchEvent(new window.Event("input", {bubbles: true}));
+        }
+    } catch (error) {
+        return false;
+    }
+    return true;
+}
+
+/* Заполняет только пустые поля — введённое водителем не трогает. */
+function prefillDriverShiftCloseReadings(form) {
+    var filled = 0;
+    driverShiftEndReadingInputs(form).forEach(function (input) {
+        if (String(input.value == null ? "" : input.value).trim() !== "") return;
+        var value = driverShiftStartReading(form, input.name);
+        if (value && setDriverShiftReadingValue(input, value)) filled += 1;
+    });
+    return filled;
+}
+
+/* Снимает показания конца смены: форма живёт на экране между сменами, и на
+   новой смене в ней оставались числа прошлой — устаревшее топливо прошло бы
+   молча (QA T-025, 8.2). Зовётся только когда смена на экране действительна
+   новая, не при каждом обновлении. */
+function clearDriverShiftCloseReadings(form) {
+    var cleared = 0;
+    driverShiftEndReadingInputs(form).forEach(function (input) {
+        if (String(input.value == null ? "" : input.value).trim() === "") return;
+        if (setDriverShiftReadingValue(input, "")) cleared += 1;
+    });
+    return cleared;
+}
+
+function driverShiftCloseReadingProblems(form) {
+    var problems = {missing: [], invalid: [], first: null, message: ""};
+    driverShiftEndReadingInputs(form).forEach(function (input) {
+        var label = DRIVER_SHIFT_END_READING_LABELS[input.name] || input.name;
+        var value = String(input.value == null ? "" : input.value).trim();
+        var badInput = !!(input.validity && input.validity.badInput);
+        var valid = typeof input.checkValidity === "function" ? input.checkValidity() : true;
+        if (badInput || (value !== "" && !valid)) {
+            problems.invalid.push(label);
+        } else if (value === "") {
+            problems.missing.push(label);
+            valid = false;
+        }
+        if (!problems.first && (badInput || !valid)) problems.first = input;
+    });
+    if (problems.missing.length) {
+        problems.message = "Заполните для закрытия смены: " + problems.missing.join(", ") + ".";
+    }
+    if (problems.invalid.length) {
+        problems.message = (problems.message ? problems.message + " " : "")
+            + "Проверьте показания: " + problems.invalid.join(", ") + ".";
+    }
+    return problems;
+}
+
+/* Явный отказ вместо молчаливого: сообщение и фокус на первое поле.
+   true — показания в порядке, можно отправлять. */
+function reportDriverShiftCloseReadings(form) {
+    var problems = driverShiftCloseReadingProblems(form);
+    if (!problems.message) return true;
+    if (problems.first && typeof problems.first.focus === "function") {
+        try { problems.first.focus({preventScroll: true}); } catch (error) { problems.first.focus(); }
+    }
+    if (typeof window.showDriverToast === "function") window.showDriverToast(problems.message);
+    return false;
+}
+
 function bindDriverShiftHoldAction(form, button, options) {
     options = options || {};
     if (!form || !button || !window.MobileShiftHold) {
@@ -605,9 +724,22 @@ function bindDriverShiftHoldAction(form, button, options) {
         holdMs: options.holdMs || 2000,
         readyLabel: options.readyLabel || button.textContent.trim(),
         onShortPress: function () {
+            /* Клик сразу после неудачной проверки — это отпускание того же
+               удержания: явное сообщение не перекрываем. */
+            if (typeof options.onShortPress === "function") {
+                options.onShortPress();
+                return;
+            }
             if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
         },
-        onComplete: function () {
+        onComplete: function (handle) {
+            /* requestSubmit проверяет поля сам, но при невалидном поле молча
+               не отправляет форму: водитель видит «ДЕРЖИТЕ» и ничего больше.
+               Поэтому проверяем до отправки и сбрасываем удержание. */
+            if (typeof options.beforeSubmit === "function" && options.beforeSubmit(form) === false) {
+                if (handle && typeof handle.reset === "function") handle.reset();
+                return;
+            }
             form.dataset.driverShiftHoldComplete = "true";
             form.requestSubmit(button);
         }

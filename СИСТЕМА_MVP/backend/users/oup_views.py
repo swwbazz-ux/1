@@ -27,6 +27,7 @@ from .models import (
     WorkSchedule,
 )
 from .live_monitor import attach_application_presence, application_presence_by_employee_ids
+from .redaction import looks_like_access_code, redact_log_values
 from .oup_forms import (
     OupAccessRoleForm,
     OupDismissEmployeeForm,
@@ -776,13 +777,17 @@ def oup_logs_view(request):
     action = _oup_action_meta(requested_action)[0] if requested_action else ''
     logs = AdminActionLog.objects.filter(actor=access.employee, action__startswith='ОУП:').order_by('-created_at')
     if query:
-        logs = logs.filter(
+        filters = (
             Q(action__icontains=query)
             | Q(object_repr__icontains=query)
             | Q(comment__icontains=query)
             | Q(old_value__icontains=query)
-            | Q(new_value__icontains=query)
         )
+        if not looks_like_access_code(query):
+            # Значение PIN не должно быть оракулом поиска (T-021), но обычный
+            # текст «Результата» по-прежнему ищется.
+            filters |= Q(new_value__icontains=query)
+        logs = logs.filter(filters)
     if action:
         logs = logs.filter(action__in=_oup_action_values(action))
     paginator = Paginator(logs, 50)
@@ -801,6 +806,7 @@ def oup_logs_view(request):
 
     rendered_logs = list(page_obj.object_list)
     for log in rendered_logs:
+        redact_log_values(log)
         action_value, action_label = _oup_action_meta(log.action)
         log.display_action = action_label
         log.display_object_repr = (

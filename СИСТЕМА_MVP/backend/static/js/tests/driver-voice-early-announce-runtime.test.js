@@ -187,6 +187,9 @@ function createDriverVoiceRuntime(options) {
         timeouts.push({callback, delay});
         return timeouts.length;
     };
+    sandbox.window.clearTimeout = function (timerId) {
+        if (timerId > 0 && timerId <= timeouts.length) timeouts[timerId - 1] = null;
+    };
     sandbox.window.MobileOperationalSounds = {
         announceDumpPoint(details) {
             bridgeCalls.push({method: "announceDumpPoint", details});
@@ -255,7 +258,7 @@ function createDriverVoiceRuntime(options) {
         vibrations,
         timeouts,
         signal(signalContext) {
-            sandbox.window.handleOperationalStateSignals(signalContext);
+            return sandbox.window.handleOperationalStateSignals(signalContext);
         },
     };
 }
@@ -446,7 +449,7 @@ test("the dump-point cue fallback finalizes the claim", async () => {
 
     assert.deepEqual(runtime.soundCalls, ["truck_assigned"]);
     assert.equal(
-        runtime.window.DriverVoiceGuard.state("dump:4321"),
+        runtime.window.DriverVoiceGuard.state("dump:4321:id-9"),
         "announced",
         "the cue already sounded, so the DOM fallback must not repeat it"
     );
@@ -699,7 +702,7 @@ test("a released claim lets the next path announce the same assignment", async (
     );
 });
 
-test("a rejected dump-point bridge promise releases the trip claim", async () => {
+test("a rejected dump-point bridge promise releases the point claim", async () => {
     const runtime = createDriverVoiceRuntime();
     runtime.window.MobileOperationalSounds.announceDumpPoint = function () {
         return Promise.reject(new Error("bridge is gone"));
@@ -707,10 +710,10 @@ test("a rejected dump-point bridge promise releases the trip claim", async () =>
     runtime.signal({events: [dumpPointEvent(6400, 5160, 4, "Отвал 2")]});
     await settlePromises();
 
-    assert.equal(runtime.window.DriverVoiceGuard.state("dump:5160"), "");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:5160:id-4"), "");
 });
 
-test("a synchronously thrown dump-point bridge call releases the trip claim", async () => {
+test("a synchronously thrown dump-point bridge call releases the point claim", async () => {
     const runtime = createDriverVoiceRuntime();
     runtime.window.MobileOperationalSounds.announceDumpPoint = function () {
         throw new Error("bridge threw");
@@ -718,7 +721,7 @@ test("a synchronously thrown dump-point bridge call releases the trip claim", as
     runtime.signal({events: [dumpPointEvent(6500, 5170, 5, "Отвал 4")]});
     await settlePromises();
 
-    assert.equal(runtime.window.DriverVoiceGuard.state("dump:5170"), "");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:5170:id-5"), "");
 });
 
 test("the dump-point signal carries the exact event version and trip", async () => {
@@ -737,6 +740,404 @@ test("the dump-point signal carries the exact event version and trip", async () 
         call.details.eventVersion > 0,
         "DriverDumpPointAnnouncer rejects a non-positive version as invalid_event"
     );
+});
+
+/* ------------------------------------------------------------------ */
+/* Ключ точки разгрузки: нативный формат и границы guard'а              */
+/* ------------------------------------------------------------------ */
+
+test("the dump-point claim key keeps the native trip-and-point form", async () => {
+    const runtime = createDriverVoiceRuntime();
+    runtime.signal({events: [dumpPointEvent(1200, 4321, 9, "Отвал 3")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:4321:id-9"),
+        "announced",
+        "core/voice_state.py and ConnectivityForegroundService use dump:<trip>:id-<point>"
+    );
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:4321"),
+        "",
+        "a whole-trip key would swallow every later point of the same trip"
+    );
+});
+
+test("a repeated delivery of one dump point is announced exactly once", async () => {
+    const runtime = createDriverVoiceRuntime();
+    const event = dumpPointEvent(1400, 6100, 21, "Отвал C");
+
+    runtime.signal({events: [event]});
+    await settlePromises();
+    /* Тот же кадр приходит вторым путём. */
+    runtime.signal({events: [event]});
+    await settlePromises();
+    /* Тот же кадр повторно доставлен уже с более высокой версией состояния. */
+    runtime.signal({events: [dumpPointEvent(1409, 6100, 21, "Отвал C")]});
+    await settlePromises();
+
+    assert.equal(
+        runtime.bridgeCalls.length,
+        1,
+        "one operation must reach the player once, however often it is delivered"
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:6100:id-21"), "announced");
+});
+
+test("another dump point inside the same trip is announced again", async () => {
+    const runtime = createDriverVoiceRuntime();
+
+    runtime.signal({events: [dumpPointEvent(1300, 6001, 11, "Отвал A")]});
+    await settlePromises();
+    runtime.signal({events: [dumpPointEvent(1307, 6001, 12, "Отвал B")]});
+    await settlePromises();
+
+    assert.equal(
+        runtime.bridgeCalls.length,
+        2,
+        "a changed point of the same trip is a new working event, not a repeat"
+    );
+    assert.deepEqual(
+        runtime.bridgeCalls.map((call) => call.details.dumpPointId),
+        [11, 12]
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:6001:id-11"), "announced");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:6001:id-12"), "announced");
+});
+
+test("a dump point without an identifier is announced and keyed by its name", async () => {
+    const runtime = createDriverVoiceRuntime();
+
+    runtime.signal({events: [dumpPointEvent(1500, 7001, 0, "Отвал 5")]});
+    await settlePromises();
+    assert.equal(runtime.bridgeCalls.length, 1, "a name-only point must still be announced");
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:7001:name-отвал_5"),
+        "announced",
+        "without an identifier the key repeats the native name form"
+    );
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:7001:id-0"),
+        "",
+        "an id-0 key is what the native truth rejects as invalidKnownOperation"
+    );
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:7001"),
+        "",
+        "one trip must not be closed by its first point"
+    );
+
+    runtime.signal({events: [dumpPointEvent(1504, 7001, 0, "Отвал 5")]});
+    await settlePromises();
+    assert.equal(runtime.bridgeCalls.length, 1, "the same name-only point does not repeat");
+
+    runtime.signal({events: [dumpPointEvent(1508, 7001, 0, "Отвал 6")]});
+    await settlePromises();
+    assert.equal(
+        runtime.bridgeCalls.length,
+        2,
+        "another point name inside the same trip is another event"
+    );
+});
+
+test("an assignment and a dump point inside one delta are both announced", async () => {
+    const runtime = createDriverVoiceRuntime();
+    runtime.signal({
+        events: [
+            assignmentEvent(1600, 71, "assignment_pending", "05"),
+            dumpPointEvent(1601, 8001, 31, "Отвал D"),
+        ],
+    });
+    await settlePromises();
+
+    assert.deepEqual(
+        runtime.bridgeCalls.map((call) => call.method),
+        ["announceDumpPoint", "announceEquipment"],
+        "each event owns a separate operation key, so neither suppresses the other"
+    );
+});
+
+test("a failed dump-point announcement leaves the same point open for the retry", async () => {
+    const runtime = createDriverVoiceRuntime();
+    const original = runtime.window.MobileOperationalSounds.announceDumpPoint;
+    runtime.window.MobileOperationalSounds.announceDumpPoint = function () {
+        return Promise.reject(new Error("bridge is gone"));
+    };
+
+    runtime.signal({events: [dumpPointEvent(1700, 8100, 41, "Отвал E")]});
+    await settlePromises();
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:8100:id-41"),
+        "",
+        "a failed bridge call must not lock the point until the page reloads"
+    );
+
+    runtime.window.MobileOperationalSounds.announceDumpPoint = original;
+    runtime.signal({events: [dumpPointEvent(1701, 8100, 41, "Отвал E")]});
+    await settlePromises();
+
+    assert.equal(
+        runtime.bridgeCalls.length,
+        1,
+        "the retry after the failure must reach the player"
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:8100:id-41"), "announced");
+});
+
+/* ------------------------------------------------------------------ */
+/* Срок ожидания голоса: зависший звук не держит экран                  */
+/* ------------------------------------------------------------------ */
+
+const VOICE_DEADLINE_MS = 2500;
+
+function fireVoiceDeadline(runtime) {
+    const pending = runtime.timeouts
+        .filter(Boolean)
+        .filter((timer) => timer.delay === VOICE_DEADLINE_MS);
+    assert.ok(pending.length >= 1, "the voice handoff must be bounded by a deadline");
+    const timer = pending[pending.length - 1];
+    runtime.timeouts[runtime.timeouts.indexOf(timer)] = null;
+    timer.callback();
+}
+
+test("a hung dump-point bridge releases the claim and does not hold the cursor", async () => {
+    const runtime = createDriverVoiceRuntime({announceResult: () => new Promise(() => {})});
+    const outcome = runtime.signal({events: [dumpPointEvent(1800, 9001, 51, "Отвал F")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:9001:id-51"),
+        "claimed",
+        "until the deadline the operation belongs to the voice path"
+    );
+
+    fireVoiceDeadline(runtime);
+    const result = await outcome;
+
+    assert.equal(result.accepted, true, "unresponsive audio must not stall the shared cursor");
+    assert.equal(
+        runtime.window.DriverVoiceGuard.state("dump:9001:id-51"),
+        "",
+        "the claim is released, so the next delivery may try again"
+    );
+});
+
+test("the same event is tried again after the voice deadline", async () => {
+    let attempts = 0;
+    const runtime = createDriverVoiceRuntime({
+        announceResult: () => {
+            attempts += 1;
+            return attempts === 1 ? new Promise(() => {}) : {supported: true, announced: true};
+        },
+    });
+    const first = runtime.signal({events: [dumpPointEvent(1810, 9002, 52, "Отвал F")]});
+    await settlePromises();
+    fireVoiceDeadline(runtime);
+    assert.equal((await first).accepted, true);
+
+    const second = runtime.signal({events: [dumpPointEvent(1811, 9002, 52, "Отвал F")]});
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.bridgeCalls.length, 2, "the released claim gives the retry a chance");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9002:id-52"), "announced");
+});
+
+test("a late bridge success after the deadline is not announced twice", async () => {
+    const late = {};
+    late.promise = new Promise((resolve) => { late.resolve = resolve; });
+    let attempts = 0;
+    const runtime = createDriverVoiceRuntime({
+        announceResult: () => {
+            attempts += 1;
+            return attempts === 1
+                ? late.promise
+                : {supported: true, announced: false, reason: "already_announced"};
+        },
+        soundResult: true,
+    });
+    const first = runtime.signal({events: [dumpPointEvent(1820, 9003, 53, "Отвал H")]});
+    await settlePromises();
+    fireVoiceDeadline(runtime);
+    assert.equal((await first).accepted, true);
+
+    /* Поздний ответ моста: звук всё-таки прозвучал уже после срока. */
+    late.resolve({supported: true, announced: true, processed: true});
+    await settlePromises();
+
+    const second = runtime.signal({events: [dumpPointEvent(1821, 9003, 53, "Отвал H")]});
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.bridgeCalls.length, 2, "the retry asks the bridge and the ledger answers");
+    assert.deepEqual(runtime.soundCalls, [], "already_announced must not add a fallback cue");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9003:id-53"), "announced");
+});
+
+test("a bridge timeout result adds no web cue and does not hold the cursor", async () => {
+    const runtime = createDriverVoiceRuntime({
+        announceResult: {supported: true, announced: false, reason: "bridge_timeout"},
+        soundResult: true,
+    });
+    const result = runtime.signal({events: [dumpPointEvent(1830, 9004, 54, "Отвал K")]});
+
+    assert.equal((await result).accepted, true);
+    assert.deepEqual(runtime.soundCalls, [], "the bridge may still speak: no second sound");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9004:id-54"), "");
+});
+
+test("a hung assignment bridge resolves the handoff within the deadline", async () => {
+    const runtime = createDriverVoiceRuntime({announceResult: () => new Promise(() => {})});
+    const outcome = runtime.signal({events: [assignmentEvent(1840, 741, "assignment_pending", "19")]});
+    await settlePromises();
+    assert.equal(runtime.window.DriverVoiceGuard.state("assign:741"), "claimed");
+
+    fireVoiceDeadline(runtime);
+    assert.equal((await outcome).accepted, true);
+    assert.equal(runtime.window.DriverVoiceGuard.state("assign:741"), "");
+});
+
+test("two hung handoffs still resolve the combined promise", async () => {
+    const runtime = createDriverVoiceRuntime({announceResult: () => new Promise(() => {})});
+    let settled = null;
+    runtime.signal({
+        events: [
+            assignmentEvent(1870, 743, "assignment_pending", "21"),
+            dumpPointEvent(1871, 9006, 56, "Отвал M"),
+        ],
+    }).then((value) => { settled = value; });
+    await settlePromises();
+
+    assert.equal(settled, null, "both handoffs are still awaiting their deadline");
+    let rounds = 0;
+    while (runtime.timeouts.filter(Boolean).some((timer) => timer.delay === VOICE_DEADLINE_MS)) {
+        fireVoiceDeadline(runtime);
+        rounds += 1;
+        assert.ok(rounds <= 4, "deadlines must not multiply");
+    }
+    await settlePromises();
+
+    assert.equal(settled && settled.accepted, true, "Promise.all must always settle");
+});
+
+test("an explicit device refusal still keeps the cursor pending for a retry", async () => {
+    const runtime = createDriverVoiceRuntime({
+        announceResult: {supported: true, announced: false, reason: "resource_unavailable"},
+        soundResult: false,
+    });
+    const result = runtime.signal({events: [assignmentEvent(1850, 742, "assignment_pending", "20")]});
+
+    assert.equal((await result).accepted, false, "a device that said no must be retried");
+    assert.equal(runtime.window.DriverVoiceGuard.state("assign:742"), "");
+});
+
+test("a browser without any voice channel does not hold the cursor", async () => {
+    const runtime = createDriverVoiceRuntime({
+        nativeApp: false,
+        announceResult: {supported: false, announced: false},
+        soundResult: false,
+    });
+    const result = runtime.signal({events: [dumpPointEvent(1860, 9005, 55, "Отвал L")]});
+
+    assert.equal(
+        (await result).accepted,
+        true,
+        "nothing can be played, so nothing is worth waiting for"
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9005:id-55"), "");
+});
+
+/* ------------------------------------------------------------------ */
+/* Гонка двух путей одной операции                                     */
+/* ------------------------------------------------------------------ */
+
+test("two concurrent paths share one in-flight dump-point result", async () => {
+    const bridge = {};
+    bridge.promise = new Promise((resolve) => { bridge.resolve = resolve; });
+    const runtime = createDriverVoiceRuntime({announceResult: () => bridge.promise});
+
+    const first = runtime.signal({events: [dumpPointEvent(2000, 9501, 71, "Отвал N")]});
+    const second = runtime.signal({events: [dumpPointEvent(2000, 9501, 71, "Отвал N")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1, "the second path must not reach the bridge again");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9501:id-71"), "claimed");
+
+    bridge.resolve({supported: true, announced: true});
+    assert.equal((await first).accepted, true);
+    assert.equal(
+        (await second).accepted,
+        true,
+        "the waiting path inherits the owner's decision instead of a false refusal"
+    );
+    assert.equal(runtime.bridgeCalls.length, 1, "one operation — one announcement");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9501:id-71"), "announced");
+});
+
+test("two concurrent paths share one in-flight assignment result", async () => {
+    const bridge = {};
+    bridge.promise = new Promise((resolve) => { bridge.resolve = resolve; });
+    const runtime = createDriverVoiceRuntime({announceResult: () => bridge.promise});
+
+    const first = runtime.signal({events: [assignmentEvent(2100, 921, "assignment_pending", "17")]});
+    const second = runtime.signal({events: [assignmentEvent(2100, 921, "assignment_pending", "17")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    bridge.resolve({supported: true, announced: true});
+
+    assert.equal((await first).accepted, true);
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.bridgeCalls.length, 1, "the waiting path must not repeat the announcement");
+    assert.equal(runtime.window.DriverVoiceGuard.state("assign:921"), "announced");
+});
+
+test("a waiting path inherits an explicit refusal and a later delivery may retry", async () => {
+    let attempts = 0;
+    const runtime = createDriverVoiceRuntime({
+        announceResult: () => {
+            attempts += 1;
+            return attempts === 1
+                ? {supported: true, announced: false, reason: "resource_unavailable"}
+                : {supported: true, announced: true};
+        },
+        soundResult: false,
+    });
+
+    const first = runtime.signal({events: [dumpPointEvent(2200, 9502, 72, "Отвал O")]});
+    const second = runtime.signal({events: [dumpPointEvent(2200, 9502, 72, "Отвал O")]});
+    await settlePromises();
+
+    assert.equal((await first).accepted, false, "a device that said no still asks for a retry");
+    assert.equal((await second).accepted, false, "the waiting path inherits the refusal");
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9502:id-72"), "");
+
+    const retry = runtime.signal({events: [dumpPointEvent(2201, 9502, 72, "Отвал O")]});
+    assert.equal((await retry).accepted, true, "the released claim allows another attempt");
+    assert.equal(runtime.bridgeCalls.length, 2);
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9502:id-72"), "announced");
+});
+
+test("a waiting path receives the deadline decision and is not sent to backoff", async () => {
+    const runtime = createDriverVoiceRuntime({announceResult: () => new Promise(() => {})});
+
+    const first = runtime.signal({events: [dumpPointEvent(2300, 9503, 73, "Отвал P")]});
+    const second = runtime.signal({events: [dumpPointEvent(2300, 9503, 73, "Отвал P")]});
+    await settlePromises();
+
+    assert.equal(runtime.bridgeCalls.length, 1);
+    assert.equal(
+        runtime.timeouts.filter(Boolean).filter((timer) => timer.delay === VOICE_DEADLINE_MS).length,
+        1,
+        "the waiting path must not start its own deadline"
+    );
+
+    fireVoiceDeadline(runtime);
+    assert.equal((await first).accepted, true);
+    assert.equal(
+        (await second).accepted,
+        true,
+        "an unanswered bridge must not turn the waiter into a retry"
+    );
+    assert.equal(runtime.window.DriverVoiceGuard.state("dump:9503:id-73"), "");
 });
 
 /* ------------------------------------------------------------------ */

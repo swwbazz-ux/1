@@ -13,6 +13,7 @@ from core.models import OfflineFieldEvent
 from references.models import Equipment, EquipmentType, DumpPoint, RockType
 from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
+from users.protected_cards import allow_protected_card_write
 from .field_signing import PROTOCOL, ENROLLMENT
 from .models import HaulAssignment, ExcavatorPlacement
 from . import test_field_sync as legacy_tests
@@ -106,6 +107,35 @@ class MasterFieldV2Tests(TestCase):
         r = self.post(e)
         self.assertEqual(r["status"], "applied", r.get("message"))
         return e
+
+    def test_owner_signed_open_and_close_ignore_different_role_history(self):
+        admin_role, _ = Role.objects.get_or_create(code="admin", defaults={"name": "Администратор"})
+        EmployeeAccess.objects.create(
+            employee=self.employee, role=admin_role, access_code="221133",
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with allow_protected_card_write():
+            Employee.objects.filter(pk=self.employee.pk).update(
+                is_protected=True, allow_parallel_role_shifts=True,
+            )
+        EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code="dispatcher",
+            shift_type="day", opened_at=self.now - timedelta(minutes=3),
+            closed_at=self.now + timedelta(seconds=3),
+        )
+        other = EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code="excavator_operator",
+            shift_type="day", opened_at=self.now + timedelta(seconds=4), equipment=self.exc,
+        )
+        opened = self.open()
+        self.assertTrue(self.post(opened)["deduplicated"])
+        close = self.post(self.event("shift.close", 2))
+        self.assertEqual(close["status"], "applied", close)
+        master = EmployeeShift.objects.get(employee=self.employee, workplace_code="mining_master")
+        self.assertTrue(master.parallel_role_slot)
+        self.assertIsNotNone(master.closed_at)
+        other.refresh_from_db()
+        self.assertIsNone(other.closed_at)
 
     def test_pinned_registration_and_no_unsigned_downgrade(self):
         self.assertEqual(self.grant["protocol"], PROTOCOL)

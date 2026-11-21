@@ -177,10 +177,14 @@ class ManualLoadingTests(TestCase):
         self.assertEqual(self.send().status_code, 409)
 
     @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=False)
-    def test_feature_can_be_disabled(self):
+    def test_disabled_manual_mode_records_load_but_does_not_allow_replacement(self):
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save()
-        self.assertEqual(self.send().status_code, 409)
+        first = self.send()
+        self.assertEqual(first.status_code, 200)
+        trip = Trip.objects.get(pk=first.json()['trip_id'])
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.assertEqual(self.send(previous=trip).status_code, 409)
 
     def test_screen_exposes_manual_permission_and_presence(self):
         response = self.client.get(reverse('excavator_work'))

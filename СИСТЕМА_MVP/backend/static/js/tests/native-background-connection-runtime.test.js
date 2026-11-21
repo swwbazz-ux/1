@@ -26,6 +26,8 @@ function createRuntime(roleCode, options = {}) {
     let snapshot = options.snapshot || {};
     const listeners = new Map();
     const timers = [];
+    const closeFormId = options.closeFormId === undefined ? "driver-17" : options.closeFormId;
+    const closeFormAlways = options.closeFormAlways === true;
     let shiftActive = false;
     let observerCallback = null;
 
@@ -41,6 +43,10 @@ function createRuntime(roleCode, options = {}) {
         getState() {
             calls.push({method: "getState"});
             return Promise.resolve({...snapshot, pendingDriverShiftClose: null});
+        },
+        syncOperationalState(options) {
+            calls.push({method: "syncOperationalState", options: {...options}});
+            return Promise.resolve({resetAccepted: options.authoritativeReset === true});
         },
         queueDriverShiftClose(options) {
             calls.push({method: "queueDriverShiftClose", options: {...options}});
@@ -65,6 +71,10 @@ function createRuntime(roleCode, options = {}) {
         querySelector(selector) {
             if (roleCode === "driver" && selector === "[data-driver-shell]") {
                 return {dataset: {driverAuthGeneration: "driver-auth-7"}};
+            }
+            if (roleCode === "driver" && selector === "[data-driver-shift-close-form]") {
+                if (!closeFormAlways && !shiftActive) return null;
+                return {dataset: {nativeShiftId: closeFormId}};
             }
             if (!shiftActive) return null;
             if (roleCode === "driver" && selector === "[data-driver-shift-close-form]") {
@@ -166,6 +176,60 @@ for (const roleCode of ["driver", "excavator_operator"]) {
     });
 }
 
+test("hidden driver close form without a shift id never starts the native service", async () => {
+    // Скриншот дефекта H1: сервер рисует скрытую форму закрытия с пустым
+    // data-native-shift-id, когда смена не открыта, но самосвал закреплён.
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: ""});
+    await runtime.flush();
+    assert.deepEqual(runtime.calls[0], {
+        method: "sync",
+        options: {
+            required: false,
+            shiftId: "",
+            authGeneration: "driver-auth-7",
+            reason: "initial_render",
+        },
+    });
+
+    await runtime.setShiftActive(true);
+    assert.equal(runtime.calls.length, 1, "empty id must not change the desired state");
+    assert.equal(runtime.calls[0].options.required, false);
+});
+
+test("driver close form with a whitespace-only shift id counts as no shift", async () => {
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: "   "});
+    await runtime.flush();
+    assert.equal(runtime.calls[0].options.required, false);
+    assert.equal(runtime.calls[0].options.shiftId, "");
+});
+
+test("driver close form with a real shift id keeps the native service required", async () => {
+    const runtime = createRuntime("driver", {closeFormAlways: true, closeFormId: " 17 "});
+    await runtime.flush();
+    assert.equal(runtime.calls[0].options.required, true);
+    assert.equal(runtime.calls[0].options.shiftId, "17");
+});
+
+test("native shift-close outbox rejects an empty shift id instead of masking it", async () => {
+    const runtime = createRuntime("driver");
+    await runtime.flush();
+    await assert.rejects(
+        runtime.connection.queueDriverShiftClose({
+            shiftId: "  ",
+            clientActionId: "driver-close-empty",
+            endFuel: "90",
+        }),
+        /Смена не открыта/
+    );
+    assert.equal(
+        runtime.calls.some((call) => call.method === "queueDriverShiftClose"),
+        false,
+        "empty shift id must never reach the native queue"
+    );
+    await runtime.connection.queueDriverShiftClose({shiftId: "17", clientActionId: "driver-close-17"});
+    assert.equal(runtime.calls.at(-1).method, "queueDriverShiftClose");
+});
+
 test("native bridge stops immediately on logout and rechecks after resume", async () => {
     const runtime = createRuntime("driver");
     await runtime.flush();
@@ -264,6 +328,47 @@ test("native bridge rejects stale future out-of-order and invalid evidence", asy
     runtime.emitNative(nativeSuccess());
     runtime.emitNative(nativeSuccess({occurredAtMs: 999_800, lastSuccessAtMs: 999_800}));
     assert.equal(runtime.events.length, 1);
+});
+
+test("native bridge preserves authoritative reset diagnostics for the visible WebView", async () => {
+    const runtime = createRuntime("driver", {newBridge: true});
+    await runtime.flush();
+    runtime.emitNative(nativeSuccess({
+        serverVersion: 0,
+        operationalResetRequired: true,
+        operationalResetReason: "cursor_ahead",
+        operationalResetToVersion: 0,
+    }));
+    assert.equal(runtime.events.length, 1);
+    assert.deepEqual(
+        {
+            required: runtime.events[0].detail.operationalResetRequired,
+            reason: runtime.events[0].detail.operationalResetReason,
+            resetTo: runtime.events[0].detail.operationalResetToVersion,
+        },
+        {required: true, reason: "cursor_ahead", resetTo: 0}
+    );
+});
+
+test("WebView forwards exact authoritative reset zero to the native ledger", async () => {
+    const runtime = createRuntime("driver");
+    await runtime.flush();
+    const result = await runtime.connection.syncOperationalState({
+        contextKey: "scope-1",
+        journalEpoch: "epoch-2",
+        appliedVersion: 7,
+        pendingVersion: 0,
+        authoritativeReset: true,
+        resetVersion: 0,
+        reason: "authoritative_reset_cursor_ahead",
+    });
+    const call = runtime.calls.at(-1);
+    assert.equal(call.method, "syncOperationalState");
+    assert.equal(call.options.authoritativeReset, true);
+    assert.equal(call.options.resetVersion, 0);
+    assert.equal(call.options.contextKey, "scope-1");
+    assert.equal(call.options.journalEpoch, "epoch-2");
+    assert.equal(result.resetAccepted, true);
 });
 
 test("old APK lastAliveAt remains lifecycle-compatible without invented heartbeat", async () => {

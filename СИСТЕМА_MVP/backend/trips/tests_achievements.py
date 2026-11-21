@@ -9,8 +9,10 @@ from core.production_time import production_work_date
 from references.models import DumpPoint, Equipment, EquipmentType, RockType
 from shifts.models import AchievementPrize, AchievementUnlock, EmployeeShift, EquipmentPlanGroup, PlanCalculationMode
 from shifts.services import assign_shift_plan_snapshot
+from trips.achievement_views import achievement_current_shift
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
+from users.protected_cards import allow_protected_card_write
 
 
 class AchievementPrizeApiTests(TestCase):
@@ -78,6 +80,17 @@ class AchievementPrizeApiTests(TestCase):
         session = self.client.session
         session['employee_access_id'] = self.driver_access.id
         session.save()
+
+    def test_achievement_selects_the_shift_for_its_workplace(self):
+        with allow_protected_card_write():
+            Employee.objects.filter(pk=self.driver.pk).update(
+                is_protected=True, allow_parallel_role_shifts=True,
+            )
+        EmployeeShift.objects.create(
+            employee=self.driver, opened_by=self.driver, workplace_code='mining_master',
+            parallel_role_slot=True, shift_type='day', opened_at=timezone.now(),
+        )
+        self.assertEqual(achievement_current_shift(self.driver_access), self.truck_shift)
 
     def add_completed_trip(self, *, volume='100.00', loading_shift=None, unloading_shift=None):
         return Trip.objects.create(

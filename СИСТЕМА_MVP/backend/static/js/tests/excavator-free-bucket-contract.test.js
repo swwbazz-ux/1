@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
 const {dispatcherScreenSource} = require('./dispatcher-screen-source');
 
@@ -16,6 +17,50 @@ const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-fre
 const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dispatcher-control-v1.js'), 'utf8');
 const dispatcherTemplate = dispatcherScreenSource();
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-free-bucket-v1.css'), 'utf8');
+
+test('a rejected load releases only its local truck projection', () => {
+    const start = template.indexOf('window.attendExcavatorFieldEvent = function');
+    const end = template.indexOf('\n    if (fieldOutbox)', start);
+    assert.ok(start >= 0 && end > start);
+    const calls = [];
+    const card = {dataset: {eoOfflineEventId: 'load-1'}};
+    const pending = {
+        dataset: {eoOfflineEventId: 'load-1'},
+        parentElement: {},
+        remove: () => calls.push('remove-pending')
+    };
+    const confirmed = {
+        dataset: {eoOfflineEventId: 'load-1', tripId: '123'},
+        remove: () => calls.push('remove-confirmed')
+    };
+    const snapshot = {equipmentState: 'assigned'};
+    const context = {
+        window: {AppRealtime: {requestReconcile: () => calls.push('reconcile')}},
+        freeBucketController: null,
+        cardByTruckId: () => card,
+        truckLoadProjections: new WeakMap([[card, {eventId: 'load-1', snapshot}]]),
+        shell: {querySelectorAll: selector => {
+            assert.equal(selector, '[data-eo-queue-truck][data-eo-offline-event-id]');
+            return [pending, confirmed];
+        }},
+        restoreTruckCard: (target, saved, select) => {
+            assert.equal(target, card);
+            assert.equal(saved, snapshot);
+            assert.equal(select, false);
+            calls.push('restore-card');
+        },
+        markLatestPendingTruckBadge: () => {},
+        ensureMutedPendingBadge: () => {},
+        showExcavatorNotice: () => {},
+        invalidateExcavatorWorkRefresh: () => {},
+    };
+    vm.runInNewContext(template.slice(start, end), context);
+    const event = {event_id: 'load-1', event_type: 'excavator.trip.loaded', payload: {truck_id: 1}};
+    context.window.attendExcavatorFieldEvent(event, {status: 'auth_required'});
+    assert.deepEqual(calls.splice(0), ['reconcile']);
+    context.window.attendExcavatorFieldEvent(event, {status: 'conflict'});
+    assert.deepEqual(calls, ['restore-card', 'remove-pending', 'reconcile']);
+});
 
 test('bucket entry stays beside the existing hourly report ring', () => {
     const widget = template.match(/<div class="eo-dashboard-plan-widget">([\s\S]*?)<\/div>\s*<\/div>/);
@@ -121,8 +166,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v264/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v264/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v268/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v268/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {

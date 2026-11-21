@@ -372,6 +372,39 @@ test("production fragment helper sends a versioned JSON-only request", async () 
 });
 
 
+test("SSE snapshot requests use the reset URL and explicit consistent-snapshot marker", async () => {
+    const fetchCalls = [];
+    const payload = {
+        contract: FRAGMENT_CONTRACT,
+        screen: "driver",
+        version: 91,
+        html: '<main data-driver-shell="1"></main>',
+    };
+    const {runtimeWindow} = createFragmentRuntime((url) => {
+        fetchCalls.push(String(url));
+        return Promise.resolve({
+            ok: true,
+            headers: {get: () => "application/json"},
+            status: 200,
+            json: () => Promise.resolve(payload),
+        });
+    });
+
+    const result = await runtimeWindow.AppOperationalFragment.request("driver", 90, {
+        snapshot: true,
+        snapshotUrl: "/driver/?from=sse-reset",
+    });
+
+    const requestUrl = new URL(fetchCalls[0]);
+    assert.equal(requestUrl.pathname, "/driver/");
+    assert.equal(requestUrl.searchParams.get("from"), "sse-reset");
+    assert.equal(requestUrl.searchParams.get("_operational_fragment"), "driver");
+    assert.equal(requestUrl.searchParams.get("_operational_version"), "90");
+    assert.equal(requestUrl.searchParams.get("_operational_snapshot"), "1");
+    assert.equal(result.snapshot_version, 91);
+});
+
+
 test("production fragment helper rejects contract and screen mismatches", async () => {
     const responses = [
         {

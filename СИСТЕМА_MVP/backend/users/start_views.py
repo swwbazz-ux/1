@@ -12,15 +12,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 import secrets
 import time
-from pathlib import Path
 from urllib.parse import urlencode
 
-from django.conf import settings
 from django.core.cache import cache
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
@@ -30,34 +27,16 @@ from django.views.decorators.http import require_http_methods
 
 from .access_auth import find_unactivated_accesses_by_phone, format_phone_for_display
 from .forms import normalize_phone
-from .app_catalog import APP_CATALOG_ROLE_CODES, role_app_public_url
+from .app_catalog import APP_CATALOG_ROLE_CODES, android_apk_for_role, role_app_public_url
 from .role_apps import get_role_app
 from .models import EmployeeAccess
 from .work_profiles import employee_has_effective_access_role
-
-
-# Единственный реестр Android-сборок для универсального входа. Имя APK и
-# отображаемая версия каждой роли берутся из того же manifest, по которому
-# нативное приложение проверяет обновления: второго ручного номера нет.
-ANDROID_APK_BY_ROLE = {
-    'excavator_operator': {
-        'manifest_path': 'apk/excavator-update.json',
-        'profile': 'excavator',
-    },
-    'driver': {
-        'manifest_path': 'apk/driver-update.json',
-        'profile': 'driver',
-    },
-}
 
 
 START_RESULT_TTL_SECONDS = 30 * 60
 _START_RESULT_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{43}$')
 _START_RESULT_CACHE_PREFIX = 'universal-start-result:v1:'
 logger = logging.getLogger(__name__)
-_ANDROID_PUBLIC_VERSION_RE = re.compile(
-    r'^\d+(?:\.\d+){2}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?$'
-)
 
 
 # Раньше здесь стоял предел на число показанных кнопок: восемь штук подряд
@@ -146,43 +125,6 @@ def is_ios_request(request):
     user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
     return 'iphone' in user_agent or 'ipad' in user_agent or 'ipod' in user_agent
 
-
-def android_apk_for_role(role_code):
-    release = ANDROID_APK_BY_ROLE.get(role_code)
-    if release is None:
-        return None
-
-    try:
-        manifest_path = Path(settings.MEDIA_ROOT) / release['manifest_path']
-        payload = json.loads(manifest_path.read_text(encoding='utf-8'))
-    except (KeyError, OSError, UnicodeError, json.JSONDecodeError):
-        logger.exception('Android update manifest is unavailable for %s', role_code)
-        return None
-    profile = release.get('profile', '')
-    version_code = payload.get('versionCode')
-    version_name = payload.get('versionName')
-    if (
-        payload.get('schemaVersion') != 1
-        or payload.get('profile') != profile
-        or not isinstance(version_code, int)
-        or version_code < 1
-        or not isinstance(version_name, str)
-        or not version_name.strip()
-        or len(version_name) > 64
-        or not _ANDROID_PUBLIC_VERSION_RE.fullmatch(version_name.strip())
-    ):
-        logger.error('Android update manifest is invalid for %s', role_code)
-        return None
-    version = version_name.strip()
-    relative_path = Path('apk') / f'{profile}-{version}.apk'
-
-    if not (Path(settings.MEDIA_ROOT) / relative_path).is_file():
-        return None
-    media_url = f"/{settings.MEDIA_URL.strip('/')}"
-    return {
-        'url': f"{media_url}/{relative_path.as_posix()}",
-        'version': version,
-    }
 
 
 def _render_universal_start(

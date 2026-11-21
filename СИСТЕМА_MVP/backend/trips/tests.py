@@ -397,7 +397,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v166')
+        self.assertContains(response, 'dispatcher-desktop-shell-v167')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -408,36 +408,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v166',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v167',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v166',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v167',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
@@ -699,7 +699,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             is_critical=True,
         )
 
-    def build_dashboard(self):
+    def build_dashboard(self, *, reporting_period=None):
         active_trips = Trip.objects.filter(status__in=(TripStatus.ACTIVE, TripStatus.LOADED_WAITING_UNLOAD))
         return build_dispatcher_dashboard_context(
             dispatcher_shift=self.shift,
@@ -712,6 +712,7 @@ class DispatcherGarageCurrentStateTests(TestCase):
             trucks=Equipment.objects.filter(equipment_type=self.truck_type).order_by('garage_number'),
             excavators=Equipment.objects.filter(equipment_type=self.excavator_type).order_by('garage_number'),
             recent_dispatcher_actions=[],
+            reporting_period=reporting_period,
         )
 
     def create_plan_group(self, *, equipment, mode, value, name='Группа плана', is_active=True):
@@ -1153,64 +1154,105 @@ class DispatcherGarageCurrentStateTests(TestCase):
         self.assertEqual(assigned_tile['percent'], 25)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
 
-    def test_assigned_truck_without_open_shift_inherits_active_complex_plan(self):
+    def test_truck_without_open_shift_keeps_its_own_plan_when_reassigned(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
         self.shift.save(update_fields=['opened_at'])
-        self.create_plan_group(
-            equipment=self.assigned_truck,
+        truck_plan = self.create_plan_group(
+            equipment=self.free_truck,
             mode=PlanCalculationMode.TRIPS,
-            value='20.00',
-            name='Самосвалы БелАЗ тест комплекса',
+            value='4.00',
+            name='Сменный план самосвалов',
         )
+        truck_plan.equipment.add(self.assigned_truck)
         self.create_plan_group(
             equipment=self.excavator,
             mode=PlanCalculationMode.VOLUME,
             value='5000.00',
-            name='Экскаваторы тест активного комплекса',
+            name='Сменный план экскаваторов',
         )
-        ExcavatorPlacement.objects.create(
-            excavator=self.excavator,
-            zone=ExcavatorPlacement.Zone.ACTIVE,
-        )
-        HaulAssignment.objects.create(
-            truck=self.assigned_truck,
-            excavator=self.excavator,
-            status=AssignmentStatus.ACCEPTED,
-        )
+        for excavator in (self.excavator, self.idle_excavator):
+            ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+        for truck in (self.free_truck, self.assigned_truck):
+            HaulAssignment.objects.create(truck=truck, excavator=self.excavator, status=AssignmentStatus.ACCEPTED)
         excavator_shift = self.open_equipment_shift(
             self.excavator,
-            employee_name='Машинист экскаватора',
+            employee_name='Машинист первого экскаватора',
         )
-        self.create_completed_trip(
+        next_excavator_shift = self.open_equipment_shift(
+            self.idle_excavator,
+            employee_name='Машинист второго экскаватора',
+        )
+        loaded_at = self.shift.opened_at + timedelta(minutes=5)
+        Trip.objects.create(
+            truck=self.free_truck,
+            excavator=self.excavator,
+            loading_shift=excavator_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='50.00',
+            loaded_at=loaded_at,
+            status=TripStatus.UNCONTROLLED,
+        )
+        # Опоздавшая запись с разгрузкой в текущей смене всё равно
+        # относится к предыдущей смене по времени погрузки.
+        previous_trip = self.create_completed_trip(truck=self.free_truck, excavator=self.excavator)
+        Trip.objects.filter(pk=previous_trip.pk).update(
+            loaded_at=self.shift.opened_at.replace(hour=6, minute=59),
+            created_at=loaded_at,
+        )
+        Trip.objects.create(
             truck=self.assigned_truck,
             excavator=self.excavator,
             loading_shift=excavator_shift,
-            volume='2652.00',
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            loaded_at=loaded_at,
+            status=TripStatus.CANCELLED,
+        )
+
+        def complexes_by_excavator(dashboard):
+            return {card['card_id']: card for card in dashboard['complex_cards']}
+
+        def percentages_by_truck(card):
+            return {tile['name']: tile['percent'] for tile in card['active_truck_tiles']}
+
+        first_key = f'complex-equipment-{self.excavator.pk}'
+        next_key = f'complex-equipment-{self.idle_excavator.pk}'
+        complexes = complexes_by_excavator(self.build_dashboard())
+        self.assertEqual(percentages_by_truck(complexes[first_key]), {'10': 25, '13': 0})
+        self.assertEqual(complexes[first_key]['percent'], 1)
+
+        HaulAssignment.objects.filter(truck=self.free_truck).update(status=AssignmentStatus.CANCELLED)
+        HaulAssignment.objects.create(
+            truck=self.free_truck,
+            excavator=self.idle_excavator,
+            status=AssignmentStatus.ACCEPTED,
+        )
+        complexes = complexes_by_excavator(self.build_dashboard())
+        self.assertEqual(percentages_by_truck(complexes[next_key]), {'10': 25})
+
+        Trip.objects.create(
+            truck=self.free_truck,
+            excavator=self.idle_excavator,
+            loading_shift=next_excavator_shift,
+            rock_type=self.rock,
+            dump_point=self.dump_point,
+            volume_m3='50.00',
+            loaded_at=loaded_at + timedelta(minutes=30),
+            status=TripStatus.LOADED_WAITING_UNLOAD,
         )
 
         dashboard = self.build_dashboard()
-        assigned_tile = next(
-            tile
-            for card in dashboard['complex_cards']
-            for tile in card['active_truck_tiles']
-            if tile['name'] == '13'
-        )
-        detail_card = dashboard['equipment_cards'][str(self.assigned_truck.id)]
-
+        complexes = complexes_by_excavator(dashboard)
+        self.assertEqual(percentages_by_truck(complexes[first_key]), {'13': 0})
+        self.assertEqual(percentages_by_truck(complexes[next_key]), {'10': 50})
+        self.assertEqual(complexes[first_key]['percent'], 1)
+        self.assertFalse(complexes[next_key]['plan_has_plan'])
+        assigned_tile = complexes[next_key]['active_truck_tiles'][0]
         self.assertFalse(assigned_tile['has_current_shift'])
-        self.assertEqual(assigned_tile['plan_status'], PlanAssignmentStatus.ASSIGNED)
-        self.assertEqual(
-            assigned_tile['plan_group_name'],
-            'Экскаваторы тест активного комплекса',
-        )
-        self.assertEqual(assigned_tile['plan_calculation_mode'], PlanCalculationMode.VOLUME)
-        self.assertEqual(assigned_tile['plan_value'], '5 000')
-        self.assertEqual(assigned_tile['plan_fact_value'], '2 652')
-        self.assertEqual(assigned_tile['percent'], 53)
-        self.assertEqual(assigned_tile['plan_visual']['loop_progress'], 53)
         self.assertTrue(assigned_tile['plan_inactive_fill'])
-        self.assertEqual(detail_card['percent'], 53)
-        self.assertEqual(detail_card['plan']['fact_plan_label'], '2 652 / 5 000 м³')
+        self.assertEqual(assigned_tile['plan_group_name'], truck_plan.name)
+        self.assertEqual(dashboard['equipment_cards'][str(self.free_truck.pk)]['plan']['fact_plan_label'], '2 / 4 рейса')
         board_html = render_to_string(
             'trips/includes/dispatcher_board.html',
             {
@@ -1218,15 +1260,31 @@ class DispatcherGarageCurrentStateTests(TestCase):
                 'mining_master_mobile_enabled': False,
             },
         )
-        tile_tag = re.search(
-            r'<article class="dispatcher-truck-tile complex-truck-tile[^>]*'
-            r'data-equipment-name="13"[^>]*>',
-            board_html,
+        for number, percent in (('10', 50), ('13', 0)):
+            with self.subTest(truck=number):
+                tile_tag = re.search(
+                    r'<article class="dispatcher-truck-tile complex-truck-tile[^>]*'
+                    rf'data-equipment-name="{number}"[^>]*>',
+                    board_html,
+                )
+                self.assertIsNotNone(tile_tag)
+                self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
+                self.assertIn(f'--tile-progress: {percent}%;', tile_tag.group(0))
+                self.assertIn(f'data-plan-percent="{percent}"', tile_tag.group(0))
+
+        # Смена мастера началась после первой погрузки. План самосвала
+        # по-прежнему учитывает её в том же производственном периоде.
+        with patch('trips.views.timezone.now', return_value=excavator_shift.opened_at + timedelta(hours=1)):
+            tablet_dashboard = self.build_dashboard(reporting_period={
+                'starts_at': loaded_at + timedelta(minutes=10),
+            })
+        tablet_complexes = complexes_by_excavator(tablet_dashboard)
+        self.assertEqual(percentages_by_truck(tablet_complexes[first_key]), {'13': 0})
+        self.assertEqual(percentages_by_truck(tablet_complexes[next_key]), {'10': 50})
+        self.assertEqual(
+            tablet_dashboard['equipment_cards'][str(self.free_truck.pk)]['plan']['progress_loop_percent'],
+            50,
         )
-        self.assertIsNotNone(tile_tag)
-        self.assertIn('is-inactive-plan-fill', tile_tag.group(0))
-        self.assertIn('--tile-progress: 53%;', tile_tag.group(0))
-        self.assertIn('data-plan-percent="53"', tile_tag.group(0))
 
     def test_assigned_truck_with_open_shift_keeps_its_own_snapshot_plan(self):
         self.shift.opened_at = self.FIXED_DAY_SHIFT_OPENED_AT
@@ -6115,34 +6173,42 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(Trip.objects.count(), 1)
 
-    def test_truck_loaded_rejects_assigned_truck_without_open_driver_shift(self):
+    @override_settings(EXCAVATOR_MANUAL_LOADING_ENABLED=False)
+    def test_truck_loaded_records_fact_without_assigned_driver(self):
+        from trips.manual_loading import MANUAL_DUMP_CARD_VISIBILITY, reconcile_expired_manual_trips
+
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save(update_fields=['closed_at'])
 
         response = self.post_truck_loaded(client_action_id='no-driver-shift')
 
-        self.assertEqual(response.status_code, 409)
-        payload = json.loads(response.content.decode('utf-8'))
-        self.assertFalse(payload['ok'])
-        self.assertEqual(payload['load_block_reason_code'], 'no_driver')
-        self.assertEqual(payload['load_block_reason_label'], 'Водитель не назначен')
-        self.assertEqual(payload['error'], 'Водитель не назначен')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        trip = Trip.objects.get()
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.assertIsNone(trip.actual_dump_point_id)
+        self.assertEqual(
+            reconcile_expired_manual_trips(now=trip.created_at + MANUAL_DUMP_CARD_VISIBILITY),
+            [trip.pk],
+        )
+        trip.refresh_from_db()
+        self.assertEqual(trip.status, TripStatus.UNCONTROLLED)
+        self.assertIsNone(trip.completed_at)
 
-    def test_truck_loaded_rejects_assigned_driver_without_open_shift(self):
+    def test_truck_loaded_records_fact_when_assigned_driver_has_no_open_shift(self):
         self.create_driver_assignment(self.truck, driver=self.driver, shift=self.truck_shift)
         self.truck_shift.closed_at = timezone.now()
         self.truck_shift.save(update_fields=['closed_at'])
 
         response = self.post_truck_loaded(client_action_id='driver-shift-not-started')
 
-        self.assertEqual(response.status_code, 409)
-        payload = json.loads(response.content.decode('utf-8'))
-        self.assertFalse(payload['ok'])
-        self.assertEqual(payload['load_block_reason_code'], 'driver_shift_not_started')
-        self.assertEqual(payload['load_block_reason_label'], 'Смена водителя не начата')
-        self.assertEqual(payload['error'], 'Смена водителя не начата')
-        self.assertEqual(Trip.objects.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['ok'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
 
     def test_truck_loaded_rejects_assigned_truck_with_active_downtime(self):
         DowntimeEvent.objects.create(

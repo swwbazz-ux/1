@@ -26,6 +26,7 @@ from .privacy_consent import (
     PRIVACY_POLICY_VERSION,
 )
 from .role_apps import ROLE_APPS, ROLE_APPS_BY_CODE, get_role_app_for_host
+from .session_device import personal_session_age_seconds
 
 
 ROLE_HOST_SETTINGS = override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
@@ -1452,7 +1453,11 @@ class RoleAppLoginTests(TestCase):
         self.assertFalse(personal_session.get_expire_at_browser_close())
         self.assertGreaterEqual(
             personal_session.get_expiry_age(),
-            settings.ROLE_APP_PERSONAL_SESSION_AGE - 5,
+            personal_session_age_seconds() - 5,
+        )
+        self.assertLessEqual(
+            personal_session.get_expiry_age(),
+            personal_session_age_seconds(),
         )
 
         shared_client = Client()
@@ -1477,7 +1482,7 @@ class RoleAppLoginTests(TestCase):
             second_response = self.client.get('/interfaces/', HTTP_HOST='driver.localhost')
         self.assertGreaterEqual(
             self.client.session.get_expiry_age(),
-            settings.ROLE_APP_PERSONAL_SESSION_AGE - 5,
+            personal_session_age_seconds() - 5,
         )
         self.assertIn(settings.SESSION_COOKIE_NAME, response.cookies)
         self.assertNotIn(settings.SESSION_COOKIE_NAME, second_response.cookies)
@@ -1510,7 +1515,7 @@ class RoleAppLoginTests(TestCase):
         self.assertNotIsInstance(converted_session.get('_session_expiry'), int)
         self.assertGreaterEqual(
             converted_session.get_expiry_age(),
-            settings.ROLE_APP_PERSONAL_SESSION_AGE - 5,
+            personal_session_age_seconds() - 5,
         )
         self.assertIn(settings.SESSION_COOKIE_NAME, response.cookies)
         self.assertNotIn(settings.SESSION_COOKIE_NAME, second_response.cookies)
@@ -1559,7 +1564,7 @@ class RoleAppLoginTests(TestCase):
         )
         self.assertGreaterEqual(
             self.client.session.get_expiry_age(),
-            settings.ROLE_APP_PERSONAL_SESSION_AGE - 10,
+            personal_session_age_seconds() - 10,
         )
 
     def test_shared_realtime_reads_remain_browser_close_and_do_not_rewrite_session(self):

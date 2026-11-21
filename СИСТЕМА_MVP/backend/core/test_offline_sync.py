@@ -2278,6 +2278,87 @@ class OfflineEventSyncTests(TestCase):
         self.assertEqual(closed.ended_at, receipt.received_at)
         self.assertIsNone(opened.ended_at)
 
+    def test_excavator_load_without_open_driver_shift_is_recorded_once(self):
+        self._open_shift_two_hours_ago()
+        now = timezone.now()
+        self.truck_shift.closed_at = now - timedelta(minutes=2)
+        self.truck_shift.save(update_fields=['closed_at'])
+        event = self.load_event(occurred_at=now - timedelta(minutes=1))
+        event['payload']['manual_control'] = False
+
+        result = self.sync([event]).json()['results'][0]
+        replay = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        self.assertEqual(replay['status'], 'deduplicated', replay)
+        self.assertEqual(replay['server_ids']['trip_id'], result['server_ids']['trip_id'])
+        trip = Trip.objects.get()
+        self.assertEqual(trip.loading_shift_id, self.shift.id)
+        self.assertEqual(trip.truck_id, self.truck.id)
+        self.assertTrue(trip.driver_participation_recorded)
+        self.assertIsNone(trip.driver_control_shift_id)
+        self.truck_shift.refresh_from_db()
+        self.assertIsNotNone(self.truck_shift.closed_at)
+
+        from shifts.services import open_driver_shift_from_device
+
+        loading_time = trip.loaded_at
+        driver_shift, created, _ = open_driver_shift_from_device(
+            employee=self.driver, equipment=self.truck, shift_type=self.truck_shift.shift_type,
+            readings={
+                'start_fuel': self.truck_shift.start_fuel,
+                'start_mileage': self.truck_shift.start_mileage,
+                'start_engine_hours': self.truck_shift.start_engine_hours,
+            },
+            client_action_id='driver-opens-after-excavator-load',
+            opened_at=timezone.now(),
+        )
+        self.assertTrue(created)
+        trip.refresh_from_db()
+        self.assertEqual(trip.driver_control_shift_id, driver_shift.pk)
+        self.assertEqual(trip.excavator_operator_id, self.operator.id)
+        self.assertEqual(trip.loaded_at, loading_time)
+        self.assertIsNone(trip.completed_at)
+        client = self.driver_client()
+        screen = client.get(reverse('driver_shift'))
+        self.assertContains(screen, f'data-driver-active-trip-id="{trip.pk}"')
+
+        unload = {
+            'event_id': 'driver-unloads-inherited-trip',
+            'event_type': 'driver.trip.unloaded',
+            'format_version': 1,
+            'occurred_at': (driver_shift.opened_at + timedelta(seconds=1)).isoformat(),
+            'sequence': 1,
+            'depends_on': [],
+            'shift_id': driver_shift.pk,
+            'equipment_id': self.truck.pk,
+            'trip_id': trip.pk,
+            'payload': {'trip_id': trip.pk},
+        }
+        result = self.sync([unload], client=client, role_code='driver').json()['results'][0]
+        self.assertEqual(result['status'], 'accepted', result)
+        trip.refresh_from_db()
+        self.assertEqual(trip.unloading_shift_id, driver_shift.pk)
+        self.assertEqual(trip.excavator_operator_id, self.operator.id)
+        self.assertEqual(trip.loaded_at, loading_time)
+
+    def test_queued_excavator_load_can_arrive_after_driver_shift_opens(self):
+        self._open_shift_two_hours_ago()
+        self.truck_shift.opened_at = timezone.now()
+        self.truck_shift.workplace_code = 'driver'
+        self.truck_shift.save(update_fields=['opened_at', 'workplace_code'])
+        loaded_at = self.truck_shift.opened_at - timedelta(minutes=1)
+        event = self.load_event(occurred_at=loaded_at)
+        event['payload']['manual_control'] = False
+
+        result = self.sync([event]).json()['results'][0]
+
+        self.assertEqual(result['status'], 'accepted', result)
+        trip = Trip.objects.get()
+        self.assertEqual(trip.driver_control_shift_id, self.truck_shift.pk)
+        self.assertEqual(trip.loaded_at, loaded_at)
+        self.assertEqual(trip.loading_shift_id, self.shift.pk)
+
     def test_sent_live_event_is_applied_at_the_server_receipt(self):
         """Событие ушло сразу после нажатия — время сервера и есть настоящее.
 

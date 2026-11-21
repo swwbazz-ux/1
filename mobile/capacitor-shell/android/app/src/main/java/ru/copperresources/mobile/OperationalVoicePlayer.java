@@ -69,6 +69,18 @@ public final class OperationalVoicePlayer {
         return shared.enqueue(cueName, voiceNames, playCue, voiceDelayMs);
     }
 
+    /**
+     * Проигрывает только записанный сигнал, без рабочей фразы. Нужен для
+     * нейтрального оповещения «что-то изменилось в смене», где нельзя называть
+     * ни технику, ни точку разгрузки.
+     */
+    public static synchronized boolean playCueOnly(Context context, String cueName) {
+        if (shared == null) {
+            shared = new OperationalVoicePlayer(context);
+        }
+        return shared.enqueueCue(cueName);
+    }
+
     private boolean enqueue(String cueName, String[] voiceNames, boolean playCue, long voiceDelayMs) {
         if (voiceNames == null || voiceNames.length == 0) {
             return false;
@@ -96,6 +108,49 @@ public final class OperationalVoicePlayer {
                     Math.max(0L, voiceDelayMs)
                 );
             }
+        });
+        return true;
+    }
+
+    private boolean enqueueCue(String cueName) {
+        int cueResourceId = resourceId(cueName);
+        if (cueResourceId == 0) {
+            return false;
+        }
+        int scheduledGeneration = ++generation;
+        mainHandler.post(() -> {
+            if (scheduledGeneration != generation) {
+                return;
+            }
+            stopCurrentPlayback();
+            requestTransientAudioFocus();
+            cuePlayer = MediaPlayer.create(
+                context,
+                cueResourceId,
+                CUE_ATTRIBUTES,
+                AudioManager.AUDIO_SESSION_ID_GENERATE
+            );
+            if (cuePlayer == null) {
+                abandonAudioFocus();
+                return;
+            }
+            cuePlayer.setVolume(1.0f, 1.0f);
+            cuePlayer.setOnCompletionListener(player -> {
+                if (cuePlayer == player) {
+                    cuePlayer = null;
+                }
+                player.release();
+                abandonAudioFocus();
+            });
+            cuePlayer.setOnErrorListener((player, what, extra) -> {
+                if (cuePlayer == player) {
+                    cuePlayer = null;
+                }
+                player.release();
+                abandonAudioFocus();
+                return true;
+            });
+            cuePlayer.start();
         });
         return true;
     }

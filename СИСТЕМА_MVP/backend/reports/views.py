@@ -3569,7 +3569,10 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
             return barrier_response
         trip = (
             Trip.objects
-            .select_for_update()
+            # `actual_dump_point` необязательная связь: PostgreSQL не даёт взять
+            # FOR UPDATE на nullable стороне outer join, поэтому блокируем только
+            # строку рейса (of=('self',)), а связанные таблицы читаем как обычно.
+            .select_for_update(of=('self',))
             .select_related('rock_type', 'actual_dump_point', 'dump_point', 'truck', 'excavator')
             .get(pk=trip_id, status=TripStatus.COMPLETED)
         )

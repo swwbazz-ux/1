@@ -43,6 +43,15 @@
     var lastConnectionLossAnnouncedAt = connectionIncident.lossAt;
     var connectionLossTimer = null;
     var connectionRecoveryTimer = null;
+    /* Сколько ждём звук. Голосовой handoff подтверждает общий курсор
+       (realtime-client.js), поэтому зависший AudioContext.resume() или молчащий
+       мост останавливают применение экрана: в браузере без нативного моста
+       экран водителя замирал, а клиент опрашивал состояние без конца
+       (T-016, e2e §10.1). Срок ниже шага опроса состояния (2 с) и заметно ниже
+       5-секундной пробы, на которой зависание было замечено. */
+    var AUDIO_TIMEOUT_MS = 1500;
+    var BRIDGE_TIMEOUT_MS = 1500;
+    var TIMED_OUT = {timedOut: true};
 
     function positiveDatasetNumber(name) {
         var value = Number(script && script.dataset ? script.dataset[name] : 0);
@@ -307,16 +316,56 @@
         return true;
     }
 
+    /* Ограниченное ожидание. Сам промис не отменяется: его результат ещё
+       нужен, чтобы поздний ответ не превратился в повторную озвучку. Наружу
+       уходит результат, а по сроку — метка TIMED_OUT; отказ проходит дальше,
+       чтобы прежние ветки обработки ошибок не изменились. */
+    function boundedWait(pending, milliseconds) {
+        return new Promise(function (resolve, reject) {
+            var settled = false;
+            var timer = window.setTimeout(function () {
+                if (settled) return;
+                settled = true;
+                resolve(TIMED_OUT);
+            }, milliseconds);
+            function clearTimer() {
+                if (typeof window.clearTimeout === "function") window.clearTimeout(timer);
+            }
+            Promise.resolve(pending).then(function (value) {
+                if (settled) return;
+                settled = true;
+                clearTimer();
+                resolve(value);
+            }, function (error) {
+                if (settled) return;
+                settled = true;
+                clearTimer();
+                reject(error);
+            });
+        });
+    }
+
     function playWebSound(name) {
         var context = getAudioContext();
         if (!context) return Promise.resolve(false);
-        var resume = context.state === "suspended" ? context.resume() : Promise.resolve();
-        return Promise.resolve(resume).then(function () {
+        /* Поздний запуск после срока не нужен: он прозвучит, когда его уже
+           никто не ждёт, и столкнётся со следующей попыткой озвучки. */
+        var attempt = {cancelled: false};
+        var chain = Promise.resolve().then(function () {
+            return context.state === "suspended" ? context.resume() : null;
+        }).then(function () {
+            if (attempt.cancelled) return null;
             return loadWebSound(name);
         }).then(function (buffer) {
+            if (attempt.cancelled || !buffer) return false;
             if (context.state !== "running") return false;
             return startWebSound(context, buffer);
         }).catch(function () {
+            return false;
+        });
+        return boundedWait(chain, AUDIO_TIMEOUT_MS).then(function (result) {
+            if (result !== TIMED_OUT) return result === true;
+            attempt.cancelled = true;
             return false;
         });
     }
@@ -326,9 +375,19 @@
         var webName = directCueName(name);
         var plugin = nativeSoundPlugin();
         if (plugin) {
-            return Promise.resolve(plugin.play({name: name})).then(function () {
-                return true;
-            }).catch(function () {
+            var bridgePlay;
+            try {
+                bridgePlay = plugin.play({name: name});
+            } catch (error) {
+                return playWebSound(webName);
+            }
+            return boundedWait(Promise.resolve(bridgePlay).then(function () {
+                return "played";
+            }, function () {
+                return "failed";
+            }), BRIDGE_TIMEOUT_MS).then(function (outcome) {
+                if (outcome === TIMED_OUT) return false;
+                if (outcome === "played") return true;
                 return playWebSound(webName);
             });
         }
@@ -340,7 +399,13 @@
         if (!plugin || typeof plugin.announceDumpPoint !== "function") {
             return Promise.resolve({supported: false, announced: false});
         }
-        return Promise.resolve(plugin.announceDumpPoint(details || {})).then(function (result) {
+        return boundedWait(
+            Promise.resolve(plugin.announceDumpPoint(details || {})),
+            BRIDGE_TIMEOUT_MS
+        ).then(function (result) {
+            if (result === TIMED_OUT) {
+                return {supported: true, announced: false, reason: "bridge_timeout"};
+            }
             return {
                 supported: true,
                 announced: !!(result && result.announced === true),
@@ -374,17 +439,25 @@
         }
         var pending;
         try {
-            pending = plugin.announceOperational({
+            var nativeDetails = {
                 cue: requestedCue,
                 voice: voiceName,
                 cueResolved: details._cueIsResolved === true,
                 eventVersion: Number(details.eventVersion || 0),
                 eventKey: String(details.eventKey || "")
-            });
+            };
+            var operationKey = String(details.operationKey || "");
+            if (operationKey) nativeDetails.operationKey = operationKey;
+            pending = plugin.announceOperational(nativeDetails);
         } catch (error) {
             return fallback();
         }
-        return Promise.resolve(pending).then(function (result) {
+        return boundedWait(Promise.resolve(pending), BRIDGE_TIMEOUT_MS).then(function (result) {
+            if (result === TIMED_OUT) {
+                /* Мост молчит: веб-фолбэк сыграл бы поверх позднего нативного
+                   звука. Отвечаем сроком и оставляем событие следующей попытке. */
+                return {supported: true, announced: false, reason: "bridge_timeout"};
+            }
             return {
                 supported: true,
                 announced: !!(result && result.announced === true),
@@ -410,7 +483,8 @@
                 _cueIsResolved: true,
                 voice: String(details.fallbackVoice || "voice_truck_assigned"),
                 eventVersion: Number(details.eventVersion || 0),
-                eventKey: String(details.eventKey || "")
+                eventKey: String(details.eventKey || ""),
+                operationKey: String(details.operationKey || "")
             });
         }
         if (!plugin || typeof plugin.announceEquipment !== "function") {
@@ -418,7 +492,7 @@
         }
         var pending;
         try {
-            pending = plugin.announceEquipment({
+            var nativeDetails = {
                 cue: requestedCue,
                 cueResolved: details._cueIsResolved === true,
                 action: String(details.action || ""),
@@ -427,11 +501,17 @@
                 dumpPointName: String(details.dumpPointName || ""),
                 eventVersion: Number(details.eventVersion || 0),
                 eventKey: String(details.eventKey || "")
-            });
+            };
+            var operationKey = String(details.operationKey || "");
+            if (operationKey) nativeDetails.operationKey = operationKey;
+            pending = plugin.announceEquipment(nativeDetails);
         } catch (error) {
             return fallback();
         }
-        return Promise.resolve(pending).then(function (result) {
+        return boundedWait(Promise.resolve(pending), BRIDGE_TIMEOUT_MS).then(function (result) {
+            if (result === TIMED_OUT) {
+                return {supported: true, announced: false, reason: "bridge_timeout"};
+            }
             if (result && result.announced === true) {
                 return {supported: true, announced: true, reason: String(result.reason || "")};
             }
@@ -457,7 +537,8 @@
                 equipmentNumber: String(first.equipmentNumber || ""),
                 fallbackVoice: String(first.fallbackVoice || "voice_truck_assigned"),
                 eventVersion: Number(first.eventVersion || 0),
-                eventKey: String(details.eventKey || "excavator_operator_assignment")
+                eventKey: String(details.eventKey || "excavator_operator_assignment"),
+                operationKey: String(first.operationKey || "")
             });
         }
         if (!plugin || typeof plugin.announceEquipmentBatch !== "function") {
@@ -480,7 +561,10 @@
         } catch (error) {
             return fallback();
         }
-        return Promise.resolve(pending).then(function (result) {
+        return boundedWait(Promise.resolve(pending), BRIDGE_TIMEOUT_MS).then(function (result) {
+            if (result === TIMED_OUT) {
+                return {supported: true, announced: false, reason: "bridge_timeout"};
+            }
             if (result && result.announced === true) {
                 return {supported: true, announced: true, reason: String(result.reason || "")};
             }

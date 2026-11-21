@@ -7,13 +7,13 @@ from unittest.mock import patch
 from django.conf import settings
 from django.contrib.messages import get_messages
 from django.db import close_old_connections, connection
-from django.db.models.query import QuerySet
 from django.test import Client, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, HaulAssignment
 from core.models import OperationalStateEvent
+from downtimes import views as downtime_views
 from downtimes.forms import MechanicDowntimeCreateForm
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.models import (
@@ -483,10 +483,10 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
         thread_state = local()
         production_saved = Event()
         release_production = Event()
-        mechanic_equipment_lock_attempted = Event()
+        mechanic_journal_lock_attempted = Event()
         production_ended_at = {}
         original_event_save = DowntimeEvent.save
-        original_queryset_get = QuerySet.get
+        original_lock_production_state = downtime_views.lock_production_state
 
         def coordinated_event_save(instance, *args, **kwargs):
             result = original_event_save(instance, *args, **kwargs)
@@ -503,14 +503,13 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
                     raise TimeoutError('Погрузка не получила разрешение завершить транзакцию.')
             return result
 
-        def observed_queryset_get(queryset, *args, **kwargs):
-            if (
-                getattr(thread_state, 'kind', '') == 'mechanic_close'
-                and queryset.model is Equipment
-                and queryset.query.select_for_update
-            ):
-                mechanic_equipment_lock_attempted.set()
-            return original_queryset_get(queryset, *args, **kwargs)
+        def coordinated_lock_production_state():
+            # Единый порядок блокировок: журнал производства раньше техники.
+            # Раньше механик ждал строку техники; теперь он обязан ждать
+            # журнал, который держит незавершённая погрузка.
+            if getattr(thread_state, 'kind', '') == 'mechanic_close':
+                mechanic_journal_lock_attempted.set()
+            return original_lock_production_state()
 
         def worker(kind, callable_):
             close_old_connections()
@@ -532,7 +531,10 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
 
         with (
             patch.object(DowntimeEvent, 'save', new=coordinated_event_save),
-            patch.object(QuerySet, 'get', new=observed_queryset_get),
+            patch(
+                'downtimes.views.lock_production_state',
+                new=coordinated_lock_production_state,
+            ),
             ThreadPoolExecutor(max_workers=2) as executor,
         ):
             load_future = executor.submit(
@@ -556,14 +558,15 @@ class DowntimePostgreSQLConcurrencyRegressionTests(TransactionTestCase):
                     'mechanic_close',
                     lambda: self.post_mechanic_close(mechanic_session, event.pk),
                 )
-                if not mechanic_equipment_lock_attempted.wait(timeout=10):
+                if not mechanic_journal_lock_attempted.wait(timeout=10):
                     if mechanic_future.done():
                         self.fail(
-                            'Закрытие Механиком завершилось до Equipment-lock: '
+                            'Закрытие Механиком завершилось до блокировки журнала: '
                             f'{mechanic_future.result()!r}'
                         )
                     self.fail(
-                        'Механик не использовал Equipment FOR UPDATE перед закрытием.'
+                        'Закрытие Механиком не дошло до блокировки журнала '
+                        'производства перед закрытием простоя.'
                     )
                 if mechanic_future.done():
                     self.fail(

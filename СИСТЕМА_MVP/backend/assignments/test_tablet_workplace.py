@@ -1,10 +1,19 @@
+from datetime import timedelta
+
 from django.test import Client, TestCase
 from django.contrib.messages import get_messages
 from django.urls import reverse
 from django.utils import timezone
 
-from shifts.models import EmployeeShift
+from core.production_time import production_shift_context
+from references.models import DumpPoint, Equipment, EquipmentType, RockType
+from shifts.models import EmployeeShift, PlanAssignmentStatus, PlanCalculationMode
+from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
+from users.protected_cards import allow_protected_card_write
+
+from .field_commands import actual_cards
+from .models import ExcavatorPlacement
 
 
 class TabletWorkplaceTests(TestCase):
@@ -56,6 +65,34 @@ class TabletWorkplaceTests(TestCase):
         actual = self.own_open().get()
         self.assertEqual((actual.pk, actual.opened_at), (original.pk, original.opened_at))
         self.assertNotIn('mining_master_tablet_shift_auth', self.client.session)
+
+    def test_owner_can_start_resume_and_close_master_without_ending_dispatcher_shift(self):
+        admin_role, _ = Role.objects.get_or_create(code='admin', defaults={'name': 'Администратор'})
+        EmployeeAccess.objects.create(
+            employee=self.employee, role=admin_role, access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with allow_protected_card_write():
+            Employee.objects.filter(pk=self.employee.pk).update(
+                is_protected=True, allow_parallel_role_shifts=True,
+            )
+        dispatcher = EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code='dispatcher',
+            shift_type='day', opened_at=timezone.now(),
+        )
+        self.assertRedirects(self.enter_to_start(), self.url, fetch_redirect_response=False)
+        first = self.own_open().get()
+        self.assertTrue(first.parallel_role_slot)
+        self.assertRedirects(
+            self.enter_to_start(close_other_role_shift='1'),
+            self.url, fetch_redirect_response=False,
+        )
+        self.assertEqual(self.own_open().get().pk, first.pk)
+        self.client.post(self.url, {'action': 'end_shift'})
+        first.refresh_from_db()
+        dispatcher.refresh_from_db()
+        self.assertIsNotNone(first.closed_at)
+        self.assertIsNone(dispatcher.closed_at)
 
     def test_start_and_resume_do_not_announce_a_redundant_status(self):
         self.login()
@@ -113,6 +150,62 @@ class TabletWorkplaceTests(TestCase):
         self.assertFalse(self.own_open().exists())
         self.assertTrue(self.client.get(self.url).context['dispatcher_header']['requires_shift_reauth'])
 
+    def test_complex_plan_counts_loads_in_excavator_shift_without_driver_confirmation(self):
+        self.login()
+        now = timezone.now()
+        shift_type = production_shift_context(now).shift_type
+        EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code='mining_master',
+            shift_type=shift_type, opened_at=now - timedelta(minutes=10),
+        )
+        operator = Employee.objects.create(full_name='Машинист')
+        excavator = Equipment.objects.create(
+            equipment_type=EquipmentType.objects.create(name='Экскаватор'), garage_number='6',
+        )
+        truck = Equipment.objects.create(
+            equipment_type=EquipmentType.objects.create(name='Самосвал'), garage_number='30',
+        )
+        ExcavatorPlacement.objects.create(excavator=excavator, zone=ExcavatorPlacement.Zone.ACTIVE)
+        previous_shift = EmployeeShift.objects.create(
+            employee=operator, opened_by=operator, equipment=excavator, workplace_code='excavator_operator',
+            shift_type=shift_type, opened_at=now - timedelta(hours=2), closed_at=now - timedelta(minutes=45),
+        )
+        loading_shift = EmployeeShift.objects.create(
+            employee=operator, opened_by=operator, equipment=excavator, workplace_code='excavator_operator',
+            shift_type=shift_type, opened_at=now - timedelta(minutes=40),
+            plan_status=PlanAssignmentStatus.ASSIGNED, plan_calculation_mode=PlanCalculationMode.VOLUME,
+            plan_value='200.00',
+        )
+        trip_fields = {
+            'truck': truck, 'excavator': excavator, 'excavator_operator': operator,
+            'rock_type': RockType.objects.create(name='Руда'),
+            'dump_point': DumpPoint.objects.create(name='ККД'),
+            'driver_participation_recorded': True,
+        }
+        Trip.objects.create(**trip_fields, loading_shift=previous_shift, status=TripStatus.COMPLETED,
+                            volume_m3='100.00', completed_at=now - timedelta(minutes=5))
+        Trip.objects.create(**trip_fields, loading_shift=loading_shift, status=TripStatus.CANCELLED,
+                            volume_m3='49.00', loaded_at=now - timedelta(minutes=25))
+        Trip.objects.create(**trip_fields, loading_shift=loading_shift, status=TripStatus.UNCONTROLLED,
+                            volume_m3='51.00', loaded_at=now - timedelta(minutes=20))
+        Trip.objects.create(**trip_fields, loading_shift=loading_shift, status=TripStatus.LOADED_WAITING_UNLOAD,
+                            volume_m3='51.00', loaded_at=now - timedelta(minutes=1))
+
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        complex_card = next(card for card in response.context['dispatcher_dashboard']['complex_zones']
+                            if card.get('excavator') == excavator)
+        self.assertEqual((complex_card['percent'], complex_card['plan_fact_value']), (51, '102'))
+        self.assertContains(response, 'data-plan-fact="102"')
+        version = response.context['operational_state_version']
+        detail_url = reverse('mining_master_tablet_dispatcher_equipment_detail', args=('complex', excavator.pk))
+        detail = self.client.get(detail_url, {'state_version': version}, HTTP_ACCEPT='application/json')
+        self.assertEqual(detail.status_code, 200)
+        plan = detail.json()['card']['plan']
+        self.assertEqual((plan['progress_percent'], plan['completed_value']), (51, '102'))
+        snapshot = actual_cards(self.access, version)
+        self.assertEqual(snapshot[f'complex:{excavator.pk}']['card']['plan'], plan)
+
     def test_next_shift_accepts_phone_pin_and_stays_shared(self):
         self.login(); self.start()
         self.client.post(self.url, {'action': 'end_shift'})
@@ -159,6 +252,16 @@ class TabletWorkplaceTests(TestCase):
         self.assertContains(response, 'data-dispatcher-move-url="/mining-master/tablet/dispatcher/control/excavator/move/"')
         self.assertEqual(reverse('dispatcher_control'), original)
         self.assertEqual(original, '/dispatcher/control/')
+
+    def test_tablet_html_is_never_cached(self):
+        self.login()
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+
+        anonymous = Client().get(self.url)
+        self.assertEqual(anonymous.status_code, 302)
+        self.assertIn('no-store', anonymous['Cache-Control'])
 
     def test_csrf_is_required_even_with_fresh_login_proof(self):
         self.login()

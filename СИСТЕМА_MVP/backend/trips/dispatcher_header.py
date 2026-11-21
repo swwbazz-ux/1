@@ -12,6 +12,8 @@ from core.production_time import (
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import (
     WORKPLACE_ROLE_LABELS,
+    can_work_parallel_roles,
+    employee_shift_scope,
     find_other_role_open_shift,
     lock_active_employee_for_shift,
     other_role_shift_prompt,
@@ -180,9 +182,11 @@ def open_dispatcher_shift(access, *, close_other_role_shift=False):
         close_other=close_other_role_shift,
         closed_by=employee,
     )
+    parallel_roles = can_work_parallel_roles(employee)
     other_shift = (
         EmployeeShift.objects
         .select_for_update()
+        .filter(employee_shift_scope('dispatcher', parallel_roles=parallel_roles))
         .filter(employee=employee, closed_at__isnull=True)
         .order_by('-opened_at')
         .first()
@@ -201,6 +205,7 @@ def open_dispatcher_shift(access, *, close_other_role_shift=False):
         employee=employee,
         shift_type=get_dispatcher_shift_type_for_now(now),
         workplace_code='dispatcher',
+        parallel_role_slot=parallel_roles,
         opened_at=now,
         opened_by=employee,
     )

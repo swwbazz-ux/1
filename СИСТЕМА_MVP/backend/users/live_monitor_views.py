@@ -11,7 +11,7 @@ from django.views.decorators.http import require_POST
 from shifts.models import EmployeeShift
 from shifts.services import equipment_is_truck
 
-from .active_role import latest_active_role_access
+from .active_role import active_access_for_employee_role, latest_active_role_access
 from .application_connection import begin_application_connection_probe
 from .live_monitor import (
     PRESENCE_FOREGROUND,
@@ -365,9 +365,13 @@ def system_admin_force_close_shift_view(request, shift_id):
         return redirect('system_admin_live_monitor')
 
     ended_sessions = 0
-    target_access = latest_active_role_access(shift.employee)
-    if request.POST.get('eject_after_close') == '1' and target_access and target_access.pk != access.pk:
-        ended_sessions = force_end_access_sessions(access=target_access)
+    if request.POST.get('eject_after_close') == '1':
+        target_access = (
+            active_access_for_employee_role(shift.employee, shift.workplace_code)
+            if shift.workplace_code else latest_active_role_access(shift.employee)
+        )
+        if target_access and target_access.pk != access.pk:
+            ended_sessions = force_end_access_sessions(access=target_access)
     AdminActionLog.objects.create(
         actor=access.employee,
         action='Принудительно завершена смена сотрудника',

@@ -1,5 +1,7 @@
 from django.urls import path
 
+from core.snapshot import operational_snapshot_view
+
 from .achievement_views import (
     achievement_current_view,
     achievement_prize_download_view,
@@ -56,7 +58,11 @@ urlpatterns = [
     path('dispatcher/trips/<int:trip_id>/complete/', dispatcher_complete_trip_view, name='dispatcher_complete_trip'),
     path('dispatcher/trucks/<int:equipment_id>/manual-trip/', dispatcher_manual_trip_view, name='dispatcher_manual_trip'),
     path('dispatcher/shifts/<int:shift_id>/service-close/', dispatcher_service_close_shift_view, name='dispatcher_service_close_shift'),
-    path('excavator/work/', excavator_work_view, name='excavator_work'),
+    path(
+        'excavator/work/',
+        operational_snapshot_view(excavator_work_view),
+        name='excavator_work',
+    ),
     path('excavator/work/hourly-report/', excavator_hourly_report_view, name='excavator_hourly_report'),
     path('excavator/shift/', excavator_shift_action_view, name='excavator_shift_action'),
     path('excavator/work/settings/', excavator_work_settings_view, name='excavator_work_settings'),

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
+from pathlib import Path
 
+from django.conf import settings
 from django.templatetags.static import static
 
 from .role_apps import READY_TRAFFIC_ROLE_CODES, get_role_app
@@ -20,6 +25,67 @@ APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in APP_CATALOG_ROLES)
 APP_CATALOG_QR_MODULE_PIXELS = 8
 APP_CATALOG_QR_CANVAS_MODULES = 37
 APP_CATALOG_QR_SIZE = APP_CATALOG_QR_MODULE_PIXELS * APP_CATALOG_QR_CANVAS_MODULES
+
+
+# Общий реестр Android-сборок для каталога и универсального входа. Имя APK и
+# отображаемая версия каждой роли берутся из того же manifest, по которому
+# нативное приложение проверяет обновления: второго ручного номера нет.
+ANDROID_APK_BY_ROLE = {
+    'excavator_operator': {
+        'manifest_path': 'apk/excavator-update.json',
+        'profile': 'excavator',
+    },
+    'driver': {
+        'manifest_path': 'apk/driver-update.json',
+        'profile': 'driver',
+    },
+}
+
+_ANDROID_PUBLIC_VERSION_RE = re.compile(
+    r'^\d+(?:\.\d+){2}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?$'
+)
+logger = logging.getLogger(__name__)
+
+
+def android_apk_for_role(role_code):
+    release = ANDROID_APK_BY_ROLE.get(role_code)
+    if release is None:
+        return None
+
+    try:
+        manifest_path = Path(settings.MEDIA_ROOT) / release['manifest_path']
+        payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (KeyError, OSError, UnicodeError, json.JSONDecodeError):
+        logger.exception('Android update manifest is unavailable for %s', role_code)
+        return None
+    if not isinstance(payload, dict):
+        logger.error('Android update manifest is invalid for %s', role_code)
+        return None
+    profile = release['profile']
+    version_code = payload.get('versionCode')
+    version_name = payload.get('versionName')
+    if (
+        payload.get('schemaVersion') != 1
+        or payload.get('profile') != profile
+        or not isinstance(version_code, int)
+        or version_code < 1
+        or not isinstance(version_name, str)
+        or not version_name.strip()
+        or len(version_name) > 64
+        or not _ANDROID_PUBLIC_VERSION_RE.fullmatch(version_name.strip())
+    ):
+        logger.error('Android update manifest is invalid for %s', role_code)
+        return None
+    version = version_name.strip()
+    relative_path = Path('apk') / f'{profile}-{version}.apk'
+
+    if not (Path(settings.MEDIA_ROOT) / relative_path).is_file():
+        return None
+    media_url = f"/{settings.MEDIA_URL.strip('/')}"
+    return {
+        'url': f"{media_url}/{relative_path.as_posix()}",
+        'version': version,
+    }
 
 
 def _split_host_port(raw_host):
@@ -83,6 +149,7 @@ def app_catalog_items(request):
                 'target_url': role_app_public_url(request, role_code),
                 'qr_target_url': role_app_qr_target_url(role_code),
                 'qr_asset_url': static(role_app_qr_asset_path(role_code)),
+                'apk': android_apk_for_role(role_code),
             }
         )
     return items

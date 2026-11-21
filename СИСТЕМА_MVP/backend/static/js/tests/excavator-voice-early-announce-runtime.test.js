@@ -49,6 +49,9 @@ function createRuntime(options = {}) {
     const calls = [];
     const notices = [];
     const storage = new Map();
+    const timers = new Map();
+    let nextTimer = 1;
+    let now = 0;
     const shell = {
         dataset: {
             eoCurrentExcavatorId: String(options.excavatorId || 9),
@@ -81,6 +84,15 @@ function createRuntime(options = {}) {
         },
     };
     context.window = context;
+    context.setTimeout = function (callback, delay) {
+        const id = nextTimer;
+        nextTimer += 1;
+        timers.set(id, {at: now + Number(delay || 0), callback});
+        return id;
+    };
+    context.clearTimeout = function (id) {
+        timers.delete(id);
+    };
     context.localStorage = {
         getItem(key) {
             return storage.has(key) ? storage.get(key) : null;
@@ -103,6 +115,17 @@ function createRuntime(options = {}) {
         shell,
         setBridge(nextBridge) {
             bridge = nextBridge;
+        },
+        pendingTimers() {
+            return [...timers.values()];
+        },
+        fireDeadline() {
+            const due = [...timers.entries()].sort((left, right) => left[1].at - right[1].at);
+            assert.equal(due.length, 1, "one bounded voice deadline is expected");
+            const [id, timer] = due[0];
+            timers.delete(id);
+            now = timer.at;
+            timer.callback();
         },
     };
 }
@@ -342,4 +365,137 @@ test("the rendered snapshot exposes the exact HaulAssignment id", () => {
         renderedTemplateSource,
         /data-eo-assignment-snapshot[\s\S]*?data-assignment-id="\{\{ card\.assignment_id \}\}"/
     );
+});
+
+/* ------------------------------------------------------------------ */
+/* Срок ожидания голоса: зависший пакетный мост не держит экран        */
+/* ------------------------------------------------------------------ */
+
+const VOICE_DEADLINE_MS = 2500;
+
+function assignEvent(version, assignmentId, truckId) {
+    return assignmentEvent({
+        version,
+        assignmentId,
+        truckId,
+        truckNumber: String(truckId),
+        action: "assignment_applied",
+        targetExcavatorId: 9,
+        excavatorIds: [9],
+    });
+}
+
+test("a hung batch bridge releases the claim and does not hold the cursor", async () => {
+    const runtime = createRuntime({bridge: () => new Promise(() => {})});
+    const pending = runtime.context.handleOperationalStateSignals({events: [assignEvent(220, 601, 61)]});
+    await settlePromises();
+
+    assert.equal(runtime.calls.length, 1);
+    assert.equal(
+        runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:601:9"),
+        "claimed",
+        "until the deadline the operation belongs to the voice path"
+    );
+    const timers = runtime.pendingTimers();
+    assert.equal(timers.length, 1, "the handoff is bounded by a deadline");
+    assert.equal(timers[0].at, VOICE_DEADLINE_MS);
+
+    runtime.fireDeadline();
+    const result = await pending;
+
+    assert.equal(result.accepted, true, "unresponsive audio must not stall the shared cursor");
+    assert.equal(
+        runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:601:9"),
+        "",
+        "the claim is released, so the next delivery may try again"
+    );
+});
+
+test("the same assignment is tried again after the voice deadline", async () => {
+    let attempts = 0;
+    const runtime = createRuntime({
+        bridge: () => {
+            attempts += 1;
+            return attempts === 1
+                ? new Promise(() => {})
+                : Promise.resolve({supported: true, announced: true});
+        },
+    });
+    const first = runtime.context.handleOperationalStateSignals({events: [assignEvent(230, 602, 62)]});
+    await settlePromises();
+    runtime.fireDeadline();
+    assert.equal((await first).accepted, true);
+
+    const second = runtime.context.handleOperationalStateSignals({events: [assignEvent(231, 602, 62)]});
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.calls.length, 2, "the released claim gives the retry a chance");
+    assert.equal(
+        runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:602:9"),
+        "announced"
+    );
+});
+
+test("a late batch success after the deadline is not announced twice", async () => {
+    const late = {};
+    late.promise = new Promise((resolve) => { late.resolve = resolve; });
+    let attempts = 0;
+    const runtime = createRuntime({
+        bridge: () => {
+            attempts += 1;
+            return attempts === 1
+                ? late.promise
+                : Promise.resolve({supported: true, announced: false, reason: "already_announced"});
+        },
+    });
+    const first = runtime.context.handleOperationalStateSignals({events: [assignEvent(240, 603, 63)]});
+    await settlePromises();
+    runtime.fireDeadline();
+    assert.equal((await first).accepted, true);
+
+    /* Поздний ответ: мост всё-таки озвучил назначение уже после срока. */
+    late.resolve({supported: true, announced: true, processed: true});
+    await settlePromises();
+
+    const second = runtime.context.handleOperationalStateSignals({events: [assignEvent(241, 603, 63)]});
+    assert.equal((await second).accepted, true);
+    assert.equal(runtime.calls.length, 2, "the retry asks the bridge and the ledger answers");
+    assert.equal(
+        runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:603:9"),
+        "announced"
+    );
+});
+
+test("a bridge timeout result does not hold the cursor and starts no second bridge", async () => {
+    const runtime = createRuntime({
+        bridge: () => Promise.resolve({supported: true, announced: false, reason: "bridge_timeout"}),
+    });
+    const result = runtime.context.handleOperationalStateSignals({events: [assignEvent(250, 604, 64)]});
+
+    assert.equal((await result).accepted, true);
+    assert.equal(runtime.calls.length, 1, "bridge_timeout must not be replaced by another announcement");
+    assert.equal(runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:604:9"), "");
+});
+
+test("an explicit device refusal still keeps the cursor pending for a retry", async () => {
+    const runtime = createRuntime({
+        bridge: () => Promise.resolve({supported: true, announced: false, reason: "resource_unavailable"}),
+    });
+    const result = runtime.context.handleOperationalStateSignals({events: [assignEvent(260, 605, 65)]});
+
+    assert.equal((await result).accepted, false, "a device that said no must be retried");
+    assert.equal(runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:605:9"), "");
+});
+
+test("a batch without any voice channel does not hold the cursor", async () => {
+    const runtime = createRuntime({
+        bridge: () => Promise.resolve({supported: false, announced: false}),
+    });
+    const result = runtime.context.handleOperationalStateSignals({events: [assignEvent(270, 606, 66)]});
+
+    assert.equal(
+        (await result).accepted,
+        true,
+        "nothing can be played, so nothing is worth waiting for"
+    );
+    assert.equal(runtime.context.ExcavatorVoiceGuard.state("excavator-assignment:assign:606:9"), "");
 });

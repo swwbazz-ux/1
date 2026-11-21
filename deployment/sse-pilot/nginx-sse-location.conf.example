@@ -1,0 +1,24 @@
+# EXAMPLE ONLY. Add this exact-match prefix before the existing `location /`.
+# The existing WSGI upstream must continue serving every non-SSE request.
+location /realtime/stream/ {
+    include proxy_params;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-ID $request_id;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    gzip off;
+    add_header X-Accel-Buffering no always;
+
+    # Heartbeat is 10 s in the example. Timeout intentionally allows three
+    # missed heartbeats before nginx closes the stream.
+    proxy_read_timeout 35s;
+    proxy_send_timeout 35s;
+    send_timeout 35s;
+
+    proxy_pass http://unix:/run/accounting-mvp-sse-pilot/asgi.sock;
+}
+

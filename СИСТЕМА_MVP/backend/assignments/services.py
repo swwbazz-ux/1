@@ -1131,6 +1131,32 @@ def clear_active_equipment_assignment(*, employee, assigned_by=None, now=None, r
     return len(assignments)
 
 
+def _notify_driver_assignment_changed(truck_id, state_version):
+    """Разбудить нативного Водителя только после записи нового назначения."""
+    from users.native_push import native_app_ids_for_role, notify_employee_devices
+
+    try:
+        shift = (
+            EmployeeShift.objects
+            .select_related('employee')
+            .filter(equipment_id=truck_id, closed_at__isnull=True)
+            .filter(Q(workplace_code='driver') | Q(
+                workplace_code='', equipment__equipment_type__name='Самосвал',
+            ))
+            .order_by('-opened_at', '-id')
+            .first()
+        )
+        if shift:
+            notify_employee_devices(
+                shift.employee,
+                kind='driver_assignment_changed',
+                state_version=str(state_version),
+                app_ids=native_app_ids_for_role('driver'),
+            )
+    except Exception:
+        logger.exception('Не удалось разбудить Водителя после изменения назначения.')
+
+
 def _emit_assignment_changed(
         *, action, truck_id, excavator_ids, assignment_id=None,
         target_excavator_id=None, source_excavator_id=None, effective_at=None):
@@ -1147,7 +1173,7 @@ def _emit_assignment_changed(
         .filter(id__in=related_equipment_ids)
         .values_list('id', 'garage_number')
     )
-    bump_operational_state(
+    state = bump_operational_state(
         f'HaulAssignment:{action}',
         event_type='assignment_changed',
         object_type='HaulAssignment',
@@ -1168,6 +1194,12 @@ def _emit_assignment_changed(
             'effective_at': effective_at.isoformat() if effective_at else '',
         },
     )
+
+
+    if action in {'assignment_pending', 'release_pending', 'pending_cancelled'}:
+        transaction.on_commit(
+            lambda: _notify_driver_assignment_changed(truck_id, state.version)
+        )
 
 
 def _cancel_assignments(assignments, now):

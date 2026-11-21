@@ -166,7 +166,7 @@ function createRuntime(options) {
             return null;
         },
     });
-    const localStorage = createStorage({
+    const localStorage = runtimeOptions.localStorage || createStorage({
         [MOBILE_QUEUE_KEY]: JSON.stringify([{id: "pending-action"}]),
     });
     const sessionStorage = createStorage();
@@ -734,6 +734,57 @@ test("system admin uses the generic safe reload after server recovery", async ()
     assert.equal(runtime.sessionStorage.getItem("operational-state-version"), "8");
     assert.equal(runtime.refreshSkippedEvents.length, 0);
     assert.equal(runtime.window.AppRealtime.getDebugState().authEnded, false);
+});
+
+test("system admin reopens with an old delivery cursor without reloading for unchanged data", async () => {
+    const configLine = BASE_TEMPLATE_SOURCE
+        .split(/\r?\n/)
+        .find((line) => line.includes('name: "system-admin"'));
+    const screen = vm.runInNewContext("(" + configLine.trim().replace(/,$/, "") + ")");
+    const sessionRevision = "2026-11-20T23:15:00+00:00";
+    const oldDeliveryKey = "operational-delivery-v1:"
+        + encodeURIComponent("||admin|||" + sessionRevision) + ":legacy";
+    const localStorage = createStorage({[oldDeliveryKey]: JSON.stringify({
+        appliedVersion: 500,
+        pendingVersion: 500,
+    })});
+    const state = {
+        version: 500,
+        role_active: true,
+        role_app_code: "admin",
+        session_revision: sessionRevision,
+        relevant: false,
+        events: [],
+    };
+
+    for (let visit = 0; visit < 3; visit += 1) {
+        const runtime = createRuntime({
+            currentHref: "https://admin.localhost/system-admin/employees/?personnel_position=42",
+            appRoleCode: "admin",
+            initialVersion: 0,
+            idleDelayMs: 2500,
+            localStorage,
+            screens: [screen],
+            fetch: () => Promise.resolve(response(200, state)),
+        });
+        await settlePromises();
+        runtime.advanceTime(2500);
+        runtime.runTimeoutsUpTo(2500);
+        await settlePromises();
+
+        assert.equal(runtime.reloads.length, 0, "the unchanged server version must not reload the page");
+        assert.equal(runtime.document.body.dataset.connectionState, "ok");
+        assert.equal(runtime.window.AppRealtime.getDebugState().pendingVersion, null);
+
+        state.version += 1;
+        state.relevant = true;
+        state.events = [{version: state.version, type: "employee_changed"}];
+        await runtime.window.AppRealtime.poll();
+        await settlePromises();
+        assert.equal(runtime.reloads.length, 1, "a relevant change in the open page still triggers a refresh");
+        state.relevant = false;
+        state.events = [];
+    }
 });
 
 test("offline state is recoverable and does not terminate authentication", async () => {

@@ -319,6 +319,19 @@ def calculate_dispatcher_snapshot_progress(shift, equipment=None):
     return calculate_open_shift_progress(shift)
 
 
+def dispatcher_trip_facts_by_truck(trips):
+    rows = (
+        trips.order_by()
+        .values('truck_id')
+        .annotate(
+            trip_count=Count('id'),
+            volume_m3=Sum('volume_m3'),
+            tonnage=Sum('tonnage'),
+        )
+    )
+    return {row['truck_id']: row for row in rows}
+
+
 def format_dispatcher_plan_number(value):
     if value in {None, ''}:
         return ''
@@ -592,7 +605,7 @@ EXCAVATOR_SERVICE_WORKER_JS = r"""
 const APP_CONTRACT_VERSION = "pwa-contract-v1";
 const ROLE_CODE = "excavator_operator";
 const CACHE_PREFIX = "excavator-mobile-shell-";
-const CACHE_NAME = "excavator-mobile-shell-v264";
+const CACHE_NAME = "excavator-mobile-shell-v268";
 const APP_SHELL_URL = "/excavator/work/";
 const MANIFEST_URL = "/excavator.webmanifest";
 const PRIVACY_POLICY_PATH = "/company/privacy/";
@@ -606,26 +619,26 @@ const CORE_ASSETS = [
   "/static/js/role-readonly.js",
   "/static/css/app.css?v=__STATIC_ASSET_RELEASE__",
   "/static/css/excavator-manual-loading-v1.css?v=4",
-  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v264",
+  "/static/css/excavator-work-v55.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-work-v55-final.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-work-v55-shift.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-shift-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-face-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/mobile-downtime-unified-v1.css?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-hourly-report-v1.css?v=excavator-mobile-shell-v268",
   "/static/css/mobile-role-login-v1.css",
-  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v264",
-  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v264",
-  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v264",
+  "/static/js/mobile-shift-unified-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/mobile-operational-sounds-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-haptics-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-native-push-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-hourly-report-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-field-outbox-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-free-bucket-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/equipment-label-fit-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-truck-number-fit-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-dashboard-drag-v1.js?v=excavator-mobile-shell-v268",
+  "/static/js/excavator-dump-return-swipe-v1.js?v=excavator-mobile-shell-v268",
+  "/static/css/excavator-free-bucket-v1.css?v=excavator-mobile-shell-v268",
   "/static/css/excavator-offline-v1.css?v=1",
   "/static/css/native-app-update-v1.css",
   "/static/favicon.ico",
@@ -1880,9 +1893,9 @@ def build_dispatcher_dashboard_context(
             )
             .order_by('-created_at')
         )
-    if not is_mining_master_reporting_period and dispatcher_plan_date is None:
-        # Даже без открытой смены диспетчера плановый период не
-        # исчезает: день 07:00–19:00, ночь 19:00–07:00.
+    if dispatcher_plan_date is None:
+        # Без диспетчерской смены план техники относится к текущему
+        # производственному периоду: день 07:00–19:00, ночь 19:00–07:00.
         current_production_context = production_shift_context()
         dispatcher_plan_date = current_production_context.production_date
         dispatcher_plan_shift_type = current_production_context.shift_type
@@ -1891,62 +1904,10 @@ def build_dispatcher_dashboard_context(
             dispatcher_plan_shift_type,
         )
     shift_trips = list(shift_trip_queryset[:500])
-    period_plan_facts = {
-        'truck': {},
-        'excavator': {},
-    }
-    if is_mining_master_reporting_period or dispatcher_plan_date is not None:
-        # Для техники без собственной открытой смены факт всё равно относится
-        # к текущему периоду пульта. Это позволяет назначенному самосвалу без
-        # смены водителя выполнять план по реально завершённым рейсам.
-        if is_mining_master_reporting_period:
-            period_plan_trip_queryset = shift_trip_queryset
-        else:
-            period_plan_trip_queryset = Trip.objects.filter(
-                Q(
-                    status=TripStatus.COMPLETED,
-                    completed_at__gte=production_shift_start,
-                    completed_at__lt=production_shift_end,
-                )
-                | Q(
-                    status=TripStatus.COMPLETED,
-                    completed_at__isnull=True,
-                    created_at__gte=production_shift_start,
-                    created_at__lt=production_shift_end,
-                )
-            )
-
-        def period_plan_facts_by_equipment(equipment_field):
-            equipment_key = f'{equipment_field}_id'
-            rows = (
-                period_plan_trip_queryset
-                .filter(status=TripStatus.COMPLETED)
-                .order_by()
-                .values(equipment_key)
-                .annotate(
-                    trip_count=Count('id'),
-                    volume_m3=Sum('volume_m3'),
-                    tonnage=Sum('tonnage'),
-                )
-            )
-            return {
-                row[equipment_key]: {
-                    'trip_count': row['trip_count'],
-                    'volume_m3': row['volume_m3'],
-                    'tonnage': row['tonnage'],
-                }
-                for row in rows
-                if row[equipment_key]
-            }
-
-        period_plan_facts = {
-            'truck': period_plan_facts_by_equipment('truck'),
-            'excavator': (
-                period_plan_facts_by_equipment('excavator')
-                if is_mining_master_reporting_period
-                else {}
-            ),
-        }
+    master_period_facts_by_truck = (
+        dispatcher_trip_facts_by_truck(shift_trip_queryset.filter(status=TripStatus.COMPLETED))
+        if is_mining_master_reporting_period else {}
+    )
     first_open_shift_by_equipment_id = {}
     latest_open_shift_by_equipment_id = {}
     for shift in open_shifts:
@@ -1982,60 +1943,52 @@ def build_dispatcher_dashboard_context(
 
     truck_equipment_ids = {truck.id for truck in trucks_list}
     excavator_equipment_ids = {excavator.id for excavator in excavators_list}
+    inactive_truck_ids = truck_equipment_ids.difference(open_shift_by_equipment_id)
     plan_group_by_equipment_id = {}
-    if not is_mining_master_reporting_period:
-        plan_groups = (
-            EquipmentPlanGroup.objects
-            .filter(equipment__id__in=truck_equipment_ids)
-            .prefetch_related('equipment')
-            .order_by('-is_active', '-active_from', 'name')
-            .distinct()
-        )
-        for plan_group in plan_groups:
-            for planned_equipment in plan_group.equipment.all():
-                if planned_equipment.id in truck_equipment_ids:
-                    plan_group_by_equipment_id.setdefault(planned_equipment.id, plan_group)
-    selected_equipment_shifts = list(open_shift_by_equipment_id.values())
-    snapshot_trip_facts = (
-        {'unloading': {}, 'loading': {}}
-        if is_mining_master_reporting_period
-        else aggregate_completed_trip_facts_by_shift(
-            unloading_shift_ids=(
-                shift.id
-                for shift in selected_equipment_shifts
-                if shift.equipment_id in truck_equipment_ids
-            ),
-            loading_shift_ids=(
-                shift.id
-                for shift in selected_equipment_shifts
-                if shift.equipment_id in excavator_equipment_ids and shift.plan_status
-            ),
-        )
+    plan_groups = (
+        EquipmentPlanGroup.objects
+        .filter(equipment__id__in=inactive_truck_ids)
+        .prefetch_related('equipment')
+        .order_by('-is_active', '-active_from', 'name')
+        .distinct()
     )
+    for plan_group in plan_groups:
+        for planned_equipment in plan_group.equipment.all():
+            if planned_equipment.id in inactive_truck_ids:
+                plan_group_by_equipment_id.setdefault(planned_equipment.id, plan_group)
 
-    def assigned_complex_progress_for_truck(truck_id):
-        """Use the working complex plan when an assigned truck has no shift."""
-        assignment = assignment_by_truck.get(truck_id)
-        if (
-            not assignment
-            or assignment.status != AssignmentStatus.ACCEPTED
-            or assignment.action == HaulAssignmentAction.RELEASE
-            or not assignment.excavator_id
-        ):
-            return None
-        excavator_shift = open_shift_by_equipment_id.get(assignment.excavator_id)
-        if not excavator_shift or not excavator_shift.plan_status:
-            return None
-        progress = calculate_progress_from_snapshot_facts(
-            excavator_shift,
-            snapshot_trip_facts['loading'].get(excavator_shift.id),
+    # Без смены водителя учитываем погрузки по самосвалу за весь производственный
+    # период. Переназначение и смена экскаватора не влияют на этот факт.
+    inactive_truck_facts = (
+        dispatcher_trip_facts_by_truck(
+            Trip.objects.filter(truck_id__in=plan_group_by_equipment_id.keys())
+            .exclude(status=TripStatus.CANCELLED)
+            .filter(
+                Q(loaded_at__gte=production_shift_start, loaded_at__lt=production_shift_end)
+                | Q(
+                    loaded_at__isnull=True,
+                    created_at__gte=production_shift_start,
+                    created_at__lt=production_shift_end,
+                )
+            )
         )
-        if (
-            progress.get('plan_status') != PlanAssignmentStatus.ASSIGNED
-            or progress.get('progress_percent') is None
-        ):
-            return None
-        return progress
+        if plan_group_by_equipment_id else {}
+    )
+    selected_equipment_shifts = list(open_shift_by_equipment_id.values())
+    snapshot_trip_facts = aggregate_completed_trip_facts_by_shift(
+        unloading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if not is_mining_master_reporting_period and shift.equipment_id in truck_equipment_ids
+        ),
+        # План экскаватора общий для машиниста, диспетчера и мастера.
+        # Погрузки относятся к смене экскаватора и учитываются до подтверждения разгрузки.
+        loading_shift_ids=(
+            shift.id
+            for shift in selected_equipment_shifts
+            if shift.equipment_id in excavator_equipment_ids and shift.plan_status
+        ),
+    )
 
     plan_by_equipment_id = {}
     def dispatcher_plan_for_equipment(equipment):
@@ -2044,12 +1997,8 @@ def build_dispatcher_dashboard_context(
             return plan_progress_display_context(None)
         if equipment_id not in plan_by_equipment_id:
             shift = open_shift_by_equipment_id.get(equipment_id)
-            if shift and is_mining_master_reporting_period:
-                equipment_kind = 'truck' if equipment_id in truck_equipment_ids else 'excavator'
-                progress = calculate_progress_from_snapshot_facts(
-                    shift,
-                    period_plan_facts[equipment_kind].get(equipment_id),
-                )
+            if shift and equipment_id in truck_equipment_ids and is_mining_master_reporting_period:
+                progress = calculate_progress_from_snapshot_facts(shift, master_period_facts_by_truck.get(equipment_id))
             elif shift and equipment_id in truck_equipment_ids:
                 progress = calculate_progress_from_snapshot_facts(
                     shift,
@@ -2060,31 +2009,13 @@ def build_dispatcher_dashboard_context(
                     shift,
                     snapshot_trip_facts['loading'].get(shift.id),
                 )
-            elif (
-                not shift
-                and not is_mining_master_reporting_period
-                and equipment_id in truck_equipment_ids
-                and (complex_progress := assigned_complex_progress_for_truck(equipment_id))
-            ):
-                # Без смены водителя рейсы не могут попасть в личный
-                # snapshot самосвала. Назначенная машина показывает
-                # авторитетный прогресс работающего комплекса, а UI окрашивает
-                # его серым как неактивную технику.
-                progress = complex_progress
-            elif (
-                not shift
-                and not is_mining_master_reporting_period
-                and dispatcher_plan_date is not None
-                and dispatcher_plan_shift_type is not None
-                and equipment_id in truck_equipment_ids
-                and equipment_id in plan_group_by_equipment_id
-            ):
+            elif equipment_id in plan_group_by_equipment_id:
                 progress = calculate_plan_group_progress_from_facts(
                     equipment,
                     plan_group_by_equipment_id[equipment_id],
                     dispatcher_plan_date,
                     dispatcher_plan_shift_type,
-                    period_plan_facts['truck'].get(equipment_id),
+                    inactive_truck_facts.get(equipment_id),
                 )
             else:
                 progress = calculate_dispatcher_snapshot_progress(shift, equipment=equipment)
@@ -3613,6 +3544,7 @@ def excavator_truck_load_block(
     has_driver_assignment=None,
     manual_control=False,
     participation=None,
+    allow_missing_driver_shift=False,
 ):
     if not assignment or not assignment.truck_id:
         return excavator_truck_load_block_payload('missing_truck')
@@ -3649,7 +3581,7 @@ def excavator_truck_load_block(
             equipment=truck,
             closed_at__isnull=True,
         ).exists()
-    if not has_open_truck_shift and not manual_control:
+    if not has_open_truck_shift and not manual_control and not allow_missing_driver_shift:
         if has_driver_assignment is None:
             has_driver_assignment = excavator_truck_has_driver_assignment(truck)
         if has_driver_assignment:
@@ -4461,7 +4393,8 @@ def excavator_truck_loaded_view(request):
             .first()
         )
         participation = truck_driver_participation([locked_truck.pk])[locked_truck.pk]
-        manual_control = payload.get('manual_control') is True
+        without_driver_shift = participation['shift'] is None
+        manual_control = payload.get('manual_control') is True or without_driver_shift
         if open_trip and may_replace_open_trip(open_trip, participation):
             if str(payload.get('expected_open_trip_id') or '') != str(open_trip.pk):
                 return JsonResponse({'ok': False, 'error': 'Рейс изменился. Обновите экран.', 'code': 'trip_changed'}, status=409)
@@ -4471,6 +4404,7 @@ def excavator_truck_loaded_view(request):
             active_trip=open_trip or False,
             manual_control=manual_control,
             participation=participation,
+            allow_missing_driver_shift=without_driver_shift,
         )
         if load_block:
             return JsonResponse({
@@ -4518,6 +4452,7 @@ def excavator_truck_loaded_view(request):
                 downtime_text=payload.get('downtime_text'),
                 note=payload.get('note'),
                 participation=participation,
+                driver_participation_recorded=True if without_driver_shift else None,
                 supersede_trip=open_trip,
             )
         except ValidationError as error:
@@ -6383,6 +6318,12 @@ def excavator_downtime_action_view(request):
 
     payload = excavator_json_payload(request)
     action = (payload.get('action') or '').strip()
+    # Порядок блокировок: сначала строка журнала производства, затем техника —
+    # как в отправке и завершении рейса (trips/views.py:6998). Иначе экран
+    # простоя держит технику и ждёт журнал, а опрос состояния
+    # (reconcile_due_haul_assignments_throttled) держит журнал и ждёт ту же
+    # технику: PostgreSQL фиксирует deadlock и отдаёт 500 (T-016).
+    lock_production_state()
     current_excavator = Equipment.objects.select_for_update(of=('self',)).get(pk=current_excavator.pk)
     active_event = (
         DowntimeEvent.objects
@@ -6828,6 +6769,14 @@ def shift_auto_close_at(shift):
         # первой смены это двадцать часов, у второй — восемь утра. Сменщика,
         # заступившего в восемь, отсечка этого же утра не касается.
         close_at = next_shift_auto_close_cutoff(period_end)
+        # Открытие после отсечки своей назначенной смены не должно получать
+        # дедлайн в прошлом (например, вторая смена, открытая после 08:00).
+        # Номер и производственная дата остаются прежними; выбираем только
+        # ближайшую штатную отсечку строго после фактического открытия.
+        if close_at <= shift.opened_at:
+            close_at = next_shift_auto_close_cutoff(
+                shift.opened_at + timedelta(microseconds=1)
+            )
     # Страховку по времени здесь не применяем: она обрубала бы смену раньше её
     # законной отсечки (смена второй смены, открытая днём, закрывалась ночью).
     return close_at
@@ -6838,11 +6787,11 @@ equipment_shift_auto_close_at = shift_auto_close_at
 
 
 def auto_close_expired_equipment_shifts(now=None):
-    """13 часов с открытия — смена техники закрывается сама как незакрытая сотрудником.
+    """Закрыть незавершённые смены после их расчётной производственной отсечки.
 
-    Смена длится 12 часов; лишний час — запас, чтобы сотрудник без связи успел
-    попросить диспетчера закрыть смену по согласованию. Вызывается таймером
-    (close_expired_shifts) и при каждой загрузке пульта.
+    Расчётная отсечка новой смены всегда позже её открытия. Дополнительно
+    сохраняется минимальный возраст в 30 минут. Вызывается серверным таймером
+    (close_expired_shifts); функция сама не зависит от присутствия клиента.
     """
     now = now or timezone.now()
     closed = []

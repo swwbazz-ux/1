@@ -348,7 +348,11 @@ class SameEmployeeAccessRoleRevisionRegressionTests(TestCase):
             HTTP_HOST='management.localhost',
             HTTP_ACCEPT='application/json',
         )
-        self.assertEqual(stale_post.status_code, 409)
+        # T-021: смена прав отзывает прежнюю сессию: запрос не выполняется, а
+        # уводит на вход (302). Это тот же инвариант «смена не создана», но с
+        # точным ожиданием вместо прежнего мягкого набора кодов.
+        self.assertEqual(stale_post.status_code, 302)
+        self.assertEqual(stale_post['Location'], reverse('login'))
         self.assertEqual(
             EmployeeShift.objects.filter(
                 employee=self.target_employee,

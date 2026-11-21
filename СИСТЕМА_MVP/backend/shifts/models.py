@@ -382,6 +382,7 @@ class EmployeeShift(models.Model):
     employee = models.ForeignKey('users.Employee', verbose_name='Сотрудник', on_delete=models.PROTECT)
     shift_type = models.CharField('Смена', max_length=16, choices=ShiftType.choices)
     workplace_code = models.CharField('Рабочий контур', max_length=32, blank=True, db_index=True)
+    parallel_role_slot = models.BooleanField(default=False, db_default=False, editable=False)
     watch_period = models.ForeignKey(WatchPeriod, verbose_name='Вахта', on_delete=models.PROTECT, null=True, blank=True)
     equipment = models.ForeignKey('references.Equipment', verbose_name='Техника', on_delete=models.PROTECT, null=True, blank=True)
     start_fuel = models.DecimalField('Топливо на начало', max_digits=10, decimal_places=2, null=True, blank=True)
@@ -438,8 +439,13 @@ class EmployeeShift(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['employee'],
-                condition=models.Q(closed_at__isnull=True),
+                condition=models.Q(closed_at__isnull=True, parallel_role_slot=False),
                 name='unique_open_shift_per_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['employee', 'workplace_code'],
+                condition=models.Q(closed_at__isnull=True),
+                name='unique_open_shift_per_employee_role',
             ),
             models.UniqueConstraint(
                 fields=['equipment'],

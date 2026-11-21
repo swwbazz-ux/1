@@ -2155,7 +2155,7 @@ def _process_excavator_loaded(access, normalized):
     from downtimes.driver_workflow import close_truck_waiting_loading_downtimes
     from downtimes.models import DowntimeEvent
     from references.models import DumpPoint, RockType
-    from trips.manual_loading import may_replace_open_trip
+    from trips.manual_loading import attach_pending_excavator_trip_to_driver_shift, may_replace_open_trip
     from trips.models import OPEN_TRIP_STATUSES, Trip, TripClientAction
     from trips.trip_creation import create_loaded_waiting_unload_trip, lock_trip_participant_equipment
     from trips.views import (
@@ -2219,7 +2219,8 @@ def _process_excavator_loaded(access, normalized):
         .order_by('-opened_at', '-id')
         .first()
     )
-    manual_control = payload.get('manual_control') is True
+    without_driver_shift = historical_driver_shift is None
+    manual_control = payload.get('manual_control') is True or without_driver_shift
     participation = {
         'shift': historical_driver_shift,
         'control_shift': None if manual_control else historical_driver_shift,
@@ -2341,6 +2342,7 @@ def _process_excavator_loaded(access, normalized):
         manual_control=manual_control,
         participation=participation,
         has_open_truck_shift=bool(historical_driver_shift),
+        allow_missing_driver_shift=without_driver_shift,
     )
     if load_block:
         _conflict(load_block['code'], load_block['label'])
@@ -2391,6 +2393,7 @@ def _process_excavator_loaded(access, normalized):
             downtime_text=payload.get('downtime_text'),
             note=payload.get('note'),
             participation=participation,
+            driver_participation_recorded=True if without_driver_shift else None,
             supersede_trip=current_open_trip,
             occurred_at=normalized['occurred_at'],
             resolve_assignment_transition=(
@@ -2404,6 +2407,19 @@ def _process_excavator_loaded(access, normalized):
         trip.load_received_at = normalized['received_at']
         trip.load_time_source = 'server_receipt'
         trip.save(update_fields=['load_received_at', 'load_time_source'])
+    if without_driver_shift and trip.loaded_at:
+        current_driver_shift = (
+            EmployeeShift.objects.filter(
+                equipment_id=truck_id, workplace_code='driver', closed_at__isnull=True,
+                opened_at__gte=trip.loaded_at,
+            )
+            .order_by('-opened_at', '-id')
+            .first()
+        )
+        if current_driver_shift:
+            attached_trip = attach_pending_excavator_trip_to_driver_shift(current_driver_shift)
+            if attached_trip and attached_trip.pk == trip.pk:
+                trip.driver_control_shift = current_driver_shift
     TripClientAction.objects.create(
         action_type='truck_loaded', client_action_id=normalized['event_id'],
         trip=trip, actor=access.employee,

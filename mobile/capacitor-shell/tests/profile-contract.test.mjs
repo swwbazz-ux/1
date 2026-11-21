@@ -43,8 +43,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "46",
-    versionName: "0.1.29",
+    versionCode: "48",
+    versionName: "0.1.31",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -54,8 +54,8 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "53",
-    versionName: "0.1.32",
+    versionCode: "55",
+    versionName: "0.1.34",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
     splashIconResource: "app_icon",
@@ -76,7 +76,7 @@ const expectedProfiles = {
     startUrl: "https://driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "55",
+    versionCode: "57",
     versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -87,7 +87,7 @@ const expectedProfiles = {
     startUrl: "https://qa-driver.driverform.ru/driver/",
     applicationId: "ru.copperresources.driver",
     appName: "Водитель",
-    versionCode: "54",
+    versionCode: "56",
     versionName: "0.1.32-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#8CFF2E",
@@ -109,7 +109,7 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "48",
+    versionCode: "49",
     versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -120,7 +120,7 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "47",
+    versionCode: "48",
     versionName: "0.1.29-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -596,8 +596,10 @@ test("foreground driver screen uses the same deduplicated recorded voice bridge"
   const announcer = readFileSync(resolve(javaRoot, "DriverDumpPointAnnouncer.java"), "utf8");
   assert.match(plugin, /DriverDumpPointAnnouncer\.announce/);
   assert.match(announcer, /private static DriverVoicePlayer sharedPlayer/);
-  assert.match(announcer, /lastScheduledTripId/);
-  assert.match(announcer, /last_driver_dump_point_alert_trip_id[\s\S]*?tripId == persistedTripId[\s\S]*?tripId == lastScheduledTripId/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.claimOperation/);
+  assert.match(announcer, /"driver-dump:" \+ tripId \+ ":"/);
+  assert.match(announcer, /dumpPointId > 0L[\s\S]*?displayName\.toLowerCase/);
+  assert.match(announcer, /OperationalVoiceAnnouncer\.commitOperation/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?0L,[\s\S]*?playCue/);
   assert.match(announcer, /sharedPlayer\.announce\([\s\S]*?preferences\.edit\(\)/);
   assert.match(plugin, /result\.announced[\s\S]*?cuePlayed/);

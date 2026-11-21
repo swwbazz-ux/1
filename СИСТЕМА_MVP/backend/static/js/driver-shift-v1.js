@@ -669,6 +669,14 @@ window.bindDriverMobileShell = function () {
         var closeButton = shell.querySelector("[data-driver-shift-close-button]");
         var logoutButton = shell.querySelector("[data-driver-shift-logout]");
         var shiftScroll = form ? form.querySelector("[data-driver-shift-scroll]") : null;
+        var closeReadingsBlockedAt = 0;
+
+        /* Показания на конец смены сразу заполнены значениями начала (водитель
+           может изменить): пустые обязательные поля молча останавливали
+           отправку, очередь не создавалась (живой тест T-020, 13.11.2026). */
+        if (form && closeButton && typeof prefillDriverShiftCloseReadings === "function") {
+            prefillDriverShiftCloseReadings(form);
+        }
 
         if (form && closeButton && closeButton.dataset.driverShiftBound !== "true") {
             closeButton.dataset.driverShiftBound = "true";
@@ -696,7 +704,23 @@ window.bindDriverMobileShell = function () {
             bindDriverShiftHoldAction(form, closeButton, {
                 holdMs: 1000,
                 readyLabel: "Закрыть смену",
-                progressProperty: "--driver-shift-hold"
+                progressProperty: "--driver-shift-hold",
+                /* Проверка до requestSubmit: пустое/неверное поле — сообщение и
+                   сброс «ДЕРЖИТЕ», а не молчаливый отказ браузера. */
+                beforeSubmit: function (target) {
+                    if (typeof reportDriverShiftCloseReadings !== "function") return true;
+                    if (reportDriverShiftCloseReadings(target)) return true;
+                    closeReadingsBlockedAt = Date.now();
+                    return false;
+                },
+                onShortPress: function () {
+                    /* Отпускание того же удержания после отказа не должно
+                       перекрывать сообщение «заполните показания»: окно чуть
+                       больше тоста (3,6 с), чтобы поздний click на медленном
+                       WebView тоже не подменил точный текст (QA T-025, 8.3). */
+                    if (closeReadingsBlockedAt && Date.now() - closeReadingsBlockedAt < 3000) return;
+                    if (typeof window.showDriverToast === "function") window.showDriverToast("Удерживайте кнопку");
+                }
             });
 
             var firstError = form.querySelector(".mobile-shift__field .errorlist");
@@ -1020,8 +1044,8 @@ window.bindDriverMobileShell = function () {
         }
     }
     /* Форма начала смены привязывается отдельно, за пределами этой области. */
-    window.showDriverToast = function (message) { showDriverToast(message); };
-    function showDriverToast(message) {
+    window.showDriverToast = showDriverToast;
+    function showDriverToast(message, durationMs) {
         var toast = shell.querySelector("[data-driver-toast]");
         if (!toast) {
             return;
@@ -1033,7 +1057,7 @@ window.bindDriverMobileShell = function () {
         }
         window.driverToastTimerId = window.setTimeout(function () {
             toast.hidden = true;
-        }, 3600);
+        }, typeof durationMs === "number" ? durationMs : 3600);
     }
     function openDriverTab(tab) {
         var allowedTabs = ["work", "shift", "downtimes", "manifest"];
@@ -1790,35 +1814,19 @@ window.bindDriverMobileShell = function () {
             indexedDB: window.indexedDB,
             localStorage: window.localStorage,
             context: driverOfflineContext,
-            send: function (batch) {
-                return fetch("/offline-events/sync/", {
-                    method: "POST",
-                    credentials: "same-origin",
-                    cache: "no-store",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "X-CSRFToken": csrf ? csrf.content : "",
-                        "X-Requested-With": "XMLHttpRequest"
-                    },
-                    body: JSON.stringify(batch)
-                }).then(function (response) {
-                    return response.text().then(function (body) {
-                        var payload = {};
-                        try { payload = JSON.parse(body || "{}"); } catch (error) {}
-                        if (response.status >= 500) throw new Error("server_unavailable");
-                        var needsAuthentication = typeof window.isDriverSyncAuthResponse === "function"
-                            && window.isDriverSyncAuthResponse(response, body, window.location.href);
-                        if (needsAuthentication) {
-                            return {results: batch.events.map(function (event) {
-                                return {event_id: event.event_id, status: "auth_required", code: "auth_required", message: "Требуется повторный вход."};
-                            })};
-                        }
-                        if (!response.ok && !Array.isArray(payload.results)) throw new Error("sync_rejected");
-                        return payload;
-                    });
-                });
-            },
+            send: typeof window.createDriverSyncSend === "function"
+                ? window.createDriverSyncSend({
+                    fetch: function (url, init) { return window.fetch(url, init); },
+                    url: "/offline-events/sync/",
+                    csrfToken: csrf ? csrf.content : "",
+                    baseUrl: window.location.href,
+                    isAuthResponse: window.isDriverSyncAuthResponse
+                })
+                : function () {
+                    /* Смешанная сборка (старый отправитель в кэше): очередь
+                       остаётся, повтор как раньше — без потери событий. */
+                    return Promise.reject(new Error("sync_sender_unavailable"));
+                },
             onState: driverOfflineBindings().onState,
             onConfirmed: driverOfflineBindings().onConfirmed,
             onReview: driverOfflineBindings().onReview
@@ -2645,6 +2653,10 @@ window.bindDriverMobileShell = function () {
             ? (dialLabel.dataset.driverDialRaw || dialLabel.textContent.trim().replace(/\s+/g, " "))
             : "";
         function submitDriverUnloadOnce() {
+            if (shell.dataset.driverShiftOpen !== "true") {
+                showDriverToast("Сначала начните смену", 4000);
+                return false;
+            }
             /* Ручной рейс на круге (барабан точек, driver-point-drum-v1.js): удержание или
                одно касание завершает его через очередь ручного режима; круг гаснет сам,
                когда движок ручного рейса сообщит о завершении. */
