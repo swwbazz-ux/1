@@ -6,7 +6,7 @@ const base='https://mining-master.driverform.ru',home='/mining-master/tablet/',p
 const out=path.resolve(process.argv[2]||path.join(__dirname,'../../../qa_artifacts/offline-reports'));fs.mkdirSync(out,{recursive:true});
 const checks={},ok=(k,v)=>{assert(v,k);checks[k]=true;};
 (async()=>{
- const b=await chromium.launch({headless:true}),ctx=await b.newContext(),p=await ctx.newPage();
+ const b=await chromium.launch({headless:true,channel:process.env.COPPER_CHROMIUM_CHANNEL}),ctx=await b.newContext(),p=await ctx.newPage();
  let offline=false,fileRequests=0;
  const documentBody='<html><body data-app-role-code="mining_master"><main>Строка проверенного отчёта 14,25 т</main></body></html>';
  const bytes=Buffer.alloc(110000,7);bytes.set([80,75,3,4]);
@@ -27,7 +27,21 @@ const checks={},ok=(k,v)=>{assert(v,k);checks[k]=true;};
  });
  for(const file of ['field-archive','field-reports'])await p.addScriptTag({path:path.join(__dirname,'../profiles/mining_master_tablet/assets/tablet/'+file+'.js')});
  await p.evaluate(u=>FieldReports.open(u),period);
- ok('exact filter and save time rendered',await p.evaluate(u=>rendered.at(-1).route===u&&rendered.at(-1).html.includes('данные получены'),period));
+ const reportPage=await p.evaluate(()=>rendered.at(-1));
+ ok('exact filter and save time reach the native bridge',reportPage.route===period&&/data-cr-field-report-at="\d+"/.test(reportPage.html));
+ for(const width of [1280, 390]){
+    const shown=await ctx.newPage({viewport:{width,height:760}});
+    try{
+        await shown.route(base+period,r=>r.fulfill({contentType:'text/html',body:reportPage.html}));
+        const errors=[];shown.on('pageerror',error=>errors.push(error.message));
+        const response=await shown.goto(base+period);
+        await shown.addScriptTag({path:path.join(__dirname,'../profiles/mining_master_tablet/assets/tablet/field-reports.js')});
+        const state=await shown.evaluate(()=>({text:document.querySelector('[data-field-report-snapshot]')?.textContent,
+            button:!!document.querySelector('[data-field-report-refresh]'),
+            width:document.documentElement.scrollWidth,viewport:innerWidth}));
+        ok('archived timestamp and refresh are visible at '+width,response.ok()&&state.text?.includes('данные получены')&&state.button&&state.width<=state.viewport&&!errors.length);
+    }finally{await shown.close();}
+ }
  await p.evaluate(u=>FieldReports.open(u),exp);
  let chunks=await p.evaluate(()=>chunks);
  const copy=Buffer.concat(chunks.filter(c=>c.op==='chunk').map(c=>Buffer.from(c.bytes,'base64')));

@@ -97,18 +97,23 @@
         return true;
     }
     const stamp=at=>new Date(at).toLocaleString("ru-RU");
-    function archivedDocument(html,title){
-        const p=new DOMParser().parseFromString(html,"text/html");
-        let tag=p.querySelector("[data-field-report-snapshot]");
-        if(!tag){tag=p.createElement("p");tag.dataset.fieldReportSnapshot="true";tag.setAttribute("role","status");
-            const host=p.querySelector("main")||p.body;host.prepend(tag);}
-        tag.textContent=title+" ";
-        const button=p.createElement("button");button.type="button";button.dataset.fieldReportRefresh="";button.textContent="Обновить";tag.append(button);
-        return "<!doctype html>"+p.documentElement.outerHTML;
+    function showReportTimestamp(){
+        const at=Number(doc.documentElement.dataset.crFieldReportAt);
+        if(!route(location.href)||!doc.documentElement.hasAttribute("data-cr-field-local")||
+                !Number.isSafeInteger(at)||at<=0||!doc.body)return;
+        let tag=doc.querySelector("[data-field-report-snapshot]");
+        if(!tag){tag=doc.createElement("p");tag.dataset.fieldReportSnapshot="true";tag.setAttribute("role","status");
+            (doc.querySelector("main")||doc.body).prepend(tag);}
+        tag.textContent="Отчёт на планшете · данные получены "+stamp(at)+" ";
+        const button=doc.createElement("button");button.type="button";button.dataset.fieldReportRefresh="";button.textContent="Обновить";tag.append(button);
     }
     async function render(page,scope){
         if(!same(await scopeNow(),scope) || !win.CopperFieldPage?.postMessage)return false;
-        win.CopperFieldPage.postMessage(JSON.stringify({route:page.path,html:archivedDocument(page.html,"Отчёт на планшете · данные получены "+stamp(page.at))}));return true;
+        if(!Number.isSafeInteger(page.at)||page.at<=0)return false;
+        // The archive already supplies the verified document. Add numeric metadata without reparsing its HTML.
+        const html=page.html.replace(/^<!doctype html><html(?=[\s>])/i,match=>match+' data-cr-field-report-at="'+page.at+'"');
+        if(html===page.html)return false;
+        win.CopperFieldPage.postMessage(JSON.stringify({route:page.path,html}));return true;
     }
     // Do not assume a particular server filename: preserve the response's real export format.
     function filename(res,path){
@@ -272,6 +277,8 @@
     win.addEventListener("online",wake);win.addEventListener("native-resume",wake);
     setInterval(()=>{if(!doc.hidden)wake();},30000);
     win.FieldReports={handles:url=>!!route(url),open,remember,missing,wake,scopeId};
+    if(doc.readyState==="loading")doc.addEventListener("DOMContentLoaded",showReportTimestamp,{once:true});
+    else showReportTimestamp();
     void db().catch(()=>{}); // Purge older copies even if this worker never opens reports.
     setTimeout(wake,100);
 })(window,document);
