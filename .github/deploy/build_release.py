@@ -402,7 +402,7 @@ def main() -> None:
                 raise SystemExit("master SSE verify takes no plan fingerprint")
             for name, source in {
                 "stream.py": "deployment/sse-production/stream.py",
-                "field_sync.py": "СИСТЕМА_MVP/backend/assignments/field_sync.py",
+                "field-sync.py": "СИСТЕМА_MVP/backend/assignments/field_sync.py",
                 "middleware.py": "СИСТЕМА_MVP/backend/users/middleware.py",
             }.items():
                 source_file = args.master_sse_source / source
