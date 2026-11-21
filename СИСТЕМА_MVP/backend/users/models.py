@@ -293,6 +293,9 @@ class Employee(models.Model):
     is_protected = models.BooleanField(
         'Защищённая карточка', default=False, db_default=False,
     )
+    allow_parallel_role_shifts = models.BooleanField(
+        'Параллельные смены владельца', default=False, db_default=False, editable=False,
+    )
     created_at = models.DateTimeField('Создан', auto_now_add=True)
     updated_at = models.DateTimeField('Обновлен', auto_now=True)
 
@@ -302,6 +305,15 @@ class Employee(models.Model):
         ordering = ['full_name']
         base_manager_name = 'objects'
         constraints = [
+            models.CheckConstraint(
+                condition=models.Q(allow_parallel_role_shifts=False) | models.Q(is_protected=True),
+                name='parallel_shifts_require_protected_employee',
+            ),
+            models.UniqueConstraint(
+                fields=['allow_parallel_role_shifts'],
+                condition=models.Q(allow_parallel_role_shifts=True),
+                name='one_employee_with_parallel_role_shifts',
+            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(brigade_number__isnull=True)

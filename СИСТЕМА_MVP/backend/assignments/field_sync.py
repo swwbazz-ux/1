@@ -28,7 +28,7 @@ from core.models import (
 )
 from references.models import Equipment
 from shifts.models import EmployeeShift
-from shifts.services import lock_active_employee_for_shift
+from shifts.services import can_work_parallel_roles, employee_shift_scope, lock_active_employee_for_shift
 from users.active_role import role_session_state
 from users.forms import is_valid_russian_mobile_phone, normalize_phone
 from users.mining_master_tablet_auth import _eligible, _version
@@ -504,10 +504,12 @@ def _process(access, proof, event, occurred):
             raise FieldProblem(
                 "shift_mismatch", "Открытие смены должно сохранить свой исходный номер."
             )
-        lock_active_employee_for_shift(access.employee, role_code=ROLE)
+        employee = lock_active_employee_for_shift(access.employee, role_code=ROLE)
+        parallel_roles = can_work_parallel_roles(employee)
+        scope = employee_shift_scope(ROLE, parallel_roles=parallel_roles)
         if (
             EmployeeShift.objects.filter(
-                employee_id=access.employee_id, closed_at__isnull=True
+                scope, employee=employee, closed_at__isnull=True
             ).exists()
             or mining_master_shift_queryset().exists()
         ):
@@ -519,16 +521,17 @@ def _process(access, proof, event, occurred):
             .filter(Q(opened_at__gt=occurred) | Q(closed_at__gt=occurred))
             .exists()
             or EmployeeShift.objects.filter(
-                employee_id=access.employee_id, closed_at__gt=occurred
+                scope, employee=employee, closed_at__gt=occurred
             ).exists()
         ):
             raise FieldProblem(
                 "late_shift", "После этой смены уже началась другая. История сохранена для сверки."
             )
         shift = EmployeeShift.objects.create(
-            employee=access.employee,
-            opened_by=access.employee,
+            employee=employee,
+            opened_by=employee,
             workplace_code=ROLE,
+            parallel_role_slot=parallel_roles,
             shift_type=get_shift_type_for_now(occurred),
             opened_at=occurred,
         )

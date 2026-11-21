@@ -194,10 +194,7 @@ def open_shift_conflict_message(shift, *, equipment=None):
     return f'Смена на технике {equipment} уже открыта другим сотрудником.'
 
 
-# Одна открытая смена на сотрудника во всех контурах (unique_open_shift_per_employee).
-# Когда один человек с несколькими ролями открывает смену в новой роли, а в
-# старой она ещё открыта, все экраны предлагают одно и то же: «завершить её и
-# начать» — вместо отказа (или, как у мастера до 10.09.2026, белого экрана 500).
+# Общая пересменка для сотрудников без разрешения на параллельные смены.
 WORKPLACE_ROLE_LABELS = {
     'driver': 'Водитель',
     'excavator_operator': 'Машинист экскаватора',
@@ -214,6 +211,29 @@ WORKPLACE_ROLE_LABELS_GENITIVE = {
 }
 OTHER_ROLE_SHIFT_OPEN_CODE = 'other_role_shift_open'
 OTHER_ROLE_SHIFT_FIELD = 'close_other_role_shift'
+
+
+def can_work_parallel_roles(employee):
+    from users.models import Employee, EmployeeAccess
+
+    return (
+        employee.allow_parallel_role_shifts
+        and employee.is_protected
+        and employee.is_active
+        and employee.status == Employee.Status.ACTIVE
+        and EmployeeAccess.objects.filter(
+            employee=employee,
+            role__code='admin',
+            role__is_active=True,
+            is_active=True,
+            status=EmployeeAccess.Status.ACTIVATED,
+        ).exists()
+    )
+
+
+def employee_shift_scope(workplace_code, *, parallel_roles):
+    """Keep old unclassified shifts in scope until their role is known."""
+    return Q(workplace_code__in=(workplace_code, '')) if parallel_roles else Q()
 
 
 def workplace_role_label(workplace_code):
@@ -256,6 +276,8 @@ class OtherRoleShiftOpen(ValidationError):
 def find_other_role_open_shift(employee, *, workplace_code, for_update=True):
     """Открытая смена сотрудника в другой роли (пустой workplace_code — старые
     записи, их роль неизвестна, поэтому они не считаются «другой ролью»)."""
+    if can_work_parallel_roles(employee):
+        return None
     queryset = EmployeeShift.objects.select_related('employee', 'equipment', 'equipment__equipment_type')
     if for_update:
         queryset = queryset.select_for_update(of=('self',))
@@ -687,9 +709,11 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 close_other=close_other_role_shift,
                 closed_by=employee,
             )
+            parallel_roles = can_work_parallel_roles(employee)
             employee_open_shift = (
                 EmployeeShift.objects
                 .select_related('employee', 'equipment', 'equipment__equipment_type')
+                .filter(employee_shift_scope('driver', parallel_roles=parallel_roles))
                 .filter(employee=employee, closed_at__isnull=True)
                 .order_by('id')
                 .first()
@@ -729,6 +753,7 @@ def open_driver_shift(*, employee, work_assignment, readings, client_action_id, 
                 opened_by=employee,
                 shift_type=locked_assignment.shift_type,
                 workplace_code='driver',
+                parallel_role_slot=parallel_roles,
                 watch_period=watch_period,
                 equipment=equipment,
                 opened_at=opened_at,
@@ -796,10 +821,9 @@ def open_driver_shift_from_device(
 ):
     """Открыть смену водителя по факту действия на телефоне (очередь без связи).
 
-    Телефон — источник истины: смена уже идёт на телефоне, сервер её только
-    записывает. Поэтому здесь нет отказов по бизнес-причинам:
+    Телефон — источник времени открытия. При сверке события:
     * время открытия — время телефона (``opened_at``);
-    * открытая смена того же сотрудника в любой роли и на любом устройстве, а
+    * открытая смена того же сотрудника, с учётом разрешения на параллельные роли, а
       также чужая открытая смена на этом самосвале закрываются служебно
       моментом открытия новой (решение Б «завершить и начать»);
     * показания пишутся как введены, проверка топлива по баку — только в журнал.
@@ -822,6 +846,11 @@ def open_driver_shift_from_device(
         if existing_shift:
             return existing_shift, False, []
         employee = Employee.objects.select_for_update().get(pk=employee.pk)
+        parallel_roles = can_work_parallel_roles(employee)
+        if parallel_roles and EmployeeShift.objects.filter(
+            employee=employee, workplace_code='', closed_at__isnull=True,
+        ).exists():
+            raise ValidationError('У открытой смены не определена роль. Нужна сверка.')
         equipment = (
             Equipment.objects
             .select_for_update(of=('self',))
@@ -833,7 +862,10 @@ def open_driver_shift_from_device(
             .select_for_update(of=('self',))
             .select_related('equipment', 'equipment__equipment_type')
             .filter(closed_at__isnull=True)
-            .filter(Q(employee=employee) | Q(equipment=equipment))
+            .filter(
+                (Q(employee=employee) & employee_shift_scope('driver', parallel_roles=parallel_roles))
+                | Q(equipment=equipment)
+            )
             .order_by('opened_at', 'id')
         )
         for previous in displaced:
@@ -869,6 +901,7 @@ def open_driver_shift_from_device(
             opened_by=employee,
             shift_type=shift_type,
             workplace_code='driver',
+            parallel_role_slot=parallel_roles,
             watch_period=watch_period,
             equipment=equipment,
             opened_at=opened_at,
@@ -2013,9 +2046,11 @@ def _open_excavator_shift_atomic(
             code=OTHER_ROLE_SHIFT_OPEN_CODE,
             extra={'other_role_shift': error.prompt},
         ) from error
+    parallel_roles = can_work_parallel_roles(employee)
     employee_open_shift = (
         EmployeeShift.objects
         .select_related('employee', 'equipment', 'equipment__equipment_type')
+        .filter(employee_shift_scope('excavator_operator', parallel_roles=parallel_roles))
         .filter(employee=employee, closed_at__isnull=True)
         .order_by('id')
         .first()
@@ -2057,6 +2092,7 @@ def _open_excavator_shift_atomic(
         equipment=equipment,
         shift_type=shift_type,
         workplace_code='excavator_operator',
+        parallel_role_slot=parallel_roles,
         start_fuel=fuel,
         start_mileage=None,
         start_engine_hours=engine_hours,
@@ -2177,6 +2213,7 @@ def open_excavator_shift(
         employee_open_shift = (
             EmployeeShift.objects
             .select_related('employee', 'equipment', 'equipment__equipment_type')
+            .filter(employee_shift_scope('excavator_operator', parallel_roles=can_work_parallel_roles(employee)))
             .filter(employee=employee, closed_at__isnull=True)
             .order_by('id')
             .first()

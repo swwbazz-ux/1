@@ -387,7 +387,7 @@ def _lock_exact_oup_write_context(*, actor_access_id):
 
 @transaction.atomic
 def open_oup_shift(*, actor_access_id, close_other_role_shift=False):
-    from shifts.services import resolve_other_role_shift
+    from shifts.services import can_work_parallel_roles, employee_shift_scope, resolve_other_role_shift
 
     actor, _actor_access = _lock_exact_oup_actor(actor_access_id=actor_access_id)
     current = get_open_oup_shift(actor)
@@ -402,8 +402,10 @@ def open_oup_shift(*, actor_access_id, close_other_role_shift=False):
         close_other=close_other_role_shift,
         closed_by=actor,
     )
+    parallel_roles = can_work_parallel_roles(actor)
     other_workplace_shift = (
         EmployeeShift.objects.select_for_update()
+        .filter(employee_shift_scope(OUP_ROLE_CODE, parallel_roles=parallel_roles))
         .filter(employee=actor, closed_at__isnull=True)
         .exclude(workplace_code=OUP_ROLE_CODE)
         .first()
@@ -436,6 +438,7 @@ def open_oup_shift(*, actor_access_id, close_other_role_shift=False):
                 employee=actor,
                 shift_type=ShiftType.DAY,
                 workplace_code=OUP_ROLE_CODE,
+                parallel_role_slot=parallel_roles,
                 equipment=None,
                 opened_at=now,
                 opened_by=actor,

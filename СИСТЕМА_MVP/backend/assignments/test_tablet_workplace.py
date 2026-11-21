@@ -10,6 +10,7 @@ from references.models import DumpPoint, Equipment, EquipmentType, RockType
 from shifts.models import EmployeeShift, PlanAssignmentStatus, PlanCalculationMode
 from trips.models import Trip, TripStatus
 from users.models import Employee, EmployeeAccess, Role
+from users.protected_cards import allow_protected_card_write
 
 from .field_commands import actual_cards
 from .models import ExcavatorPlacement
@@ -64,6 +65,34 @@ class TabletWorkplaceTests(TestCase):
         actual = self.own_open().get()
         self.assertEqual((actual.pk, actual.opened_at), (original.pk, original.opened_at))
         self.assertNotIn('mining_master_tablet_shift_auth', self.client.session)
+
+    def test_owner_can_start_resume_and_close_master_without_ending_dispatcher_shift(self):
+        admin_role, _ = Role.objects.get_or_create(code='admin', defaults={'name': 'Администратор'})
+        EmployeeAccess.objects.create(
+            employee=self.employee, role=admin_role, access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+        with allow_protected_card_write():
+            Employee.objects.filter(pk=self.employee.pk).update(
+                is_protected=True, allow_parallel_role_shifts=True,
+            )
+        dispatcher = EmployeeShift.objects.create(
+            employee=self.employee, opened_by=self.employee, workplace_code='dispatcher',
+            shift_type='day', opened_at=timezone.now(),
+        )
+        self.assertRedirects(self.enter_to_start(), self.url, fetch_redirect_response=False)
+        first = self.own_open().get()
+        self.assertTrue(first.parallel_role_slot)
+        self.assertRedirects(
+            self.enter_to_start(close_other_role_shift='1'),
+            self.url, fetch_redirect_response=False,
+        )
+        self.assertEqual(self.own_open().get().pk, first.pk)
+        self.client.post(self.url, {'action': 'end_shift'})
+        first.refresh_from_db()
+        dispatcher.refresh_from_db()
+        self.assertIsNotNone(first.closed_at)
+        self.assertIsNone(dispatcher.closed_at)
 
     def test_start_and_resume_do_not_announce_a_redundant_status(self):
         self.login()

@@ -5,12 +5,16 @@
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
 from references.models import Equipment, EquipmentModel, EquipmentType
+from trips.dispatcher_header import close_dispatcher_shift, open_dispatcher_shift
 from users.models import Employee, EmployeeAccess, Role
+from users.oup_services import open_oup_shift
+from users.protected_cards import allow_protected_card_write
 
 from .models import EmployeeShift
 from .services import (
@@ -18,6 +22,7 @@ from .services import (
     OtherRoleShiftOpen,
     find_other_role_open_shift,
     open_driver_shift,
+    open_driver_shift_from_device,
     open_excavator_shift,
     other_role_shift_flag,
     other_role_shift_prompt,
@@ -68,6 +73,83 @@ class OtherRoleShiftHandoverTests(TestCase):
             'start_mileage': Decimal('10000'),
             'start_engine_hours': Decimal('1000'),
         }
+
+    def give_access(self, role_code):
+        role, _ = Role.objects.get_or_create(code=role_code, defaults={'name': role_code})
+        return EmployeeAccess.objects.create(
+            employee=self.employee, role=role, access_code='654321',
+            status=EmployeeAccess.Status.ACTIVATED,
+        )
+
+    def grant_owner_exception(self):
+        self.give_access('admin')
+        with allow_protected_card_write():
+            Employee.objects.filter(pk=self.employee.pk).update(
+                is_protected=True, allow_parallel_role_shifts=True,
+            )
+        self.employee.refresh_from_db()
+
+    def test_owner_can_work_across_roles_and_dispatcher_close_targets_its_role(self):
+        dispatcher_access = self.give_access('dispatcher')
+        oup_access = self.give_access('oup')
+        self.grant_owner_exception()
+        master = self.open_other_role_shift('mining_master')
+        dispatcher = open_dispatcher_shift(dispatcher_access)
+        oup, created = open_oup_shift(actor_access_id=oup_access.pk, close_other_role_shift=True)
+        self.assertTrue(created)
+        driver, created = open_driver_shift(
+            employee=self.employee, work_assignment=self.driver_assignment,
+            readings=self.driver_readings(), client_action_id='owner-driver-online',
+            close_other_role_shift=True,
+        )
+        self.assertTrue(created)
+        self.assertTrue(open_excavator_shift(
+            employee=self.employee, equipment=self.excavator, shift_type='day',
+            fuel_value='100', engine_hours_value='1200', client_action_id='owner-excavator',
+            close_other_role_shift=True,
+        )['ok'])
+        self.assertEqual(EmployeeShift.objects.filter(employee=self.employee, closed_at__isnull=True).count(), 5)
+        self.assertEqual(close_dispatcher_shift(dispatcher_access).pk, dispatcher.pk)
+        for shift in (master, oup, driver):
+            shift.refresh_from_db()
+            self.assertIsNone(shift.closed_at)
+        self.assertEqual(EmployeeShift.objects.filter(employee=self.employee, closed_at__isnull=True).count(), 4)
+
+    def test_owner_offline_driver_open_does_not_service_close_master(self):
+        self.grant_owner_exception()
+        master = self.open_other_role_shift('mining_master')
+        shift, created, notes = open_driver_shift_from_device(
+            employee=self.employee, equipment=self.truck, shift_type='day',
+            readings=self.driver_readings(), client_action_id='owner-driver-offline',
+            opened_at=timezone.now(),
+        )
+        self.assertTrue(created)
+        self.assertTrue(shift.parallel_role_slot)
+        self.assertEqual(notes, [])
+        master.refresh_from_db()
+        self.assertIsNone(master.closed_at)
+
+    def test_admin_without_explicit_grant_still_requires_handover(self):
+        self.give_access('admin')
+        self.open_other_role_shift('dispatcher')
+        with self.assertRaises(OtherRoleShiftOpen):
+            open_driver_shift(
+                employee=self.employee, work_assignment=self.driver_assignment,
+                readings=self.driver_readings(), client_action_id='second-admin',
+            )
+
+    def test_database_keeps_single_grant_and_one_open_shift_per_role(self):
+        self.grant_owner_exception()
+        self.open_other_role_shift('mining_master')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            EmployeeShift.objects.create(
+                employee=self.employee, opened_by=self.employee, workplace_code='mining_master',
+                parallel_role_slot=True, shift_type='day', opened_at=timezone.now(),
+            )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Employee.objects.create(
+                full_name='Другой администратор', is_protected=True, allow_parallel_role_shifts=True,
+            )
 
     def test_prompt_names_the_open_role_and_the_target_role(self):
         shift = self.open_other_role_shift('dispatcher')

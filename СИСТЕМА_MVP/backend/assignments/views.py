@@ -16,6 +16,8 @@ from core.models import lock_production_state
 from references.models import Equipment
 from shifts.models import EmployeeShift, ShiftType
 from shifts.services import (
+    can_work_parallel_roles,
+    employee_shift_scope,
     find_other_role_open_shift,
     lock_active_employee_for_shift,
     other_role_shift_flag,
@@ -511,24 +513,26 @@ def handle_shift_action(request, action, access, current_shift, blocking_shift, 
                 lock_production_state()
                 current_shift, blocking_shift = get_shift_state(employee)
                 if not current_shift and not blocking_shift:
-                    # get_shift_state видит только смены мастера, а база
-                    # запрещает две открытые смены у одного сотрудника в любых
-                    # контурах (unique_open_shift_per_employee). Открытая смена
-                    # диспетчера или водителя того же человека раньше кончалась
-                    # IntegrityError и белым экраном 500 — теперь, как у всех
-                    # ролей, предлагается завершить её и начать эту.
                     resolve_other_role_shift(
                         employee,
                         workplace_code='mining_master',
                         close_other=other_role_shift_flag(request.POST),
                         closed_by=employee,
                     )
+                    parallel_roles = can_work_parallel_roles(employee)
+                    if EmployeeShift.objects.filter(
+                        employee_shift_scope('mining_master', parallel_roles=parallel_roles),
+                        employee=employee,
+                        closed_at__isnull=True,
+                    ).exists():
+                        raise ValidationError('У вас уже есть открытая смена. Обновите экран и попробуйте снова.')
                     try:
                         with transaction.atomic():
                             EmployeeShift.objects.create(
                                 employee=employee,
                                 shift_type=get_shift_type_for_now(now),
                                 workplace_code='mining_master',
+                                parallel_role_slot=parallel_roles,
                                 opened_at=now,
                                 opened_by=employee,
                             )
