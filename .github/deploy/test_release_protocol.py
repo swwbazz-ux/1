@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import sqlite3
 import ssl
 import subprocess
@@ -1079,6 +1080,39 @@ class ReleaseProtocolTests(unittest.TestCase):
         ):
             with self.subTest(invalid=invalid), self.assertRaises(receiver.ReleaseError):
                 for_master(invalid)
+
+    def test_master_sse_managed_file_identifiers_can_be_backed_up_and_restored(self):
+        transaction = runpy.run_path(str(ROOT / "deployment" / "sse-production" / "file_transaction.py"))
+        image = transaction["FileImage"]
+        globals_for_backup = transaction["save_backup"].__globals__
+
+        def round_trip(directory):
+            targets = {name: directory / name for name in (*receiver.MASTER_SSE_FILES, "nginx")}
+            for name, path in targets.items():
+                path.write_bytes(name.encode())
+            before = {name: globals_for_backup["read_image"](path) for name, path in targets.items()}
+            after = {name: image(b"new", previous.mode, previous.uid, previous.gid)
+                     for name, previous in before.items()}
+            backup = directory / "before"
+            transaction["apply_file_plan"](backup, targets, before, after)
+            self.assertTrue(all(path.read_bytes() == b"new" for path in targets.values()))
+            transaction["restore_backup"](backup, targets)
+            self.assertEqual({name: path.read_bytes() for name, path in targets.items()},
+                             {name: name.encode() for name in targets})
+
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = Path(scratch)
+            if os.name != "nt":
+                round_trip(directory)
+                return
+            posix_ids = mock.Mock(geteuid=lambda: 0, getegid=lambda: 0)
+            with mock.patch.dict(globals_for_backup, {
+                "os": posix_ids,
+                "read_image": lambda path: image(path.read_bytes(), 0o644, 0, 0),
+                "replace_image": lambda path, value: path.write_bytes(value.content),
+                "sync_directory": lambda _: None,
+            }):
+                round_trip(directory)
 
     def test_master_sse_rollback_and_enable_metadata_are_distinct(self):
         receiver.validate_mode_contract(

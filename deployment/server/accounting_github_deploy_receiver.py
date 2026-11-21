@@ -48,17 +48,17 @@ SSE_PRODUCTION_MODES = {"verify_sse_production", "enable_sse_production", "rollb
 MASTER_SSE_MODES = {"verify_master_sse_production", "enable_master_sse_production", "rollback_master_sse_production"}
 MASTER_SSE_PREFIX = "deploy/master-sse/"
 MASTER_SSE_FILES = {
-    "stream.py": ("core/sse.py",
+    "stream": ("core/sse.py",
                   "aa25a2888d6e183b98c6be2a903f49a10b4f7c7926f7fa263aadde819215549f",
                   "621a71a2146c05d83c343e4ed7650c588624788c7f50240ef95e9dd15d3b2432"),
-    "field_sync.py": ("assignments/field_sync.py",
+    "field-sync": ("assignments/field_sync.py",
                       "89bb56e53369aca6f391d844ccf10cab7bbeab8e5dcbf754b7aad12d96df417f",
                       "aac1abce388a17917ab951102f872e4531c323916aab75815c6d48798964d960"),
-    "middleware.py": ("users/middleware.py",
+    "middleware": ("users/middleware.py",
                       "b2a805464314169d1ba78df82d5ae37ba3ef9eb131b6a8d0b279d54703e68eae",
                       "8815f07e216db259a5ea3ae0a45ec97a4ba43b35db5bbd38443c1885521c7ce4"),
 }
-MASTER_SSE_PAYLOADS = {MASTER_SSE_PREFIX + name for name in MASTER_SSE_FILES}
+MASTER_SSE_PAYLOADS = {MASTER_SSE_PREFIX + name + ".py" for name in MASTER_SSE_FILES}
 SSE_PRODUCTION_PREFIX = "deploy/sse-production/"
 SSE_PRODUCTION_WHEELS = {
     "click-8.5.0-py3-none-any.whl": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
@@ -3892,7 +3892,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
         ):
             raise ReleaseError("invalid master SSE package contract")
         for target, content in payload.items():
-            if digest(content) != MASTER_SSE_FILES[PurePosixPath(target).name][2]:
+            if digest(content) != MASTER_SSE_FILES[PurePosixPath(target).stem][2]:
                 raise ReleaseError(f"master SSE payload differs from reviewed source: {target}")
             compile(content, target, "exec")
     elif mode in SSE_PRODUCTION_MODES:
@@ -5344,7 +5344,7 @@ def run_master_sse(mode: str, payload: dict[str, bytes], commit: str, metadata: 
     if digest(module.read_bytes()) != SSE_PRODUCTION_HASHES["file_transaction.py"]:
         raise ReleaseError("SSE backup module differs from the reviewed revision")
     transaction = runpy.run_path(str(module))
-    targets = {name.removesuffix(".py"): APP / values[0] for name, values in MASTER_SSE_FILES.items()}
+    targets = {name: APP / values[0] for name, values in MASTER_SSE_FILES.items()}
     version = metadata.get("enabled_commit", commit)
     state = SSE_PRODUCTION_STATE / f"master-{version}"
     backup = state / "before"
@@ -5367,14 +5367,13 @@ def run_master_sse(mode: str, payload: dict[str, bytes], commit: str, metadata: 
     nginx_path, site, planned_site = resolve_master_sse_nginx(rendered)
     targets["nginx"] = nginx_path
     before = {name: transaction["read_image"](path) for name, path in targets.items()}
-    if any(before[name.removesuffix(".py")] is None or
-           digest(before[name.removesuffix(".py")].content) != values[1]
+    if any(before[name] is None or digest(before[name].content) != values[1]
            for name, values in MASTER_SSE_FILES.items()):
         raise ReleaseError("master SSE application files differ from the reviewed production base")
     if before["nginx"] is None or before["nginx"].content != site:
         raise ReleaseError("master SSE nginx source changed during review")
     image = transaction["FileImage"]
-    new_bytes = {name.removesuffix(".py"): payload[MASTER_SSE_PREFIX + name] for name in MASTER_SSE_FILES}
+    new_bytes = {name: payload[MASTER_SSE_PREFIX + name + ".py"] for name in MASTER_SSE_FILES}
     new_bytes["nginx"] = planned_site
     planned = {name: image(new_bytes[name], previous.mode, previous.uid, previous.gid)
                for name, previous in before.items()}
