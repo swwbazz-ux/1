@@ -9,10 +9,11 @@ const token = '7cd577fa-f06c-47ac-a3f2-7a608c137034';
 
 function load({ state = {}, read, path = login, inputs = [], focused = false } = {}) {
   const messages = [];
+  const events = new Map();
   const document = {
     readyState: 'loading',
     activeElement: { matches: () => focused },
-    addEventListener() {},
+    addEventListener: (name, callback) => events.set(name, callback),
     querySelector: () => null,
     querySelectorAll: () => inputs,
   };
@@ -28,7 +29,7 @@ function load({ state = {}, read, path = login, inputs = [], focused = false } =
   vm.runInNewContext(source, { window, document, location, TextEncoder,
     HTMLFormElement: class {}, crypto: { subtle: { digest: async () => new Uint8Array(32).buffer } } });
   document.readyState = 'complete';
-  return { identity: window.FieldIdentity, messages };
+  return { identity: window.FieldIdentity, messages, submit: events.get('submit') };
 }
 
 test('does not reserve an update while any local shift is open', async () => {
@@ -45,7 +46,7 @@ test('defers for pending actions, missing journal, active board or typed credent
     { state: { snapshot_ready: false } }, { state: { locked: false } },
     { read: async () => { throw new Error('journal unavailable'); } },
     { path: '/mining-master/tablet/' }, { focused: true },
-    { inputs: [{ name: 'phone', value: '+7-900' }] }, { inputs: [{ name: 'access_code', value: '1' }] },
+    { inputs: [{ name: 'phone', value: '9' }] }, { inputs: [{ name: 'access_code', value: '1' }] },
   ]) {
     const { identity, messages } = load(config);
     await identity.reserveUpdate(token);
@@ -54,10 +55,13 @@ test('defers for pending actions, missing journal, active board or typed credent
 });
 
 test('reserves only the empty handover screen and gates login until the reservation is released', async () => {
-  const { identity, messages } = load({ inputs: [{ name: 'phone', value: '+7' }] });
+  const { identity, messages, submit } = load({ inputs: [{ name: 'phone', value: '+7' }] });
   await identity.reserveUpdate(token);
   assert.deepEqual(messages, [{ op: 'tablet_update_window', token, state: 'ready' }]);
   await assert.rejects(identity.signIn('9000000012', '123456'), /Устанавливается обновление/);
+  let prevented = false;
+  submit({ preventDefault: () => { prevented = true; }, stopImmediatePropagation() {} });
+  assert.equal(prevented, true);
   identity.releaseUpdate(token);
   await identity.reserveUpdate(token);
   assert.equal(messages.length, 2);

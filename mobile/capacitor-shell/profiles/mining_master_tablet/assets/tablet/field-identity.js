@@ -236,7 +236,7 @@
             !doc.querySelector("dialog[open], [aria-modal=true]") &&
             !doc.activeElement?.matches("input, textarea, select, [contenteditable=true]") &&
             ![...doc.querySelectorAll('form[data-tablet-shift-entry] input:not([type=hidden])')]
-                .some(input=>input.name==="phone" ? digits(input.value).length>1 : input.value.trim()!=="");
+                .some(input=>input.value.trim()!=="" && !(input.name==="phone" && input.value.trim()==="+7"));
     }
     async function reserveUpdate(token){
         if(!/^[a-f0-9-]{36}$/.test(token) || !win.CopperFieldPage || updateReservation)return;
@@ -276,6 +276,7 @@
         finally{if(secret)secret.value="";const repeat=form.elements.confirm_access_code;if(repeat)repeat.value="";}
     }
     doc.addEventListener("submit",event=>{
+        if(updateReservation){event.preventDefault();event.stopImmediatePropagation();return;}
         const form=event.target,cmd=controlForm(form,event.submitter);
         if(!cmd){
             if(doc.documentElement.hasAttribute("data-cr-field-local") && form.method==="get" && new URL(form.action).pathname===LOGIN){
@@ -290,6 +291,7 @@
     },true);
     const priorSubmit=HTMLFormElement.prototype.submit;
     HTMLFormElement.prototype.submit=function(){
+        if(updateReservation)return;
         const cmd=controlForm(this);
         if(!cmd)return priorSubmit.call(this);
         if(cmd==="end_shift" && this.dataset.confirmed!=="1")return;
