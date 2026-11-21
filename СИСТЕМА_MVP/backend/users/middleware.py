@@ -230,6 +230,7 @@ class ActiveRoleSessionMiddleware:
         '/mining-master/tablet/activate/',
         '/mining-master/tablet/logout/',
         '/mining-master/tablet/field-sync/',
+        '/realtime/stream/',  # POST uses the tablet's signed shift proof, not the WebView session.
         # Taking the session back is the one action an inactive role must still
         # be able to perform — otherwise there is no way out but retyping the PIN.
         '/reclaim-session/',

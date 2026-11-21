@@ -1077,12 +1077,59 @@ def _consume_personal_read(ticket, event, key, op):
     fresh[nonce] = now.timestamp()
     key.context_snapshot = {**key.context_snapshot, "used_read_challenges": fresh}
     key.save(update_fields=["context_snapshot", "updated_at"])
-    return access
+    return access, proof
+
+
+def authorize_tablet_stream(body):
+    """Consume a one-time device proof for one open shift."""
+    if not isinstance(body, dict) or body.get("protocol") != field_signing.PROTOCOL:
+        raise ValueError("invalid field protocol")
+    event, key, _ = field_signing.checked_event(body)
+    with transaction.atomic():
+        access, proof = _consume_personal_read(body.get("ticket"), event, key, "stream")
+        shift = _own_shift(access)
+        if (
+            not shift
+            or type(event.get("shift_id")) is not int
+            or event["shift_id"] != shift.pk
+            or event.get("actor_id") != access.employee_id
+            or event.get("actor_access_id") != access.pk
+        ):
+            raise FieldProblem("shift_scope_changed", "Смена мастера изменилась.", status="auth")
+    return {
+        "shift_id": shift.pk,
+        "employee_id": access.employee_id,
+        "access_id": access.pk,
+        "access_version": proof["access_version"],
+        "generation": proof["generation"],
+        "grant_until": proof["grant_until"],
+        "device_id": event["device_id"],
+        "fingerprint": key.fingerprint,
+    }
+
+
+def tablet_stream_grant_is_current(grant):
+    access = (
+        EmployeeAccess.objects.select_related("employee", "role", "employee__contractor_organization")
+        .filter(pk=grant["access_id"], employee_id=grant["employee_id"])
+        .first()
+    )
+    if (
+        not _eligible(access)
+        or _version(access) != grant["access_version"]
+        or not _read_grant(access, grant)
+    ):
+        return False
+    key = field_signing.registration(grant["device_id"])
+    return bool(
+        key and key.fingerprint == grant["fingerprint"]
+        and mining_master_shift_queryset().filter(pk=grant["shift_id"], employee_id=access.employee_id).exists()
+    )
 
 
 def _pull(ticket, event, key, op, csrf_secret):
     with transaction.atomic():
-        access = _consume_personal_read(ticket, event, key, op)
+        access, _ = _consume_personal_read(ticket, event, key, op)
         if op == "report":
             return field_reports.render_report(access, event.get("path"), csrf_secret)
         if op == "snapshot":
