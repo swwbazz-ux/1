@@ -32,6 +32,7 @@ MODES = {
     "verify_sse_production",
     "enable_sse_production",
     "rollback_sse_production",
+    "verify_master_sse_production", "enable_master_sse_production", "rollback_master_sse_production",
     "verify_sse_qa",
     "prepare_sse_qa_host_key",
     "install_sse_qa",
@@ -157,6 +158,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--event-file", type=Path)
     parser.add_argument("--sse-qa-package", type=Path)
     parser.add_argument("--sse-production-wheels", type=Path)
+    parser.add_argument("--master-sse-source", type=Path)
     parser.add_argument("--sse-qa-secrets", type=Path)
     parser.add_argument("--sse-qa-secrets-stdin", action="store_true")
     parser.add_argument("--sse-qa-candidate-commit")
@@ -383,6 +385,28 @@ def main() -> None:
                 (PurePosixPath("deploy/sse-production", name), args.sse_production_wheels / name)
                 for name in SSE_PRODUCTION_WHEELS
             )
+    elif args.mode.endswith("_master_sse_production"):
+        paths = []
+        if args.mode == "rollback_master_sse_production":
+            if not re.fullmatch(r"[0-9a-f]{40}", args.rollback_id or ""):
+                raise SystemExit("master SSE rollback requires the exact enabled release SHA")
+            metadata["enabled_commit"] = args.rollback_id
+        else:
+            if not args.master_sse_source:
+                raise SystemExit("master SSE requires the reviewed release source")
+            if args.mode == "enable_master_sse_production":
+                if not re.fullmatch(r"[0-9a-f]{64}", args.rollback_id or ""):
+                    raise SystemExit("master SSE enable requires the verified plan fingerprint")
+                metadata["plan_sha256"] = args.rollback_id
+            elif args.rollback_id:
+                raise SystemExit("master SSE verify takes no plan fingerprint")
+            for name, source in {
+                "stream.py": "deployment/sse-production/stream.py",
+                "field_sync.py": "СИСТЕМА_MVP/backend/assignments/field_sync.py",
+                "middleware.py": "СИСТЕМА_MVP/backend/users/middleware.py",
+            }.items():
+                source_file = args.master_sse_source / source
+                inline_payload.append((PurePosixPath("deploy/master-sse", name), source_file.read_bytes().replace(b"\r\n", b"\n")))
     elif args.mode in {"verify_receiver", "update_receiver"}:
         if not args.receiver_source:
             raise SystemExit("receiver mode requires --receiver-source")

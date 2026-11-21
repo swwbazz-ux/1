@@ -1050,6 +1050,49 @@ class ReleaseProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             receiver.plan_sse_production_site(site, "0" * 64)
 
+    def test_master_sse_only_extends_the_selected_tls_vhost(self):
+        separate = b"server { listen 443 ssl; server_name mining-master.driverform.ru; include proxy_params; }"
+        worker = b"server { listen 443 ssl; server_name driver.driverform.ru; }"
+        site = receiver.plan_sse_production_site(
+            worker + b"\n" + separate, receiver.digest(worker + b"\n" + separate),
+            frozenset({b"driver.driverform.ru"}),
+        )
+        def for_master(data):
+            vhost, = [x for x in receiver.parse_sse_production_vhosts(data)
+                      if x["tls"] and receiver.MASTER_SSE_HOST in x["names"]]
+            return receiver.master_sse_nginx_change(data, vhost)
+
+        split = for_master(site)
+        self.assertEqual(split.count(receiver.SSE_PRODUCTION_LOCATION), 1)
+        self.assertIn(rb"^mining-master\.driverform\.ru$", split)
+        shared = site.replace(b"server_name driver.driverform.ru;", b"server_name driver.driverform.ru mining-master.driverform.ru;")
+        shared = shared.replace(separate, b"")
+        planned = for_master(shared)
+        self.assertEqual(
+            planned.replace(rb"^(driver|excavator|mining-master)\.driverform\.ru$", receiver.SSE_STREAM_HOST_FILTER),
+            shared,
+        )
+        for invalid in (
+            separate.replace(b"include proxy_params;", b"include unexpected.conf;"),
+            separate.replace(b"include proxy_params;", b"location /realtime/stream/ { return 404; }"),
+            separate.replace(b"include proxy_params;", b"allow 127.0.0.1;"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(receiver.ReleaseError):
+                for_master(invalid)
+
+    def test_master_sse_rollback_and_enable_metadata_are_distinct(self):
+        receiver.validate_mode_contract(
+            {"mode": "rollback_master_sse_production", "metadata": {"enabled_commit": "a" * 40}}, {},
+        )
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_mode_contract(
+                {"mode": "rollback_master_sse_production", "metadata": {"plan_sha256": "a" * 64}}, {},
+            )
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_mode_contract(
+                {"mode": "enable_master_sse_production", "metadata": {"plan_sha256": "a" * 64}}, {},
+            )
+
     def test_production_sse_effective_nginx_sanitizes_dump_and_refuses_mismatch(self):
         site = (
             b"server { listen 443 ssl; "
