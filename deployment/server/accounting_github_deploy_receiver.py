@@ -3841,7 +3841,7 @@ def validate_mode_contract(manifest: dict[str, Any], payload: dict[str, bytes]) 
     metadata = manifest["metadata"]
     if mode in APK_MODES:
         profile = metadata.get("apk_profile")
-        if profile not in {"driver", "excavator"}:
+        if profile not in {"driver", "excavator", "mining_master_tablet"}:
             raise ReleaseError("invalid APK profile")
         expected_manifest = f"media/apk/{profile}-update.json"
         apk_files = [path for path in payload if path.endswith(".apk")]

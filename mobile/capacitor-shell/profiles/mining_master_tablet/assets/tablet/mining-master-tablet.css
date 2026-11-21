@@ -1,0 +1,536 @@
+/* APK touch layer; the existing Dispatcher layout, role and colours remain authoritative. */
+/* Related dispatcher pages scroll in the real viewport. A transformed scroll
+   layer is clipped to the unscaled viewport on the tablet's Android WebView. */
+@media screen {
+/* Shift state is already communicated by the board colour and start button.
+   Retain every other result, warning and error in these message containers. */
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .cr-mm-shift-notice,
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) :is(.dispatcher-messages, .dispatcher-shift-report-messages):not(:has(> :not(.cr-mm-shift-notice))) { display: none !important; }
+/* A non-interactive backdrop leaves the real start button in colour. No
+   ancestor filter: that would also desaturate the button and move fixed UI. */
+#cr-mm-shift-monochrome { display: none; position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; backdrop-filter: grayscale(1); -webkit-backdrop-filter: grayscale(1); }
+html.cr-mm-shift-closed #cr-mm-shift-monochrome { display: block; }
+html.cr-mm-shift-closed .cr-mm-shift-start-accent { animation: cr-mm-shift-start-pulse 2.4s ease-in-out infinite; }
+html.cr-mm-shift-closed .cr-mm-shift-start-accent:active { transform: none; }
+@keyframes cr-mm-shift-start-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .08); filter: brightness(1); }
+    50% { box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .65); filter: brightness(1.16); }
+}
+@media (prefers-reduced-motion: reduce) {
+    html.cr-mm-shift-closed .cr-mm-shift-start-accent { animation: none; box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .4); }
+}
+/* Touch keeps :hover after a tap. Only the explicit clock mode may spin;
+   otherwise the second tap would stop the mode but leave hover spinning. */
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .dispatcher-radial-clock:not(.is-music):not(.is-music-stopping):hover .dispatcher-radial-clock-face,
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) .dispatcher-radial-clock:not(.is-music):not(.is-music-stopping):hover .dispatcher-radial-clock-ring { animation: none; filter: none; }
+html.cr-mm-tablet-page, html.cr-mm-tablet-page body { width: 100%; height: 100%; margin: 0; overflow: hidden !important; -webkit-text-size-adjust: 100%; }
+html.cr-mm-tablet-page .dispatcher-canvas[data-dispatcher-canvas] { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important; transform: none !important; --gd-vw: 1vw !important; --gd-vh: 1vh !important; }
+html.cr-mm-tablet-page .dispatcher-canvas > .dispatcher-analytics-shell, html.cr-mm-tablet-page body > .dispatcher-analytics-shell.management-linked-report { box-sizing: border-box; width: 100% !important; max-width: 100% !important; height: 100% !important; min-height: 0 !important; transform: none !important; overflow: hidden auto !important; --gd-header-h: 126px; overscroll-behavior: contain; }
+html.cr-mm-tablet-page .dispatcher-analytics-board { width: 100% !important; min-width: 0 !important; min-height: 100% !important; }
+html.cr-mm-tablet-page .dispatcher-unified-topbar { --gd-header-identity-width: 24%; --gd-header-actions-width: clamp(180px, 20vw, 250px); --gd-header-clock-width: 126px; }
+html.cr-mm-tablet-page .dispatcher-command-actions { display: grid !important; grid-template: auto / minmax(0, 1fr) !important; align-items: center !important; align-content: center !important; gap: 6px !important; height: 100% !important; }
+html.cr-mm-tablet-page .dispatcher-shift-slot, html.cr-mm-tablet-page .dispatcher-shift-form { height: auto !important; margin: 0 !important; padding: 0 !important; }
+html.cr-mm-tablet-page .dispatcher-nav a, html.cr-mm-tablet-page .dispatcher-subnav a, html.cr-mm-tablet-page .dispatcher-report-actions a, html.cr-mm-tablet-page .dispatcher-report-actions-row a, html.cr-mm-tablet-page .dispatcher-shift-report-tabs a, html.cr-mm-tablet-page .dispatcher-shift-report-back, html.cr-mm-tablet-page button, html.cr-mm-tablet-page input:not([type="checkbox"]):not([type="radio"]), html.cr-mm-tablet-page select { box-sizing: border-box; min-height: 44px !important; font-size: 14px; }
+html.cr-mm-tablet-page .dispatcher-theme-button { min-width: 44px; min-height: 44px !important; }
+html.cr-mm-tablet-page .dispatcher-header-row .dispatcher-nav { gap: 8px; }
+html.cr-mm-tablet-page .dispatcher-nav a { display: inline-flex; justify-content: center; align-items: center; }
+html.cr-mm-tablet-page .dispatcher-report-filters, html.cr-mm-tablet-page .dispatcher-report-controlbar-filters { flex-wrap: wrap; }
+html.cr-mm-tablet-page .dispatcher-shift-report-controlbar { flex-wrap: wrap; }
+html.cr-mm-tablet-page .dispatcher-shift-report-switcher { flex: 1 1 600px; }
+html.cr-mm-tablet-page .dispatcher-shift-report-filters { display: grid; grid-template-columns: repeat(2, minmax(132px, 1fr)); gap: 6px 8px; flex: 0 0 auto; }
+html.cr-mm-tablet-page .dispatcher-shift-report-filter-summary { grid-column: 1 / -1; justify-content: flex-end; min-width: 0; margin: 0 !important; white-space: normal; }
+html.cr-mm-tablet-page .dispatcher-shift-report-controlbar > .dispatcher-report-actions { flex: 0 0 auto; }
+html.cr-mm-tablet-page .dispatcher-report-table-wrap, html.cr-mm-tablet-page .dispatcher-shift-report-table-wrap { max-width: 100%; overflow-x: auto; overscroll-behavior: contain; }
+html.cr-mm-tablet-page .management-linked-report-content .button-link { min-height: 44px; }
+html.cr-mm-tablet-page .management-linked-report-content .checkbox-grid .checkline { background: var(--gd-panel); border-color: var(--gd-line); }
+html.cr-mm-tablet-page .management-linked-report-content .checkbox-grid .checkline label { min-height: 44px; }
+html.cr-mm-tablet-page .management-linked-report-content input[type="checkbox"] { width: 24px; min-height: 24px; height: 24px; flex: 0 0 24px; }
+}
+@media print {
+    html.cr-mm-tablet-page, html.cr-mm-tablet-page body { width: 100% !important; height: auto !important; min-height: 0 !important; margin: 0 !important; overflow: visible !important; background: #fff !important; color: #111 !important; }
+    html.cr-mm-tablet-page .dispatcher-canvas[data-dispatcher-canvas], html.cr-mm-tablet-page .dispatcher-canvas > .dispatcher-analytics-shell, html.cr-mm-tablet-page body > .dispatcher-analytics-shell.management-linked-report, html.cr-mm-tablet-page .dispatcher-analytics-board { display: block !important; position: static !important; inset: auto !important; width: 100% !important; max-width: 100% !important; min-width: 0 !important; height: auto !important; min-height: 0 !important; max-height: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; transform: none !important; background: #fff !important; box-shadow: none !important; }
+    html.cr-mm-tablet-page .dispatcher-shell { --gd-text: #111; --gd-ink: #111; --gd-muted: #444; --gd-panel: #fff; --gd-panel-soft: #fff; --gd-card: #fff; --gd-green: #216d35; --gd-red: #a62525; --gd-yellow: #805800; --gd-cyan: #145d75; --gd-line: #a5afb5; }
+    html.cr-mm-tablet-page .dispatcher-command-identity, html.cr-mm-tablet-page .dispatcher-command-actions, html.cr-mm-tablet-page .dispatcher-radial-clock, html.cr-mm-tablet-page .dispatcher-nav, html.cr-mm-tablet-page .dispatcher-subnav, html.cr-mm-tablet-page .dispatcher-report-actions, html.cr-mm-tablet-page .dispatcher-report-actions-row, html.cr-mm-tablet-page .app-connection-dot, html.cr-mm-tablet-page .app-realtime-update, html.cr-mm-tablet-page .app-realtime-status { display: none !important; }
+    html.cr-mm-tablet-page .dispatcher-unified-topbar, html.cr-mm-tablet-page .dispatcher-header-row, html.cr-mm-tablet-page .dispatcher-command-main, html.cr-mm-tablet-page .dispatcher-command-context { display: block !important; position: static !important; height: auto !important; min-height: 0 !important; max-height: none !important; padding: 0 !important; border: 0 !important; background: #fff !important; }
+    html.cr-mm-tablet-page .dispatcher-command-context > :not(strong) { display: none !important; }
+    html.cr-mm-tablet-page .dispatcher-command-context > strong { color: #111 !important; font-size: 16pt !important; margin: 0 0 8pt; }
+    html.cr-mm-tablet-page .dispatcher-report-filters { display: flex !important; flex-wrap: wrap; gap: 18pt; min-height: 0; margin: 0 0 10pt; padding: 0; border: 0; background: #fff; color: #111; break-inside: avoid; }
+    html.cr-mm-tablet-page .dispatcher-report-filters label, html.cr-mm-tablet-page .dispatcher-report-filters input, html.cr-mm-tablet-page .dispatcher-report-filters select { color: #111 !important; background: #fff !important; border: 0 !important; min-height: 0 !important; padding: 0; font-size: 11pt; appearance: none; }
+    html.cr-mm-tablet-page .dispatcher-report-filters button { display: none !important; }
+    html.cr-mm-tablet-page .dispatcher-reports-layout { display: block !important; }
+    html.cr-mm-tablet-page .dispatcher-report-tile-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8pt; }
+    html.cr-mm-tablet-page .dispatcher-report-tile { min-height: 0; padding: 8pt; break-inside: avoid; background: #fff !important; box-shadow: none; }
+    html.cr-mm-tablet-page .dispatcher-report-hub-card { margin-top: 10pt; break-inside: avoid; }
+    html.cr-mm-tablet-page .dispatcher-report-template-list a { color: #111 !important; background: #fff !important; }
+    html.cr-mm-tablet-page .dispatcher-report-table-wrap, html.cr-mm-tablet-page .dispatcher-shift-report-table-wrap { position: static !important; width: 100% !important; max-width: 100% !important; height: auto !important; max-height: none !important; overflow: visible !important; }
+    html.cr-mm-tablet-page .dispatcher-shift-report-table { width: 100%; min-width: 0 !important; max-width: 100%; }
+    html.cr-mm-tablet-page .dispatcher-shift-report-table thead { display: table-header-group; }
+    html.cr-mm-tablet-page .dispatcher-shift-report-table th, html.cr-mm-tablet-page .dispatcher-shift-report-table .is-sticky { position: static !important; }
+    html.cr-mm-tablet-page .dispatcher-shift-report-table tr { break-inside: avoid; }
+    html.cr-mm-tablet-page .management-linked-report-content .dashboard-grid { display: block !important; }
+    html.cr-mm-tablet-page .management-linked-report-content .dashboard-grid > .card { margin-bottom: 10pt; break-inside: avoid; }
+    html.cr-mm-tablet-page .management-linked-report-content .table-wrap { height: auto !important; max-height: none !important; overflow: visible !important; }
+    html.cr-mm-tablet-page .management-linked-report-content table { width: 100% !important; min-width: 0 !important; table-layout: auto; font-size: 8pt; }
+    html.cr-mm-tablet-page .management-linked-report-content th, html.cr-mm-tablet-page .management-linked-report-content td { white-space: normal; overflow-wrap: anywhere; }
+    html.cr-mm-tablet-page .management-linked-report-content thead { display: table-header-group; }
+    html.cr-mm-tablet-page .management-linked-report-content tr { break-inside: avoid; }
+}
+html.cr-mm-incompatible body > :not(#cr-mm-compatibility-warning) { display: none !important; }
+#cr-mm-compatibility-warning {
+  position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center;
+  box-sizing: border-box; padding: 24px; color: #eef4f6; background: #101b21;
+  text-align: center; font: 16px/1.4 system-ui, sans-serif;
+}
+#cr-mm-compatibility-warning h1 { margin: 0; font-size: clamp(1.25rem, 3vw, 2rem); }
+html.cr-mm-tablet, html.cr-mm-tablet body { width: 100%; height: 100%; margin: 0; overflow: hidden !important; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+html.cr-mm-tablet .dispatcher-canvas[data-dispatcher-canvas] { position: fixed !important; top: var(--cr-mm-canvas-center) !important; left: 50% !important; width: var(--dispatcher-canvas-w) !important; height: var(--dispatcher-canvas-h) !important; transform: translate(-50%, -50%) scale(var(--dispatcher-canvas-scale)) !important; }
+html.cr-mm-tablet .dispatcher-canvas > .dispatcher-shell { width: 100% !important; height: 100% !important; min-height: 0 !important; transform: none !important; --gd-header-h: calc(126px / var(--cr-mm-scale)); }
+html.cr-mm-tablet .dispatcher-board { height: 100% !important; }
+html.cr-mm-tablet .dispatcher-unified-topbar { --gd-header-actions-width: clamp(225px, 18%, 330px); }
+html.cr-mm-tablet .dispatcher-nav a, html.cr-mm-tablet .dispatcher-shift-button, html.cr-mm-tablet .dispatcher-theme-button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(12px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .dispatcher-theme-button { min-width: calc(44px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .dispatcher-command-actions { display: grid !important; grid-template: auto / minmax(0, 1fr) !important; align-items: center !important; align-content: center !important; gap: calc(6px / var(--cr-mm-scale)) !important; height: 100% !important; }
+html.cr-mm-tablet .dispatcher-shift-slot, html.cr-mm-tablet .dispatcher-shift-form { height: auto !important; margin: 0 !important; padding: 0 !important; }
+html.cr-mm-tablet .dispatcher-command-main > .dispatcher-equipment-search { display: none !important; }
+html.cr-mm-tablet .gd-equipment-detail input, html.cr-mm-tablet .gd-equipment-detail select, html.cr-mm-tablet .gd-equipment-detail button, html.cr-mm-tablet [data-shared-shift-login-modal]:not([data-tablet-personal-login]) input, html.cr-mm-tablet [data-shared-shift-login-modal]:not([data-tablet-personal-login]) button { min-height: calc(44px / var(--cr-mm-scale)) !important; font-size: calc(14px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .gd-detail-close, html.cr-mm-tablet .mm-detail-close, html.cr-mm-tablet [data-shared-shift-login-modal]:not([data-tablet-personal-login]) .shared-shift-close { min-width: calc(44px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .gd-detail-panel, html.cr-mm-tablet .shared-shift-dialog { max-height: calc(94vh / var(--cr-mm-scale)) !important; overflow: auto !important; }
+html.cr-mm-tablet .dispatcher-zone-grid { overscroll-behavior: contain; }
+html.cr-mm-tablet .dispatcher-complex-card .complex-truck-more:not([hidden]) { min-width: calc(44px / var(--cr-mm-scale)); min-height: calc(44px / var(--cr-mm-scale)); cursor: pointer; pointer-events: auto !important; touch-action: manipulation; }
+html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack { align-content: start !important; overflow: auto !important; overscroll-behavior: contain; grid-auto-rows: max(var(--complex-truck-h), calc(44px / var(--cr-mm-scale))) !important; }
+html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-tile[hidden] { display: grid !important; }
+html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-tile { min-height: calc(44px / var(--cr-mm-scale)) !important; }
+html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more { order: -1; font-size: 0 !important; }
+html.cr-mm-tablet .dispatcher-complex-card .cr-mm-expanded-rack .complex-truck-more::after { content: "Свернуть"; font-size: calc(10px / var(--cr-mm-scale)); }
+#cr-mm-toolbar { position: fixed; inset: auto 0 0; z-index: 1000; display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: 64px; margin: 0; padding: 9px 12px; border-top: 1px solid #48606b; color: #edf4f7; background: #10232e; font: 14px/1.3 system-ui, sans-serif; }
+#cr-mm-toolbar label { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; margin: 0; }
+#cr-mm-toolbar label.cr-mm-assign-excavator { flex-grow: 1.25; }
+#cr-mm-toolbar label > img { flex: 0 0 36px; width: 36px; height: 36px; object-fit: contain; }
+#cr-mm-toolbar .cr-mm-assign-control { display: block; position: relative; flex: 1 1 0; min-width: 0; }
+#cr-mm-toolbar .cr-mm-assign-control > span { position: absolute; top: 4px; left: 11px; z-index: 1; font: 11px/12px system-ui, sans-serif; color: #c4d6df; pointer-events: none; }
+#cr-mm-toolbar input, #cr-mm-toolbar select { box-sizing: border-box; width: 100% !important; min-width: 0; height: 44px; margin: 0; padding: 16px 10px 2px; border: 1px solid #627f8d; border-radius: 7px; background: #071720; color: #fff; font: 18px/22px system-ui, sans-serif; }
+#cr-mm-toolbar select { cursor: pointer; }
+#cr-mm-toolbar .cr-mm-assign-arrow { flex: 0 0 auto; font: 28px/1 system-ui, sans-serif; color: #c4d6df; }
+#cr-mm-toolbar button { flex: 0 0 auto; width: auto !important; min-width: 200px; height: 44px; margin: 0 !important; padding: 0 18px; border: 1px solid #ffd200; border-radius: 7px; color: #172129; background: #ffd200; font: 600 16px/1.2 system-ui, sans-serif; cursor: pointer; }
+/* Same match presentation as dispatcher-adaptive-v1.css. Keep the tablet's
+   own marker so the independent desktop search cannot clear a found truck. */
+html.cr-mm-tablet .cr-mm-truck-hit { position: relative; z-index: 3; animation: dispatcher-search-blink .7s ease-in-out infinite; }
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit;
+    background: rgba(52, 194, 211, .22);
+    background: color-mix(in srgb, var(--gd-cyan) 22%, transparent);
+    box-shadow: inset 0 0 0 3px #8df3ff; pointer-events: none;
+}
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit img { opacity: 1 !important; filter: grayscale(0); }
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit strong,
+html.cr-mm-tablet .dispatcher-truck-garage .cr-mm-truck-hit span { color: #ffffff !important; }
+@media (prefers-reduced-motion: reduce) {
+    html.cr-mm-tablet .cr-mm-truck-hit { animation: none; box-shadow: 0 0 0 3px #8df3ff, 0 0 18px 4px rgba(141, 243, 255, .7); }
+}
+#cr-mm-toolbar [hidden] { display: none !important; }
+#cr-mm-toolbar input:focus-visible, #cr-mm-toolbar select:focus-visible, #cr-mm-toolbar button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+@media (max-width: 600px) {
+    #cr-mm-toolbar label { gap: 4px; }
+    #cr-mm-toolbar label > img { flex-basis: 22px; width: 22px; height: 28px; }
+    #cr-mm-toolbar .cr-mm-assign-arrow { font-size: 20px; }
+    #cr-mm-toolbar button { min-width: 82px; padding-inline: 7px; font-size: 13px; }
+    #cr-mm-toolbar input, #cr-mm-toolbar select { padding-inline: 6px; font-size: 16px; }
+    #cr-mm-toolbar .cr-mm-assign-control > span { left: 7px; font-size: 10px; }
+}
+@media screen and (max-height: 639px) {
+    html.cr-mm-tablet .dispatcher-excavators, html.cr-mm-tablet .dispatcher-trucks { grid-template-rows: none !important; grid-auto-rows: calc(58px / var(--cr-mm-scale)) !important; align-content: start !important; overflow-y: auto !important; }
+}
+@media (max-width: 1180px) {
+    html.cr-mm-tablet .dispatcher-board { display: grid !important; grid-template-columns: calc(90px / var(--cr-mm-scale)) minmax(0, 1fr) calc(110px / var(--cr-mm-scale)) !important; grid-template-rows: var(--gd-header-h) minmax(0, 1fr) !important; grid-template-areas: "header header header" "left complexes right" !important; }
+    html.cr-mm-tablet .dispatcher-topbar { grid-area: header !important; }
+    html.cr-mm-tablet .dispatcher-left { grid-area: left !important; }
+    html.cr-mm-tablet .dispatcher-right { grid-area: right !important; }
+    html.cr-mm-tablet .dispatcher-complexes { grid-area: complexes !important; }
+    html.cr-mm-tablet .dispatcher-left, html.cr-mm-tablet .dispatcher-right, html.cr-mm-tablet .dispatcher-complexes { display: flex !important; position: relative !important; flex-direction: column !important; width: 100% !important; height: 100% !important; min-height: 0 !important; inset: auto !important; margin: 0 !important; }
+    html.cr-mm-tablet .dispatcher-garage-panel { display: flex !important; flex-direction: column !important; flex: 1 !important; height: 100% !important; min-height: 0 !important; }
+    html.cr-mm-tablet .dispatcher-excavators, html.cr-mm-tablet .dispatcher-trucks { display: grid !important; flex: 1 !important; grid-template-columns: 1fr !important; grid-auto-rows: calc(58px / var(--cr-mm-scale)) !important; grid-template-rows: none !important; align-content: start !important; width: 100% !important; min-height: 0 !important; overflow: auto !important; }
+    html.cr-mm-tablet .dispatcher-zone-grid { min-height: 0 !important; height: 100% !important; overflow-y: auto !important; }
+    html.cr-mm-tablet .dispatcher-header-row { display: grid !important; grid-template-columns: 25% minmax(0, 1fr) 22% !important; grid-template-rows: 1fr !important; }
+    html.cr-mm-tablet .dispatcher-header-row > section { grid-area: auto !important; width: auto !important; min-width: 0 !important; }
+    html.cr-mm-tablet body .dispatcher-command-main { display: flex !important; flex-direction: column !important; justify-content: center !important; gap: calc(8px / var(--cr-mm-scale)) !important; height: 100% !important; overflow: visible !important; }
+    html.cr-mm-tablet body .dispatcher-command-context { position: static !important; height: auto !important; min-height: 0 !important; padding: 0 !important; }
+    html.cr-mm-tablet body .dispatcher-nav { display: flex !important; position: static !important; flex: 0 0 auto !important; height: auto !important; min-height: calc(44px / var(--cr-mm-scale)) !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+    html.cr-mm-tablet body .dispatcher-nav a { flex: 1 1 auto !important; padding-inline: 4px !important; }
+    html.cr-mm-tablet body .dispatcher-left .dispatcher-excavators, html.cr-mm-tablet body .dispatcher-right .dispatcher-trucks { grid-template-columns: 1fr !important; }
+    html.cr-mm-tablet .dispatcher-clock { display: none !important; }
+    #cr-mm-toolbar { gap: 7px; padding-inline: 8px; }
+}
+
+@media screen {
+/* Four original control panels. Related pages keep their separate layout. */
+html.cr-mm-panels .dispatcher-canvas[data-dispatcher-canvas] {
+  width: var(--cr-panel-canvas-w) !important; height: var(--cr-panel-canvas-h) !important;
+  transform: translate(-50%, -50%) scale(var(--cr-mm-scale)) !important;
+  --gd-vw: var(--cr-panel-canvas-vw) !important; --gd-vh: 10px !important;
+}
+html.cr-mm-panels .dispatcher-canvas > .dispatcher-shell { padding: 0 !important; }
+html.cr-mm-panels .dispatcher-board {
+  position: relative !important;
+  grid-template-columns: var(--cr-field-left, 0px) minmax(0, 1fr) var(--cr-field-right, 0px) !important;
+  grid-template-rows: var(--cr-field-top, 0px) minmax(0, 1fr) var(--cr-field-bottom, 0px) !important;
+  grid-template-areas: none !important;
+  gap: 0 !important;
+}
+/* The active track survives the closing animation. It is released only when
+   the controller marks the old panel closed; another panel opens afterwards. */
+html.cr-mm-panels[data-cr-panel-open="top"] .dispatcher-board { --cr-field-top: calc(126px / var(--cr-mm-scale)); }
+html.cr-mm-panels[data-cr-panel-open="bottom"] .dispatcher-board { --cr-field-bottom: calc((64px + var(--cr-panel-keyboard-inset, 0px)) / var(--cr-mm-scale)); }
+html.cr-mm-panels #cr-mm-toolbar { bottom: var(--cr-panel-toolbar-inset, 0px); }
+html.cr-mm-panels[data-cr-panel-open="left"] .dispatcher-board { --cr-field-left: var(--cr-panel-side-w, 110px); }
+html.cr-mm-panels[data-cr-panel-open="right"] .dispatcher-board { --cr-field-right: var(--cr-panel-side-w, 110px); }
+html.cr-mm-panels .dispatcher-complexes {
+  grid-area: auto !important; grid-column: 2 !important; grid-row: 2 !important;
+  width: 100% !important; height: 100% !important; min-width: 0 !important; min-height: 0 !important;
+  margin: 0 !important; display: flex !important; flex-direction: column; overflow: hidden !important;
+}
+html.cr-mm-panels .dispatcher-zone-head { flex: 0 0 auto; }
+/* The field owns its scroll position; rows use the space left by the open panel. */
+html.cr-mm-panels .dispatcher-zone-grid {
+  --cr-complex-gap: 9px;
+  display: grid; flex: 1 1 0; min-height: 0; max-width: 100%; height: auto !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-rows: none !important;
+  grid-auto-rows: calc((100% - 2 * var(--cr-complex-gap)) / 3) !important;
+  gap: var(--cr-complex-gap) !important; align-content: start;
+  padding: 0 !important; overflow: hidden auto !important;
+  scrollbar-width: none; scrollbar-gutter: auto; overflow-anchor: none;
+}
+html.cr-mm-panels .dispatcher-zone-grid::-webkit-scrollbar { display: none; }
+html.cr-mm-panels .dispatcher-zone-grid > .dispatcher-complex-card {
+  min-height: 0 !important; min-width: 0;
+  order: var(--cr-complex-order, 0);
+}
+html.cr-mm-panels .dispatcher-topbar,
+html.cr-mm-panels .dispatcher-left,
+html.cr-mm-panels .dispatcher-right {
+  position: absolute !important; grid-area: auto !important; grid-column: auto !important; grid-row: auto !important;
+  z-index: 602; margin: 0 !important;
+}
+html.cr-mm-panels .dispatcher-topbar {
+  inset: 0 0 auto !important; width: 100% !important; box-sizing: border-box !important;
+  height: calc(126px / var(--cr-mm-scale)) !important; min-height: calc(126px / var(--cr-mm-scale)) !important; max-height: calc(126px / var(--cr-mm-scale)) !important;
+}
+html.cr-mm-panels .dispatcher-left, html.cr-mm-panels .dispatcher-right {
+  display: block !important; top: 0 !important; bottom: 0 !important;
+  width: var(--cr-panel-side-w, 110px) !important; height: 100% !important; min-height: 0 !important;
+}
+html.cr-mm-panels .dispatcher-left { left: 0 !important; right: auto !important; }
+html.cr-mm-panels .dispatcher-right { right: 0 !important; left: auto !important; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-garage-panel { display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 6px !important; border-width: 1px; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .dispatcher-panel-head { flex: 0 0 auto; }
+html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks) {
+  display: grid !important; grid-template-columns: var(--cr-panel-tile-w, 88px) !important;
+  grid-template-rows: none !important; grid-auto-rows: var(--cr-panel-tile-h, 63px) !important;
+  grid-auto-flow: row !important; grid-auto-columns: auto !important; flex: 1 1 auto;
+  align-content: space-between !important; justify-content: start !important; gap: 6px !important;
+  box-sizing: border-box; width: 100%; height: 100%; min-height: 0; padding: 0 !important;
+  overflow: hidden auto !important; overscroll-behavior: contain; scroll-snap-type: none !important; scrollbar-gutter: stable; scrollbar-width: auto !important;
+}
+html.cr-mm-panels :is(.dispatcher-excavators, .dispatcher-trucks)::-webkit-scrollbar { width: 8px; }
+html.cr-mm-panels [data-cr-mm-garage-fill] { pointer-events: none; }
+/* Geometry and number/icon scale follow the real field tile. Assigned/hidden
+   garage copies retain the server's visibility; no sources are cloned. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item]:not(.is-assigned):not([hidden]), .dispatcher-truck-tile.is-placeholder:not([hidden]), [data-cr-mm-garage-fill]) {
+  display: flex !important; flex-direction: column; align-items: center; justify-content: space-between;
+  box-sizing: border-box; width: var(--cr-panel-tile-w, 88px) !important; height: var(--cr-panel-tile-h, 63px) !important;
+  min-width: 0 !important; min-height: 0 !important; gap: 0; padding: 3px 3px 2px !important; border-radius: 6px;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > :is(strong, img, span) {
+  position: static !important; inset: auto !important; transform: none !important; flex: 0 0 auto; margin: 0;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > strong {
+  color: var(--gd-ink); font-size: max(12px, calc(var(--cr-panel-tile-h, 63px) * .25)) !important;
+  font-weight: 900; line-height: 1; letter-spacing: 0; font-variant-numeric: tabular-nums;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is([data-garage-item], .is-placeholder) > img {
+  display: block !important; width: 82% !important; height: 46% !important; margin: 0 auto; object-fit: contain; opacity: .92;
+}
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .is-placeholder > img { opacity: .23; }
+/* Empty slots have no number/status rows to distribute around the icon. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) :is(.dispatcher-truck-tile, .dispatcher-excavator-garage-tile).is-placeholder:not([hidden]) {
+  justify-content: center; padding-block: 2.5px !important;
+}
+/* Keep the desktop placeholders intact for fail-closed fallback. The adapter
+   supplies only the number of full rows that fit the current tablet height. */
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) .is-placeholder:not([data-cr-mm-garage-fill]):not([hidden]) { display: none !important; }
+html.cr-mm-panels :is(.dispatcher-left, .dispatcher-right) [data-garage-item] > span {
+  display: block !important; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: max(8px, calc(var(--cr-panel-tile-h, 63px) * .155)) !important; font-weight: 700; line-height: 1.1; letter-spacing: .01em; opacity: .9;
+}
+html.cr-mm-panels [data-garage-item] > .dispatcher-tile-plan-label {
+  position: static !important; inset: auto !important; transform: none !important; flex: 0 0 auto;
+  width: 100%; min-height: 0; font-size: max(7px, calc(var(--cr-panel-tile-h, 63px) * .125)) !important; line-height: 1;
+}
+html.cr-mm-panels [data-garage-item]:has(> .dispatcher-tile-plan-label) > img { flex-shrink: 1; min-height: 0; }
+html.cr-mm-panels [data-cr-panel] { visibility: hidden; pointer-events: none; transition: none; }
+html.cr-mm-panels [data-cr-panel="top"] { transform: translateY(calc(-100% - 24px)) !important; }
+html.cr-mm-panels [data-cr-panel="bottom"] { transform: translateY(100%) !important; }
+html.cr-mm-panels [data-cr-panel="left"] { transform: translateX(calc(-100% - 24px)) !important; }
+html.cr-mm-panels [data-cr-panel="right"] { transform: translateX(calc(100% + 24px)) !important; }
+html.cr-mm-panels[data-cr-panels-ready="true"] [data-cr-panel] { transition: transform 180ms ease, visibility 180ms; }
+html.cr-mm-panels [data-cr-panel-state="open"] { visibility: visible; pointer-events: auto; transform: translate(0, 0) !important; }
+html.cr-mm-panels [data-cr-panel-state="closing"] { visibility: visible; pointer-events: none; }
+html.cr-mm-panels [data-cr-panel-state="closed"] { visibility: hidden; pointer-events: none; transition: none !important; }
+html.cr-mm-panels:not([data-cr-panel-open="top"]) .app-connection-dot[data-connection-indicator],
+html.cr-mm-panels:has([data-gd-equipment-detail]:not([hidden])) .app-connection-dot[data-connection-indicator] {
+  visibility: hidden !important; pointer-events: none !important;
+}
+.cr-mm-panel-edge { position: fixed; z-index: 1050; touch-action: none; }
+.cr-mm-panel-edge[data-cr-panel-side="top"] { inset: 0 0 auto; height: 8px; }
+.cr-mm-panel-edge[data-cr-panel-side="bottom"] { inset: auto 0 0; height: 8px; }
+.cr-mm-panel-edge[data-cr-panel-side="left"] { inset: 8px auto 8px 0; width: 8px; }
+.cr-mm-panel-edge[data-cr-panel-side="right"] { inset: 8px 0 8px auto; width: 8px; }
+.cr-mm-panel-handle {
+  all: unset; box-sizing: border-box; position: fixed; z-index: 1060;
+  display: grid; place-items: center; border: 1px solid #71858f;
+  border-radius: 6px; background: #10212b; color: #c4d2d9;
+  cursor: pointer; touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+.cr-mm-panel-handle::before { content: ""; display: block; border-radius: 2px; background: currentColor; }
+.cr-mm-panel-handle::after { content: ""; position: absolute; }
+.cr-mm-panel-handle[data-cr-panel-side="top"]::after { inset: 0 0 auto; height: 36px; }
+.cr-mm-panel-handle[data-cr-panel-side="bottom"]::after { inset: auto 0 0; height: 36px; }
+.cr-mm-panel-handle[data-cr-panel-side="left"]::after { inset: 0 auto 0 0; width: 36px; }
+.cr-mm-panel-handle[data-cr-panel-side="right"]::after { inset: 0 0 0 auto; width: 36px; }
+.cr-mm-panel-handle[data-cr-panel-side="top"], .cr-mm-panel-handle[data-cr-panel-side="bottom"] { left: calc(50% - 44px); width: 88px; height: 14px; }
+.cr-mm-panel-handle[data-cr-panel-side="left"], .cr-mm-panel-handle[data-cr-panel-side="right"] { top: calc(50% - 44px); width: 14px; height: 88px; }
+/* Native bars can receive touches while transiently visible in lock task.
+   Keep grips just inside their stable insets without shrinking the field. */
+.cr-mm-panel-handle[data-cr-panel-side="top"] { top: max(6px, calc(var(--cr-tablet-system-top, 0px) + 6px)); }
+.cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: max(6px, calc(var(--cr-tablet-system-bottom, 0px) + 6px)); }
+.cr-mm-panel-handle[data-cr-panel-side="left"] { left: 4px; }
+.cr-mm-panel-handle[data-cr-panel-side="right"] { right: 4px; }
+.cr-mm-panel-handle[data-cr-panel-side="top"]::before, .cr-mm-panel-handle[data-cr-panel-side="bottom"]::before { width: 38px; height: 3px; }
+.cr-mm-panel-handle[data-cr-panel-side="left"]::before, .cr-mm-panel-handle[data-cr-panel-side="right"]::before { height: 38px; width: 3px; }
+html[data-cr-panel-open="top"] .cr-mm-panel-handle[data-cr-panel-side="top"] { top: max(var(--cr-panel-top-edge), calc(var(--cr-tablet-system-top, 0px) + 6px)); }
+html[data-cr-panel-open="bottom"] .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: max(calc(64px + var(--cr-panel-toolbar-inset, 0px)), calc(var(--cr-tablet-system-bottom, 0px) + 6px)); }
+html[data-cr-panel-open="left"] .cr-mm-panel-handle[data-cr-panel-side="left"] { left: var(--cr-panel-side-edge); }
+html[data-cr-panel-open="right"] .cr-mm-panel-handle[data-cr-panel-side="right"] { right: var(--cr-panel-side-edge); }
+/* Native edge protection owns system gestures. Closed grips stay on the
+   physical edge, and their invisible hit area must not cover field cards. */
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="top"]) .cr-mm-panel-handle[data-cr-panel-side="top"] { top: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="bottom"]) .cr-mm-panel-handle[data-cr-panel-side="bottom"] { bottom: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="left"]) .cr-mm-panel-handle[data-cr-panel-side="left"] { left: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"]:not([data-cr-panel-open="right"]) .cr-mm-panel-handle[data-cr-panel-side="right"] { right: 0; }
+html.cr-mm-panels[data-cr-tablet-edge-guard="active"] .cr-mm-panel-handle[aria-expanded="false"]::after { inset: 0; width: auto; height: auto; }
+.cr-mm-panel-handle:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  html.cr-mm-panels[data-cr-panels-ready="true"] [data-cr-panel] { transition: none; }
+}
+
+html[data-cr-panel-modal="true"] .cr-mm-panel-handle, html[data-cr-panel-modal="true"] .cr-mm-panel-edge { visibility: hidden; pointer-events: none; }
+
+/* The detail dialog lives INSIDE the scaled dispatcher canvas. Cancel that
+   scale for this surface alone: its typography and touch targets use viewport
+   CSS pixels. The original panel remains the scroll/fragment-restore owner. */
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail:not([hidden]) {
+  inset: 0 0 calc(var(--cr-panel-keyboard-inset, 0px) / var(--cr-mm-scale)) !important;
+  padding: 0 !important; place-items: start;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .mm-equipment-detail-panel {
+  zoom: calc(1 / var(--cr-mm-scale)); width: 100vw !important; max-width: none !important;
+  height: calc(var(--cr-panel-canvas-h) * var(--cr-mm-scale) - var(--cr-panel-keyboard-inset, 0px)) !important;
+  max-height: none !important; box-sizing: border-box; margin: 0; padding: 0 !important;
+  border: 0; border-radius: 0; overflow: hidden auto; overscroll-behavior: contain;
+  scroll-padding: 80px 0 20px;
+}
+html.cr-mm-panels .gd-equipment-detail :is(input, select, button) {
+  min-height: 44px !important; font-size: 15px !important; box-sizing: border-box; max-width: 100%;
+}
+/* Both siblings stick to the original panel. The close button occupies its
+   own reserved space at the right of the header, without a separate row. */
+html.cr-mm-panels .gd-equipment-detail .mm-detail-close {
+  position: sticky; top: 8px; right: auto; z-index: 12; width: 44px; height: 44px;
+  min-width: 44px !important; margin: 8px 10px -52px auto; padding: 0; font-size: 0 !important;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero {
+  position: sticky; top: 0; z-index: 10; box-sizing: border-box; min-height: 62px;
+  grid-template-columns: 60px minmax(0, 1fr) auto; gap: 12px;
+  padding: 7px 68px 7px 14px; background: var(--gd-detail-panel);
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot {
+  width: 60px; height: 44px; min-width: 0; overflow: hidden;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot .gd-detail-slot-clone {
+  display: grid; place-items: center; padding: 0; width: 100%; height: 100%; min-width: 0; min-height: 0;
+}
+html.cr-mm-panels .gd-detail-slot-clone > :is(strong,span) { display: none; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot .gd-detail-slot-clone img {
+  position: static; transform: none; width: 46px; height: 34px; object-fit: contain; margin: 0;
+}
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero-copy {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 9px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero h2 { font-size: 24px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-meta { flex-basis: 100%; margin: 0; font-size: 13px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-tags { margin: 0; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan:not([hidden]) {
+  grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1px 10px; max-width: 280px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan > strong { grid-column: 2; grid-row: 1 / span 2; font-size: 24px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan > small { grid-column: 1; white-space: normal; text-align: right; }
+/* Flatten only the work wrapper; all form, hidden, and event-bound nodes stay
+   in place. Reports and load/retry states can use the entire screen. */
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-columns {
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 0 16px; padding: 12px 14px;
+}
+html.cr-mm-panels .gd-equipment-detail .gd-detail-col-people { grid-column: 1; grid-row: 1; gap: 10px; padding-right: 14px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-col-work { display: contents; }
+html.cr-mm-panels .gd-detail-col-work > :is(.gd-detail-settings,.gd-detail-manual-trip) { grid-column: 2; }
+html.cr-mm-panels .gd-detail-col-work > :is(.gd-detail-shift-report,.gd-detail-load-state) { grid-column: 1 / -1; min-width: 0; margin-top: 10px; }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-settings-face { grid-template-columns: minmax(76px,.55fr) minmax(72px,.55fr) minmax(0,2fr) !important; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-settings :is(label,select,input) { min-width: 0; }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 285px), 1fr)); }
+html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-destination-row { grid-template-columns: minmax(0,1fr) 76px 44px !important; align-items: end; }
+html.cr-mm-panels .dispatcher-shell .gd-detail-settings .gd-detail-destination-remove { width: 44px !important; min-width: 44px; margin-bottom: 6px; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics { grid-template-columns: repeat(auto-fit,minmax(min(100%,132px),1fr)); }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-metrics :is(span,strong) { white-space: normal; overflow-wrap: anywhere; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-dashboard { min-width: 0; max-width: 100%; overflow-x: auto; }
+html.cr-mm-panels .gd-equipment-detail .gd-detail-scroll-hint { bottom: 0; height: 24px; margin: 0; padding: 3px 0; box-sizing: border-box; }
+@media (max-width: 720px) {
+  html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-columns { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 10px; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-col-people { border: 0; padding: 0; }
+  html.cr-mm-panels .dispatcher-shell .gd-equipment-detail .gd-detail-hero { grid-template-columns: minmax(0,1fr) minmax(0,100px); gap: 6px; padding-left: 10px; padding-right: 62px; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-garage-slot { display: none; }
+  html.cr-mm-panels .gd-equipment-detail .gd-detail-hero-plan:not([hidden]) { display: flex; flex-direction: column; align-items: end; padding-left: 6px; }
+}
+}
+
+/* This form is mounted under body, outside the scaled board. Size it to the
+   visible viewport so the keyboard leaves both fields and the actions in reach. */
+body > .tablet-personal-login-portal:not([hidden]) {
+  position: fixed; inset: var(--cr-dialog-top, 0px) 0 var(--cr-dialog-bottom, 0px); z-index: 2147483646;
+  display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center;
+  box-sizing: border-box; padding: 12px; background: rgba(2, 8, 12, .68); backdrop-filter: blur(3px);
+}
+body > .tablet-personal-login-portal .shared-shift-dialog {
+  position: relative; display: grid; grid-template: minmax(0, 1fr) auto / minmax(0, 1fr); gap: 10px;
+  box-sizing: border-box; width: min(640px, 100%); max-width: 100%; min-height: 0; max-height: 100% !important;
+  overflow: hidden !important; padding: 18px; border: 1px solid #23333c; border-radius: 8px;
+  background: #10191f; color: #edf5f7; box-shadow: 0 26px 80px rgba(0, 0, 0, .42);
+  font-family: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+}
+body > .tablet-personal-login-portal .app-confirm-content {
+  display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); align-content: start;
+  gap: 6px 14px; padding: 2px; min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain;
+}
+body > .tablet-personal-login-portal .app-confirm-content h2 {
+  grid-column: 1 / -1; margin: 0; padding-right: 48px; line-height: 1.2;
+  font-size: 22px; font-weight: 900; text-transform: uppercase; color: #edf5f7 !important;
+}
+body > .tablet-personal-login-portal :is(.shared-shift-accent, .shared-shift-country-code > [aria-hidden]),
+body > .tablet-personal-login-portal .app-confirm-content > h2 + p:not([role="alert"]),
+body > .tablet-personal-login-portal .shared-shift-phone-shell + small { display: none; }
+body > .tablet-personal-login-portal .shared-shift-close {
+  position: absolute; z-index: 1; inset: 6px 8px auto auto; display: grid; place-items: center;
+  width: 44px; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: #aebfc6; font-size: 28px; line-height: 1; cursor: pointer;
+}
+body > .tablet-personal-login-portal .shared-shift-login-field {
+  display: grid; align-content: start; align-self: start; gap: 5px; min-width: 0; margin: 8px 0 0;
+  font-size: 16px; font-weight: 700;
+}
+body > .tablet-personal-login-portal .shared-shift-login-field > small {
+  font-size: 13px; line-height: 1.2; font-weight: 400; color: #b8c6cd;
+}
+body > .tablet-personal-login-portal .shared-shift-phone-shell,
+body > .tablet-personal-login-portal .shared-shift-login-field > input {
+  box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #536672; border-radius: 6px; background: #0c161c;
+}
+body > .tablet-personal-login-portal .shared-shift-phone-shell { display: flex; align-items: stretch; overflow: hidden; }
+body > .tablet-personal-login-portal .shared-shift-country-code {
+  display: grid; place-items: center; flex: none; padding: 0 10px; border-right: 1px solid #43525d;
+  font-size: 20px; line-height: 1; color: #edf5f7;
+}
+body > .tablet-personal-login-portal .shared-shift-login-field input {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; padding: 8px 12px;
+  font: inherit; font-size: 20px; color: #edf5f7;
+}
+body > .tablet-personal-login-portal .shared-shift-phone-shell input { flex: 1; border: 0; background: transparent; }
+body > .tablet-personal-login-portal .shared-shift-phone-shell:focus-within,
+body > .tablet-personal-login-portal .shared-shift-login-field > input:focus { outline: 2px solid #72c9ed; outline-offset: -2px; }
+body > .tablet-personal-login-portal .shared-shift-phone-shell input:focus { outline: 0; }
+body > .tablet-personal-login-portal .shared-shift-first-entry {
+  grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; min-height: 44px;
+  font-size: 15px; color: #c6d9e3; text-underline-offset: 3px;
+}
+body > .tablet-personal-login-portal .app-confirm-actions {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 10px; margin: 0; padding: 0;
+}
+body > .tablet-personal-login-portal .app-confirm-actions button {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 48px; padding: 8px 12px;
+  border: 1px solid #536672; border-radius: 6px; background: #1a2932; color: #edf5f7;
+  font: inherit; font-size: 17px; font-weight: 800; line-height: 1.2; text-transform: uppercase; white-space: normal;
+}
+body > .tablet-personal-login-portal .app-confirm-actions button[type="submit"] {
+  background: #ffd200; border-color: #ffd200; color: #111b21;
+}
+@media (max-width: 560px) {
+  body > .tablet-personal-login-portal .shared-shift-dialog { padding: 12px; }
+  body > .tablet-personal-login-portal .app-confirm-content { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The confirmation lives under body, outside the scaled board. Use viewport
+   pixels for both text and actions; a destructive action may have a long name. */
+@media screen {
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal {
+  inset: var(--cr-dialog-top, 0px) 0 var(--cr-dialog-bottom, 0px); box-sizing: border-box; padding: 12px;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.dispatcher-night {
+  --gd-panel: var(--cr-dialog-bg); --gd-ink: var(--cr-dialog-ink); --gd-line: var(--cr-dialog-border);
+  --gd-muted: var(--cr-dialog-muted); --gd-red: var(--cr-dialog-red); --gd-green: var(--cr-dialog-green);
+  background: var(--cr-dialog-backdrop);
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-dialog {
+  box-sizing: border-box; width: min(var(--cr-dialog-width), 100%); max-width: 100%; max-height: 100%;
+  overflow: auto; overscroll-behavior: contain; padding: var(--cr-dialog-padding); gap: var(--cr-dialog-gap);
+  border-radius: var(--cr-dialog-radius); font-family: var(--cr-dialog-font); box-shadow: var(--cr-dialog-shadow);
+  grid-template-columns: 44px minmax(0, 1fr) 44px; grid-auto-rows: max-content; align-items: start;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-accent { display: none; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-icon { grid-area: 1 / 1; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content {
+  grid-area: 1 / 2; min-width: 0; padding: 0; overflow-wrap: anywhere;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.is-shift-end-confirm .app-confirm-content { grid-column: 1 / 3; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content h2 { margin: 0 0 8px; font-size: var(--cr-dialog-title); line-height: 1.15; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-content p { max-width: none; margin: 0; font-size: var(--cr-dialog-body); line-height: 1.4; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-close {
+  position: static; display: grid; grid-area: 1 / 3; width: 44px; min-width: 44px; height: 44px; margin: 0;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-summary { grid-column: 1 / -1; margin: 0; padding-top: 12px; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-grid { grid-template-columns: 1fr 1fr 2fr; }
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-shift-grid :is(strong, span) {
+  white-space: normal; overflow: visible; overflow-wrap: anywhere;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-actions {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: stretch; gap: var(--cr-dialog-action-gap); padding: 0; margin: 4px 0 0; border: 0;
+}
+html:is(.cr-mm-tablet, .cr-mm-tablet-page) #app-confirm-modal.app-confirm-modal .app-confirm-actions button {
+  box-sizing: border-box; flex: 1 1 180px; width: auto; min-width: 0; min-height: var(--cr-dialog-action); height: auto;
+  padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; border-radius: var(--cr-dialog-action-radius); font-size: var(--cr-dialog-action-font); line-height: 1.2;
+}
+/* The notice, unlike the confirmation, belongs to the transformed canvas. */
+html.cr-mm-panels .dispatcher-shell .dispatcher-notice-modal {
+  inset: 0 0 calc(var(--cr-panel-keyboard-inset, 0px) / var(--cr-mm-scale)); padding: 0;
+}
+html.cr-mm-panels .dispatcher-shell .dispatcher-notice-dialog {
+  zoom: calc(1 / var(--cr-mm-scale)); box-sizing: border-box; width: min(640px, calc(100vw - 24px));
+  max-height: calc(var(--cr-panel-canvas-h) * var(--cr-mm-scale) - var(--cr-panel-keyboard-inset, 0px) - 24px);
+  overflow: auto; overscroll-behavior: contain; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: start;
+}
+html.cr-mm-panels .dispatcher-notice-copy { min-width: 0; overflow-wrap: anywhere; }
+html.cr-mm-panels .dispatcher-notice-copy p { font-size: 16px; line-height: 1.4; }
+html.cr-mm-panels .dispatcher-notice-dialog button { grid-column: 1 / -1; justify-self: end; min-height: 48px; }
+/* The API also returns text such as «План не назначен» for a gauge value. */
+html.cr-mm-panels .gd-detail-gauge-summary .gd-detail-gauge { width: min(88px, 100%); height: auto; aspect-ratio: 1; }
+html.cr-mm-panels .gd-detail-gauge-summary .gd-detail-gauge strong {
+  max-width: 72%; white-space: normal; overflow-wrap: anywhere; overflow: visible; font-size: 12px; line-height: 1.15;
+}
+}

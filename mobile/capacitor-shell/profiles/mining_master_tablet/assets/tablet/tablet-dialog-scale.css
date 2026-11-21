@@ -1,0 +1,25 @@
+/* Shared by the shift entry and the tablet's confirmation dialogs.
+   The board scales its canvas separately; these dimensions are viewport pixels. */
+:root {
+    --cr-dialog-width: 640px;
+    --cr-dialog-padding: 18px;
+    --cr-dialog-gap: 12px;
+    --cr-dialog-radius: 8px;
+    --cr-dialog-title: 22px;
+    --cr-dialog-body: 16px;
+    --cr-dialog-label: 16px;
+    --cr-dialog-field: 52px;
+    --cr-dialog-action: 48px;
+    --cr-dialog-action-gap: 10px;
+    --cr-dialog-action-radius: 6px;
+    --cr-dialog-action-font: 17px;
+    --cr-dialog-font: "Roboto Condensed", "Arial Narrow", "Segoe UI", Arial, sans-serif;
+    --cr-dialog-bg: #10191f;
+    --cr-dialog-border: #23333c;
+    --cr-dialog-ink: #edf5f7;
+    --cr-dialog-muted: #8c9ca4;
+    --cr-dialog-red: #ff524b;
+    --cr-dialog-green: #7bd319;
+    --cr-dialog-shadow: 0 26px 80px rgb(0 0 0 / 42%);
+    --cr-dialog-backdrop: rgb(2 8 12 / 68%);
+}

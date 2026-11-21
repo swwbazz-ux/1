@@ -63,7 +63,7 @@ if (buildType === "release") {
         return [line.slice(0, separator), line.slice(separator + 1)];
       })
   );
-  const updaterEnabled = properties.inAppUpdaterEnabled !== "false";
+  const updaterEnabled = properties.inAppUpdaterEnabled !== "false" || properties.tabletAutoUpdateEnabled === "true";
   if (updaterEnabled) {
     const apkBaseUrl = properties.updateApkBaseUrl;
     if (!apkBaseUrl?.startsWith("https://")) {

@@ -149,7 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--mode", choices=sorted(MODES), required=True)
     parser.add_argument("--apk-dist", type=Path)
-    parser.add_argument("--apk-profile", choices=("driver", "excavator"))
+    parser.add_argument("--apk-profile", choices=("driver", "excavator", "mining_master_tablet"))
     parser.add_argument("--operation")
     parser.add_argument("--receiver-source", type=Path)
     parser.add_argument("--fcm-service-account", type=Path)
