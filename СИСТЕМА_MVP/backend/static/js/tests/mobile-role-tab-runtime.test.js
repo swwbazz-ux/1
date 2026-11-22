@@ -1,19 +1,14 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
-const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
-const TEMPLATE_ROOT = path.resolve(__dirname, "..", "..", "..", "templates");
 const DRIVER_SOURCE = driverScreenSource();
-const EXCAVATOR_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
-    "utf8"
-);
+const EXCAVATOR_SOURCE = excavatorScreenSource();
 
 
 function extractMarkedSource(source, startMarker, endMarker, label) {
@@ -977,7 +972,7 @@ test("Excavator downtime status applies only the latest connected-shell response
     const pendingRequests = [];
     const applied = [];
     const cleared = [];
-    const shell = {isConnected: true};
+    const shell = {isConnected: true, dataset: {eoDowntimeUrl: "/excavator/downtime/"}};
     const eventsScreen = {dataset: {eoDowntimeAvailable: "true"}};
     const context = {
         currentShell: shell,

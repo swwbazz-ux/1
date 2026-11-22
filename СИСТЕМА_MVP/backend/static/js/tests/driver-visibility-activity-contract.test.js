@@ -15,7 +15,7 @@ const read = (relative) => fs.readFileSync(path.join(BACKEND_ROOT, ...relative.s
 test("driver and excavator screens both count a visible screen as active", () => {
     const flag = /document\.body\.dataset\.realtimeVisibilityOnly = "true";/;
     assert.match(read("templates/users/driver_shift.html"), flag);
-    assert.match(read("templates/trips/excavator_work.html"), flag);
+    assert.match(require("./excavator-screen-source").excavatorScreenSource(), flag);
 });
 
 test("driver sets the flag before the realtime client reads it", () => {

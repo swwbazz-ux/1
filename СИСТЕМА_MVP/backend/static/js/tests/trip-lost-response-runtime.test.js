@@ -1,31 +1,13 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
-const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
 
-const driverTemplatePath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "users",
-    "driver_shift.html"
-);
-const excavatorTemplatePath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "trips",
-    "excavator_work.html"
-);
 
 
 function extractMarkedSource(source, startMarker, endMarker, label) {
@@ -329,7 +311,7 @@ function flushPromiseChain() {
 }
 
 function createExcavatorLoadFixture({loseFirstResponse = false, completed = false} = {}) {
-    const template = fs.readFileSync(excavatorTemplatePath, "utf8");
+    const template = excavatorScreenSource();
     const createOutbox = require("../excavator-field-outbox-v1.js");
     const local = new MemoryStorage();
     const serverActions = new Set(), requests = [], reconcile = [];

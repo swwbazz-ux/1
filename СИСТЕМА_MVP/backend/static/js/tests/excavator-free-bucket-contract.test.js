@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,12 +8,11 @@ const {confirmedAcceptanceIsAbsent} = require('../excavator-free-bucket-v1.js');
 const {dispatcherScreenSource} = require('./dispatcher-screen-source');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
-const template = [
-    'templates/trips/excavator_work.html',
+const template = [excavatorScreenSource(), ...[
     'templates/includes/excavator_dashboard_workspace.html',
     'templates/includes/excavator_dashboard_source_card.html',
     'templates/includes/excavator_dashboard_dump_card.html',
-].map(file => fs.readFileSync(path.join(backend, file), 'utf8')).join('\n');
+].map(file => fs.readFileSync(path.join(backend, file), 'utf8'))].join('\n');
 const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
 const dispatcherSource = fs.readFileSync(path.join(backend, 'static', 'js', 'dispatcher-control-v1.js'), 'utf8');
 const dispatcherTemplate = dispatcherScreenSource();
@@ -171,8 +171,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v275/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v275/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v276/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v276/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {
@@ -202,7 +202,8 @@ test('an upward swipe cancels only an unused free bucket card through the durabl
     assert.match(template, /state\.card\.dataset\.eoFreeBucketUsed !== "1"/);
     assert.match(template, /deltaY <= -56/);
     assert.match(template, /Math\.abs\(deltaY\) >= Math\.max\(56, Math\.abs\(deltaX\) \* 1\.25\)/);
-    assert.match(template, /freeBucketController\.cancelAccepted\(state\.card\)/);
+    assert.match(template, /isSpecialCancel: isFreeBucketCancelSwipe/);
+    assert.match(template, /onSpecialCancel: function \(card\)[\s\S]*?freeBucketController\.cancelAccepted\(card\)/);
     assert.match(source, /function cancelAcceptedCard\(card\)/);
     assert.match(source, /queueEvent\("excavator\.free_bucket\.cancelled"/);
     assert.match(source, /eoFreeBucketCancelPending/);

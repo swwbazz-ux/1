@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,9 +7,9 @@ const path = require('node:path');
 const backend = path.resolve(__dirname, '..', '..', '..');
 const source = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-hourly-report-v1.js'), 'utf8');
 const template = [
-    path.join(backend, 'templates', 'trips', 'excavator_work.html'),
-    path.join(backend, 'templates', 'includes', 'excavator_dashboard_workspace.html'),
-].map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+    excavatorScreenSource(),
+    fs.readFileSync(path.join(backend, 'templates/includes/excavator_dashboard_workspace.html'), 'utf8'),
+].join('\n');
 const css = fs.readFileSync(path.join(backend, 'static', 'css', 'excavator-hourly-report-v1.css'), 'utf8');
 
 test('existing plan ring is the only accessible hourly-report entry', () => {

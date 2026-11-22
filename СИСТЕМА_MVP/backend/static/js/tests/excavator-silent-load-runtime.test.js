@@ -1,22 +1,11 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
-const templatePath = path.resolve(
-    __dirname,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "trips",
-    "excavator_work.html"
-);
-const template = fs.readFileSync(templatePath, "utf8");
+const template = excavatorScreenSource();
 
 
 function extractBraceBlock(source, signature, label) {

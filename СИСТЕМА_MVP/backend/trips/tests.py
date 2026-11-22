@@ -1883,7 +1883,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
         self.assertContains(response, '/static/js/mobile-shift-unified-v1.js')
-        self.assertContains(response, 'window.MobileShiftHold.bind(shiftButton')
+        self.assertIn(
+            'window.MobileShiftHold.bind(shiftButton',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         self.assertContains(response, 'mobile-shift__version')
         self.assertContains(
             response,
@@ -1892,14 +1895,26 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '/static/js/mobile-operational-sounds-v1.js')
         self.assertContains(response, 'data-mobile-sound-profile="excavator"')
         self.assertContains(response, 'data-mobile-sound-base="/static/audio/excavator/"')
-        self.assertContains(response, 'playExcavatorAssignmentAlerts(operations)')
-        self.assertContains(response, 'window.handleOperationalStateSignals = function (context)')
+        self.assertIn(
+            'playExcavatorAssignmentAlerts(operations)',
+            excavator_screen_script('excavator-work-feedback-v1.js'),
+        )
+        self.assertIn(
+            'window.handleOperationalStateSignals = function (context)',
+            excavator_screen_script('excavator-work-feedback-v1.js'),
+        )
         self.assertContains(response, 'data-assignment-id=')
-        self.assertContains(response, 'action === "close" ? "shift_end" : "shift_start"')
-        self.assertContains(response, 'action === "close" ? "voice_shift_closed" : "voice_shift_opened"')
-        self.assertContains(response, 'card.dataset.eoLoadActionId')
-        self.assertContains(response, 'actionOwner.dataset.eoCancelActionId')
-        self.assertContains(response, 'shiftPendingActionId')
+        self.assertIn(
+            'action === "close" ? "shift_end" : "shift_start"',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn(
+            'action === "close" ? "voice_shift_closed" : "voice_shift_opened"',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('card.dataset.eoLoadActionId', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('actionOwner.dataset.eoCancelActionId', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('shiftPendingActionId', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'data-eo-shift-scroll')
         self.assertContains(response, 'data-eo-shift-inputs')
 
@@ -1918,13 +1933,22 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-mobile-shift-field="mileage"')
         self.assertNotContains(response, 'data-eo-shift-review')
         self.assertNotContains(response, 'Проверить показания')
-        self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty === "true"')
+        self.assertIn(
+            'shiftScreen.dataset.eoShiftDirty === "true"',
+            excavator_screen_script('excavator-work-runtime-v1.js'),
+        )
         self.assertNotContains(response, 'firstErrorField.scrollIntoView')
-        self.assertContains(response, 'var isSoftBlocked = shiftServerBlocked || !validation.valid;')
-        self.assertContains(response, 'shiftButton.disabled = false;')
-        self.assertContains(response, 'shiftButton.setAttribute("aria-disabled", isSoftBlocked ? "true" : "false");')
-        self.assertContains(response, 'canStart: function ()')
-        self.assertContains(response, 'onBlockedPress: function ()')
+        self.assertIn(
+            'var isSoftBlocked = shiftServerBlocked || !validation.valid;',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('shiftButton.disabled = false;', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn(
+            'shiftButton.setAttribute("aria-disabled", isSoftBlocked ? "true" : "false");',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('canStart: function ()', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('onBlockedPress: function ()', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertNotContains(response, 'class="eo-pin-icon"')
         self.assertContains(response, 'class="eo-face-coordinates"')
         self.assertContains(response, 'class="eo-face-rock"')
@@ -1943,19 +1967,28 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'data-eo-hold-label="Применить настройки"')
         self.assertContains(response, 'data-eo-settings-applied="')
         self.assertContains(response, 'data-eo-settings-applied="false"')
-        self.assertContains(response, 'appliedExcavatorSettingsSnapshot')
-        self.assertContains(response, 'currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot')
-        self.assertContains(response, 'data.work_context_changed && data.active_downtime_reason')
-        self.assertContains(response, '? "events"')
+        self.assertIn('appliedExcavatorSettingsSnapshot', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn(
+            'currentExcavatorSettingsSnapshot() !== appliedExcavatorSettingsSnapshot',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn(
+            'data.work_context_changed && data.active_downtime_reason',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('? "events"', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'Простои')
         self.assertContains(response, '>Работа</span>')
         self.assertContains(response, '>Простой</span>')
         self.assertContains(response, 'mm-mobile-nav-icon')
         self.assertContains(response, 'data-eo-tab="shift" data-eo-pwa-update-nav-target')
-        self.assertContains(response, 'tab.setAttribute("aria-current", "page")')
-        self.assertContains(response, 'if (name !== "events") return;')
-        self.assertContains(response, 'syncDowntimeStatus()')
-        self.assertContains(response, 'cache: "no-store"')
+        self.assertIn(
+            'tab.setAttribute("aria-current", "page")',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('if (name !== "events") return;', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('syncDowntimeStatus()', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('cache: "no-store"', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertNotContains(response, 'class="eo-nav-clock"')
         self.assertNotContains(response, 'class="eo-nav-bell"')
         self.assertNotContains(response, 'data-eo-icon-idle')
@@ -1968,13 +2001,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mm-mobile-nav-item.is-active.has-pwa-update', nav_css)
         self.assertIn('.mm-mobile-nav-item:not(.is-active).has-pwa-update', nav_css)
         self.assertNotContains(response, 'Отпустить сюда')
-        self.assertContains(response, 'resolveExcavatorUpdateVersion')
-        self.assertContains(response, 'renderUpdateModal')
+        self.assertIn('resolveExcavatorUpdateVersion', excavator_screen_script('excavator-work-pwa-v1.js'))
+        self.assertIn('renderUpdateModal', excavator_screen_script('excavator-work-pwa-v1.js'))
         self.assertNotContains(response, 'fetchServerVersion')
         self.assertNotContains(response, '?version_check')
-        self.assertContains(response, 'serverContractVersion')
-        self.assertContains(response, 'syncContractState')
-        self.assertContains(response, 'normalizeExcavatorVersion')
+        self.assertIn('serverContractVersion', excavator_screen_script('excavator-work-pwa-v1.js'))
+        self.assertIn('syncContractState', excavator_screen_script('excavator-work-pwa-v1.js'))
+        self.assertIn('normalizeExcavatorVersion', excavator_screen_script('excavator-work-pwa-v1.js'))
         self.assertNotContains(response, '<button class="eo-shift-update-button"')
         self.assertNotContains(response, 'data-eo-pwa-update-check-label')
         self.assertNotContains(response, 'data-eo-pwa-update-check-version')
@@ -1998,11 +2031,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         self.assertContains(response, '/static/css/excavator-offline-v1.css?v=1')
         self.assertContains(response, 'data-eo-offline-sync-url="/offline-events/sync/"')
-        self.assertContains(response, '"excavator.trip.loaded"')
-        self.assertContains(response, '"excavator.trip.loaded.cancelled"')
-        self.assertContains(response, '"excavator.downtime.started"')
-        self.assertContains(response, '"excavator.downtime.ended"')
-        self.assertContains(response, '"excavator.shift.closed"')
+        self.assertIn('"excavator.trip.loaded"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('"excavator.trip.loaded.cancelled"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('"excavator.downtime.started"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('"excavator.downtime.ended"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('"excavator.shift.closed"', excavator_screen_script('excavator-work-screen-v1.js'))
 
     def test_browser_excavator_keeps_automatic_pwa_update_ui_without_manual_controls(self):
         response = self.client.get(reverse('excavator_work'))
@@ -2143,22 +2176,22 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('data-eo-dump-persisted="true"', dump_tag)
         self.assertIn('aria-label="Дробилка. Активная точка разгрузки."', dump_tag)
         self.assertNotIn('is-dump-pending"', dump_tag)
-        self.assertContains(response, 'registration && registration.active')
+        self.assertIn('registration && registration.active', excavator_screen_script('excavator-work-pwa-v1.js'))
         self.assertNotContains(response, 'newVersion || "new"')
         self.assertNotContains(response, 'registration.active || navigator.serviceWorker.controller')
         self.assertContains(response, reverse('excavator_work_settings'))
         self.assertContains(response, reverse('excavator_shift_action'))
         self.assertContains(response, reverse('excavator_truck_loaded_cancel'))
 
-        self.assertContains(response, 'eo-truck-detail-cards-data')
+        self.assertIn('eo-truck-detail-cards-data', excavator_screen_script('excavator-work-runtime-v1.js'))
         self.assertContains(response, 'data-eo-truck-detail')
         self.assertContains(response, 'data-eo-truck-detail-id')
-        self.assertContains(response, 'openTruckDetailCard')
+        self.assertIn('openTruckDetailCard', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'excavator-dashboard-drag-v1.js')
         drag_module = excavator_screen_script('excavator-dashboard-drag-v1.js')
         self.assertIn('holdTimer', drag_module)
         self.assertIn('longPressOpened', drag_module)
-        self.assertContains(response, 'truck-drag-preview')
+        self.assertIn('truck-drag-preview', drag_module)
         self.assertContains(response, 'data-eo-shift-url')
         self.assertContains(response, 'data-eo-truck-loaded-cancel-url')
         self.assertContains(response, 'data-eo-shift-button')
@@ -2190,28 +2223,37 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertNotContains(response, 'Факт</span><strong>0 рейс.</strong>')
         self.assertNotContains(response, 'data-eo-open-face-settings')
         self.assertNotContains(response, '+ Добавить')
-        self.assertContains(response, 'Удерживайте 1 секунду, чтобы закрыть смену')
+        self.assertIn(
+            'Удерживайте 1 секунду, чтобы закрыть смену',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         self.assertContains(response, 'Удерживайте 2 секунды, чтобы выйти')
         self.assertContains(response, 'data-eo-settings-url')
         self.assertContains(response, 'data-eo-rock-select')
         self.assertContains(response, 'data-eo-dump-points-input')
-        self.assertContains(response, 'dump_point_ids')
+        self.assertIn('dump_point_ids', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'data-eo-apply-settings')
         self.assertContains(response, 'aria-label="Настройки уже применены"')
         self.assertNotContains(response, 'Удерживайте 2 секунды, чтобы применить настройки')
-        self.assertContains(response, 'window.applyOperationalStateRefresh')
-        self.assertContains(response, 'refreshExcavatorWorkFromServer')
-        self.assertContains(response, 'function hasExcavatorRelevantEvents')
-        self.assertContains(response, 'return Array.isArray(events) && events.length > 0;')
+        self.assertIn('window.applyOperationalStateRefresh', excavator_screen_script('excavator-work-runtime-v1.js'))
+        self.assertIn('refreshExcavatorWorkFromServer', excavator_screen_script('excavator-work-runtime-v1.js'))
+        self.assertIn('function hasExcavatorRelevantEvents', excavator_screen_script('excavator-work-runtime-v1.js'))
+        self.assertIn(
+            'return Array.isArray(events) && events.length > 0;',
+            excavator_screen_script('excavator-work-runtime-v1.js'),
+        )
         self.assertContains(response, 'data-eo-pwa-update-modal')
         self.assertContains(response, 'data-eo-pwa-update-badge')
         self.assertNotContains(response, 'data-eo-refresh-work')
         self.assertRegex(
-            html,
+            excavator_screen_script('excavator-work-screen-v1.js'),
             r'refreshExcavatorWorkFromServer\(\{\s*preserveTab:\s*true,\s*'
             r'pendingOwner:\s*"shift",\s*suppressAssignmentAlert:\s*true\s*\}\)',
         )
-        self.assertContains(response, 'shiftScreen.dataset.eoShiftDirty = "false"')
+        self.assertIn(
+            'shiftScreen.dataset.eoShiftDirty = "false"',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         self.assertContains(response, 'class="eo-dashboard-head"')
         self.assertContains(response, 'class="eo-dashboard-main-zone"')
         self.assertContains(response, 'class="eo-dashboard-dump-zone"')
@@ -2246,15 +2288,15 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         # точкам разгрузки её было не отдать — а им её не хватало на номера.
         self.assertEqual(len(response.context['truck_cards']), 1)
         self.assertContains(response, 'class="eo-truck-grid eo-dashboard-truck-grid is-rows-1"')
-        self.assertContains(response, 'addEventListener("pointerdown"')
+        self.assertIn('addEventListener("pointerdown"', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertNotContains(response, 'document.elementFromPoint')
-        self.assertContains(response, 'findDumpTargetIntersectingPreview')
+        self.assertIn('findIntersectingTarget', drag_module)
         self.assertContains(response, 'data-eo-dump-queue-modal')
         self.assertContains(response, 'data-eo-dump-queue-gesture-hint')
-        self.assertContains(response, 'isReturnReady')
-        self.assertContains(response, 'event.clientY <= dialogRect.top + 12')
+        self.assertIn('isReturnReady', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('event.clientY <= dialogRect.top + 12', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertNotContains(response, 'data-eo-dump-return-zone')
-        self.assertContains(response, 'truck_loaded_cancel')
+        self.assertIn('truck_loaded_cancel', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'Ожидание самосвалов')
         self.assertContains(response, 'Дробилка')
         self.assertContains(response, 'Первичная сульфидная руда')
@@ -2273,7 +2315,10 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'Назначена')
         self.assertContains(response, 'data-eo-equipment-state="assigned"')
         self.assertContains(response, 'data-eo-can-load="1"')
-        self.assertContains(response, 'card.dataset.eoEquipmentState = "loaded_waiting_unload";')
+        self.assertIn(
+            'card.dataset.eoEquipmentState = "loaded_waiting_unload";',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         self.assertNotContains(response, 'ожидает сервер')
         self.assertNotContains(response, 'Под погрузкой')
         self.assertContains(response, 'mobile-shift__action--danger')
@@ -3963,7 +4008,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         for reason in created_reasons:
             self.assertIn(reason.id, rendered_ids)
             self.assertContains(response, f'data-eo-downtime-reason-id="{reason.id}"')
-            self.assertContains(response, 'eo-reason-action')
+            self.assertIn('eo-reason-action', excavator_screen_script('excavator-work-runtime-v1.js'))
             self.assertContains(response, f'data-eo-reason-label>{reason.button_label}</span>')
         self.assertNotIn(hidden_reason.id, rendered_ids)
         self.assertNotIn(wrong_type_reason.id, rendered_ids)
@@ -4058,9 +4103,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'mobile-shift__action--primary')
         self.assertContains(response, '<span data-eo-shift-label data-mobile-shift-label>Начать смену</span>', html=True)
         self.assertNotContains(response, 'mobile-shift__assignment')
-        self.assertContains(response, 'return isShiftCloseAction() ? shiftHoldMs : 1000;')
-        self.assertContains(response, 'shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";')
-        self.assertContains(response, 'showExcavatorNotice("Удерживайте кнопку");')
+        self.assertIn(
+            'return isShiftCloseAction() ? shiftHoldMs : 1000;',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn(
+            'shiftLabel.textContent = action === "close" ? "Закрываем смену" : "Открываем смену";',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn(
+            'showExcavatorNotice("Удерживайте кнопку");',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         self.assertNotContains(response, 'shiftLabel.textContent = "Держите";')
 
         self.assertContains(response, 'data-eo-settings-available="false"')
@@ -4077,11 +4131,17 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             )
         self.assertContains(response, 'mobile-face mobile-work-controls is-shift-inactive')
         self.assertNotContains(response, 'data-eo-face-inactive-notice')
-        self.assertContains(response, 'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });')
-        self.assertContains(response, 'faceScreen.addEventListener("click"')
-        self.assertContains(response, 'eventsScreen.addEventListener("click"')
-        self.assertContains(response, 'workScreen.addEventListener("click"')
-        self.assertContains(response, 'event.target.closest(".eo-dashboard-truck-grid, .eo-dashboard-unload-grid")')
+        self.assertIn(
+            'showExcavatorNotice("Смена не активна. Сначала начните смену.", { variant: "shift-lock" });',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('faceScreen.addEventListener("click"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('eventsScreen.addEventListener("click"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn('workScreen.addEventListener("click"', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn(
+            'event.target.closest(".eo-dashboard-truck-grid, .eo-dashboard-unload-grid")',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
         for card in response.context['truck_cards']:
             self.assertRegex(
                 response.content.decode('utf-8'),
@@ -4189,8 +4249,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
             '<strong data-eo-shift-fuel-liters>0</strong><em>л</em>',
             html=True,
         )
-        self.assertContains(response, 'shiftButton.disabled = false;')
-        self.assertContains(response, 'showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");')
+        self.assertIn('shiftButton.disabled = false;', excavator_screen_script('excavator-work-screen-v1.js'))
+        self.assertIn(
+            'showExcavatorNotice(shiftBlockMessage || "Смена сейчас недоступна.");',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
 
         shared_css = (
             Path(__file__).resolve().parents[1]
@@ -4455,18 +4518,18 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
     def test_excavator_shift_keyboard_overlays_stable_layout(self):
         response = self.client.get(reverse('excavator_work'))
-        html = response.content.decode('utf-8')
+        runtime = excavator_screen_script('excavator-work-runtime-v1.js')
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('function syncExcavatorKeyboardState(metrics)', html)
-        self.assertIn('[data-eo-face-horizon], [data-eo-face-block]', html)
-        self.assertIn('shell.dataset.eoImeOpen = "true"', html)
-        self.assertIn('delete shell.dataset.eoImeOpen', html)
+        self.assertIn('function syncExcavatorKeyboardState(metrics)', runtime)
+        self.assertIn('[data-eo-face-horizon], [data-eo-face-block]', runtime)
+        self.assertIn('shell.dataset.eoImeOpen = "true"', runtime)
+        self.assertIn('delete shell.dataset.eoImeOpen', runtime)
         self.assertLess(
-            html.index('syncExcavatorKeyboardState(metrics);'),
-            html.index('metrics.height < 320'),
+            runtime.index('syncExcavatorKeyboardState(metrics);'),
+            runtime.index('metrics.height < 320'),
         )
-        self.assertIn('excavatorStableViewportHeight : metrics.height', html)
+        self.assertIn('excavatorStableViewportHeight : metrics.height', runtime)
 
         css_path = (
             Path(__file__).resolve().parents[1]
@@ -4491,8 +4554,9 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('mobile-shift__action--primary mobile-face__apply', html)
         self.assertIn('inputmode="numeric" pattern="[0-9]*" name="loading_horizon"', html)
         self.assertIn('inputmode="numeric" pattern="[0-9]*" name="loading_block"', html)
-        self.assertIn('applySettings.addEventListener("click"', html)
-        self.assertNotIn('registerHoldAction(applySettings', html)
+        screen = excavator_screen_script('excavator-work-screen-v1.js')
+        self.assertIn('applySettings.addEventListener("click"', screen)
+        self.assertNotIn('registerHoldAction(applySettings', screen)
         self.assertNotIn('data-eo-apply-settings data-eo-instant="true"', html)
         self.assertNotIn('class="eo-face-form"', html)
         self.assertNotIn('class="eo-large-field"', html)
@@ -4504,13 +4568,13 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('data-eo-dump-persisted="false"', dump_tag)
         self.assertIn('aria-label="Дробилка. Будет добавлена после применения."', dump_tag)
         self.assertNotIn('is-dump-applied', dump_tag)
-        self.assertIn('? "applied"', html)
-        self.assertIn('? "pending-add"', html)
-        self.assertIn('? "pending-remove"', html)
-        self.assertIn('button.classList.toggle("is-dump-applied", state === "applied");', html)
-        self.assertIn('button.classList.toggle("is-dump-pending", state === "pending-add");', html)
-        self.assertIn('button.classList.toggle("is-dump-pending-remove", state === "pending-remove");', html)
-        self.assertIn('replacePersistedDumpPointIds(savedIds);', html)
+        self.assertIn('? "applied"', screen)
+        self.assertIn('? "pending-add"', screen)
+        self.assertIn('? "pending-remove"', screen)
+        self.assertIn('button.classList.toggle("is-dump-applied", state === "applied");', screen)
+        self.assertIn('button.classList.toggle("is-dump-pending", state === "pending-add");', screen)
+        self.assertIn('button.classList.toggle("is-dump-pending-remove", state === "pending-remove");', screen)
+        self.assertIn('replacePersistedDumpPointIds(savedIds);', screen)
 
         css_path = (
             Path(__file__).resolve().parents[1]
@@ -4875,7 +4939,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
 
         last_sent_cards = [card for card in response.context['dump_cards'] if card['is_last_sent']]
         self.assertEqual([card['point'].id for card in last_sent_cards], [second_dump.id])
-        self.assertContains(response, 'is-last-dump')
+        self.assertIn('is-last-dump', excavator_screen_script('excavator-work-screen-v1.js'))
 
     def test_excavator_dump_queue_marks_newest_open_trip_for_direct_swipe_return(self):
         shift = EmployeeShift.objects.get(employee=self.operator, closed_at__isnull=True)
@@ -4922,8 +4986,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         # Возврат самосвала теперь вызывается модулем свайпа через onReturn,
         # а не напрямую из обработчика в шаблоне.
-        self.assertContains(response, 'function returnLastTruckFromDump(dumpTarget)')
-        self.assertContains(response, 'onReturn: returnLastTruckFromDump')
+        self.assertIn(
+            'function returnLastTruckFromDump(dumpTarget)',
+            excavator_screen_script('excavator-work-screen-v1.js'),
+        )
+        self.assertIn('onReturn: returnLastTruckFromDump', excavator_screen_script('excavator-work-screen-v1.js'))
 
     def post_truck_loaded(
         self, *, client_action_id='load-1', truck=None, dump_point=None,
@@ -6827,7 +6894,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-active-duration')
         self.assertContains(response, 'data-eo-active-started-at=')
         self.assertContains(response, 'data-eo-downtime-state="waiting"')
-        self.assertContains(response, 'startDowntimeTimer')
+        self.assertIn('startDowntimeTimer', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, '>00:')
         self.assertNotContains(response, 'eo-downtime-clock')
 
@@ -7076,7 +7143,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, 'data-eo-close-event')
         self.assertContains(response, 'disabled aria-disabled="true"')
         self.assertContains(response, 'mobile-shift__action mobile-shift__action--danger')
-        self.assertContains(response, 'is-disabled')
+        self.assertIn('is-disabled', excavator_screen_script('excavator-work-screen-v1.js'))
         self.assertContains(response, 'class="mobile-shift__actions mobile-downtime__actions"')
         self.assertContains(response, '<span data-mobile-shift-label>Завершить простой</span>', html=True)
 
@@ -7100,31 +7167,32 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         response = self.client.get(reverse('excavator_work'))
         html = response.content.decode('utf-8')
 
-        self.assertIn('button.addEventListener("click", function (event)', html)
-        self.assertIn('closeEvent.addEventListener("click", function (event)', html)
-        self.assertIn('var downtimeActionPending = false;', html)
-        self.assertIn('if (downtimeActionPending || button.disabled', html)
-        self.assertIn('downtimeStatusSyncGeneration += 1;', html)
-        self.assertIn('|| downtimeActionPending', html)
+        source = excavator_screen_script('excavator-work-screen-v1.js', 'excavator-work-runtime-v1.js')
+        self.assertIn('button.addEventListener("click", function (event)', source)
+        self.assertIn('closeEvent.addEventListener("click", function (event)', source)
+        self.assertIn('var downtimeActionPending = false;', source)
+        self.assertIn('if (downtimeActionPending || button.disabled', source)
+        self.assertIn('downtimeStatusSyncGeneration += 1;', source)
+        self.assertIn('|| downtimeActionPending', source)
         self.assertIn(
             'if (downtimeActionPending || (shell && shell.dataset && '
             'shell.dataset.eoHasPendingFieldEvents === "true")) return Promise.resolve(null);',
-            html,
+            source,
         )
-        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") {', html)
-        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") return;', html)
-        self.assertIn('.eo-reason-action.is-pending, [data-eo-close-event].is-pending', html)
-        self.assertIn('previousSelectedReason', html)
-        self.assertIn('var excavatorWorkMutationGeneration = 0;', html)
-        self.assertIn('mutationGeneration !== excavatorWorkMutationGeneration', html)
-        self.assertGreaterEqual(html.count('invalidateExcavatorWorkRefresh();'), 2)
-        self.assertNotIn('window.MobileShiftHold.bind(closeEvent', html)
-        self.assertNotIn('closeEventHoldController', html)
-        self.assertNotIn('Удерживайте 2 секунды, чтобы завершить простой', html)
-        self.assertNotIn('function registerHoldAction', html)
-        downtime_control_script = html[
-            html.index('var downtimeActionPending = false;'):
-            html.index('var shiftPendingActionId = "";')
+        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") {', source)
+        self.assertIn('if (!eventsScreen || eventsScreen.dataset.eoDowntimeAvailable !== "true") return;', source)
+        self.assertIn('.eo-reason-action.is-pending, [data-eo-close-event].is-pending', source)
+        self.assertIn('previousSelectedReason', source)
+        self.assertIn('var excavatorWorkMutationGeneration = 0;', source)
+        self.assertIn('mutationGeneration !== excavatorWorkMutationGeneration', source)
+        self.assertGreaterEqual(source.count('invalidateExcavatorWorkRefresh();'), 2)
+        self.assertNotIn('window.MobileShiftHold.bind(closeEvent', source)
+        self.assertNotIn('closeEventHoldController', source)
+        self.assertNotIn('Удерживайте 2 секунды, чтобы завершить простой', source)
+        self.assertNotIn('function registerHoldAction', source)
+        downtime_control_script = source[
+            source.index('var downtimeActionPending = false;'):
+            source.index('var shiftPendingActionId = "";')
         ]
         self.assertNotIn('window.openAppConfirmDialog(', downtime_control_script)
         self.assertNotIn('eo-hold-action', html)
@@ -7199,9 +7267,11 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-selected::after', work_tabs_css)
         self.assertIn('.mobile-downtime__reason.eo-reason-action.is-used:not(.is-selected)', work_tabs_css)
         self.assertIn('color: #ff6658 !important;', work_tabs_css)
-        self.assertIn('button.classList.toggle("is-used", isVisible);', html)
-        self.assertNotIn('rotate(" + tilt + "deg)', html)
-        self.assertIn('findDumpTargetIntersectingPreview', html)
+        screen = excavator_screen_script('excavator-work-screen-v1.js')
+        drag = excavator_screen_script('excavator-dashboard-drag-v1.js')
+        self.assertIn('button.classList.toggle("is-used", isVisible);', screen)
+        self.assertNotIn('rotate(" + tilt + "deg)', drag)
+        self.assertIn('findIntersectingTarget', drag)
         self.assertIn('@keyframes eo-truck-preview-float', legacy_css)
         self.assertIn('.eo-shell.is-truck-drag-active[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid', legacy_css)
         self.assertNotIn('transform: scale(1.045) !important;', legacy_css)

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
@@ -7,6 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const backendRoot = resolve(root, "..", "..", "СИСТЕМА_MVP", "backend");
+const {excavatorScreenSource} = createRequire(import.meta.url)(
+  resolve(backendRoot, "static/js/tests/excavator-screen-source.js")
+);
 
 // Разметка, стили и код экрана водителя разложены по отдельным файлам —
 // собираем тот же набор, что и СИСТЕМА_MVP/backend/static/js/tests/driver-screen-source.js,
@@ -543,7 +547,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   const service = readFileSync(resolve(javaRoot, "ConnectivityForegroundService.java"), "utf8");
   const sounds = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "static", "js", "mobile-operational-sounds-v1.js"), "utf8");
   const driverTemplate = driverScreenSource();
-  const excavatorTemplate = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "templates", "trips", "excavator_work.html"), "utf8");
+  const excavatorTemplate = excavatorScreenSource();
 
   assert.match(plugin, /public void announceEquipment\(PluginCall call\)/);
   assert.match(plugin, /public void announceEquipmentBatch\(PluginCall call\)/);
@@ -568,7 +572,7 @@ test("recorded equipment numbers are packaged and routed through native sequence
   assert.match(excavatorTemplate, /excavator_truck_removed/);
   assert.match(excavatorTemplate, /excavator_truck_sent/);
   const excavatorShellVersion = excavatorTemplate.match(
-    /var excavatorShellVersion = "(excavator-mobile-shell-v\d+)";/
+    /data-eo-pwa-version="(excavator-mobile-shell-v\d+)"/
   )?.[1];
   const roleApps = readFileSync(resolve(root, "..", "..", "СИСТЕМА_MVP", "backend", "users", "role_apps.py"), "utf8");
   const declaredShell = roleApps.match(/shell_version=['"](excavator-mobile-shell-v\d+)['"]/)?.[1];

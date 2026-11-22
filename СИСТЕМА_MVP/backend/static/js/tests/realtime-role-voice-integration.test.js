@@ -14,6 +14,7 @@
  * Остаточный риск описан в отчёте T-014-realtime-2.
  */
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -21,15 +22,11 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const jsRoot = path.resolve(__dirname, "..");
-const backendRoot = path.resolve(jsRoot, "..", "..");
 const realtimeSource = fs.readFileSync(path.join(jsRoot, "realtime-client.js"), "utf8");
 const soundsSource = fs.readFileSync(path.join(jsRoot, "mobile-operational-sounds-v1.js"), "utf8");
-const excavatorTemplate = fs.readFileSync(
-    path.join(backendRoot, "templates", "trips", "excavator_work.html"),
-    "utf8"
-);
+const excavatorTemplate = excavatorScreenSource();
 const voiceStart = excavatorTemplate.indexOf("/* EXCAVATOR_VOICE_GUARD_START */");
-const voiceEnd = excavatorTemplate.indexOf("function readExcavatorViewportMetrics", voiceStart);
+const voiceEnd = excavatorTemplate.indexOf("window.ExcavatorWorkFeedback =", voiceStart);
 assert.notEqual(voiceStart, -1);
 assert.notEqual(voiceEnd, -1);
 const excavatorVoiceSource = excavatorTemplate.slice(voiceStart, voiceEnd);

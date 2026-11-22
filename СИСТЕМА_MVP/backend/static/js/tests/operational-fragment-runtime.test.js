@@ -1,5 +1,6 @@
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const {dispatcherScreenSource} = require("./dispatcher-screen-source");
@@ -8,17 +9,13 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-
 const TEMPLATE_ROOT = path.resolve(__dirname, "..", "..", "..", "templates");
 const BASE_TEMPLATE_SOURCE = fs.readFileSync(
     path.join(TEMPLATE_ROOT, "base.html"),
     "utf8"
 );
 const DRIVER_TEMPLATE_SOURCE = driverScreenSource();
-const EXCAVATOR_TEMPLATE_SOURCE = fs.readFileSync(
-    path.join(TEMPLATE_ROOT, "trips", "excavator_work.html"),
-    "utf8"
-).replace(/\r\n?/g, "\n");
+const EXCAVATOR_TEMPLATE_SOURCE = excavatorScreenSource().replace(/\r\n?/g, "\n");
 const DISPATCHER_TEMPLATE_SOURCE = dispatcherScreenSource();
 
 const FRAGMENT_CLIENT_START = "/* OPERATIONAL_FRAGMENT_CLIENT_START */";

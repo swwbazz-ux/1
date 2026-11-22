@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -202,7 +203,7 @@ test("manual free-bucket button delegates to the canonical Driver control", () =
 });
 
 test("both roles render the same dashboard and card includes", () => {
-    const excavator = read("templates", "trips", "excavator_work.html");
+    const excavator = excavatorScreenSource();
     const driverShell = read("templates", "users", "driver_shift.html");
     const driver = read("templates", "includes", "driver_manual_excavator_workspace.html");
     const workspace = read("templates", "includes", "excavator_dashboard_workspace.html");
@@ -890,7 +891,7 @@ test("dump point corner button reroutes a manual trip to a point outside the dru
 });
 
 test("shared controller remains the only live card binder in both roles", () => {
-    const excavator = read("templates", "trips", "excavator_work.html");
+    const excavator = excavatorScreenSource();
     const driverRuntimeSource = read("static", "js", "driver-manual-excavator-workspace-v1.js");
     assert.match(excavator, /ExcavatorDashboardDrag\.attach\(/);
     assert.match(driverRuntimeSource, /ExcavatorDashboardDrag\.attach\(/);

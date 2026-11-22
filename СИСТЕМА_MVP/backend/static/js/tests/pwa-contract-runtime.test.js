@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const {dispatcherScreenSource} = require("./dispatcher-screen-source");
@@ -12,20 +13,8 @@ const vm = require("node:vm");
 const backendRoot = path.resolve(__dirname, "../../..");
 const baseTemplatePath = path.join(backendRoot, "templates", "base.html");
 const baseTemplate = fs.readFileSync(baseTemplatePath, "utf8");
-const driverTemplatePath = path.join(
-    backendRoot,
-    "templates",
-    "users",
-    "driver_shift.html"
-);
-const excavatorTemplatePath = path.join(
-    backendRoot,
-    "templates",
-    "trips",
-    "excavator_work.html"
-);
 const driverTemplate = driverScreenSource();
-const excavatorTemplate = fs.readFileSync(excavatorTemplatePath, "utf8");
+const excavatorTemplate = excavatorScreenSource();
 const miningMasterTemplate = dispatcherScreenSource();
 const excavatorCssPath = path.join(
     backendRoot,

@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const {driverScreenSource} = require("./driver-screen-source");
 const fs = require("node:fs");
@@ -14,10 +15,7 @@ const baseTemplate = fs.readFileSync(
     "utf8"
 );
 const driverTemplate = driverScreenSource();
-const excavatorTemplate = fs.readFileSync(
-    path.resolve(__dirname, "../../../templates/trips/excavator_work.html"),
-    "utf8"
-);
+const excavatorTemplate = excavatorScreenSource();
 
 function createRuntime(roleCode, options = {}) {
     const calls = [];

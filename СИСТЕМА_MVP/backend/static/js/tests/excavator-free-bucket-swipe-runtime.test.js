@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,65 +6,62 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const backend = path.resolve(__dirname, '..', '..', '..');
-const template = [
-    'templates/trips/excavator_work.html',
+const template = [excavatorScreenSource(), ...[
     'templates/includes/excavator_dashboard_source_card.html',
-].map(file => fs.readFileSync(path.join(backend, file), 'utf8')).join('\n');
+].map(file => fs.readFileSync(path.join(backend, file), 'utf8'))].join('\n');
 const controllerSource = fs.readFileSync(path.join(backend, 'static', 'js', 'excavator-free-bucket-v1.js'), 'utf8');
 
 function gestureFixture({freeBucket = true, target = null} = {}) {
     const calls = {cancel: 0, load: 0};
+    const handlers = {};
     const classes = new Set();
     const card = {
-        dataset: {
-            eoFreeBucket: freeBucket ? '1' : '0',
-            eoFreeBucketUsed: '0',
-            eoFreeBucketCancelPending: '0',
-            eoSuppressClick: '',
-        },
+        dataset: {eoFreeBucket: freeBucket ? "1" : "0", eoFreeBucketUsed: "0"},
         classList: {
             add: (...names) => names.forEach(name => classes.add(name)),
             remove: (...names) => names.forEach(name => classes.delete(name)),
+            contains: name => classes.has(name),
         },
-        style: {transform: ''},
+        style: {},
+        addEventListener(name, listener) { handlers[name] = listener; },
+        getBoundingClientRect: () => ({top: 130, left: 50, width: 100, height: 100}),
+        setPointerCapture() {},
         releasePointerCapture() {},
     };
-    const context = {
-        Math,
-        Number,
-        activeTruckDrag: {
-            card,
-            pointerId: 7,
-            startX: 100,
-            startY: 180,
-            started: true,
-            target,
-            longPressOpened: false,
-        },
-        freeBucketController: {cancelAccepted() { calls.cancel += 1; }},
-        removeTruckDragPreview() {},
-        clearDropReady() {},
-        canTruckLoad: () => true,
-        selectTruck() {},
-        selectDump() {},
-        postTruckLoaded() { calls.load += 1; },
-        window: {setTimeout(fn) { fn(); }},
+    const shell = {
+        classList: {remove() {}},
+        addEventListener() {},
+        querySelectorAll: selector => selector === "[data-eo-truck-card]" ? [card] : [],
     };
-    vm.createContext(context);
-    const helperStart = template.indexOf('    function isFreeBucketCancelSwipe(state, deltaX, deltaY)');
-    const helperEnd = template.indexOf('    tabs.forEach(function (tab)', helperStart);
+    const window = {setTimeout(fn) { fn(); }, clearTimeout() {}};
+    const context = vm.createContext({window});
+    const source = fs.readFileSync(path.join(backend, "static/js/excavator-dashboard-drag-v1.js"), "utf8");
+    vm.runInContext(source, context);
+    const helperStart = template.indexOf("    function isFreeBucketCancelSwipe(");
+    const helperEnd = template.indexOf("    tabs.forEach(function (tab)", helperStart);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart);
     vm.runInContext(template.slice(helperStart, helperEnd), context);
-    const finishStart = template.indexOf('    function finishTruckDrag(event)');
-    const finishEnd = template.indexOf('    function cancelTruckDrag(event)', finishStart);
-    vm.runInContext(template.slice(finishStart, finishEnd), context);
-    return {context, card, classes, calls};
+    const controller = window.ExcavatorDashboardDrag.attach({
+        shell,
+        canDrag: () => true,
+        isSpecialCancel: context.isFreeBucketCancelSwipe,
+        onSpecialCancel() { calls.cancel++; },
+        onDrop() { calls.load++; },
+        haptic() {},
+    });
+    const start = {button: 0, pointerId: 7, clientX: 100, clientY: 180, preventDefault() {}};
+    handlers.pointerdown(start);
+    assert.ok(controller.active());
+    Object.assign(controller.active(), {started: true, target});
+    return {controller, calls, finish(coordinates) { handlers.pointerup({...start, ...coordinates}); }};
+
 }
 
 test('predominantly upward swipe cancels exactly once and never creates a load', () => {
     const fixture = gestureFixture({target: {dataset: {eoDumpTarget: '9'}}});
-    fixture.context.finishTruckDrag({pointerId: 7, clientX: 104, clientY: 110, preventDefault() {}});
+    fixture.finish({pointerId: 7, clientX: 104, clientY: 110, preventDefault() {}});
     assert.deepEqual(fixture.calls, {cancel: 1, load: 0});
-    assert.equal(fixture.context.activeTruckDrag, null);
+    assert.equal(fixture.controller.active(), null);
 });
 
 test('short, sideways and ordinary truck gestures never cancel free bucket acceptance', () => {
@@ -72,11 +70,11 @@ test('short, sideways and ordinary truck gestures never cancel free bucket accep
         {clientX: 175, clientY: 115},
     ]) {
         const fixture = gestureFixture();
-        fixture.context.finishTruckDrag({pointerId: 7, ...coordinates, preventDefault() {}});
+        fixture.finish({pointerId: 7, ...coordinates, preventDefault() {}});
         assert.equal(fixture.calls.cancel, 0);
     }
     const ordinary = gestureFixture({freeBucket: false});
-    ordinary.context.finishTruckDrag({pointerId: 7, clientX: 100, clientY: 100, preventDefault() {}});
+    ordinary.finish({pointerId: 7, clientX: 100, clientY: 100, preventDefault() {}});
     assert.equal(ordinary.calls.cancel, 0);
 });
 

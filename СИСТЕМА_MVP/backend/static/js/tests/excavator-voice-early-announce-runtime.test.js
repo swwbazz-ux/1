@@ -1,3 +1,4 @@
+const {excavatorScreenSource} = require("./excavator-screen-source");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -5,8 +6,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const backendRoot = path.resolve(__dirname, "..", "..", "..");
-const templatePath = path.join(backendRoot, "templates", "trips", "excavator_work.html");
-const templateSource = fs.readFileSync(templatePath, "utf8");
+const templateSource = excavatorScreenSource();
 const renderedTemplateSource = [
     templateSource,
     fs.readFileSync(
@@ -15,7 +15,7 @@ const renderedTemplateSource = [
     ),
 ].join("\n");
 const start = templateSource.indexOf("/* EXCAVATOR_VOICE_GUARD_START */");
-const end = templateSource.indexOf("function readExcavatorViewportMetrics", start);
+const end = templateSource.indexOf("window.ExcavatorWorkFeedback =", start);
 
 assert.notEqual(start, -1, "Excavator voice guard start marker was not found");
 assert.notEqual(end, -1, "Excavator assignment snapshot end marker was not found");
