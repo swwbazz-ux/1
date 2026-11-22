@@ -1018,7 +1018,7 @@ def _phone_access_conflict_response(
     )
 
 
-def _own_catalog_apps(employee):
+def _own_catalog_apps(employee, *, include_admin_clerk=True):
     """Доступные приложения сотрудника и запись для входа в каждое из них."""
     accesses = {
         access.role.code: access
@@ -1034,7 +1034,7 @@ def _own_catalog_apps(employee):
         if employee_has_effective_access_role(access.employee, access.role.code)
     }
     # Администратор уже допущен к /clerk/ со своей записью доступа.
-    if 'admin' in accesses:
+    if include_admin_clerk and 'admin' in accesses:
         accesses.setdefault('settlement_clerk', accesses['admin'])
     result = []
     for role_code in PUBLIC_APP_CATALOG_ROLE_CODES:
@@ -1589,13 +1589,13 @@ def login_view(
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
             landing_url = next_url or _role_landing_url(access)
-            # Единый вход, несколько ролей на одном номере и PIN: после PIN —
-            # выбор приложения одним нажатием, а не первая попавшаяся роль.
+            # Вход по телефону предлагает все рабочие места. Старый вход
+            # только по коду сохраняет стартовый экран своей назначенной роли.
             if (
                 not next_url
                 and role_app is None
                 and not allowed_role_codes
-                and len(_own_catalog_apps(locked_access.employee)) > 1
+                and len(_own_catalog_apps(locked_access.employee, include_admin_clerk=bool(phone))) > 1
             ):
                 landing_url = reverse('app_choose')
             response = _login_redirect_response(request, landing_url)
