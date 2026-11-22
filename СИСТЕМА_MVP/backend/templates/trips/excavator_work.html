@@ -91,7 +91,7 @@
 
         <div class="eo-offline-sync" data-eo-offline-sync hidden role="status" aria-live="polite">
             <span data-eo-offline-sync-label>Все действия отправлены</span>
-            <b class="eo-offline-sync__count" data-eo-offline-sync-count hidden>0</b>
+            <span class="eo-offline-sync__count" data-eo-offline-sync-count hidden>0</span>
         </div>
         <template data-eo-offline-sync-home></template>
 
@@ -1447,27 +1447,27 @@ function renderExcavatorOfflineStatus(summary) {
     var count = indicator.querySelector("[data-eo-offline-sync-count]");
     var offline = navigator.onLine === false;
     var text = "Все действия отправлены";
-    var stateClass = "";
+    var stateClass = "is-synced";
     if (summary.storage_failed) {
-        text = "Не удалось сохранить действие";
+        text = "Действие не сохранено";
         stateClass = "is-storage-error";
     } else if (summary.attention > 0) {
         text = "Нужна сверка";
         stateClass = "is-attention";
     } else if (summary.syncing > 0) {
-        text = "Отправляем накопленное";
+        text = "Идёт отправка";
         stateClass = "is-syncing";
     } else if (summary.total > 0 && offline) {
-        text = "Нет сети · сохранено на телефоне";
+        text = "Нет сети · сохранено";
         stateClass = "is-offline";
     } else if (summary.total > 0) {
         text = "Ожидает отправки";
         stateClass = "is-offline";
     } else if (offline) {
-        text = "Новых действий на телефоне нет";
+        text = "Нет сети · очередь пуста";
         stateClass = "is-offline";
     }
-    indicator.className = "eo-offline-sync" + (stateClass ? " " + stateClass : "");
+    indicator.className = "eo-offline-sync " + stateClass;
     if (shell) shell.dataset.eoHasPendingFieldEvents = summary.pending > 0 ? "true" : "false";
     indicator.hidden = false;
     if (label) label.textContent = text;
@@ -1627,7 +1627,11 @@ window.initExcavatorWorkShell = function () {
     var faceContent = shell.querySelector("[data-eo-face-settings-available]");
     var syncBadge = shell.querySelector("[data-eo-offline-sync]");
     var syncBadgeHome = shell.querySelector("[data-eo-offline-sync-home]");
-    var faceVersionGroup = faceScreen && faceScreen.querySelector(".mobile-shift__update-group");
+    var badgeAnchors = {
+        trucks: workScreen && workScreen.querySelector(".eo-operator-role"),
+        shift: shiftScreen && shiftScreen.querySelector(".mobile-shift__update-group"),
+        face: faceScreen && faceScreen.querySelector(".mobile-shift__update-group")
+    };
     var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
     var shiftServerBlocked = !!(
         shiftButton
@@ -2114,7 +2118,7 @@ window.initExcavatorWorkShell = function () {
         if (!isKnownExcavatorTab(name)) {
             name = "trucks";
         }
-        var badgeAnchor = name === "face" ? faceVersionGroup : syncBadgeHome;
+        var badgeAnchor = badgeAnchors[name] || syncBadgeHome;
         if (syncBadge && syncBadgeHome && badgeAnchor && syncBadge.nextElementSibling !== badgeAnchor) {
             badgeAnchor.before(syncBadge);
         }

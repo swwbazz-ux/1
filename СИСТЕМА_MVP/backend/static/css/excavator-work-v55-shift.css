@@ -4151,28 +4151,68 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     font-size: 31px !important;
 }
 
-/* Плашка состояния очереди («Нужна сверка», «Ожидает отправки», «Нет сети»)
-   висит поверх шапки и режет подпись роли пополам — видно на любом снимке за
-   сегодня. Появляется она тогда, когда экран отстал от сервера или накопились
-   неотправленные действия, то есть в самый нервный момент смены, и читать в
-   этот момент приходится обе надписи сразу.
+/* На «Работе» у роли и состояния очереди одна строка над ФИО. */
+.eo-operator-caption {
+    position: relative;
+    inline-size: 100%;
+    min-inline-size: 0;
+}
 
-   Место под неё резервируется ТОЛЬКО пока она видна: шапка опускается на её
-   высоту. Саму плашку не двигаем и её логику не трогаем — она остаётся там,
-   где её ищет глаз, и показывается тем же кодом, что и раньше. */
-body.excavator-operator-screen:has(.eo-offline-sync:not([hidden])) .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-head {
-    /* Сдвигаем шапку целиком, а не добавляем ей внутренний отступ: высота у
-       шапки своя, и отступ внутрь просто срезал бы кнопки снизу — проверено на
-       телефоне, обе кнопки обрезало по нижнему краю.
+.eo-operator-role { display: block; }
 
-       Размер резерва берётся из ТОЙ ЖЕ величины, которой задана высота самой
-       плашки: min-height 1.65rem при box-sizing: border-box, перенос запрещён
-       (white-space: nowrap), поэтому строка у неё всегда одна, какой бы
-       длинной ни была надпись. Плюс просвет.
+.eo-operator-caption > .eo-offline-sync {
+    inset: 0;
+    max-width: 100% !important;
+    min-height: 0;
+    padding: 0;
+    gap: 4px;
+    justify-content: flex-start;
+    border: 0;
+    background: none;
+    transform: none;
+}
 
-       В rem, а не в пикселях, намеренно: если базовый шрифт вырастет, плашка
-       и резерв вырастут вместе. Постоянное число здесь означало бы, что при
-       крупном шрифте подпись снова окажется перерезанной — и увидели бы это
-       только те, кто шрифт увеличил, то есть самые старшие машинисты. */
-    margin-top: calc(1.65rem + 10px) !important;
+.eo-operator-caption > .eo-offline-sync:not([hidden]):not(.is-synced) + .eo-operator-role {
+    visibility: hidden;
+}
+
+.eo-operator-caption .eo-offline-sync::before { content: none; }
+.eo-operator-caption .eo-offline-sync__count {
+    min-width: 0;
+    padding: 0;
+    background: none;
+}
+
+body.excavator-operator-screen .eo-operator-caption .eo-offline-sync > span {
+    min-width: 0;
+    overflow: hidden;
+    color: inherit !important;
+    font-size: clamp(11px, 3vw, 13px) !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    text-overflow: ellipsis;
+}
+
+.eo-operator-caption .is-offline { color: #ffd45b; }
+.eo-operator-caption .is-syncing { color: #69c9ff; }
+.eo-operator-caption :is(.is-attention, .is-storage-error) { color: #ffaaa3; }
+
+.mobile-shift[data-eo-screen="shift"] .eo-offline-sync {
+    position: static !important;
+    min-width: 0;
+    min-height: 0;
+    padding: 1px 5px;
+    gap: 4px;
+    font-size: clamp(10px, 2.75vw, 12px);
+    transform: none;
+}
+
+.mobile-shift[data-eo-screen="shift"] [data-eo-offline-sync-label] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.eo-operator-caption .eo-offline-sync.is-synced,
+.mobile-shift[data-eo-screen="shift"] .eo-offline-sync.is-synced {
+    display: none;
 }

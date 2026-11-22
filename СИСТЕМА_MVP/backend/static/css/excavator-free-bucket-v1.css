@@ -129,8 +129,8 @@ body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls]
 }
 
 [data-eo-round-controls] .eo-free-bucket-button > svg {
-    width: calc(var(--eo-control-diameter) * .74);
-    height: calc(var(--eo-control-diameter) * .74);
+    width: calc(var(--eo-control-diameter) * .50);
+    height: calc(var(--eo-control-diameter) * .50);
     color: #ffcf55;
 }
 body.excavator-operator-screen [data-eo-round-controls] .eo-dashboard-plan-ring > span:first-child {
