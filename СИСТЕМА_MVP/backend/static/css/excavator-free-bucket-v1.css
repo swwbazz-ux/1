@@ -129,8 +129,8 @@ body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls]
 }
 
 [data-eo-round-controls] .eo-free-bucket-button > svg {
-    width: 58%;
-    height: 58%;
+    width: calc(var(--eo-control-diameter) * .74);
+    height: calc(var(--eo-control-diameter) * .74);
     color: #ffcf55;
 }
 body.excavator-operator-screen [data-eo-round-controls] .eo-dashboard-plan-ring > span:first-child {
@@ -158,21 +158,25 @@ body.excavator-operator-screen [data-eo-round-controls] .eo-dashboard-progress-l
 }
 
 .eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):active:not(:disabled) {
-    --eo-control-face: linear-gradient(155deg, #172228, #223138 80%, #30404a);
-    --eo-control-depth: inset 0 6px 8px #010709;
+    --eo-control-face: radial-gradient(circle at 50% 72%, #49616b, #263740 54%, #0e1b23 92%);
+    --eo-control-depth: inset 0 7px 10px #010609;
     transform: none;
-    filter: none;
+    filter: brightness(1.2);
+}
+body.excavator-operator-screen .eo-dashboard-plan-widget[data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):active:not(:disabled)::after {
+    box-shadow: 0 0 5px #cbe4f499, inset 0 1px 4px #000a;
 }
 body.excavator-operator-screen [data-eo-round-controls] > :is(.eo-free-bucket-button, .eo-dashboard-plan-ring):focus-visible {
     outline: 2px solid #e1e8eb;
     outline-offset: 2px;
 }
 @media (prefers-reduced-motion: no-preference) {
-    [data-eo-round-controls] > :active:not(:disabled) > :is(span, svg:not(.eo-dashboard-plan-arc)) {
-        transform: translateY(2px);
+    [data-eo-round-controls] > :active:not(:disabled) > :is(span, svg:not(.eo-dashboard-plan-arc)):first-child {
+        transform: translateY(3px) scale(.9);
+        transition-duration: 55ms;
     }
-    [data-eo-round-controls] > * > :is(span, svg:not(.eo-dashboard-plan-arc)) {
-        transition: transform 85ms ease-out;
+    [data-eo-round-controls] > * > :is(span, svg:not(.eo-dashboard-plan-arc)):first-child {
+        transition: transform 155ms cubic-bezier(.2, .85, .25, 1.2);
     }
 }
 

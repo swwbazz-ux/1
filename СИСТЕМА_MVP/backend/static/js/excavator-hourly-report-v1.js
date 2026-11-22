@@ -337,6 +337,7 @@
             if (modal) modal.querySelector("[data-eo-hourly-report-close]").focus();
             return;
         }
+        if (typeof window.excavatorRoundControlFeedback === "function") window.excavatorRoundControlFeedback();
         opener = button;
         closing = false;
         modal.hidden = false;

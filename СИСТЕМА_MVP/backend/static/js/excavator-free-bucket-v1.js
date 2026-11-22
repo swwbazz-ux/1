@@ -388,8 +388,9 @@
     }
 
     function openModal(button) {
-        if (!modal || !shell || shell.dataset.eoCurrentExcavatorId === "") return;
+        if (!modal || !modal.hidden || button.disabled || !shell || shell.dataset.eoCurrentExcavatorId === "") return;
         if (root.ExcavatorHourlyReport && root.ExcavatorHourlyReport.isOpen()) return;
+        if (typeof root.excavatorRoundControlFeedback === "function") root.excavatorRoundControlFeedback();
         opener = button;
         selectedTruck = null;
         input.value = "";

@@ -23,7 +23,7 @@
             </div>
             <div class="eo-dashboard-plan-widget"{% if not driver_manual_dashboard %} data-eo-round-controls{% endif %}>
                 <button class="eo-free-bucket-button" type="button"{% if driver_manual_dashboard %} data-driver-manual-free-bucket-open aria-controls="driver-free-bucket-dialog"{% else %} data-eo-free-bucket-open{% endif %} aria-haspopup="dialog" aria-label="Свободный ковш" title="Свободный ковш"{% if driver_manual_dashboard %}{% if not driver_manual_free_bucket_enabled %} disabled aria-disabled="true"{% endif %}{% elif not open_shift %} disabled aria-disabled="true"{% endif %}>
-                    <svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+                    <svg viewBox="{% if driver_manual_dashboard %}0 0 28 28{% else %}1 1 24 24{% endif %}" aria-hidden="true" focusable="false">
                         <path d="M3.5 7.5h7.8l2.6 8.2H7.2L3.5 7.5Z"></path>
                         <path d="M7.2 15.7c1.7 3.2 4.7 5.1 8.4 5.1 2.5 0 4.7-.8 6.6-2.3"></path>
                         <path d="M17.9 5.5v8M13.9 9.5h8"></path>
