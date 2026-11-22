@@ -4089,16 +4089,13 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-da
    номера скрыты правилом выше, и такой плитке центрирование нужно ровно так
    же. */
 body.excavator-operator-screen .eo-dashboard-unload-card:not(:has(.eo-dashboard-unload-badges b)),
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-3) .eo-dashboard-unload-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-rows-4) .eo-dashboard-unload-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid.is-many) .eo-dashboard-unload-card {
+body.excavator-operator-screen .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"]:has(.eo-dashboard-truck-grid:is(.is-rows-3, .is-rows-4, .is-many)) .eo-dashboard-unload-card {
     grid-template-rows: auto !important;
     align-content: center !important;
 }
 
-/* Для двух и трёх точек название занимает всю ширину ниже счётчика. */
-body.excavator-operator-screen .eo-shell[data-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-2 .eo-dashboard-unload-card,
-body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-card {
+/* Для трёх точек название занимает всю ширину под счётчиком в ручном режиме водителя. */
+body.excavator-operator-screen .eo-shell[data-driver-manual-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-card {
     padding-block-start: calc(var(--eo-dump-count-inset) + var(--eo-dump-count-height) + 3px) !important;
 }
 
@@ -4106,7 +4103,6 @@ body.excavator-operator-screen .eo-shell[data-eo-active-tab="trucks"] .eo-dashbo
     padding-inline: 4px !important;
 }
 
-body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid.is-count-2 .eo-dashboard-unload-top,
 body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboard-unload-top {
     padding-inline-end: 0;
 }
@@ -4115,13 +4111,9 @@ body.excavator-operator-screen .eo-dashboard-unload-grid.is-count-3 .eo-dashboar
 /* У многорядной сетки счётчик компактнее, чтобы оставить место названию. */
 body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-card {
     --eo-dump-count-height: 16px;
-    --eo-dump-count-inset: 3px;
-    padding-block: calc(var(--eo-dump-count-inset) + var(--eo-dump-count-height) + 6px) 6px !important;
+    --eo-dump-count-inset: 2px;
+    --eo-dump-dense-clearance: 16px;
     padding-inline: 4px !important;
-}
-
-body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-top {
-    padding-inline: 0;
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-grid:not(.is-count-1, .is-count-2, .is-count-3) .eo-dashboard-unload-top strong {
@@ -4134,7 +4126,26 @@ body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-gri
 }
 
 body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-dump-zone:has(.eo-dashboard-unload-grid:not(.is-count-0, .is-count-1, .is-count-2, .is-count-3)) {
-    --eo-mobile-dump-zone-h: max(190px, 20dvh);
+    --eo-mobile-dump-zone-h: max(224px, 20dvh);
+}
+
+/* Равные ряды сверху и снизу держат название в центре независимо от очереди. */
+body.excavator-operator-screen .eo-shell[data-eo-shell][data-eo-active-tab="trucks"] .eo-dashboard-unload-card {
+    --eo-dump-label-clearance: var(--eo-dump-dense-clearance, calc(var(--eo-dump-count-height) + var(--eo-dump-count-inset)));
+    grid-template-rows: minmax(var(--eo-dump-label-clearance), 1fr) auto minmax(var(--eo-dump-label-clearance), 1fr) !important;
+    align-content: safe center !important;
+    row-gap: 0 !important;
+    padding-block: 2px !important;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-top {
+    grid-row: 2;
+    padding-inline: 0;
+}
+
+body.excavator-operator-screen .eo-shell[data-eo-shell] .eo-dashboard-unload-badges {
+    grid-row: 3;
+    align-self: center !important;
 }
 
 /* Карточка самосвала вытянута по вертикали. Пользователь посмотрел на бой и
