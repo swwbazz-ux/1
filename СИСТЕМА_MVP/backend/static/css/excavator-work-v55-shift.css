@@ -3427,7 +3427,7 @@ body.excavator-operator-screen main.eo-shell[data-eo-shell] {
 .eo-downtime-edge { display: none; }
 
 @media (any-pointer: coarse) {
-    body:not(.modal-open) .eo-shell[data-eo-active-tab="trucks"] > .eo-downtime-edge {
+    body:not(.modal-open) .eo-shell[data-eo-active-tab="trucks"]:not([data-eo-downtime-preview]) > .eo-downtime-edge {
         display: grid;
         place-items: center end;
         position: absolute;
@@ -3452,6 +3452,8 @@ body.excavator-operator-screen main.eo-shell[data-eo-shell] {
 }
 
 .eo-shell [data-eo-screen="trucks"],
+.eo-shell [data-eo-screen="events"],
+.eo-shell .mobile-downtime__reasons,
 .eo-shell .eo-dashboard-main-zone,
 .eo-shell .eo-dashboard-truck-grid,
 .eo-shell .eo-dashboard-dump-zone {
