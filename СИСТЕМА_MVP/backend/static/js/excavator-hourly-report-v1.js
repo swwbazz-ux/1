@@ -23,7 +23,7 @@
     }
 
     function cacheKey() {
-        return "eo-hourly-report-v2:" + currentExcavatorId();
+        return "eo-hourly-report-v3:" + currentExcavatorId();
     }
 
     function safeCacheRead() {
@@ -71,6 +71,38 @@
         if (tail === 1) return "рейс";
         if (tail > 1 && tail < 5) return "рейса";
         return "рейсов";
+    }
+
+    function renderDowntimeSection(hour) {
+        if (!Object.prototype.hasOwnProperty.call(hour, "downtimes")) return null;
+        var downtime = hour.downtimes || {};
+        var rows = Array.isArray(downtime.rows) ? downtime.rows : [];
+        var section = element("section", "eo-hourly-report__downtimes");
+        section.setAttribute("aria-label", hour.title + ": простои");
+
+        var header = element("header", "eo-hourly-report__downtime-header");
+        header.appendChild(element("strong", "", "Простои"));
+        header.appendChild(element(
+            "span",
+            "eo-hourly-report__downtime-total",
+            downtime.total_label || "0 мин"
+        ));
+        section.appendChild(header);
+
+        if (!rows.length) {
+            section.appendChild(element("p", "eo-hourly-report__downtime-empty", "Простоев нет"));
+            return section;
+        }
+
+        var list = element("div", "eo-hourly-report__downtime-list");
+        rows.forEach(function (downtimeRow) {
+            var row = element("div", "eo-hourly-report__downtime-row");
+            row.appendChild(element("span", "", downtimeRow.reason));
+            row.appendChild(element("strong", "", downtimeRow.duration_label));
+            list.appendChild(row);
+        });
+        section.appendChild(list);
+        return section;
     }
 
     function renderHourBlock(hour) {
@@ -156,6 +188,8 @@
                 unknownTotal + " " + tripWord(unknownTotal) + " требуют уточнения типа самосвала"
             ));
         }
+        var downtimeSection = renderDowntimeSection(hour);
+        if (downtimeSection) block.appendChild(downtimeSection);
         return block;
     }
 

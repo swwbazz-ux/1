@@ -1,6 +1,8 @@
 СИСТЕМА_MVP/backend/static/css/excavator-work-v55-shift.css
 СИСТЕМА_MVP/backend/static/css/excavator-free-bucket-v1.css
-СИСТЕМА_MVP/backend/static/css/mobile-face-unified-v1.css
+СИСТЕМА_MVP/backend/static/js/excavator-free-bucket-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
 СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_workspace.html
 СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
 СИСТЕМА_MVP/backend/trips/views.py

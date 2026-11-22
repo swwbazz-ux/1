@@ -54,7 +54,8 @@ test('report lifecycle is coalesced, stale guarded and closes only once', () => 
 });
 
 test('offline cache is explicit and unresolved local loads are not claimed', () => {
-    assert.match(source, /eo-hourly-report-v2:/);
+    assert.match(source, /eo-hourly-report-v3:/);
+    assert.match(source, /renderDowntimeSection\(hour\)/);
     assert.match(source, /"Нет связи · " \+ cachedAt/);
     assert.match(source, /Локально сохранённые, но ещё не синхронизированные погрузки/);
     assert.match(source, /Сохранённого отчёта пока нет/);
