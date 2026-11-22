@@ -124,8 +124,8 @@
                 </div>
             </header>
 
-            <div class="mobile-face__content{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-face-settings-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
-                <div class="mobile-face__settings" aria-label="Настройки забоя">
+            <div class="mobile-face__content{% if not open_shift %} is-shift-inactive{% endif %}" data-eo-face-scroll="content" data-eo-face-settings-available="{% if open_shift %}true{% else %}false{% endif %}"{% if not open_shift %} aria-disabled="true"{% endif %}>
+                <div class="mobile-face__settings" data-eo-face-scroll="settings" aria-label="Настройки забоя">
                     <label class="mobile-shift__field mobile-face__setting">
                         <span class="mobile-shift__field-label"><span>Горизонт</span></span>
                         <span class="mobile-shift__metric-value"><input type="number" inputmode="numeric" pattern="[0-9]*" name="loading_horizon" value="{{ face_horizon }}" placeholder="75" data-eo-face-horizon{% if not open_shift %} disabled aria-disabled="true"{% endif %}></span>
@@ -146,7 +146,7 @@
                     </label>
                 </div>
 
-                <div class="mobile-face__destinations" aria-label="Выбор точек разгрузки">
+                <div class="mobile-face__destinations" data-eo-face-scroll="destinations" role="group" aria-label="Выбор точек разгрузки">
                     {% for card in dump_choice_cards %}
                         <button
                             class="eo-unload-card mobile-face__destination status-{{ card.status_key }}{% if card.is_selected %} is-selected{% endif %}{% if card.is_persisted %} is-dump-applied{% elif card.is_selected %} is-dump-pending{% endif %}"
@@ -977,8 +977,10 @@ function syncExcavatorKeyboardState(metrics) {
     var isOpen = viewportReduced && (fieldFocused || wasOpen);
     if (isOpen) {
         shell.dataset.eoImeOpen = "true";
+        shell.style.setProperty("--eo-visible-height", metrics.height + "px");
     } else {
         delete shell.dataset.eoImeOpen;
+        shell.style.removeProperty("--eo-visible-height");
         if (!fieldFocused) {
             excavatorStableViewportHeight = metrics.height;
             excavatorStableViewportWidth = metrics.width;
@@ -1204,6 +1206,9 @@ function refreshExcavatorWorkFromServer(options) {
         var viewState = window.AppOperationalFragment.captureView
             ? window.AppOperationalFragment.captureView(currentShell, "[data-eo-screen]", "data-eo-screen")
             : null;
+        var faceScroll = viewState && latestActiveTab === "face" && newShell.dataset.eoActiveTab === "face"
+            ? window.AppOperationalFragment.captureView(currentShell, "[data-eo-face-scroll]", "data-eo-face-scroll")
+            : null;
         currentShell.replaceWith(newShell);
         if (typeof window.bindMobileShiftScreens === "function") {
             window.bindMobileShiftScreens();
@@ -1244,6 +1249,7 @@ function refreshExcavatorWorkFromServer(options) {
         scheduleExcavatorViewportHeightSync();
         if (window.AppOperationalFragment.restoreView) {
             window.AppOperationalFragment.restoreView(newShell, viewState);
+            if (faceScroll) window.AppOperationalFragment.restoreView(newShell, faceScroll);
         }
         // Версия подтверждена только после установки и инициализации server truth.
         excavatorWorkAppliedRequestGeneration = requestGeneration;
