@@ -13,7 +13,7 @@
             <div>
                 <span>Физический фонд</span>
                 <h2 id="settlement-fund-title">Жилфонд</h2>
-                <p>Собственные общежития КИС-5 и КИС-6 ведутся картой расселения; здесь они только читаются. Арендованный у подрядчика фонд вводится и закрывается на этой панели.</p>
+                <p>Здесь добавляют переданные комнаты в КИС-5 и КИС-6 и ведут арендованный фонд.</p>
             </div>
         </header>
         <p class="settlement-fund-intro-note">Арендованный фонд не попадает на карту КИС-5/6, и авторасселение в него не селит: места такого фонда используются только вручную, после серверных проверок.</p>
@@ -43,7 +43,6 @@
                 <span>Общежития и комнаты</span>
                 <h2 id="settlement-fund-list-title">Фонд в системе</h2>
             </div>
-            <p>Собственный фонд — только чтение. Арендованный фонд можно дополнять и закрывать.</p>
         </header>
 
         {% for dormitory in fund_dormitories %}
@@ -58,7 +57,7 @@
                         {% else %}
                         <span class="settlement-fund-state is-closed">Закрыто</span>
                         {% endif %}
-                        {% if not dormitory.is_manageable %}
+                        {% if not dormitory.can_add_room and not dormitory.is_manageable %}
                         <span class="settlement-fund-state is-readonly">Только чтение</span>
                         {% endif %}
                     </div>
@@ -152,7 +151,6 @@
     <section class="settlement-fund-manage" aria-labelledby="settlement-fund-manage-title">
         <header class="settlement-fund-section-header">
             <div>
-                <span>Действия с арендованным фондом</span>
                 <h2 id="settlement-fund-manage-title">Управление жилфондом</h2>
             </div>
             <p>Каждое действие требует основания и записывается в журнал расселения.</p>
@@ -205,7 +203,7 @@
             <details class="settlement-fund-form-card" data-fund-form="create_room">
                 <summary>
                     <strong>Добавить комнату</strong>
-                    <small>Только в арендованное общежитие</small>
+                    <small>КИС-5, КИС-6 или арендованное общежитие</small>
                 </summary>
                 <form class="settlement-fund-form" method="post" action="{% url 'settlement_fund' %}" data-fund-action="create_room">
                     {% csrf_token %}
@@ -214,9 +212,9 @@
                         <label class="settlement-fund-field is-wide">
                             <span>Общежитие</span>
                             <select name="dormitory" required>
-                                <option value="">Выберите арендованное общежитие</option>
+                                <option value="">Выберите общежитие</option>
                                 {% for dormitory in fund_dormitories %}
-                                {% if dormitory.is_manageable and dormitory.is_active %}
+                                {% if dormitory.can_add_room %}
                                 <option value="{{ dormitory.id }}">Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
                                 {% endif %}
                                 {% endfor %}
@@ -231,7 +229,7 @@
                         </label>
                         <label class="settlement-fund-field">
                             <span>Номер комнаты</span>
-                            <input type="number" name="number" min="1" step="1" required>
+                            <input type="number" name="number" min="1" max="32767" step="1" required>
                         </label>
                         <label class="settlement-fund-field">
                             <span>Вместимость</span>
@@ -253,7 +251,7 @@
                         </label>
                         <label class="settlement-fund-field">
                             <span>Позиция на стороне</span>
-                            <input type="number" name="side_position" min="1" step="1" required>
+                            <input type="number" name="side_position" min="1" max="32767" step="1" placeholder="В конец ряда">
                         </label>
                         <label class="settlement-fund-field">
                             <span>Тип комнаты</span>
@@ -267,7 +265,7 @@
                             <input type="text" name="reason" maxlength="255" autocomplete="off" required>
                         </label>
                     </div>
-                    <p class="settlement-fund-form-hint">Добавленная комната сразу считается переданной. Комната ИТР вмещает не более 2 мест.</p>
+                    <p class="settlement-fund-form-hint">Комната сразу считается переданной. Для КИС-5 и КИС-6 койко-места создаются автоматически. В комнате ИТР до двух мест.</p>
                     <div class="settlement-fund-form-actions">
                         <button type="submit">Добавить комнату</button>
                     </div>

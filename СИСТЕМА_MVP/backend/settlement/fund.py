@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Max, Prefetch, Q
 from django.utils import timezone
 
 
@@ -71,8 +71,8 @@ PHYSICAL_FUND_SPECS = tuple(
     + _room_specs(
         dormitory_number='6',
         floor=1,
-        room_numbers=range(1, 12),
-        transferred_numbers=(1, 2, 3, 5, 6, 8, 9, 10, 11),
+        room_numbers=range(1, 13),
+        transferred_numbers=(1, 2, 3, 5, 6, 8, 9, 10, 11, 12),
     )
     + _room_specs(
         dormitory_number='6',
@@ -84,19 +84,22 @@ PHYSICAL_FUND_SPECS = tuple(
 
 
 def bed_specs(room_spec):
-    dormitory_code = f'KIS{room_spec.dormitory_number}'
-    room_code = (
-        f'{dormitory_code}-F{room_spec.floor}-'
-        f'R{room_spec.room_number:02d}'
+    return _room_bed_specs(
+        room_spec.dormitory_number, room_spec.floor, room_spec.room_number,
+        room_spec.room_type, room_spec.capacity,
     )
-    if room_spec.room_type == 'itr':
+
+
+def _room_bed_specs(dormitory_number, floor, room_number, room_type, capacity):
+    room_code = f'KIS{dormitory_number}-F{floor}-R{room_number:02d}'
+    if room_type == 'itr':
         return tuple(
             {
                 'stable_id': f'{room_code}-ITR{position}',
                 'block': 'ITR',
                 'position': position,
             }
-            for position in range(1, 3)
+            for position in range(1, capacity + 1)
         )
 
     return tuple(
@@ -107,7 +110,7 @@ def bed_specs(room_spec):
         }
         for block in ('A', 'B')
         for position in range(1, 4)
-    )
+    )[:capacity]
 
 
 def expected_fund_totals():
@@ -137,8 +140,7 @@ def expected_fund_totals():
 #
 # Панель делопроизводителя собирает фонд существующими моделями
 # ``references.Dormitory`` -> ``PhysicalRoom`` -> ``PhysicalBed``. Через панель
-# добавляется только арендованный фонд (`kind='rented'`); собственные КИС-5/6
-# панель только читает. Карта КИС-5/6 не меняется и аренду не показывает.
+# добавляются комнаты КИС-5/6 и управляется арендованный фонд.
 # Каждое изменение пишется в неизменяемый журнал ``SettlementPlacementEvent``
 # отдельным `FUND_*` событием с причиной и автором.
 # ---------------------------------------------------------------------------
@@ -286,6 +288,14 @@ def _bed_stable_id(dormitory, room, block, position):
     )
 
 
+def _dormitory_accepts_rooms(dormitory):
+    from references.models import Dormitory
+
+    return dormitory.kind == Dormitory.Kind.RENTED or (
+        dormitory.kind == Dormitory.Kind.OWN and dormitory.number in MAP_DORMITORY_NUMBERS
+    )
+
+
 def fund_dormitory_list():
     """Список фонда для панели: общежития -> комнаты -> койки, со счётчиками."""
     from .models import PhysicalBed, PhysicalRoom
@@ -355,6 +365,7 @@ def fund_dormitory_list():
             'note': dormitory.note,
             'is_active': dormitory.is_active,
             'is_manageable': dormitory.kind == Dormitory.Kind.RENTED,
+            'can_add_room': dormitory.is_active and _dormitory_accepts_rooms(dormitory),
             'counts': {
                 'rooms': len(rooms),
                 'beds': bed_total,
@@ -445,8 +456,8 @@ def create_room(
     actor_access,
     reason,
 ):
-    """Добавляет комнату в арендованное общежитие; доступные комнаты переданы."""
-    from .models import PhysicalRoom
+    """Добавляет переданную комнату; в КИС-5/6 сразу создаёт места."""
+    from .models import PhysicalBed, PhysicalRoom
     from references.models import Dormitory
 
     actor = _required_actor(actor_access)
@@ -456,28 +467,13 @@ def create_room(
             'Общежитие не найдено.',
             'settlement.fund.dormitory_required',
         )
-    if dormitory.kind != Dormitory.Kind.RENTED:
-        raise _fund_error(
-            'Комнаты добавляются только в арендованный фонд.',
-            'settlement.fund.dormitory_not_rented',
-        )
-    if not dormitory.is_active:
-        raise _fund_error(
-            'Общежитие закрыто: сначала откройте его заново.',
-            'settlement.fund.dormitory_closed',
-        )
-
     floor_number = _positive_int(floor, field='Этаж', minimum=1, maximum=2)
-    room_number = _positive_int(number, field='Номер комнаты')
+    room_number = _positive_int(number, field='Номер комнаты', maximum=32767)
     capacity_number = _positive_int(
         capacity,
         field='Вместимость',
         minimum=1,
         maximum=6,
-    )
-    side_position_number = _positive_int(
-        side_position,
-        field='Позиция на стороне этажа',
     )
     room_type_value = room_type or PhysicalRoom.RoomType.STANDARD
     if room_type_value not in PhysicalRoom.RoomType.values:
@@ -497,29 +493,39 @@ def create_room(
         )
 
     with transaction.atomic():
-        if (
-            PhysicalRoom.objects
-            .filter(
-                dormitory_id=dormitory.pk,
-                floor=floor_number,
-                number=room_number,
+        dormitory = Dormitory.objects.select_for_update().filter(pk=dormitory.pk).first()
+        if dormitory is None:
+            raise _fund_error('Общежитие не найдено.', 'settlement.fund.dormitory_required')
+        if not _dormitory_accepts_rooms(dormitory):
+            raise _fund_error(
+                'Комнаты добавляются в КИС-5, КИС-6 и арендованные общежития.',
+                'settlement.fund.dormitory_room_creation_unavailable',
             )
-            .exists()
-        ):
+        if not dormitory.is_active:
+            raise _fund_error(
+                'Общежитие закрыто: сначала откройте его заново.',
+                'settlement.fund.dormitory_closed',
+            )
+        own = dormitory.kind == Dormitory.Kind.OWN
+        floor_rooms = PhysicalRoom.objects.filter(dormitory=dormitory, floor=floor_number)
+        if floor_rooms.filter(number=room_number).exists():
             raise _fund_error(
                 'Комната с таким номером на этом этаже уже существует.',
                 'settlement.fund.room_number_taken',
             )
-        if (
-            PhysicalRoom.objects
-            .filter(
-                dormitory_id=dormitory.pk,
-                floor=floor_number,
-                corridor_side=corridor_side,
-                side_position=side_position_number,
-            )
-            .exists()
-        ):
+        side_rooms = floor_rooms.filter(corridor_side=corridor_side)
+        position_is_blank = side_position in (None, '')
+        position_limit = 32767
+        if own or position_is_blank:
+            next_position = (side_rooms.aggregate(last=Max('side_position'))['last'] or 0) + 1
+            if position_is_blank:
+                side_position = next_position
+            if own:
+                position_limit = min(next_position, position_limit)
+        side_position_number = _positive_int(
+            side_position, field='Позиция на стороне этажа', maximum=position_limit,
+        )
+        if side_rooms.filter(side_position=side_position_number).exists():
             raise _fund_error(
                 'Позиция на стороне этажа уже занята другой комнатой.',
                 'settlement.fund.side_position_taken',
@@ -535,6 +541,10 @@ def create_room(
             side_position=side_position_number,
         )
         room.save()
+        beds = []
+        if own:
+            specs = _room_bed_specs(dormitory.number, room.floor, room.number, room.room_type, room.capacity)
+            beds = PhysicalBed.objects.bulk_create([PhysicalBed(room=room, **spec) for spec in specs])
         _placement_event(
             event_type='fund_room_created',
             actor_access=actor,
@@ -543,6 +553,7 @@ def create_room(
                 'dormitory': _dormitory_snapshot(dormitory),
                 'before': None,
                 'after': _room_snapshot(room),
+                'beds': [_bed_snapshot(bed) for bed in beds],
             },
         )
     return room
@@ -565,12 +576,6 @@ def create_bed(*, room, block, position, actor_access, reason):
         raise _fund_error(
             'Койко-места добавляются только в арендованный фонд.',
             'settlement.fund.dormitory_not_rented',
-        )
-    # T-029 D1 (QA-4): закрытое общежитие закрыто и на записи, как в create_room.
-    if not dormitory.is_active:
-        raise _fund_error(
-            'Общежитие закрыто: сначала откройте его заново.',
-            'settlement.fund.dormitory_closed',
         )
     if not room.is_transferred:
         raise _fund_error(
@@ -616,6 +621,11 @@ def create_bed(*, room, block, position, actor_access, reason):
         )
 
     with transaction.atomic():
+        if not Dormitory.objects.select_for_update().get(pk=dormitory.pk).is_active:
+            raise _fund_error(
+                'Общежитие закрыто: сначала откройте его заново.',
+                'settlement.fund.dormitory_closed',
+            )
         if PhysicalBed.objects.filter(room_id=room.pk).count() >= room.capacity:
             raise _fund_error(
                 'Достигнута вместимость комнаты.',
@@ -739,7 +749,7 @@ def close_dormitory(*, dormitory, actor_access, reason):
         )
     if dormitory.kind != Dormitory.Kind.RENTED:
         raise _fund_error(
-            'Собственный фонд КИС-5/6 панель только читает.',
+            'Закрывать через панель можно арендованные общежития.',
             'settlement.fund.dormitory_not_rented',
         )
     if not dormitory.is_active:

@@ -3722,7 +3722,7 @@ class PhysicalFundTests(TestCase):
                 room_type=PhysicalRoom.RoomType.STANDARD,
                 capacity=6,
             ).count(),
-            57,
+            58,
         )
         self.assertEqual(
             PhysicalRoom.objects.filter(
@@ -3761,7 +3761,7 @@ class PhysicalFundTests(TestCase):
         dormitory_6 = Dormitory.objects.get(number='6')
         cases = (
             (dormitory_5, 38, 216, 30, 168),
-            (dormitory_6, 22, 132, 17, 102),
+            (dormitory_6, 23, 138, 18, 108),
         )
         for dormitory, rooms, beds, transferred_rooms, transferred_beds in cases:
             with self.subTest(dormitory=dormitory.number):
@@ -3800,6 +3800,7 @@ class PhysicalFundTests(TestCase):
         self.assertIn('KIS5-F1-R01-A1', stable_ids)
         self.assertIn('KIS5-F2-R36-ITR1', stable_ids)
         self.assertIn('KIS6-F2-R50-B3', stable_ids)
+        self.assertIn('KIS6-F1-R12-B3', stable_ids)
 
     def test_bed_identifier_cannot_be_changed(self):
         bed = PhysicalBed.objects.get(stable_id='KIS5-F1-R01-A1')
@@ -4773,10 +4774,10 @@ class SettlementMapAccessTests(TestCase):
         self.assertContains(response, 'Нерасселённые')
         self.assertContains(response, 'КИС-5')
         self.assertContains(response, 'КИС-6')
-        self.assertEqual(response.context['summary']['rooms'], 60)
-        self.assertEqual(response.context['summary']['beds'], 348)
-        self.assertEqual(response.context['summary']['transferred_rooms'], 47)
-        self.assertEqual(response.context['summary']['transferred_beds'], 270)
+        self.assertEqual(response.context['summary']['rooms'], 61)
+        self.assertEqual(response.context['summary']['beds'], 354)
+        self.assertEqual(response.context['summary']['transferred_rooms'], 48)
+        self.assertEqual(response.context['summary']['transferred_beds'], 276)
 
         content = response.content.decode('utf-8')
         self.assertNotIn('<iframe', content.lower())
@@ -4801,24 +4802,24 @@ class SettlementMapAccessTests(TestCase):
         )
         self.assertIn('Текущий состав расселения не определён', content)
         self.assertEqual(content.count('data-unsettled-employee'), 0)
-        self.assertEqual(content.count('data-room-card'), 60)
-        self.assertEqual(content.count('data-bed-id='), 348)
-        self.assertEqual(content.count('data-bed-card'), 348)
-        self.assertEqual(content.count('data-bed-state="free"'), 270)
+        self.assertEqual(content.count('data-room-card'), 61)
+        self.assertEqual(content.count('data-bed-id='), 354)
+        self.assertEqual(content.count('data-bed-card'), 354)
+        self.assertEqual(content.count('data-bed-state="free"'), 276)
         self.assertEqual(content.count('data-bed-state="unavailable"'), 78)
         self.assertEqual(content.count('data-bed-state="occupied"'), 0)
-        self.assertEqual(content.count('data-bed-photo-slot'), 348)
-        self.assertEqual(content.count('data-bed-photo-image'), 348)
-        self.assertEqual(content.count('data-bed-photo-fallback'), 348)
-        self.assertEqual(content.count('data-occupant-photo-url='), 348)
-        self.assertEqual(content.count('data-bed-number='), 348)
-        self.assertEqual(content.count('data-bed-status'), 348)
-        self.assertEqual(content.count('data-bed-person-label'), 348)
-        self.assertEqual(content.count('data-bed-shift-badge'), 348)
-        self.assertEqual(content.count('data-bed-avatar-initial'), 348)
-        self.assertEqual(content.count('data-bed-empty-icon'), 348)
-        self.assertEqual(content.count('data-bed-state-indicator'), 348)
-        self.assertEqual(content.count('data-bed-block-size="3"'), 114)
+        self.assertEqual(content.count('data-bed-photo-slot'), 354)
+        self.assertEqual(content.count('data-bed-photo-image'), 354)
+        self.assertEqual(content.count('data-bed-photo-fallback'), 354)
+        self.assertEqual(content.count('data-occupant-photo-url='), 354)
+        self.assertEqual(content.count('data-bed-number='), 354)
+        self.assertEqual(content.count('data-bed-status'), 354)
+        self.assertEqual(content.count('data-bed-person-label'), 354)
+        self.assertEqual(content.count('data-bed-shift-badge'), 354)
+        self.assertEqual(content.count('data-bed-avatar-initial'), 354)
+        self.assertEqual(content.count('data-bed-empty-icon'), 354)
+        self.assertEqual(content.count('data-bed-state-indicator'), 354)
+        self.assertEqual(content.count('data-bed-block-size="3"'), 116)
         self.assertEqual(content.count('data-bed-block-size="2"'), 3)
         self.assertEqual(content.count('data-room-type="itr"'), 3)
         self.assertNotIn('settlement-room-state', content)
@@ -5007,7 +5008,7 @@ class SettlementMapAccessTests(TestCase):
             for room in (row['left'], row['right'])
             if room is not None
         }
-        self.assertEqual(len(rooms_in_context), 60)
+        self.assertEqual(len(rooms_in_context), 61)
         for room_number, anchor_type in anchor_plan.items():
             with self.subTest(room=room_number):
                 self.assertEqual(
@@ -5234,8 +5235,8 @@ class AutoSettlementPreviewPageTests(TestCase):
         with mock.patch('settlement.views.build_auto_settlement_preview') as preview:
             response = self.client.get(reverse('settlement_map'))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['summary']['rooms'], 60)
-        self.assertEqual(response.context['summary']['beds'], 348)
+        self.assertEqual(response.context['summary']['rooms'], 61)
+        self.assertEqual(response.context['summary']['beds'], 354)
         self.assertContains(response, 'Предварительное авторасселение')
         self.assertNotContains(response, 'data-auto-settlement-preview-bed')
         preview.assert_not_called()
@@ -5304,8 +5305,8 @@ class AutoSettlementPreviewPageTests(TestCase):
             return_value=self.preview_result(),
         ):
             response = self.client.get(reverse('settlement_map'), {'preview': '1', 'effective_date': '2026-08-10'})
-        self.assertEqual(response.context['summary']['rooms'], 60)
-        self.assertEqual(response.context['summary']['beds'], 348)
+        self.assertEqual(response.context['summary']['rooms'], 61)
+        self.assertEqual(response.context['summary']['beds'], 354)
         self.assertEqual(EmployeeBedOccupancy.objects.count(), before)
 
     def test_successful_preview_rows_stay_in_the_result_table_and_do_not_change_bed_markup(self):

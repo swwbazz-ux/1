@@ -1101,7 +1101,7 @@ class FundCloseOccupancyBlockerTests(FundTestBase):
 
 
 class FundOwnFundBoundaryTests(FundTestBase):
-    """m2 (review-8): own-фонд отклоняется и для комнат, и для коек."""
+    """Новые комнаты доступны в КИС-5/6, а их койки создаются при добавлении."""
 
     def make_own_room(self, *, number='5'):
         dormitory = Dormitory.objects.create(number=number)
@@ -1117,8 +1117,8 @@ class FundOwnFundBoundaryTests(FundTestBase):
         )
         return dormitory, room
 
-    def test_room_in_own_dormitory_is_refused(self):
-        own, _room = self.make_own_room()
+    def test_room_outside_own_map_dormitories_is_refused(self):
+        own, _room = self.make_own_room(number='70')
 
         with self.assertRaises(ValidationError) as raised:
             create_room(
@@ -1129,12 +1129,12 @@ class FundOwnFundBoundaryTests(FundTestBase):
                 corridor_side=PhysicalRoom.CorridorSide.LEFT,
                 side_position=7,
                 actor_access=self.clerk_access,
-                reason='Попытка добавить комнату в КИС-5',
+                reason='Вне карты расселения',
             )
 
         self.assertEqual(
             raised.exception.error_list[0].code,
-            'settlement.fund.dormitory_not_rented',
+            'settlement.fund.dormitory_room_creation_unavailable',
         )
         self.assertFalse(
             PhysicalRoom.objects.filter(dormitory=own, number=7).exists()
@@ -1158,34 +1158,64 @@ class FundOwnFundBoundaryTests(FundTestBase):
         )
         self.assertFalse(PhysicalBed.objects.filter(room=room).exists())
 
-    def test_posted_room_into_own_dormitory_is_refused(self):
+    def test_clerk_adds_room_with_all_beds_to_own_map_and_cannot_duplicate_it(self):
         own, _room = self.make_own_room()
         self.authenticate(self.client, self.clerk_access)
 
-        response = self.client.post(
-            reverse('settlement_fund'),
-            {
-                'action': 'create_room',
-                'dormitory': own.pk,
-                'floor': '1',
-                'number': '7',
-                'capacity': '1',
-                'corridor_side': PhysicalRoom.CorridorSide.LEFT,
-                'side_position': '7',
-                'reason': 'Подмена id общежития',
-            },
-        )
+        payload = {
+            'action': 'create_room',
+            'dormitory': own.pk,
+            'floor': '1',
+            'number': '7',
+            'capacity': '4',
+            'corridor_side': PhysicalRoom.CorridorSide.LEFT,
+            'side_position': '',
+            'reason': 'Подтверждена передача комнаты',
+        }
+        url = reverse('settlement_fund')
+        response = self.client.post(url, payload)
 
         self.assertRedirects(
             response,
-            reverse('settlement_fund'),
+            url,
             fetch_redirect_response=False,
         )
-        self.assertFalse(
-            PhysicalRoom.objects.filter(dormitory=own, number=7).exists()
+        room = PhysicalRoom.objects.get(dormitory=own, floor=1, number=7)
+        self.assertTrue(room.is_transferred)
+        self.assertEqual(room.side_position, 2)
+        self.assertCountEqual(
+            room.beds.values_list('stable_id', flat=True),
+            ['KIS5-F1-R07-A1', 'KIS5-F1-R07-A2', 'KIS5-F1-R07-A3', 'KIS5-F1-R07-B1'],
         )
-        stored = self.client.session['settlement_fund_message']
-        self.assertEqual(stored['level'], 'error')
+        self.assertEqual(self.client.session['settlement_fund_message']['level'], 'success')
+        self.assertContains(self.client.get(reverse('settlement_map')), 'KIS5-F1-R07-B1')
+        self.client.post(url, payload)
+        self.assertEqual(self.client.session['settlement_fund_message']['level'], 'error')
+        self.assertEqual(room.beds.count(), 4)
+        event = SettlementPlacementEvent.objects.get(event_type=SettlementPlacementEvent.EventType.FUND_ROOM_CREATED)
+        self.assertEqual(event.actor_access_id, self.clerk_access.pk)
+        self.assertEqual(event.reason, payload['reason'])
+        self.assertEqual(len(event.payload['beds']), 4)
+
+    def test_loading_baseline_preserves_a_room_added_in_the_workplace(self):
+        call_command('load_physical_fund', stdout=StringIO())
+        dormitory = Dormitory.objects.get(number='6')
+        room = create_room(
+            dormitory=dormitory,
+            floor=1,
+            number=13,
+            capacity=2,
+            room_type=PhysicalRoom.RoomType.ITR,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=None,
+            actor_access=self.clerk_access,
+            reason='Передана комната ИТР',
+        )
+        call_command('load_physical_fund', '--check', stdout=StringIO())
+        call_command('load_physical_fund', stdout=StringIO())
+        self.assertCountEqual(room.beds.values_list('stable_id', flat=True), [
+            'KIS6-F1-R13-ITR1', 'KIS6-F1-R13-ITR2',
+        ])
 
     def test_posted_bed_into_own_dormitory_is_refused(self):
         _own, room = self.make_own_room(number='6')

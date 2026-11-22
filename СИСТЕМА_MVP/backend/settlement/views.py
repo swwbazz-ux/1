@@ -3152,7 +3152,7 @@ def _settlement_fund_post(request, access):
                 request.POST.get('dormitory'),
                 not_found_message='Общежитие не найдено.',
             )
-            create_fund_room(
+            room = create_fund_room(
                 dormitory=dormitory,
                 floor=request.POST.get('floor'),
                 number=request.POST.get('number'),
@@ -3166,7 +3166,10 @@ def _settlement_fund_post(request, access):
                 actor_access=access,
                 reason=reason,
             )
-            success_text = 'Комната добавлена и отмечена как переданная.'
+            if dormitory.kind == Dormitory.Kind.OWN:
+                success_text = f'Добавлена комната № {room.number} в КИС-{dormitory.number}. Койко-мест создано {room.capacity}.'
+            else:
+                success_text = 'Комната добавлена и отмечена как переданная.'
         elif action == 'create_bed':
             room = _fund_form_object(
                 PhysicalRoom,

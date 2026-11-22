@@ -3,7 +3,7 @@
 Проверяется только отдача шаблона ``settlement/clerk_fund.html``:
 страница доступна делопроизводителю, в шапке рабочего места есть ссылка
 «Жилфонд», формы действий приходят с серверным ``action`` и обязательным
-основанием, собственный фонд остаётся только для чтения.
+основанием и возможностью добавить комнаты собственного фонда.
 """
 
 from django.test import TestCase
@@ -130,15 +130,16 @@ class FundPanelUiTests(TestCase):
         self.assertIn('data-fund-room="%s"' % self.rented_room.pk, html)
         self.assertIn('title="%s"' % self.rented_bed.stable_id, html)
 
-    def test_own_dormitory_is_read_only_and_not_offered_in_forms(self):
+    def test_own_dormitory_is_offered_only_for_room_creation(self):
         self.authenticate()
 
         response = self.client.get(reverse('settlement_fund'))
 
         html = response.content.decode()
         self.assertIn('data-fund-dormitory="5"', html)
-        self.assertIn('Только чтение', html)
-        self.assertNotIn('>Общежитие 5</option>', html)
+        room_form = html.split('data-fund-action="create_room"', 1)[1].split('</form>', 1)[0]
+        self.assertIn(f'value="{self.own_dormitory.pk}">Общежитие 5</option>', room_form)
+        self.assertEqual(html.count('>Общежитие 5</option>'), 1)
         self.assertIn(
             '>Общежитие АР-1 · ООО «Арендодатель панели»</option>',
             html,

@@ -166,13 +166,14 @@ test("повторное открытие: только закрытый аре�
     );
 });
 
-test("собственный фонд только читается, арендованный — управляется", () => {
+test("собственный фонд доступен для добавления комнат", () => {
     assert.equal(
         count(TEMPLATE, "{% if dormitory.is_manageable and dormitory.is_active %}"),
-        4,
+        3,
         "остальные списки выбора ограничены арендованными активными общежитиями"
     );
-    assert.match(TEMPLATE, /{% if not dormitory.is_manageable %}/);
+    assert.match(TEMPLATE, /{% if dormitory.can_add_room %}/);
+    assert.match(TEMPLATE, /{% if not dormitory.can_add_room and not dormitory.is_manageable %}/);
     assert.match(TEMPLATE, /Только чтение/);
     assert.match(TEMPLATE, /is-\{\{ dormitory\.kind \}\}/);
     assert.match(TEMPLATE, /{% if fund_can_manage %}/);

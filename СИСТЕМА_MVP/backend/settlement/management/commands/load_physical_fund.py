@@ -128,7 +128,7 @@ class Command(BaseCommand):
             )
         }
 
-        if set(current_rooms) != set(expected_rooms):
+        if not expected_rooms.keys() <= current_rooms.keys():
             raise CommandError(
                 'Набор физических комнат КИС-5/КИС-6 не совпадает '
                 'с подтверждённой структурой.'

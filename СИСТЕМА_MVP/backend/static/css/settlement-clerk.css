@@ -871,6 +871,7 @@
         minmax(var(--settlement-room-min-height), 1fr);
     gap: var(--settlement-map-gap);
     width: 100%;
+    min-width: calc(100px * var(--settlement-side-slots));
     height: 100%;
     min-height: var(--settlement-plan-block-size);
     max-height: none;
@@ -3045,14 +3046,7 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-floor-plan {
         height: auto;
-    }
-
-    .settlement-floor-plan[data-side-slots="10"] {
-        min-width: 1680px;
-    }
-
-    .settlement-floor-plan[data-side-slots="6"] {
-        min-width: 1020px;
+        min-width: calc(165px * var(--settlement-side-slots) + 30px);
     }
 }
 
