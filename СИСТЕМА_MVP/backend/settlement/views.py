@@ -639,6 +639,7 @@ def settlement_login_view(request):
         allowed_role_codes=('settlement_clerk', 'admin'),
         target_role_app=get_role_app('settlement_clerk'),
         forced_next_url=reverse('clerk_home'),
+        allow_same_employee_multiple_active_roles=True,
     )
 
 

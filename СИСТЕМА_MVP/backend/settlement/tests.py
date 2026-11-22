@@ -4388,6 +4388,54 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(map_response.status_code, 200)
         self.assertTemplateUsed(map_response, 'settlement/clerk_map.html')
 
+    def test_targeted_login_accepts_admin_pin_when_employee_has_both_roles(self):
+        admin_access = EmployeeAccess.objects.create(
+            employee=self.clerk_employee,
+            role=self.admin_role,
+            access_code='990008',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        login_url = reverse('clerk_login')
+        phone_data = {'phone': self.clerk_employee.phone, 'device_kind': 'personal'}
+        phone_step = self.client.post(login_url, {**phone_data, 'action': 'continue'})
+        self.assertTemplateUsed(phone_step, 'users/login.html')
+        self.assertEqual(phone_step.context['login_step'], 'pin')
+        self.assertNotIn('employee_access_id', self.client.session)
+
+        self.client.post(login_url, {**phone_data, 'access_code': '999999'})
+        self.assertNotIn('employee_access_id', self.client.session)
+        response = self.client.post(login_url, {**phone_data, 'access_code': admin_access.access_code})
+        self.assertRedirects(response, reverse('clerk_home'), fetch_redirect_response=False)
+        self.assertEqual(self.client.session['employee_access_id'], admin_access.pk)
+        self.assertEqual(self.client.session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
+        self.assertTemplateUsed(self.client.get(reverse('clerk_home')), 'settlement/clerk_map.html')
+
+    def test_targeted_login_keeps_conflict_for_duplicate_role(self):
+        EmployeeAccess.objects.create(
+            employee=self.clerk_employee,
+            role=self.clerk_role,
+            access_code='990009',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        response = self.client.post(
+            reverse('clerk_login'), {'phone': self.clerk_employee.phone, 'action': 'continue'},
+        )
+        self.assertTemplateUsed(response, 'users/login_phone_not_found.html')
+        self.assertTrue(response.context['access_conflict'])
+        self.assertNotIn('employee_access_id', self.client.session)
+
+    def test_targeted_login_keeps_conflict_for_phone_shared_by_two_employees(self):
+        self.admin_employee.phone = self.clerk_employee.phone
+        self.admin_employee.save(update_fields=['phone'])
+        response = self.client.post(
+            reverse('clerk_login'), {'phone': self.clerk_employee.phone, 'action': 'continue'},
+        )
+        self.assertTemplateUsed(response, 'users/login_phone_not_found.html')
+        self.assertTrue(response.context['access_conflict'])
+        self.assertNotIn('employee_access_id', self.client.session)
+
     @override_settings(ALLOWED_HOSTS=['localhost', '.localhost'])
     def test_targeted_login_activates_pending_clerk_access_on_other_role_host(self):
         pending_access = EmployeeAccess.objects.create(

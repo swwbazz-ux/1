@@ -990,15 +990,22 @@ def _phone_accesses_have_duplicate_role(candidates):
     return False
 
 
-def _phone_access_conflict_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
+def _phone_access_conflict_response(
+    request, candidates, *, role_app, allowed_role_codes, login_role_app, phone,
+    allow_same_employee_multiple_roles=False,
+):
     """Номер с несколькими записями доступа.
 
     Дубли одной роли — «нужна помощь администратора». Разные роли на общем
     входе driverform.ru — не ошибка, а сотрудник с несколькими ролями: вход
     продолжается как обычно (номер → PIN), а после PIN он выбирает приложение
-    на экране /apps/choose/. Возвращает None, когда конфликта нет."""
-    if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
-        return None
+    на экране /apps/choose/. Для целевого входа можно разрешить переход к PIN
+    при нескольких действующих ролях одной карточки сотрудника."""
+    if not _phone_accesses_have_duplicate_role(candidates):
+        if role_app is None and not allowed_role_codes:
+            return None
+        if allow_same_employee_multiple_roles and len({access.employee_id for access in candidates}) == 1:
+            return None
     return render(
         request,
         'users/login_phone_not_found.html',
@@ -1213,6 +1220,7 @@ def login_view(
     allowed_role_codes=None,
     target_role_app=None,
     forced_next_url='',
+    allow_same_employee_multiple_active_roles=False,
 ):
     if request.session.get('mining_master_tablet_device'):
         return redirect('mining_master_tablet_login')
@@ -1328,6 +1336,7 @@ def login_view(
                 request, activated,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
+                allow_same_employee_multiple_roles=allow_same_employee_multiple_active_roles,
             )
             if conflict is not None:
                 return conflict
