@@ -50,6 +50,9 @@ public class MainActivity extends BridgeActivity {
         SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
         splashScreen.setKeepOnScreenCondition(() -> !nativeCoverReady);
         registerPlugin(NativeKeyboardPlugin.class);
+        if ("excavator".equals(BuildConfig.APP_PROFILE_ID)) {
+            registerPlugin(ExcavatorNavigationPlugin.class);
+        }
         if ("excavator".equals(BuildConfig.APP_PROFILE_ID)
                 || "driver".equals(BuildConfig.APP_PROFILE_ID)) {
             registerPlugin(NativeSoundPlugin.class);
@@ -65,6 +68,9 @@ public class MainActivity extends BridgeActivity {
             public void onPageStarted(WebView loadingWebView) {
                 runOnUiThread(() -> {
                     configureProfileWebViewTextZoom(loadingWebView);
+                    if ("excavator".equals(BuildConfig.APP_PROFILE_ID) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        loadingWebView.setSystemGestureExclusionRects(Collections.emptyList());
+                    }
                     if (loadingWebView instanceof NativeImeWebView) {
                         ((NativeImeWebView) loadingWebView).clearNativeImeAction();
                     }

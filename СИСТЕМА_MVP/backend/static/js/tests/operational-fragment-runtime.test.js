@@ -537,8 +537,9 @@ test("concurrent Excavator refresh triggers share one in-flight request", async 
 });
 
 
-test("successful Excavator Shift save clears its draft before owned fragment reconciliation", async () => {
+test("successful Excavator shift start opens Work before refreshing the saved shift", async () => {
     const refreshCalls = [];
+    const tabs = [];
     let clearCalls = 0;
     let reloadCalls = 0;
     const shiftScreen = {dataset: {eoShiftDirty: "true"}};
@@ -554,7 +555,9 @@ test("successful Excavator Shift save clears its draft before owned fragment rec
             return Promise.resolve(true);
         },
         action: "open",
+        activateTab(name) { tabs.push(name); },
         refreshExcavatorWorkFromServer(options) {
+            assert.deepEqual(tabs, ["trucks"]);
             refreshCalls.push(options);
             return Promise.resolve(true);
         },

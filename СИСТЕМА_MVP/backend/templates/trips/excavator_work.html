@@ -6,28 +6,29 @@
 {% block viewport_extra %}, viewport-fit=cover{% endblock %}
 {% block extra_head %}
 <link rel="manifest" href="{% url 'excavator_manifest' %}">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v272">
-<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v272">
-<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v272" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
-<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-final.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/excavator-work-v55-shift.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/mobile-shift-unified-v1.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/mobile-face-unified-v1.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/mobile-downtime-unified-v1.css' %}?v=excavator-mobile-shell-v273">
+<link rel="stylesheet" href="{% static 'css/excavator-hourly-report-v1.css' %}?v=excavator-mobile-shell-v273">
+<script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/mobile-operational-sounds-v1.js' %}?v=excavator-mobile-shell-v273" data-mobile-sound-profile="excavator" data-mobile-sound-base="{% static 'audio/excavator/' %}" data-connection-loss-stable-ms="30000" data-connection-recovery-stable-ms="30000" data-connection-alert-cooldown-ms="300000" defer></script>
+<script src="{% static 'js/excavator-haptics-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/excavator-native-push-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/excavator-hourly-report-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
 <link rel="stylesheet" href="{% static 'css/native-app-update-v1.css' %}?v=1">
 <link rel="stylesheet" href="{% static 'css/excavator-manual-loading-v1.css' %}?v=4">
 <link rel="stylesheet" href="{% static 'css/excavator-offline-v1.css' %}?v=1">
-<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v272">
-<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v272" defer></script>
-<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v272"></script>
-<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v272"></script>
+<link rel="stylesheet" href="{% static 'css/excavator-free-bucket-v1.css' %}?v=excavator-mobile-shell-v273">
+<script src="{% static 'js/excavator-field-outbox-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/excavator-free-bucket-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/equipment-label-fit-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/excavator-truck-number-fit-v1.js' %}?v=excavator-mobile-shell-v273" defer></script>
+<script src="{% static 'js/excavator-dashboard-drag-v1.js' %}?v=excavator-mobile-shell-v273"></script>
+<script src="{% static 'js/excavator-dump-return-swipe-v1.js' %}?v=excavator-mobile-shell-v273"></script>
+<script src="{% static 'js/excavator-downtime-edge-v1.js' %}?v=excavator-mobile-shell-v273"></script>
 <meta name="theme-color" content="#D58B14">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Погрузка">
@@ -61,6 +62,7 @@
         </div>
     {% endif %}
 
+    <div class="eo-downtime-edge" data-eo-downtime-edge aria-hidden="true"></div>
     <form class="eo-form" method="post" data-eo-trip-form>
         {% csrf_token %}
         <input type="hidden" name="client_action_id" value="{{ legacy_trip_client_action_id }}">
@@ -398,7 +400,7 @@
 
 <script>
 (function () {
-var excavatorShellVersion = "excavator-mobile-shell-v272";
+var excavatorShellVersion = "excavator-mobile-shell-v273";
 var staticPrefix = "{{ static_prefix|escapejs }}";
 var viewportSyncFrame = null;
 var excavatorStableViewportHeight = 0;
@@ -1053,6 +1055,7 @@ function isExcavatorRefreshUnsafe(options) {
         : "";
     var shell = document.querySelector("[data-eo-shell]");
     if (!shell) return false;
+    if (shell.dataset.eoDowntimePreview !== undefined) return true;
     if (shell.dataset.eoHasPendingFieldEvents === "true") return true;
     var active = document.activeElement;
     var activeTag = active && active.tagName ? active.tagName.toLowerCase() : "";
@@ -2104,6 +2107,12 @@ window.initExcavatorWorkShell = function () {
     }
 
     function rememberExcavatorTab(name) {
+        // Keep a deep link in step with navigation across fragment and page reloads.
+        var url = new URL(window.location.href);
+        if (url.searchParams.has("tab") && url.searchParams.get("tab") !== name) {
+            url.searchParams.set("tab", name);
+            window.history.replaceState(window.history.state, "", url);
+        }
         try {
             window.localStorage.setItem(excavatorTabPreferenceKey, name);
         } catch (error) {
@@ -2119,6 +2128,7 @@ window.initExcavatorWorkShell = function () {
             name = "trucks";
         }
         var badgeAnchor = badgeAnchors[name] || syncBadgeHome;
+        if (downtimeEdge) downtimeEdge.reset();
         if (syncBadge && syncBadgeHome && badgeAnchor && syncBadge.nextElementSibling !== badgeAnchor) {
             badgeAnchor.before(syncBadge);
         }
@@ -2136,6 +2146,7 @@ window.initExcavatorWorkShell = function () {
         });
         shell.dataset.eoActiveTab = name;
         rememberExcavatorTab(name);
+        if (downtimeEdge) downtimeEdge.syncNative();
     }
 
     /* EXCAVATOR_TAB_SETTLE_START */
@@ -3736,6 +3747,11 @@ window.initExcavatorWorkShell = function () {
         });
     });
 
+    var downtimeEdge = window.ExcavatorDowntimeEdge && window.ExcavatorDowntimeEdge.bind(shell, eventsScreen, function () {
+        activateTab("events");
+        scheduleExcavatorTabSettle("events");
+    });
+
     var excavatorDashboardDrag = window.ExcavatorDashboardDrag.attach({
         shell: shell,
         canDrag: canTruckLoad,
@@ -4402,6 +4418,7 @@ window.initExcavatorWorkShell = function () {
                     : "Закрытие смены сохранено. Отправляем на сервер...");
                 return true;
             }
+            if (action === "open") activateTab("trucks");
             if (window.AppRealtime && typeof window.AppRealtime.wake === "function") {
                 try {
                     window.AppRealtime.wake("excavator_shift_saved");
