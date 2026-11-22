@@ -5,6 +5,24 @@
  * настройками и основной кнопкой.
  */
 
+/* Some Android vendors replace the generic sans-serif including the Roboto
+   family alias. The installed face names keep point labels at Redmi's width. */
+@font-face {
+    font-family: "Excavator Roboto";
+    src: local("Roboto Regular"), local("Roboto-Regular");
+    font-weight: 400;
+}
+
+@font-face {
+    font-family: "Excavator Roboto";
+    src: local("Roboto Bold"), local("Roboto-Bold");
+    font-weight: 600 900;
+}
+
+body.excavator-operator-screen .eo-shell .eo-screen.mobile-work-screen.mobile-face[data-eo-screen="face"] {
+    font-family: "Excavator Roboto", Roboto, Arial, sans-serif;
+}
+
 .mobile-face,
 .mobile-face *,
 .mobile-face *::before,
@@ -14,8 +32,9 @@
 
 .mobile-work-screen.mobile-face {
     container-name: mobile-face;
-    --ms-screen-rows: minmax(38px, .12fr) minmax(0, 1fr) auto;
-    --ms-screen-rows-landscape: minmax(30px, .12fr) minmax(0, 1fr) auto;
+    --ms-screen-rows: minmax(min-content, .12fr) minmax(0, 1fr) auto;
+    --ms-screen-rows-landscape: minmax(min-content, .12fr) minmax(0, 1fr) auto;
+    --mobile-face-title-min: 38px;
     --mobile-face-setting-h: 48px;
     /* Middle track of «Простой» with its 12 standard reasons, allowing
        for its 38px title and 48px action minimums on short screens. */
@@ -46,6 +65,40 @@
     grid-template-rows: auto minmax(0, 1fr);
     gap: var(--ms-gap);
     overflow: hidden;
+}
+
+.mobile-face .mobile-face__titlebar {
+    block-size: auto;
+    min-block-size: var(--mobile-face-title-min);
+    column-gap: clamp(3px, .8vw, 6px);
+}
+
+.mobile-face__titlebar > .mobile-shift__title,
+.mobile-face__titlebar > .mobile-shift__update-group {
+    flex: none;
+}
+
+.mobile-face__titlebar > .eo-offline-sync {
+    position: static !important;
+    transform: none;
+    min-inline-size: 0;
+    padding-inline: clamp(4px, 1.2vw, 8px);
+    gap: 4px;
+    font-family: inherit;
+    font-size: clamp(11px, 3vw, 12px);
+    letter-spacing: normal;
+    text-align: center;
+    white-space: normal;
+}
+
+.mobile-face__titlebar [data-eo-offline-sync-label] {
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+}
+
+.mobile-face__titlebar > .eo-offline-sync::before,
+.mobile-face__titlebar .eo-offline-sync__count {
+    flex-shrink: 0;
 }
 
 .mobile-face__content.is-shift-inactive > .mobile-face__settings,
@@ -240,6 +293,7 @@ body.excavator-operator-screen .eo-shell[data-eo-ime-open="true"] .eo-screen.mob
 
 @media (orientation: landscape) and (max-height: 500px) {
     .mobile-work-screen.mobile-face {
+        --mobile-face-title-min: 30px;
         --mobile-face-option-h: 44px;
     }
 }

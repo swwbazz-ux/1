@@ -93,6 +93,7 @@
             <span data-eo-offline-sync-label>Все действия отправлены</span>
             <b class="eo-offline-sync__count" data-eo-offline-sync-count hidden>0</b>
         </div>
+        <template data-eo-offline-sync-home></template>
 
         {% include "includes/mobile_shift_screen.html" with mobile_shift_role="excavator" mobile_shift_state=open_shift|yesno:"open,closed" mobile_shift_previous=shift_previous_readings %}
 
@@ -1624,6 +1625,9 @@ window.initExcavatorWorkShell = function () {
     var shiftConfirmationAccept = shell.querySelector("[data-eo-reading-confirmation-accept]");
     var faceScreen = shell.querySelector('[data-eo-screen="face"]');
     var faceContent = shell.querySelector("[data-eo-face-settings-available]");
+    var syncBadge = shell.querySelector("[data-eo-offline-sync]");
+    var syncBadgeHome = shell.querySelector("[data-eo-offline-sync-home]");
+    var faceVersionGroup = faceScreen && faceScreen.querySelector(".mobile-shift__update-group");
     var eventsScreen = shell.querySelector('[data-eo-screen="events"]');
     var shiftServerBlocked = !!(
         shiftButton
@@ -2109,6 +2113,10 @@ window.initExcavatorWorkShell = function () {
            переключал на «downtime», а вкладка простоя называется «events». */
         if (!isKnownExcavatorTab(name)) {
             name = "trucks";
+        }
+        var badgeAnchor = name === "face" ? faceVersionGroup : syncBadgeHome;
+        if (syncBadge && syncBadgeHome && badgeAnchor && syncBadge.nextElementSibling !== badgeAnchor) {
+            badgeAnchor.before(syncBadge);
         }
         screens.forEach(function (screen) {
             screen.hidden = screen.dataset.eoScreen !== name;
