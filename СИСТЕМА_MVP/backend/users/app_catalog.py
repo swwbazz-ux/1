@@ -22,6 +22,11 @@ APP_CATALOG_ROLES = (
     ('admin', 'Системный администратор'),
 )
 APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in APP_CATALOG_ROLES)
+# These cards use the main site's existing entry path. The subdomain
+# readiness list and the role choices for signed-in employees stay separate.
+MAIN_SITE_CATALOG_ROLES = {'settlement_clerk': 'Делопроизводитель'}
+PUBLIC_APP_CATALOG_ROLES = (*APP_CATALOG_ROLES, *MAIN_SITE_CATALOG_ROLES.items())
+PUBLIC_APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in PUBLIC_APP_CATALOG_ROLES)
 APP_CATALOG_QR_MODULE_PIXELS = 8
 APP_CATALOG_QR_CANVAS_MODULES = 37
 APP_CATALOG_QR_SIZE = APP_CATALOG_QR_MODULE_PIXELS * APP_CATALOG_QR_CANVAS_MODULES
@@ -100,11 +105,14 @@ def _split_host_port(raw_host):
 
 def role_app_public_url(request, role_code):
     app = get_role_app(role_code)
-    if app is None or role_code not in APP_CATALOG_ROLE_CODES:
+    if app is None or role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise KeyError(role_code)
 
     host, port_suffix = _split_host_port(request.get_host())
-    if host == '127.0.0.1' or host == 'localhost' or host.endswith('.localhost'):
+    is_local = host in {'127.0.0.1', 'localhost'} or host.endswith('.localhost')
+    if role_code in MAIN_SITE_CATALOG_ROLES:
+        return request.build_absolute_uri(app.start_url) if is_local else role_app_qr_target_url(role_code)
+    if is_local:
         return f'http://{app.subdomain}.localhost{port_suffix}/'
 
     production_domain = 'driverform.ru'
@@ -113,13 +121,15 @@ def role_app_public_url(request, role_code):
 
 def role_app_qr_target_url(role_code):
     app = get_role_app(role_code)
-    if app is None or role_code not in APP_CATALOG_ROLE_CODES:
+    if app is None or role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise KeyError(role_code)
+    if role_code in MAIN_SITE_CATALOG_ROLES:
+        return f'https://driverform.ru{app.start_url}'
     return f'https://{app.subdomain}.driverform.ru/'
 
 
 def role_app_qr_asset_path(role_code):
-    if role_code not in APP_CATALOG_ROLE_CODES:
+    if role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise KeyError(role_code)
     return f'img/pwa/qr/{role_code}.png'
 
@@ -133,8 +143,8 @@ def app_catalog_public_url(request):
 
 def app_catalog_items(request):
     items = []
-    for role_code, label in APP_CATALOG_ROLES:
-        if role_code not in READY_TRAFFIC_ROLE_CODES:
+    for role_code, label in PUBLIC_APP_CATALOG_ROLES:
+        if role_code not in READY_TRAFFIC_ROLE_CODES and role_code not in MAIN_SITE_CATALOG_ROLES:
             continue
         app = get_role_app(role_code)
         if app is None:

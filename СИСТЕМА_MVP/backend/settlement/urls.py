@@ -4,11 +4,26 @@ from .views import (
     legacy_settlement_entry_view,
     legacy_settlement_login_view,
     legacy_settlement_service_worker_view,
+    settlement_bed_preparation_cancel_view,
+    settlement_bed_preparation_confirm_view,
+    settlement_bed_preparation_extend_view,
+    settlement_bed_preparation_prepare_view,
+    settlement_bed_preparation_suggest_view,
+    settlement_bed_reserve_view,
+    settlement_clerk_shift_close_view,
+    settlement_clerk_shift_handover_view,
+    settlement_clerk_shift_open_view,
+    settlement_clerk_shift_state_view,
     settlement_employee_search_view,
     settlement_employee_detail_view,
+    settlement_external_resident_create_view,
+    settlement_external_resident_search_view,
+    settlement_fund_view,
     settlement_control_acquire_view,
     settlement_control_heartbeat_view,
     settlement_control_release_view,
+    settlement_control_takeover_view,
+    settlement_resident_search_view,
     settlement_auto_preview_apply_view,
     settlement_auto_preview_apply_day_view,
     settlement_auto_preview_apply_night_view,
@@ -26,6 +41,9 @@ from .views import (
     settlement_map_view,
     settlement_occupancy_create_view,
     settlement_service_worker_view,
+    settlement_temporary_relocate_view,
+    settlement_temporary_release_view,
+    settlement_temporary_state_view,
 )
 
 
@@ -59,6 +77,11 @@ urlpatterns = [
     path('clerk/', settlement_map_view, name='clerk_home'),
     path('clerk/settlement/', settlement_map_view, name='settlement_map'),
     path(
+        'clerk/settlement/fund/',
+        settlement_fund_view,
+        name='settlement_fund',
+    ),
+    path(
         'clerk/settlement/control/acquire/',
         settlement_control_acquire_view,
         name='settlement_control_acquire',
@@ -72,6 +95,11 @@ urlpatterns = [
         'clerk/settlement/control/release/',
         settlement_control_release_view,
         name='settlement_control_release',
+    ),
+    path(
+        'clerk/settlement/control/takeover/',
+        settlement_control_takeover_view,
+        name='settlement_control_takeover',
     ),
     path(
         'clerk/settlement/auto/state/',
@@ -129,9 +157,89 @@ urlpatterns = [
         name='settlement_employee_detail',
     ),
     path(
+        'clerk/settlement/residents/external/search/',
+        settlement_external_resident_search_view,
+        name='settlement_external_resident_search',
+    ),
+    path(
+        'clerk/settlement/residents/search/',
+        settlement_resident_search_view,
+        name='settlement_resident_search',
+    ),
+    path(
+        'clerk/settlement/residents/external/create/',
+        settlement_external_resident_create_view,
+        name='settlement_external_resident_create',
+    ),
+    path(
         'clerk/settlement/occupancies/',
         settlement_occupancy_create_view,
         name='settlement_occupancy_create',
+    ),
+    path(
+        'clerk/settlement/bed-preparations/prepare/',
+        settlement_bed_preparation_prepare_view,
+        name='settlement_bed_preparation_prepare',
+    ),
+    path(
+        'clerk/settlement/bed-preparations/suggest/',
+        settlement_bed_preparation_suggest_view,
+        name='settlement_bed_preparation_suggest',
+    ),
+    path(
+        'clerk/settlement/bed-preparations/<int:preparation_id>/confirm/',
+        settlement_bed_preparation_confirm_view,
+        name='settlement_bed_preparation_confirm',
+    ),
+    path(
+        'clerk/settlement/bed-preparations/<int:preparation_id>/cancel/',
+        settlement_bed_preparation_cancel_view,
+        name='settlement_bed_preparation_cancel',
+    ),
+    path(
+        'clerk/settlement/bed-preparations/<int:preparation_id>/extend/',
+        settlement_bed_preparation_extend_view,
+        name='settlement_bed_preparation_extend',
+    ),
+    path(
+        'clerk/settlement/temporary/relocate/',
+        settlement_temporary_relocate_view,
+        name='settlement_temporary_relocate',
+    ),
+    path(
+        'clerk/settlement/temporary/release/',
+        settlement_temporary_release_view,
+        name='settlement_temporary_release',
+    ),
+    path(
+        'clerk/settlement/temporary/state/',
+        settlement_temporary_state_view,
+        name='settlement_temporary_state',
+    ),
+    path(
+        'clerk/settlement/shift/state/',
+        settlement_clerk_shift_state_view,
+        name='settlement_clerk_shift_state',
+    ),
+    path(
+        'clerk/settlement/shift/open/',
+        settlement_clerk_shift_open_view,
+        name='settlement_clerk_shift_open',
+    ),
+    path(
+        'clerk/settlement/shift/close/',
+        settlement_clerk_shift_close_view,
+        name='settlement_clerk_shift_close',
+    ),
+    path(
+        'clerk/settlement/shift/handover/',
+        settlement_clerk_shift_handover_view,
+        name='settlement_clerk_shift_handover',
+    ),
+    path(
+        'clerk/settlement/bed-reserves/',
+        settlement_bed_reserve_view,
+        name='settlement_bed_reserve',
     ),
     path(
         'settlement/manifest.webmanifest',

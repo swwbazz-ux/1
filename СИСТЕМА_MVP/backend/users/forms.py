@@ -360,18 +360,29 @@ class EmployeeCardForm(forms.ModelForm):
                 self.fields['work_schedule'].help_text = (
                     f'Старое значение: «{self.instance.rotation}». Выберите стандартный график и бригаду.'
                 )
-        position_catalog = {}
+        self._position_catalog = {}
         for position in self.fields['personnel_position'].queryset:
-            position_catalog[str(position.id)] = {
+            self._position_catalog[str(position.id)] = {
                 'allowed': list(position.allowed_specializations.values_list('id', flat=True)),
                 'default': position.default_specialization_id,
                 'required': position.requires_specialization,
+                'settlement_category_label': position.settlement_category_label,
             }
         self.fields['base_specialization'].widget.attrs.update({
-            'data-specialization-catalog': json.dumps(position_catalog),
+            'data-specialization-catalog': json.dumps(self._position_catalog),
             'data-base-specialization': '1',
         })
         self.fields['personnel_position'].widget.attrs['data-personnel-position'] = '1'
+
+    @property
+    def selected_settlement_category_label(self):
+        position = self._position_catalog.get(
+            str(self['personnel_position'].value()), {},
+        )
+        return position.get(
+            'settlement_category_label',
+            PersonnelPosition.SettlementCategory.UNCLASSIFIED.label,
+        )
 
     def clean_full_name(self):
         value = ' '.join((self.cleaned_data.get('full_name') or '').split())
@@ -919,6 +930,7 @@ class PersonnelPositionReferenceForm(forms.ModelForm):
         fields = (
             'name',
             'code',
+            'settlement_category',
             'requires_specialization',
             'allowed_specializations',
             'default_specialization',

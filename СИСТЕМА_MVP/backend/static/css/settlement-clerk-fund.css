@@ -1,0 +1,570 @@
+/* T-029 этап C: панель жилфонда делопроизводителя (/clerk/settlement/fund/).
+ *
+ * Файл обслуживает только экран жилфонда и не влияет на карту КИС-5/6:
+ * все селекторы начинаются с .settlement-fund-.
+ * Цвета и границы берутся из токенов рабочего места (.admin-exports-shell),
+ * поэтому ночная тема переключается без отдельного набора правил.
+ */
+
+.settlement-fund-page {
+    grid-template-rows: none;
+    grid-auto-rows: min-content;
+    align-content: start;
+    gap: 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 28px;
+}
+
+.settlement-fund-page > * {
+    min-width: 0;
+}
+
+/* --- Вступление --------------------------------------------------------- */
+
+.settlement-fund-intro {
+    display: grid;
+    gap: 8px;
+    padding: 14px 18px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-fund-intro-header > div > span,
+.settlement-fund-section-header > div > span {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-fund-intro-header h2,
+.settlement-fund-section-header h2 {
+    margin: 2px 0 0;
+    color: var(--admin-ink);
+    font-size: 20px;
+    font-weight: 900;
+    line-height: 1.15;
+}
+
+.settlement-fund-intro-header p,
+.settlement-fund-section-header p {
+    margin: 4px 0 0;
+    color: var(--admin-muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.settlement-fund-intro-note {
+    margin: 0;
+    padding: 9px 12px;
+    border-left: 3px solid var(--admin-yellow);
+    border-radius: 0 6px 6px 0;
+    background: var(--admin-yellow-soft);
+    color: var(--admin-ink);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* --- Сообщения ---------------------------------------------------------- */
+
+.settlement-fund-message {
+    padding: 11px 14px;
+    border: 1px solid var(--admin-line);
+    border-left: 4px solid var(--admin-gray);
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.settlement-fund-message.is-success {
+    border-left-color: var(--admin-green);
+    background: var(--admin-green-soft);
+}
+
+.settlement-fund-message.is-error {
+    border-left-color: var(--admin-red);
+    background: var(--admin-red-soft);
+}
+
+.settlement-fund-message strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.settlement-fund-message ul {
+    margin: 6px 0 0;
+    padding-left: 18px;
+}
+
+/* --- Список фонда ------------------------------------------------------- */
+
+.settlement-fund-list,
+.settlement-fund-manage {
+    display: grid;
+    gap: 10px;
+}
+
+.settlement-fund-section-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    align-items: end;
+    justify-content: space-between;
+    padding: 0 2px;
+}
+
+.settlement-fund-dormitory {
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+    overflow: hidden;
+}
+
+.settlement-fund-dormitory.is-rented {
+    border-left: 4px solid var(--admin-cyan);
+}
+
+.settlement-fund-dormitory.is-own {
+    border-left: 4px solid var(--admin-gray);
+}
+
+.settlement-fund-dormitory-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: start;
+    justify-content: space-between;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--admin-line-soft);
+}
+
+.settlement-fund-dormitory-title {
+    min-width: 0;
+}
+
+.settlement-fund-dormitory-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.settlement-fund-kind,
+.settlement-fund-state {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.settlement-fund-kind.is-rented {
+    background: var(--admin-cyan-soft);
+    color: var(--admin-cyan);
+}
+
+.settlement-fund-kind.is-own {
+    background: var(--admin-gray-soft);
+    color: var(--admin-muted);
+}
+
+.settlement-fund-state.is-active {
+    background: var(--admin-green-soft);
+    color: var(--admin-green);
+}
+
+.settlement-fund-state.is-closed {
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+}
+
+.settlement-fund-state.is-readonly {
+    background: var(--admin-gray-soft);
+    color: var(--admin-muted);
+}
+
+.settlement-fund-state.is-pending {
+    background: var(--admin-yellow-soft);
+    color: var(--admin-yellow);
+}
+
+.settlement-fund-dormitory-title h3 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: 18px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.settlement-fund-dormitory-title p {
+    margin: 2px 0 0;
+    color: var(--admin-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.settlement-fund-dormitory-title .settlement-fund-dormitory-note {
+    color: var(--admin-ink);
+    font-size: 12px;
+}
+
+.settlement-fund-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+}
+
+.settlement-fund-counts > div {
+    min-width: 78px;
+    padding: 7px 10px;
+    border: 1px solid var(--admin-line-soft);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    text-align: center;
+}
+
+.settlement-fund-counts dt {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.settlement-fund-counts dd {
+    margin: 2px 0 0;
+    color: var(--admin-ink);
+    font-size: 17px;
+    font-weight: 900;
+}
+
+.settlement-fund-rooms {
+    padding: 0;
+}
+
+.settlement-fund-rooms > summary {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 16px;
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+    list-style: none;
+}
+
+.settlement-fund-rooms > summary::-webkit-details-marker {
+    display: none;
+}
+
+.settlement-fund-rooms > summary::before {
+    content: "▸";
+    color: var(--admin-muted);
+    font-size: 12px;
+    transition: transform .15s ease;
+}
+
+.settlement-fund-rooms[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.settlement-fund-rooms > summary small {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.settlement-fund-rooms > summary:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-fund-dormitory-empty {
+    margin: 0;
+    padding: 12px 16px;
+    color: var(--admin-muted);
+    font-size: 12px;
+}
+
+/* --- Таблица комнат ----------------------------------------------------- */
+
+.settlement-fund-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.settlement-fund-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.settlement-fund-table th {
+    padding: 7px 10px;
+    border-top: 1px solid var(--admin-line-soft);
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.settlement-fund-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--admin-line-soft);
+    color: var(--admin-ink);
+    vertical-align: middle;
+}
+
+.settlement-fund-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.settlement-fund-table tbody tr:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-fund-bed {
+    display: inline-flex;
+    margin: 1px 3px 1px 0;
+    padding: 2px 7px;
+    border: 1px solid var(--admin-line);
+    border-radius: 5px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 900;
+}
+
+.settlement-fund-muted {
+    color: var(--admin-muted);
+    font-size: 11px;
+}
+
+.settlement-fund-empty {
+    padding: 18px;
+    border: 1px dashed var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    color: var(--admin-muted);
+    text-align: center;
+}
+
+.settlement-fund-empty strong {
+    display: block;
+    color: var(--admin-ink);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.settlement-fund-empty p {
+    margin: 4px 0 0;
+    font-size: 12px;
+}
+
+/* --- Формы управления --------------------------------------------------- */
+
+.settlement-fund-forms {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 10px;
+    align-items: start;
+}
+
+.settlement-fund-form-card {
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-fund-form-card > summary {
+    display: grid;
+    gap: 2px;
+    padding: 12px 16px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.settlement-fund-form-card > summary::-webkit-details-marker {
+    display: none;
+}
+
+.settlement-fund-form-card > summary::before {
+    content: "+";
+    float: right;
+    color: var(--admin-muted);
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.settlement-fund-form-card[open] > summary::before {
+    content: "−";
+}
+
+.settlement-fund-form-card > summary strong {
+    color: var(--admin-ink);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.settlement-fund-form-card > summary small {
+    color: var(--admin-muted);
+    font-size: 11px;
+}
+
+.settlement-fund-form-card > summary:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-fund-form {
+    display: grid;
+    gap: 10px;
+    padding: 0 16px 14px;
+}
+
+.settlement-fund-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 9px 12px;
+}
+
+.settlement-fund-field {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.settlement-fund-field.is-wide {
+    grid-column: 1 / -1;
+}
+
+.settlement-fund-field > span {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.settlement-fund-field input,
+.settlement-fund-field select,
+.settlement-fund-field textarea {
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 9px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+}
+
+.settlement-fund-field textarea {
+    min-height: 58px;
+    resize: vertical;
+}
+
+.settlement-fund-field input:focus-visible,
+.settlement-fund-field select:focus-visible,
+.settlement-fund-field textarea:focus-visible,
+.settlement-fund-form-actions button:focus-visible {
+    outline: 2px solid var(--admin-cyan);
+    outline-offset: 1px;
+}
+
+.settlement-fund-form-hint {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.settlement-fund-form-blocked {
+    margin: 0 16px 14px;
+    padding: 9px 11px;
+    border-left: 3px solid var(--admin-yellow);
+    border-radius: 0 6px 6px 0;
+    background: var(--admin-yellow-soft);
+    color: var(--admin-ink);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.settlement-fund-form-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.settlement-fund-form-actions button {
+    min-height: 38px;
+    padding: 8px 16px;
+    border: 1px solid var(--admin-green);
+    border-radius: 6px;
+    background: var(--admin-green);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-fund-form-actions button:hover {
+    filter: brightness(1.06);
+}
+
+.settlement-fund-form-actions button.is-danger {
+    border-color: var(--admin-red);
+    background: var(--admin-red);
+}
+
+.settlement-fund-form-actions button[disabled] {
+    cursor: progress;
+    opacity: .65;
+}
+
+@media (max-width: 900px) {
+    .settlement-fund-page {
+        width: calc(100% - 16px);
+    }
+
+    .settlement-fund-dormitory-header {
+        padding: 11px 12px;
+    }
+
+    .settlement-fund-counts > div {
+        min-width: 68px;
+        padding: 6px 8px;
+    }
+
+    .settlement-fund-forms {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-fund-form {
+        padding: 0 12px 12px;
+    }
+
+    .settlement-fund-form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

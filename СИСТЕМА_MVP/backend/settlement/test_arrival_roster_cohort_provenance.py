@@ -639,7 +639,11 @@ class ArrivalRosterCohortProvenanceSchemaTests(TestCase):
         )
         self.assertIn(
             ('settlement', '0019_cohort_member_watch_profile_provenance'),
+            MigrationLoader(None).graph.nodes,
+        )
+        self.assertEqual(
             MigrationLoader(None).graph.leaf_nodes('settlement'),
+            [('settlement', '0023_alter_settlementplacementevent_event_type')],
         )
 
 

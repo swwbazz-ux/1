@@ -45,14 +45,14 @@
         calc(8 * var(--settlement-density-unit))
     );
     --settlement-room-min-height: clamp(
-        188px,
-        32dvh,
-        calc(520 * var(--settlement-density-unit))
+        156px,
+        25dvh,
+        calc(260 * var(--settlement-density-unit))
     );
     --settlement-bed-card-min-height: clamp(
-        42px,
-        7dvh,
-        calc(88 * var(--settlement-density-unit))
+        30px,
+        4.5dvh,
+        calc(52 * var(--settlement-density-unit))
     );
     --settlement-bed-photo-size: clamp(
         40px,
@@ -132,6 +132,9 @@
 
 @media (min-width: 1181px) {
     .settlement-shell .admin-console-header {
+        grid-template-columns: fit-content(27%) minmax(0, 1fr) auto;
+        height: auto;
+        max-height: none;
         border-bottom-width: var(--settlement-line);
     }
 
@@ -159,7 +162,8 @@
 
     .settlement-shell .admin-console-main {
         border-right-width: var(--settlement-line);
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+        gap: clamp(12px, 2vw, 32px);
     }
 
     .settlement-shell .admin-console-identity strong {
@@ -200,6 +204,7 @@
     }
 
     .settlement-shell .admin-console-nav {
+        flex-wrap: nowrap;
         gap: calc(8 * var(--settlement-density-unit));
     }
 
@@ -208,7 +213,9 @@
     }
 
     .settlement-shell .admin-console-nav button {
+        width: auto;
         height: var(--admin-header-control-height);
+        text-transform: uppercase;
         padding-inline: calc(8 * var(--settlement-density-unit));
         padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
@@ -304,8 +311,7 @@
         minmax(190px, auto)
         minmax(142px, auto)
         minmax(210px, 1fr)
-        auto
-        auto;
+        auto auto;
     gap: clamp(3px, .35vw, calc(7 * var(--settlement-density-unit)));
     align-items: end;
     padding: clamp(2px, .45dvh, calc(5 * var(--settlement-density-unit)));
@@ -375,6 +381,7 @@
     min-height: var(--settlement-control-height);
     padding: 0 calc(7 * var(--settlement-density-unit));
     border: 0;
+    border-radius: 0;
     border-left: var(--settlement-line) solid var(--admin-line-soft);
     background: transparent;
     color: var(--admin-muted);
@@ -555,6 +562,8 @@
 }
 
 .settlement-control-actions button {
+    width: auto;
+    white-space: nowrap;
     min-height: var(--settlement-control-height);
     padding: 0 calc(12 * var(--settlement-density-unit));
     border: var(--settlement-line) solid var(--admin-line);
@@ -567,7 +576,7 @@
     cursor: pointer;
 }
 
-.settlement-control-actions button:first-child {
+.settlement-control-actions button:first-child:not(:disabled) {
     border-color: var(--settlement-accent);
     background: var(--settlement-accent);
     color: #fff;
@@ -843,11 +852,12 @@
 
 .settlement-floor-scroll {
     display: grid;
+    grid-template-rows: minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
-    place-items: center;
+    place-items: start stretch;
     padding: clamp(2px, .45dvh, calc(6 * var(--settlement-density-unit)));
-    overflow: visible;
+    overflow: auto;
     overscroll-behavior-inline: contain;
     scrollbar-width: thin;
     container-type: inline-size;
@@ -861,8 +871,8 @@
         minmax(var(--settlement-room-min-height), 1fr);
     gap: var(--settlement-map-gap);
     width: 100%;
-    height: var(--settlement-plan-block-size);
-    min-height: 0;
+    height: 100%;
+    min-height: var(--settlement-plan-block-size);
     max-height: none;
     aspect-ratio: auto;
 }
@@ -942,6 +952,39 @@
 .settlement-room-right .settlement-room-content {
     grid-column: auto;
     grid-row: auto;
+}
+
+.settlement-room-anchor {
+    position: absolute;
+    top: calc(2 * var(--settlement-density-unit));
+    right: calc(2 * var(--settlement-density-unit));
+    z-index: 3;
+    max-width: calc(100% - calc(46 * var(--settlement-density-unit)));
+    overflow: hidden;
+    padding: 0 calc(4 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(999 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font-size: calc(9 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .02em;
+    line-height: 1.6;
+    pointer-events: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settlement-room-anchor.is-anchor-reserve {
+    border-color: color-mix(in srgb, var(--admin-orange) 58%, var(--admin-line));
+    background: var(--admin-orange-soft);
+    color: var(--admin-orange);
+}
+
+.settlement-room-anchor.is-anchor-protected {
+    border-color: color-mix(in srgb, var(--admin-ink) 28%, var(--admin-line));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
 }
 
 .settlement-room-number {
@@ -1340,9 +1383,15 @@
     visibility: hidden;
 }
 
-.settlement-room-right .settlement-bed-hover-card {
+.settlement-room-right .settlement-bed-hover-card,
+.settlement-room-left:nth-last-child(-n+3) .settlement-bed-hover-card {
     right: calc(100% + calc(6 * var(--settlement-density-unit)));
     left: auto;
+}
+
+.settlement-room-right:nth-child(-n+3) .settlement-bed-hover-card {
+    right: auto;
+    left: calc(100% + calc(6 * var(--settlement-density-unit)));
 }
 
 .settlement-bed.is-occupied:hover .settlement-bed-hover-card,
@@ -2857,7 +2906,6 @@ body.settlement-auto-preview-modal-open {
     .settlement-toolbar {
         grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(160px, 1fr) auto auto;
     }
-
 }
 
 @media (max-width: 1180px) {
@@ -2894,8 +2942,9 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-shell .admin-console-nav button {
-        height: var(--admin-header-control-height);
-        min-height: var(--admin-header-control-height);
+        width: auto;
+        min-height: 40px;
+        text-transform: uppercase;
         padding-inline: calc(8 * var(--settlement-density-unit));
         padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
@@ -2905,7 +2954,7 @@ body.settlement-auto-preview-modal-open {
         font-family: inherit;
         font-weight: 900;
         line-height: 1;
-        font-size: calc(11 * var(--settlement-density-unit));
+        font-size: 13px;
         cursor: pointer;
     }
 
@@ -2920,8 +2969,9 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-page {
         width: calc(100% - 16px);
-        height: auto;
-        overflow: visible;
+        grid-template-rows: auto auto auto;
+        align-content: start;
+        overflow: auto;
     }
 
     .settlement-auto-preview > header,
@@ -2931,20 +2981,12 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-toolbar {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: auto auto auto minmax(90px, 1fr) auto auto;
         align-items: end;
     }
 
     .settlement-current-date {
         border-right: 0;
-    }
-
-    .settlement-search-field {
-        grid-column: 1 / -1;
-    }
-
-    .settlement-work-badge {
-        grid-column: 1 / -1;
     }
 
     .settlement-auto-preview-trigger {
@@ -3017,11 +3059,33 @@ body.settlement-auto-preview-modal-open {
 @media (max-width: 720px) {
     .settlement-shell {
         --settlement-room-min-height: clamp(188px, 32dvh, 330px);
+        --settlement-control-height: 44px;
+        --settlement-bed-card-min-height: var(--settlement-control-height);
         --settlement-bed-photo-size: 50px;
+    }
+
+    .settlement-shell .admin-console-main {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-shell .admin-console-title h1 {
+        font-size: clamp(18px, 4vw, 24px);
+    }
+
+    .settlement-shell .admin-console-nav {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, .8fr);
+    }
+
+    .settlement-shell .admin-console-nav :is(a, button) {
+        height: auto;
+        min-height: 44px;
+        padding: 4px 6px;
+        white-space: normal;
     }
 
     .settlement-page {
         width: calc(100% - 12px);
+        grid-template-rows: repeat(3, max-content);
         padding-top: 6px;
     }
 
@@ -3067,11 +3131,16 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-toolbar {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .settlement-current-date,
     .settlement-search-field {
-        grid-column: auto;
+        grid-column: 1 / -1;
+    }
+
+    .settlement-current-date {
+        min-height: 0;
     }
 
     .settlement-summary {
@@ -3079,8 +3148,8 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-summary article {
-        min-height: 56px;
-        padding: 7px 9px;
+        min-height: 34px;
+        padding: 4px 9px;
     }
 
     .settlement-summary strong {
@@ -3123,22 +3192,6 @@ body.settlement-auto-preview-modal-open {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .settlement-summary {
-        grid-template-columns: 1fr;
-    }
-
-    .settlement-summary article,
-    .settlement-summary article:nth-child(3),
-    .settlement-summary article:nth-child(5) {
-        grid-column: auto;
-        border-top: 1px solid var(--admin-line-soft);
-        border-left: 0;
-    }
-
-    .settlement-summary article:first-child {
-        border-top: 0;
-    }
-
     .settlement-filter-buttons button {
         padding: 0 6px;
         font-size: 10px;
@@ -3160,9 +3213,12 @@ body.settlement-auto-preview-modal-open {
 }
 
 .settlement-map-modes button {
+    width: auto;
     min-height: var(--settlement-control-height);
     padding: 0 calc(16 * var(--settlement-density-unit));
     border: 0;
+    border-radius: 0;
+    white-space: nowrap;
     border-left: var(--settlement-line) solid var(--admin-line-soft);
     background: transparent;
     color: var(--admin-muted);
@@ -3197,10 +3253,36 @@ body.settlement-auto-preview-modal-open {
     display: grid;
     gap: clamp(2px, .5dvh, calc(6 * var(--settlement-density-unit)));
     min-height: 0;
+    min-width: 0;
+}
+
+@media (min-width: 1181px) {
+    .settlement-map-mode-panel[data-map-mode-panel="current"] {
+        grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    .settlement-next-arrival {
+        align-content: start;
+        overflow: auto;
+    }
 }
 
 .settlement-map-mode-panel[hidden] {
     display: none;
+}
+
+.settlement-routing-page {
+    display: block;
+    min-width: 0;
+    overflow: auto;
+}
+
+.settlement-routing-page .admin-console-table-wrap {
+    overflow-x: auto;
+}
+
+.settlement-routing-page th {
+    white-space: nowrap;
 }
 
 .settlement-next-arrival {
@@ -3457,7 +3539,6 @@ body.settlement-auto-preview-modal-open {
         padding: 0 calc(8 * var(--settlement-density-unit));
     }
 
-    .settlement-page > .settlement-control-panel,
     .settlement-next-arrival-toolbar {
         grid-template-columns: minmax(0, 1fr);
         align-items: stretch;
@@ -3470,5 +3551,928 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-plan-lists {
         grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* T-025a: внешние жильцы — кнопка панели инструментов и окно карточки. */
+.settlement-external-residents-trigger {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(12 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.settlement-external-residents-trigger:hover,
+.settlement-external-residents-trigger:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-external-residents-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1260;
+    background: rgba(25, 39, 47, .42);
+    backdrop-filter: blur(2px);
+}
+
+.settlement-external-residents-modal {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    z-index: 1260;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: min(720px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--admin-line);
+    border-radius: 10px;
+    background: var(--admin-bg);
+    box-shadow: 0 18px 48px rgba(35, 49, 57, .28);
+}
+
+.settlement-external-residents-modal[hidden],
+.settlement-external-residents-backdrop[hidden],
+.settlement-external-residents-results[hidden],
+.settlement-external-residents-empty[hidden],
+.settlement-external-residents-lease-hint[hidden],
+.settlement-external-residents-form[hidden],
+.settlement-external-residents-feedback[hidden],
+.settlement-external-residents-duplicates[hidden] {
+    display: none !important;
+}
+
+.settlement-external-residents-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 16px;
+    align-items: start;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--admin-line);
+    background: var(--admin-panel);
+}
+
+.settlement-external-residents-header > div > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-external-residents-header h2 {
+    margin: 3px 0 0;
+    color: var(--admin-ink);
+    font-size: 20px;
+    font-weight: 900;
+}
+
+.settlement-external-residents-header p {
+    margin: 4px 0 0;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-body {
+    display: grid;
+    gap: 12px;
+    min-height: 0;
+    padding: 14px 18px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.settlement-external-residents-registry-hint {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--settlement-accent) 30%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--settlement-accent-soft);
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-search {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+}
+
+.settlement-external-residents-search > span {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-external-residents-search input {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    outline: 0;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.settlement-external-residents-search input:focus {
+    border-color: var(--settlement-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 17%, transparent);
+}
+
+.settlement-external-residents-count {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.settlement-external-residents-count:focus-visible,
+.settlement-external-residents-results:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+}
+
+.settlement-external-residents-results {
+    display: grid;
+    max-height: 220px;
+    gap: 5px;
+    overflow-y: auto;
+    padding: 5px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-bg);
+}
+
+.settlement-external-residents-result {
+    display: grid;
+    gap: 2px;
+    padding: 8px 9px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+}
+
+.settlement-external-residents-result-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.settlement-external-residents-result strong {
+    font-size: 12px;
+    font-weight: 900;
+    overflow-wrap: anywhere;
+}
+
+.settlement-external-residents-result small {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settlement-external-residents-type {
+    flex: 0 0 auto;
+    padding: 2px 7px;
+    border: 1px solid color-mix(in srgb, var(--settlement-accent) 34%, var(--admin-line));
+    border-radius: 999px;
+    background: var(--settlement-accent-soft);
+    color: var(--settlement-accent);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.settlement-external-residents-empty {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px dashed var(--admin-line);
+    border-radius: 7px;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-lease-hint {
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 30%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-feedback {
+    margin: 0;
+    padding: 9px 12px;
+    border: 1px solid color-mix(in srgb, var(--settlement-accent) 32%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--settlement-accent-soft);
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-feedback.is-error {
+    border-color: color-mix(in srgb, var(--admin-red) 42%, var(--admin-line));
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+}
+
+.settlement-external-residents-actions {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.settlement-external-residents-open-form,
+.settlement-external-residents-form-actions [type="submit"],
+.settlement-external-residents-duplicates-actions [data-external-residents-confirm-duplicate] {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid var(--settlement-accent);
+    border-radius: 7px;
+    background: var(--settlement-accent);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-external-residents-open-form:disabled,
+.settlement-external-residents-form-actions [type="submit"]:disabled,
+.settlement-external-residents-duplicates-actions [data-external-residents-confirm-duplicate]:disabled {
+    border-color: var(--admin-line);
+    background: var(--admin-gray-soft);
+    color: var(--admin-gray);
+    cursor: not-allowed;
+}
+
+.settlement-external-residents-open-form:hover:not(:disabled),
+.settlement-external-residents-open-form:focus-visible,
+.settlement-external-residents-form-actions [type="submit"]:hover:not(:disabled),
+.settlement-external-residents-form-actions [type="submit"]:focus-visible,
+.settlement-external-residents-duplicates-actions [data-external-residents-confirm-duplicate]:hover:not(:disabled),
+.settlement-external-residents-duplicates-actions [data-external-residents-confirm-duplicate]:focus-visible {
+    outline: 0;
+    background: color-mix(in srgb, var(--settlement-accent) 86%, #000);
+    color: #fff;
+}
+
+.settlement-external-residents-secondary {
+    min-height: 42px;
+    padding: 0 16px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.settlement-external-residents-secondary:hover,
+.settlement-external-residents-secondary:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-external-residents-form {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-external-residents-form h3 {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.settlement-external-residents-form-note {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-field {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.settlement-external-residents-field > span,
+.settlement-external-residents-field legend {
+    color: var(--admin-muted);
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-external-residents-field legend small {
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.settlement-external-residents-field input,
+.settlement-external-residents-field select {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    outline: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.settlement-external-residents-field input:focus,
+.settlement-external-residents-field select:focus {
+    border-color: var(--settlement-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--settlement-accent) 17%, transparent);
+}
+
+.settlement-external-residents-field[aria-invalid="true"],
+.settlement-external-residents-field [aria-invalid="true"] {
+    border-color: var(--admin-red);
+}
+
+.settlement-external-residents-field-error {
+    color: var(--admin-red);
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.settlement-external-residents-sex-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+}
+
+.settlement-external-residents-sex-options label {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.settlement-external-residents-sex-options input {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+}
+
+.settlement-external-residents-duplicates {
+    display: grid;
+    gap: 8px;
+    padding: 11px 12px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 38%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+}
+
+.settlement-external-residents-duplicates strong {
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.settlement-external-residents-duplicates p {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.settlement-external-residents-duplicates ul {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 16px;
+}
+
+.settlement-external-residents-duplicates li {
+    color: var(--admin-ink);
+    font-size: 11px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settlement-external-residents-duplicates-actions,
+.settlement-external-residents-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.settlement-external-residents-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--admin-line-soft);
+}
+
+body.settlement-external-residents-modal-open {
+    overflow: hidden;
+}
+
+@media (max-width: 720px) {
+    .settlement-external-residents-modal {
+        width: calc(100vw - 20px);
+        max-height: calc(100dvh - 20px);
+    }
+
+    .settlement-external-residents-header,
+    .settlement-external-residents-body,
+    .settlement-external-residents-footer {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    .settlement-external-residents-body {
+        gap: 10px;
+    }
+
+    .settlement-external-residents-form-actions,
+    .settlement-external-residents-duplicates-actions,
+    .settlement-external-residents-footer {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-external-residents-open-form,
+    .settlement-external-residents-form-actions button,
+    .settlement-external-residents-duplicates-actions button,
+    .settlement-external-residents-footer button {
+        width: 100%;
+    }
+}
+
+/* T-029 B2: подготовка места, временное проживание, резерв и перехват
+   управления. Новые элементы только добавляются; существующие правила карты,
+   тулбара и сводки не переопределяются. */
+
+.settlement-bed-tags {
+    position: absolute;
+    top: calc(4 * var(--settlement-density-unit));
+    right: calc(4 * var(--settlement-density-unit));
+    z-index: 3;
+    display: inline-flex;
+    gap: calc(2 * var(--settlement-density-unit));
+    align-items: center;
+    pointer-events: none;
+}
+
+.settlement-bed-tag {
+    display: inline-grid;
+    min-height: clamp(14px, 2.6dvh, calc(18 * var(--settlement-density-unit)));
+    padding: 0 calc(4 * var(--settlement-density-unit));
+    place-items: center;
+    border: var(--settlement-line) solid color-mix(in srgb, var(--admin-orange) 58%, var(--admin-line));
+    border-radius: calc(4 * var(--settlement-density-unit));
+    background: var(--admin-orange-soft);
+    color: var(--admin-orange);
+    font-size: calc(9 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .02em;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.settlement-bed-tag.is-temporary {
+    border-color: color-mix(in srgb, var(--admin-cyan) 58%, var(--admin-line));
+    background: var(--admin-cyan-soft);
+    color: var(--admin-cyan);
+}
+
+.settlement-bed-tag.is-reserve {
+    border-color: var(--admin-line);
+    background: var(--admin-panel-soft);
+    color: var(--admin-muted);
+}
+
+.settlement-bed.is-prepared:not(.is-occupied) {
+    border-style: dashed;
+    border-color: var(--admin-orange);
+}
+
+.settlement-bed.is-reserve:not(.is-occupied) {
+    box-shadow: inset 0 0 0 var(--settlement-line) var(--admin-muted);
+}
+
+.settlement-bed.is-prepared.is-selected,
+.settlement-bed.is-reserve.is-selected {
+    box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 24%, transparent);
+}
+
+.settlement-bed-prep {
+    display: grid;
+    gap: 10px;
+    margin-top: 9px;
+    padding: 10px 12px;
+    border: 1px dashed color-mix(in srgb, var(--admin-orange) 46%, var(--admin-line));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--admin-orange-soft) 42%, var(--admin-panel));
+}
+
+.settlement-bed-prep-status {
+    display: grid;
+    gap: 3px;
+}
+
+.settlement-bed-prep-status strong {
+    color: var(--admin-ink);
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.settlement-bed-prep-status span {
+    color: var(--admin-ink);
+    font-size: 12px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.settlement-bed-prep-status small {
+    color: var(--admin-muted);
+    font-size: 11px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settlement-bed-prep-status small.is-expired {
+    color: var(--admin-red);
+    font-weight: 800;
+}
+
+.settlement-bed-prep-actions,
+.settlement-bed-prep-extend,
+.settlement-bed-prep-form-actions {
+    display: grid;
+    gap: 8px;
+}
+
+.settlement-bed-prep-actions {
+    margin-top: 9px;
+}
+
+.settlement-bed-prep-open,
+.settlement-bed-reserve,
+.settlement-bed-prep-secondary,
+.settlement-bed-prep-suggest,
+.settlement-temporary-button {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-bed-prep-open:hover:not(:disabled),
+.settlement-bed-reserve:hover:not(:disabled),
+.settlement-bed-prep-secondary:hover:not(:disabled),
+.settlement-bed-prep-suggest:hover:not(:disabled),
+.settlement-temporary-button:hover:not(:disabled),
+.settlement-bed-prep-open:focus-visible,
+.settlement-bed-reserve:focus-visible,
+.settlement-bed-prep-secondary:focus-visible,
+.settlement-bed-prep-suggest:focus-visible,
+.settlement-temporary-button:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-bed-prep-open:disabled,
+.settlement-bed-reserve:disabled,
+.settlement-bed-prep-secondary:disabled,
+.settlement-bed-prep-suggest:disabled,
+.settlement-temporary-button:disabled {
+    cursor: not-allowed;
+    opacity: .58;
+}
+
+.settlement-temporary-button.is-danger,
+.settlement-bed-prep-danger {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 58%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-bed-prep-danger:hover:not(:disabled),
+.settlement-temporary-button.is-danger:hover:not(:disabled),
+.settlement-bed-prep-danger:focus-visible {
+    outline: 0;
+    border-color: var(--admin-red);
+}
+
+.settlement-temporary-scope {
+    display: grid;
+    min-width: 0;
+}
+
+.settlement-unsettled-tools-fields {
+    display: grid;
+    min-width: 0;
+    gap: calc(10 * var(--settlement-density-unit));
+}
+
+.settlement-temporary-scope b {
+    margin-left: calc(3 * var(--settlement-density-unit));
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+}
+
+.settlement-temporary-body {
+    min-height: 0;
+}
+
+.settlement-temporary-summary {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.settlement-temporary-feedback {
+    margin: 0;
+    padding:
+        calc(9 * var(--settlement-density-unit))
+        calc(11 * var(--settlement-density-unit));
+    border: 1px solid color-mix(in srgb, var(--settlement-accent) 35%, var(--admin-line));
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: var(--settlement-accent-soft);
+    color: var(--settlement-accent);
+    font-size: calc(12 * var(--settlement-density-unit));
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settlement-temporary-feedback.is-error {
+    border-color: color-mix(in srgb, var(--admin-red) 42%, var(--admin-line));
+    background: var(--admin-red-soft);
+    color: var(--admin-red);
+}
+
+.settlement-temporary-list {
+    display: grid;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: calc(8 * var(--settlement-density-unit));
+    overflow-y: auto;
+    padding: 0 calc(6 * var(--settlement-density-unit)) 0 0;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+}
+
+.settlement-temporary-group {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+}
+
+.settlement-temporary-group > h3 {
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: calc(9 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settlement-temporary-row {
+    display: grid;
+    gap: calc(7 * var(--settlement-density-unit));
+    padding: calc(8 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-left: calc(3 * var(--settlement-density-unit)) solid var(--admin-orange);
+    border-radius: calc(9 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+}
+
+.settlement-temporary-row.is-temporary {
+    border-left-color: var(--admin-cyan);
+}
+
+.settlement-temporary-row.is-reserve {
+    border-left-color: var(--admin-muted);
+}
+
+.settlement-temporary-row-copy {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-temporary-row-copy strong {
+    color: var(--admin-ink);
+    font-size: calc(13 * var(--settlement-density-unit));
+    font-weight: 900;
+    overflow-wrap: anywhere;
+}
+
+.settlement-temporary-row-copy small {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.settlement-temporary-row-copy small.is-suggestion {
+    color: var(--admin-ink);
+    font-weight: 800;
+}
+
+.settlement-temporary-row-actions {
+    display: grid;
+    gap: calc(6 * var(--settlement-density-unit));
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.settlement-control-feedback {
+    color: var(--admin-red);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+body.settlement-temporary-relocation-armed .settlement-bed.is-free:not(:disabled) {
+    border-color: var(--settlement-accent);
+}
+
+.settlement-bed-prep[hidden],
+.settlement-bed-prep-actions[hidden],
+.settlement-bed-prep-extend[hidden],
+.settlement-temporary-body[hidden],
+.settlement-temporary-feedback[hidden],
+.settlement-unsettled-tools-fields[hidden],
+.settlement-unsettled-panel-body[hidden],
+.settlement-temporary-empty[hidden],
+.settlement-control-feedback[hidden],
+.settlement-bed-prep-form[hidden],
+.settlement-bed-prep-form [hidden] {
+    display: none !important;
+}
+
+@media (max-width: 1180px) {
+    .settlement-control-takeover {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 720px) {
+    .settlement-bed-prep-actions,
+    .settlement-bed-prep-form-actions,
+    .settlement-temporary-row-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* T-031 B3c: вахтенная смена делопроизводителя в существующей панели
+   управления. Только новые элементы, существующие правила не переопределяются. */
+
+.settlement-clerk-shift {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(6 * var(--settlement-density-unit));
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+    padding-top: calc(6 * var(--settlement-density-unit));
+    border-top: var(--settlement-line) solid var(--admin-line-soft);
+}
+
+.settlement-clerk-shift-copy {
+    display: grid;
+    gap: calc(2 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-clerk-shift-copy small {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.settlement-clerk-shift-copy small:first-child {
+    color: var(--admin-ink);
+}
+
+.settlement-clerk-shift-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(6 * var(--settlement-density-unit));
+    align-items: center;
+}
+
+.settlement-clerk-shift-actions button {
+    min-height: var(--settlement-control-height);
+    padding: 0 calc(12 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.settlement-clerk-shift-actions button:hover:not(:disabled),
+.settlement-clerk-shift-actions button:focus-visible:not(:disabled) {
+    outline: 0;
+    border-color: var(--settlement-accent);
+    color: var(--settlement-accent);
+}
+
+.settlement-clerk-shift-actions button:disabled {
+    cursor: not-allowed;
+    opacity: .56;
+}
+
+.settlement-clerk-shift[hidden],
+.settlement-clerk-shift-actions button[hidden],
+.settlement-clerk-shift-copy small[hidden] {
+    display: none !important;
+}
+
+@media (min-width: 1181px) {
+    .settlement-control-panel {
+        grid-template-columns: auto minmax(0, 1fr) auto minmax(19rem, 1.2fr);
+    }
+
+    .settlement-clerk-shift {
+        grid-column: auto;
+        padding: 0 0 0 calc(10 * var(--settlement-density-unit));
+        border-top: 0;
+        border-left: var(--settlement-line) solid var(--admin-line-soft);
+    }
+}
+
+@media (max-width: 1180px) {
+    .settlement-clerk-shift-actions {
+        width: 100%;
+    }
+
+    .settlement-clerk-shift-actions button {
+        width: 100%;
     }
 }

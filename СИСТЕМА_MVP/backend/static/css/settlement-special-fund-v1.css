@@ -1,0 +1,91 @@
+/* T-036 frontend-4: поля ручного заселения в комнаты на 2 места.
+   Только собственные селекторы .settlement-special-fund*; форма карты и
+   карточки комнат не переопределяются. */
+
+.settlement-special-fund {
+    display: grid;
+    gap: calc(8 * var(--settlement-density-unit));
+    margin: 0 0 calc(8 * var(--settlement-density-unit));
+    padding: calc(10 * var(--settlement-density-unit));
+    border: 1px solid color-mix(in srgb, var(--admin-yellow) 55%, var(--admin-line));
+    border-left: calc(4 * var(--settlement-density-unit)) solid var(--admin-yellow);
+    border-radius: calc(7 * var(--settlement-density-unit));
+    background: color-mix(in srgb, var(--admin-yellow-soft) 55%, var(--admin-panel));
+}
+
+.settlement-special-fund[hidden] {
+    display: none;
+}
+
+.settlement-special-fund-note {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    line-height: 1.35;
+}
+
+.settlement-special-fund-field {
+    display: grid;
+    gap: calc(4 * var(--settlement-density-unit));
+    min-width: 0;
+}
+
+.settlement-special-fund-field > span {
+    color: var(--admin-muted);
+    font-size: calc(10 * var(--settlement-density-unit));
+    font-weight: 900;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.settlement-special-fund-field input {
+    width: 100%;
+    min-height: calc(38 * var(--settlement-density-unit));
+    padding: 0 calc(10 * var(--settlement-density-unit));
+    border: var(--settlement-line) solid var(--admin-line);
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: calc(12 * var(--settlement-density-unit));
+}
+
+.settlement-special-fund-field input:focus-visible {
+    outline: 0;
+    border-color: var(--settlement-accent);
+}
+
+.settlement-special-fund-check {
+    display: flex;
+    gap: calc(8 * var(--settlement-density-unit));
+    align-items: flex-start;
+    color: var(--admin-ink);
+    font-size: calc(12 * var(--settlement-density-unit));
+    font-weight: 900;
+    line-height: 1.3;
+    cursor: pointer;
+}
+
+.settlement-special-fund-check input {
+    flex: 0 0 auto;
+    width: calc(18 * var(--settlement-density-unit));
+    height: calc(18 * var(--settlement-density-unit));
+    margin: calc(1 * var(--settlement-density-unit)) 0 0;
+    accent-color: var(--settlement-accent);
+}
+
+.settlement-special-fund-error {
+    margin: 0;
+    padding: calc(6 * var(--settlement-density-unit)) calc(8 * var(--settlement-density-unit));
+    border-radius: calc(6 * var(--settlement-density-unit));
+    background: color-mix(in srgb, var(--admin-red) 12%, var(--admin-panel));
+    color: var(--admin-red);
+    font-size: calc(11 * var(--settlement-density-unit));
+    font-weight: 900;
+    line-height: 1.35;
+}
+
+.settlement-special-fund-error[hidden] {
+    display: none;
+}

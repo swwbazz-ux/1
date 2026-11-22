@@ -216,6 +216,7 @@
     function initSpecialization() {
         var position = document.querySelector("[data-personnel-position]");
         var specialization = document.querySelector("[data-base-specialization]");
+        var settlementCategory = document.getElementById("employee-settlement-category");
         if (!position || !specialization) return;
         var accessRole = document.querySelector("select[name='role'], select[name='access_role']");
         var issueAccess = document.querySelector("input[name='generate_access'], input[name='issue_access']");
@@ -227,6 +228,9 @@
 
         function syncSpecializationOptions() {
             var config = catalog[position.value] || null;
+            if (settlementCategory) {
+                settlementCategory.value = (config && config.settlement_category_label) || "Не указана";
+            }
             var allowed = config && Array.isArray(config.allowed) ? config.allowed.map(String) : [];
             var hasOptions = allowed.length > 0;
             var selectedAllowed = false;

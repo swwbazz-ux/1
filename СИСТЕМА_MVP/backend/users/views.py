@@ -116,8 +116,8 @@ from .access_auth import (
     find_unactivated_accesses_by_phone,
 )
 from .app_catalog import (
-    APP_CATALOG_ROLE_CODES,
-    APP_CATALOG_ROLES,
+    PUBLIC_APP_CATALOG_ROLE_CODES,
+    PUBLIC_APP_CATALOG_ROLES,
     app_catalog_public_url,
     app_catalog_items,
     role_app_qr_asset_path,
@@ -989,15 +989,22 @@ def _phone_accesses_have_duplicate_role(candidates):
     return False
 
 
-def _phone_access_conflict_response(request, candidates, *, role_app, allowed_role_codes, login_role_app, phone):
+def _phone_access_conflict_response(
+    request, candidates, *, role_app, allowed_role_codes, login_role_app, phone,
+    allow_same_employee_multiple_roles=False,
+):
     """Номер с несколькими записями доступа.
 
     Дубли одной роли — «нужна помощь администратора». Разные роли на общем
     входе driverform.ru — не ошибка, а сотрудник с несколькими ролями: вход
     продолжается как обычно (номер → PIN), а после PIN он выбирает приложение
-    на экране /apps/choose/. Возвращает None, когда конфликта нет."""
-    if not _phone_accesses_have_duplicate_role(candidates) and role_app is None and not allowed_role_codes:
-        return None
+    на экране /apps/choose/. Для целевого входа можно разрешить переход к PIN
+    при нескольких действующих ролях одной карточки сотрудника."""
+    if not _phone_accesses_have_duplicate_role(candidates):
+        if role_app is None and not allowed_role_codes:
+            return None
+        if allow_same_employee_multiple_roles and len({access.employee_id for access in candidates}) == 1:
+            return None
     return render(
         request,
         'users/login_phone_not_found.html',
@@ -1011,9 +1018,8 @@ def _phone_access_conflict_response(request, candidates, *, role_app, allowed_ro
     )
 
 
-def _own_catalog_apps(employee):
-    """Активированные роли сотрудника, у которых есть приложение в каталоге,
-    в порядке каталога: [(app, access), ...]."""
+def _own_catalog_apps(employee, *, include_admin_clerk=True):
+    """Доступные приложения сотрудника и запись для входа в каждое из них."""
     accesses = {
         access.role.code: access
         for access in EmployeeAccess.objects
@@ -1023,12 +1029,15 @@ def _own_catalog_apps(employee):
             is_active=True,
             status=EmployeeAccess.Status.ACTIVATED,
             role__is_active=True,
-            role__code__in=APP_CATALOG_ROLE_CODES,
+            role__code__in=PUBLIC_APP_CATALOG_ROLE_CODES,
         )
         if employee_has_effective_access_role(access.employee, access.role.code)
     }
+    # Администратор уже допущен к /clerk/ со своей записью доступа.
+    if include_admin_clerk and 'admin' in accesses:
+        accesses.setdefault('settlement_clerk', accesses['admin'])
     result = []
-    for role_code in APP_CATALOG_ROLE_CODES:
+    for role_code in PUBLIC_APP_CATALOG_ROLE_CODES:
         app = get_role_app(role_code)
         if app is not None and role_code in accesses:
             result.append((app, accesses[role_code]))
@@ -1049,10 +1058,13 @@ def app_choose_view(request):
     own_apps = _own_catalog_apps(access.employee)
     if request.method == 'POST':
         role_code = (request.POST.get('role_code') or '').strip()
-        target = next((item_access for app, item_access in own_apps if app.role_code == role_code), None)
-        if target is None:
+        selected = next((item for item in own_apps if item[0].role_code == role_code), None)
+        if selected is None:
             messages.error(request, 'Это приложение вам не назначено.')
             return redirect('app_choose')
+        app, target = selected
+        if app.role_code != target.role.code and target.pk == access.pk:
+            return redirect(app.start_url)
         try:
             with transaction.atomic():
                 activate_role_session(request, target)
@@ -1060,7 +1072,7 @@ def app_choose_view(request):
             messages.error(request, '; '.join(error.messages))
             return redirect('app_choose')
         request.session.cycle_key()
-        return redirect(_role_landing_url(target))
+        return redirect(app.start_url)
     if not own_apps:
         return redirect(_role_landing_url(access))
     response = render(
@@ -1072,7 +1084,7 @@ def app_choose_view(request):
             'own_apps': [
                 {
                     'role_code': app.role_code,
-                    'label': dict(APP_CATALOG_ROLES).get(app.role_code, app.short_name),
+                    'label': dict(PUBLIC_APP_CATALOG_ROLES).get(app.role_code, app.short_name),
                     'description': app.description,
                     'icon_url': app.icon_192_url,
                     'theme_color': app.theme_color,
@@ -1112,7 +1124,7 @@ def app_catalog_view(request):
 
 @require_GET
 def app_catalog_qr_view(request, role_code):
-    if role_code not in APP_CATALOG_ROLE_CODES:
+    if role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise Http404
     response = redirect(static(role_app_qr_asset_path(role_code)))
     response['Cache-Control'] = 'public, max-age=86400'
@@ -1212,6 +1224,7 @@ def login_view(
     allowed_role_codes=None,
     target_role_app=None,
     forced_next_url='',
+    allow_same_employee_multiple_active_roles=False,
 ):
     if request.session.get('mining_master_tablet_device'):
         return redirect('mining_master_tablet_login')
@@ -1327,6 +1340,7 @@ def login_view(
                 request, activated,
                 role_app=role_app, allowed_role_codes=allowed_role_codes,
                 login_role_app=login_role_app, phone=phone,
+                allow_same_employee_multiple_roles=allow_same_employee_multiple_active_roles,
             )
             if conflict is not None:
                 return conflict
@@ -1575,13 +1589,13 @@ def login_view(
             request.session.cycle_key()
             set_session_device_kind(request, selected_device_kind)
             landing_url = next_url or _role_landing_url(access)
-            # Единый вход, несколько ролей на одном номере и PIN: после PIN —
-            # выбор приложения одним нажатием, а не первая попавшаяся роль.
+            # Вход по телефону предлагает все рабочие места. Старый вход
+            # только по коду сохраняет стартовый экран своей назначенной роли.
             if (
                 not next_url
                 and role_app is None
                 and not allowed_role_codes
-                and len(_own_catalog_apps(locked_access.employee)) > 1
+                and len(_own_catalog_apps(locked_access.employee, include_admin_clerk=bool(phone))) > 1
             ):
                 landing_url = reverse('app_choose')
             response = _login_redirect_response(request, landing_url)
@@ -2232,9 +2246,9 @@ def get_system_admin_reference_configs():
             'model': PersonnelPosition,
             'form_class': PersonnelPositionReferenceForm,
             'description': 'Официальные должности из 1С. Одна должность действует у сотрудника одновременно; она определяет допустимые базовые специализации.',
-            'fields': ['name', 'code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'fields': ['name', 'code', 'settlement_category', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
             'search_fields': ['name', 'code', 'allowed_specializations__name', 'default_specialization__name'],
-            'preview_fields': ['code', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
+            'preview_fields': ['code', 'settlement_category', 'requires_specialization', 'allowed_specializations', 'default_specialization', 'is_active'],
             'prefetch_related': ['allowed_specializations'],
             'select_related': ['default_specialization'],
             'initial': {'is_active': True},

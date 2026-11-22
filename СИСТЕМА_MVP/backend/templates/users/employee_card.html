@@ -177,6 +177,12 @@
                             </div>
                             {{ form.personnel_position }}{{ form.personnel_position.errors }}
                         </div>
+                        <div class="employee-card-field" data-card-field data-copy-label="Категория для расселения">
+                            <div class="employee-card-label-row">
+                                <label for="employee-settlement-category">Категория для расселения</label>
+                            </div>
+                            <input id="employee-settlement-category" value="{{ form.selected_settlement_category_label }}" readonly>
+                        </div>
                     </div>
                 </div>
 
@@ -566,5 +572,5 @@
 </div>
 {% endif %}
 
-<script src="{% static 'js/employee-card-unified.js' %}?v=20260907-1"></script>
+<script src="{% static 'js/employee-card-unified.js' %}?v=20261122-1"></script>
 {% endblock %}

@@ -358,20 +358,35 @@ def _validate_external_sex_against_open_occupancies(*, resident, using):
     if tuple((item.pk, item.physical_bed_id) for item in occupancies) != snapshot:
         raise _validation_error('stale_occupancy', 'Фактическое проживание изменилось.')
 
-    room_by_id = {room.pk: room for room in rooms}
     bed_room_by_id = {bed.pk: bed.room_id for bed in beds}
     sex = authoritative_resident_sex(resident)
+    # T-036 backend-15: совместимость считается по фактическим жильцам комнаты
+    # на период проживания, а не по legacy-атрибуту `sex_restriction`.
+    from .room_sex import (
+        classify_sexes,
+        occupancy_sex,
+        room_occupancies,
+    )
+
     for occupancy in occupancies:
-        restriction = room_by_id[bed_room_by_id[occupancy.physical_bed_id]].sex_restriction
-        if restriction == PhysicalRoom.SexRestriction.MALE_ONLY and sex != Employee.Sex.MALE:
+        room_id = bed_room_by_id[occupancy.physical_bed_id]
+        others = room_occupancies(
+            room_ids=(room_id,),
+            starts_at=occupancy.starts_at,
+            ends_at=occupancy.ends_at,
+            using=using,
+            exclude_occupancy_ids=(occupancy.pk,),
+            for_update=True,
+        )
+        state, room_sex = classify_sexes(
+            occupancy_sex(row) for row in others
+        )
+        if state in {'unknown_occupant', 'mixed'} or (
+            state == 'fixed' and room_sex != sex
+        ):
             raise _validation_error(
                 'sex_occupancy_conflict',
-                'Новый пол несовместим с текущей комнатой жильца.',
-            )
-        if restriction == PhysicalRoom.SexRestriction.FEMALE_ONLY and sex != Employee.Sex.FEMALE:
-            raise _validation_error(
-                'sex_occupancy_conflict',
-                'Новый пол несовместим с текущей комнатой жильца.',
+                'Новый пол несовместим с фактическими жильцами комнаты.',
             )
 
 

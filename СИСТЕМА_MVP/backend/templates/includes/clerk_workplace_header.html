@@ -14,14 +14,20 @@
             <p>Работа с фактическим размещением сотрудников.</p>
         </div>
         <nav class="admin-console-nav" aria-label="Разделы делопроизводителя">
-            <button type="button"
-                    class="{% if clerk_active_section == "settlement" %}is-active{% endif %}"
-                    data-clerk-section="settlement"
-                    data-unsettled-panel-toggle
-                    aria-controls="settlement-unsettled-panel"
-                    aria-expanded="false">Расселение</button>
+            {% if clerk_active_section == "settlement" %}
+                <button type="button"
+                        class="is-active"
+                        data-clerk-section="settlement"
+                        data-unsettled-panel-toggle
+                        aria-controls="settlement-unsettled-panel"
+                        aria-expanded="false">Расселение</button>
+            {% else %}
+                <a href="{% url 'clerk_home' %}" data-clerk-section="settlement">Расселение</a>
+            {% endif %}
             <a href="{% url 'settlement_arrival_roster_routing' %}"
-               class="{% if clerk_active_section == 'routing' %}is-active{% endif %}">Готово к расселению</a>
+               {% if clerk_active_section == 'routing' %}class="is-active" aria-current="page"{% endif %}>Готово к расселению</a>
+            <a href="{% url 'settlement_fund' %}"
+               {% if clerk_active_section == 'fund' %}class="is-active" aria-current="page"{% endif %}>Жилфонд</a>
         </nav>
     </section>
 

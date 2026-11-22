@@ -920,6 +920,10 @@ ERROR_PROVENANCE_INCONSISTENT = 'provenance_inconsistent'
 ERROR_COHORT_GRAPH_INCOMPLETE = 'cohort_graph_incomplete'
 ERROR_COHORT_GRAPH_INCONSISTENT = 'cohort_graph_inconsistent'
 
+# T-029: владелец (администратор) действует вместо делопроизводителя по тому же
+# точному доступу; остальные проверки доступа не меняются.
+COHORT_ACTOR_ROLE_CODES = frozenset({'settlement_clerk', 'admin'})
+
 _ROUTING_SOURCE_TYPE = 'arrival_roster_routing'
 _ROUTING_BASIS_TYPE = 'arrival_roster_routing_row'
 
@@ -1172,7 +1176,7 @@ def _lock_settlement_clerk_access(plan):
         raise _creation_error(ERROR_ACCESS_INACTIVE, 'Сотрудник делопроизводителя неактивен.')
     if not access.role.is_active:
         raise _creation_error(ERROR_ACCESS_INACTIVE, 'Роль доступа неактивна.')
-    if access.role.code != 'settlement_clerk':
+    if access.role.code not in COHORT_ACTOR_ROLE_CODES:
         raise _creation_error(
             ERROR_ACCESS_WRONG_ROLE,
             'Точный доступ не принадлежит роли делопроизводителя.',
