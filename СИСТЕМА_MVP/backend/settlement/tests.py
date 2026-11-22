@@ -4501,6 +4501,35 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(self.client.session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
         self.assertTemplateUsed(self.client.get(reverse('clerk_home')), 'settlement/clerk_map.html')
 
+    def test_app_chooser_opens_clerk_as_admin_without_assigning_a_clerk_role(self):
+        phone_data = {'phone': self.admin_employee.phone, 'device_kind': 'personal'}
+        chooser = reverse('app_choose')
+        login = self.client.post(reverse('login'), {**phone_data, 'access_code': self.admin_access.access_code})
+        self.assertRedirects(login, chooser, fetch_redirect_response=False)
+        self.assertContains(self.client.get(chooser), 'data-app-choose="settlement_clerk"', count=1)
+        generation = self.client.session[ACTIVE_ROLE_GENERATION_SESSION_KEY]
+        opened = self.client.post(chooser, {'role_code': 'settlement_clerk'}, follow=True)
+        self.assertEqual(opened.redirect_chain, [(reverse('clerk_home'), 302)])
+        self.assertTemplateUsed(opened, 'settlement/clerk_map.html')
+        self.assertEqual(self.client.session['employee_access_id'], self.admin_access.pk)
+        self.assertEqual(self.client.session[ACTIVE_ROLE_GENERATION_SESSION_KEY], generation)
+        self.assertFalse(EmployeeAccess.objects.filter(employee=self.admin_employee, role=self.clerk_role).exists())
+
+    def test_app_chooser_uses_assigned_clerk_access_and_rejects_unassigned_access(self):
+        chooser = reverse('app_choose')
+        self.authenticate(self.client, self.dispatcher_access)
+        self.assertContains(self.client.get(chooser), 'data-app-choose="settlement_clerk"', count=1)
+        opened = self.client.post(chooser, {'role_code': 'settlement_clerk'}, follow=True)
+        self.assertTemplateUsed(opened, 'settlement/clerk_map.html')
+        self.assertEqual(self.client.session['employee_access_id'], self.switch_clerk_access.pk)
+
+        driver_client = Client()
+        self.authenticate(driver_client, self.driver_access)
+        self.assertNotContains(driver_client.get(chooser), 'data-app-choose="settlement_clerk"')
+        blocked = driver_client.post(chooser, {'role_code': 'settlement_clerk'})
+        self.assertRedirects(blocked, chooser, fetch_redirect_response=False)
+        self.assertEqual(driver_client.session['employee_access_id'], self.driver_access.pk)
+
     def test_targeted_login_keeps_conflict_for_duplicate_role(self):
         EmployeeAccess.objects.create(
             employee=self.clerk_employee,
@@ -9368,7 +9397,8 @@ class SettlementFrontendContractTests(TestCase):
             1,
         )[0]
         self.assertNotIn('display: none', responsive_toolbar)
-        self.assertIn('.settlement-work-badge {\n        grid-column: 1 / -1;', stylesheet)
+        self.assertNotRegex(stylesheet, r'\.settlement-work-badge\s*\{[^}]*grid-column:\s*1\s*/\s*-1')
+        self.assertIn('minmax(160px, 1fr) auto auto', responsive_toolbar)
         self.assertIn('.settlement-room-panel', stylesheet)
         self.assertIn('position: fixed', stylesheet)
         self.assertIn('.settlement-unsettled-panel', stylesheet)

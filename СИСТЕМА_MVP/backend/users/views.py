@@ -116,9 +116,8 @@ from .access_auth import (
     find_unactivated_accesses_by_phone,
 )
 from .app_catalog import (
-    APP_CATALOG_ROLE_CODES,
-    APP_CATALOG_ROLES,
     PUBLIC_APP_CATALOG_ROLE_CODES,
+    PUBLIC_APP_CATALOG_ROLES,
     app_catalog_public_url,
     app_catalog_items,
     role_app_qr_asset_path,
@@ -1020,8 +1019,7 @@ def _phone_access_conflict_response(
 
 
 def _own_catalog_apps(employee):
-    """Активированные роли сотрудника, у которых есть приложение в каталоге,
-    в порядке каталога: [(app, access), ...]."""
+    """Доступные приложения сотрудника и запись для входа в каждое из них."""
     accesses = {
         access.role.code: access
         for access in EmployeeAccess.objects
@@ -1031,12 +1029,15 @@ def _own_catalog_apps(employee):
             is_active=True,
             status=EmployeeAccess.Status.ACTIVATED,
             role__is_active=True,
-            role__code__in=APP_CATALOG_ROLE_CODES,
+            role__code__in=PUBLIC_APP_CATALOG_ROLE_CODES,
         )
         if employee_has_effective_access_role(access.employee, access.role.code)
     }
+    # Администратор уже допущен к /clerk/ со своей записью доступа.
+    if 'admin' in accesses:
+        accesses.setdefault('settlement_clerk', accesses['admin'])
     result = []
-    for role_code in APP_CATALOG_ROLE_CODES:
+    for role_code in PUBLIC_APP_CATALOG_ROLE_CODES:
         app = get_role_app(role_code)
         if app is not None and role_code in accesses:
             result.append((app, accesses[role_code]))
@@ -1057,10 +1058,13 @@ def app_choose_view(request):
     own_apps = _own_catalog_apps(access.employee)
     if request.method == 'POST':
         role_code = (request.POST.get('role_code') or '').strip()
-        target = next((item_access for app, item_access in own_apps if app.role_code == role_code), None)
-        if target is None:
+        selected = next((item for item in own_apps if item[0].role_code == role_code), None)
+        if selected is None:
             messages.error(request, 'Это приложение вам не назначено.')
             return redirect('app_choose')
+        app, target = selected
+        if app.role_code != target.role.code and target.pk == access.pk:
+            return redirect(app.start_url)
         try:
             with transaction.atomic():
                 activate_role_session(request, target)
@@ -1068,7 +1072,7 @@ def app_choose_view(request):
             messages.error(request, '; '.join(error.messages))
             return redirect('app_choose')
         request.session.cycle_key()
-        return redirect(_role_landing_url(target))
+        return redirect(app.start_url)
     if not own_apps:
         return redirect(_role_landing_url(access))
     response = render(
@@ -1080,7 +1084,7 @@ def app_choose_view(request):
             'own_apps': [
                 {
                     'role_code': app.role_code,
-                    'label': dict(APP_CATALOG_ROLES).get(app.role_code, app.short_name),
+                    'label': dict(PUBLIC_APP_CATALOG_ROLES).get(app.role_code, app.short_name),
                     'description': app.description,
                     'icon_url': app.icon_192_url,
                     'theme_color': app.theme_color,
