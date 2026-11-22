@@ -3414,6 +3414,19 @@ body.excavator-operator-screen .app-contract-banner [data-app-contract-retry] {
     }
 }
 
+/* «Чёрный рояль»: общий фон четырёх рабочих вкладок. */
+body.excavator-operator-screen main.eo-shell[data-eo-shell] {
+    background:
+        linear-gradient(146deg, transparent 34%, rgba(191, 199, 201, .038) 42%, rgba(201, 207, 211, .10) 48%, rgba(213, 215, 216, .055) 50%, rgba(60, 68, 74, .035) 51%, transparent 55%),
+        radial-gradient(ellipse 103% 39% at -22% 19%, #383c41 0%, #1e2227 34%, transparent 73%),
+        radial-gradient(ellipse 93% 36% at 116% 87%, #292c30 0%, transparent 73%),
+        linear-gradient(147deg, #17191d 0%, #0a0c0e 36%, #121519 59%, #090a0c 77%, #16181b);
+}
+
+body.excavator-operator-screen [data-eo-shell] > form > .mobile-work-screen {
+    background: transparent !important;
+}
+
 /* v130: one container-driven Shift layout for every viewport and shift state. */
 body.excavator-operator-screen {
     -webkit-text-size-adjust: 100%;
