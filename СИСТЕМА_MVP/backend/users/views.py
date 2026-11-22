@@ -118,6 +118,7 @@ from .access_auth import (
 from .app_catalog import (
     APP_CATALOG_ROLE_CODES,
     APP_CATALOG_ROLES,
+    PUBLIC_APP_CATALOG_ROLE_CODES,
     app_catalog_public_url,
     app_catalog_items,
     role_app_qr_asset_path,
@@ -1112,7 +1113,7 @@ def app_catalog_view(request):
 
 @require_GET
 def app_catalog_qr_view(request, role_code):
-    if role_code not in APP_CATALOG_ROLE_CODES:
+    if role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise Http404
     response = redirect(static(role_app_qr_asset_path(role_code)))
     response['Cache-Control'] = 'public, max-age=86400'
