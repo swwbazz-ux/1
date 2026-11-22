@@ -43,8 +43,8 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "48",
-    versionName: "0.1.31",
+    versionCode: "50",
+    versionName: "0.1.32",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
     splashIconResource: "app_icon",
@@ -109,7 +109,7 @@ const expectedProfiles = {
     startUrl: "https://excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "49",
+    versionCode: "52",
     versionName: "0.1.29",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -120,7 +120,7 @@ const expectedProfiles = {
     startUrl: "https://qa-excavator.driverform.ru/excavator/work/",
     applicationId: "ru.copperresources.excavator",
     appName: "Экскаваторщик",
-    versionCode: "48",
+    versionCode: "51",
     versionName: "0.1.29-rc",
     splashBackgroundColor: "#02080b",
     splashAccentColor: "#FFD200",
@@ -862,6 +862,8 @@ test("native updater is profile-driven, deferrable and verifies the APK", () => 
   assert.match(updater, /data-native-app-version/);
   assert.match(updater, /Update checksum mismatch/);
   assert.match(updater, /Update signing certificate mismatch/);
+  assert.match(updater, /archiveFlags = flags \| PackageManager\.GET_SIGNATURES;/);
+  assert.match(updater, /getPackageArchiveInfo\(apk\.getAbsolutePath\(\), archiveFlags\)/);
   assert.match(updater, /activity\.getPackageName\(\)\.equals\(archive\.packageName\)/);
   assert.match(updater, /!hostResumed \|\| !pageLoaded/);
   assert.match(activity, /onPageStarted\(loadingWebView\)[\s\S]*?appUpdateManager\.onPageStarted\(loadingWebView\)/);

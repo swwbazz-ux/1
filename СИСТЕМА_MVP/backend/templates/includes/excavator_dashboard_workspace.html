@@ -88,16 +88,20 @@
             {% else %}
                 {% for card in truck_cards %}
                     {% include "includes/excavator_dashboard_source_card.html" with driver_manual_dashboard=driver_manual_dashboard %}
-                {% empty %}
-                    <div class="eo-empty-state eo-dashboard-empty">
-                        <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
-                        <strong>Нет погрузки</strong>
-                        <span>Назначает горный мастер</span>
-                    </div>
                 {% endfor %}
+                <div class="eo-empty-state eo-dashboard-empty"{% if truck_cards %} hidden{% endif %}>
+                    <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
+                    <strong>Самосвалы не назначены</strong>
+                    <span>Назначает горный мастер или горный диспетчер</span>
+                </div>
             {% endif %}
         </div>
         {% if not driver_manual_dashboard %}
+            <div class="eo-empty-state eo-dashboard-empty eo-dashboard-shift-closed">
+                <img src="{% static empty_source_icon|default:'img/equipment/truck-gray.png' %}" alt="">
+                <strong>Смена закрыта</strong>
+                <span>{{ shift_action_block_message|default:'Начните смену во вкладке «Смена»' }}</span>
+            </div>
             <div data-eo-assignment-snapshot hidden>
                 {% for card in assignment_snapshot_cards %}
                     <i data-assignment-id="{{ card.assignment_id }}" data-truck-id="{{ card.truck_id }}" data-truck-number="{{ card.number }}"></i>

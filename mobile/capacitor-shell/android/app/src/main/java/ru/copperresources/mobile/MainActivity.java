@@ -9,17 +9,26 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.core.graphics.Insets;
 import androidx.core.splashscreen.SplashScreen;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.CapConfig;
 import com.getcapacitor.WebViewListener;
+
+import org.json.JSONObject;
+
+import java.util.Collections;
 
 public class MainActivity extends BridgeActivity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 4101;
@@ -116,20 +125,43 @@ public class MainActivity extends BridgeActivity {
         String serverHost = serverUri.getHost();
         String[] allowNavigation = serverHost == null ? new String[0] : new String[] { serverHost };
 
-        config = new CapConfig.Builder(this)
+        CapConfig.Builder configBuilder = new CapConfig.Builder(this)
             .setServerUrl(BuildConfig.APP_START_URL)
             .setAllowNavigation(allowNavigation)
             .setAppendedUserAgentString(
                 " CopperResourcesNative/" + BuildConfig.APP_PROFILE_ID
                     + "/" + BuildConfig.VERSION_NAME
             )
-            .setResolveServiceWorkerRequests(true)
-            .create();
+            .setResolveServiceWorkerRequests(true);
+
+        boolean legacyExcavatorInsets = "excavator".equals(BuildConfig.APP_PROFILE_ID)
+            && Build.VERSION.SDK_INT < Build.VERSION_CODES.R;
+        if (legacyExcavatorInsets) {
+            // Fit the bars and keyboard in the legacy decor. SystemBars would
+            // otherwise add the IME padding again to the WebView parent.
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            configBuilder.setPluginsConfiguration(new JSONObject(Collections.singletonMap(
+                "SystemBars", Collections.singletonMap("insetsHandling", "disable")
+            )));
+        }
+        config = configBuilder.create();
 
         super.onCreate(savedInstanceState);
         configurePersistentWebViewCookies();
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
+            if (legacyExcavatorInsets) {
+                ViewCompat.setOnApplyWindowInsetsListener(webView, (view, insets) -> {
+                    // The decor already keeps the WebView clear of these areas.
+                    WindowInsetsCompat fitted = new WindowInsetsCompat.Builder(insets)
+                        .setInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+                        .setDisplayCutout(null)
+                        .build();
+                    return ViewCompat.onApplyWindowInsets(view, fitted);
+                });
+                ViewCompat.requestApplyInsets(webView);
+            }
             configureProfileWebViewTextZoom(webView);
             webView.setBackgroundColor(
                 android.graphics.Color.parseColor(BuildConfig.SPLASH_BACKGROUND_COLOR)

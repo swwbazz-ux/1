@@ -7181,7 +7181,7 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertIn('--ms-card-pad-y: 1px;', shift_css)
         self.assertIn('--ms-summary-size: 15px;', shift_css)
         self.assertIn('block-size: 100%;', shift_css)
-        self.assertIn('--eo-topbar-text-size: clamp(11px, 2.8vw, 14px);', shift_css)
+        self.assertIn('--eo-topbar-text-size: clamp(10px, 2.8vw, 14px);', shift_css)
         self.assertIn('.eo-topbar .eo-face-rock', shift_css)
         self.assertIn('--mobile-shift-role-header-h: var(--driver-header-h);', shift_css)
         self.assertIn('--mobile-shift-role-header-h: var(--eo-fixed-header-h);', shift_css)

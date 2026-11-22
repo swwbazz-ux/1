@@ -142,7 +142,7 @@ body.excavator-operator-screen [data-eo-screen="shift"] {
    используют тот же DOM, поэтому размер больше не меняется от активного экрана
    и не подгоняется отдельным JavaScript. */
 body.excavator-operator-screen .eo-topbar {
-    --eo-topbar-text-size: clamp(11px, 2.8vw, 14px);
+    --eo-topbar-text-size: clamp(10px, 2.8vw, 14px);
 }
 
 body.excavator-operator-screen .eo-topbar .eo-topbar-cell strong,

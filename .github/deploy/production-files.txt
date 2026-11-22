@@ -1,1 +1,6 @@
-СИСТЕМА_MVP/backend/deploy/data_updates/grant_owner_parallel_shifts_20261121.py
+СИСТЕМА_MVP/backend/static/css/excavator-work-v55-shift.css
+СИСТЕМА_MVP/backend/static/css/mobile-shift-unified-v1.css
+СИСТЕМА_MVP/backend/templates/includes/excavator_dashboard_workspace.html
+СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
