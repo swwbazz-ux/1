@@ -1,4 +1,5 @@
 СИСТЕМА_MVP/backend/static/css/excavator-work-v55-shift.css
+СИСТЕМА_MVP/backend/static/js/excavator-downtime-edge-v1.js
 СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
 СИСТЕМА_MVP/backend/trips/views.py
 СИСТЕМА_MVP/backend/users/role_apps.py
