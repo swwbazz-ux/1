@@ -278,8 +278,8 @@ def settlement_clerk_access_from_request(request, *, allow_admin=True):
 
 @require_GET
 def settlement_arrival_roster_routing_view(request):
-    """Read-only ready-for-settlement hand-off queue for the exact clerk access."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
+    """Read-only ready-for-settlement queue for the clerk workplace."""
+    access = settlement_clerk_access_from_request(request)
     if not access:
         next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
         return redirect(f'{reverse("clerk_login")}?{next_url}')
@@ -316,6 +316,7 @@ def settlement_arrival_roster_routing_view(request):
             'routing_queue': settlement_clerk_arrival_roster_routing_queue(),
             'cohort_overview': cohort_overview,
             'cohort_preview_rows': tuple(preview_rows),
+            'can_manage_routing': access.role.code == 'settlement_clerk',
             'clerk_active_section': 'routing',
         },
     )

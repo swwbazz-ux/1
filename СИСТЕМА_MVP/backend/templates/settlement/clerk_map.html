@@ -1,11 +1,6 @@
 {% extends "clerk/base.html" %}
 {% load static %}
 
-{% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v34">
-{% endblock %}
-
-{% block clerk_shell_class %}settlement-shell{% endblock %}
 {% block clerk_shell_attributes %}data-settlement-root
      data-employee-search-url="{% url 'settlement_employee_search' %}"
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
@@ -524,5 +519,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v34"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v35"></script>
 {% endblock %}

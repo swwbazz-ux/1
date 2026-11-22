@@ -530,7 +530,15 @@ def touch_application_session(
     if not access:
         return False
     app = app_hint or get_role_app(access.role.code)
-    if not app or app.role_code != access.role.code:
+    if not app:
+        return False
+    # Администратор открывает рабочее место делопроизводителя под собственной ролью.
+    clerk_admin_visit = (
+        presence_kind == PRESENCE_FOREGROUND
+        and app.role_code == 'settlement_clerk'
+        and access.role.code == 'admin'
+    )
+    if app.role_code != access.role.code and not clerk_admin_visit:
         return False
     path_app = get_role_app_for_path(path) if path else None
     if not path_app or path_app.role_code != app.role_code:

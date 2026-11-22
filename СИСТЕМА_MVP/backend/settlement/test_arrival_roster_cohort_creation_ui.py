@@ -13,7 +13,7 @@ from rotations.models import (
     ArrivalRosterVersion,
 )
 from shifts.models import WatchPeriod, WatchPeriodBrigadePhaseVersion
-from users.models import EmployeeAccess
+from users.models import EmployeeAccess, Role
 
 from .cohorts import create_approved_arrival_roster_cohort
 from .models import SettlementCohort, SettlementCohortMember
@@ -62,6 +62,34 @@ class ArrivalRosterCohortCreationUiTests(TestCase):
     def _make_ready(self, name='Готовый участник T3 UI'):
         self._confirm_calendar()
         return self._direct_row(employee=self._internal_employee(name))
+
+    def test_admin_can_read_ready_and_formed_cohorts_without_clerk_actions(self):
+        self._make_ready()
+        role, _ = Role.objects.get_or_create(code='admin', defaults={'name': 'Системный администратор'})
+        admin = EmployeeAccess.objects.create(
+            employee=self._employee('Администратор расселения'),
+            role=role,
+            access_code='943821',
+            status=EmployeeAccess.Status.ACTIVATED,
+            is_active=True,
+        )
+        client = self._login(access=admin)
+
+        response = client.get(self._queue_url())
+        self.assertContains(response, 'Готово к формированию')
+        self.assertNotContains(response, self._create_url())
+        self.assertEqual(client.post(self._create_url()).status_code, 302)
+        self.assertFalse(SettlementCohort.objects.filter(routing_batch=self.batch).exists())
+
+        cohort = create_approved_arrival_roster_cohort(
+            batch_id=self.batch.pk,
+            actor_access_id=self.clerk_access.pk,
+        )
+        preview_url = reverse('settlement_arrival_roster_create_preview', args=[cohort.pk])
+        response = client.get(self._queue_url())
+        self.assertContains(response, 'Состав расселения сформирован')
+        self.assertNotContains(response, preview_url)
+        self.assertEqual(client.post(preview_url).status_code, 302)
 
     def test_ready_batch_has_exact_post_form_csrf_counts_and_no_hidden_domain_fields(self):
         self._make_ready()

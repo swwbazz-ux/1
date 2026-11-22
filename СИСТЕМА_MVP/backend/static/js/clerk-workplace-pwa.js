@@ -65,5 +65,29 @@
         ]).catch(function () {});
     }
 
+    function initWorkplaceTheme() {
+        var shell = document.querySelector(".clerk-workplace-shell");
+        var toggle = shell && shell.querySelector("[data-admin-theme-toggle]");
+        if (!toggle) return;
+
+        function applyTheme(isNight) {
+            shell.classList.toggle("admin-night", isNight);
+            shell.classList.toggle("admin-day", !isNight);
+            toggle.dataset.themeIcon = isNight ? "moon" : "sun";
+            toggle.title = isNight ? "Включить дневную тему" : "Включить ночную тему";
+            toggle.setAttribute("aria-label", toggle.title);
+        }
+
+        var savedTheme;
+        try { savedTheme = window.localStorage.getItem("clerk-theme"); } catch (error) {}
+        applyTheme(savedTheme === "night");
+        toggle.addEventListener("click", function () {
+            var isNight = !shell.classList.contains("admin-night");
+            applyTheme(isNight);
+            try { window.localStorage.setItem("clerk-theme", isNight ? "night" : "day"); } catch (error) {}
+        });
+    }
+
+    window.addEventListener("DOMContentLoaded", initWorkplaceTheme);
     window.addEventListener("load", retireLegacySettlementPwa);
 }());

@@ -4577,6 +4577,16 @@ class SettlementMapAccessTests(TestCase):
         )
         self.assertNotIn('<iframe', content.lower())
 
+    def test_routing_header_links_back_to_the_settlement_workplace(self):
+        self.authenticate(self.client, self.clerk_access)
+        response = self.client.get(reverse('settlement_arrival_roster_routing'))
+        self.assertContains(
+            response,
+            f'<a href="{reverse("clerk_home")}" data-clerk-section="settlement">Расселение</a>',
+            html=True,
+        )
+        self.assertNotContains(response, 'data-unsettled-panel-toggle')
+
     def test_legacy_settlement_routes_enter_only_the_clerk_contour(self):
         self.authenticate(self.client, self.dispatcher_access)
 
@@ -4750,8 +4760,8 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v34'), 2)
-        self.assertNotIn('-settlement-map-v33', content)
+        self.assertEqual(content.count('-settlement-map-v35'), 2)
+        self.assertNotIn('-settlement-map-v34', content)
         self.assertNotIn('-settlement-map-v31', content)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
@@ -8040,8 +8050,9 @@ class SettlementFrontendContractTests(TestCase):
         self.assertEqual(declaration('.settlement-shell', 'height'), '100dvh')
         self.assertEqual(declaration('.settlement-shell', 'max-height'), '100dvh')
         self.assertEqual(declaration('.settlement-page', 'height'), 'auto')
-        self.assertEqual(declaration('.settlement-floor-plan', 'height'), 'var(--settlement-plan-block-size)')
-        self.assertEqual(declaration('.settlement-floor-plan', 'min-height'), '0')
+        self.assertEqual(declaration('.settlement-floor-plan', 'height'), '100%')
+        self.assertEqual(declaration('.settlement-floor-plan', 'min-height'), 'var(--settlement-plan-block-size)')
+        self.assertEqual(declaration('.settlement-floor-scroll', 'overflow'), 'auto')
         self.assertEqual(declaration('.settlement-floor-plan', 'max-height'), 'none')
         self.assertEqual(declaration('.settlement-floor-plan', 'width'), '100%')
         self.assertEqual(declaration('.settlement-floor-plan', 'aspect-ratio'), 'auto')
@@ -8215,8 +8226,7 @@ class SettlementFrontendContractTests(TestCase):
         self.assertNotIn('settlementControlAcquireUrl)', javascript)
         self.assertIn('.settlement-plan-map', stylesheet)
         self.assertIn('.settlement-plan-resident.is-manually-changed', stylesheet)
-        self.assertEqual(template.count('settlement-map-v34'), 2)
-        self.assertNotIn('settlement-map-v33', template)
+        self.assertIn("static 'js/settlement-clerk.js'", template)
 
 
 class AutoSettlementPreviewTests(TestCase):

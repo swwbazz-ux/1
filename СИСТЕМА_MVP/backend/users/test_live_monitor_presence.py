@@ -95,6 +95,16 @@ class LiveMonitorPresenceTests(TestCase):
     def _monitor(self):
         return self.admin.get(reverse('system_admin_live_monitor'))
 
+    def test_admin_visiting_clerk_workplace_reports_own_role_and_actual_app(self):
+        url = reverse('application_session_heartbeat')
+        response = self.admin.post(url, {'path': reverse('clerk_home')})
+        self.assertEqual(response.status_code, 204)
+        presence = ActiveApplicationSession.objects.get(access=self.admin_access)
+        self.assertEqual((presence.role_code, presence.app_code), ('admin', 'settlement_clerk'))
+        self.assertEqual(presence.path, reverse('clerk_home'))
+        self.assertEqual(self.driver.post(url, {'path': reverse('clerk_home')}).status_code, 401)
+        self.assertEqual(self.admin.post(url, {'path': '/driver/'}).status_code, 401)
+
     def test_native_realtime_heartbeat_becomes_blue_background_presence(self):
         response = self.driver.get(
             reverse('operational_state_version'),

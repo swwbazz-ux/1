@@ -1,7 +1,7 @@
 {% extends "clerk/base.html" %}
 
 {% block clerk_content %}
-<main class="admin-console-page settlement-page">
+<main class="admin-console-page settlement-page settlement-routing-page">
     {% if messages %}
     <section aria-label="Сообщения системы">
         {% for message in messages %}<div class="message {{ message.tags }}" role="status">{{ message }}</div>{% endfor %}
@@ -39,11 +39,13 @@
                                 <small>Утверждён {{ item.approved_at|date:"d.m.Y H:i" }}</small>
                             </td>
                             <td>
-                                {% if preview_cohort_id %}
+                                {% if preview_cohort_id and can_manage_routing %}
                                 <form method="post" action="{% url 'settlement_arrival_roster_create_preview' preview_cohort_id %}">
                                     {% csrf_token %}
                                     <button type="submit">Подготовить предварительное расселение</button>
                                 </form>
+                                {% elif preview_cohort_id %}
+                                Предпросмотр доступен делопроизводителю
                                 {% else %}
                                 Требуется проверка исходных данных
                                 {% endif %}
@@ -55,10 +57,14 @@
                                 <small>Не заезжают: {{ item.excluded_not_arriving_count }}</small>
                             </td>
                             <td>
+                                {% if can_manage_routing %}
                                 <form method="post" action="{% url 'settlement_arrival_roster_create_cohort' item.batch_id %}">
                                     {% csrf_token %}
                                     <button type="submit">Сформировать состав расселения</button>
                                 </form>
+                                {% else %}
+                                Формирование доступно делопроизводителю
+                                {% endif %}
                             </td>
                             {% else %}
                             <td>Требуется проверка</td>

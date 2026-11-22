@@ -45,14 +45,14 @@
         calc(8 * var(--settlement-density-unit))
     );
     --settlement-room-min-height: clamp(
-        188px,
-        32dvh,
-        calc(520 * var(--settlement-density-unit))
+        156px,
+        25dvh,
+        calc(260 * var(--settlement-density-unit))
     );
     --settlement-bed-card-min-height: clamp(
-        42px,
-        7dvh,
-        calc(88 * var(--settlement-density-unit))
+        30px,
+        4.5dvh,
+        calc(52 * var(--settlement-density-unit))
     );
     --settlement-bed-photo-size: clamp(
         40px,
@@ -132,6 +132,9 @@
 
 @media (min-width: 1181px) {
     .settlement-shell .admin-console-header {
+        grid-template-columns: fit-content(27%) minmax(0, 1fr) auto;
+        height: auto;
+        max-height: none;
         border-bottom-width: var(--settlement-line);
     }
 
@@ -159,7 +162,8 @@
 
     .settlement-shell .admin-console-main {
         border-right-width: var(--settlement-line);
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+        gap: clamp(12px, 2vw, 32px);
     }
 
     .settlement-shell .admin-console-identity strong {
@@ -200,6 +204,7 @@
     }
 
     .settlement-shell .admin-console-nav {
+        flex-wrap: nowrap;
         gap: calc(8 * var(--settlement-density-unit));
     }
 
@@ -208,7 +213,9 @@
     }
 
     .settlement-shell .admin-console-nav button {
+        width: auto;
         height: var(--admin-header-control-height);
+        text-transform: uppercase;
         padding-inline: calc(8 * var(--settlement-density-unit));
         padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
@@ -304,7 +311,6 @@
         minmax(190px, auto)
         minmax(142px, auto)
         minmax(210px, 1fr)
-        auto
         auto;
     gap: clamp(3px, .35vw, calc(7 * var(--settlement-density-unit)));
     align-items: end;
@@ -375,6 +381,7 @@
     min-height: var(--settlement-control-height);
     padding: 0 calc(7 * var(--settlement-density-unit));
     border: 0;
+    border-radius: 0;
     border-left: var(--settlement-line) solid var(--admin-line-soft);
     background: transparent;
     color: var(--admin-muted);
@@ -555,6 +562,8 @@
 }
 
 .settlement-control-actions button {
+    width: auto;
+    white-space: nowrap;
     min-height: var(--settlement-control-height);
     padding: 0 calc(12 * var(--settlement-density-unit));
     border: var(--settlement-line) solid var(--admin-line);
@@ -567,7 +576,7 @@
     cursor: pointer;
 }
 
-.settlement-control-actions button:first-child {
+.settlement-control-actions button:first-child:not(:disabled) {
     border-color: var(--settlement-accent);
     background: var(--settlement-accent);
     color: #fff;
@@ -843,11 +852,12 @@
 
 .settlement-floor-scroll {
     display: grid;
+    grid-template-rows: minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
-    place-items: center;
+    place-items: start stretch;
     padding: clamp(2px, .45dvh, calc(6 * var(--settlement-density-unit)));
-    overflow: visible;
+    overflow: auto;
     overscroll-behavior-inline: contain;
     scrollbar-width: thin;
     container-type: inline-size;
@@ -861,8 +871,8 @@
         minmax(var(--settlement-room-min-height), 1fr);
     gap: var(--settlement-map-gap);
     width: 100%;
-    height: var(--settlement-plan-block-size);
-    min-height: 0;
+    height: 100%;
+    min-height: var(--settlement-plan-block-size);
     max-height: none;
     aspect-ratio: auto;
 }
@@ -1340,9 +1350,15 @@
     visibility: hidden;
 }
 
-.settlement-room-right .settlement-bed-hover-card {
+.settlement-room-right .settlement-bed-hover-card,
+.settlement-room-left:nth-last-child(-n+3) .settlement-bed-hover-card {
     right: calc(100% + calc(6 * var(--settlement-density-unit)));
     left: auto;
+}
+
+.settlement-room-right:nth-child(-n+3) .settlement-bed-hover-card {
+    right: auto;
+    left: calc(100% + calc(6 * var(--settlement-density-unit)));
 }
 
 .settlement-bed.is-occupied:hover .settlement-bed-hover-card,
@@ -2855,7 +2871,7 @@ body.settlement-auto-preview-modal-open {
 
 @media (max-width: 1500px) {
     .settlement-toolbar {
-        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(160px, 1fr) auto auto;
+        grid-template-columns: auto minmax(160px, auto) minmax(120px, auto) minmax(160px, 1fr) auto;
     }
 
 }
@@ -2894,8 +2910,9 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-shell .admin-console-nav button {
-        height: var(--admin-header-control-height);
-        min-height: var(--admin-header-control-height);
+        width: auto;
+        min-height: 40px;
+        text-transform: uppercase;
         padding-inline: calc(8 * var(--settlement-density-unit));
         padding-block: 0;
         border: var(--settlement-line) solid var(--admin-line);
@@ -2905,7 +2922,7 @@ body.settlement-auto-preview-modal-open {
         font-family: inherit;
         font-weight: 900;
         line-height: 1;
-        font-size: calc(11 * var(--settlement-density-unit));
+        font-size: 13px;
         cursor: pointer;
     }
 
@@ -2920,8 +2937,9 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-page {
         width: calc(100% - 16px);
-        height: auto;
-        overflow: visible;
+        grid-template-rows: auto auto auto;
+        align-content: start;
+        overflow: auto;
     }
 
     .settlement-auto-preview > header,
@@ -2931,20 +2949,12 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-toolbar {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: auto auto auto minmax(120px, 1fr) auto;
         align-items: end;
     }
 
     .settlement-current-date {
         border-right: 0;
-    }
-
-    .settlement-search-field {
-        grid-column: 1 / -1;
-    }
-
-    .settlement-work-badge {
-        grid-column: 1 / -1;
     }
 
     .settlement-auto-preview-trigger {
@@ -3017,11 +3027,33 @@ body.settlement-auto-preview-modal-open {
 @media (max-width: 720px) {
     .settlement-shell {
         --settlement-room-min-height: clamp(188px, 32dvh, 330px);
+        --settlement-control-height: 44px;
+        --settlement-bed-card-min-height: 44px;
         --settlement-bed-photo-size: 50px;
+    }
+
+    .settlement-shell .admin-console-main {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settlement-shell .admin-console-title h1 {
+        font-size: clamp(18px, 4vw, 24px);
+    }
+
+    .settlement-shell .admin-console-nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settlement-shell .admin-console-nav :is(a, button) {
+        height: auto;
+        min-height: 44px;
+        padding: 4px 6px;
+        white-space: normal;
     }
 
     .settlement-page {
         width: calc(100% - 12px);
+        grid-template-rows: repeat(3, max-content);
         padding-top: 6px;
     }
 
@@ -3067,11 +3099,20 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-toolbar {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .settlement-current-date,
     .settlement-search-field {
-        grid-column: auto;
+        grid-column: 1 / -1;
+    }
+
+    .settlement-current-date {
+        min-height: 0;
+    }
+
+    .settlement-work-badge {
+        grid-column: 1 / -1;
     }
 
     .settlement-summary {
@@ -3079,8 +3120,8 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-summary article {
-        min-height: 56px;
-        padding: 7px 9px;
+        min-height: 34px;
+        padding: 4px 9px;
     }
 
     .settlement-summary strong {
@@ -3123,22 +3164,6 @@ body.settlement-auto-preview-modal-open {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .settlement-summary {
-        grid-template-columns: 1fr;
-    }
-
-    .settlement-summary article,
-    .settlement-summary article:nth-child(3),
-    .settlement-summary article:nth-child(5) {
-        grid-column: auto;
-        border-top: 1px solid var(--admin-line-soft);
-        border-left: 0;
-    }
-
-    .settlement-summary article:first-child {
-        border-top: 0;
-    }
-
     .settlement-filter-buttons button {
         padding: 0 6px;
         font-size: 10px;
@@ -3160,9 +3185,12 @@ body.settlement-auto-preview-modal-open {
 }
 
 .settlement-map-modes button {
+    width: auto;
     min-height: var(--settlement-control-height);
     padding: 0 calc(16 * var(--settlement-density-unit));
     border: 0;
+    border-radius: 0;
+    white-space: nowrap;
     border-left: var(--settlement-line) solid var(--admin-line-soft);
     background: transparent;
     color: var(--admin-muted);
@@ -3197,10 +3225,36 @@ body.settlement-auto-preview-modal-open {
     display: grid;
     gap: clamp(2px, .5dvh, calc(6 * var(--settlement-density-unit)));
     min-height: 0;
+    min-width: 0;
+}
+
+@media (min-width: 1181px) {
+    .settlement-map-mode-panel[data-map-mode-panel="current"] {
+        grid-template-rows: auto auto minmax(0, 1fr);
+    }
+
+    .settlement-next-arrival {
+        align-content: start;
+        overflow: auto;
+    }
 }
 
 .settlement-map-mode-panel[hidden] {
     display: none;
+}
+
+.settlement-routing-page {
+    display: block;
+    min-width: 0;
+    overflow: auto;
+}
+
+.settlement-routing-page .admin-console-table-wrap {
+    overflow-x: auto;
+}
+
+.settlement-routing-page th {
+    white-space: nowrap;
 }
 
 .settlement-next-arrival {
@@ -3457,7 +3511,6 @@ body.settlement-auto-preview-modal-open {
         padding: 0 calc(8 * var(--settlement-density-unit));
     }
 
-    .settlement-page > .settlement-control-panel,
     .settlement-next-arrival-toolbar {
         grid-template-columns: minmax(0, 1fr);
         align-items: stretch;
