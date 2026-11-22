@@ -65,6 +65,9 @@ class ManualLoadingTests(TestCase):
         self.assertIsNone(trip.actual_dump_point_id)
         self.assertIsNone(trip.completed_at)
         self.assertEqual(calculate_open_shift_progress(self.shift)['trip_count'], 1)
+        self.assertFalse(DowntimeEvent.objects.filter(
+            equipment=self.excavator, reason__name='Ожидание самосвалов', ended_at__isnull=True,
+        ).exists())
 
     def test_passive_requires_deliberate_manual_action(self):
         self.assertEqual(self.send(manual=False).status_code, 409)

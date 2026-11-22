@@ -13,9 +13,10 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.contrib.staticfiles import finders
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.template.loader import render_to_string
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import resolve, reverse
 from django.utils import timezone
 
@@ -39,7 +40,7 @@ from assignments.services import (
 )
 from core.models import OperationalStateEvent
 from users.role_apps import ROLE_APPS_BY_CODE, STATIC_ASSET_RELEASE
-from core.production_time import production_work_date
+from core.production_time import assigned_shift_open_bounds, production_work_date, production_work_date_for_shift
 from downtimes.models import DowntimeEvent, DowntimeReason
 from references.equipment_states import upsert_default_equipment_states
 from references.models import (
@@ -58,9 +59,11 @@ from shifts.models import (
     EmployeeShift,
     ExcavatorShiftReadingConfirmation,
     EquipmentPlanGroup,
+    EquipmentShiftPlan,
     PlanAssignmentStatus,
     PlanCalculationMode,
     ShiftClientAction,
+    ShiftPlan,
     ShiftReadingCorrection,
 )
 from shifts.services import assign_shift_plan_snapshot, progress_cycle_visual_context
@@ -69,6 +72,7 @@ from trips.models import DispatcherActionLog, DispatcherActionType, Trip, TripCl
 from trips.views import (
     build_dispatcher_dashboard_context,
     dispatcher_empty_snapshot_progress,
+    excavator_assigned_truck_counts,
     reconcile_excavator_waiting_for_trucks,
     finalize_trip_unloaded,
     get_operational_state_version,
@@ -2464,6 +2468,44 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         self.assertContains(response, '--eo-truck-progress: 49%;')
         self.assertContains(response, 'data-plan-loop-percent="49"')
         self.assertContains(response, 'data-plan-completed-loops="0"')
+
+    def test_excavator_truck_plan_without_open_shift_keeps_completed_trips_in_period(self):
+        loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
+        work_date = production_work_date_for_shift(loading_shift.opened_at, loading_shift.shift_type)
+        start, _ = assigned_shift_open_bounds(work_date, loading_shift.shift_type)
+        self.truck_shift.opened_at = start
+        self.truck_shift.shift_type = loading_shift.shift_type
+        self.truck_shift.closed_at = start + timedelta(hours=4)
+        self.truck_shift.save(update_fields=['opened_at', 'shift_type', 'closed_at'])
+        old_shift = EmployeeShift.objects.create(
+            employee=self.driver, equipment=self.truck, shift_type=loading_shift.shift_type,
+            opened_at=start - timedelta(days=1), closed_at=start - timedelta(hours=12),
+        )
+        plan = ShiftPlan.objects.create(date=work_date, shift_type=loading_shift.shift_type)
+        EquipmentShiftPlan.objects.create(
+            shift_plan=plan, equipment=self.truck, calculation_mode=PlanCalculationMode.VOLUME,
+            plan_volume_m3='100.00',
+        )
+        for status, volume, excavator, unloading_shift in [
+            (TripStatus.COMPLETED, '20.00', self.excavator, self.truck_shift),
+            (TripStatus.COMPLETED, '15.00', self.other_excavator, self.truck_shift),
+            (TripStatus.COMPLETED, '60.00', self.excavator, old_shift),
+            (TripStatus.CANCELLED, '70.00', self.excavator, self.truck_shift),
+            (TripStatus.LOADED_WAITING_UNLOAD, '40.00', self.excavator, self.truck_shift),
+        ]:
+            Trip.objects.create(
+                excavator=excavator, truck=self.truck, driver=self.driver,
+                loading_shift=loading_shift, unloading_shift=unloading_shift,
+                rock_type=self.rock, dump_point=self.dump_point, volume_m3=volume, status=status,
+                loaded_at=start + timedelta(hours=1),
+            )
+
+        response = self.client.get(reverse('excavator_work'))
+
+        self.assertEqual(response.status_code, 200)
+        card = next(card for card in response.context['truck_cards'] if card['number'] == '21')
+        self.assertEqual(card['plan_percent'], 35)
+        self.assertEqual(card['plan_value'], Decimal('100.00'))
 
     def test_truck_plan_percent_matches_dispatcher_driver_and_excavator(self):
         loading_shift = EmployeeShift.objects.get(employee=self.operator, equipment=self.excavator)
@@ -6106,6 +6148,57 @@ class ExcavatorWorkServerIntegrationTests(TestCase):
         )
         self.assertEqual(waiting.employee, self.operator)
         self.assertEqual(waiting.comment, 'Автоматически по производственному событию')
+
+    def test_waiting_truck_counts_batch_active_shifts_and_downtimes(self):
+        with CaptureQueriesContext(connection) as one_truck:
+            self.assertEqual(excavator_assigned_truck_counts(self.excavator), (1, 1, False, True))
+
+        trucks = []
+        for index in range(4):
+            truck = Equipment.objects.create(
+                equipment_type=self.truck_type, model=self.truck_model, garage_number=str(81 + index),
+            )
+            self.create_registered_driver_shift(truck, access_code=str(200081 + index))
+            HaulAssignment.objects.create(
+                truck=truck, excavator=self.excavator, status=AssignmentStatus.ACCEPTED,
+            )
+            trucks.append(truck)
+        repair = DowntimeReason.objects.create(name='Ремонт самосвала для проверки автоожидания')
+        DowntimeEvent.objects.create(equipment=trucks[0], reason=repair, started_at=timezone.now())
+
+        with self.assertNumQueries(len(one_truck)):
+            self.assertEqual(excavator_assigned_truck_counts(self.excavator), (5, 4, False, True))
+
+    def test_automatic_waiting_requires_open_driver_shifts_for_all_assigned_trucks(self):
+        truck = Equipment.objects.create(equipment_type=self.truck_type, garage_number='88')
+        _, _, driver_shift = self.create_registered_driver_shift(truck, access_code='200088')
+        driver_shift.closed_at = timezone.now()
+        driver_shift.save(update_fields=['closed_at'])
+        HaulAssignment.objects.create(
+            truck=truck, excavator=self.excavator, status=AssignmentStatus.ACCEPTED,
+        )
+        repair = DowntimeReason.objects.create(name='Ремонт второго назначенного самосвала')
+        DowntimeEvent.objects.create(equipment=truck, reason=repair, started_at=timezone.now())
+        active_waiting = DowntimeEvent.objects.filter(
+            equipment=self.excavator, reason=self.reason, ended_at__isnull=True,
+        )
+        fragment = {'_operational_fragment': 'excavator'}
+
+        response = self.post_truck_loaded(client_action_id='last-available-other-shift-closed')
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.client.get(reverse('excavator_work'), fragment).status_code, 200)
+        self.assertFalse(active_waiting.exists())
+
+        driver_shift.closed_at = None
+        driver_shift.save(update_fields=['closed_at'])
+        self.assertEqual(self.client.get(reverse('excavator_work'), fragment).status_code, 200)
+        waiting = active_waiting.get()
+
+        driver_shift.closed_at = timezone.now()
+        driver_shift.save(update_fields=['closed_at'])
+        self.assertEqual(self.client.get(reverse('excavator_work'), fragment).status_code, 200)
+        waiting.refresh_from_db()
+        self.assertIsNotNone(waiting.ended_at)
 
     def test_waiting_does_not_start_with_inactive_assigned_truck(self):
         self.truck.is_active = False

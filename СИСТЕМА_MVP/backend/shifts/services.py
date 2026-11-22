@@ -1277,21 +1277,25 @@ def shift_plan_totals(date):
     return shift_plan_totals_for_dates([date])[date]
 
 
-def get_equipment_shift_plan(equipment, date, shift_type):
-    if not equipment or not date or not shift_type:
-        return None
+def active_equipment_shift_plans(date, shift_type):
     return (
         EquipmentShiftPlan.objects
         .select_related('shift_plan', 'equipment', 'employee')
         .filter(
-            equipment=equipment,
             is_active=True,
             shift_plan__date=date,
             shift_plan__shift_type=shift_type,
             shift_plan__is_active=True,
         )
-        .first()
+        # Several named plans can exist for the same equipment and period.
+        .order_by('shift_plan__date', 'shift_plan__shift_type', 'equipment__garage_number', 'pk')
     )
+
+
+def get_equipment_shift_plan(equipment, date, shift_type):
+    if not equipment or not date or not shift_type:
+        return None
+    return active_equipment_shift_plans(date, shift_type).filter(equipment=equipment).first()
 
 
 def get_equipment_plan_group(equipment):
@@ -1542,6 +1546,11 @@ def calculate_progress_from_snapshot(shift, trips):
 def calculate_progress_from_trip_queryset(equipment, date, shift_type, trips):
     plan = get_equipment_shift_plan(equipment, date, shift_type)
     facts = aggregate_trip_facts(trips)
+    return calculate_legacy_equipment_progress(equipment, date, shift_type, plan, facts)
+
+
+def calculate_legacy_equipment_progress(equipment, date, shift_type, plan, facts):
+    facts = normalize_trip_facts(facts)
     trip_count = facts['trip_count']
     volume_m3 = facts['volume_m3']
     tonnage = facts['tonnage']
@@ -1638,6 +1647,59 @@ def calculate_truck_shift_progress(truck, reference_shift=None):
         )
         return calculate_equipment_shift_progress(truck, date, reference_shift.shift_type)
     return empty_progress(truck, status=PlanAssignmentStatus.NO_PLAN_GROUP)
+
+
+def calculate_truck_shift_progress_batch(trucks, open_shifts_by_truck_id, reference_shift):
+    """Calculate Excavator cards using the open shifts already loaded for the screen."""
+    trucks_by_id = {truck.pk: truck for truck in trucks}
+    open_shifts = {
+        truck_id: shift for truck_id, shift in open_shifts_by_truck_id.items()
+        if truck_id in trucks_by_id
+    }
+    trips = Trip.objects.filter(status=TripStatus.COMPLETED)
+    open_shift_facts = {
+        (row['truck_id'], row['unloading_shift_id']): row
+        for row in trips.filter(
+            truck_id__in=open_shifts,
+            unloading_shift_id__in=[shift.pk for shift in open_shifts.values()],
+        ).order_by().values('truck_id', 'unloading_shift_id').annotate(
+            trip_count=Count('id'), volume_m3=Sum('volume_m3'), tonnage=Sum('tonnage'),
+        )
+    }
+    result = {
+        truck_id: calculate_progress_from_snapshot_facts(shift, open_shift_facts.get((truck_id, shift.pk)))
+        for truck_id, shift in open_shifts.items()
+    }
+    remaining = trucks_by_id.keys() - open_shifts.keys()
+    if not remaining:
+        return result
+    if not reference_shift.opened_at or not reference_shift.shift_type:
+        result.update((truck_id, empty_progress(trucks_by_id[truck_id], status=PlanAssignmentStatus.NO_PLAN_GROUP))
+                      for truck_id in remaining)
+        return result
+
+    shift_type = reference_shift.shift_type
+    date = production_work_date_for_shift(reference_shift.opened_at, shift_type)
+    period_start, period_end = assigned_shift_open_bounds(date, shift_type)
+    plans = {}
+    for plan in active_equipment_shift_plans(date, shift_type).filter(equipment_id__in=remaining):
+        plans.setdefault(plan.equipment_id, plan)
+    period_facts = {
+        row['unloading_shift__equipment_id']: row
+        for row in trips.filter(
+            unloading_shift__equipment_id__in=remaining,
+            unloading_shift__shift_type=shift_type,
+            unloading_shift__opened_at__gte=period_start,
+            unloading_shift__opened_at__lt=period_end,
+        ).order_by().values('unloading_shift__equipment_id').annotate(
+            trip_count=Count('id'), volume_m3=Sum('volume_m3'), tonnage=Sum('tonnage'),
+        )
+    }
+    for truck_id in remaining:
+        result[truck_id] = calculate_legacy_equipment_progress(
+            trucks_by_id[truck_id], date, shift_type, plans.get(truck_id), period_facts.get(truck_id),
+        )
+    return result
 
 
 def calculate_open_shift_progress(open_shift):

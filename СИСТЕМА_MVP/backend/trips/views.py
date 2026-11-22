@@ -65,7 +65,7 @@ from shifts.services import (
     calculate_open_shift_progress,
     calculate_plan_group_progress_from_facts,
     calculate_progress_from_snapshot_facts,
-    calculate_truck_shift_progress,
+    calculate_truck_shift_progress_batch,
     close_excavator_shift,
     equipment_is_truck,
     excavator_fuel_capacity_l,
@@ -3515,29 +3515,23 @@ def excavator_truck_load_block_payload(code):
     }
 
 
-def excavator_truck_has_driver_assignment(truck):
-    if not truck:
-        return False
-    return (
-        EquipmentAssignment.objects
-        .filter(
-            equipment=truck,
-            ended_at__isnull=True,
-            status__in=(AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED),
-            employee__is_active=True,
-            employee_id__in=(
-                EmployeeAccess.objects
-                .filter(role__code='driver', is_active=True)
-                .exclude(status=EmployeeAccess.Status.DEACTIVATED)
-                .values('employee_id')
-            ),
-        )
-        .filter(
-            Q(role__code='driver')
-            | Q(role__isnull=True)
-        )
-        .exists()
+def excavator_driver_assignments():
+    return EquipmentAssignment.objects.filter(
+        Q(role__code='driver') | Q(role__isnull=True),
+        ended_at__isnull=True,
+        status__in=(AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED),
+        employee__is_active=True,
+        employee_id__in=(
+            EmployeeAccess.objects
+            .filter(role__code='driver', is_active=True)
+            .exclude(status=EmployeeAccess.Status.DEACTIVATED)
+            .values('employee_id')
+        ),
     )
+
+
+def excavator_truck_has_driver_assignment(truck):
+    return bool(truck and excavator_driver_assignments().filter(equipment=truck).exists())
 
 
 def excavator_truck_load_block(
@@ -3731,14 +3725,11 @@ def close_excavator_open_downtimes(excavator):
 def excavator_assigned_truck_counts(excavator):
     """Сколько самосвалов назначено экскаватору и сколько из них можно грузить.
 
-    Возвращает (всего назначено, доступно для погрузки, есть выключенный).
-    Выключенной считается только неактивная единица техники. Рейс на
-    разгрузке сюда не относится: это штатное состояние, при котором
-    ожидание самосвалов как раз должно включаться после отправки всех
-    рабочих машин.
+    Возвращает (всего назначено, доступно для погрузки, есть выключенный,
+    у всех активных назначенных самосвалов открыта смена водителя).
     """
     if not excavator:
-        return 0, 0, False
+        return 0, 0, False, False
     assignments = list(
         HaulAssignment.objects
         .filter(
@@ -3748,16 +3739,49 @@ def excavator_assigned_truck_counts(excavator):
         )
         .select_related('truck', 'truck__equipment_type')
     )
-    has_inactive_assigned_truck = any(
-        not getattr(assignment.truck, 'is_active', True)
-        for assignment in assignments
-    )
+    active_assignments = [assignment for assignment in assignments if assignment.truck.is_active]
+    has_inactive_assigned_truck = len(active_assignments) != len(assignments)
+    truck_ids = {assignment.truck_id for assignment in active_assignments}
+    if not truck_ids:
+        return len(assignments), 0, has_inactive_assigned_truck, False
+
+    active_trips = {}
+    for trip in Trip.objects.filter(
+        truck_id__in=truck_ids, status__in=OPEN_TRIP_STATUSES,
+    ).order_by('-created_at'):
+        active_trips.setdefault(trip.truck_id, trip)
+    active_downtimes = {}
+    for downtime in DowntimeEvent.objects.filter(
+        equipment_id__in=truck_ids, ended_at__isnull=True,
+    ).select_related('reason', 'reason__equipment_state').order_by('-started_at', '-id'):
+        active_downtimes.setdefault(downtime.equipment_id, downtime)
+    driver_participation = truck_driver_participation(truck_ids)
+    open_shift_truck_ids = set(EmployeeShift.objects.filter(
+        equipment_id__in=truck_ids, closed_at__isnull=True,
+    ).values_list('equipment_id', flat=True))
+    driver_assignment_truck_ids = set(excavator_driver_assignments().filter(
+        equipment_id__in=truck_ids - open_shift_truck_ids,
+    ).values_list('equipment_id', flat=True).distinct())
+
+    # False передаёт проверенное отсутствие записи, None запускает запрос в правиле погрузки.
     loadable = sum(
         1
-        for assignment in assignments
-        if not excavator_truck_load_block(assignment, current_excavator=excavator, manual_control=True)
+        for assignment in active_assignments
+        if not excavator_truck_load_block(
+            assignment,
+            current_excavator=excavator,
+            manual_control=True,
+            active_trip=active_trips.get(assignment.truck_id, False),
+            active_downtime=active_downtimes.get(assignment.truck_id, False),
+            has_open_truck_shift=assignment.truck_id in open_shift_truck_ids,
+            has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
+            participation=driver_participation[assignment.truck_id],
+        )
     )
-    return len(assignments), loadable, has_inactive_assigned_truck
+    all_driver_shifts_open = all(
+        driver_participation[truck_id]['shift'] is not None for truck_id in truck_ids
+    )
+    return len(assignments), loadable, has_inactive_assigned_truck, all_driver_shifts_open
 
 
 def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_when_empty=False):
@@ -3765,20 +3789,10 @@ def reconcile_excavator_waiting_for_trucks(excavator, employee=None, *, start_wh
         return None
     with transaction.atomic():
         excavator = Equipment.objects.select_for_update().get(pk=excavator.pk)
-        assigned_total, loadable, has_inactive_assigned_truck = excavator_assigned_truck_counts(excavator)
-        if loadable:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
-            return None
-        # Ждать самосвалы можно только тогда, когда они назначены и все уже
-        # отгружены. Если экскаватору не назначено ни одного самосвала, ждать
-        # ему нечего — это не простой по ожиданию, и открывать его нельзя.
-        if assigned_total == 0:
-            close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
-            return None
-        # Автоматическое «Ожидание самосвалов» отражает только ситуацию,
-        # когда весь назначенный парк включён, но уже находится в рейсах.
-        # Выключенный самосвал не должен сам запускать этот простой.
-        if has_inactive_assigned_truck:
+        assigned_total, loadable, has_inactive, all_driver_shifts_open = excavator_assigned_truck_counts(excavator)
+        # Ручная погрузка доступна и без смены водителя. Для учёта
+        # автоматического ожидания у всей назначенной техники нужна смена.
+        if loadable or not assigned_total or has_inactive or not all_driver_shifts_open:
             close_excavator_auto_downtime(excavator, EXCAVATOR_AUTO_DOWNTIME_WAITING_TRUCKS)
             return None
         if start_when_empty:
@@ -5561,29 +5575,9 @@ def excavator_work_view(request):
                 open_truck_shift_by_equipment_id[truck_shift.equipment_id] = truck_shift
         open_truck_shift_equipment_ids = set(open_truck_shift_by_equipment_id.keys())
 
-    driver_assignment_truck_ids = set()
-    if assignment_truck_ids:
-        driver_assignment_truck_ids = set(
-            EquipmentAssignment.objects
-            .filter(
-                equipment_id__in=assignment_truck_ids,
-                ended_at__isnull=True,
-                status__in=(AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED),
-                employee__is_active=True,
-                employee_id__in=(
-                    EmployeeAccess.objects
-                    .filter(role__code='driver', is_active=True)
-                    .exclude(status=EmployeeAccess.Status.DEACTIVATED)
-                    .values('employee_id')
-                ),
-            )
-            .filter(
-                Q(role__code='driver')
-                | Q(role__isnull=True)
-            )
-            .values_list('equipment_id', flat=True)
-            .distinct()
-        )
+    driver_assignment_truck_ids = set(excavator_driver_assignments().filter(
+        equipment_id__in=assignment_truck_ids,
+    ).values_list('equipment_id', flat=True).distinct())
 
     driver_participation = truck_driver_participation(assignment_truck_ids)
 
@@ -5597,7 +5591,7 @@ def excavator_work_view(request):
             participation=driver_participation[assignment.truck_id],
             manual_control=manual_control,
             active_trip=known_active_trip,
-            active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id),
+            active_downtime=truck_downtime_by_equipment_id.get(assignment.truck_id, False),
             has_open_truck_shift=assignment.truck_id in open_truck_shift_equipment_ids,
             has_driver_assignment=assignment.truck_id in driver_assignment_truck_ids,
         )
@@ -5970,10 +5964,13 @@ def excavator_work_view(request):
     shift_plan_percent = shift_plan['percent']
     shift_plan_visual = progress_cycle_visual_context(shift_plan_percent if shift_plan['has_plan'] else 0)
 
+    truck_progress_by_id = {}
+    if open_shift:
+        truck_progress_by_id = calculate_truck_shift_progress_batch(
+            (card['assignment'].truck for card in truck_cards), open_truck_shift_by_equipment_id, open_shift,
+        )
     for card in truck_cards:
-        truck_progress = None
-        if open_shift:
-            truck_progress = calculate_truck_shift_progress(card['assignment'].truck, reference_shift=open_shift)
+        truck_progress = truck_progress_by_id.get(card['assignment'].truck_id)
         truck_plan = plan_progress_display_context(truck_progress)
         plan_percent = truck_plan['percent']
         card['plan_percent'] = plan_percent
