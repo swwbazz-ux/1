@@ -389,17 +389,23 @@ def settlement_arrival_roster_routing_view(request):
     )
 
 
+def _routing_write_access(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
+        return None, redirect(f'{reverse("clerk_login")}?{next_url}')
+    if access.role.code != 'settlement_clerk':
+        messages.info(request, 'Формирование состава и подготовка плана из очереди доступны в роли делопроизводителя.')
+        return None, redirect('settlement_arrival_roster_routing')
+    return access, None
+
+
 @require_POST
 def settlement_arrival_roster_create_cohort_view(request, batch_id):
     """Create one approved cohort from an exact routing batch."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
-    if not access:
-        messages.error(
-            request,
-            'Для создания состава требуется действующий доступ делопроизводителя.',
-        )
-        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
-        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    access, response = _routing_write_access(request)
+    if response is not None:
+        return response
 
     try:
         create_approved_arrival_roster_cohort(
@@ -419,15 +425,9 @@ def settlement_arrival_roster_create_cohort_view(request, batch_id):
 @require_POST
 def settlement_arrival_roster_create_preview_view(request, cohort_id):
     """Create a saved preview for the exact routing cohort from server context."""
-    access = settlement_clerk_access_from_request(request, allow_admin=False)
-    if not access:
-        messages.error(
-            request,
-            'Для подготовки расселения требуется действующий '
-            'доступ делопроизводителя.',
-        )
-        next_url = urlencode({'next': reverse('settlement_arrival_roster_routing')})
-        return redirect(f'{reverse("clerk_login")}?{next_url}')
+    access, response = _routing_write_access(request)
+    if response is not None:
+        return response
 
     try:
         control_context = _auto_settlement_control_context(request, access)

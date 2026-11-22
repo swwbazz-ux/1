@@ -97,9 +97,11 @@ class FundPanelUiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, 'settlement/clerk_fund.html')
         html = response.content.decode()
-        self.assertIn(f'href="{reverse("settlement_fund")}"', html)
-        self.assertIn('>Жилфонд</a>', html)
-        self.assertIn('class="is-active">Жилфонд</a>', html)
+        self.assertContains(
+            response,
+            f'<a href="{reverse("settlement_fund")}" class="is-active" aria-current="page">Жилфонд</a>',
+            html=True,
+        )
         self.assertIn('Управление жилфондом', html)
         for action in (
             'create_dormitory',
