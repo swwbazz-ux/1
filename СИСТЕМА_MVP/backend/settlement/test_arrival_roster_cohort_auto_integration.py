@@ -83,6 +83,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
             floor=1,
             number=1,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
             capacity=4,
             corridor_side=PhysicalRoom.CorridorSide.LEFT,
             side_position=1,
@@ -134,6 +135,37 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
     _force_legacy_watch_profile_drift_for_test = (
         cohort_fixtures.ArrivalRosterCohortCreationTests._force_legacy_watch_profile_drift_for_test
     )
+
+    def _employee(self, full_name, **overrides):
+        # C-4 / SET-R042: койка в комнате с известным полом требует известного
+        # пола жильца. Синтетические сотрудники этого файла — мужчины.
+        overrides.setdefault('sex', Employee.Sex.MALE)
+        # Решение владельца 22.11.2026: для авторасселения нужна категория
+        # кадровой должности (рабочий/ИТР). Должность без категории в фикстуре
+        # заменяем на рабочую; явно заданную ИТР-должность не трогаем.
+        position = overrides.get('personnel_position')
+        if position is None or not position.settlement_category:
+            overrides['personnel_position'] = self._worker_position()
+        return cohort_fixtures.ArrivalRosterCohortCreationTests._employee(
+            self,
+            full_name,
+            **overrides,
+        )
+
+    def _worker_position(self):
+        if not hasattr(self, '_cached_worker_position'):
+            self._cached_worker_position, _created = (
+                PersonnelPosition.objects.get_or_create(
+                    code='ri-worker',
+                    defaults={
+                        'name': 'RI рабочий',
+                        'settlement_category': (
+                            PersonnelPosition.SettlementCategory.WORKER
+                        ),
+                    },
+                )
+            )
+        return self._cached_worker_position
 
     def _anchor(self, *, bed, equipment=None, position=None, suffix='anchor'):
         anchor = AccommodationAnchor.objects.create(
@@ -193,6 +225,7 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
         position = PersonnelPosition.objects.create(
             code=f'RI-POS-{self._testMethodName}',
             name=f'Должность {self._testMethodName}',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
         )
         employee = employee or self._internal_employee(f'Прямой {self._testMethodName}')
         Employee.objects.filter(pk=employee.pk).update(personnel_position=position)

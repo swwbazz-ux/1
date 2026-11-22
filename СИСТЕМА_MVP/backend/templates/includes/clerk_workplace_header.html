@@ -26,6 +26,8 @@
             {% endif %}
             <a href="{% url 'settlement_arrival_roster_routing' %}"
                {% if clerk_active_section == 'routing' %}class="is-active" aria-current="page"{% endif %}>Готово к расселению</a>
+            <a href="{% url 'settlement_fund' %}"
+               {% if clerk_active_section == 'fund' %}class="is-active" aria-current="page"{% endif %}>Жилфонд</a>
         </nav>
     </section>
 

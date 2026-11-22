@@ -1,4 +1,5 @@
 import inspect
+import json
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -77,10 +78,13 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementClerkShift,
     SettlementControlEvent,
     SettlementControlLease,
     SettlementCohort,
     SettlementCohortMember,
+    SettlementBedPreparation,
+    SettlementBedReserve,
     SettlementPreviewPlacement,
     SettlementPreviewApplication,
     SettlementPreviewApplicationItem,
@@ -114,10 +118,12 @@ from .saved_previews import (
     settlement_preview_is_stale,
 )
 from .services import (
+    _validate_resident_and_destination,
     build_auto_settlement_preview,
     current_roster_resolution,
     effective_occupancy_at_q,
     relocate_employee_to_bed,
+    relocate_resident_to_bed,
     release_employee_from_bed,
     settle_employee_on_bed,
     settle_resident_on_bed,
@@ -126,8 +132,18 @@ from .services import (
 from .views import _occupancy_response
 
 
-def _migration_targets_with_latest_users(executor, *targets):
-    return [*targets, *executor.loader.graph.leaf_nodes('users')]
+def _migration_targets_with_current_foreign_apps(executor, *targets):
+    """Держит `users` и `references` на последних миграциях при откате settlement.
+
+    Иначе историческое состояние этих приложений отстаёт от фактической схемы
+    БД (пример: NOT NULL `references.dormitory.kind` из `references/0011`),
+    и вставка через историческую модель падает на IntegrityError.
+    """
+    return [
+        *targets,
+        *executor.loader.graph.leaf_nodes('users'),
+        *executor.loader.graph.leaf_nodes('references'),
+    ]
 
 
 def _resident_for_employee(employee):
@@ -574,17 +590,47 @@ class SettlementResidentTests(TestCase):
         self.assertEqual(resident.organization, 'ООО «Новая организация»')
         self.assertEqual(resident.revision, 2)
 
+    def _add_room_occupant(self, *, bed, sex, name='ДЕМО Сосед по комнате'):
+        employee = Employee.objects.create(
+            full_name=name,
+            sex=sex,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        resident, _created = get_or_create_employee_resident(
+            employee_id=employee.pk,
+        )
+        other_bed = PhysicalBed.objects.create(
+            room=bed.room,
+            stable_id=f'RESIDENT-SEX-OTHER-{employee.pk}',
+            block=PhysicalBed.Block.B,
+            position=2,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=resident,
+            physical_bed=other_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.now() - timedelta(hours=1),
+            settled_at=timezone.now() - timedelta(hours=1),
+            settled_by=self.clerk,
+        )
+        return resident
+
     def test_external_sex_change_revalidates_open_occupancy(self):
+        # T-036 backend-15: решение по фактическим жильцам, не по атрибуту.
         resident = self.create_external(sex=Employee.Sex.MALE)
         bed = self.create_transferred_bed(
-            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
         )
         occupancy = EmployeeBedOccupancy.objects.create(
             resident=resident,
             physical_bed=bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.now() - timedelta(hours=1),
+            settled_at=timezone.now() - timedelta(hours=1),
             settled_by=self.clerk,
         )
+        self._add_room_occupant(bed=bed, sex=Employee.Sex.MALE)
 
         self.assert_validation_code(
             'settlement.resident.sex_occupancy_conflict',
@@ -601,7 +647,7 @@ class SettlementResidentTests(TestCase):
         self.assertEqual(resident.revision, 1)
         self.assertIsNone(occupancy.terminated_at)
 
-    def test_external_sex_change_is_allowed_for_compatible_open_occupancy(self):
+    def test_external_sex_change_conflicts_with_unknown_occupant(self):
         resident = self.create_external(sex=Employee.Sex.MALE)
         bed = self.create_transferred_bed(
             sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
@@ -610,6 +656,33 @@ class SettlementResidentTests(TestCase):
             resident=resident,
             physical_bed=bed,
             assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.now() - timedelta(hours=1),
+            settled_at=timezone.now() - timedelta(hours=1),
+            settled_by=self.clerk,
+        )
+        self._add_room_occupant(bed=bed, sex=Employee.Sex.UNKNOWN)
+
+        self.assert_validation_code(
+            'settlement.resident.sex_occupancy_conflict',
+            lambda: update_external_resident(
+                resident_id=resident.pk,
+                expected_revision=resident.revision,
+                sex=Employee.Sex.FEMALE,
+                control_context=self.control_context,
+            ),
+        )
+
+    def test_external_sex_change_is_allowed_for_empty_compatible_room(self):
+        resident = self.create_external(sex=Employee.Sex.MALE)
+        bed = self.create_transferred_bed(
+            sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.now() - timedelta(hours=1),
+            settled_at=timezone.now() - timedelta(hours=1),
             settled_by=self.clerk,
         )
 
@@ -3820,29 +3893,30 @@ class PhysicalRoomSexRestrictionTests(TestCase):
             with transaction.atomic():
                 invalid.save()
 
-    def test_django_admin_form_saves_selected_sex_restriction(self):
+    def test_django_admin_form_excludes_legacy_sex_restriction(self):
+        # T-036 backend-16: `sex_restriction` — legacy-поле схемы; пол комнаты
+        # вычисляется по жильцам, поэтому в админке атрибут не редактируется.
         dormitory = Dormitory.objects.create(number='ADMIN-SEX')
         room_admin = PhysicalRoomAdmin(PhysicalRoom, admin.site)
         request = RequestFactory().get('/admin/settlement/physicalroom/add/')
         request.user = AnonymousUser()
         form_class = room_admin.get_form(request)
+        self.assertNotIn('sex_restriction', form_class.base_fields)
         form = form_class(data={
             'dormitory': dormitory.pk,
             'floor': 1,
             'number': 1,
             'room_type': PhysicalRoom.RoomType.STANDARD,
             'transfer_status': PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
-            'sex_restriction': PhysicalRoom.SexRestriction.FEMALE_ONLY,
             'capacity': 6,
             'corridor_side': PhysicalRoom.CorridorSide.LEFT,
             'side_position': 1,
         })
 
-        self.assertEqual(form.fields['sex_restriction'].widget.__class__.__name__, 'Select')
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(
             form.save().sex_restriction,
-            PhysicalRoom.SexRestriction.FEMALE_ONLY,
+            PhysicalRoom.SexRestriction.UNKNOWN,
         )
 
     def test_reloading_fund_preserves_manual_sex_restrictions(self):
@@ -3868,8 +3942,12 @@ class PhysicalRoomSexRestrictionMigrationTests(TransactionTestCase):
     def setUp(self):
         super().setUp()
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_current_foreign_apps(
+            executor,
+            self.migrate_from,
+        )
+        executor.migrate(targets)
+        old_apps = executor.loader.project_state(targets).apps
         DormitoryBefore = old_apps.get_model('references', 'Dormitory')
         PhysicalRoomBefore = old_apps.get_model('settlement', 'PhysicalRoom')
         dormitories = {
@@ -3891,8 +3969,12 @@ class PhysicalRoomSexRestrictionMigrationTests(TransactionTestCase):
         ]
 
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        self.apps = executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_current_foreign_apps(
+            executor,
+            self.migrate_to,
+        )
+        executor.migrate(targets)
+        self.apps = executor.loader.project_state(targets).apps
 
     def tearDown(self):
         executor = MigrationExecutor(connection)
@@ -3928,8 +4010,12 @@ class EmployeeBedOccupancyCanonicalIntervalMigrationTests(TransactionTestCase):
         self.ends_at = self.starts_at + timedelta(days=5)
 
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_from])
-        old_apps = executor.loader.project_state([self.migrate_from]).apps
+        targets = _migration_targets_with_current_foreign_apps(
+            executor,
+            self.migrate_from,
+        )
+        executor.migrate(targets)
+        old_apps = executor.loader.project_state(targets).apps
         DormitoryBefore = old_apps.get_model('references', 'Dormitory')
         PhysicalRoomBefore = old_apps.get_model('settlement', 'PhysicalRoom')
         PhysicalBedBefore = old_apps.get_model('settlement', 'PhysicalBed')
@@ -3971,8 +4057,12 @@ class EmployeeBedOccupancyCanonicalIntervalMigrationTests(TransactionTestCase):
         ).pk
 
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        self.apps = executor.loader.project_state([self.migrate_to]).apps
+        targets = _migration_targets_with_current_foreign_apps(
+            executor,
+            self.migrate_to,
+        )
+        executor.migrate(targets)
+        self.apps = executor.loader.project_state(targets).apps
 
     def _restore_latest_migrations(self):
         executor = MigrationExecutor(connection)
@@ -4760,8 +4850,24 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-room-panel', content)
         self.assertIn('data-settlement-form', content)
         self.assertIn('data-employee-search', content)
-        self.assertEqual(content.count('-settlement-map-v35'), 2)
+        self.assertEqual(content.count('-settlement-map-v39'), 5)
+        self.assertEqual(
+            len(re.findall(r'<script[^>]*-settlement-map-v39', content)),
+            4,
+        )
+        self.assertIn(
+            'js/settlement-temporary-placement.js',
+            content,
+        )
+        self.assertIn(
+            'js/settlement-clerk-shift.js',
+            content,
+        )
+        self.assertNotIn('-settlement-map-v37', content)
+        self.assertNotIn('-settlement-map-v36', content)
+        self.assertNotIn('-settlement-map-v35', content)
         self.assertNotIn('-settlement-map-v34', content)
+        self.assertNotIn('-settlement-map-v33', content)
         self.assertNotIn('-settlement-map-v31', content)
         self.assertNotIn('-settlement-map-v28', content)
         self.assertNotIn('-settlement-map-v24', content)
@@ -4800,6 +4906,128 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('data-floor-section="1"', visible_floor_tags[0])
         self.assertIn('aria-label="Верхний ряд комнат"', content)
         self.assertIn('aria-label="Нижний ряд комнат"', content)
+
+    def test_map_passes_room_anchor_types_and_renders_badges(self):
+        # T-036 backend-23: бейджи 36–38 рисуются по room.anchor_types, который
+        # передаёт карта; service остаётся без утверждённой подписи.
+        moment = timezone.now()
+        source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.SYSTEM,
+            title='T-036 backend-23 бейджи карты',
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=moment,
+            confirmed_by_label='Тест',
+        )
+        revision = SettlementRevision.objects.create(
+            code='T036-B23-MAP-BADGES',
+            source=source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=moment,
+            confirmed_at=moment,
+            confirmed_by_label='Тест',
+            reason='T-036 backend-23 бейджи карты.',
+        )
+        anchor_plan = {
+            36: AccommodationAnchor.AnchorType.RESERVE,
+            37: AccommodationAnchor.AnchorType.PROTECTED,
+            38: AccommodationAnchor.AnchorType.SERVICE,
+        }
+        special_rooms = {}
+        for room_number, anchor_type in anchor_plan.items():
+            room = PhysicalRoom.objects.get(
+                dormitory__number='5',
+                floor=2,
+                number=room_number,
+            )
+            special_rooms[room_number] = room
+            anchor = AccommodationAnchor.objects.create(
+                code=f'T036-B23-MAP-{anchor_type.upper()}',
+                display_name=f'T-036 backend-23 {anchor_type}',
+                anchor_type=anchor_type,
+                group_key=f'room:{room.pk}',
+                ordinal=1,
+                status=AccommodationAnchor.Status.ACTIVE,
+                created_revision=revision,
+            )
+            AccommodationAnchorBedAssignment.objects.create(
+                anchor=anchor,
+                physical_bed=room.beds.order_by('block', 'position').first(),
+                valid_from=moment,
+                status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+                started_revision=revision,
+            )
+
+        self.authenticate(self.client, self.clerk_access)
+        with CaptureQueriesContext(connection) as captured_queries:
+            response = self.client.get(reverse('settlement_map'))
+
+        self.assertEqual(response.status_code, 200)
+        # T-036 backend-24: типы якорей на всю карту (60 комнат) берутся одним
+        # пакетным запросом, а не по одному запросу на комнату.
+        anchor_queries = [
+            query['sql']
+            for query in captured_queries.captured_queries
+            if 'accommodationanchorbedassignment' in query['sql'].lower()
+        ]
+        self.assertEqual(len(anchor_queries), 1)
+        rooms_in_context = {
+            room.pk: room
+            for dormitory in response.context['dormitories']
+            for floor in dormitory['floors']
+            for row in floor['rows']
+            for room in (row['left'], row['right'])
+            if room is not None
+        }
+        self.assertEqual(len(rooms_in_context), 60)
+        for room_number, anchor_type in anchor_plan.items():
+            with self.subTest(room=room_number):
+                self.assertEqual(
+                    rooms_in_context[special_rooms[room_number].pk].anchor_types,
+                    frozenset({anchor_type}),
+                )
+        plain_room = PhysicalRoom.objects.get(
+            dormitory__number='5',
+            floor=1,
+            number=1,
+        )
+        self.assertEqual(
+            rooms_in_context[plain_room.pk].anchor_types,
+            frozenset(),
+        )
+
+        content = response.content.decode('utf-8')
+
+        def room_card(floor_number, room_number):
+            match = re.search(
+                r'<article(?=[^>]*data-dormitory="5")'
+                r'(?=[^>]*data-floor="' + str(floor_number) + r'")'
+                r'(?=[^>]*data-room-number="' + str(room_number) + r'")'
+                r'[^>]*>(.*?)</article>',
+                content,
+                re.S,
+            )
+            self.assertIsNotNone(match)
+            return match.group(1)
+
+        reserve_card = room_card(2, 36)
+        self.assertIn('data-room-anchor="reserve"', reserve_card)
+        self.assertIn('ВИП-резерв', reserve_card)
+        self.assertNotIn('Защищённая', reserve_card)
+
+        protected_card = room_card(2, 37)
+        self.assertIn('data-room-anchor="protected"', protected_card)
+        self.assertIn('Защищённая', protected_card)
+        self.assertNotIn('ВИП-резерв', protected_card)
+
+        service_card = room_card(2, 38)
+        self.assertNotIn('data-room-anchor', service_card)
+        self.assertNotIn('ВИП-резерв', service_card)
+        self.assertNotIn('Защищённая', service_card)
+
+        self.assertNotIn('data-room-anchor', room_card(1, 1))
+        self.assertEqual(content.count('data-room-anchor="reserve"'), 1)
+        self.assertEqual(content.count('data-room-anchor="protected"'), 1)
+        self.assertEqual(content.count('data-room-anchor="service"'), 0)
 
     def test_resolved_empty_roster_uses_all_settled_state(self):
         composition = WatchComposition.objects.create(
@@ -5320,11 +5548,19 @@ class SettlementOccupancyWorkflowTests(TestCase):
             ends_on=today + timedelta(days=1),
             is_active=True,
         )
+        # Решение владельца 22.11.2026: категория кадровой должности обязательна
+        # для заселения (рабочий/ИТР не смешиваются в комнате).
+        cls.worker_position = PersonnelPosition.objects.create(
+            code='settlement-workflow-worker',
+            name='Должность тестов расселения (рабочий)',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
         cls.candidate = Employee.objects.create(
             full_name='Тестовый кандидат Иванов',
             personnel_number='SET-001',
             phone='+79000001903',
             position='Водитель',
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -5334,6 +5570,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
             personnel_number='SET-002',
             phone='+79000001904',
             position='Слесарь',
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -5387,12 +5624,30 @@ class SettlementOccupancyWorkflowTests(TestCase):
             .select_related('room')
             .order_by('stable_id')[:3]
         )
+        # C-4: ручное заселение fail-closed для комнат с неизвестным полом.
+        # Фикстура делает рабочие комнаты и жильцов полоопределёнными.
+        cls.candidate.sex = Employee.Sex.MALE
+        cls.candidate.save(update_fields=['sex'])
+        cls.second_candidate.sex = Employee.Sex.MALE
+        cls.second_candidate.save(update_fields=['sex'])
+        for bed in cls.transferred_beds:
+            if bed.room.sex_restriction == PhysicalRoom.SexRestriction.UNKNOWN:
+                bed.room.sex_restriction = PhysicalRoom.SexRestriction.MALE_ONLY
+                bed.room.save(update_fields=['sex_restriction'])
         cls.untransferred_bed = (
             PhysicalBed.objects
             .filter(room__transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED)
             .select_related('room')
             .order_by('stable_id')
             .first()
+        )
+        # Решение владельца 22.11.2026: при активной вахте клерк пишет только
+        # со своей OPEN-сменой. Эти тесты про заселение, а не про правило смены,
+        # поэтому смена открыта в фикстуре.
+        cls.clerk_shift = SettlementClerkShift.objects.create(
+            clerk_access=cls.clerk_access,
+            watch_period=cls.watch_period,
+            status=SettlementClerkShift.Status.OPEN,
         )
 
     @staticmethod
@@ -5410,6 +5665,8 @@ class SettlementOccupancyWorkflowTests(TestCase):
         action='settle',
         ends_at=None,
         acquire_control=True,
+        confirm_itr=False,
+        placement_reason='',
     ):
         if acquire_control:
             self.client.post(reverse('settlement_control_acquire'))
@@ -5421,6 +5678,10 @@ class SettlementOccupancyWorkflowTests(TestCase):
                 or EmployeeBedOccupancy.AssignmentType.PERMANENT
             ),
         }
+        if confirm_itr:
+            payload['confirm_itr'] = True
+        if placement_reason:
+            payload['placement_reason'] = placement_reason
         resident = _resident_for_employee(employee or self.candidate)
         if action == 'settle':
             payload['resident_id'] = resident.pk
@@ -6604,43 +6865,862 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(occupancy.ends_at, valid_end)
         self.assertEqual(occupancy.starts_at, moment)
 
-    def test_gender_restrictions_block_only_unknown_or_mismatched_employee(self):
+    def _sex_room(self, suffix, capacity=3):
+        room = PhysicalRoom.objects.create(
+            dormitory=self.transferred_beds[0].room.dormitory,
+            floor=2,
+            number=200 + len(suffix),
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=capacity,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=200 + len(suffix),
+        )
+        beds = [
+            PhysicalBed.objects.create(
+                room=room,
+                stable_id=f'SEX-ROOM-{suffix}-{position}',
+                block=PhysicalBed.Block.A,
+                position=position,
+            )
+            for position in range(1, capacity + 1)
+        ]
+        return room, beds
+
+    def test_room_sex_from_occupants_blocks_other_gender_and_unknown(self):
+        # T-036 backend-14: пустая комната принимает любую группу и фиксирует
+        # её пол; жильца другого пола и жильца без пола ручной путь не селит.
+        room, beds = self._sex_room('A')
         self.candidate.sex = Employee.Sex.FEMALE
         self.candidate.save(update_fields=['sex'])
         self.second_candidate.sex = Employee.Sex.MALE
         self.second_candidate.save(update_fields=['sex'])
-        restricted_room = self.transferred_beds[0].room
-        restricted_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
-        restricted_room.save(update_fields=['sex_restriction'])
         self.authenticate(self.client, self.clerk_access)
 
-        matching = self.post_settle()
+        first = self.post_settle(bed=beds[0])
 
-        self.assertEqual(matching.status_code, 201)
-        EmployeeBedOccupancy._base_manager.all().delete()
-        mismatched = self.post_settle(employee=self.second_candidate)
+        self.assertEqual(first.status_code, 201)
+        mismatched = self.post_settle(bed=beds[1], employee=self.second_candidate)
 
         self.assertEqual(mismatched.status_code, 409)
         self.assertEqual(mismatched.json()['code'], 'settlement_room_sex_mismatch')
         self.second_candidate.sex = Employee.Sex.UNKNOWN
         self.second_candidate.save(update_fields=['sex'])
-        unknown = self.post_settle(employee=self.second_candidate)
+        unknown = self.post_settle(bed=beds[1], employee=self.second_candidate)
 
         self.assertEqual(unknown.status_code, 409)
         self.assertEqual(unknown.json()['code'], 'settlement_employee_sex_unknown')
 
-    def test_unknown_room_restriction_allows_employee_with_unknown_sex(self):
+    def test_empty_room_accepts_group_and_fixes_its_sex(self):
+        # Пустая комната (в том числе с legacy-атрибутом unknown) доступна и
+        # фиксирует пол первого жильца.
+        room, beds = self._sex_room('B')
+        room.sex_restriction = PhysicalRoom.SexRestriction.UNKNOWN
+        room.save(update_fields=['sex_restriction'])
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.post_settle(bed=beds[0])
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
+
+    def _new_resident(self, *, sex, name):
+        employee = Employee.objects.create(
+            full_name=name,
+            sex=sex,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.watch_composition,
+        )
+        return _resident_for_employee(employee)
+
+    def test_mixed_gender_room_is_rejected_as_data_conflict(self):
+        # T-036 backend-14 / SET-R042: комната с жильцами обоих полов — это
+        # конфликт данных, а не молчаливое размещение.
+        _room, beds = self._sex_room('E')
+        now = timezone.now()
+        male = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Общий мужчина',
+        )
+        female = self._new_resident(
+            sex=Employee.Sex.FEMALE,
+            name='ДЕМО Общая женщина',
+        )
+        for resident, bed in ((male, beds[0]), (female, beds[1])):
+            EmployeeBedOccupancy.objects.create(
+                resident=resident,
+                physical_bed=bed,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                settled_at=now,
+                starts_at=now,
+                settled_by=self.clerk,
+            )
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.post_settle(bed=beds[2])
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement_room_sex_mixed')
+
+    def _two_bed_room(self, suffix):
+        room = PhysicalRoom.objects.create(
+            dormitory=self.transferred_beds[0].room.dormitory,
+            floor=2,
+            number=300 + len(suffix),
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=2,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=300 + len(suffix),
+        )
+        beds = [
+            PhysicalBed.objects.create(
+                room=room,
+                stable_id=f'ITR-ROOM-{suffix}-{position}',
+                block=PhysicalBed.Block.ITR,
+                position=position,
+            )
+            for position in (1, 2)
+        ]
+        return room, beds
+
+    def test_two_bed_room_requires_itr_and_confirmation(self):
+        # SET-R097: двухместная комната — только ручное размещение ИТР;
+        # водитель/машинист и «other» без подтверждения и основания — 409.
+        _room, beds = self._two_bed_room('A')
+        self.authenticate(self.client, self.clerk_access)
+
+        self.candidate.work_category = Employee.WorkCategory.DRIVER
+        self.candidate.save(update_fields=['work_category'])
+        driver = self.post_settle(bed=beds[0])
+        self.assertEqual(driver.status_code, 409)
+        self.assertEqual(driver.json()['code'], 'itr_room_requires_itr')
+
+        self.candidate.work_category = Employee.WorkCategory.OTHER
+        self.candidate.save(update_fields=['work_category'])
+        unconfirmed = self.post_settle(bed=beds[0])
+        self.assertEqual(unconfirmed.status_code, 409)
+        self.assertEqual(unconfirmed.json()['code'], 'itr_room_requires_itr')
+
+        no_reason = self.post_settle(bed=beds[0], confirm_itr=True)
+        self.assertEqual(no_reason.status_code, 409)
+        self.assertEqual(no_reason.json()['code'], 'itr_room_requires_itr')
+
+        confirmed = self.post_settle(
+            bed=beds[0],
+            confirm_itr=True,
+            placement_reason='ИТР по приказу № 12',
+        )
+        self.assertEqual(confirmed.status_code, 201)
+        self.assertTrue(
+            EmployeeBedOccupancy.objects.filter(physical_bed=beds[0]).exists()
+        )
+
+    def test_two_bed_room_rejects_blank_work_category(self):
+        _room, beds = self._two_bed_room('B')
+        self.candidate.work_category = ''
+        self.candidate.save(update_fields=['work_category'])
+        self.authenticate(self.client, self.clerk_access)
+
+        response = self.post_settle(
+            bed=beds[0],
+            confirm_itr=True,
+            placement_reason='По приказу № 12',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'itr_room_requires_itr')
+
+    def _backend15_revision(self):
+        if not hasattr(self, '_backend15_revision_cache'):
+            now = timezone.now()
+            source = SettlementSource.objects.create(
+                source_type=SettlementSource.SourceType.SYSTEM,
+                title='T-036 backend-15 специальный фонд',
+                version='1',
+                file_sha256='b' * 64,
+                status=SettlementSource.Status.CONFIRMED,
+                confirmed_at=now,
+                confirmed_by_label='backend-15 test',
+            )
+            self._backend15_revision_cache = SettlementRevision.objects.create(
+                code='T036-B15-TEST',
+                source=source,
+                status=SettlementRevision.Status.CONFIRMED,
+                effective_at=now,
+                confirmed_at=now,
+                confirmed_by_label='backend-15 test',
+                reason='T-036 backend-15 special fund test.',
+            )
+        return self._backend15_revision_cache
+
+    def _attach_special_anchor(self, *, bed, anchor_type, holder=None):
+        revision = self._backend15_revision()
+        anchor = AccommodationAnchor.objects.create(
+            code=f'B15-{anchor_type.upper()}-{bed.pk}',
+            display_name=f'T-036 backend-15 {anchor_type} {bed.stable_id}',
+            anchor_type=anchor_type,
+            group_key=f'room:{bed.room_id}',
+            ordinal=bed.position,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(
+                datetime.combine(
+                    self.watch_period.starts_on,
+                    datetime.min.time(),
+                ),
+            ),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=self.watch_period.pk,
+            source_revision_id=revision.pk,
+        )
+        slot = confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.clerk.pk,
+        )
+        if holder is not None:
+            binding = create_employee_accommodation_binding(
+                resident_id=holder.pk,
+                calendar_slot_id=slot.pk,
+                valid_from=self.watch_period.starts_on,
+                valid_to=self.watch_period.ends_on,
+                basis_type='t036_backend15_holder',
+                basis_id=f'B15-{holder.pk}-{slot.pk}',
+                basis_snapshot={'resident_id': holder.pk, 'slot_id': slot.pk},
+                source_revision_id=revision.pk,
+            )
+            confirm_employee_accommodation_binding(
+                binding_id=binding.pk,
+                approved_by_id=self.clerk.pk,
+            )
+        return anchor
+
+    def _special_room(self, suffix, *, capacity=2):
+        _room, beds = self._two_bed_room(suffix)
+        if capacity != 2:
+            _room.capacity = capacity
+            _room.save(update_fields=['capacity'])
+        return _room, beds
+
+    def test_protected_room_allows_only_confirmed_holders(self):
+        # SET-R098: держатели защищённого места — только подтверждённые
+        # привязки; третий человек получает `protected_room_forbidden`.
+        from settlement.special_fund import manual_room_rejection
+
+        room, beds = self._special_room('P')
+        first = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Держатель первый',
+        )
+        second = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Держатель второй',
+        )
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+            holder=first,
+        )
+        self._attach_special_anchor(
+            bed=beds[1],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+            holder=second,
+        )
+        now = timezone.now()
+
+        self.assertIsNone(manual_room_rejection(
+            resident=first,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='Держатель места',
+        ))
+        self.assertIsNone(manual_room_rejection(
+            resident=second,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='Держатель места',
+        ))
+        stranger = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Третий в защищённую комнату',
+        )
+        code, _message = manual_room_rejection(
+            resident=stranger,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            confirm_itr=True,
+            placement_reason='ИТР по приказу',
+        )
+        self.assertEqual(code, 'protected_room_forbidden')
+
+    def test_protected_room_without_holders_allows_only_confirmed_itr(self):
+        # SET-R100: 37-подобное место без держателей — только ИТР по основанию.
+        from settlement.special_fund import manual_room_rejection
+
+        room, beds = self._special_room('Q')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+        )
+        self._attach_special_anchor(
+            bed=beds[1],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+        )
+        now = timezone.now()
+        itr = self._new_resident(sex=Employee.Sex.MALE, name='ДЕМО ИТР')
+        driver = self._new_resident(sex=Employee.Sex.MALE, name='ДЕМО Водитель')
+        itr.employee.work_category = Employee.WorkCategory.OTHER
+        itr.employee.save(update_fields=['work_category'])
+        driver.employee.work_category = Employee.WorkCategory.DRIVER
+        driver.employee.save(update_fields=['work_category'])
+
+        self.assertIsNone(manual_room_rejection(
+            resident=itr,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            confirm_itr=True,
+            placement_reason='ИТР по приказу',
+        ))
+        code, _message = manual_room_rejection(
+            resident=itr,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            confirm_itr=False,
+            placement_reason='',
+        )
+        self.assertEqual(code, 'itr_room_requires_itr')
+        code, _message = manual_room_rejection(
+            resident=driver,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            confirm_itr=True,
+            placement_reason='ИТР по приказу',
+        )
+        self.assertEqual(code, 'itr_room_requires_itr')
+
+    def test_protected_two_bed_room_without_holders_is_manual_itr_only(self):
+        # SET-R100: PROTECTED-место с capacity<=2 без держателей не попадает в
+        # авто/подсказки (авто исключает и capacity<=2, и PROTECTED — тесты
+        # `test_two_bed_room_slot_is_excluded_from_auto_candidates` и
+        # `test_protected_anchor_slot_is_excluded_from_auto_candidates`) и
+        # требует ручного ИТР-пути: `other` + `confirm_itr` + основание.
+        # Машинист экскаватора и пустая категория — отказ даже с основанием.
+        from settlement.special_fund import (
+            manual_room_rejection,
+            suggestion_room_allowed,
+        )
+
+        room, beds = self._special_room('T')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+        )
+        self._attach_special_anchor(
+            bed=beds[1],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+        )
+        now = timezone.now()
+        itr = self._new_resident(sex=Employee.Sex.MALE, name='ДЕМО ИТР R100')
+        excavator = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Машинист R100',
+        )
+        blank = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Без категории R100',
+        )
+        itr.employee.work_category = Employee.WorkCategory.OTHER
+        itr.employee.save(update_fields=['work_category'])
+        excavator.employee.work_category = (
+            Employee.WorkCategory.EXCAVATOR_OPERATOR
+        )
+        excavator.employee.save(update_fields=['work_category'])
+        blank.employee.work_category = ''
+        blank.employee.save(update_fields=['work_category'])
+
+        # Место без держателей не предлагается в подсказках никому.
+        self.assertFalse(suggestion_room_allowed(resident=itr, room=room))
+
+        # Ручной ИТР-путь: `other` + подтверждение + основание — разрешено.
+        self.assertIsNone(manual_room_rejection(
+            resident=itr,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            confirm_itr=True,
+            placement_reason='ИТР по приказу',
+        ))
+        for resident in (excavator, blank):
+            code, _message = manual_room_rejection(
+                resident=resident,
+                room=room,
+                starts_at=now,
+                ends_at=None,
+                confirm_itr=True,
+                placement_reason='ИТР по приказу',
+            )
+            self.assertEqual(code, 'itr_room_requires_itr')
+
+    def test_reserve_room_allows_only_business_trip(self):
+        # SET-R099: резервная комната — только командированный по основанию.
+        from settlement.special_fund import manual_room_rejection
+
+        room, beds = self._special_room('R')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        self._attach_special_anchor(
+            bed=beds[1],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        now = timezone.now()
+        business_trip = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО Командированный головного офиса',
+            position_title='Специалист',
+            organization='Головной офис',
+            phone='+7 900 000-15-01',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+        internal = self._new_resident(sex=Employee.Sex.MALE, name='ДЕМО Внутренний')
+
+        self.assertIsNone(manual_room_rejection(
+            resident=business_trip,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='Командировка головного офиса',
+        ))
+        code, _message = manual_room_rejection(
+            resident=business_trip,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='',
+        )
+        self.assertEqual(code, 'protected_dispatch_only')
+        code, _message = manual_room_rejection(
+            resident=internal,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='Командировка',
+        )
+        self.assertEqual(code, 'protected_dispatch_only')
+
+    def test_business_trip_can_be_manually_settled_in_reserve_room(self):
+        room, beds = self._special_room('S')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        business_trip = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО Командированный резерв',
+            position_title='Специалист',
+            organization='Головной офис',
+            phone='+7 900 000-15-02',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+        context = self._service_control_context()
+
+        occupancy = settle_resident_on_bed(
+            bed_stable_id=beds[0].stable_id,
+            resident_id=business_trip.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            placement_reason='Командировка головного офиса',
+            control_context=context,
+        )
+
+        self.assertEqual(occupancy.resident_id, business_trip.pk)
+        self.assertIsNone(occupancy.watch_period_id)
+        self.assertIsNone(occupancy.cohort_member_id)
         self.assertEqual(
-            self.transferred_beds[0].room.sex_restriction,
-            PhysicalRoom.SexRestriction.UNKNOWN,
+            occupancy.placement_reason,
+            'Командировка головного офиса',
+        )
+
+    def test_business_trip_relocation_reports_external_unavailable(self):
+        business_trip = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО Командированный переселение',
+            position_title='Специалист',
+            organization='Головной офис',
+            phone='+7 900 000-16-03',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+        occupancy = EmployeeBedOccupancy.objects.create(
+            resident=business_trip,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=timezone.now() - timedelta(hours=1),
+            starts_at=timezone.now() - timedelta(hours=1),
+            settled_by=self.clerk,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            relocate_resident_to_bed(
+                bed_stable_id=self.transferred_beds[1].stable_id,
+                occupancy_id=occupancy.pk,
+                control_context=self._service_control_context(),
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.manual.external_unavailable',
+        )
+
+    def test_protected_holder_http_settlement_and_stranger_rejection(self):
+        # T-036 backend-17: полный HTTP-путь держателя защищённой комнаты.
+        room, beds = self._special_room('Y')
+        first = self.candidate_resident
+        second = self.second_candidate_resident
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+            holder=first,
+        )
+        self._attach_special_anchor(
+            bed=beds[1],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+            holder=second,
+        )
+        stranger_resident = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Не держатель защищённой комнаты',
         )
         self.authenticate(self.client, self.clerk_access)
 
-        response = self.post_settle()
+        granted = self.post_settle(bed=beds[0], employee=self.candidate)
+
+        self.assertEqual(granted.status_code, 201)
+        self.assertEqual(
+            EmployeeBedOccupancy.objects.get().resident_id,
+            first.pk,
+        )
+        stranger = self.post_settle(
+            bed=beds[1],
+            employee=stranger_resident.employee,
+        )
+
+        self.assertEqual(stranger.status_code, 409)
+        self.assertEqual(
+            stranger.json()['code'],
+            'protected_room_forbidden',
+        )
+
+    def _guest_resident(self, resident_type, suffix):
+        return SettlementResident.objects.create(
+            resident_type=resident_type,
+            full_name=f'ДЕМО Гость backend-20 {suffix}',
+            position_title='Гость',
+            organization='Головной офис',
+            phone=f'+7 900 000-20-{suffix}',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+
+    def test_reserve_room_denies_external_other_and_contractor(self):
+        from settlement.special_fund import manual_room_rejection
+
+        room, beds = self._special_room('Z1')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        now = timezone.now()
+        business_trip = self._guest_resident(
+            SettlementResident.ResidentType.BUSINESS_TRIP, '01',
+        )
+        external_other = self._guest_resident(
+            SettlementResident.ResidentType.EXTERNAL_OTHER, '02',
+        )
+        contractor = self._guest_resident(
+            SettlementResident.ResidentType.CONTRACTOR, '03',
+        )
+        self.assertIsNone(manual_room_rejection(
+            resident=business_trip,
+            room=room,
+            starts_at=now,
+            ends_at=None,
+            placement_reason='ВИП-резерв',
+        ))
+        for denied in (external_other, contractor):
+            with self.subTest(resident_type=denied.resident_type):
+                code, _message = manual_room_rejection(
+                    resident=denied,
+                    room=room,
+                    starts_at=now,
+                    ends_at=None,
+                    placement_reason='ВИП-резерв',
+                )
+                self.assertEqual(code, 'protected_dispatch_only')
+
+    def test_external_other_is_rejected_in_reserve_room(self):
+        _room, beds = self._special_room('Z2')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        guest = self._guest_resident(
+            SettlementResident.ResidentType.EXTERNAL_OTHER, '04',
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            settle_resident_on_bed(
+                bed_stable_id=beds[0].stable_id,
+                resident_id=guest.pk,
+                assignment_type=(
+                    EmployeeBedOccupancy.AssignmentType.PERMANENT
+                ),
+                placement_reason='ВИП-резерв головного офиса',
+                control_context=self._service_control_context(),
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.manual.external_unavailable',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_contractor_and_employee_are_rejected_in_reserve_room(self):
+        _room, beds = self._special_room('Z3')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        contractor = self._guest_resident(
+            SettlementResident.ResidentType.CONTRACTOR, '05',
+        )
+        context = self._service_control_context()
+
+        with self.assertRaises(ValidationError) as contractor_error:
+            settle_resident_on_bed(
+                bed_stable_id=beds[0].stable_id,
+                resident_id=contractor.pk,
+                assignment_type=(
+                    EmployeeBedOccupancy.AssignmentType.PERMANENT
+                ),
+                placement_reason='ВИП-резерв',
+                control_context=context,
+            )
+        self.assertEqual(
+            contractor_error.exception.code,
+            'settlement.manual.external_unavailable',
+        )
+
+        with self.assertRaises(ValidationError) as employee_error:
+            settle_resident_on_bed(
+                bed_stable_id=beds[0].stable_id,
+                resident_id=self.candidate_resident.pk,
+                assignment_type=(
+                    EmployeeBedOccupancy.AssignmentType.PERMANENT
+                ),
+                placement_reason='ВИП-резерв',
+                control_context=context,
+            )
+        self.assertEqual(
+            employee_error.exception.code,
+            'protected_dispatch_only',
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_service_anchor_room_is_forbidden(self):
+        from settlement.special_fund import manual_room_rejection
+
+        room, beds = self._special_room('U')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.SERVICE,
+        )
+        internal = self._new_resident(
+            sex=Employee.Sex.MALE,
+            name='ДЕМО Служебная комната',
+        )
+
+        code, _message = manual_room_rejection(
+            resident=internal,
+            room=room,
+            starts_at=timezone.now(),
+            ends_at=None,
+            confirm_itr=True,
+            placement_reason='ИТР по приказу',
+        )
+        self.assertEqual(code, 'protected_room_forbidden')
+
+    def test_business_trip_http_response_keeps_placement_reason(self):
+        _room, beds = self._special_room('V')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        business_trip = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО Командированный HTTP',
+            position_title='Специалист',
+            organization='Головной офис',
+            phone='+7 900 000-16-01',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(reverse('settlement_control_acquire'))
+        payload = {
+            'action': 'settle',
+            'bed_stable_id': beds[0].stable_id,
+            'resident_id': business_trip.pk,
+            'assignment_type': EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            'placement_reason': 'Командировка головного офиса',
+        }
+
+        response = self.client.post(
+            reverse('settlement_occupancy_create'),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()['occupancy']['placement_reason'],
+            'Командировка головного офиса',
+        )
+        self.assertEqual(
+            EmployeeBedOccupancy.objects.get().placement_reason,
+            'Командировка головного офиса',
+        )
 
-    def test_relocation_obeys_target_room_sex_restriction(self):
+    def test_business_trip_without_reason_is_rejected(self):
+        _room, beds = self._special_room('W')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+        )
+        business_trip = SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='ДЕМО Командированный без основания',
+            position_title='Специалист',
+            organization='Головной офис',
+            phone='+7 900 000-16-02',
+            external_sex=Employee.Sex.MALE,
+            created_by_access=self.clerk_access,
+        )
+        self.authenticate(self.client, self.clerk_access)
+        self.client.post(reverse('settlement_control_acquire'))
+
+        response = self.client.post(
+            reverse('settlement_occupancy_create'),
+            data=json.dumps({
+                'action': 'settle',
+                'bed_stable_id': beds[0].stable_id,
+                'resident_id': business_trip.pk,
+                'assignment_type': (
+                    EmployeeBedOccupancy.AssignmentType.PERMANENT
+                ),
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_relocation_into_special_room_keeps_placement_reason(self):
+        room, beds = self._special_room('X')
+        self._attach_special_anchor(
+            bed=beds[0],
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+        )
+        moment = timezone.now().replace(microsecond=0)
+        self.candidate.work_category = Employee.WorkCategory.OTHER
+        self.candidate.save(update_fields=['work_category'])
+        original = EmployeeBedOccupancy.objects.create(
+            resident=self.candidate_resident,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(hours=1),
+            starts_at=moment - timedelta(hours=1),
+            settled_by=self.clerk,
+        )
+        official_assignment = EquipmentAssignment.objects.filter(
+            employee_id=self.candidate.pk,
+            status=AssignmentStatus.ACCEPTED,
+        ).first()
+        self.assertIsNotNone(official_assignment)
+        source = {
+            'work_shift': 'day',
+            'shift_source_fingerprint': 'a' * 64,
+            'official_equipment_assignment': official_assignment,
+        }
+
+        with mock.patch(
+            'settlement.services._official_manual_source_for_occupancy',
+            return_value=source,
+        ), mock.patch(
+            'settlement.services.timezone.now',
+            return_value=moment,
+        ):
+            occupancy = relocate_resident_to_bed(
+                bed_stable_id=beds[0].stable_id,
+                occupancy_id=original.pk,
+                confirm_itr=True,
+                placement_reason='ИТР по приказу № 16',
+                control_context=self._service_control_context(),
+            )
+
+        self.assertEqual(occupancy.placement_reason, 'ИТР по приказу № 16')
+        self.assertEqual(
+            EmployeeBedOccupancy.objects.get(pk=occupancy.pk).placement_reason,
+            'ИТР по приказу № 16',
+        )
+
+    def _service_control_context(self):
+        if not hasattr(self, '_service_control_ctx'):
+            session = self.client.session
+            session.save()
+            grant = acquire_control_lease(
+                owner_access_id=self.clerk_access.pk,
+                raw_session_key=session.session_key,
+                source='backend-15-test',
+            )
+            self._service_control_ctx = SettlementControlWriteContext(
+                owner_access_id=self.clerk_access.pk,
+                raw_session_key=session.session_key,
+                lease_token=str(grant.lease_token),
+                fencing_revision=grant.fencing_revision,
+            )
+        return self._service_control_ctx
+
+    def test_manual_settle_refuses_empty_rule_set_version(self):
+        # Z1 / SET-R094: структурный контракт обязателен и в ручной точке записи.
+        self.authenticate(self.client, self.clerk_access)
+        before = EmployeeBedOccupancy.objects.count()
+        with mock.patch('settlement.services.SETTLEMENT_RULE_SET_VERSION', ''):
+            response = self.post_settle()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()['code'],
+            'settlement.input.rule_set_version.required',
+        )
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), before)
+
+    def test_relocation_obeys_room_sex_from_occupants(self):
         moment = timezone.now().replace(microsecond=0)
         self.candidate.sex = Employee.Sex.MALE
         self.candidate.save(update_fields=['sex'])
@@ -6652,15 +7732,25 @@ class SettlementOccupancyWorkflowTests(TestCase):
             starts_at=moment - timedelta(hours=1),
             settled_by=self.clerk,
         )
-        target_room = self.transferred_beds[1].room
-        target_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
-        target_room.save(update_fields=['sex_restriction'])
+        # T-036 backend-14: комнату делает женской фактический жилец, а не
+        # атрибут комнаты.
+        _target_room, target_beds = self._sex_room('C')
+        self.second_candidate.sex = Employee.Sex.FEMALE
+        self.second_candidate.save(update_fields=['sex'])
+        EmployeeBedOccupancy.objects.create(
+            resident=_resident_for_employee(self.second_candidate),
+            physical_bed=target_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=moment - timedelta(hours=2),
+            starts_at=moment - timedelta(hours=2),
+            settled_by=self.clerk,
+        )
         self.authenticate(self.client, self.clerk_access)
 
         with mock.patch('settlement.services.timezone.now', return_value=moment):
             response = self.post_settle(
                 action='relocate',
-                bed=self.transferred_beds[1],
+                bed=target_beds[1],
             )
 
         self.assertEqual(response.status_code, 409)
@@ -6893,6 +7983,144 @@ class SettlementOccupancyWorkflowTests(TestCase):
 
         self.assertEqual(csrf_response.status_code, 403)
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def _confirmed_itr_binding(self, *, bed, period_start, period_end):
+        """Подтверждённая привязка ИТР к койке через доменные команды M4."""
+
+        suffix = f'{bed.pk}-{period_start.isoformat()}'
+        composition = WatchComposition.objects.create(
+            code=f'wfb-composition-{suffix}',
+            name=f'Состав привязки {suffix}',
+            is_active=True,
+        )
+        position = PersonnelPosition.objects.create(
+            code=f'wfb-itr-{suffix}',
+            name=f'ИТР привязки {suffix}',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        employee = Employee.objects.create(
+            full_name='ИТР с привязкой в комнате',
+            sex=Employee.Sex.MALE,
+            personnel_position=position,
+            watch_composition=composition,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        resident, _created = get_or_create_employee_resident(
+            employee_id=employee.pk,
+        )
+        source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.DOCUMENT,
+            title=f'Привязка ИТР {suffix}',
+            version='1',
+            file_sha256='d' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=timezone.now(),
+            confirmed_by_label='Тест ручного заселения',
+        )
+        revision = SettlementRevision.objects.create(
+            code=f'WFB-REV-{suffix}',
+            source=source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=timezone.now(),
+            confirmed_at=timezone.now(),
+            confirmed_by_label='Тест ручного заселения',
+            reason='Проверка привязки при ручном заселении.',
+        )
+        period = WatchPeriod.objects.create(
+            name=f'Период привязки {suffix}',
+            watch_composition=composition,
+            starts_on=period_start,
+            ends_on=period_end,
+            is_active=True,
+        )
+        anchor = AccommodationAnchor.objects.create(
+            code=f'WFB-ANCHOR-{suffix}',
+            display_name='Плановое место ИТР',
+            anchor_type=AccommodationAnchor.AnchorType.FUNCTION,
+            ordinal=1,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(
+                datetime.combine(period_start, datetime.min.time()),
+            ),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=period.pk,
+            source_revision_id=revision.pk,
+        )
+        slot = confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.clerk.pk,
+            approved_at=timezone.now(),
+        )
+        binding = create_employee_accommodation_binding(
+            resident_id=resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=period_start,
+            valid_to=period_end,
+            basis_type='wfb-test',
+            basis_id=str(bed.pk),
+            basis_snapshot={'bed': bed.pk},
+            source_revision_id=revision.pk,
+        )
+        confirm_employee_accommodation_binding(
+            binding_id=binding.pk,
+            approved_by_id=self.clerk.pk,
+        )
+        return resident
+
+    def test_public_settle_respects_confirmed_binding_of_other_category(self):
+        now = timezone.now()
+        today = timezone.localdate(now)
+        bed = self.transferred_beds[0]
+        self._confirmed_itr_binding(
+            bed=bed,
+            period_start=today,
+            period_end=today + timedelta(days=2),
+        )
+
+        with self.assertRaises(ValidationError) as captured:
+            settle_resident_on_bed(
+                bed_stable_id=bed.stable_id,
+                resident_id=self.candidate_resident.pk,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                control_context=self.service_control_context(),
+                ends_at=now + timedelta(days=1),
+            )
+
+        self.assertIn(
+            'settlement_room_personnel_category_conflict',
+            [error.code for error in captured.exception.error_list],
+        )
+        self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_public_settle_allows_non_overlapping_confirmed_binding(self):
+        now = timezone.now()
+        today = timezone.localdate(now)
+        bed = self.transferred_beds[1]
+        self._confirmed_itr_binding(
+            bed=bed,
+            period_start=today + timedelta(days=30),
+            period_end=today + timedelta(days=40),
+        )
+
+        occupancy = settle_resident_on_bed(
+            bed_stable_id=bed.stable_id,
+            resident_id=self.candidate_resident.pk,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            control_context=self.service_control_context(),
+            ends_at=now + timedelta(days=1),
+        )
+
+        self.assertEqual(occupancy.physical_bed_id, bed.pk)
 
 
 class SettlementMutualRelocationConcurrencyTests(TransactionTestCase):
@@ -8226,25 +9454,56 @@ class SettlementFrontendContractTests(TestCase):
         self.assertNotIn('settlementControlAcquireUrl)', javascript)
         self.assertIn('.settlement-plan-map', stylesheet)
         self.assertIn('.settlement-plan-resident.is-manually-changed', stylesheet)
-        self.assertIn("static 'js/settlement-clerk.js'", template)
+        self.assertEqual(template.count('settlement-map-v39'), 4)
+        self.assertEqual(
+            len(re.findall(r'<script[^>]*settlement-map-v39', template)),
+            4,
+        )
+        for script_name in (
+            'settlement-clerk.js',
+            'settlement-temporary-placement.js',
+            'settlement-clerk-shift.js',
+            'settlement-external-residents.js',
+        ):
+            self.assertIn(
+                "js/"
+                + script_name
+                + "' %}?v={{ static_asset_release }}"
+                + '-settlement-map-v39',
+                template,
+            )
+        self.assertNotIn('settlement-map-v37', template)
+        self.assertNotIn('settlement-map-v36', template)
+        self.assertNotIn('settlement-map-v35', template)
+        self.assertNotIn('settlement-map-v34', template)
 
 
 class AutoSettlementPreviewTests(TestCase):
     def setUp(self):
         self.moment = timezone.now().replace(microsecond=0)
         self.role = Role.objects.create(code='preview-driver', name='Водитель preview')
+        # Решение владельца 22.11.2026: категория кадровой должности обязательна
+        # для авторасселения (рабочий/ИТР не смешиваются в комнате).
+        self.worker_position = PersonnelPosition.objects.create(
+            code='preview-worker',
+            name='Сотрудник preview (рабочий)',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
         self.employee = Employee.objects.create(
             full_name='Сотрудник preview 1',
+            personnel_position=self.worker_position,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
         self.second_employee = Employee.objects.create(
             full_name='Сотрудник preview 2',
+            personnel_position=self.worker_position,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
         self.third_employee = Employee.objects.create(
             full_name='Сотрудник preview 3',
+            personnel_position=self.worker_position,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -8567,6 +9826,76 @@ class AutoSettlementPreviewTests(TestCase):
                 AccommodationAnchorBedAssignment.objects.values_list('pk', flat=True),
             ),
         })
+
+    def _employee_with_category(self, *, full_name, category, suffix):
+        position = PersonnelPosition.objects.create(
+            code=f'preview-cat-{suffix}',
+            name=f'Preview категория {suffix}',
+            settlement_category=category,
+        )
+        return Employee.objects.create(
+            full_name=full_name,
+            personnel_position=position,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+
+    def test_worker_and_itr_in_one_room_are_both_conflicted(self):
+        itr_employee = self._employee_with_category(
+            full_name='Сотрудник preview ИТР',
+            category=PersonnelPosition.SettlementCategory.ITR,
+            suffix='itr',
+        )
+        self.bind_bed(
+            self.create_anchor(self.equipment_1, 'PREVIEW-CAT-W'),
+            self.bed_1,
+        )
+        self.bind_bed(
+            self.create_anchor(self.equipment_2, 'PREVIEW-CAT-I'),
+            self.bed_2,
+        )
+        self.create_assignment(
+            employee=self.employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+        self.create_assignment(
+            employee=itr_employee,
+            equipment=self.equipment_2,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(preview['rows'], ())
+        self.assertEqual(
+            self.conflict_codes(preview),
+            {'settlement_room_personnel_category_conflict'},
+        )
+
+    def test_employee_without_category_is_not_planned(self):
+        employee = Employee.objects.create(
+            full_name='Сотрудник preview без категории',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        self.bind_bed(
+            self.create_anchor(self.equipment_1, 'PREVIEW-CAT-NONE'),
+            self.bed_1,
+        )
+        self.create_assignment(
+            employee=employee,
+            equipment=self.equipment_1,
+            shift_type=WorkShiftType.SHIFT_1,
+        )
+
+        preview = build_auto_settlement_preview(effective_date=self.moment)
+
+        self.assertEqual(preview['rows'], ())
+        self.assertIn(
+            'missing_settlement_personnel_category',
+            self.conflict_codes(preview),
+        )
 
 
 class M4CalendarBindingTests(TestCase):
@@ -9965,7 +11294,7 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
         super().setUp()
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_from)
         executor.migrate(targets)
         self.old_apps = executor.loader.project_state(targets).apps
 
@@ -9975,7 +11304,7 @@ class ResidentSubjectTransitionMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_to)
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
@@ -10334,6 +11663,14 @@ class M6SettlementResolverTests(TestCase):
         cls.position = PersonnelPosition.objects.create(
             code='m6-position',
             name='M6 нормативная должность',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
+        # Отдельная рабочая должность без якорей: сотрудник с ней проходит
+        # категорию, но не претендует на должностные места.
+        cls.pool_position = PersonnelPosition.objects.create(
+            code='m6-pool-position',
+            name='M6 рабочая должность пула',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
         )
         cls.rooms = []
         cls.beds = []
@@ -10345,6 +11682,7 @@ class M6SettlementResolverTests(TestCase):
                 floor=1,
                 number=room_number,
                 transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+                sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
                 capacity=3,
                 corridor_side=(
                     PhysicalRoom.CorridorSide.LEFT
@@ -10387,6 +11725,7 @@ class M6SettlementResolverTests(TestCase):
         cls.employee = Employee.objects.create(
             full_name='ДЕМО M6 Внутренний',
             sex=Employee.Sex.MALE,
+            personnel_position=cls.pool_position,
             status=Employee.Status.ACTIVE,
             is_active=True,
             watch_composition=cls.composition,
@@ -10651,7 +11990,11 @@ class M6SettlementResolverTests(TestCase):
                 floor=2,
                 number=sequence,
                 transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-                capacity=1,
+                sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+                # T-036 backend-14: комнаты вместимостью 2 и меньше авто не
+                # использует, поэтому технический маршрут живёт в обычной
+                # комнате.
+                capacity=3,
                 corridor_side=PhysicalRoom.CorridorSide.LEFT,
                 side_position=sequence,
             )
@@ -10684,6 +12027,268 @@ class M6SettlementResolverTests(TestCase):
             result.placements[0].shift_source_kind,
             SettlementCohortMember.ShiftSourceKind.INTERNAL_ASSIGNMENT,
         )
+
+    def _employee_with_category(self, *, full_name, category, suffix):
+        position = PersonnelPosition.objects.create(
+            code=f'm6-cat-{suffix}',
+            name=f'M6 категория {suffix}',
+            settlement_category=category,
+        )
+        employee = Employee.objects.create(
+            full_name=full_name,
+            sex=Employee.Sex.MALE,
+            personnel_position=position,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.composition,
+        )
+        resident, _created = get_or_create_employee_resident(
+            employee_id=employee.pk,
+        )
+        return employee, resident
+
+    def test_confirmed_bindings_do_not_mix_worker_and_itr_in_one_room(self):
+        _worker_employee, worker = self._employee_with_category(
+            full_name='M6 Рабочий в комнате',
+            category=PersonnelPosition.SettlementCategory.WORKER,
+            suffix='workroom-w',
+        )
+        _itr_employee, itr = self._employee_with_category(
+            full_name='M6 ИТР в комнате',
+            category=PersonnelPosition.SettlementCategory.ITR,
+            suffix='workroom-i',
+        )
+        self._binding(worker, self._slot(0, 0))
+        self._binding(itr, self._slot(0, 1))
+        cohort = self._cohort(worker, itr)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(len(result.placements), 1)
+        self.assertEqual(len(result.unresolved), 1)
+        self.assertIn(
+            'settlement_room_personnel_category_conflict',
+            result.unresolved[0].reason_codes,
+        )
+
+    def test_unknown_neighbour_category_is_reported_as_missing(self):
+        # Review-12 N-3: пустая категория у соседа — это «уточните категорию»,
+        # а не «смешение рабочих и ИТР».
+        _unknown_employee, unknown_resident = self._employee_with_category(
+            full_name='M6 Сосед без категории',
+            category=PersonnelPosition.SettlementCategory.UNCLASSIFIED,
+            suffix='neighbour-nocat',
+        )
+        _worker_employee, worker = self._employee_with_category(
+            full_name='M6 Рабочий рядом с неизвестным',
+            category=PersonnelPosition.SettlementCategory.WORKER,
+            suffix='neighbour-worker',
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=unknown_resident,
+            physical_bed=self.beds[0][0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.actor,
+            settled_at=timezone.make_aware(datetime(2031, 1, 1)),
+            starts_at=timezone.make_aware(datetime(2031, 1, 1)),
+        )
+        self._binding(worker, self._slot(0, 1))
+        cohort = self._cohort(worker)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('missing_settlement_personnel_category',),
+        )
+
+    def test_resident_without_category_is_unresolved(self):
+        _employee, resident = self._employee_with_category(
+            full_name='M6 Без категории',
+            category=PersonnelPosition.SettlementCategory.UNCLASSIFIED,
+            suffix='nocat',
+        )
+        self._binding(resident, self._slot(0, 0))
+        cohort = self._cohort(resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        self.assertIn(
+            'missing_settlement_personnel_category',
+            result.unresolved[0].reason_codes,
+        )
+        self.assertIn('SET-R102', result.unresolved[0].rule_ids)
+
+    def test_snapshot_marks_new_resolver_version(self):
+        self._binding(self.position_resident, self._slot(0, 0))
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertIn(
+            'resolver:m6-personnel-category-v2',
+            result.source_identifiers,
+        )
+
+    def _special_room_slot(self, *, capacity, anchor_type, suffix):
+        room = PhysicalRoom.objects.create(
+            dormitory=self.dormitory,
+            floor=2,
+            number=400 + PhysicalRoom.objects.count(),
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=capacity,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=400 + PhysicalRoom.objects.count(),
+        )
+        bed = PhysicalBed.objects.create(
+            room=room,
+            stable_id=f'M6-SPECIAL-{suffix}',
+            block=PhysicalBed.Block.ITR if capacity <= 2 else PhysicalBed.Block.A,
+            position=1,
+        )
+        anchor = AccommodationAnchor.objects.create(
+            code=f'M6-SPECIAL-ANCHOR-{suffix}',
+            display_name=f'M6 специальное место {suffix}',
+            anchor_type=anchor_type,
+            group_key=f'm6-special-{suffix}',
+            ordinal=1,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=self.revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(datetime(2031, 1, 1)),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=self.period.pk,
+            source_revision_id=self.revision.pk,
+        )
+        return confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+
+    def test_two_bed_room_slot_is_excluded_from_auto_candidates(self):
+        # SET-R097: авто не видит двухместные комнаты вовсе.
+        from settlement.resolver import _slot_candidates
+
+        slot = self._special_room_slot(
+            capacity=2,
+            anchor_type=AccommodationAnchor.AnchorType.GROUP,
+            suffix='TWO-BED',
+        )
+        cohort = self._cohort(self.internal_resident)
+        candidates, _snapshot = _slot_candidates(cohort)
+        self.assertNotIn(slot.pk, candidates)
+
+    def test_protected_anchor_slot_is_excluded_from_auto_candidates(self):
+        # SET-R098: защищённый фонд — только ручной путь.
+        from settlement.resolver import _slot_candidates
+
+        slot = self._special_room_slot(
+            capacity=3,
+            anchor_type=AccommodationAnchor.AnchorType.PROTECTED,
+            suffix='PROTECTED',
+        )
+        cohort = self._cohort(self.internal_resident)
+        candidates, _snapshot = _slot_candidates(cohort)
+        self.assertNotIn(slot.pk, candidates)
+
+    def test_reserve_anchor_slot_is_excluded_from_auto_candidates(self):
+        # T-036 backend-16: резервная комната тоже вне авто.
+        from settlement.resolver import _slot_candidates
+
+        slot = self._special_room_slot(
+            capacity=3,
+            anchor_type=AccommodationAnchor.AnchorType.RESERVE,
+            suffix='RESERVE-AUTO',
+        )
+        cohort = self._cohort(self.internal_resident)
+        candidates, _snapshot = _slot_candidates(cohort)
+        self.assertNotIn(slot.pk, candidates)
+
+    def test_service_anchor_slot_is_excluded_from_auto_candidates(self):
+        # T-036 backend-16: служебное место не участвует в плане.
+        from settlement.resolver import _slot_candidates
+
+        slot = self._special_room_slot(
+            capacity=3,
+            anchor_type=AccommodationAnchor.AnchorType.SERVICE,
+            suffix='SERVICE-AUTO',
+        )
+        cohort = self._cohort(self.internal_resident)
+        candidates, _snapshot = _slot_candidates(cohort)
+        self.assertNotIn(slot.pk, candidates)
+
+    def test_active_reserve_excludes_bed_from_planned_distribution(self):
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        SettlementBedReserve.objects.create(
+            physical_bed=self.beds[0][0],
+            is_active=True,
+            reason='Резерв под срочное размещение',
+            created_by_access=self.access,
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('bed_reserve_hold',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R096',))
+
+    def test_active_preparation_excludes_bed_from_planned_distribution(self):
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed=self.beds[0][0],
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск внешнего',
+            created_by_access=self.access,
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('bed_prepared_hold',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R095',))
+
+    def test_expired_preparation_does_not_block_planned_distribution(self):
+        """T-029 QA-2: истёкшая подготовка не держит койку вечно."""
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed=self.beds[0][0],
+            arrival_date=self.period.starts_on - timedelta(days=2),
+            hold_until=timezone.now() - timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Просроченный пропуск',
+            created_by_access=self.access,
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(len(result.placements), 1)
+        self.assertFalse(result.unresolved)
 
     def test_stale_shift_source_is_unresolved_and_changes_fingerprint(self):
         slot = self._slot(0, 0)
@@ -10934,14 +12539,38 @@ class M6SettlementResolverTests(TestCase):
         cohort = self._cohort(self.internal_resident)
         route_room = route_assignment.physical_bed.room
 
-        route_room.sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
-        route_room.save(update_fields=['sex_restriction'])
+        # T-036 backend-14: комнату делает женской фактический жилец, а не
+        # атрибут комнаты.
+        female_employee = Employee.objects.create(
+            full_name='ДЕМО M6 женщина в комнате маршрута',
+            sex=Employee.Sex.FEMALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.composition,
+        )
+        female, _created = get_or_create_employee_resident(
+            employee_id=female_employee.pk,
+        )
+        female_bed = PhysicalBed.objects.create(
+            room=route_room,
+            stable_id='M6-EQUIPMENT-ROOM-FEMALE',
+            block=PhysicalBed.Block.B,
+            position=2,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=female,
+            physical_bed=female_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=timezone.make_aware(datetime(2031, 1, 1)),
+            starts_at=timezone.make_aware(datetime(2031, 1, 1)),
+            ends_at=timezone.make_aware(datetime(2031, 2, 1)),
+            settled_by=self.actor,
+        )
         sex_result = resolve_settlement_cohort(cohort_id=cohort.pk)
-        self.assertEqual(sex_result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+        self.assertEqual(sex_result.unresolved[0].reason_codes, ('room_sex_mismatch',))
 
-        route_room.sex_restriction = PhysicalRoom.SexRestriction.UNKNOWN
         route_room.transfer_status = PhysicalRoom.TransferStatus.NOT_TRANSFERRED
-        route_room.save(update_fields=['sex_restriction', 'transfer_status'])
+        route_room.save(update_fields=['transfer_status'])
         transfer_result = resolve_settlement_cohort(cohort_id=cohort.pk)
         self.assertEqual(
             transfer_result.unresolved[0].reason_codes,
@@ -11081,7 +12710,9 @@ class M6SettlementResolverTests(TestCase):
         cohort = self._cohort(self.external_a, self.internal_resident)
         result = resolve_settlement_cohort(cohort_id=cohort.pk)
         internal = next(item for item in result.unresolved if item.resident_id == self.internal_resident.pk)
-        self.assertIn('resolver_not_configured', internal.reason_codes)
+        # Внутренний сотрудник имеет кадровую должность и категорию, но все его
+        # кандидаты заняты внешним жильцом: своего места нет.
+        self.assertIn('no_compatible_place', internal.reason_codes)
         self.assertFalse(any(
             item.resident_id == self.internal_resident.pk for item in result.placements
         ))
@@ -11110,13 +12741,39 @@ class M6SettlementResolverTests(TestCase):
         self.assertEqual(placement.physical_room_id, self.rooms[0].pk)
 
     def test_gender_and_transfer_hard_rules_reject_invalid_binding(self):
-        self.rooms[0].sex_restriction = PhysicalRoom.SexRestriction.FEMALE_ONLY
-        self.rooms[0].save(update_fields=['sex_restriction'])
+        # T-036 backend-14: комнату делает женской фактический жилец, а не
+        # атрибут комнаты.
+        female_employee = Employee.objects.create(
+            full_name='ДЕМО M6 женщина в комнате',
+            sex=Employee.Sex.FEMALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.composition,
+        )
+        female, _created = get_or_create_employee_resident(
+            employee_id=female_employee.pk,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=female,
+            physical_bed=self.beds[0][1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=timezone.make_aware(datetime(2031, 1, 1)),
+            settled_at=timezone.make_aware(datetime(2031, 1, 1)),
+            ends_at=timezone.make_aware(datetime(2031, 2, 1)),
+            settled_by=self.actor,
+        )
         slot = self._slot(0, 0)
         self._binding(self.internal_resident, slot)
         cohort = self._cohort(self.internal_resident)
         result = resolve_settlement_cohort(cohort_id=cohort.pk)
-        self.assertEqual(result.unresolved[0].reason_codes, ('hard_rule_conflict',))
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('room_sex_mismatch',),
+        )
+        self.assertEqual(
+            result.unresolved[0].rule_ids,
+            ('SET-R042', 'SET-R043'),
+        )
 
         PhysicalRoom.objects.filter(pk=self.rooms[0].pk).update(
             transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
@@ -11229,6 +12886,353 @@ class M6SettlementResolverTests(TestCase):
         )
         self.assertEqual(result.unresolved[0].reason_codes, ('resolver_not_configured',))
         self.assertEqual(after, before)
+
+    def _unknown_sex_room_slot(self, *, capacity=3):
+        room = PhysicalRoom.objects.create(
+            dormitory=self.dormitory,
+            floor=2,
+            number=90 + PhysicalRoom.objects.count(),
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=PhysicalRoom.SexRestriction.UNKNOWN,
+            capacity=capacity,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=50 + PhysicalRoom.objects.count(),
+        )
+        beds = []
+        anchors = []
+        for position in range(1, capacity + 1):
+            bed = PhysicalBed.objects.create(
+                room=room,
+                stable_id=f'M6-UNKNOWN-R{room.pk}-A{position}',
+                block=PhysicalBed.Block.A,
+                position=position,
+            )
+            anchor = AccommodationAnchor.objects.create(
+                code=f'M6-UNKNOWN-ANCHOR-{room.pk}-{position}',
+                display_name=f'M6 неизвестная комната {room.pk}/{position}',
+                anchor_type=AccommodationAnchor.AnchorType.GROUP,
+                group_key=f'm6-unknown-room-{room.pk}',
+                ordinal=position,
+                status=AccommodationAnchor.Status.ACTIVE,
+                created_revision=self.revision,
+            )
+            AccommodationAnchorBedAssignment.objects.create(
+                anchor=anchor,
+                physical_bed=bed,
+                valid_from=timezone.make_aware(datetime(2031, 1, 1)),
+                status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+                started_revision=self.revision,
+            )
+            beds.append(bed)
+            anchors.append(anchor)
+        return room, beds, anchors
+
+    def test_unknown_occupant_sex_is_fail_closed_for_confirmed_binding(self):
+        # T-036 backend-14 / SET-R042/R043/R081: если в комнате живёт жилец с
+        # неуказанным полом, доказать совместимость нельзя — место недоступно.
+        _room, beds, anchors = self._unknown_sex_room_slot()
+        slot = create_calendar_slot(
+            anchor_id=anchors[0].pk,
+            watch_period_id=self.period.pk,
+            source_revision_id=self.revision.pk,
+        )
+        slot = confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        self._binding(self.internal_resident, slot)
+        unknown_employee = Employee.objects.create(
+            full_name='ДЕМО M6 жилец без пола',
+            sex=Employee.Sex.UNKNOWN,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=_resident_for_employee(unknown_employee),
+            physical_bed=beds[1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_at=timezone.make_aware(datetime(2031, 1, 1)),
+            starts_at=timezone.make_aware(datetime(2031, 1, 1)),
+            ends_at=timezone.make_aware(datetime(2031, 2, 1)),
+            settled_by=self.actor,
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('room_occupant_sex_unknown',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R043', 'SET-R081'))
+
+    def _prepare_bed(self, bed, resident):
+        return SettlementBedPreparation.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск прибывающего',
+            created_by_access=self.access,
+        )
+
+    def test_prepared_bed_reports_set_r095(self):
+        # Z5 / SET-R095: подготовленная койка называет своё правило, а не
+        # агрегированный hard_rule_conflict.
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        self._prepare_bed(self.beds[0][0], self.external_a)
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('bed_prepared_hold',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R095',))
+
+    def test_reserved_bed_reports_set_r096(self):
+        # Z5 / SET-R096: резервная койка называет R096.
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        SettlementBedReserve.objects.create(
+            physical_bed=self.beds[0][0],
+            is_active=True,
+            reason='Резерв для срочного размещения',
+            created_by_access=self.access,
+        )
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('bed_reserve_hold',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R096',))
+
+    def test_all_prepared_candidates_are_not_reported_as_no_compatible_place(self):
+        # review-2 §2.1: если все подходящие койки придержаны подготовкой,
+        # причина — R095, а не no_compatible_place с чужими правилами.
+        self._slot(2, 0)
+        self._prepare_bed(self.beds[2][0], self.external_a)
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('bed_prepared_hold',))
+        self.assertEqual(unresolved.rule_ids, ('SET-R095',))
+
+    def test_unconfirmed_slot_revision_is_excluded_from_plan(self):
+        # Z9 / SET-R010: денормализованного transfer_status мало — происхождение
+        # места (подтверждённая ревизия слота и закрепления) проверяется.
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        baseline = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(len(baseline.placements), 1)
+
+        SettlementRevision._base_manager.filter(pk=self.revision.pk).update(
+            status=SettlementRevision.Status.DRAFT,
+        )
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('invalid_existing_binding',),
+        )
+
+    def test_production_changes_do_not_move_confirmed_anchor(self):
+        # Z10 / SET-R018-R021, SET-R041: смена техники и режима не меняет
+        # подтверждённый якорь и койку.
+        slot = self._slot(0, 0)
+        binding = self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        baseline = resolve_settlement_cohort(cohort_id=cohort.pk)
+        self.assertEqual(len(baseline.placements), 1)
+        anchor_id = baseline.placements[0].anchor_id
+        bed_id = baseline.placements[0].physical_bed_id
+        member = cohort.members.get(resident=self.internal_resident)
+
+        # Ремонт/простой техники: SET-R022 — койка не освобождается, якорь и
+        # официальная смена остаются прежними.
+        equipment_id = member.official_equipment_assignment.equipment_id
+        Equipment._base_manager.filter(pk=equipment_id).update(is_active=False)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(len(result.placements), 1)
+        self.assertEqual(result.placements[0].binding_id, binding.pk)
+        self.assertEqual(result.placements[0].anchor_id, anchor_id)
+        self.assertEqual(result.placements[0].physical_bed_id, bed_id)
+        self.assertEqual(
+            AccommodationAnchorBedAssignment.objects.filter(
+                pk=result.placements[0].anchor_bed_assignment_id,
+            ).count(),
+            1,
+        )
+
+    def test_unresolved_reason_rule_map_covers_all_causes(self):
+        # Z5 / SET-R078: каждая причина неразмещения ссылается на правило
+        # реестра SET-R001..R096, а не на пустое или чужое правило.
+        from settlement import resolver as resolver_module
+
+        expected_reasons = {
+            resolver_module.REASON_COHORT_NOT_APPROVED,
+            resolver_module.REASON_RESOLVER_NOT_CONFIGURED,
+            resolver_module.REASON_RESIDENT_INACTIVE,
+            resolver_module.REASON_INCOMPLETE_CONTEXT,
+            resolver_module.REASON_STALE_CALENDAR,
+            resolver_module.REASON_INVALID_BINDING,
+            resolver_module.REASON_NO_PLACE,
+            resolver_module.REASON_EQUAL_PRIORITY,
+            resolver_module.REASON_HARD_CONFLICT,
+            resolver_module.REASON_BED_PREPARED_HOLD,
+            resolver_module.REASON_BED_RESERVE_HOLD,
+            resolver_module.REASON_ROOM_SEX_UNKNOWN,
+            resolver_module.REASON_RESIDENT_SEX_UNKNOWN,
+            resolver_module.REASON_ROOM_SEX_MISMATCH,
+            resolver_module.REASON_ROOM_SEX_MIXED,
+            resolver_module.REASON_ROOM_SEX_TAKEN,
+            resolver_module.REASON_MISSING_CATEGORY,
+            resolver_module.REASON_ROOM_CATEGORY_CONFLICT,
+        }
+        self.assertEqual(set(resolver_module._REASON_RULE_IDS), expected_reasons)
+        for reason, rule_ids in resolver_module._REASON_RULE_IDS.items():
+            with self.subTest(reason=reason):
+                self.assertTrue(rule_ids)
+                for rule_id in rule_ids:
+                    match = re.fullmatch(r'SET-R(\d{3})', rule_id)
+                    self.assertIsNotNone(match, rule_id)
+                    self.assertTrue(1 <= int(match.group(1)) <= 102, rule_id)
+        rule_map = resolver_module._REASON_RULE_IDS
+        self.assertEqual(
+            rule_map[resolver_module.REASON_BED_PREPARED_HOLD],
+            ('SET-R095',),
+        )
+        self.assertEqual(
+            rule_map[resolver_module.REASON_BED_RESERVE_HOLD],
+            ('SET-R096',),
+        )
+        self.assertEqual(
+            rule_map[resolver_module.REASON_ROOM_SEX_UNKNOWN],
+            ('SET-R081', 'SET-R043'),
+        )
+        self.assertEqual(
+            rule_map[resolver_module.REASON_RESIDENT_SEX_UNKNOWN],
+            ('SET-R081', 'SET-R042'),
+        )
+        no_place_rules = rule_map[resolver_module.REASON_NO_PLACE]
+        self.assertIn('SET-R042', no_place_rules)
+        self.assertIn('SET-R043', no_place_rules)
+        self.assertNotIn('SET-R032', no_place_rules)
+        for reason in (
+            resolver_module.REASON_NO_PLACE,
+            resolver_module.REASON_HARD_CONFLICT,
+        ):
+            for rule_id in ('SET-R081', 'SET-R095', 'SET-R096'):
+                with self.subTest(reason=reason, rule_id=rule_id):
+                    self.assertNotIn(rule_id, rule_map[reason])
+
+    def test_unknown_resident_sex_is_not_placed_in_known_room(self):
+        # C-4 / SET-R081: пол жильца вне {male, female} — fail-closed,
+        # причина атомарная и называет R081, а не агрегированный hard conflict.
+        slot = self._slot(0, 0)
+        employee = Employee.objects.create(
+            full_name='ДЕМО M6 Без пола',
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+            watch_composition=self.composition,
+        )
+        resident, _created = get_or_create_employee_resident(
+            employee_id=employee.pk,
+        )
+        self._binding(resident, slot)
+        cohort = self._cohort(resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(
+            unresolved.reason_codes,
+            ('resident_sex_unknown',),
+        )
+        self.assertEqual(
+            unresolved.rule_ids,
+            ('SET-R042', 'SET-R081'),
+        )
+
+    def test_unconfirmed_assignment_revision_is_excluded_from_plan(self):
+        # Z9 / SET-R010: проверяется ревизия самого закрепления, отдельно от
+        # ревизии слота.
+        slot = self._slot(0, 0)
+        assignment = AccommodationAnchorBedAssignment.objects.get(
+            anchor_id=slot.anchor_id,
+        )
+        other_revision = SettlementRevision.objects.create(
+            code='M6-REV-ASSIGNMENT-ONLY',
+            source=self.source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=self.now,
+            confirmed_at=self.now,
+            confirmed_by_label='Архитектор M6',
+            reason='Отдельная ревизия закрепления для проверки происхождения.',
+        )
+        AccommodationAnchorBedAssignment._base_manager.filter(
+            pk=assignment.pk,
+        ).update(started_revision=other_revision)
+        SettlementRevision._base_manager.filter(
+            pk=other_revision.pk,
+        ).update(status=SettlementRevision.Status.DRAFT)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        self.assertEqual(
+            result.unresolved[0].reason_codes,
+            ('invalid_existing_binding',),
+        )
+
+    def test_no_compatible_place_records_profile_and_sex_rules(self):
+        # no_compatible_place: свободные места есть, но ни одно не подходит по
+        # официальной должности/полу. В payload должны быть R004/R042/R043,
+        # а не R032 (непереданная комната).
+        self._slot(0, 0)
+        cohort = self._cohort(self.position_resident)
+
+        result = resolve_settlement_cohort(cohort_id=cohort.pk)
+
+        self.assertEqual(result.placements, ())
+        self.assertEqual(len(result.unresolved), 1)
+        unresolved = result.unresolved[0]
+        self.assertEqual(unresolved.reason_codes, ('no_compatible_place',))
+        self.assertEqual(
+            unresolved.rule_ids,
+            ('SET-R004', 'SET-R042', 'SET-R043'),
+        )
+        self.assertNotIn('SET-R032', unresolved.rule_ids)
+        member = cohort.members.get(resident=self.position_resident)
+        self.assertEqual(
+            unresolved.interval,
+            (
+                member.arrival_at.isoformat(),
+                member.departure_at.isoformat(),
+            ),
+        )
 
 
 class M7SavedPreviewTests(TestCase):
@@ -11541,9 +13545,15 @@ class M7SavedPreviewTests(TestCase):
     def test_changed_unresolved_reason_is_stale_source(self):
         cohort, run = self._create_run()
         current = resolve_settlement_cohort(cohort_id=cohort.pk)
+        # Текущая причина — no_compatible_place; подменяем на другую причину,
+        # чтобы сохранить проверку «смена причины делает источник устаревшим».
+        self.assertNotEqual(
+            current.unresolved[0].reason_codes,
+            ('resolver_not_configured',),
+        )
         changed_item = replace(
             current.unresolved[0],
-            reason_codes=('no_compatible_place',),
+            reason_codes=('resolver_not_configured',),
         )
         changed = replace(current, unresolved=(changed_item,))
         with mock.patch(
@@ -11784,6 +13794,27 @@ class M7SavedPreviewTests(TestCase):
             )
         self.assertFalse(SettlementPreviewRun.objects.exists())
 
+    def test_unresolved_row_records_rule_id_and_period(self):
+        # Z5 / SET-R078: конфликт фиксируется явно — правило, причина, период.
+        cohort, run = self._create_run()
+        row = run.unresolved_rows.get()
+        member = cohort.members.get(resident_id=row.resident_id)
+        details = row.structured_details
+
+        self.assertEqual(list(row.reason_codes), ['no_compatible_place'])
+        self.assertEqual(details['reason_codes'], list(row.reason_codes))
+        self.assertEqual(
+            details['rule_ids'],
+            ['SET-R004', 'SET-R042', 'SET-R043'],
+        )
+        self.assertEqual(
+            details['interval'],
+            [
+                member.arrival_at.isoformat(),
+                member.departure_at.isoformat(),
+            ],
+        )
+
 
 class M8SettlementApplyTests(TestCase):
     _DEFAULT_CONTROL = object()
@@ -11858,6 +13889,7 @@ class M8SettlementApplyTests(TestCase):
         employee = Employee.objects.create(
             full_name=f'ДЕМО M8 equipment resident {suffix}',
             sex=Employee.Sex.MALE,
+            personnel_position=self.pool_position,
             status=Employee.Status.ACTIVE,
             is_active=True,
             watch_composition=self.composition,
@@ -11937,6 +13969,30 @@ class M8SettlementApplyTests(TestCase):
 
     def _confirmed_run(self, *, include_unresolved=True):
         cohort = self._prepared_cohort(include_unresolved=include_unresolved)
+        slot = AccommodationAnchorCalendarSlot.objects.get(
+            anchor=self.anchors[2][0],
+            watch_period=self.period,
+        )
+        self._binding(self.position_resident, slot)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        return cohort, run
+
+    def _two_placement_run(self):
+        first_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, first_slot)
+        second_slot = self._slot(1, 0)
+        self._binding(self.position_resident, second_slot)
+        cohort = self._cohort(
+            self.internal_resident,
+            self.position_resident,
+        )
         run = create_settlement_preview_run(
             cohort_id=cohort.pk,
             control_context=self.control_context,
@@ -11951,6 +14007,20 @@ class M8SettlementApplyTests(TestCase):
         with self.assertRaises(ValidationError) as raised:
             callback()
         self.assertEqual(raised.exception.code, code)
+
+    def test_apply_requires_valid_rule_set_version_contract(self):
+        # Z1 / SET-R094: структурные проверки validator.py обязательны в точке
+        # записи; пустая версия набора правил останавливает Apply.
+        _cohort, run = self._confirmed_run()
+        before = EmployeeBedOccupancy.objects.count()
+        with mock.patch('settlement.services.SETTLEMENT_RULE_SET_VERSION', ''):
+            with self.assertRaises(ValidationError) as raised:
+                self._apply(run_id=run.pk)
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.input.rule_set_version.required',
+        )
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), before)
 
     def test_initial_apply_uses_exact_actor_and_finite_member_interval(self):
         cohort, run = self._confirmed_run()
@@ -11984,16 +14054,65 @@ class M8SettlementApplyTests(TestCase):
             ).exists()
         )
 
+    def test_apply_rejects_bed_with_active_preparation(self):
+        _cohort, run = self._confirmed_run()
+        placement = run.placements.get()
+        preparation = SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed_id=placement.physical_bed_id,
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск внешнего',
+            created_by_access=self.control_access,
+        )
+
+        self.assert_apply_code(
+            'settlement.apply.bed_unavailable_for_plan',
+            lambda: self._apply(run_id=run.pk),
+        )
+
+        preparation.refresh_from_db()
+        self.assertEqual(
+            preparation.status,
+            SettlementBedPreparation.Status.PREPARED,
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application__isnull=False,
+            ).exists()
+        )
+        self.assertFalse(
+            SettlementPreviewApplication._base_manager.filter(
+                preview_run=run,
+            ).exists()
+        )
+
+    def test_apply_rejects_bed_with_active_reserve(self):
+        _cohort, run = self._confirmed_run()
+        placement = run.placements.get()
+        reserve = SettlementBedReserve.objects.create(
+            physical_bed_id=placement.physical_bed_id,
+            is_active=True,
+            reason='Резерв под срочное размещение',
+            created_by_access=self.control_access,
+        )
+
+        self.assert_apply_code(
+            'settlement.apply.bed_unavailable_for_plan',
+            lambda: self._apply(run_id=run.pk),
+        )
+
+        reserve.refresh_from_db()
+        self.assertTrue(reserve.is_active)
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application__isnull=False,
+            ).exists()
+        )
+
     def test_structured_run_is_applied_only_for_requested_shift(self):
-        cohort = self._prepared_cohort(include_unresolved=False)
-        run = create_settlement_preview_run(
-            cohort_id=cohort.pk,
-            control_context=self.control_context,
-        )
-        run = confirm_settlement_preview_run(
-            run_id=run.pk,
-            control_context=self.control_context,
-        )
+        _cohort, run = self._confirmed_run(include_unresolved=False)
         self.assertTrue(run.requires_shift_split)
 
         application = self._apply(
@@ -12204,7 +14323,7 @@ class M8SettlementApplyTests(TestCase):
         )
 
         self.assert_apply_code(
-            'settlement.apply.stale_preview',
+            'settlement.apply.hard_conflict',
             lambda: self._apply(
                 run_id=run.pk,
                 work_shift=SettlementCohortMember.WorkShift.DAY,
@@ -12311,8 +14430,7 @@ class M8SettlementApplyTests(TestCase):
 
     def test_stale_confirmed_preview_rolls_back(self):
         _cohort, run = self._confirmed_run(include_unresolved=False)
-        self.position_employee.personnel_position = None
-        self.position_employee.save(update_fields=['personnel_position'])
+        WatchPeriod.objects.filter(pk=self.period.pk).update(is_active=False)
         self.assert_apply_code(
             'settlement.apply.stale_preview',
             lambda: self._apply(
@@ -12339,7 +14457,7 @@ class M8SettlementApplyTests(TestCase):
             settled_by=self.control_actor,
         )
         self.assert_apply_code(
-            'settlement.apply.stale_preview',
+            'settlement.apply.hard_conflict',
             lambda: self._apply(
                 run_id=run.pk,
                 control_context=self.control_context,
@@ -12347,6 +14465,1092 @@ class M8SettlementApplyTests(TestCase):
         )
         self.assertFalse(SettlementPreviewApplication.objects.exists())
         self.assertEqual(EmployeeBedOccupancy._base_manager.count(), 1)
+
+    def test_partial_apply_skips_conflicting_row_and_creates_others(self):
+        # W1.2: одна конфликтная строка не отменяет всю смену.
+        cohort, run = self._two_placement_run()
+        conflicting_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        conflicting_member = cohort.members.get(
+            resident_id=self.internal_resident.pk,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=self.external_a,
+            physical_bed_id=conflicting_placement.physical_bed_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=conflicting_member.arrival_at,
+            settled_at=conflicting_member.arrival_at,
+            ends_at=conflicting_member.departure_at,
+            settled_by=self.control_actor,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 1)
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['resident_id'], self.internal_resident.pk)
+        self.assertEqual(skipped[0]['reason_codes'], ['hard_rule_conflict'])
+        self.assertTrue(skipped[0]['in_plan'])
+        self.assertEqual(
+            skipped[0]['source_placement_id'],
+            conflicting_placement.pk,
+        )
+        self.assertIn('SET-R033', skipped[0]['rule_ids'])
+        self.assertIn('SET-R034', skipped[0]['rule_ids'])
+        self.assertTrue(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.position_resident.pk,
+            ).exists()
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.internal_resident.pk,
+            ).exists()
+        )
+        from settlement.views import _auto_settlement_application_payload
+        payload = _auto_settlement_application_payload(application, 0)
+        self.assertEqual(payload['skipped_count'], 1)
+        self.assertIn('SET-R033', payload['skipped'][0]['rule_ids'])
+        self.assertIn('SET-R034', payload['skipped'][0]['rule_ids'])
+
+    def test_partial_apply_skips_prepared_bed_with_r095(self):
+        cohort, run = self._two_placement_run()
+        conflicting_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed_id=conflicting_placement.physical_bed_id,
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск прибывающего',
+            created_by_access=self.control_access,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 1)
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['reason_codes'], ['bed_prepared_hold'])
+        self.assertEqual(skipped[0]['rule_ids'], ['SET-R095'])
+        self.assertEqual(skipped[0]['apply_code'], 'bed_unavailable_for_plan')
+        self.assertTrue(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.position_resident.pk,
+            ).exists()
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                physical_bed_id=conflicting_placement.physical_bed_id,
+            ).exists()
+        )
+
+    def test_partial_apply_skips_sex_conflict_with_r042(self):
+        # T-036 backend-14: пол комнаты — по фактическому жильцу, поэтому
+        # женский жилец в той же комнате закрывает её для мужчины из плана.
+        cohort, run = self._two_placement_run()
+        conflicting_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        member = cohort.members.get(resident_id=self.internal_resident.pk)
+        female_employee = Employee.objects.create(
+            full_name='ДЕМО M8 женщина в комнате',
+            sex=Employee.Sex.FEMALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        female, _created = get_or_create_employee_resident(
+            employee_id=female_employee.pk,
+        )
+        EmployeeBedOccupancy.objects.create(
+            resident=female,
+            physical_bed=self.beds[0][1],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 1)
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['resident_id'], self.internal_resident.pk)
+        self.assertEqual(skipped[0]['reason_codes'], ['room_sex_mismatch'])
+        self.assertEqual(skipped[0]['rule_ids'], ['SET-R042', 'SET-R043'])
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.internal_resident.pk,
+            ).exists()
+        )
+
+    def test_apply_rejects_special_anchor_room_even_for_stale_preview(self):
+        # T-036 backend-16: финальный авто-гард не пускает защищённый фонд
+        # даже если preview был подтверждён до изменения карты.
+        cohort, run = self._two_placement_run()
+        placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        target_room = PhysicalRoom.objects.get(
+            pk=PhysicalBed.objects.get(
+                pk=placement.physical_bed_id,
+            ).room_id,
+        )
+        # Защищённым делаем якорь СОСЕДНЕЙ койки: целевая строка остаётся
+        # валидным кандидатом, и срабатывает именно финальный авто-гард.
+        neighbour_assignment = (
+            AccommodationAnchorBedAssignment.objects
+            .filter(
+                physical_bed__room_id=target_room.pk,
+                status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            )
+            .exclude(physical_bed_id=placement.physical_bed_id)
+            .first()
+        )
+        self.assertIsNotNone(neighbour_assignment)
+        AccommodationAnchor.objects.filter(
+            pk=neighbour_assignment.anchor_id,
+        ).update(anchor_type=AccommodationAnchor.AnchorType.PROTECTED)
+        from settlement.special_fund import room_anchor_types
+
+        self.assertIn(
+            AccommodationAnchor.AnchorType.PROTECTED,
+            room_anchor_types(room=target_room),
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            self._apply(
+                run_id=run.pk,
+                control_context=self.control_context,
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.apply.protected_room_forbidden',
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_legacy_sex_restriction_change_does_not_invalidate_preview(self):
+        # T-036 backend-16: legacy-атрибут не входит в снапшот apply.
+        _cohort, run = self._two_placement_run()
+        placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        room_id = PhysicalBed.objects.get(
+            pk=placement.physical_bed_id,
+        ).room_id
+        PhysicalRoom.objects.filter(pk=room_id).update(
+            sex_restriction=PhysicalRoom.SexRestriction.FEMALE_ONLY,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 2)
+
+    def test_partial_apply_is_idempotent_and_keeps_skipped_rows(self):
+        cohort, run = self._two_placement_run()
+        conflicting_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        member = cohort.members.get(resident_id=self.internal_resident.pk)
+        EmployeeBedOccupancy.objects.create(
+            resident=self.external_a,
+            physical_bed_id=conflicting_placement.physical_bed_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+        first = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        created = EmployeeBedOccupancy._base_manager.filter(
+            source_application=first,
+        ).count()
+
+        second = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=first,
+            ).count(),
+            created,
+        )
+        self.assertEqual(
+            second.result_snapshot['skipped_rows'],
+            first.result_snapshot['skipped_rows'],
+        )
+
+    def _pool_run(self):
+        slot = self._slot(0, 0)
+        self._binding(self.internal_resident, slot)
+        cohort = self._cohort(self.internal_resident)
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        return cohort, run
+
+    def test_pool_place_creates_temporary_with_departure_end(self):
+        cohort, run = self._pool_run()
+        member = cohort.members.get(resident=self.internal_resident)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        placement = run.placements.get(resident_id=self.internal_resident.pk)
+        self.assertEqual(placement.normalized_provenance['place_kind'], 'pool')
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        self.assertEqual(occupancy.starts_at, member.arrival_at)
+        self.assertEqual(occupancy.ends_at, member.departure_at)
+        self.assertIsNone(occupancy.terminated_at)
+        self.assertIsNone(occupancy.ended_at)
+        self.assertEqual(
+            occupancy.source_kind,
+            EmployeeBedOccupancy.SourceKind.AUTO,
+        )
+
+    def test_positional_place_creates_permanent_with_chain(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        placement = run.placements.get()
+        self.assertEqual(
+            placement.normalized_provenance['place_kind'],
+            'positional',
+        )
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.PERMANENT,
+        )
+        self.assertEqual(
+            EmployeeBedOccupancy._base_manager.filter(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            occupancy.source_kind,
+            EmployeeBedOccupancy.SourceKind.AUTO,
+        )
+        self.assertIsNotNone(occupancy.source_application_id)
+        self.assertIsNotNone(occupancy.watch_period_id)
+        self.assertIsNotNone(occupancy.cohort_member_id)
+
+    def test_position_route_placements_are_temporary_not_skipped(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        self._slot(2, 0)
+        cohort = self._cohort(
+            self.internal_resident,
+            self.position_resident,
+        )
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 2)
+        self.assertEqual(application.result_snapshot['skipped_rows'], [])
+        placement_occupancies = (
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+            )
+        )
+        self.assertEqual(placement_occupancies.count(), 2)
+        self.assertTrue(all(
+            row.assignment_type
+            == EmployeeBedOccupancy.AssignmentType.TEMPORARY
+            for row in placement_occupancies
+        ))
+
+    def test_draft_binding_on_positional_place_is_skipped(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        slot = self._slot(2, 0)
+        draft = create_employee_accommodation_binding(
+            resident_id=self.position_resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=self.period.starts_on,
+            valid_to=self.period.ends_on,
+            basis_type='m8_draft_test',
+            basis_id=f'M8-DRAFT-{self.position_resident.pk}',
+            basis_snapshot={'resident_id': self.position_resident.pk},
+            source_revision_id=self.revision.pk,
+        )
+        cohort = self._cohort(
+            self.internal_resident,
+            self.position_resident,
+        )
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(draft.status, EmployeeAccommodationBinding.Status.DRAFT)
+        self.assertEqual(application.created_occupancy_count, 1)
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(
+            skipped[0]['resident_id'],
+            self.position_resident.pk,
+        )
+        self.assertEqual(
+            skipped[0]['reason_codes'],
+            ['permanent_chain_missing'],
+        )
+        self.assertEqual(
+            skipped[0]['rule_ids'],
+            ['SET-R013', 'SET-R024', 'SET-R065'],
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.position_resident.pk,
+            ).exists()
+        )
+
+    def test_equipment_place_without_confirmed_binding_is_temporary(self):
+        resident, _employee, _equipment, _bed, _assignment = (
+            self._equipment_resident('T10-EQ-NOBIND')
+        )
+        cohort = self._cohort(resident)
+        run = self._confirmed_run_for_cohort(cohort)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        self.assertEqual(application.result_snapshot['skipped_rows'], [])
+
+    def test_equipment_place_with_confirmed_binding_is_permanent(self):
+        resident, _employee, equipment, _bed, _assignment = (
+            self._equipment_resident('T10-EQ-BIND')
+        )
+        slot = AccommodationAnchorCalendarSlot.objects.get(
+            watch_period=self.period,
+            anchor__equipment=equipment,
+        )
+        self._binding(resident, slot)
+        cohort = self._cohort(resident)
+        run = self._confirmed_run_for_cohort(cohort)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.PERMANENT,
+        )
+        self.assertEqual(
+            EmployeeBedOccupancy._base_manager.filter(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            ).count(),
+            1,
+        )
+        self.assertEqual(application.result_snapshot['skipped_rows'], [])
+
+    def test_mixed_anchor_reached_by_position_route_is_not_permanent(self):
+        equipment = self._equipment('T10-MIXED')
+        room = PhysicalRoom.objects.create(
+            dormitory=self.dormitory,
+            floor=2,
+            number=96,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест авто не использует.
+            capacity=3,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=96,
+        )
+        bed = PhysicalBed.objects.create(
+            room=room,
+            stable_id='T10-MIXED-BED-1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        anchor = AccommodationAnchor.objects.create(
+            code='T10-MIXED-ANCHOR',
+            display_name='Смешанный якорь',
+            anchor_type=AccommodationAnchor.AnchorType.FUNCTION,
+            equipment=equipment,
+            personnel_position=self.position,
+            group_key='t10-mixed',
+            ordinal=1,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=self.revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(datetime(2031, 1, 1)),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=self.period.pk,
+            source_revision_id=self.revision.pk,
+        )
+        confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        cohort = self._cohort(self.position_resident)
+        run = self._confirmed_run_for_cohort(cohort)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            ).exists()
+        )
+
+    def test_binding_period_not_covering_watch_is_skipped(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        slot = self._slot(2, 0)
+        binding = create_employee_accommodation_binding(
+            resident_id=self.position_resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=self.period.starts_on,
+            valid_to=self.period.ends_on,
+            basis_type='m8_period_test',
+            basis_id=f'M8-PERIOD-{self.position_resident.pk}',
+            basis_snapshot={'resident_id': self.position_resident.pk},
+            source_revision_id=self.revision.pk,
+        )
+        confirm_employee_accommodation_binding(
+            binding_id=binding.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        cohort = self._cohort(
+            self.internal_resident,
+            self.position_resident,
+        )
+        run = self._confirmed_run_for_cohort(cohort)
+        EmployeeAccommodationBinding._base_manager.filter(
+            pk=binding.pk,
+        ).update(valid_from=self.period.starts_on + timedelta(days=1))
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(
+            application.created_occupancy_count,
+            1,
+            application.result_snapshot.get('skipped_rows'),
+        )
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['resident_id'], self.position_resident.pk)
+        self.assertEqual(
+            skipped[0]['reason_codes'],
+            ['permanent_chain_missing'],
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.position_resident.pk,
+            ).exists()
+        )
+
+    def test_binding_on_slot_of_another_resident_is_skipped(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        slot = self._slot(2, 0)
+        foreign = create_employee_accommodation_binding(
+            resident_id=self.position_resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=self.period.starts_on,
+            valid_to=self.period.ends_on,
+            basis_type='m8_foreign_test',
+            basis_id=f'M8-FOREIGN-{self.position_resident.pk}',
+            basis_snapshot={'resident_id': self.position_resident.pk},
+            source_revision_id=self.revision.pk,
+        )
+        confirm_employee_accommodation_binding(
+            binding_id=foreign.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        cohort = self._cohort(
+            self.internal_resident,
+            self.position_resident,
+        )
+        run = self._confirmed_run_for_cohort(cohort)
+        EmployeeAccommodationBinding._base_manager.filter(
+            pk=foreign.pk,
+        ).update(resident_id=self.external_a.pk)
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(
+            application.created_occupancy_count,
+            1,
+            application.result_snapshot.get('skipped_rows'),
+        )
+        skipped = application.result_snapshot['skipped_rows']
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['resident_id'], self.position_resident.pk)
+        self.assertEqual(
+            skipped[0]['reason_codes'],
+            ['permanent_chain_missing'],
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=application,
+                resident_id=self.position_resident.pk,
+            ).exists()
+        )
+
+    def test_inactive_resident_is_reported_before_chain(self):
+        _cohort, run = self._confirmed_run(include_unresolved=False)
+        self.position_employee.status = Employee.Status.DEACTIVATED
+        self.position_employee.is_active = False
+        self.position_employee.save(update_fields=['status', 'is_active'])
+
+        with self.assertRaises(ValidationError) as raised:
+            self._apply(
+                run_id=run.pk,
+                control_context=self.control_context,
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.resident.inactive_employee',
+        )
+        self.assertFalse(SettlementPreviewApplication.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy._base_manager.exists())
+
+    def test_permanent_requires_confirmed_binding_for_every_anchor_type(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        position_slot = self._slot(2, 0)
+        self._binding(self.position_resident, position_slot)
+        cohort = self._cohort(self.internal_resident, self.position_resident)
+        run = self._confirmed_run_for_cohort(cohort)
+        self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        permanent_rows = list(
+            EmployeeBedOccupancy._base_manager.filter(
+                assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            ).select_related('source_preview_placement'),
+        )
+        self.assertEqual(len(permanent_rows), 1)
+        # Инвариант действует только на строки, созданные этим apply.
+        # Старые AUTO-PERMANENT не покрываются: reuse не сверяет тип.
+        for occupancy in permanent_rows:
+            placement = occupancy.source_preview_placement
+            self.assertIsNotNone(placement)
+            binding_exists = EmployeeAccommodationBinding.objects.filter(
+                resident_id=occupancy.resident_id,
+                anchor_calendar_slot_id=placement.calendar_slot_id,
+                status=EmployeeAccommodationBinding.Status.CONFIRMED,
+                approved_by__isnull=False,
+                approved_at__isnull=False,
+                valid_from__lte=self.period.starts_on,
+                valid_to__gte=self.period.ends_on,
+                source_revision__status='confirmed',
+            ).exists()
+            self.assertTrue(
+                binding_exists,
+                f'PERMANENT без подтверждённой привязки: {occupancy.pk}',
+            )
+
+    def test_pool_temporary_requires_end_set_r066(self):
+        # DB-ограничение не даёт сохранить пустые даты члену вахты; проверяем
+        # тот же структурный контракт TEMPORARY на точке записи.
+        from settlement.services import validate_placement_input_contract
+
+        with self.assertRaises(ValidationError) as raised:
+            validate_placement_input_contract(
+                resident=self.internal_resident,
+                bed_stable_id=self.beds[0][0].stable_id,
+                assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+                starts_at=timezone.now(),
+                ends_at=None,
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            'settlement.input.ends_at.required_for_temporary',
+        )
+
+    def test_occupancy_is_not_active_after_watch_end(self):
+        cohort, run = self._pool_run()
+        member = cohort.members.get(resident=self.internal_resident)
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        from settlement.services import effective_occupancy_at_q
+
+        self.assertFalse(occupancy.is_active_at(member.departure_at))
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                effective_occupancy_at_q(member.departure_at),
+                pk=occupancy.pk,
+            ).exists()
+        )
+
+    def test_reapply_same_preview_is_idempotent_for_pool(self):
+        _cohort, run = self._pool_run()
+        first = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        second = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(second.pk, first.pk)
+        self.assertEqual(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application=first,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            SettlementPreviewApplicationItem.objects.filter(
+                application=first,
+            ).count(),
+            1,
+        )
+
+    def test_pool_temporary_is_not_listed_in_urgent_contour(self):
+        _cohort, run = self._pool_run()
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=application,
+        )
+        from settlement.temporary_placement import temporary_placement_state
+
+        self.assertEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+        )
+        self.assertNotEqual(
+            occupancy.assignment_type,
+            EmployeeBedOccupancy.AssignmentType.TEMPORARY_UNAPPROVED,
+        )
+        state = temporary_placement_state()
+        listed_ids = {
+            row['occupancy_id'] for row in state['temporary']
+        }
+        self.assertNotIn(occupancy.pk, listed_ids)
+
+    def _next_watch_pool_setup(self):
+        next_start = self.period.ends_on + timedelta(days=1)
+        next_end = next_start + timedelta(days=14)
+        next_period = WatchPeriod.objects.create(
+            name='Следующая вахта M8',
+            watch_composition=self.composition,
+            starts_on=next_start,
+            ends_on=next_end,
+            is_active=True,
+        )
+        room = PhysicalRoom.objects.create(
+            dormitory=self.dormitory,
+            floor=2,
+            number=97,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест авто не использует.
+            capacity=3,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=97,
+        )
+        bed = PhysicalBed.objects.create(
+            room=room,
+            stable_id='M8-NEXT-WATCH-BED-1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        anchor = AccommodationAnchor.objects.create(
+            code='M8-NEXT-WATCH-POOL',
+            display_name='Следующая вахта пул',
+            anchor_type=AccommodationAnchor.AnchorType.GROUP,
+            group_key=f'next-room-{room.pk}',
+            ordinal=1,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=self.revision,
+        )
+        AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(
+                datetime.combine(next_start, datetime.min.time()),
+            ),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=self.revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=next_period.pk,
+            source_revision_id=self.revision.pk,
+        )
+        slot = confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        binding = create_employee_accommodation_binding(
+            resident_id=self.external_a.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=next_start,
+            valid_to=next_end,
+            basis_type='m8_next_test',
+            basis_id=f'M8-NEXT-{self.external_a.pk}',
+            basis_snapshot={'resident_id': self.external_a.pk},
+            source_revision_id=self.revision.pk,
+        )
+        confirm_employee_accommodation_binding(
+            binding_id=binding.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        cohort = create_settlement_cohort(
+            watch_period_id=next_period.pk,
+            source_revision_id=self.revision.pk,
+            source_type='m8_next_test',
+            source_id=f'M8-NEXT-COHORT-{next_period.pk}',
+            source_snapshot={'period_id': next_period.pk},
+            input_fingerprint='d' * 64,
+            created_by_id=self.actor.pk,
+        )
+        add_settlement_cohort_member(
+            cohort_id=cohort.pk,
+            resident_id=self.external_a.pk,
+            arrival_at=timezone.make_aware(
+                datetime.combine(next_start, datetime.min.time()),
+            ),
+            departure_at=timezone.make_aware(
+                datetime.combine(next_end + timedelta(days=1), datetime.min.time()),
+            ),
+            participation_status=(
+                SettlementCohortMember.ParticipationStatus.PARTICIPATING
+            ),
+            reason='',
+            expected_schedule_regime='',
+            source_revision_id=self.revision.pk,
+            basis_type='m8_next_test',
+            basis_id=f'M8-NEXT-MEMBER-{self.external_a.pk}',
+            basis_snapshot={'resident_id': self.external_a.pk},
+            production_context_snapshot={'must_not_be_authority': True},
+            work_shift=SettlementCohortMember.WorkShift.DAY,
+            shift_selected_by_access_id=self.access.pk,
+            shift_selection_basis='Подтверждено для следующей вахты.',
+        )
+        approve_settlement_cohort(
+            cohort_id=cohort.pk,
+            approved_by_id=self.actor.pk,
+            approved_at=self.now,
+        )
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+        run = confirm_settlement_preview_run(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+        return next_period, next_start, run
+
+    def test_next_watch_apply_creates_new_rows_without_overlap(self):
+        _cohort, first_run = self._pool_run()
+        first_application = self._apply(
+            run_id=first_run.pk,
+            control_context=self.control_context,
+        )
+        first_occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=first_application,
+        )
+        _next_period, next_start, next_run = self._next_watch_pool_setup()
+        next_application = self._apply(
+            run_id=next_run.pk,
+            control_context=self.control_context,
+            now=timezone.make_aware(
+                datetime.combine(next_start, datetime.min.time()),
+            ),
+        )
+
+        next_occupancy = EmployeeBedOccupancy._base_manager.get(
+            source_application=next_application,
+        )
+        self.assertLessEqual(first_occupancy.ends_at, next_occupancy.starts_at)
+        first_occupancy.refresh_from_db()
+        next_occupancy.refresh_from_db()
+        self.assertIsNone(first_occupancy.replaced_by_application_id)
+        self.assertIsNone(next_occupancy.replaced_by_application_id)
+
+    def test_out_of_plan_member_conflict_is_marked_in_plan_false(self):
+        pool_slot = self._slot(0, 0)
+        self._binding(self.internal_resident, pool_slot)
+        cohort = self._cohort(self.internal_resident, self.external_a)
+        run = self._confirmed_run_for_cohort(cohort)
+        member = cohort.members.get(resident=self.external_a)
+        EmployeeBedOccupancy.objects.create(
+            resident=self.external_a,
+            physical_bed=self.beds[1][0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+
+        application = self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        self.assertEqual(application.created_occupancy_count, 1)
+        skipped = application.result_snapshot['skipped_rows']
+        external_row = next(
+            row for row in skipped if row['resident_id'] == self.external_a.pk
+        )
+        self.assertFalse(external_row['in_plan'])
+        self.assertIsNone(external_row['source_placement_id'])
+
+    def test_conflict_payload_in_plan_is_authoritative_from_effective_placements(self):
+        # Backend-13 / review-7 note 2: признак плановой строки берётся из
+        # effective placements, а не из dict конфликта. Явно неверные
+        # значения (устаревший False для плановой строки, чужой True у
+        # внепланового члена) не должны попадать в итоговый payload.
+        from types import SimpleNamespace
+
+        from settlement.apply import _conflict_payloads
+
+        _cohort, run = self._two_placement_run()
+        plan_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        bed = self.beds[0][0]
+
+        locked = {
+            'beds': [bed],
+            'resident_rows': SimpleNamespace(
+                residents=[self.internal_resident, self.external_a],
+            ),
+            'effective_placements': [
+                SimpleNamespace(
+                    resident_id=self.internal_resident.pk,
+                    physical_bed_id=plan_placement.physical_bed_id,
+                    source_placement=plan_placement,
+                ),
+            ],
+        }
+        conflicts = {
+            self.internal_resident.pk: {
+                'reason_codes': ['hard_rule_conflict'],
+                'rule_ids': ['SET-R033'],
+                'message': 'Конфликт плановой строки.',
+                'apply_code': 'hard_conflict',
+                'in_plan': False,
+                'source_placement_id': None,
+            },
+            self.external_a.pk: {
+                'reason_codes': ['hard_rule_conflict'],
+                'rule_ids': ['SET-R033'],
+                'message': 'Конфликт внепланового члена.',
+                'apply_code': 'hard_conflict',
+                'in_plan': True,
+                'source_placement_id': plan_placement.pk,
+            },
+        }
+
+        payloads = _conflict_payloads(conflicts=conflicts, locked=locked)
+        by_resident = {row['resident_id']: row for row in payloads}
+
+        plan_row = by_resident[self.internal_resident.pk]
+        self.assertTrue(plan_row['in_plan'])
+        self.assertEqual(
+            plan_row['source_placement_id'],
+            plan_placement.pk,
+        )
+
+        out_row = by_resident[self.external_a.pk]
+        self.assertFalse(out_row['in_plan'])
+        self.assertIsNone(out_row['source_placement_id'])
+
+    def test_unresolved_rows_expose_rule_ids(self):
+        from settlement.views import _auto_settlement_run_payload
+
+        cohort = self._prepared_cohort()
+        run = create_settlement_preview_run(
+            cohort_id=cohort.pk,
+            control_context=self.control_context,
+        )
+
+        payload = _auto_settlement_run_payload(run)
+
+        self.assertTrue(payload['unresolved'])
+        self.assertTrue(payload['unresolved'][0]['rule_ids'])
+
+    def test_shift_apply_payload_contains_skipped_per_shift(self):
+        from settlement.views import _auto_settlement_run_payload
+
+        cohort, run = self._two_placement_run()
+        conflicting_placement = run.placements.get(
+            resident_id=self.internal_resident.pk,
+        )
+        member = cohort.members.get(resident_id=self.internal_resident.pk)
+        EmployeeBedOccupancy.objects.create(
+            resident=self.external_a,
+            physical_bed_id=conflicting_placement.physical_bed_id,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            starts_at=member.arrival_at,
+            settled_at=member.arrival_at,
+            ends_at=member.departure_at,
+            settled_by=self.control_actor,
+        )
+        self._apply(
+            run_id=run.pk,
+            control_context=self.control_context,
+        )
+
+        payload = _auto_settlement_run_payload(run)
+
+        self.assertEqual(payload['shift_apply']['day']['skipped_count'], 1)
+        self.assertEqual(
+            len(payload['shift_apply']['day']['skipped']),
+            1,
+        )
+        self.assertEqual(payload['shift_apply']['night']['skipped_count'], 0)
+
+    def test_full_conflict_error_payload_contains_all_skipped_rows(self):
+        cohort, run = self._pool_run()
+        bed = self.beds[0][0]
+        SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed=bed,
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск прибывающего',
+            created_by_access=self.control_access,
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            self._apply(
+                run_id=run.pk,
+                control_context=self.control_context,
+            )
+
+        params = raised.exception.error_list[0].params or {}
+        skipped = params.get('skipped_rows', [])
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped[0]['reason_codes'], ['bed_prepared_hold'])
+        self.assertEqual(skipped[0]['rule_ids'], ['SET-R095'])
 
     def test_repeat_apply_reuses_unchanged_auto_occupancy(self):
         cohort, first_run = self._confirmed_run(include_unresolved=False)
@@ -12853,6 +16057,11 @@ class M9PreviewCorrectionTests(TestCase):
 
     def _run_with_target(self, *, include_unresolved=True, target=(0, 0)):
         cohort = self._prepared_cohort(include_unresolved=include_unresolved)
+        base_slot = AccommodationAnchorCalendarSlot.objects.get(
+            anchor=self.anchors[2][0],
+            watch_period=self.period,
+        )
+        self._binding(self.position_resident, base_slot)
         slot = self._slot(*target)
         run = self._confirmed_run_for_cohort(cohort)
         return cohort, run, slot
@@ -12860,26 +16069,26 @@ class M9PreviewCorrectionTests(TestCase):
     def test_move_placement_is_append_only_and_apply_uses_effective_target(self):
         cohort, run, target = self._run_with_target(
             include_unresolved=False,
-            target=(2, 1),
+            target=(0, 0),
         )
         base = run.placements.get()
         correction = move_settlement_preview_resident(
             run_id=run.pk,
             resident_id=base.resident_id,
             target_calendar_slot_id=target.pk,
-            target_physical_bed_id=self.beds[2][1].pk,
+            target_physical_bed_id=self.beds[0][0].pk,
             reason='Переставить в подтверждённое место.',
             control_context=self.control_context,
         )
         effective = get_effective_settlement_preview_plan(run_id=run.pk)
         decision = effective.decisions[0]
         self.assertEqual(decision.effective_correction_id, correction.pk)
-        self.assertEqual(decision.physical_bed_id, self.beds[2][1].pk)
+        self.assertEqual(decision.physical_bed_id, self.beds[0][0].pk)
         self.assertEqual(run.placements.get().physical_bed_id, base.physical_bed_id)
 
         application = self._apply(run_id=run.pk)
         occupancy = application.created_occupancies.get()
-        self.assertEqual(occupancy.physical_bed_id, self.beds[2][1].pk)
+        self.assertEqual(occupancy.physical_bed_id, self.beds[0][0].pk)
         self.assertEqual(occupancy.source_preview_correction_id, correction.pk)
         self.assertEqual(application.normalized_fingerprint, effective.fingerprint)
         item = application.occupancy_items.get(action='created')
@@ -13261,10 +16470,20 @@ class AutoSettlementM7M8HttpTests(TestCase):
         )
 
     def _prepared_cohort(self, *, include_unresolved=True):
-        return M7SavedPreviewTests._prepared_cohort(
+        cohort = M7SavedPreviewTests._prepared_cohort(
             self,
             include_unresolved=include_unresolved,
         )
+        slot = AccommodationAnchorCalendarSlot.objects.get(
+            anchor=self.anchors[2][0],
+            watch_period=self.period,
+        )
+        M6SettlementResolverTests._binding(
+            self,
+            self.position_resident,
+            slot,
+        )
+        return cohort
 
     def test_state_lists_approved_cohort_and_serializes_no_secrets(self):
         approved = self._prepared_cohort()
@@ -13297,8 +16516,9 @@ class AutoSettlementM7M8HttpTests(TestCase):
         self.assertEqual(draft['member_count'], 2)
         self.assertEqual(draft['placement_count'], 1)
         self.assertEqual(draft['unresolved_count'], 1)
-        self.assertEqual(draft['placements'][0]['source'], 'position')
+        self.assertEqual(draft['placements'][0]['source'], 'binding')
         self.assertTrue(draft['unresolved'][0]['reason'])
+        self.assertTrue(draft['unresolved'][0]['rule_ids'])
 
         confirmed = self.client.post(
             reverse('settlement_auto_preview_confirm'),
@@ -13546,6 +16766,63 @@ class AutoSettlementM7M8HttpTests(TestCase):
         ):
             self.assertNotIn(str(forbidden), serialized)
 
+    def test_http_apply_rejects_planned_bed_with_active_preparation(self):
+        """T-029 QA-2: подготовка A × apply B → 409, подготовка цела."""
+        cohort = self._prepared_cohort(include_unresolved=False)
+        created = self.client.post(
+            reverse('settlement_auto_preview_create'),
+            data={'cohort_id': cohort.pk},
+            content_type='application/json',
+        )
+        self.assertEqual(created.status_code, 200, created.content)
+        run_id = created.json()['preview']['id']
+        confirmed = self.client.post(
+            reverse('settlement_auto_preview_confirm'),
+            data={'run_id': run_id},
+            content_type='application/json',
+        )
+        self.assertEqual(confirmed.status_code, 200, confirmed.content)
+
+        run = SettlementPreviewRun._base_manager.get(pk=run_id)
+        placement = run.placements.get()
+        preparation = SettlementBedPreparation.objects.create(
+            resident=self.external_a,
+            physical_bed_id=placement.physical_bed_id,
+            arrival_date=self.period.starts_on,
+            hold_until=timezone.now() + timedelta(days=1),
+            status=SettlementBedPreparation.Status.PREPARED,
+            basis='Пропуск внешнего',
+            created_by_access=self.control_access,
+        )
+
+        with mock.patch('settlement.apply._validate_apply_date'):
+            applied = self.client.post(
+                reverse('settlement_auto_preview_apply_day'),
+                data={'run_id': run_id, 'confirm_replace_manual': False},
+                content_type='application/json',
+            )
+
+        self.assertEqual(applied.status_code, 409, applied.content)
+        self.assertEqual(
+            applied.json()['code'],
+            'settlement.apply.bed_unavailable_for_plan',
+        )
+        preparation.refresh_from_db()
+        self.assertEqual(
+            preparation.status,
+            SettlementBedPreparation.Status.PREPARED,
+        )
+        self.assertFalse(
+            EmployeeBedOccupancy._base_manager.filter(
+                source_application__isnull=False,
+            ).exists(),
+        )
+        self.assertFalse(
+            SettlementPreviewApplication._base_manager.filter(
+                preview_run_id=run_id,
+            ).exists(),
+        )
+
 
 class M8SettlementApplyMigrationTests(TransactionTestCase):
     migrate_from = ('settlement', '0013_resident_occupancy_subject')
@@ -13554,7 +16831,7 @@ class M8SettlementApplyMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_from)
         executor.migrate(targets)
         self.old_apps = executor.loader.project_state(targets).apps
 
@@ -13564,7 +16841,7 @@ class M8SettlementApplyMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_to)
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
@@ -13738,11 +17015,14 @@ class M5ShiftSourceMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(
-            executor,
-            self.migrate_from,
+        # Здесь намеренно откатываются assignments до 0007. Пин references на
+        # последнюю миграцию вместе с этим откатом даёт InvalidMigrationPlan
+        # (план с прямыми и обратными шагами), а Dormitory этот тест не создаёт.
+        targets = [
+            ('settlement', '0014_m8_apply_provenance'),
             ('assignments', '0007_equipment_assignment_provenance'),
-        )
+            *executor.loader.graph.leaf_nodes('users'),
+        ]
         executor.migrate(targets)
         self.old_apps = executor.loader.project_state(targets).apps
 
@@ -13941,7 +17221,7 @@ class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_from)
         executor.migrate(targets)
         self.old_apps = executor.loader.project_state(targets).apps
 
@@ -13951,7 +17231,7 @@ class ResidentOccupancySubjectMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_to)
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
@@ -14109,7 +17389,7 @@ class ShiftScopedApplyMigrationTests(TransactionTestCase):
     def setUp(self):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_from)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_from)
         executor.migrate(targets)
         self.old_apps = executor.loader.project_state(targets).apps
 
@@ -14119,7 +17399,7 @@ class ShiftScopedApplyMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_to)
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
@@ -14343,7 +17623,7 @@ class PreviewCorrectionMigrationTests(TransactionTestCase):
         self.addCleanup(self._restore_latest_migrations)
         executor = MigrationExecutor(connection)
         executor.migrate(
-            _migration_targets_with_latest_users(executor, self.migrate_from),
+            _migration_targets_with_current_foreign_apps(executor, self.migrate_from),
         )
 
     def _restore_latest_migrations(self):
@@ -14352,7 +17632,7 @@ class PreviewCorrectionMigrationTests(TransactionTestCase):
 
     def _migrate_to_target(self):
         executor = MigrationExecutor(connection)
-        targets = _migration_targets_with_latest_users(executor, self.migrate_to)
+        targets = _migration_targets_with_current_foreign_apps(executor, self.migrate_to)
         executor.migrate(targets)
         return executor.loader.project_state(targets).apps
 
@@ -14418,3 +17698,416 @@ class PreviewCorrectionMigrationTests(TransactionTestCase):
         ):
             executor.migrate([self.migrate_from])
         self.assertTrue(CorrectionModel.objects.filter(pk=correction.pk).exists())
+
+
+class PersonnelCategoryRoomRuleTests(TestCase):
+    """Решение владельца 22.11.2026: рабочие и ИТР не в одной комнате."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.dormitory = Dormitory.objects.create(number='KAT')
+        cls.worker_position = PersonnelPosition.objects.create(
+            code='kat-worker',
+            name='Категория рабочий',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
+        cls.itr_position = PersonnelPosition.objects.create(
+            code='kat-itr',
+            name='Категория ИТР',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        cls.empty_position = PersonnelPosition.objects.create(
+            code='kat-empty',
+            name='Категория не указана',
+        )
+        cls.worker = cls._employee('Рабочий категории', cls.worker_position)
+        cls.itr = cls._employee('ИТР категории', cls.itr_position)
+        cls.unknown = cls._employee('Без категории', cls.empty_position)
+        cls.worker_resident = get_or_create_employee_resident(
+            employee_id=cls.worker.pk,
+        )[0]
+        cls.itr_resident = get_or_create_employee_resident(
+            employee_id=cls.itr.pk,
+        )[0]
+        cls.unknown_resident = get_or_create_employee_resident(
+            employee_id=cls.unknown.pk,
+        )[0]
+        cls.room = PhysicalRoom.objects.create(
+            dormitory=cls.dormitory,
+            floor=1,
+            number=1,
+            room_type=PhysicalRoom.RoomType.STANDARD,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=4,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+            side_position=1,
+        )
+        cls.block_a_bed = PhysicalBed.objects.create(
+            room=cls.room,
+            stable_id='KAT-R01-A1',
+            block=PhysicalBed.Block.A,
+            position=1,
+        )
+        cls.block_b_bed = PhysicalBed.objects.create(
+            room=cls.room,
+            stable_id='KAT-R01-B1',
+            block=PhysicalBed.Block.B,
+            position=1,
+        )
+        cls.itr_room = PhysicalRoom.objects.create(
+            dormitory=cls.dormitory,
+            floor=1,
+            number=2,
+            room_type=PhysicalRoom.RoomType.ITR,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            capacity=3,
+            corridor_side=PhysicalRoom.CorridorSide.RIGHT,
+            side_position=1,
+        )
+        cls.itr_room_bed = PhysicalBed.objects.create(
+            room=cls.itr_room,
+            stable_id='KAT-R02-ITR1',
+            block=PhysicalBed.Block.ITR,
+            position=1,
+        )
+
+    @classmethod
+    def _employee(cls, full_name, position):
+        return Employee.objects.create(
+            full_name=full_name,
+            sex=Employee.Sex.MALE,
+            personnel_position=position,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+
+    def _occupy(self, *, bed, resident, starts_at, ends_at=None):
+        return EmployeeBedOccupancy.objects.create(
+            resident=resident,
+            physical_bed=bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            settled_by=self.worker,
+            settled_at=starts_at,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+
+    def _validate(self, *, resident, room, starts_at):
+        return _validate_resident_and_destination(
+            resident=resident,
+            room=room,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(days=10),
+        )
+
+    def test_worker_and_itr_in_one_room_even_in_different_blocks(self):
+        now = timezone.now()
+        self._occupy(
+            bed=self.block_a_bed,
+            resident=self.itr_resident,
+            starts_at=now - timedelta(days=1),
+        )
+
+        with self.assertRaises(ValidationError) as captured:
+            self._validate(
+                resident=self.worker_resident,
+                room=self.room,
+                starts_at=now,
+            )
+
+        self.assertEqual(
+            captured.exception.error_list[0].code,
+            'settlement_room_personnel_category_conflict',
+        )
+
+    def test_itr_room_accepts_only_itr(self):
+        now = timezone.now()
+
+        with self.assertRaises(ValidationError) as captured:
+            self._validate(
+                resident=self.worker_resident,
+                room=self.itr_room,
+                starts_at=now,
+            )
+
+        self.assertEqual(
+            captured.exception.error_list[0].code,
+            'settlement_room_personnel_category_conflict',
+        )
+        self._validate(
+            resident=self.itr_resident,
+            room=self.itr_room,
+            starts_at=now,
+        )
+
+    def test_missing_category_is_refused_with_exact_message(self):
+        now = timezone.now()
+
+        with self.assertRaises(ValidationError) as captured:
+            self._validate(
+                resident=self.unknown_resident,
+                room=self.room,
+                starts_at=now,
+            )
+
+        self.assertEqual(
+            captured.exception.error_list[0].code,
+            'missing_settlement_personnel_category',
+        )
+        self.assertEqual(
+            captured.exception.error_list[0].message,
+            'Уточните категорию кадровой должности: рабочий или ИТР.',
+        )
+
+    def test_missing_category_of_neighbour_is_reported_as_missing(self):
+        # Review-12 N-3: сосед без категории не превращает отказ в «смешение».
+        now = timezone.now()
+        self._occupy(
+            bed=self.block_a_bed,
+            resident=self.unknown_resident,
+            starts_at=now - timedelta(days=1),
+        )
+
+        with self.assertRaises(ValidationError) as captured:
+            self._validate(
+                resident=self.worker_resident,
+                room=self.room,
+                starts_at=now,
+            )
+
+        self.assertEqual(
+            captured.exception.error_list[0].code,
+            'missing_settlement_personnel_category',
+        )
+        self.assertEqual(
+            captured.exception.error_list[0].message,
+            'Уточните категорию кадровой должности: рабочий или ИТР.',
+        )
+
+    def test_ended_occupancy_does_not_block_other_category(self):
+        now = timezone.now()
+        self._occupy(
+            bed=self.block_a_bed,
+            resident=self.itr_resident,
+            starts_at=now - timedelta(days=10),
+            ends_at=now - timedelta(days=5),
+        )
+
+        self._validate(
+            resident=self.worker_resident,
+            room=self.room,
+            starts_at=now,
+        )
+
+    def test_apply_category_conflict_classifies_messages(self):
+        from settlement.apply import _category_conflict
+
+        conflict = _category_conflict(
+            self.worker_resident,
+            room=self.itr_room,
+            roommate_categories=(),
+        )
+        self.assertEqual(
+            conflict[0],
+            'settlement_room_personnel_category_conflict',
+        )
+        missing = _category_conflict(
+            self.unknown_resident,
+            room=self.room,
+            roommate_categories=(),
+        )
+        self.assertEqual(missing[0], 'missing_settlement_personnel_category')
+        self.assertEqual(
+            missing[2],
+            'Уточните категорию кадровой должности: рабочий или ИТР.',
+        )
+
+    def _confirmed_binding(
+        self,
+        *,
+        bed,
+        valid_from,
+        valid_to,
+        period_from=None,
+        period_to=None,
+        assignment_valid_from=None,
+        assignment_valid_to=None,
+    ):
+        """Подтверждённая плановая привязка ИТР к койке комнаты."""
+
+        period_from = period_from or valid_from
+        period_to = period_to or valid_to
+        composition = WatchComposition.objects.create(
+            code=f'kat-composition-{bed.pk}',
+            name=f'KAT состав {bed.pk}',
+            is_active=True,
+        )
+        employee = Employee.objects.create(
+            full_name='KAT ИТР с привязкой',
+            sex=Employee.Sex.MALE,
+            personnel_position=self.itr_position,
+            watch_composition=composition,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        resident, _created = get_or_create_employee_resident(
+            employee_id=employee.pk,
+        )
+        source = SettlementSource.objects.create(
+            source_type=SettlementSource.SourceType.DOCUMENT,
+            title=f'KAT binding {resident.pk}',
+            version='1',
+            file_sha256='c' * 64,
+            status=SettlementSource.Status.CONFIRMED,
+            confirmed_at=timezone.now(),
+            confirmed_by_label='Тест категорий',
+        )
+        revision = SettlementRevision.objects.create(
+            code=f'KAT-REV-{resident.pk}-{bed.pk}',
+            source=source,
+            status=SettlementRevision.Status.CONFIRMED,
+            effective_at=timezone.now(),
+            confirmed_at=timezone.now(),
+            confirmed_by_label='Тест категорий',
+            reason='Проверка плановой привязки категории.',
+        )
+        period = WatchPeriod.objects.create(
+            name=f'KAT период {resident.pk}',
+            watch_composition=composition,
+            starts_on=period_from,
+            ends_on=period_to,
+            is_active=True,
+        )
+        anchor = AccommodationAnchor.objects.create(
+            code=f'KAT-ANCHOR-{resident.pk}-{bed.pk}',
+            display_name='KAT плановое место',
+            anchor_type=AccommodationAnchor.AnchorType.FUNCTION,
+            ordinal=1,
+            status=AccommodationAnchor.Status.ACTIVE,
+            created_revision=revision,
+        )
+        assignment_valid_from = assignment_valid_from or valid_from
+        assignment = AccommodationAnchorBedAssignment.objects.create(
+            anchor=anchor,
+            physical_bed=bed,
+            valid_from=timezone.make_aware(
+                datetime.combine(assignment_valid_from, datetime.min.time()),
+            ),
+            valid_to=(
+                timezone.make_aware(
+                    datetime.combine(
+                        assignment_valid_to + timedelta(days=1),
+                        datetime.min.time(),
+                    ),
+                )
+                if assignment_valid_to is not None else None
+            ),
+            ended_revision=(revision if assignment_valid_to is not None else None),
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision=revision,
+        )
+        slot = create_calendar_slot(
+            anchor_id=anchor.pk,
+            watch_period_id=period.pk,
+            source_revision_id=revision.pk,
+        )
+        slot = confirm_calendar_slot(
+            slot_id=slot.pk,
+            approved_by_id=self.worker.pk,
+            approved_at=timezone.now(),
+        )
+        binding = create_employee_accommodation_binding(
+            resident_id=resident.pk,
+            calendar_slot_id=slot.pk,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            basis_type='kat-test',
+            basis_id=str(bed.pk),
+            basis_snapshot={'bed': bed.pk},
+            source_revision_id=revision.pk,
+        )
+        confirm_employee_accommodation_binding(
+            binding_id=binding.pk,
+            approved_by_id=self.worker.pk,
+        )
+        return assignment
+
+    def test_confirmed_binding_blocks_other_category_on_overlapping_dates(self):
+        # D1 (QA-21): ручной путь обязан видеть плановую привязку ИТР.
+        now = timezone.now()
+        today = timezone.localdate(now)
+        self._confirmed_binding(
+            bed=self.block_b_bed,
+            valid_from=today,
+            valid_to=today + timedelta(days=30),
+        )
+
+        with self.assertRaises(ValidationError) as captured:
+            self._validate(
+                resident=self.worker_resident,
+                room=self.room,
+                starts_at=now,
+            )
+
+        self.assertEqual(
+            captured.exception.error_list[0].code,
+            'settlement_room_personnel_category_conflict',
+        )
+
+    def test_confirmed_binding_outside_dates_does_not_block(self):
+        now = timezone.now()
+        today = timezone.localdate(now)
+        self._confirmed_binding(
+            bed=self.block_b_bed,
+            valid_from=today - timedelta(days=40),
+            valid_to=today - timedelta(days=30),
+        )
+
+        self._validate(
+            resident=self.worker_resident,
+            room=self.room,
+            starts_at=now,
+        )
+
+    def test_closed_anchor_assignment_does_not_block(self):
+        # N1 (QA-22): закрепление койки за якорем действует только в своём
+        # периоде. Слот и привязка валидны (иначе M4 не соберётся), но закрепление
+        # закрыто в прошлом — как после переноса якоря в другую комнату. Такую
+        # комбинацию даёт только «историческая» правка, поэтому окно закрепления
+        # переписывается напрямую: доменные команды не позволяют подтверждённому
+        # слоту существовать с непокрывающим закреплением.
+        now = timezone.now()
+        today = timezone.localdate(now)
+        assignment = self._confirmed_binding(
+            bed=self.block_b_bed,
+            valid_from=today,
+            valid_to=today + timedelta(days=2),
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'UPDATE settlement_accommodationanchorbedassignment '
+                'SET valid_from = %s, valid_to = %s, ended_revision_id = %s '
+                'WHERE id = %s',
+                [
+                    timezone.make_aware(
+                        datetime.combine(
+                            today - timedelta(days=60),
+                            datetime.min.time(),
+                        ),
+                    ),
+                    timezone.make_aware(
+                        datetime.combine(
+                            today - timedelta(days=50),
+                            datetime.min.time(),
+                        ),
+                    ),
+                    assignment.anchor.created_revision_id,
+                    assignment.pk,
+                ],
+            )
+
+        self._validate(
+            resident=self.worker_resident,
+            room=self.room,
+            starts_at=now,
+        )

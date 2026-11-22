@@ -14,13 +14,19 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import Client, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
-from django.urls import Resolver404, resolve, reverse
+from django.urls import resolve, reverse
 from django.utils import timezone
 
 from references.models import Dormitory
 from shifts.models import WatchPeriod
 from users import employee_access_locks
-from users.models import Employee, EmployeeAccess, Role, WatchComposition
+from users.models import (
+    Employee,
+    EmployeeAccess,
+    PersonnelPosition,
+    Role,
+    WatchComposition,
+)
 
 from . import control as control_module
 from . import residents as settlement_residents
@@ -38,6 +44,7 @@ from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
     PhysicalRoom,
+    SettlementClerkShift,
     SettlementControlEvent,
     SettlementControlLease,
     SettlementPreviewApplication,
@@ -1852,8 +1859,14 @@ class SettlementControlHttpLifecycleTests(
         self.assertContains(response, self.acquire_url)
         self.assertContains(response, self.heartbeat_url)
         self.assertContains(response, self.release_url)
-        self.assertEqual(response.content.count(b'-settlement-map-v35'), 2)
+        self.assertEqual(response.content.count(b'-settlement-map-v39'), 5)
+        self.assertContains(response, 'js/settlement-temporary-placement.js')
+        self.assertContains(response, 'js/settlement-clerk-shift.js')
+        self.assertNotContains(response, '-settlement-map-v37')
+        self.assertNotContains(response, '-settlement-map-v36')
+        self.assertNotContains(response, '-settlement-map-v35')
         self.assertNotContains(response, '-settlement-map-v34')
+        self.assertNotContains(response, '-settlement-map-v33')
         self.assertContains(response, 'data-auto-apply-night-url')
         self.assertContains(response, 'data-auto-apply-day-url')
         self.assertContains(response, 'Применить ночную смену')
@@ -1954,9 +1967,17 @@ class SettlementControlHttpLifecycleTests(
         )
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
 
-    def test_no_takeover_endpoint_was_added(self):
-        with self.assertRaises(Resolver404):
-            resolve('/clerk/settlement/control/takeover/')
+    def test_takeover_endpoint_is_admin_only_http_route(self):
+        match = resolve('/clerk/settlement/control/takeover/')
+
+        self.assertEqual(
+            match.url_name,
+            'settlement_control_takeover',
+        )
+        self.assertEqual(
+            reverse('settlement_control_takeover'),
+            '/clerk/settlement/control/takeover/',
+        )
 
 
 class SettlementControlledWriterTests(
@@ -1979,6 +2000,20 @@ class SettlementControlledWriterTests(
             ends_on=today + timedelta(days=14),
             is_active=True,
         )
+        # Решение владельца 22.11.2026: категория кадровой должности обязательна.
+        cls.worker_position = PersonnelPosition.objects.create(
+            code='control-writer-worker',
+            name='Control writer worker position',
+            settlement_category=PersonnelPosition.SettlementCategory.WORKER,
+        )
+        # Решение владельца 22.11.2026: при активной вахте клерк пишет только
+        # со своей OPEN-сменой. Эти тесты про писателя/блокировки, поэтому
+        # смена клерка открыта в фикстуре.
+        cls.clerk_shift = SettlementClerkShift.objects.create(
+            clerk_access=cls.clerk_access,
+            watch_period=cls.watch_period,
+            status=SettlementClerkShift.Status.OPEN,
+        )
         cls.same_employee_access = EmployeeAccess.objects.create(
             employee=cls.clerk_access.employee,
             role=cls.clerk_role,
@@ -1990,6 +2025,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer subject',
             personnel_number='CONTROL-WRITER-SUBJECT',
             sex=Employee.Sex.MALE,
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -2005,6 +2041,7 @@ class SettlementControlledWriterTests(
             full_name='Control writer unrelated subject',
             personnel_number='CONTROL-WRITER-UNRELATED',
             sex=Employee.Sex.MALE,
+            personnel_position=cls.worker_position,
             watch_composition=cls.watch_composition,
             status=Employee.Status.ACTIVE,
             is_active=True,
@@ -2031,7 +2068,9 @@ class SettlementControlledWriterTests(
             number=1,
             room_type=PhysicalRoom.RoomType.STANDARD,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-            capacity=1,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест — только ручной ИТР-путь.
+            capacity=3,
             corridor_side=PhysicalRoom.CorridorSide.LEFT,
             side_position=1,
         )
@@ -2041,7 +2080,9 @@ class SettlementControlledWriterTests(
             number=2,
             room_type=PhysicalRoom.RoomType.STANDARD,
             transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-            capacity=1,
+            sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY,
+            # T-036 backend-14: комнаты <=2 мест — только ручной ИТР-путь.
+            capacity=3,
             corridor_side=PhysicalRoom.CorridorSide.RIGHT,
             side_position=1,
         )

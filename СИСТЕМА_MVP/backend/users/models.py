@@ -595,8 +595,21 @@ class ProductionSpecialization(models.Model):
 class PersonnelPosition(models.Model):
     """Official personnel position imported from 1C or selected in the employee card."""
 
+    class SettlementCategory(models.TextChoices):
+        UNCLASSIFIED = '', 'Не указана'
+        WORKER = 'worker', 'Рабочий'
+        ITR = 'itr', 'ИТР'
+
     code = models.SlugField('Код должности', max_length=96, unique=True)
     name = models.CharField('Кадровая должность', max_length=255, unique=True)
+    settlement_category = models.CharField(
+        'Категория для расселения',
+        max_length=8,
+        choices=SettlementCategory.choices,
+        default=SettlementCategory.UNCLASSIFIED,
+        blank=True,
+        help_text='Для авторасселения рабочих и ИТР по разным комнатам.',
+    )
     requires_specialization = models.BooleanField(
         'Требует производственную специализацию',
         default=False,
@@ -624,6 +637,12 @@ class PersonnelPosition(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def settlement_category_label(self):
+        return dict(self.SettlementCategory.choices).get(
+            self.settlement_category, self.SettlementCategory.UNCLASSIFIED.label,
+        )
 
 
 class TemporaryWorkTransfer(models.Model):

@@ -169,13 +169,56 @@ class TruckCapacityRule(models.Model):
 
 
 class Dormitory(models.Model):
+    class Kind(models.TextChoices):
+        OWN = 'own', 'Собственный'
+        RENTED = 'rented', 'Арендованный'
+
     number = models.CharField('Номер общежития', max_length=16, unique=True)
+    kind = models.CharField(
+        'Тип фонда',
+        max_length=16,
+        choices=Kind.choices,
+        default=Kind.OWN,
+        db_index=True,
+        help_text=(
+            'Собственный фонд — КИС-5/КИС-6. Арендованный фонд вводится '
+            'отдельной панелью и на карту КИС-5/6 не попадает.'
+        ),
+    )
+    contractor_organization = models.ForeignKey(
+        'users.ContractorOrganization',
+        verbose_name='Организация-арендодатель',
+        on_delete=models.PROTECT,
+        related_name='dormitories',
+        null=True,
+        blank=True,
+    )
+    note = models.TextField('Примечание', blank=True, default='')
     is_active = models.BooleanField('Активно', default=True)
 
     class Meta:
         verbose_name = 'Общежитие'
         verbose_name_plural = 'Общежития'
         ordering = ['number']
+
+    def clean(self):
+        super().clean()
+        if self.kind == self.Kind.RENTED and not self.contractor_organization_id:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({
+                'contractor_organization': (
+                    'Для арендованного фонда выберите организацию-арендодателя.'
+                )
+            })
+        if self.kind != self.Kind.RENTED and self.contractor_organization_id:
+            from django.core.exceptions import ValidationError
+
+            raise ValidationError({
+                'contractor_organization': (
+                    'Для собственного фонда организация-арендодатель не указывается.'
+                )
+            })
 
     def __str__(self):
         return f'Общежитие {self.number}'

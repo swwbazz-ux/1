@@ -6,7 +6,7 @@
 {% block extra_head %}
 {% include "includes/role_app_pwa_head.html" with manifest_url="/clerk/manifest.webmanifest" theme_color="#2E7D52" apple_title="Делопроизводитель" icon_180="img/pwa/clerk-180.png" service_worker_url="/clerk/sw.js" role_code="settlement_clerk" legacy_scope="/clerk/" %}
 <link rel="stylesheet" href="{% static 'css/clerk-workplace.css' %}?v={{ static_asset_release }}-clerk-workplace-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v35">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk.css' %}?v={{ static_asset_release }}-settlement-map-v39">
 <script src="{% static 'js/clerk-workplace-pwa.js' %}?v={{ static_asset_release }}-clerk-workplace-v2" defer></script>
 {% block clerk_extra_head %}{% endblock %}
 {% endblock %}

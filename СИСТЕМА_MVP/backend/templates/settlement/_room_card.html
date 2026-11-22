@@ -12,6 +12,10 @@
          data-search="{{ room.search_text }}"
          role="group"
          aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, {% if room.is_transferred %}передана в распоряжение{% else %}не передана и недоступна для расселения{% endif %}">
+    {% if room.anchor_types %}
+        {% if "reserve" in room.anchor_types %}<span class="settlement-room-anchor is-anchor-reserve" data-room-anchor="reserve">ВИП-резерв</span>{% endif %}
+        {% if "protected" in room.anchor_types %}<span class="settlement-room-anchor is-anchor-protected" data-room-anchor="protected">Защищённая</span>{% endif %}
+    {% endif %}
     <button type="button"
             class="settlement-room-number"
             data-room-open

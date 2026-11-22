@@ -557,7 +557,7 @@ class CohortMemberWatchProfileProvenanceSchemaTests(TestCase):
         self.assertEqual(defaults['watch_profile_fingerprint'].field.default, '')
         self.assertEqual(
             MigrationLoader(None).graph.leaf_nodes('settlement'),
-            [('settlement', '0019_cohort_member_watch_profile_provenance')],
+            [('settlement', '0023_alter_settlementplacementevent_event_type')],
         )
 
 

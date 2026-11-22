@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
@@ -20,6 +20,7 @@ from .models import (
     AccommodationAnchorBedAssignment,
     AccommodationAnchorCalendarSlot,
     EmployeeBedOccupancy,
+    EmployeeAccommodationBinding,
     PhysicalBed,
     PhysicalRoom,
     SettlementCohort,
@@ -30,6 +31,16 @@ from .models import (
     SettlementPreviewPlacement,
     SettlementPreviewRun,
     SettlementPreviewUnresolved,
+)
+from .bed_availability import active_prepared_bed_ids, active_reserved_bed_ids
+from .intervals import occupancy_overlaps_period
+from .personnel_categories import (
+    MISSING_CATEGORY,
+    MISSING_CATEGORY_MESSAGE,
+    ROOM_CATEGORY_CONFLICT,
+    ROOM_CATEGORY_CONFLICT_MESSAGE,
+    employee_settlement_category,
+    room_allows_personnel_category,
 )
 from .preview_corrections import build_effective_settlement_preview_plan
 from .residents import (
@@ -42,6 +53,7 @@ from .saved_previews import (
     _validate_resolver_result,
 )
 from .resolver import (
+    _occupancy_overlaps_member,
     _replaceable_occupancy_kind,
     resolve_settlement_cohort,
     validate_preview_correction_target,
@@ -49,6 +61,7 @@ from .resolver import (
 from .services import (
     _validate_occupancy_conflicts,
     _validate_resident_and_destination,
+    validate_placement_input_contract,
 )
 
 
@@ -391,6 +404,13 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
     target_bed_ids = tuple(sorted({
         row.physical_bed_id for row in effective_plan.decisions if row.physical_bed_id
     }))
+    # T-036 backend-14: пол комнаты считается по всем её жильцам, поэтому в
+    # снапшот попадают занятия всех коек целевых комнат, а не только целевых.
+    target_room_ids = tuple(sorted(set(
+        PhysicalBed.objects.using(using)
+        .filter(pk__in=target_bed_ids)
+        .values_list('room_id', flat=True)
+    )))
     calendar_slot_ids = tuple(sorted({
         row.calendar_slot_id for row in effective_plan.decisions if row.calendar_slot_id
     }))
@@ -414,6 +434,7 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
             & (
                 Q(resident_id__in=active_resident_ids)
                 | Q(physical_bed_id__in=target_bed_ids)
+                | Q(physical_bed__room_id__in=target_room_ids)
                 | Q(source_application__watch_period_id=period_row['pk'])
             )
             & Q(replaced_by_application__isnull=True)
@@ -460,7 +481,7 @@ def _build_apply_lock_plan(*, run_id: int, work_shift: str) -> _ApplyLockPlan:
         .filter(pk__in=room_ids)
         .order_by('pk')
         .values_list(
-            'pk', 'transfer_status', 'sex_restriction',
+            'pk', 'transfer_status', 'room_type',
             'dormitory_id', 'floor', 'number',
         )
     )
@@ -553,7 +574,7 @@ def _lock_and_revalidate_plan(
     calendar_slots = list(
         AccommodationAnchorCalendarSlot._base_manager.using(using)
         .select_for_update(of=('self',))
-        .select_related('watch_period')
+        .select_related('watch_period', 'anchor', 'anchor__created_revision', 'source_revision')
         .filter(pk__in=calendar_slot_ids).order_by('pk')
     )
     list(
@@ -644,7 +665,7 @@ def _lock_and_revalidate_plan(
     )
     actual_room_snapshot = tuple(
         (
-            row.pk, row.transfer_status, row.sex_restriction,
+            row.pk, row.transfer_status, row.room_type,
             row.dormitory_id, row.floor, row.number,
         )
         for row in rooms
@@ -696,7 +717,7 @@ def _lock_and_revalidate_plan(
     }
 
 
-def _validate_locked_preview(locked):
+def _validate_locked_preview(locked, *, using=None):
     run = locked['run']
     cohort = locked['cohort']
     period = locked['period']
@@ -726,13 +747,20 @@ def _validate_locked_preview(locked):
             materialized_preview_run_id=run.pk,
         )
         validated = _validate_resolver_result(cohort=cohort, result=result)
-        _assert_stored_result_matches(run=run, result=result, validated=validated)
     except ValidationError as error:
         raise _apply_error(
             'stale_preview',
             'Текущие источники не воспроизводят подтверждённый preview.',
         ) from error
-    return result
+    source_changed = False
+    try:
+        _assert_stored_result_matches(run=run, result=result, validated=validated)
+    except ValidationError:
+        # Строки плана могли измениться точечно (подготовка/резерв койки,
+        # пол, посторонняя занятость). Это больше не отменяет всю смену:
+        # строки разделяются на применимые и пропущенные в _classify_row_conflicts.
+        source_changed = True
+    return result, source_changed
 
 
 def _allowed_apply_date(*, period, work_shift):
@@ -813,12 +841,567 @@ def _validate_shift_scope(locked):
     locked['effective_unresolved'] = effective_unresolved
 
 
+def _category_conflict(resident, *, room, roommate_categories):
+    """Причина отказа по категории «рабочий/ИТР» или ``None``.
+
+    Решение владельца 22.11.2026: рабочие и ИТР не живут в одной комнате даже в
+    разных блоках; ИТР-комната принимает только ИТР; пустая категория кадровой
+    должности не назначается автоматически.
+    """
+
+    if resident.is_external:
+        return None
+    category = employee_settlement_category(resident.employee)
+    if category is None:
+        return (
+            MISSING_CATEGORY,
+            ('SET-R102',),
+            MISSING_CATEGORY_MESSAGE,
+        )
+    if not room_allows_personnel_category(
+        room.room_type, category, roommate_categories,
+    ):
+        return (
+            ROOM_CATEGORY_CONFLICT,
+            ('SET-R102',),
+            ROOM_CATEGORY_CONFLICT_MESSAGE,
+        )
+    return None
+
+
+def _sex_conflict(resident, *, occupant_sexes, planned_sexes):
+    """Причина отказа по полу или ``None`` (та же логика, что в resolver).
+
+    T-036 backend-14: пол комнаты вычисляется по эффективным жильцам и по уже
+    поставленным в этом плане жильцам той же комнаты; атрибут комнаты не
+    используется.
+    """
+
+    from .room_sex import (
+        REASON_OCCUPANT_SEX_UNKNOWN,
+        REASON_RESIDENT_SEX_UNKNOWN,
+        REASON_ROOM_SEX_MISMATCH,
+        REASON_ROOM_SEX_MIXED,
+        classify_sexes,
+        rejection_reason,
+        resident_sex,
+    )
+
+    sex = resident_sex(resident)
+    state, room_sex_value = classify_sexes(
+        {*occupant_sexes, *planned_sexes}
+    )
+    reason = rejection_reason(
+        sex=sex,
+        room_state=state,
+        room_sex=room_sex_value,
+    )
+    if reason is None:
+        return None
+    if reason == REASON_RESIDENT_SEX_UNKNOWN:
+        return (
+            'resident_sex_unknown',
+            ('SET-R081', 'SET-R042'),
+            'Пол жильца не указан.',
+        )
+    if reason == REASON_OCCUPANT_SEX_UNKNOWN:
+        return (
+            'room_occupant_sex_unknown',
+            ('SET-R081', 'SET-R043'),
+            'В комнате живёт жилец с неуказанным полом.',
+        )
+    if reason == REASON_ROOM_SEX_MIXED:
+        return (
+            'room_sex_mixed',
+            ('SET-R042', 'SET-R043'),
+            'В комнате на этот период живут и мужчины, и женщины.',
+        )
+    return (
+        'room_sex_mismatch',
+        ('SET-R042', 'SET-R043'),
+        'Пол жильца не совпадает с полом комнаты.',
+    )
+
+
+def _permanent_chain_problem(*, resident, slot, bed, period):
+    """Проверить цепочку employee → permanent anchor → bed (domain-3 §2).
+
+    Возвращает ``(kind, message)``: ``None`` — цепочка подтверждена;
+    ``('invalid', …)`` — карта противоречива (привязка есть, но не та);
+    ``('missing', …)`` — подтверждённой привязки нет вовсе (место может быть
+    временным, но не постоянным). Технический якорь не является исключением:
+    посуточное назначение техники постоянным правом не считается (Q-D3-3).
+    """
+
+    def invalid(message):
+        return 'invalid', message
+
+    if not resident.employee_id:
+        return invalid('Жилец не связан с сотрудником.')
+    employee = resident.employee
+    if not employee.is_active or employee.status != employee.Status.ACTIVE:
+        return invalid('Сотрудник неактивен.')
+    if slot.status != AccommodationAnchorCalendarSlot.Status.CONFIRMED:
+        return invalid('Календарный слот не подтверждён.')
+    if slot.calendar_relation_is_stale:
+        return invalid('Календарный слот устарел.')
+    if slot.source_revision.status != 'confirmed':
+        return invalid('Ревизия слота не подтверждена.')
+    anchor = slot.anchor
+    if anchor.status != anchor.Status.ACTIVE:
+        return invalid('Якорь не действует.')
+    if anchor.created_revision.status != 'confirmed':
+        return invalid('Ревизия создания якоря не подтверждена.')
+
+    bindings = list(
+        EmployeeAccommodationBinding.objects.filter(
+            resident=resident,
+            anchor_calendar_slot=slot,
+        ).order_by('pk'),
+    )
+    valid_bindings = [
+        binding for binding in bindings
+        if (
+            binding.status == EmployeeAccommodationBinding.Status.CONFIRMED
+            and binding.approved_by_id is not None
+            and binding.approved_at is not None
+            and binding.valid_from <= period.starts_on
+            and binding.valid_to >= period.ends_on
+            and binding.source_revision.status == 'confirmed'
+        )
+    ]
+    if not valid_bindings:
+        if bindings:
+            return invalid(
+                'Привязка жильца к слоту не подтверждена, просрочена или '
+                'имеет неподтверждённую ревизию.'
+            )
+        other_binding = EmployeeAccommodationBinding.objects.filter(
+            anchor_calendar_slot=slot,
+            status__in=(
+                EmployeeAccommodationBinding.Status.CONFIRMED,
+                EmployeeAccommodationBinding.Status.CLOSED,
+            ),
+        ).exclude(resident=resident).exists()
+        if other_binding:
+            return invalid('Слот привязан к другому жильцу.')
+        return 'missing', 'Нет подтверждённой привязки жильца к слоту.'
+    period_start = timezone.make_aware(
+        datetime.combine(period.starts_on, time.min),
+        timezone.get_current_timezone(),
+    )
+    assignment_exists = (
+        AccommodationAnchorBedAssignment.objects.filter(
+            anchor=anchor,
+            physical_bed=bed,
+            status=AccommodationAnchorBedAssignment.Status.CONFIRMED,
+            started_revision__status='confirmed',
+            valid_from__lte=period_start,
+        )
+        .filter(Q(valid_to__isnull=True) | Q(valid_to__gte=period_start))
+        .exists()
+    )
+    if not assignment_exists:
+        return invalid('Нет подтверждённого закрепления якоря за целевой койкой.')
+    return None
+
+
+def _placement_place_kind(*, placement, slot):
+    anchor = slot.anchor
+    return (
+        'pool'
+        if anchor.personnel_position_id is None and anchor.equipment_id is None
+        else 'positional'
+    )
+
+
+def _skip_row(
+    *,
+    resident,
+    bed,
+    reason_codes,
+    rule_ids,
+    message,
+    apply_code,
+    line=None,
+    source_placement_id=None,
+    in_plan=False,
+):
+    return {
+        'resident_id': resident.pk,
+        'resident_name': resident.display_name,
+        'physical_bed_id': bed.pk if bed is not None else None,
+        'bed_stable_id': bed.stable_id if bed is not None else '',
+        'reason_codes': list(reason_codes),
+        'rule_ids': list(rule_ids),
+        'message': message,
+        'apply_code': apply_code,
+        'line': line,
+        'source_placement_id': source_placement_id,
+        'in_plan': bool(in_plan),
+    }
+
+
+def _classify_row_conflicts(*, locked, changes, result, source_changed, using):
+    """Дополнить конфликты строками, которые нельзя применить сейчас."""
+
+    members_by_resident = changes['members_by_resident']
+    beds_by_id = {row.pk: row for row in locked['beds']}
+    residents_by_id = {
+        row.pk: row for row in locked['resident_rows'].residents
+    }
+    target_bed_ids = {
+        row.physical_bed_id for row in changes['create_placements']
+    }
+    prepared = active_prepared_bed_ids(
+        bed_ids=target_bed_ids,
+        using=using,
+        for_update=True,
+    ) if target_bed_ids else set()
+    reserved = active_reserved_bed_ids(
+        bed_ids=target_bed_ids,
+        using=using,
+        for_update=True,
+    ) if target_bed_ids else set()
+    effective_rows = [
+        row for row in locked['occupancies']
+        if row not in changes['replace_rows']
+    ]
+    # T-036 backend-14: пол комнаты — по фактическим жильцам на период и по
+    # жильцам, которых этот же план ставит в ту же комнату.
+    from .room_sex import occupancy_sex, resident_sex
+
+    occupancies_by_room: dict[int, list] = {}
+    for row in effective_rows:
+        occupancies_by_room.setdefault(
+            row.physical_bed.room_id, [],
+        ).append(row)
+    planned_sexes_by_room: dict[int, list[tuple[int, str]]] = {}
+    for row in changes['create_placements']:
+        bed = beds_by_id.get(row.physical_bed_id)
+        resident = residents_by_id.get(row.resident_id)
+        if bed is None or resident is None:
+            continue
+        planned_sexes_by_room.setdefault(bed.room_id, []).append(
+            (row.resident_id, resident_sex(resident)),
+        )
+    planned_categories_by_room: dict[int, list[tuple[int, str | None]]] = {}
+    for row in changes['create_placements']:
+        bed = beds_by_id.get(row.physical_bed_id)
+        resident = residents_by_id.get(row.resident_id)
+        if bed is None or resident is None or resident.is_external:
+            continue
+        planned_categories_by_room.setdefault(bed.room_id, []).append(
+            (row.resident_id, employee_settlement_category(resident.employee)),
+        )
+    slots_by_id = {row.pk: row for row in locked['calendar_slots']}
+    place_kinds: dict[int, str] = {}
+    placement_types: dict[int, str] = {}
+    current_placements = {}
+    current_unresolved = {}
+    if source_changed and result is not None:
+        current_placements = {
+            row.resident_id: row for row in result.placements
+        }
+        current_unresolved = {
+            row.resident_id: row for row in result.unresolved
+        }
+
+    def add(resident_id, *, reason_codes, rule_ids, message, apply_code):
+        if resident_id in conflicts:
+            return
+        resident = residents_by_id[resident_id]
+        placement = next(
+            (
+                row for row in locked['effective_placements']
+                if row.resident_id == resident_id
+            ),
+            None,
+        )
+        bed = (
+            beds_by_id.get(placement.physical_bed_id)
+            if placement is not None else None
+        )
+        conflicts[resident_id] = {
+            'reason_codes': list(reason_codes),
+            'rule_ids': list(rule_ids),
+            'message': message,
+            'apply_code': apply_code,
+            'resident': resident,
+            'bed': bed,
+            'in_plan': placement is not None,
+            'source_placement_id': (
+                placement.source_placement.pk
+                if placement is not None and placement.source_placement is not None
+                else None
+            ),
+        }
+
+    conflicts = dict(changes['conflicts'])
+    for placement in list(changes['create_placements']):
+        resident_id = placement.resident_id
+        if resident_id in conflicts:
+            continue
+        member = members_by_resident[resident_id]
+        resident = residents_by_id[resident_id]
+        bed = beds_by_id[placement.physical_bed_id]
+        room = bed.room
+        slot = slots_by_id[placement.calendar_slot_id]
+        place_kind = _placement_place_kind(placement=placement, slot=slot)
+        place_kinds[resident_id] = place_kind
+        if (
+            resident.status != resident.Status.ACTIVE
+            or (
+                resident.employee_id
+                and (
+                    not resident.employee.is_active
+                    or resident.employee.status != resident.employee.Status.ACTIVE
+                )
+            )
+        ):
+            add(
+                resident_id,
+                reason_codes=['resident_inactive'],
+                rule_ids=['SET-R003'],
+                message='Карточка жильца или сотрудник неактивны.',
+                apply_code='hard_conflict',
+            )
+            continue
+        if (
+            slot.calendar_relation_is_stale
+            or slot.source_revision.status != 'confirmed'
+        ):
+            add(
+                resident_id,
+                reason_codes=['stale_calendar_relation'],
+                rule_ids=['SET-R010'],
+                message='Календарное основание места устарело.',
+                apply_code='stale_preview',
+            )
+            continue
+        if place_kind == 'pool':
+            placement_types[resident_id] = 'temporary'
+        else:
+            chain = _permanent_chain_problem(
+                resident=resident,
+                slot=slot,
+                bed=bed,
+                period=locked['period'],
+            )
+            if chain is None:
+                placement_types[resident_id] = 'permanent'
+            else:
+                kind, message = chain
+                if kind == 'invalid':
+                    add(
+                        resident_id,
+                        reason_codes=['permanent_chain_missing'],
+                        rule_ids=['SET-R013', 'SET-R024', 'SET-R065'],
+                        message=(
+                            'Место с постоянным правом имеет противоречивую '
+                            f'привязку; исправьте карту. {message}'
+                        ),
+                        apply_code='permanent_chain_missing',
+                    )
+                    continue
+                # Подтверждённой привязки нет вовсе: это допустимое временное
+                # фактическое размещение (SET-R065), не отказ.
+                placement_types[resident_id] = 'temporary'
+        if placement_types[resident_id] == 'temporary' and (
+            member.arrival_at is None
+            or member.departure_at is None
+            or member.departure_at <= member.arrival_at
+        ):
+            add(
+                resident_id,
+                reason_codes=['temporary_requires_end'],
+                rule_ids=['SET-R066'],
+                message=(
+                    'Для временного размещения нужны начало и окончание '
+                    'в пределах вахты.'
+                ),
+                apply_code='temporary_requires_end',
+            )
+            continue
+        if bed.pk in prepared:
+            # Единственный барьер: глобальный guard удалён, койку проверяет
+            # только эта построчная классификация (review-5 note 4). Не удалять.
+            add(
+                resident_id,
+                reason_codes=['bed_prepared_hold'],
+                rule_ids=['SET-R095'],
+                message='Койка придержана подготовкой за другим жильцом.',
+                apply_code='bed_unavailable_for_plan',
+            )
+            continue
+        if bed.pk in reserved:
+            add(
+                resident_id,
+                reason_codes=['bed_reserve_hold'],
+                rule_ids=['SET-R096'],
+                message='Койка находится в резерве для срочного размещения.',
+                apply_code='bed_unavailable_for_plan',
+            )
+            continue
+        if room.transfer_status != PhysicalRoom.TransferStatus.TRANSFERRED:
+            add(
+                resident_id,
+                reason_codes=['hard_rule_conflict'],
+                rule_ids=['SET-R032'],
+                message='Комната не передана для расселения.',
+                apply_code='hard_conflict',
+            )
+            continue
+        occupant_sexes = {
+            occupancy_sex(row)
+            for row in occupancies_by_room.get(room.pk, ())
+            if row.resident_id != resident.pk
+            and occupancy_overlaps_period(
+                occupancy=row,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
+            )
+        }
+        planned_sexes = {
+            value
+            for other_resident_id, value in planned_sexes_by_room.get(room.pk, ())
+            if other_resident_id != resident.pk
+        }
+        sex_conflict = _sex_conflict(
+            resident,
+            occupant_sexes=occupant_sexes,
+            planned_sexes=planned_sexes,
+        )
+        if sex_conflict is not None:
+            reason, rule_ids, message = sex_conflict
+            add(
+                resident_id,
+                reason_codes=[reason],
+                rule_ids=rule_ids,
+                message=message,
+                apply_code='hard_conflict',
+            )
+            continue
+        # Решение владельца 22.11.2026: категории «рабочий/ИТР» не смешиваются.
+        occupant_categories = {
+            employee_settlement_category(row.resident.employee)
+            for row in occupancies_by_room.get(room.pk, ())
+            if row.resident_id != resident.pk
+            and not row.resident.is_external
+            and occupancy_overlaps_period(
+                occupancy=row,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
+            )
+        }
+        planned_categories = {
+            value
+            for other_resident_id, value in planned_categories_by_room.get(
+                room.pk, (),
+            )
+            if other_resident_id != resident.pk
+        }
+        category_conflict = _category_conflict(
+            resident,
+            room=room,
+            roommate_categories=(
+                *occupant_categories,
+                *planned_categories,
+            ),
+        )
+        if category_conflict is not None:
+            reason, rule_ids, message = category_conflict
+            add(
+                resident_id,
+                reason_codes=[reason],
+                rule_ids=rule_ids,
+                message=message,
+                apply_code='hard_conflict',
+            )
+            continue
+        try:
+            _validate_occupancy_conflicts(
+                resident_id=resident.pk,
+                bed=bed,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
+                persisted_occupancies=effective_rows,
+            )
+        except ValidationError as error:
+            codes = [
+                item.code for item in error.error_list
+            ] if hasattr(error, 'error_list') else [error.code]
+            rule_ids = []
+            if 'settlement.bed.interval_overlap' in codes:
+                rule_ids.append('SET-R033')
+            if 'settlement.employee.interval_overlap' in codes:
+                rule_ids.append('SET-R034')
+            if not rule_ids:
+                rule_ids = ['SET-R033', 'SET-R034']
+            add(
+                resident_id,
+                reason_codes=['hard_rule_conflict'],
+                rule_ids=rule_ids,
+                message='; '.join(str(item) for item in error.messages),
+                apply_code='hard_conflict',
+            )
+            continue
+        if (
+            source_changed
+            and placement.effective_correction is None
+        ):
+            current = current_placements.get(resident_id)
+            if (
+                current is None
+                or current.physical_bed_id != placement.physical_bed_id
+                or current.calendar_slot_id != placement.calendar_slot_id
+            ):
+                unresolved = current_unresolved.get(resident_id)
+                if unresolved is not None:
+                    add(
+                        resident_id,
+                        reason_codes=unresolved.reason_codes,
+                        rule_ids=unresolved.rule_ids,
+                        message='Строка плана больше не воспроизводится из источников.',
+                        apply_code='stale_preview',
+                    )
+                else:
+                    add(
+                        resident_id,
+                        reason_codes=['stale_calendar_relation'],
+                        rule_ids=['SET-R010'],
+                        message='Строка плана устарела относительно источников.',
+                        apply_code='stale_preview',
+                    )
+
+    blocked = set(conflicts)
+    changes['create_placements'] = [
+        row for row in changes['create_placements']
+        if row.resident_id not in blocked
+    ]
+    changes['replace_rows'] = [
+        row for row in changes['replace_rows']
+        if row.resident_id not in blocked
+    ]
+    changes['replaced_with_new'] = sum(
+        1 for row in changes['replace_rows']
+        if row.resident_id in {
+            item.resident_id for item in locked['effective_placements']
+        }
+    )
+    changes['conflicts'] = conflicts
+    changes['place_kinds'] = place_kinds
+    changes['placement_types'] = placement_types
+    return changes
+
+
 def _classify_changes(*, locked, confirm_replace_manual):
     members_by_id = {row.pk: row for row in locked['members']}
     members_by_resident = {row.resident_id: row for row in locked['members']}
     placements_by_resident = {
         row.resident_id: row for row in locked['effective_placements']
     }
+    conflicts: dict[int, dict] = {}
     if len(placements_by_resident) != len(locked['effective_placements']):
         raise _apply_error('incomplete_preview', 'Effective plan содержит duplicate resident.')
     if (
@@ -884,28 +1467,26 @@ def _classify_changes(*, locked, confirm_replace_manual):
             continue
         member = members_by_resident.get(occupancy.resident_id)
         if member is not None:
-            overlaps_member = (
-                occupancy.starts_at < member.departure_at
-                and (occupancy.ends_at is None or occupancy.ends_at > member.arrival_at)
-                and (
-                    occupancy.terminated_at is None
-                    or occupancy.terminated_at > member.arrival_at
-                )
+            overlaps_member = occupancy_overlaps_period(
+                occupancy=occupancy,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
             )
             if overlaps_member:
-                raise _apply_error(
-                    'hard_conflict',
-                    'Resident выбранной смены имеет unrelated occupancy.',
-                )
+                conflicts[occupancy.resident_id] = {
+                    'reason_codes': ['hard_rule_conflict'],
+                    'rule_ids': ['SET-R033', 'SET-R034'],
+                    'message': (
+                        'У жильца есть посторонняя занятость на период вахты.'
+                    ),
+                    'apply_code': 'hard_conflict',
+                }
         for placement in locked['effective_placements']:
             member = members_by_resident[placement.resident_id]
-            overlaps = (
-                occupancy.starts_at < member.departure_at
-                and (occupancy.ends_at is None or occupancy.ends_at > member.arrival_at)
-                and (
-                    occupancy.terminated_at is None
-                    or occupancy.terminated_at > member.arrival_at
-                )
+            overlaps = occupancy_overlaps_period(
+                occupancy=occupancy,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
             )
             if not overlaps:
                 continue
@@ -913,14 +1494,23 @@ def _classify_changes(*, locked, confirm_replace_manual):
                 occupancy.resident_id == placement.resident_id
                 or occupancy.physical_bed_id == placement.physical_bed_id
             ):
-                raise _apply_error(
-                    'hard_conflict',
-                    'Целевой resident или PhysicalBed занят unrelated occupancy.',
-                )
+                conflicts[placement.resident_id] = {
+                    'reason_codes': ['hard_rule_conflict'],
+                    'rule_ids': ['SET-R033', 'SET-R034'],
+                    'message': (
+                        'Целевой жилец или койка заняты посторонней occupancy.'
+                    ),
+                    'apply_code': 'hard_conflict',
+                }
 
+    blocked_residents = set(conflicts)
+    replace_rows = [
+        row for row in replace_rows if row.resident_id not in blocked_residents
+    ]
     create_placements = [
         row for row in locked['effective_placements']
         if row.resident_id not in reusable_by_resident
+        and row.resident_id not in blocked_residents
     ]
     replaced_with_new = sum(
         1 for row in replace_rows if row.resident_id in placements_by_resident
@@ -933,7 +1523,47 @@ def _classify_changes(*, locked, confirm_replace_manual):
         'create_placements': create_placements,
         'excluded': locked['effective_excluded'],
         'replaced_with_new': replaced_with_new,
+        'conflicts': conflicts,
     }
+
+
+def _conflict_payloads(*, conflicts, locked):
+    beds_by_id = {row.pk: row for row in locked['beds']}
+    residents_by_id = {
+        row.pk: row for row in locked['resident_rows'].residents
+    }
+    placements_by_resident = {
+        row.resident_id: row for row in locked['effective_placements']
+    }
+    payloads = []
+    for resident_id in sorted(conflicts):
+        data = conflicts[resident_id]
+        resident = data.get('resident') or residents_by_id[resident_id]
+        # Признак плановой строки — authoritative: он всегда выводится из
+        # effective placements, а не из dict конфликта. Любое явное значение
+        # `in_plan`/`source_placement_id` в конфликте игнорируется, иначе
+        # устаревший или ошибочный False вернул бы дефект QA-7.
+        placement = placements_by_resident.get(resident_id)
+        bed = data.get('bed')
+        if bed is None and placement is not None:
+            bed = beds_by_id.get(placement.physical_bed_id)
+        in_plan = placement is not None
+        source_placement_id = (
+            placement.source_placement.pk
+            if placement is not None and placement.source_placement is not None
+            else None
+        )
+        payloads.append(_skip_row(
+            resident=resident,
+            bed=bed,
+            reason_codes=data['reason_codes'],
+            rule_ids=data['rule_ids'],
+            message=data['message'],
+            apply_code=data['apply_code'],
+            source_placement_id=source_placement_id,
+            in_plan=in_plan,
+        ))
+    return payloads
 
 
 def apply_confirmed_settlement_preview(
@@ -969,7 +1599,10 @@ def apply_confirmed_settlement_preview(
             work_shift=work_shift,
             now=now,
         )
-        _validate_locked_preview(locked)
+        result, source_changed = _validate_locked_preview(
+            locked,
+            using=plan.using,
+        )
         if not locked['run'].requires_shift_split:
             raise _apply_error(
                 'shift_split_required',
@@ -981,6 +1614,29 @@ def apply_confirmed_settlement_preview(
             locked=locked,
             confirm_replace_manual=confirm_replace_manual,
         )
+        changes = _classify_row_conflicts(
+            locked=locked,
+            changes=changes,
+            result=result,
+            source_changed=source_changed,
+            using=plan.using,
+        )
+        skipped_rows = _conflict_payloads(
+            conflicts=changes['conflicts'],
+            locked=locked,
+        )
+        if (
+            skipped_rows
+            and not changes['create_placements']
+            and not changes['reusable_by_resident']
+            and not changes['replace_rows']
+        ):
+            first = skipped_rows[0]
+            raise _apply_error(
+                first['apply_code'],
+                first['message'],
+                params={'skipped_rows': skipped_rows},
+            )
         run = locked['run']
         actor_access = locked['actor_access']
         actor_employee = locked['actor_employee']
@@ -1027,6 +1683,9 @@ def apply_confirmed_settlement_preview(
             'reused_occupancy_ids': list(reused_ids),
             'replaced_auto_occupancy_ids': list(auto_ids),
             'replaced_manual_occupancy_ids': list(manual_ids),
+            'skipped_rows': skipped_rows,
+            'skipped_count': len(skipped_rows),
+            'applied_count': len(changes['create_placements']) + len(reused_ids),
         }
         application = SettlementPreviewApplication(
             preview_run=run,
@@ -1182,11 +1841,105 @@ def apply_confirmed_settlement_preview(
         residents_by_id = {
             row.pk: row for row in locked['resident_rows'].residents
         }
+        # SET-R098/R099: защищённый, служебный и резервный фонд авто не трогает
+        # даже устаревшим preview.
+        from .models import AccommodationAnchor as _Anchor
+        from .special_fund import room_anchor_types
+
+        target_room_ids = sorted({
+            bed.room_id for bed in beds_by_id.values()
+        })
+        special_room_types: dict[int, set[str]] = {}
+        for room_id in target_room_ids:
+            room_obj = next(
+                (room for room in locked['rooms'] if room.pk == room_id),
+                None,
+            )
+            if room_obj is None:
+                continue
+            types = room_anchor_types(room=room_obj, using=plan.using)
+            if types:
+                special_room_types[room_id] = set(types)
+        forbidden_types = {
+            _Anchor.AnchorType.PROTECTED,
+            _Anchor.AnchorType.SERVICE,
+            _Anchor.AnchorType.RESERVE,
+        }
+        # Решение владельца 22.11.2026: плановые привязки жильцов текущего
+        # состава (обе смены) не блокируют друг друга — их однородность
+        # проверяет резолвер, классификация плана и жёсткий guard ниже.
+        # Блокируют только привязки жильцов вне состава (другие вахты).
+        planned_resident_ids = tuple(
+            SettlementCohortMember._base_manager.using(plan.using)
+            .filter(cohort_id=plan.cohort_id)
+            .values_list('resident_id', flat=True)
+        )
         for placement in changes['create_placements']:
             member = changes['members_by_resident'][placement.resident_id]
             resident = residents_by_id[placement.resident_id]
             bed = beds_by_id[placement.physical_bed_id]
-            _validate_resident_and_destination(resident=resident, room=bed.room)
+            placement_type = changes['placement_types'].get(
+                placement.resident_id,
+                'temporary',
+            )
+            assignment_type = (
+                EmployeeBedOccupancy.AssignmentType.TEMPORARY
+                if placement_type == 'temporary'
+                else EmployeeBedOccupancy.AssignmentType.PERMANENT
+            )
+            # SET-R097: двухместная комната не может попасть в авто-план даже
+            # устаревшим preview.
+            from .special_fund import is_manual_only_room, room_capacity_reason
+
+            if is_manual_only_room(bed.room):
+                code, message = room_capacity_reason()
+                raise _apply_error(code, message)
+            if special_room_types.get(bed.room_id, set()) & forbidden_types:
+                raise _apply_error(
+                    'protected_room_forbidden',
+                    'Защищённый или резервный фонд не используется '
+                    'авторасселением.',
+                )
+            _validate_resident_and_destination(
+                resident=resident,
+                room=bed.room,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
+                using=plan.using,
+                exclude_occupancy_ids=tuple(
+                    row.pk for row in replace_rows
+                ),
+                exclude_resident_ids=planned_resident_ids,
+            )
+            # Жёсткий guard перед вставкой (решение владельца 22.11.2026):
+            # повторяем проверку категории по строкам, которые реально остаются
+            # в комнате на пересечении с member.
+            if not resident.is_external:
+                roommate_categories = [
+                    employee_settlement_category(
+                        residents_by_id[row.resident_id].employee,
+                    )
+                    for row in effective_rows
+                    if row.resident_id != resident.pk
+                    and row.physical_bed.room_id == bed.room_id
+                    and _occupancy_overlaps_member(row, member)
+                ]
+                if not room_allows_personnel_category(
+                    bed.room.room_type,
+                    employee_settlement_category(resident.employee),
+                    roommate_categories,
+                ):
+                    raise _apply_error(
+                        'hard_conflict',
+                        ROOM_CATEGORY_CONFLICT_MESSAGE,
+                    )
+            validate_placement_input_contract(
+                resident=resident,
+                bed_stable_id=bed.stable_id,
+                assignment_type=assignment_type,
+                starts_at=member.arrival_at,
+                ends_at=member.departure_at,
+            )
             try:
                 _validate_occupancy_conflicts(
                     resident_id=resident.pk,
@@ -1204,7 +1957,7 @@ def apply_confirmed_settlement_preview(
                 occupancy = EmployeeBedOccupancy(
                     resident=resident,
                     physical_bed=bed,
-                    assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+                    assignment_type=assignment_type,
                     source_kind=EmployeeBedOccupancy.SourceKind.AUTO,
                     work_shift=work_shift,
                     shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.AUTO_PREVIEW,

@@ -1350,6 +1350,7 @@
         [
             ["Табельный номер", employee.personnel_number],
             ["Должность", employee.position],
+            ["Категория для расселения", employee.settlement_category_label || "Не указана"],
             ["Подразделение", employee.department],
             ["График", employee.work_schedule],
             ["Бригада", employee.brigade],
