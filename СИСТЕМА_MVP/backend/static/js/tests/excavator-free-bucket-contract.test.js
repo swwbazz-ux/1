@@ -63,8 +63,13 @@ test('a rejected load releases only its local truck projection', () => {
 });
 
 test('bucket entry stays beside the existing hourly report ring', () => {
-    const widget = template.match(/<div class="eo-dashboard-plan-widget">([\s\S]*?)<\/div>\s*<\/div>/);
+    const widget = template.match(/<div class="eo-dashboard-plan-widget"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/);
     assert.ok(widget);
+    const roundControls = css.match(/\.eo-dashboard-plan-widget\[data-eo-round-controls\] > :is\(\.eo-free-bucket-button, \.eo-dashboard-plan-ring\) \{([^}]*)\}/);
+    assert.ok(roundControls);
+    assert.match(roundControls[1], /width: var\(--eo-control-diameter\)/);
+    assert.match(roundControls[1], /height: var\(--eo-control-diameter\)/);
+    assert.match(roundControls[1], /border-radius: 50%/);
     assert.ok(widget[1].indexOf('data-eo-free-bucket-open') < widget[1].indexOf('data-eo-hourly-report-open'));
     assert.equal((template.match(/data-eo-hourly-report-open/g) || []).length, 1);
     assert.match(template, /<button class="eo-free-bucket-button"[\s\S]*?data-eo-free-bucket-open[\s\S]*?aria-label="Свободный ковш"/);
@@ -166,8 +171,8 @@ test('one successful free-bucket swipe removes the upper card and keeps a separa
 });
 
 test('all free bucket assets share the current shell marker', () => {
-    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v269/);
-    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v269/);
+    assert.match(template, /excavator-free-bucket-v1\.css[^\n]+excavator-mobile-shell-v270/);
+    assert.match(template, /excavator-free-bucket-v1\.js[^\n]+excavator-mobile-shell-v270/);
 });
 
 test('temporary card adds semantics without replacing production status', () => {
