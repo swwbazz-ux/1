@@ -208,13 +208,16 @@ test("excavator POST acknowledgement maps server IDs but leaves DOM applied vers
     const requested = [];
     const document = {body: {dataset: {operationalStateVersion: "100"}}, querySelector: () => badge};
     const window = {AppRealtime: {requestReconcile: (...args) => requested.push(args)}, sessionStorage: {setItem() {}}, setTimeout() {}, clearTimeout() {}};
-    const context = {window, document, Promise, freeBucketController: null, cardByTruckId: () => card, downtimeCard: null};
-    vm.runInNewContext(extract(excavator, "function storeExcavatorRealtimeVersion(version)") + ";\n" + extract(excavator, "window.confirmExcavatorFieldEvent = function (event, result)"), context);
+    const truckLoadProjections = new WeakMap([[card, {eventId: "event"}]]);
+    const context = {window, document, Promise, freeBucketController: null, cardByTruckId: () => card, downtimeCard: null, truckLoadProjections};
+    vm.runInNewContext(extract(excavator, "window.confirmExcavatorFieldEvent = function (event, result)"), context);
     await window.confirmExcavatorFieldEvent({event_type: "excavator.trip.loaded", event_id: "event", payload: {truck_id: 8}}, {server_version: 101, server_ids: {trip_id: 810}});
     assert.equal(document.body.dataset.operationalStateVersion, "100");
     assert.equal(badge.dataset.tripId, "810");
     assert.equal(card.dataset.eoOpenTripId, "810");
     assert.equal(badge.dataset.eoLocalTripId, undefined);
+    assert.equal(card.dataset.eoLocalOpenTripId, undefined);
+    assert.equal(truckLoadProjections.has(card), false);
     assert.deepEqual(requested, [["offline_excavator_events_confirmed", 101]]);
 });
 
