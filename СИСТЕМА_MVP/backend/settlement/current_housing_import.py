@@ -743,6 +743,19 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
     return groups
 
 
+REVIEW_LABELS = {
+    'person': 'Указано несколько мест',
+    'bed': 'Несколько жильцов на койку',
+    'linked': 'Пересекаются места и жильцы',
+    'interwatch': 'Проживание или межвахта',
+    'map': 'Расхождение с картой',
+    'identity': 'Уточнить сотрудника',
+    'dates': 'Уточнить даты',
+    'notes': 'Пометка в Excel',
+    'other': 'Уточнить размещение',
+}
+
+
 def housing_review_cases(conflicts):
     by_source = {row.source: row for row in conflicts}
     order = {source: index for index, source in enumerate(by_source)}
@@ -781,7 +794,10 @@ def housing_review_cases(conflicts):
             kind = 'notes'
         else:
             kind = 'other'
-        cases.append({'kind': kind, 'first': row, 'entries': entries})
+        cases.append({
+            'kind': kind, 'label': REVIEW_LABELS[kind], 'first': row, 'entries': entries,
+            'interwatch_choice': kind == 'interwatch' and row.review_notes and not row.review_dates,
+        })
     return cases
 
 

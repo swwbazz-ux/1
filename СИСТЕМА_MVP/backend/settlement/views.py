@@ -561,6 +561,10 @@ def _current_housing_post(request, access, form, context, storage, saved):
                 if command == 'move':
                     context['review_bed_id'] = request.POST.get('review_bed_id', '')
             else:
+                context['review_undone'] = command == 'undo'
+                if source in review:
+                    context['last_review_source'] = source
+                    context['last_review_name'] = next(row.name for row in groups['conflict'] if row.source == source)
                 draft, groups = revised, revised_groups
                 context['review_saved'] = True
     if draft is not saved:

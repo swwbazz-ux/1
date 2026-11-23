@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v7">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v8">
 {% endblock %}
 
 {% block clerk_content %}
@@ -55,7 +55,12 @@
     {% if report_groups %}
         <section class="housing-import__report" aria-label="Предпросмотр расселения">
             {% if review_saved %}
-                <p role="status">Решение сохранено в черновике.</p>
+                <div class="housing-import__saved-choice">
+                    <p role="status">{% if review_undone %}Решение отменено.{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
+                    {% if last_review_source %}
+                        <button type="submit" name="review_action" value="undo:{{ last_review_source }}" form="housing-import-form">Отменить решение</button>
+                    {% endif %}
+                </div>
             {% endif %}
             {% if application %}
                 <h2>Результат загрузки</h2>
@@ -120,5 +125,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v6" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v8" defer></script>
 {% endblock %}
