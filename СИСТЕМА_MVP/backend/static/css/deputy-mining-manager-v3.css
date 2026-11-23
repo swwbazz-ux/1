@@ -1779,6 +1779,16 @@ button.deputy-avatar {
     font-weight: 800;
 }
 
+@media (max-width: 1600px) {
+    .deputy-planning-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .deputy-planning-scope {
+        grid-column: 1 / -1;
+    }
+}
+
 @media (max-width: 1180px) {
     .deputy-mining-manager-screen {
         overflow: auto;
@@ -1794,14 +1804,6 @@ button.deputy-avatar {
         width: 100%;
     }
 
-    .deputy-planning-toolbar {
-        grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .deputy-planning-scope {
-        grid-column: 1 / -1;
-    }
-
     .deputy-work-date span {
         display: none;
     }
@@ -1815,6 +1817,17 @@ button.deputy-avatar {
         height: auto;
         min-height: 0;
         overflow: hidden;
+    }
+}
+
+@media (max-width: 1000px) {
+    .deputy-planning-toolbar {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .deputy-toolbar-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
     }
 }
 
@@ -1940,7 +1953,7 @@ button.deputy-avatar {
 
     .deputy-toolbar-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 72px 116px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 6px;
         justify-content: stretch;
     }
