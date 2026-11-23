@@ -431,6 +431,21 @@ def _housing_draft_scope(request, access, draft):
     return {'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(), 'revision': draft.revision}
 
 
+def _housing_draft_from_open_preview(request, access, draft):
+    token = request.POST.get('review_state')
+    if not token or not request.session.session_key:
+        return draft
+    try:
+        state = signing.loads(token, salt='settlement.current_housing.review', max_age=12 * 60 * 60)
+    except signing.BadSignature:
+        return draft
+    scope = {
+        'access': access.pk, 'session': sha256(request.session.session_key.encode()).hexdigest(),
+        'workbook': draft.digest, 'filename': draft.filename, 'date': draft.as_of.isoformat(),
+    }
+    return draft.with_review(state['review']) if state.get('scope') == scope else draft
+
+
 def _housing_draft_groups(draft, rows=None):
     if rows is None:
         rows = parse_current_housing_workbook(draft.workbook)
@@ -486,7 +501,7 @@ def _current_housing_post(request, access, form, context, storage, saved):
     if workbook:
         candidate = CurrentHousingDraft.from_workbook(workbook.name, workbook.read(MAX_FILE_SIZE + 1), as_of)
         if not saved or (candidate.filename, candidate.digest, candidate.as_of) != (saved.filename, saved.digest, saved.as_of):
-            draft = candidate
+            draft = candidate if saved else _housing_draft_from_open_preview(request, access, candidate)
     elif saved and saved.as_of != as_of and not (applying or review_action):
         draft = CurrentHousingDraft.from_workbook(saved.filename, saved.workbook, as_of)
     if draft is None:

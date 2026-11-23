@@ -1,9 +1,11 @@
 from datetime import date, timedelta
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core import signing
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
@@ -440,3 +442,21 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(replaced.context['draft'].filename, 'Другой.xlsx')
         self.assertNotEqual(replaced.context['draft'].revision, saved.revision)
         self.assertEqual(replaced.context['draft'].review, {})
+
+    def test_first_saved_draft_keeps_choices_from_open_preview(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (3, '03А-1', self.workers[0], False, self.ends),
+        ]).read()
+        filename = 'Расселение.xlsx'
+        review = {'КИС 5!J4': {'peers': ['КИС 5!J3']}}
+        scope = {
+            'access': self.access.pk, 'session': sha256(self.client.session.session_key.encode()).hexdigest(),
+            'workbook': sha256(payload).hexdigest(), 'filename': filename, 'date': self.as_of.isoformat(),
+        }
+        state = signing.dumps({'scope': scope, 'review': review}, salt='settlement.current_housing.review')
+        saved = self.submit(payload, filename=filename, review_state=state)
+        self.assertEqual(saved.context['draft'].review, review)
+        self.assertEqual(saved.context['applicable_count'], 1)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
