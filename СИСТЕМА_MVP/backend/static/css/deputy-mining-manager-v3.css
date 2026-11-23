@@ -1690,6 +1690,7 @@ button.deputy-avatar {
     height: calc(100% - 70px);
     padding: 10px;
     overflow-y: auto;
+    scrollbar-gutter: stable;
 }
 
 .deputy-import-page .deputy-publications-card {
@@ -1707,9 +1708,9 @@ button.deputy-avatar {
 
 .deputy-publication-row {
     display: grid;
-    grid-template-columns: minmax(130px, .8fr) minmax(120px, .7fr) minmax(190px, 1.2fr) auto;
+    grid-template-columns: minmax(0, .8fr) minmax(0, .9fr) minmax(0, 1.2fr) clamp(18rem, 29%, 24rem);
     gap: 12px;
-    align-items: center;
+    align-items: start;
     min-height: 68px;
     padding: 9px 11px;
     border: 1px solid var(--admin-line-soft);
@@ -1751,10 +1752,24 @@ button.deputy-avatar {
 }
 
 .deputy-publication-status {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
-    justify-content: flex-end;
+    align-self: center;
+}
+
+.deputy-publication-row > .deputy-publication-status > .admin-chip {
+    justify-self: start;
+    max-width: 100%;
+    box-sizing: border-box;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.deputy-publication-status > .admin-button {
+    grid-column: 2;
 }
 
 .deputy-report-empty {
@@ -1828,6 +1843,10 @@ button.deputy-avatar {
     .deputy-toolbar-actions {
         flex-wrap: wrap;
         justify-content: flex-start;
+    }
+
+    .deputy-publication-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 
@@ -2133,13 +2152,9 @@ button.deputy-avatar {
         overflow: visible;
     }
 
-    .deputy-publication-row {
-        grid-template-columns: 1fr 1fr;
-    }
-
+    .deputy-publication-time,
     .deputy-publication-status {
         grid-column: 1 / -1;
-        justify-content: flex-start;
     }
 }
 
