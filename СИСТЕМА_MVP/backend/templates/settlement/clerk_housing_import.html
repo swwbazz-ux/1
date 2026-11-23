@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v2">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v3">
 {% endblock %}
 
 {% block clerk_content %}
@@ -33,8 +33,17 @@
             {{ form.non_field_errors }}
         </div>
     {% endif %}
+    {% if review_error %}
+        <p class="housing-import__errors" role="alert">{{ review_error }}</p>
+    {% endif %}
     {% if report_groups %}
         <section class="housing-import__report" aria-label="Предпросмотр расселения">
+            {% if review_state %}
+                <input type="hidden" name="review_state" value="{{ review_state }}" form="housing-import-form">
+            {% endif %}
+            {% if review_saved %}
+                <p role="status">Решение учтено в предпросмотре.</p>
+            {% endif %}
             {% if application %}
                 <h2>Результат загрузки</h2>
                 <p role="status">Перенесено на карту — {{ application.placed }}. Создано карточек жильцов — {{ application.residents }}.</p>
@@ -56,7 +65,7 @@
                     {% if group.rows %}
                         <ul class="housing-import__rows">
                             {% for row in group.rows %}
-                                <li>
+                                <li id="housing-row-{{ row.source|slugify }}">
                                     <div class="housing-import__person">
                                         <strong>{{ row.name }}</strong>
                                         <small>{{ row.category_label }}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
@@ -75,6 +84,54 @@
                                             </ul>
                                         {% endif %}
                                     </div>
+                                    {% if group.code == 'conflict' and review_state %}
+                                        <div class="housing-import__review">
+                                            {% if row.review_peers %}
+                                                <div class="housing-import__review-links">
+                                                    Сопоставить:
+                                                    {% for peer in row.review_peers %}
+                                                        <a href="#housing-row-{{ peer|slugify }}">{{ peer }}</a>
+                                                    {% endfor %}
+                                                </div>
+                                            {% endif %}
+                                            <div class="housing-import__review-buttons">
+                                                {% if row.review_peers or row.review_notes and not row.review_dates %}
+                                                    <button type="submit" name="review_action" value="keep:{{ row.source }}" form="housing-import-form">
+                                                        {% if row.review_peers %}Оставить эту строку{% else %}Подтвердить проживание{% endif %}
+                                                    </button>
+                                                {% endif %}
+                                                <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">Пропустить</button>
+                                                {% if row.reviewed %}
+                                                    <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
+                                                {% endif %}
+                                            </div>
+                                            {% if row.review_identity or row.review_dates %}
+                                                <details class="housing-import__review-editor"{% if review_error and row.source == review_source %} open{% endif %}>
+                                                    <summary>{% if row.review_identity and row.review_dates %}Уточнить сотрудника и даты{% elif row.review_identity %}Уточнить сотрудника{% else %}Уточнить даты{% endif %}</summary>
+                                                    <div class="housing-import__review-fields">
+                                                        {% if row.review_identity %}
+                                                            <label>Табельный номер
+                                                                <input type="text" name="personnel_number:{{ row.source }}" maxlength="64" form="housing-import-form">
+                                                            </label>
+                                                        {% endif %}
+                                                        {% if row.review_dates %}
+                                                            <label>Дата заезда
+                                                                <input type="date" name="starts:{{ row.source }}" value="{{ row.starts|date:'Y-m-d' }}" form="housing-import-form">
+                                                            </label>
+                                                            <label>Дата выезда
+                                                                <input type="date" name="ends:{{ row.source }}" value="{{ row.ends|date:'Y-m-d' }}" form="housing-import-form">
+                                                            </label>
+                                                        {% endif %}
+                                                        <button type="submit" name="review_action" value="edit:{{ row.source }}" form="housing-import-form">Проверить строку</button>
+                                                    </div>
+                                                </details>
+                                            {% endif %}
+                                        </div>
+                                    {% elif row.reviewed and review_state %}
+                                        <div class="housing-import__review">
+                                            <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
+                                        </div>
+                                    {% endif %}
                                 </li>
                             {% endfor %}
                         </ul>
@@ -88,5 +145,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v2" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v3" defer></script>
 {% endblock %}

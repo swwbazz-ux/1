@@ -1,6 +1,6 @@
 import json
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from functools import wraps
 from hashlib import sha256
 from urllib.parse import urlencode
@@ -367,6 +367,8 @@ class CurrentHousingWorkbookForm(forms.Form):
 
 CURRENT_HOUSING_PREVIEW_SALT = 'settlement.current_housing.preview'
 CURRENT_HOUSING_PREVIEW_MAX_AGE = 30 * 60
+CURRENT_HOUSING_REVIEW_SALT = 'settlement.current_housing.review'
+CURRENT_HOUSING_REVIEW_MAX_AGE = 12 * 60 * 60
 CURRENT_HOUSING_GROUPS = (
     ('applied', 'Перенесено на карту'),
     ('ready', 'Готово к переносу'),
@@ -375,8 +377,52 @@ CURRENT_HOUSING_GROUPS = (
     ('interwatch', 'Межвахта'),
     ('outside', 'Вне выбранного периода'),
     ('duplicate', 'Дубли строк'),
+    ('omitted', 'Исключено при сверке'),
     ('existing', 'Уже учтено на карте'),
 )
+
+
+def _housing_review_choice(request, groups, review, as_of):
+    command, _, source = request.POST['review_action'].partition(':')
+    if command == 'undo' and source in review:
+        return {key: value for key, value in review.items() if key != source}
+    row = next((entry for entry in groups['conflict'] if entry.source == source), None)
+    if row is None:
+        raise ValidationError('Строка изменилась. Выберите её в обновлённом списке.')
+    decision = dict(review.get(source, {}))
+    if command == 'omit':
+        decision = {'omit': True}
+    elif command == 'keep' and (row.review_peers or (row.review_notes and not row.review_dates)):
+        if row.review_peers:
+            decision['peers'] = sorted(set(decision.get('peers', ())) | row.review_peers)
+        if row.review_notes and not row.review_dates:
+            decision['confirm'] = True
+            for field in ('starts', 'ends'):
+                if value := getattr(row, field):
+                    decision[field] = value.isoformat()
+    elif command == 'edit' and (row.review_identity or row.review_dates):
+        number = request.POST.get(f'personnel_number:{source}', '').strip()
+        if row.review_identity and number:
+            matches = list(Employee.objects.filter(
+                is_active=True, status=Employee.Status.ACTIVE, personnel_number__iexact=number,
+            ).values_list('pk', flat=True)[:2])
+            if len(matches) != 1:
+                raise ValidationError('По этому табельному номеру нужна одна активная карточка сотрудника.')
+            decision['employee_id'] = matches[0]
+        if row.review_dates:
+            try:
+                starts = date.fromisoformat(request.POST.get(f'starts:{source}', ''))
+                ends = date.fromisoformat(request.POST.get(f'ends:{source}', ''))
+            except ValueError as error:
+                raise ValidationError('Укажите даты заезда и выезда.') from error
+            if not starts <= as_of < ends:
+                raise ValidationError('Дата расселения должна входить в период проживания.')
+            decision.update(starts=starts.isoformat(), ends=ends.isoformat())
+        if decision == review.get(source, {}):
+            raise ValidationError('Укажите табельный номер сотрудника.')
+    else:
+        raise ValidationError('Это решение недоступно для выбранной строки.')
+    return {**review, source: decision}
 
 
 def _current_housing_post(request, access, form, context):
@@ -391,6 +437,8 @@ def _current_housing_post(request, access, form, context):
         'workbook': workbook_digest, 'filename': filename, 'date': as_of.isoformat(),
     }
     applying = request.POST.get('action') == 'apply'
+    review_action = request.POST.get('review_action', '')
+    review = {}
     if applying:
         try:
             receipt = signing.loads(
@@ -402,6 +450,19 @@ def _current_housing_post(request, access, form, context):
         if not session_key or receipt.get('scope') != scope or not receipt.get('placements'):
             form.add_error(None, 'Предпросмотр истёк или изменился. Снова нажмите «Проверить Excel».')
             return
+        review = receipt.get('review', {})
+    elif review_action or request.POST.get('review_state'):
+        try:
+            state = signing.loads(
+                request.POST.get('review_state', ''), salt=CURRENT_HOUSING_REVIEW_SALT,
+                max_age=CURRENT_HOUSING_REVIEW_MAX_AGE,
+            )
+        except signing.BadSignature:
+            state = {}
+        if not session_key or state.get('scope') != scope:
+            form.add_error(None, 'Сверка устарела. Снова нажмите «Проверить Excel».')
+            return
+        review = state['review']
     try:
         rows = parse_current_housing_workbook(payload)
     except ValidationError as error:
@@ -411,7 +472,7 @@ def _current_housing_post(request, access, form, context):
         try:
             groups, created_residents, grant = apply_current_housing(
                 rows, as_of, confirmed=receipt['placements'], workbook_digest=workbook_digest,
-                access_id=access.pk, session_key=session_key, filename=filename,
+                access_id=access.pk, session_key=session_key, filename=filename, review=review,
             )
         except ValidationError as error:
             form.add_error(None, error)
@@ -419,18 +480,32 @@ def _current_housing_post(request, access, form, context):
         store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
         context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
     else:
-        groups = build_current_housing_preview(rows, as_of, filename=filename)
+        groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
+        if review_action:
+            try:
+                review = _housing_review_choice(request, groups, review, as_of)
+            except ValidationError as error:
+                context['review_error'] = error.message
+                context['review_source'] = review_action.partition(':')[2]
+            else:
+                rows = parse_current_housing_workbook(payload)
+                groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
+                context['review_saved'] = True
         placements = preview_placements(groups)
         if placements:
             context['receipt'] = signing.dumps(
-                {'scope': scope, 'placements': placements},
+                {'scope': scope, 'placements': placements, 'review': review},
                 salt=CURRENT_HOUSING_PREVIEW_SALT, compress=True,
             )
             context['applicable_count'] = len(placements)
+    if groups['conflict'] or review:
+        context['review_state'] = signing.dumps(
+            {'scope': scope, 'review': review}, salt=CURRENT_HOUSING_REVIEW_SALT, compress=True,
+        )
     context.update(as_of=as_of, report_groups=[
         {'code': code, 'label': label, 'rows': groups[code]}
         for code, label in CURRENT_HOUSING_GROUPS
-        if code in groups and (code != 'duplicate' or groups[code])
+        if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
         and (not applying or code not in ('ready', 'needs_resident'))
     ])
 

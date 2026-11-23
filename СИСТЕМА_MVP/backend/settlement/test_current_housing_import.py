@@ -271,6 +271,57 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(result.context['applicable_count'], 1)
         self.assertContains(result, 'На эту койку есть несколько записей на выбранную дату.', count=2)
 
+    def test_choose_one_row_undo_and_apply_without_editing_excel(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-1', self.workers[1], False, self.ends),
+        ]).read()
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            preview = self.submit(payload)
+            choice = self.submit(payload, review_action='keep:КИС 5!J4', review_state=preview.context['review_state'])
+            self.assertEqual(choice.context['applicable_count'], 1)
+            self.assertContains(choice, 'Исключено при сверке')
+            undo = self.submit(payload, review_action='undo:КИС 5!J4', review_state=choice.context['review_state'])
+            self.assertContains(undo, 'На эту койку есть несколько записей на выбранную дату.', count=2)
+            self.assertIsNone(undo.context.get('receipt'))
+            self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+            choice = self.submit(payload, review_action='keep:КИС 5!J4', review_state=undo.context['review_state'])
+            result = self.submit(payload, action='apply', receipt=choice.context['receipt'])
+            self.assertEqual(result.context['application'], {'placed': 1, 'residents': 1})
+        employee = EmployeeBedOccupancy.objects.get(physical_bed__stable_id='KIS5-F1-R01-A1').resident.employee
+        self.assertEqual(employee, self.workers[1])
+
+    def test_review_can_match_employee_and_complete_period_in_place(self):
+        self.use_clerk_session()
+        self.workers[0].personnel_number = 'QA-42'
+        self.workers[0].save(update_fields=['personnel_number'])
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, None),
+        ], edits={'J3': 'Опечатка В Имени', 'O3': None}).read()
+        preview = self.submit(payload)
+        fields = {'personnel_number:КИС 5!J3': 'QA-42', 'starts:КИС 5!J3': self.starts.isoformat(),
+                  'ends:КИС 5!J3': self.ends.isoformat()}
+        rejected = self.submit(payload, review_action='edit:КИС 5!J3', review_state='forged', **fields)
+        self.assertContains(rejected, 'Сверка устарела', status_code=400)
+        result = self.submit(payload, review_action='edit:КИС 5!J3', review_state=preview.context['review_state'], **fields)
+        self.assertEqual(result.context['applicable_count'], 1)
+        self.assertContains(result, self.workers[0].full_name)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
+    def test_review_choice_does_not_override_live_bed_occupancy(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (2, '02А-1', self.workers[0], False, self.ends),
+            (2, '02А-1', self.workers[1], False, self.ends),
+        ]).read()
+        preview = self.submit(payload)
+        choice = self.submit(payload, review_action='keep:КИС 5!J3', review_state=preview.context['review_state'])
+        self.assertContains(choice, 'Койка занята другим жильцом')
+        self.assertIsNone(choice.context.get('receipt'))
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
     def test_apply_rechecks_holds_and_leaves_unconfirmed_rows_alone(self):
         self.use_clerk_session()
         self.starts = date(2026, 11, 22)

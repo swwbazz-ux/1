@@ -98,6 +98,15 @@ class HousingRow:
     bed_id: str = ''
     physical_bed_id: int | None = None
     employee_id: int | None = None
+    reviewed_employee: Employee | None = None
+    match_identity: int | str = ''
+    reviewed: bool = False
+    confirmed_in_review: bool = False
+    review_peers: set[str] = field(default_factory=set)
+    review_notes: bool = False
+    review_identity: bool = False
+    review_dates: bool = False
+    invalid_excel_dates: bool = False
     category: str = ''
     needs_resident: bool = False
     status: str = ''
@@ -229,7 +238,8 @@ def _parse_sheet(sheet, building):
         else:
             row.issues.append('Номер койки не соответствует комнате в Excel.')
         if (_text(raw_starts) and not row.starts) or (_text(raw_ends) and not row.ends):
-            row.issues.append('Дата проживания в Excel не распознана.')
+            row.invalid_excel_dates = True
+            row.review_dates = True
         yield row
 
 
@@ -283,6 +293,8 @@ def _note_date(value, as_of):
 
 
 def _resolve_row_dates(row, as_of):
+    if row.confirmed_in_review:
+        return
     notes = tuple(_current_person_notes(row))
     if row.starts is None:
         match = next((match for note in notes if (match := ARRIVAL_NOTE.search(note))), None)
@@ -294,10 +306,12 @@ def _resolve_row_dates(row, as_of):
     }
     note_end = next(iter(departures)) if len(departures) == 1 else None
     if len(departures) > 1 and row.ends is None:
+        row.review_dates = True
         row.issues.append('В Excel указано несколько дат выезда.')
     if row.ends is None:
         row.ends = note_end
-    elif note_end and note_end <= as_of < row.ends:
+    elif row.date_sources.get('ends') != 'clerk_review' and note_end and note_end <= as_of < row.ends:
+        row.review_notes = True
         row.issues.append('Даты проживания и пометка о выезде противоречат друг другу.')
     move = next((match for note in notes if (match := OTHER_ROOM_NOTE.search(note))), None)
     if move:
@@ -306,14 +320,15 @@ def _resolve_row_dates(row, as_of):
         if destination[:2] != (row.building, row.room_number) or (block and block != row.block):
             row.other_room = destination
     if any(ABSENCE_NOTE.search(note) and not DEPARTURE_NOTE.search(note) for note in notes):
+        row.review_notes = True
         row.issues.append('В Excel есть пометка, что сотрудник выбыл или пока не заехал.')
 
 
 def _mark_duplicate_rows(rows):
     same_place = defaultdict(list)
     for row in rows:
-        if not row.status and not row.issues and not row.other_room and row.name_key and row.block:
-            same_place[(row.name_key, row.building, row.room_number, row.block, row.position)].append(row)
+        if not row.status and not row.issues and not row.review_dates and not row.other_room and row.match_identity and row.block:
+            same_place[(row.match_identity, row.building, row.room_number, row.block, row.position)].append(row)
     for matches in same_place.values():
         if len(matches) < 2:
             continue
@@ -337,6 +352,8 @@ def _excel_conflicts(rows, as_of, workbook_end):
     active_beds = defaultdict(list)
     interwatch = set()
     for row in rows:
+        if row.status:
+            continue
         if row.interwatch:
             row.status = 'interwatch'
             if row.name_key and (not row.starts or row.starts <= as_of) and (not row.ends or as_of < row.ends):
@@ -344,6 +361,7 @@ def _excel_conflicts(rows, as_of, workbook_end):
             continue
         _resolve_row_dates(row, as_of)
         if row.starts and row.ends and row.starts >= row.ends:
+            row.review_dates = True
             row.issues.append('Дата выезда должна быть позже даты заселения.')
         elif (row.starts and row.starts > as_of) or (row.ends and row.ends <= as_of):
             row.status = 'outside'
@@ -353,43 +371,51 @@ def _excel_conflicts(rows, as_of, workbook_end):
         if row.status or not row.other_room:
             continue
         building, room, block = row.other_room
-        if row.name_key and any(
-            not match.status and not match.other_room and match.name_key == row.name_key
+        if row.match_identity and any(
+            not match.status and not match.other_room and match.match_identity == row.match_identity
             and (match.building, match.room_number) == (building, room)
             and (not block or match.block == block)
             for match in rows
         ):
             row.status = 'duplicate'
         else:
+            row.review_notes = True
             row.issues.append('В Excel указано, что жилец на продлении в другой комнате.')
     for row in rows:
         if row.status:
             continue
-        if row.name_key and not row.other_room:
-            active_names[row.name_key].append(row)
+        if row.match_identity and not row.other_room:
+            active_names[row.match_identity].append(row)
         if row.block and not row.other_room:
             active_beds[(row.building, row.room_number, row.block, row.position)].append(row)
         if not row.ends and workbook_end:
             row.ends = workbook_end
             row.date_sources['end'] = 'workbook_filename'
         if not row.ends:
+            row.review_dates = True
             row.issues.append('Нет даты выезда и периода в названии файла.')
         if not row.starts:
             # A current snapshot proves presence on the selected date only.
             row.starts = as_of
             row.date_sources['start'] = 'snapshot_date'
         if not row.name_key:
+            row.review_identity = True
             row.issues.append('Уточните ФИО в Excel.')
+        if row.invalid_excel_dates:
+            row.issues.append('Дата проживания в Excel не распознана.')
 
     for overlapping in active_beds.values():
         if len(overlapping) > 1:
             for row in overlapping:
+                row.review_peers.update(other.source for other in overlapping if other is not row)
                 row.issues.append('На эту койку есть несколько записей на выбранную дату.')
-    for name, matches in active_names.items():
+    for matches in active_names.values():
         for row in matches:
             if len(matches) > 1:
+                row.review_peers.update(other.source for other in matches if other is not row)
                 row.issues.append('Сотрудник повторяется в строках на выбранную дату.')
-            if name in interwatch:
+            if row.name_key in interwatch and not row.confirmed_in_review:
+                row.review_notes = True
                 row.issues.append('По этому же ФИО в Excel есть голубая строка межвахты.')
 
 
@@ -432,7 +458,47 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
     return same
 
 
-def build_current_housing_preview(rows, as_of, *, filename=''):
+def _apply_review_decisions(rows, review):
+    excluded = {source for decision in review.values() for source in decision.get('peers', ())}
+    employees = Employee.objects.select_related('personnel_position', 'settlement_resident').in_bulk(
+        [decision['employee_id'] for decision in review.values() if 'employee_id' in decision],
+    )
+    for row in rows:
+        decision = review.get(row.source, {})
+        row.reviewed = bool(decision)
+        if row.source in excluded or decision.get('omit'):
+            row.status = 'omitted'
+            continue
+        row.confirmed_in_review = decision.get('confirm', False)
+        if 'employee_id' in decision:
+            row.reviewed_employee = employees.get(decision['employee_id'])
+            if row.reviewed_employee:
+                row.name = row.reviewed_employee.full_name
+                row.name_key = _name_key(row.name)
+            else:
+                row.issues.append('Выбранная карточка сотрудника больше недоступна.')
+        for field in ('starts', 'ends'):
+            if field in decision:
+                setattr(row, field, date.fromisoformat(decision[field]))
+                row.date_sources[field] = 'clerk_review'
+        if 'starts' in decision and 'ends' in decision:
+            row.review_dates = False
+            row.invalid_excel_dates = False
+
+
+def build_current_housing_preview(rows, as_of, *, filename='', review=None):
+    if review:
+        _apply_review_decisions(rows, review)
+    roster = defaultdict(list)
+    needed = {row.name_key for row in rows if not row.status and row.name_key}
+    for person in Employee.objects.select_related('personnel_position', 'settlement_resident'):
+        key = _name_key(person.full_name)
+        if key in needed:
+            roster[key].append(person)
+    for row in rows:
+        matches = roster.get(row.name_key, ())
+        employee = row.reviewed_employee or (matches[0] if len(matches) == 1 else None)
+        row.match_identity = employee.pk if employee else row.name_key
     _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
     rooms = defaultdict(list)
     room_query = PhysicalRoom.objects.filter(dormitory__kind=Dormitory.Kind.OWN, dormitory__number__in=['5', '6'])
@@ -452,13 +518,6 @@ def build_current_housing_preview(rows, as_of, *, filename=''):
     reserved_beds = set(SettlementBedReserve.objects.filter(
         physical_bed__room_id__in=room_ids, is_active=True,
     ).values_list('physical_bed_id', flat=True))
-    roster = defaultdict(list)
-    needed = {row.name_key for row in rows if not row.status and row.name_key}
-    for person in Employee.objects.select_related('personnel_position', 'settlement_resident'):
-        key = _name_key(person.full_name)
-        if key in needed:
-            roster[key].append(person)
-
     candidates = [row for row in rows if not row.status and not row.other_room and row.ends and row.starts <= as_of < row.ends]
     bed_use, room_use, employee_use = defaultdict(list), defaultdict(list), defaultdict(list)
     if candidates:
@@ -503,14 +562,16 @@ def build_current_housing_preview(rows, as_of, *, filename=''):
         if room and anchors.get(room.pk):
             row.issues.append('У комнаты есть специальное закрепление. Проверьте назначение жилфонда.')
 
-        people = roster[row.name_key]
+        people = [row.reviewed_employee] if row.reviewed_employee else roster[row.name_key]
         employee = people[0] if len(people) == 1 else None
         if len(people) > 1:
+            row.review_identity = True
             row.issues.append('По ФИО найдено несколько карточек. Нужен табельный номер.')
         elif employee and not (employee.is_active and employee.status == Employee.Status.ACTIVE):
             row.issues.append('Карточка сотрудника неактивна.')
             employee = None
         elif row.name_key and not employee:
+            row.review_identity = True
             row.issues.append('Точное ФИО не найдено в справочнике сотрудников.')
         if employee:
             row.employee_id = employee.pk
@@ -536,7 +597,9 @@ def build_current_housing_preview(rows, as_of, *, filename=''):
             if len(sexes) > 1:
                 row.issues.append('В одну комнату попадают жильцы разного пола.')
 
-    groups = {key: [] for key in ('ready', 'needs_resident', 'conflict', 'interwatch', 'outside', 'duplicate', 'existing')}
+    groups = {key: [] for key in (
+        'ready', 'needs_resident', 'conflict', 'interwatch', 'outside', 'duplicate', 'omitted', 'existing',
+    )}
     for row in rows:
         if not row.status:
             if row.issues:
@@ -601,12 +664,13 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
             'occupancy_id': occupancy.pk, 'workbook_sha256': workbook_digest,
             'source_row': row.source, 'resident_created': created,
             'date_sources': row.date_sources,
+            'reviewed_by_clerk': row.reviewed,
         },
     )
     return created
 
 
-def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id, session_key, filename=''):
+def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id, session_key, filename='', review=None):
     # The normal control lease serializes this operation with map edits and other
     # clerk imports. Acquire it before locking the target employees so that all
     # employee rows are acquired in the standard lock order.
@@ -619,12 +683,13 @@ def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id,
     )
     groups, created_count = _apply_confirmed_housing(
         rows, as_of, confirmed=confirmed, workbook_digest=workbook_digest, control=control, filename=filename,
+        review=review,
     )
     return groups, created_count, grant
 
 
 @transaction.atomic
-def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control, filename):
+def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control, filename, review):
     using = DEFAULT_DB_ALIAS
     lease = lock_settlement_write_lease(control_context=control, using=using)
     employee_ids = tuple(Employee.objects.filter(
@@ -645,7 +710,7 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
         .select_related('room')
         .filter(pk__in={bed_id for _, bed_id in confirmed.values()}).order_by('pk')
     }
-    groups = build_current_housing_preview(rows, as_of, filename=filename)
+    groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
     groups['applied'] = []
     created_count = 0
     moment = timezone.now()
