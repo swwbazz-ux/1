@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Загрузить расстановку из Excel{% endblock %}
+{% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/deputy_mining_manager_pwa_head.html" %}
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261123-excel">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell deputy-shell admin-day" data-admin-theme>
+    {% include "includes/deputy_mining_manager_header.html" with active_section="placement" screen_title="Импорт" %}
+
+    <main class="admin-console-page deputy-reports-page deputy-import-page">
+        <section class="deputy-publications-card" aria-labelledby="crew-import-title">
+            <header>
+                <div>
+                    <h2 id="crew-import-title">Загрузить расстановку</h2>
+                    <p>Самосвалы и экскаваторы на {{ work_date|date:"d.m.Y" }}</p>
+                </div>
+            </header>
+            <div class="deputy-publications-list">
+                {% if errors %}
+                    <div class="message error" role="alert">
+                        <strong>Расстановка не опубликована</strong>
+                        <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+                    </div>
+                {% endif %}
+                {% if processed %}
+                    <div class="message success" role="status">
+                        {% if publications %}
+                            <strong>Расстановка опубликована</strong>
+                            <ul>
+                                {% for plan, category, changed in publications %}
+                                    <li>
+                                        <a href="{% url 'deputy_mining_manager_placement' %}?role={{ plan.role.code }}&amp;plan={{ plan.pk }}">
+                                            {{ category }} · r{{ plan.revision }}
+                                        </a>
+                                        · Изменено сменных ячеек: {{ changed }}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            Назначения уже совпадают с расстановкой в Excel.
+                        {% endif %}
+                    </div>
+                {% endif %}
+                {% if skipped_categories %}
+                    <div class="message info">
+                        <strong>Строки вне импорта</strong>
+                        <ul>{% for category, count in skipped_categories %}<li>{{ category }} · {{ count }}</li>{% endfor %}</ul>
+                    </div>
+                {% endif %}
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
+                    <p>Данные берутся с «Лист1». Пустые ячейки сохраняют назначения. Чтобы снять экипаж, впиши «Снять».</p>
+                    <p>
+                        <label for="deputy-crew-workbook">Файл .xlsx до 2 МБ</label>
+                        <input type="file" id="deputy-crew-workbook" name="workbook"
+                               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+                    </p>
+                    <div class="deputy-dialog-actions">
+                        <button class="admin-button admin-button-primary" type="submit">Загрузить и опубликовать</button>
+                        <a class="admin-button admin-button-secondary" href="{% url 'deputy_mining_manager_placement' %}">К расстановке</a>
+                    </div>
+                </form>
+            </div>
+        </section>
+    </main>
+</div>
+{% endblock %}

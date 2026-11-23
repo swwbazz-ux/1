@@ -1692,6 +1692,19 @@ button.deputy-avatar {
     overflow-y: auto;
 }
 
+.deputy-import-page .deputy-publications-card {
+    align-self: start;
+    justify-self: center;
+    width: min(100%, 44rem);
+    max-height: 100%;
+}
+
+.deputy-import-page .deputy-dialog-actions {
+    justify-content: flex-start;
+    padding: 8px 0 0;
+    border: 0;
+}
+
 .deputy-publication-row {
     display: grid;
     grid-template-columns: minmax(130px, .8fr) minmax(120px, .7fr) minmax(190px, 1.2fr) auto;

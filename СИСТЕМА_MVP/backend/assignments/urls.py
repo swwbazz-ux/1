@@ -9,6 +9,7 @@ from .views import (
 )
 from .deputy_views import (
     deputy_mining_manager_export_view,
+    deputy_mining_manager_import_view,
     deputy_mining_manager_arrival_roster_routing_view,
     deputy_mining_manager_manifest_view,
     deputy_mining_manager_placement_view,
@@ -29,6 +30,7 @@ urlpatterns = [
         name='deputy_mining_manager_arrival_roster_routing',
     ),
     path('deputy-mining-manager/', deputy_mining_manager_placement_view, name='deputy_mining_manager_placement'),
+    path('deputy-mining-manager/import/', deputy_mining_manager_import_view, name='deputy_mining_manager_import'),
     path('deputy-mining-manager/plans/<int:plan_id>/excel/', deputy_mining_manager_export_view, name='deputy_mining_manager_export'),
     path('deputy-mining-manager/slot/', deputy_mining_manager_slot_view, name='deputy_mining_manager_slot'),
     path(

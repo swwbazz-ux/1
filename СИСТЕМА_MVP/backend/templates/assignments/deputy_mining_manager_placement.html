@@ -56,6 +56,10 @@
                    aria-label="Скачать текущую расстановку в Excel для печати"
                    aria-disabled="true"
                    title="Скачать Excel для печати">Excel</a>
+                {% if selected_date == current_production_date %}
+                    <a class="admin-button admin-button-secondary"
+                       href="{% url 'deputy_mining_manager_import' %}">Загрузить Excel</a>
+                {% endif %}
                 <button class="admin-button admin-button-primary deputy-publish-button"
                         type="button"
                         data-publish-button>Опубликовать</button>

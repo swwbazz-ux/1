@@ -6,10 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.staticfiles import finders
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.urls import reverse
 from django.utils import timezone
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from PIL import Image
 
 from references.models import (
@@ -32,8 +33,13 @@ from users.models import (
     WorkSchedule,
 )
 
-from .models import AssignmentStatus, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
-from .services import get_active_equipment_assignment, get_or_create_crew_draft, set_active_equipment_assignment
+from .models import AssignmentStatus, CrewPlan, CrewPlanSlot, CrewPlanStatus, EquipmentAssignment, WorkShiftType
+from .services import (
+    get_active_equipment_assignment,
+    get_or_create_crew_draft,
+    production_work_date,
+    set_active_equipment_assignment,
+)
 
 
 class DeputyPlanningViewTests(TestCase):
@@ -136,6 +142,113 @@ class DeputyPlanningViewTests(TestCase):
             actor=self.deputy,
         )
         return plan
+
+    def upload_crew_excel(self, rows, *, work_date=None):
+        workbook = Workbook()
+        workbook.active.title = 'Старая версия'
+        sheet = workbook.create_sheet('Лист1')
+        sheet.append([None, None, 'смена 1', 'смена 2'])
+        for row in rows:
+            sheet.append(row)
+        data = BytesIO()
+        workbook.save(data)
+        return self.client.post(
+            reverse('deputy_mining_manager_import'),
+            {
+                'work_date': (work_date or production_work_date()).isoformat(),
+                'workbook': SimpleUploadedFile('Расстановка.xlsx', data.getvalue()),
+            },
+        )
+
+    def test_excel_import_publishes_a_swap_and_repeat_is_a_no_op(self):
+        second, _ = self.create_employee_with_access(
+            'Петров Николай Иванович',
+            self.driver_role,
+            phone='+79000000011',
+            access_code='210011',
+            position='Водитель самосвала',
+        )
+        set_active_equipment_assignment(
+            employee=second, role=self.driver_role, equipment=self.truck_1,
+            shift_type=WorkShiftType.SHIFT_2, assigned_by=self.deputy,
+        )
+        rows = [
+            ['Самосвал БЕЛАЗ', self.truck_1.garage_number, 'Петров Н. И.', self.driver.full_name],
+            ['Вахтовый автобус', '103', None, 'Водитель автобуса'],
+        ]
+        response = self.upload_crew_excel(rows)
+        self.assertContains(response, 'Расстановка опубликована')
+        self.assertContains(response, 'Вахтовый автобус')
+        plan = CrewPlan.objects.get(role=self.driver_role, status=CrewPlanStatus.PUBLISHED)
+        self.assertEqual(plan.published_by, self.deputy)
+        self.assertEqual(get_active_equipment_assignment(second, 'driver').shift_type, WorkShiftType.SHIFT_1)
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver').shift_type, WorkShiftType.SHIFT_2)
+        self.assertContains(self.upload_crew_excel(rows), 'Назначения уже совпадают')
+        self.assertEqual(CrewPlan.objects.filter(role=self.driver_role, published_at__isnull=False).count(), 1)
+
+    def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
+        response = self.upload_crew_excel([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', None],
+            ['Экскаватор 3000', '999', self.driver.full_name, None],
+        ])
+        self.assertContains(response, 'C3. Номер техники', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.original_assignment.refresh_from_db()
+        self.assertIsNone(self.original_assignment.ended_at)
+
+    def test_excel_import_publishes_excavator_and_truck_plans_together(self):
+        excavator_type = EquipmentType.objects.create(name='Экскаватор')
+        excavator_model = EquipmentModel.objects.create(
+            equipment_type=excavator_type, name='Экскаватор 3000',
+        )
+        excavator = Equipment.objects.create(
+            equipment_type=excavator_type, model=excavator_model, garage_number='3',
+        )
+        operator, _ = self.create_employee_with_access(
+            'Машинист Александр Викторович',
+            self.excavator_role,
+            phone='+79000000012',
+            access_code='210012',
+            position='Машинист экскаватора',
+        )
+        response = self.upload_crew_excel([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+            ['Экскаватор 3000', '003', None, operator.full_name],
+        ])
+        self.assertContains(response, 'Расстановка опубликована')
+        self.assertEqual(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).count(), 2)
+        assignment = get_active_equipment_assignment(operator, 'excavator_operator')
+        self.assertEqual(assignment.equipment, excavator)
+        self.assertEqual(assignment.shift_type, WorkShiftType.SHIFT_2)
+
+    def test_excel_import_preserves_unspecified_slots_and_rejects_duplicates(self):
+        response = self.upload_crew_excel([['Самосвал', self.truck_2.garage_number, self.driver.full_name, None]])
+        self.assertContains(response, 'Сотрудник оказался назначен дважды', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver'), self.original_assignment)
+
+    def test_excel_import_does_not_publish_hand_edited_draft(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        response = self.upload_crew_excel([['Самосвал', self.truck_1.garage_number, self.driver.full_name, None]])
+        self.assertContains(response, 'есть ручные правки', status_code=400)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee, self.driver)
+
+    def test_excel_import_rejects_an_old_date_and_other_roles(self):
+        url = reverse('deputy_mining_manager_import')
+        self.assertContains(self.client.get(url), 'Загрузить и опубликовать')
+        response = self.upload_crew_excel(
+            [['Самосвал', self.truck_1.garage_number, 'Снять', None]],
+            work_date=production_work_date() - timedelta(days=1),
+        )
+        self.assertContains(response, 'Производственные сутки изменились', status_code=400)
+        self.authenticate(self.client, self.driver_access)
+        self.assertRedirects(self.client.get(url), reverse('role_home'), fetch_redirect_response=False)
+        response = self.upload_crew_excel([['Самосвал', self.truck_1.garage_number, 'Снять', None]])
+        self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
 
     def autosave_slot(self, plan, *, equipment, shift_type, employee):
         response = self.client.post(

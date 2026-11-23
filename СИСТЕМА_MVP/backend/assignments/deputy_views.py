@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
@@ -34,6 +34,7 @@ from users.work_profiles import (
 )
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
+from .crew_excel_import import MAX_FILE_SIZE, publish_crew_excel, read_crew_excel
 from .models import (
     AssignmentStatus,
     CrewPlan,
@@ -1264,6 +1265,38 @@ def deputy_mining_manager_export_view(request, plan_id):
     response['Cache-Control'] = 'private, no-store, max-age=0'
     response['X-Content-Type-Options'] = 'nosniff'
     workbook.save(response)
+    return response
+
+
+@require_http_methods(['GET', 'POST'])
+def deputy_mining_manager_import_view(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return redirect('role_home')
+    work_date = production_work_date()
+    context = {'access': access, 'work_date': work_date}
+    if request.method == 'POST':
+        try:
+            if request.POST.get('work_date') != work_date.isoformat():
+                raise ValidationError('Производственные сутки изменились. Выбери файл заново.')
+            upload = request.FILES.get('workbook')
+            if upload is None or not upload.name.lower().endswith('.xlsx'):
+                raise ValidationError('Выбери файл в формате .xlsx.')
+            grouped, skipped = read_crew_excel(upload.read(MAX_FILE_SIZE + 1))
+            context['skipped_categories'] = sorted(skipped.items())
+            publications = publish_crew_excel(grouped, work_date=work_date, access=access)
+            context['publications'] = [
+                (plan, TARGET_ROLE_LABELS[plan.role.code], count)
+                for plan, count in publications
+            ]
+            context['processed'] = True
+        except ValidationError as error:
+            context['errors'] = error.messages
+    response = render(
+        request, 'assignments/deputy_mining_manager_import.html', context,
+        status=400 if 'errors' in context else 200,
+    )
+    response['Cache-Control'] = 'private, no-store'
     return response
 
 
