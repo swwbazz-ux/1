@@ -1,1 +1,6 @@
+СИСТЕМА_MVP/backend/settlement/current_housing_import.py
 СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
+СИСТЕМА_MVP/backend/static/js/settlement-housing-import.js
+СИСТЕМА_MVP/backend/templates/settlement/_clerk_housing_conflicts.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_housing_import.html
