@@ -1,10 +1,12 @@
 from datetime import date, timedelta
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 from openpyxl import Workbook
 from openpyxl.styles import Color, PatternFill
@@ -23,6 +25,11 @@ class CurrentHousingPreviewTests(TestCase):
     as_of = date(2026, 11, 23)
     starts = date(2026, 11, 20)
     ends = date(2026, 12, 14)
+
+    def setUp(self):
+        root = self.enterContext(TemporaryDirectory())
+        self.enterContext(self.settings(PORTAL_PRIVATE_MEDIA_ROOT=Path(root)))
+        self.draft_revision = ''
 
     @classmethod
     def setUpTestData(cls):
@@ -170,10 +177,14 @@ class CurrentHousingPreviewTests(TestCase):
         hold.refresh_from_db()
         self.assertEqual(hold.status, SettlementBedPreparation.Status.PREPARED)
 
-    def submit(self, payload, *, filename='housing.xlsx', **extra):
-        return self.client.post(reverse('settlement_current_housing_import'), {
-            'workbook': SimpleUploadedFile(filename, payload), 'as_of': self.as_of.isoformat(), **extra,
-        })
+    def submit(self, payload=None, *, filename='housing.xlsx', **extra):
+        data = {'as_of': self.as_of.isoformat(), 'draft_revision': self.draft_revision, **extra}
+        if payload is not None:
+            data['workbook'] = SimpleUploadedFile(filename, payload)
+        response = self.client.post(reverse('settlement_current_housing_import'), data)
+        if response.context and response.context.get('draft'):
+            self.draft_revision = response.context['draft'].revision
+        return response
 
     def test_apply_creates_missing_resident_and_is_idempotent(self):
         self.use_clerk_session()
@@ -190,10 +201,10 @@ class CurrentHousingPreviewTests(TestCase):
             self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
             self.assertEqual(SettlementResident.objects.count(), 3)
             receipt = preview.context['receipt']
-            applied = self.submit(payload, action='apply', receipt=receipt)
+            applied = self.submit(action='apply', receipt=receipt)
             self.assertEqual(applied.status_code, 200)
             self.assertEqual(applied.context['application'], {'placed': 2, 'residents': 1})
-            repeated = self.submit(payload, action='apply', receipt=receipt)
+            repeated = self.submit(action='apply', receipt=receipt)
             self.assertEqual(repeated.context['application'], {'placed': 0, 'residents': 0})
         imported = EmployeeBedOccupancy.objects.get(resident__employee=self.workers[0])
         self.assertEqual(imported.physical_bed.stable_id, 'KIS5-F1-R01-A1')
@@ -250,7 +261,7 @@ class CurrentHousingPreviewTests(TestCase):
                 payload, filename='РАССЕЛЕНИЕ на 30.10. по 15.12.xlsx',
                 action='apply', receipt=preview.context['receipt'],
             )
-            self.assertContains(changed_period, 'Снова нажмите', status_code=400)
+            self.assertContains(changed_period, 'Сначала проверьте Excel', status_code=400)
             result = self.submit(payload, filename=filename, action='apply', receipt=preview.context['receipt'])
             self.assertEqual(result.context['application'], {'placed': 2, 'residents': 2})
         first = EmployeeBedOccupancy.objects.get(resident__employee=self.workers[0])
@@ -280,17 +291,17 @@ class CurrentHousingPreviewTests(TestCase):
         ]).read()
         start, _ = production_day_bounds(self.as_of)
         with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
-            preview = self.submit(payload)
-            choice = self.submit(payload, review_action='keep:КИС 5!J4', review_state=preview.context['review_state'])
+            self.submit(payload)
+            choice = self.submit(review_action='keep:КИС 5!J4')
             self.assertEqual(choice.context['applicable_count'], 1)
             self.assertContains(choice, 'Исключено при сверке')
-            undo = self.submit(payload, review_action='undo:КИС 5!J4', review_state=choice.context['review_state'])
+            undo = self.submit(review_action='undo:КИС 5!J4')
             self.assertContains(undo, 'Кто занимает койку 01А-1?', count=1)
             self.assertContains(undo, 'Выбрать жильца', count=2)
             self.assertIsNone(undo.context.get('receipt'))
             self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
-            choice = self.submit(payload, review_action='keep:КИС 5!J4', review_state=undo.context['review_state'])
-            result = self.submit(payload, action='apply', receipt=choice.context['receipt'])
+            choice = self.submit(review_action='keep:КИС 5!J4')
+            result = self.submit(action='apply', receipt=choice.context['receipt'])
             self.assertEqual(result.context['application'], {'placed': 1, 'residents': 1})
         employee = EmployeeBedOccupancy.objects.get(physical_bed__stable_id='KIS5-F1-R01-A1').resident.employee
         self.assertEqual(employee, self.workers[1])
@@ -302,12 +313,12 @@ class CurrentHousingPreviewTests(TestCase):
         payload = self.upload([
             (1, '01А-1', self.workers[0], False, None),
         ], edits={'J3': 'Опечатка В Имени', 'O3': None}).read()
-        preview = self.submit(payload)
+        self.submit(payload)
         fields = {'personnel_number:КИС 5!J3': 'QA-42', 'starts:КИС 5!J3': self.starts.isoformat(),
                   'ends:КИС 5!J3': self.ends.isoformat()}
-        rejected = self.submit(payload, review_action='edit:КИС 5!J3', review_state='forged', **fields)
-        self.assertContains(rejected, 'Сверка устарела', status_code=400)
-        result = self.submit(payload, review_action='edit:КИС 5!J3', review_state=preview.context['review_state'], **fields)
+        rejected = self.submit(review_action='edit:КИС 5!J3', draft_revision='forged', **fields)
+        self.assertContains(rejected, 'Черновик обновился', status_code=400)
+        result = self.submit(review_action='edit:КИС 5!J3', **fields)
         self.assertEqual(result.context['applicable_count'], 1)
         self.assertContains(result, self.workers[0].full_name)
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
@@ -318,8 +329,8 @@ class CurrentHousingPreviewTests(TestCase):
             (2, '02А-1', self.workers[0], False, self.ends),
             (2, '02А-1', self.workers[1], False, self.ends),
         ]).read()
-        preview = self.submit(payload)
-        choice = self.submit(payload, review_action='keep:КИС 5!J3', review_state=preview.context['review_state'])
+        self.submit(payload)
+        choice = self.submit(review_action='keep:КИС 5!J3')
         self.assertContains(choice, f'На карте: {self.resident.display_name}')
         self.assertIsNone(choice.context.get('receipt'))
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
@@ -366,10 +377,10 @@ class CurrentHousingPreviewTests(TestCase):
         self.use_clerk_session()
         payload = self.upload([(1, '01А-1', self.workers[0], False, self.ends)]).read()
         before = self.submit(payload, action='apply', receipt='invalid')
-        self.assertContains(before, 'Снова нажмите', status_code=400)
+        self.assertContains(before, 'Сначала проверьте Excel', status_code=400)
         receipt = self.submit(payload).context['receipt']
         different = self.upload([(1, '01А-2', self.workers[0], False, self.ends)]).read()
-        self.assertContains(self.submit(different, action='apply', receipt=receipt), 'Снова нажмите', status_code=400)
+        self.assertContains(self.submit(different, action='apply', receipt=receipt), 'Сначала проверьте Excel', status_code=400)
         start, _ = production_day_bounds(self.as_of)
         with (
             patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)),
@@ -381,3 +392,51 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(response.context['application'], {'placed': 0, 'residents': 0})
         self.assertFalse(SettlementResident.objects.filter(employee=self.workers[0]).exists())
         self.assertEqual(SettlementPlacementEvent.objects.count(), 0)
+
+    def test_saved_file_and_choices_reopen_after_login_and_stale_tabs_cannot_edit(self):
+        self.use_clerk_session()
+        url = reverse('settlement_current_housing_import')
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (3, '03А-1', self.workers[0], False, self.ends),
+        ]).read()
+        original = self.submit(payload, filename='Общежитие.xlsx').context['draft']
+        choice = self.submit(review_action='keep:КИС 5!J4')
+        stale = self.submit(review_action='keep:КИС 5!J3', draft_revision=original.revision)
+        self.assertContains(stale, 'Черновик обновился', status_code=400)
+        self.client = Client()
+        self.use_clerk_session()
+        reopened = self.client.get(url)
+        self.assertContains(reopened, 'Общежитие.xlsx')
+        self.assertContains(reopened, 'Сохранённый Excel')
+        self.assertEqual(reopened.context['draft'].revision, choice.context['draft'].revision)
+        self.assertEqual(reopened.context['draft'].review, {'КИС 5!J4': {'peers': ['КИС 5!J3']}})
+        self.assertEqual(reopened.context['applicable_count'], 1)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
+    def test_replacing_draft_requires_valid_file_and_owner_revision(self):
+        self.use_clerk_session()
+        url = reverse('settlement_current_housing_import')
+        original = self.upload([(1, '01А-1', self.workers[0], False, self.ends)]).read()
+        saved = self.submit(original, filename='Сохранённый.xlsx').context['draft']
+        invalid = self.submit(b'not an xlsx', filename='Неверный.xlsx')
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(invalid.context['draft'].revision, saved.revision)
+
+        other = EmployeeAccess.objects.create(
+            employee=self.workers[4], role=self.access.role, status=EmployeeAccess.Status.ACTIVATED,
+            access_code='510011',
+        )
+        other_client = Client()
+        session = other_client.session
+        session['employee_access_id'] = other.pk
+        session.save()
+        self.assertNotContains(other_client.get(url), 'Сохранённый.xlsx')
+        response = other_client.post(url, {'as_of': self.as_of.isoformat(), 'draft_revision': saved.revision})
+        self.assertContains(response, 'Выберите Excel', status_code=400)
+
+        replacement = self.upload([(3, '03А-1', self.workers[2], False, self.ends)]).read()
+        replaced = self.submit(replacement, filename='Другой.xlsx')
+        self.assertEqual(replaced.context['draft'].filename, 'Другой.xlsx')
+        self.assertNotEqual(replaced.context['draft'].revision, saved.revision)
+        self.assertEqual(replaced.context['draft'].review, {})

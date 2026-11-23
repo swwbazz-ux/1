@@ -28,20 +28,43 @@
 }
 
 .housing-import__form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, max-content) max-content;
-    align-items: end;
-    gap: 0.75rem;
     padding: 0.875rem;
     border: 1px solid var(--admin-line);
     border-radius: 0.5rem;
     background: var(--admin-panel);
 }
 
-.housing-import__form > div {
+.housing-import__inputs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(9.5rem, max-content) max-content;
+    align-items: end;
+    gap: 0.75rem;
+}
+
+.housing-import__inputs > div {
     display: grid;
     min-width: 0;
     gap: 0.375rem;
+}
+
+.housing-import__saved {
+    display: grid;
+    gap: 0.25rem;
+    overflow-wrap: anywhere;
+}
+
+.housing-import__replace {
+    margin-top: 0.55rem;
+}
+
+.housing-import__replace summary {
+    width: fit-content;
+    padding-block: 0.35rem;
+    cursor: pointer;
+}
+
+.housing-import__replace .housing-import__inputs {
+    margin-top: 0.4rem;
 }
 
 .housing-import__form label {
@@ -295,7 +318,7 @@
         padding: 0.75rem;
     }
 
-    .housing-import__form {
+    .housing-import__inputs {
         grid-template-columns: minmax(0, 1fr);
     }
 

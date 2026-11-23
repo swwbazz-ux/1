@@ -5,7 +5,7 @@
     let busy = false;
 
     form.addEventListener('change', () => {
-        if (!busy) document.querySelector('#housing-import-response').replaceChildren();
+        if (!busy) document.querySelector('#housing-import-report-content')?.replaceChildren();
     });
 
     form.closest('main').addEventListener('keydown', event => {
@@ -23,6 +23,7 @@
         const data = new FormData(form);
         data.set('action', action);
         if (reviewAction) data.set('review_action', event.submitter.value);
+        if (!form.querySelector('#id_workbook').files.length) data.delete('workbook');
         const controls = [...form.elements].filter(control => !control.disabled);
         busy = true;
         controls.forEach(control => { control.disabled = true; });
@@ -41,12 +42,16 @@
             const page = new DOMParser().parseFromString(await response.text(), 'text/html');
             const result = page.querySelector('#housing-import-response');
             if (!result) throw new Error('Missing import response');
+            if (response.ok) {
+                document.querySelector('#housing-import-source-state')
+                    .replaceWith(page.querySelector('#housing-import-source-state'));
+            }
             document.querySelector('#housing-import-response').replaceWith(result);
             const rowError = result.querySelector('.housing-review__error');
             (rowError || result).focus({ preventScroll: !rowError });
             feedback.textContent = '';
         } catch {
-            feedback.textContent = 'Ответ не получен. Снова нажмите «Проверить Excel», чтобы сверить карту.';
+            feedback.textContent = 'Ответ не получен. Обновите страницу, чтобы открыть сохранённый черновик.';
         } finally {
             controls.forEach(control => { control.disabled = false; });
             form.removeAttribute('aria-busy');

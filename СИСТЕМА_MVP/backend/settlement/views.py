@@ -61,6 +61,7 @@ from .clerk_shifts import (
     open_clerk_shift,
 )
 from .cohort_readiness import build_arrival_roster_cohort_overview
+from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
 from .current_housing_import import (
     MAX_FILE_SIZE,
     apply_current_housing,
@@ -352,6 +353,7 @@ def settlement_clerk_access_from_request(request, *, allow_admin=True):
 class CurrentHousingWorkbookForm(forms.Form):
     workbook = forms.FileField(
         label='Файл Excel (.xlsx)',
+        required=False,
         widget=forms.FileInput(attrs={'accept': '.xlsx'}),
     )
     as_of = forms.DateField(
@@ -361,15 +363,13 @@ class CurrentHousingWorkbookForm(forms.Form):
 
     def clean_workbook(self):
         workbook = self.cleaned_data['workbook']
-        if not workbook.name.casefold().endswith('.xlsx') or workbook.size > MAX_FILE_SIZE:
+        if workbook and (not workbook.name.casefold().endswith('.xlsx') or workbook.size > MAX_FILE_SIZE):
             raise ValidationError('Выберите файл .xlsx размером до 10 МБ.')
         return workbook
 
 
 CURRENT_HOUSING_PREVIEW_SALT = 'settlement.current_housing.preview'
 CURRENT_HOUSING_PREVIEW_MAX_AGE = 30 * 60
-CURRENT_HOUSING_REVIEW_SALT = 'settlement.current_housing.review'
-CURRENT_HOUSING_REVIEW_MAX_AGE = 12 * 60 * 60
 CURRENT_HOUSING_GROUPS = (
     ('applied', 'Перенесено на карту'),
     ('ready', 'Готово к переносу'),
@@ -426,89 +426,102 @@ def _housing_review_choice(request, groups, review, as_of):
     return {**review, source: decision}
 
 
-def _current_housing_post(request, access, form, context):
-    as_of = form.cleaned_data['as_of']
-    workbook = form.cleaned_data['workbook']
-    filename = workbook.name
-    payload = workbook.read(MAX_FILE_SIZE + 1)
-    workbook_digest = sha256(payload).hexdigest()
+def _housing_draft_scope(request, access, draft):
     session_key = request.session.session_key or ''
-    scope = {
-        'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(),
-        'workbook': workbook_digest, 'filename': filename, 'date': as_of.isoformat(),
-    }
-    applying = request.POST.get('action') == 'apply'
-    review_action = request.POST.get('review_action', '')
-    review = {}
-    if applying:
-        try:
-            receipt = signing.loads(
-                request.POST.get('receipt', ''), salt=CURRENT_HOUSING_PREVIEW_SALT,
-                max_age=CURRENT_HOUSING_PREVIEW_MAX_AGE,
-            )
-        except signing.BadSignature:
-            receipt = {}
-        if not session_key or receipt.get('scope') != scope or not receipt.get('placements'):
-            form.add_error(None, 'Предпросмотр истёк или изменился. Снова нажмите «Проверить Excel».')
-            return
-        review = receipt.get('review', {})
-    elif review_action or request.POST.get('review_state'):
-        try:
-            state = signing.loads(
-                request.POST.get('review_state', ''), salt=CURRENT_HOUSING_REVIEW_SALT,
-                max_age=CURRENT_HOUSING_REVIEW_MAX_AGE,
-            )
-        except signing.BadSignature:
-            state = {}
-        if not session_key or state.get('scope') != scope:
-            form.add_error(None, 'Сверка устарела. Снова нажмите «Проверить Excel».')
-            return
-        review = state['review']
-    try:
-        rows = parse_current_housing_workbook(payload)
-    except ValidationError as error:
-        form.add_error('workbook', error)
-        return
-    if applying:
-        try:
-            groups, created_residents, grant = apply_current_housing(
-                rows, as_of, confirmed=receipt['placements'], workbook_digest=workbook_digest,
-                access_id=access.pk, session_key=session_key, filename=filename, review=review,
-            )
-        except ValidationError as error:
-            form.add_error(None, error)
-            return
-        store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
-        context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
-    else:
-        groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
-        if review_action:
-            try:
-                review = _housing_review_choice(request, groups, review, as_of)
-            except ValidationError as error:
-                context['review_error'] = error.message
-                context['review_source'] = review_action.partition(':')[2]
-            else:
-                rows = parse_current_housing_workbook(payload)
-                groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
-                context['review_saved'] = True
+    return {'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(), 'revision': draft.revision}
+
+
+def _housing_draft_groups(draft, rows=None):
+    if rows is None:
+        rows = parse_current_housing_workbook(draft.workbook)
+    return build_current_housing_preview(rows, draft.as_of, filename=draft.filename, review=draft.review)
+
+
+def _housing_draft_report(request, access, context, draft, groups):
+    applying = 'application' in context
+    if not applying:
         placements = preview_placements(groups)
         if placements:
             context['receipt'] = signing.dumps(
-                {'scope': scope, 'placements': placements, 'review': review},
+                {'scope': _housing_draft_scope(request, access, draft), 'placements': placements},
                 salt=CURRENT_HOUSING_PREVIEW_SALT, compress=True,
             )
             context['applicable_count'] = len(placements)
-    if groups['conflict'] or review:
-        context['review_state'] = signing.dumps(
-            {'scope': scope, 'review': review}, salt=CURRENT_HOUSING_REVIEW_SALT, compress=True,
-        )
-    context.update(as_of=as_of, review_cases=housing_review_cases(groups['conflict']), report_groups=[
+    context.update(draft=draft, as_of=draft.as_of, review_cases=housing_review_cases(groups['conflict']), report_groups=[
         {'code': code, 'label': label, 'rows': groups[code]}
         for code, label in CURRENT_HOUSING_GROUPS
         if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
         and (not applying or code not in ('ready', 'needs_resident'))
     ])
+
+
+def _apply_housing_draft(request, access, context, draft, rows):
+    try:
+        receipt = signing.loads(
+            request.POST.get('receipt', ''), salt=CURRENT_HOUSING_PREVIEW_SALT,
+            max_age=CURRENT_HOUSING_PREVIEW_MAX_AGE,
+        )
+    except signing.BadSignature:
+        receipt = {}
+    session_key = request.session.session_key or ''
+    if (not session_key or receipt.get('scope') != _housing_draft_scope(request, access, draft)
+            or not receipt.get('placements')):
+        raise ValidationError('Предпросмотр изменился. Проверьте обновлённый список перед применением.')
+    groups, created_residents, grant = apply_current_housing(
+        rows, draft.as_of, confirmed=receipt['placements'], workbook_digest=draft.digest,
+        access_id=access.pk, session_key=session_key, filename=draft.filename, review=draft.review,
+    )
+    store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
+    context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
+    return groups
+
+
+def _current_housing_post(request, access, form, context, storage, saved):
+    applying = request.POST.get('action') == 'apply'
+    review_action = request.POST.get('review_action', '')
+    submitted_revision = request.POST.get('draft_revision', '')
+    as_of = form.cleaned_data['as_of']
+    workbook = form.cleaned_data['workbook']
+    draft = saved
+    if workbook:
+        candidate = CurrentHousingDraft.from_workbook(workbook.name, workbook.read(MAX_FILE_SIZE + 1), as_of)
+        if not saved or (candidate.filename, candidate.digest, candidate.as_of) != (saved.filename, saved.digest, saved.as_of):
+            draft = candidate
+    elif saved and saved.as_of != as_of and not (applying or review_action):
+        draft = CurrentHousingDraft.from_workbook(saved.filename, saved.workbook, as_of)
+    if draft is None:
+        form.add_error('workbook', 'Выберите Excel для начала сверки.')
+        return
+    revision_matches = submitted_revision == (saved.revision if saved else '')
+    # An old page may still hold the same file after a release. It can check the
+    # saved draft, but a different file needs the latest revision to replace it.
+    old_preview = workbook and draft is saved and not submitted_revision and not (applying or review_action)
+    if not revision_matches and not old_preview:
+        raise ValidationError('Черновик обновился в другой вкладке. Показана последняя сохранённая версия.')
+    if (applying or review_action) and draft is not saved:
+        raise ValidationError('Файл или дата изменились. Сначала проверьте Excel.')
+    try:
+        rows = parse_current_housing_workbook(draft.workbook)
+    except ValidationError as error:
+        form.add_error('workbook', error)
+        return
+    if applying:
+        groups = _apply_housing_draft(request, access, context, draft, rows)
+    else:
+        groups = _housing_draft_groups(draft, rows)
+        if review_action:
+            try:
+                review = _housing_review_choice(request, groups, draft.review, draft.as_of)
+            except ValidationError as error:
+                context['review_error'] = error.message
+                context['review_source'] = review_action.partition(':')[2]
+            else:
+                draft = draft.with_review(review)
+                groups = _housing_draft_groups(draft)
+                context['review_saved'] = True
+    if draft is not saved:
+        storage.save(draft)
+    _housing_draft_report(request, access, context, draft, groups)
 
 
 @never_cache
@@ -519,16 +532,32 @@ def settlement_current_housing_import_view(request):
         next_url = urlencode({'next': reverse('settlement_current_housing_import')})
         return redirect(f'{reverse("clerk_login")}?{next_url}')
 
-    form = CurrentHousingWorkbookForm(initial={'as_of': production_work_date()})
-    context = {'access': access, 'form': form, 'clerk_active_section': 'settlement'}
+    storage = CurrentHousingDraftStorage(access.pk)
+    saved = None
+    context = {'access': access, 'clerk_active_section': 'settlement'}
     status = 200
-    if request.method == 'POST':
-        form = CurrentHousingWorkbookForm(request.POST, request.FILES)
-        context['form'] = form
-        if form.is_valid():
-            _current_housing_post(request, access, form, context)
-        if form.errors:
-            status = 400
+    posted = request.method == 'POST'
+    form = CurrentHousingWorkbookForm(request.POST if posted else None, request.FILES if posted else None)
+    context['form'] = form
+    try:
+        if posted or storage.path.exists():
+            with storage.locked():
+                saved = storage.load()
+                context['draft'] = saved
+                if posted and form.is_valid():
+                    try:
+                        _current_housing_post(request, access, form, context, storage, saved)
+                    except ValidationError as error:
+                        form.add_error(None, error)
+                if saved and 'report_groups' not in context:
+                    _housing_draft_report(request, access, context, saved, _housing_draft_groups(saved))
+    except (OSError, ValidationError):
+        context['draft_error'] = 'Не удалось открыть или сохранить черновик. Попробуйте ещё раз.'
+        status = 503
+    if not posted:
+        form.initial['as_of'] = saved.as_of if saved else production_work_date()
+    elif form.errors and status == 200:
+        status = 400
     return render(request, 'settlement/clerk_housing_import.html', context, status=status)
 
 
