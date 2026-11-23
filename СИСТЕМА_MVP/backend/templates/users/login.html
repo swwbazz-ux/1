@@ -44,6 +44,58 @@
     {% if combined_mobile_login %}
     <link rel="stylesheet" href="{% static 'css/mobile-role-login-v1.css' %}?v={{ login_role_app.shell_version }}-consent1">
     {% endif %}
+    <style>
+        @media (orientation: landscape) and (max-width: 1180px) {
+            body.login-page.login-role-settlement_clerk {
+                width: 100%;
+                height: auto;
+                transform: none;
+            }
+        }
+        @media (max-width: 480px) {
+            body.login-page.login-role-settlement_clerk .unified-login-dialog .unified-login-form > h2 {
+                font-size: clamp(16px, 4.8vw, 22px);
+            }
+        }
+        .login-pin-shell {
+            position: relative;
+            display: block;
+        }
+        .login-pin-shell input {
+            width: 100%;
+            padding-right: 60px;
+        }
+        /* PIN виден только при удержании. Отключаем выделение текста на кнопке. */
+        .login-pin-reveal {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            transform: translateY(-50%);
+            display: grid;
+            place-items: center;
+            width: 44px;
+            height: 44px;
+            padding: 0;
+            border: 1px solid rgba(140, 255, 46, .28);
+            border-radius: 8px;
+            background: rgba(140, 255, 46, .10);
+            color: #b8f27a;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .login-pin-reveal.is-revealing {
+            background: rgba(140, 255, 46, .24);
+            color: #eaffd6;
+        }
+        body.login-role-settlement_clerk .login-pin-shell input:is(:autofill, :-webkit-autofill) {
+            box-shadow: inset 0 0 0 1000px var(--gd-panel);
+            -webkit-text-fill-color: var(--gd-ink);
+            caret-color: var(--gd-ink);
+        }
+    </style>
     {% endif %}
     <link rel="stylesheet" href="{% static 'css/entry-action-button-v2.css' %}">
     {% if login_role_app.role_code == 'driver' or login_role_app.role_code == 'excavator_operator' or login_role_app.role_code == 'mining_master' %}
@@ -121,40 +173,6 @@ _is_native_app в users/context_processors.py — метка в User-Agent).
         font-size: 15px;
         line-height: 1.35;
         text-align: center;
-    }
-    .login-pin-shell {
-        position: relative;
-        display: block;
-    }
-    .login-pin-shell input {
-        width: 100%;
-        padding-right: 60px;
-    }
-    /* Глаз показывает пинкод, пока кнопка нажата. touch-action и
-       user-select не дают удержанию превратиться в выделение текста. */
-    .login-pin-reveal {
-        position: absolute;
-        top: 50%;
-        right: 8px;
-        transform: translateY(-50%);
-        display: grid;
-        place-items: center;
-        width: 44px;
-        height: 44px;
-        padding: 0;
-        border: 1px solid rgba(140, 255, 46, .28);
-        border-radius: 8px;
-        background: rgba(140, 255, 46, .10);
-        color: #b8f27a;
-        cursor: pointer;
-        touch-action: manipulation;
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-tap-highlight-color: transparent;
-    }
-    .login-pin-reveal.is-revealing {
-        background: rgba(140, 255, 46, .24);
-        color: #eaffd6;
     }
     .login-install-gate__skip {
         justify-self: center;

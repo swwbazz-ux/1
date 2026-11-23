@@ -1,2 +1,1 @@
-СИСТЕМА_MVP/backend/static/img/pwa/qr/settlement_clerk-www.png
-СИСТЕМА_MVP/backend/users/app_catalog.py
+СИСТЕМА_MVP/backend/templates/users/login.html
