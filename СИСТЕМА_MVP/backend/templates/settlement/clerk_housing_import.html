@@ -4,11 +4,11 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v2">
 {% endblock %}
 
 {% block clerk_content %}
-<main class="admin-console-page housing-import">
+<main class="housing-import">
     <a class="housing-import__back" href="{% url 'settlement_map' %}">К карте расселения</a>
     <h1>Загрузка текущего расселения</h1>
     <form id="housing-import-form" class="housing-import__form" method="post" enctype="multipart/form-data">
@@ -88,5 +88,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v1" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v2" defer></script>
 {% endblock %}
