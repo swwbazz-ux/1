@@ -28,7 +28,6 @@ from users.role_apps import (
 )
 from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
-    effective_specialization,
     eligible_employee_ids_for_work_role,
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
@@ -52,6 +51,8 @@ from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
+    employee_is_excavator_assistant,
+    employee_matches_work_role,
     get_or_create_crew_draft,
     production_work_date,
     publish_crew_plan,
@@ -496,31 +497,30 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
     return payload
 
 
-def _secondary_eligible_employee_ids(role_code):
-    if role_code == 'driver':
-        return eligible_employee_ids_for_work_role(role_code)
-    if role_code != 'excavator_operator':
+def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
+    if role_code not in TARGET_ROLE_LABELS:
         return set()
+    if primary_employee_ids is None:
+        primary_employee_ids = eligible_employee_ids_for_work_role(role_code)
+    if role_code == 'driver':
+        return primary_employee_ids
     employees = (
         Employee.objects.filter(
             Employee.work_eligibility_q(),
             is_active=True,
             status=Employee.Status.ACTIVE,
         )
+        .exclude(id__in=primary_employee_ids)
         .select_related(
             'base_specialization',
             'base_specialization__access_role',
         )
         .order_by('id')
     )
-    return {
+    return primary_employee_ids | {
         employee.id
         for employee in employees
-        if (
-            (specialization := effective_specialization(employee))
-            and specialization.is_active
-            and specialization.code == 'assistant_excavator_operator'
-        )
+        if employee_is_excavator_assistant(employee)
     }
 
 
@@ -629,8 +629,9 @@ def build_crew_plan_payload(plan, *, request=None):
     }
     expire_due_temporary_work_transfers()
     eligible_employee_ids = eligible_employee_ids_for_work_role(plan.role.code)
-    secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code)
+    secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code, eligible_employee_ids)
     all_eligible_employee_ids = eligible_employee_ids | secondary_eligible_employee_ids
+    secondary_position_label = 'Стажёр' if plan.role.code == 'driver' else 'Помощник или стажёр'
     other_role_assignment_employee_ids = set(
         EquipmentAssignment.objects.filter(
             employee_id__in=all_eligible_employee_ids,
@@ -770,6 +771,14 @@ def build_crew_plan_payload(plan, *, request=None):
             if changed or secondary_changed:
                 changed_count += 1
                 row_changed = True
+            secondary_label = secondary_position_label
+            if slot.secondary_employee_id and plan.role.code == 'excavator_operator':
+                secondary_label = (
+                    'Стажёр'
+                    if slot.secondary_employee_id in eligible_employee_ids
+                    or employee_matches_work_role(slot.secondary_employee, plan.role)
+                    else 'Помощник машиниста'
+                )
             row_slots.append({
                 'shift_type': shift_type,
                 'label': 'Первая смена' if shift_type == WorkShiftType.SHIFT_1 else 'Вторая смена',
@@ -798,11 +807,7 @@ def build_crew_plan_payload(plan, *, request=None):
                         if slot.secondary_employee_id in employee_ids
                     ],
                 ),
-                'secondary_label': (
-                    'Стажёр'
-                    if plan.role.code == 'driver'
-                    else 'Помощник машиниста'
-                ),
+                'secondary_label': secondary_label,
                 'changed': changed,
                 'secondary_changed': secondary_changed,
                 'conflict': bool(issue),
@@ -918,11 +923,7 @@ def build_crew_plan_payload(plan, *, request=None):
             )
             for employee in eligible_employees
         ],
-        'secondary_employee_label': (
-            'Стажёр'
-            if plan.role.code == 'driver'
-            else 'Помощник машиниста'
-        ),
+        'secondary_employee_label': secondary_position_label,
         'temporary_transfer': {
             'available': bool(
                 editable

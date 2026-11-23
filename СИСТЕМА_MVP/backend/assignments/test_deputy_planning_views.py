@@ -216,15 +216,70 @@ class DeputyPlanningViewTests(TestCase):
             access_code='210012',
             position='Машинист экскаватора',
         )
+        trainee, _ = self.create_employee_with_access(
+            'Машинист Иван Викторович',
+            self.excavator_role,
+            phone='+79000000014',
+            access_code='210014',
+            position='Машинист экскаватора',
+        )
         response = self.upload_crew_excel([
             ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
-            ['Экскаватор 3000', '003', None, operator.full_name],
+            ['Экскаватор 3000', '003', None, f'{operator.full_name}\n{trainee.full_name}'],
         ])
         self.assertContains(response, 'Расстановка опубликована')
         self.assertEqual(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).count(), 2)
         assignment = get_active_equipment_assignment(operator, 'excavator_operator')
         self.assertEqual(assignment.equipment, excavator)
         self.assertEqual(assignment.shift_type, WorkShiftType.SHIFT_2)
+        slot = CrewPlanSlot.objects.get(
+            plan__status=CrewPlanStatus.PUBLISHED,
+            equipment=excavator,
+            shift_type=WorkShiftType.SHIFT_2,
+        )
+        self.assertEqual(slot.secondary_employee, trainee)
+        self.assertIsNone(get_active_equipment_assignment(trainee, 'excavator_operator'))
+
+    def test_excavator_second_place_distinguishes_assistant_and_trainee(self):
+        excavator = Equipment.objects.create(
+            equipment_type=EquipmentType.objects.create(name='Экскаватор'),
+            garage_number='3',
+        )
+        operator, _ = self.create_employee_with_access(
+            'Машинист Иван Викторович',
+            self.excavator_role,
+            phone='+79000000014',
+            access_code='210014',
+            position='Машинист экскаватора',
+        )
+        assistant = Employee.objects.create(
+            full_name='Помощник Иван Викторович',
+            status=Employee.Status.ACTIVE,
+            base_specialization=ProductionSpecialization.objects.get(code='assistant_excavator_operator'),
+        )
+        plan, _created = get_or_create_crew_draft(role=self.excavator_role, actor=self.deputy)
+        response = self.client.get(
+            reverse('deputy_mining_manager_placement'),
+            {'role': self.excavator_role.code},
+            HTTP_HOST='localhost',
+        )
+        payload = response.context['planning_payload']
+        self.assertEqual(payload['secondary_employee_label'], 'Помощник или стажёр')
+        eligible_positions = {row['id']: row['eligible_positions'] for row in payload['employees']}
+        self.assertEqual(eligible_positions[operator.id], ['primary', 'secondary'])
+        self.assertEqual(eligible_positions[assistant.id], ['secondary'])
+
+        for employee, label in ((operator, 'Стажёр'), (assistant, 'Помощник машиниста')):
+            response, plan = self.autosave_slot(
+                plan,
+                equipment=excavator,
+                shift_type=WorkShiftType.SHIFT_1,
+                employee=employee,
+                position='secondary',
+            )
+            slot = response.json()['payload']['rows'][0]['slots'][0]
+            self.assertEqual(slot['secondary_label'], label)
+            self.assertEqual(slot['secondary_employee']['id'], employee.id)
 
     def test_excel_import_preserves_unspecified_slots_and_rejects_duplicates(self):
         response = self.upload_crew_excel([['Самосвал', self.truck_2.garage_number, self.driver.full_name, None]])
@@ -304,7 +359,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertRedirects(response, reverse('role_home'), fetch_redirect_response=False)
         self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
 
-    def autosave_slot(self, plan, *, equipment, shift_type, employee):
+    def autosave_slot(self, plan, *, equipment, shift_type, employee, position='primary'):
         response = self.client.post(
             reverse('deputy_mining_manager_slot'),
             data=json.dumps({
@@ -313,6 +368,7 @@ class DeputyPlanningViewTests(TestCase):
                 'equipment_id': equipment.id,
                 'shift_type': shift_type,
                 'employee_id': employee.id if employee else None,
+                'position': position,
             }),
             content_type='application/json',
             HTTP_HOST='localhost',

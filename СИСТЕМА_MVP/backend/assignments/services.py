@@ -186,16 +186,20 @@ def employee_matches_work_role(employee, role):
     return employee_has_effective_access_role(employee, role.code)
 
 
+def employee_is_excavator_assistant(employee):
+    specialization = effective_specialization(employee)
+    return bool(
+        specialization
+        and specialization.is_active
+        and specialization.code == 'assistant_excavator_operator'
+    )
+
+
 def secondary_employee_matches_work_role(employee, role):
     if role.code == 'driver':
         return employee_matches_work_role(employee, role)
     if role.code == 'excavator_operator':
-        specialization = effective_specialization(employee)
-        return bool(
-            specialization
-            and specialization.is_active
-            and specialization.code == 'assistant_excavator_operator'
-        )
+        return employee_matches_work_role(employee, role) or employee_is_excavator_assistant(employee)
     return False
 
 
@@ -213,7 +217,7 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
         position_label = (
             'основной рабочей роли'
             if position == CREW_SLOT_POSITION_PRIMARY
-            else ('стажёра' if role.code == 'driver' else 'помощника машиниста')
+            else ('стажёра' if role.code == 'driver' else 'помощника машиниста или стажёра')
         )
         raise ValidationError(
             f'Производственная специализация сотрудника не соответствует позиции {position_label}.',
