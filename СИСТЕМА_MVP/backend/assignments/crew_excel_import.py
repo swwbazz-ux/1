@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
 
+from django.core import signing
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from openpyxl import load_workbook
@@ -26,6 +27,7 @@ from .services import (
 
 MAX_FILE_SIZE = 2 * 1024 * 1024
 MAX_ROWS = 400
+CONFIRMATION_SALT = 'deputy-crew-excel-replace'
 EXCEL_CATEGORIES = {'самосвал': 'driver', 'экскаватор': 'excavator_operator'}
 SHIFT_COLUMNS = (WorkShiftType.SHIFT_1, WorkShiftType.SHIFT_2)
 TRANSITION = re.compile(
@@ -40,6 +42,12 @@ class ExcelSlot:
     shift: str
     value: str
     address: str
+
+
+class DraftConfirmationRequired(Exception):
+    def __init__(self, categories, token):
+        self.categories = categories
+        self.token = token
 
 
 def _text(value):
@@ -150,21 +158,22 @@ def _find_employee(value, names):
     return candidates[0]
 
 
-def _stage_plan(plan, records, names, actor):
-    slots = list(plan.slots.select_for_update(of=('self',)).select_related('equipment'))
-    if any(
-        (slot.employee_id, slot.secondary_employee_id)
-        != (slot.baseline_employee_id, slot.baseline_secondary_employee_id)
-        for slot in slots
-    ):
-        raise ValidationError(f'В категории «{plan.role.name}» уже есть ручные правки в черновике.')
+def _assigned_crew(slot):
+    return slot.employee_id, slot.secondary_employee_id
 
+
+def _baseline_crew(slot):
+    return slot.baseline_employee_id, slot.baseline_secondary_employee_id
+
+
+def _stage_plan(plan, slots, records, names, actor):
+    original = {slot.pk: _assigned_crew(slot) for slot in slots}
     by_number = defaultdict(list)
     for slot in slots:
+        slot.employee_id, slot.secondary_employee_id = _baseline_crew(slot)
         key = (_number(slot.equipment.garage_number), slot.shift_type)
         by_number[key].append(slot)
     coordinates = {}
-    changed = []
     errors = []
     for record in records:
         matching_slots = by_number.get((_number(record.number), record.shift), ())
@@ -190,9 +199,7 @@ def _stage_plan(plan, records, names, actor):
             secondary = staff[1].pk if staff[1] else None
         else:
             secondary = slot.secondary_employee_id if primary else None
-        if (primary, secondary) != (slot.employee_id, slot.secondary_employee_id):
-            slot.employee_id, slot.secondary_employee_id = primary, secondary
-            changed.append(slot)
+        slot.employee_id, slot.secondary_employee_id = primary, secondary
     if errors:
         raise ValidationError(errors)
 
@@ -204,24 +211,57 @@ def _stage_plan(plan, records, names, actor):
                 if employee_id in occupied:
                     raise ValidationError(f'{label} и {occupied[employee_id]}. Сотрудник оказался назначен дважды.')
                 occupied[employee_id] = label
-    if not changed:
-        return 0
+    changed = [slot for slot in slots if original[slot.pk] != _assigned_crew(slot)]
+    if changed:
+        CrewPlanSlot.objects.filter(pk__in=[slot.pk for slot in changed]).update(
+            employee=None, secondary_employee=None,
+        )
+        CrewPlanSlot.objects.bulk_update(changed, ['employee', 'secondary_employee'])
+        plan.updated_by = actor
+        plan.version += 1
+        plan.save(update_fields=['updated_by', 'updated_at', 'version'])
+    return sum(_assigned_crew(slot) != _baseline_crew(slot) for slot in slots)
 
-    CrewPlanSlot.objects.filter(pk__in=[slot.pk for slot in changed]).update(
-        employee=None, secondary_employee=None,
-    )
-    CrewPlanSlot.objects.bulk_update(changed, ['employee', 'secondary_employee'])
-    plan.updated_by = actor
-    plan.version += 1
-    plan.save(update_fields=['updated_by', 'updated_at', 'version'])
-    return len(changed)
+
+def _require_draft_confirmation(plans, *, confirmation, file_digest, work_date, access):
+    revisions = []
+    categories = []
+    for plan, slots in plans:
+        edited = sum(_assigned_crew(slot) != _baseline_crew(slot) for slot in slots)
+        draft_version = [plan.pk, plan.version] if edited else None
+        revisions.append([plan.role.code, plan.revision, draft_version])
+        if edited:
+            categories.append((plan.role.code, edited))
+    expected = [access.pk, work_date.isoformat(), file_digest, revisions]
+    if confirmation:
+        try:
+            supplied = signing.loads(confirmation, salt=CONFIRMATION_SALT)
+        except signing.BadSignature:
+            supplied = None
+        if supplied == expected:
+            return
+        if not categories:
+            raise ValidationError('Файл или расстановка изменились. Запусти импорт ещё раз.')
+    if categories:
+        raise DraftConfirmationRequired(categories, signing.dumps(expected, salt=CONFIRMATION_SALT))
 
 
 @transaction.atomic
-def publish_crew_excel(grouped, *, work_date, access):
+def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=''):
     if work_date != production_work_date():
         raise ValidationError('Производственные сутки изменились. Открой форму загрузки заново.')
     actor, actor_access = _locked_deputy_publish_access(actor_access=access, actor=access.employee)
+    plans = []
+    for code in sorted(grouped):
+        role = Role.objects.filter(code=code, is_active=True).first()
+        if role is None:
+            raise ValidationError('Категория техники недоступна для публикации.')
+        plan, _ = get_or_create_crew_draft(role=role, work_date=work_date, actor=actor)
+        slots = list(plan.slots.select_for_update(of=('self',)).select_related('equipment'))
+        plans.append((plan, slots))
+    _require_draft_confirmation(
+        plans, confirmation=confirmation, file_digest=file_digest, work_date=work_date, access=actor_access,
+    )
     names = defaultdict(list)
     for employee in Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE):
         parts = _name_parts(employee.full_name)
@@ -229,12 +269,8 @@ def publish_crew_excel(grouped, *, work_date, access):
             names[parts[0]].append((parts, employee))
 
     publications = []
-    for code in sorted(grouped):
-        role = Role.objects.filter(code=code, is_active=True).first()
-        if role is None:
-            raise ValidationError('Категория техники недоступна для публикации.')
-        plan, _ = get_or_create_crew_draft(role=role, work_date=work_date, actor=actor)
-        changed = _stage_plan(plan, grouped[code], names, actor)
+    for plan, slots in plans:
+        changed = _stage_plan(plan, slots, grouped[plan.role.code], names, actor)
         if changed:
             published = publish_crew_plan(
                 plan=plan, expected_version=plan.version, actor=actor, actor_access=actor_access,

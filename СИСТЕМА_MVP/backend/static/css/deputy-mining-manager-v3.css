@@ -2060,6 +2060,11 @@ button.deputy-avatar {
         flex: 1 1 130px;
     }
 
+    .deputy-import-page .deputy-dialog-actions button[type="submit"] {
+        flex-basis: 100%;
+        min-height: 44px;
+    }
+
     .deputy-dialog-actions [data-clear-slot] {
         flex-basis: 100%;
         margin-right: 0;

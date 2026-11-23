@@ -143,7 +143,7 @@ class DeputyPlanningViewTests(TestCase):
         )
         return plan
 
-    def upload_crew_excel(self, rows, *, work_date=None):
+    def crew_excel_bytes(self, rows):
         workbook = Workbook()
         workbook.active.title = 'Старая версия'
         sheet = workbook.create_sheet('Лист1')
@@ -152,11 +152,16 @@ class DeputyPlanningViewTests(TestCase):
             sheet.append(row)
         data = BytesIO()
         workbook.save(data)
+        return data.getvalue()
+
+    def upload_crew_excel(self, rows, *, work_date=None, confirmation=''):
+        payload = rows if isinstance(rows, bytes) else self.crew_excel_bytes(rows)
         return self.client.post(
             reverse('deputy_mining_manager_import'),
             {
                 'work_date': (work_date or production_work_date()).isoformat(),
-                'workbook': SimpleUploadedFile('Расстановка.xlsx', data.getvalue()),
+                'workbook': SimpleUploadedFile('Расстановка.xlsx', payload),
+                'draft_confirmation': confirmation,
             },
         )
 
@@ -231,9 +236,58 @@ class DeputyPlanningViewTests(TestCase):
         plan = self.create_draft()
         self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
         response = self.upload_crew_excel([['Самосвал', self.truck_1.garage_number, self.driver.full_name, None]])
-        self.assertContains(response, 'есть ручные правки', status_code=400)
+        self.assertContains(response, 'есть ручные правки', status_code=409)
+        self.assertContains(response, 'Заменить черновик и опубликовать', status_code=409)
         plan.refresh_from_db()
         self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee, self.driver)
+
+    def test_excel_import_replaces_draft_and_publishes_only_excel_changes(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+        ])
+        preview = self.upload_crew_excel(workbook)
+        self.assertEqual(preview.status_code, 409)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        response = self.upload_crew_excel(workbook, confirmation=preview.context['draft_confirmation'])
+        self.assertContains(response, 'Расстановка опубликована')
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.PUBLISHED)
+        self.assertIsNone(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee)
+        current = get_active_equipment_assignment(self.driver, 'driver')
+        self.assertEqual((current.equipment, current.shift_type), (self.truck_1, WorkShiftType.SHIFT_2))
+
+    def test_excel_import_requires_confirmation_again_if_file_or_draft_changed(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name]])
+        preview = self.upload_crew_excel(workbook)
+        token = preview.context['draft_confirmation']
+        changed_file = self.crew_excel_bytes([['Самосвал', self.truck_1.garage_number, 'Снять', None]])
+        self.assertContains(
+            self.upload_crew_excel(changed_file, confirmation=token),
+            'Подтверди замену заново',
+            status_code=409,
+        )
+        plan.refresh_from_db()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_2, employee=self.driver)
+        response = self.upload_crew_excel(workbook, confirmation=token)
+        self.assertContains(response, 'Подтверди замену заново', status_code=409)
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
+        self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_2).employee, self.driver)
+        self.assertEqual(get_active_equipment_assignment(self.driver, 'driver'), self.original_assignment)
+
+    def test_excel_import_keeps_the_draft_if_confirmed_workbook_has_an_error(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        workbook = self.crew_excel_bytes([['Самосвал', '999', self.driver.full_name, None]])
+        preview = self.upload_crew_excel(workbook)
+        response = self.upload_crew_excel(workbook, confirmation=preview.context['draft_confirmation'])
+        self.assertContains(response, 'C2. Номер техники', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
         self.assertEqual(plan.slots.get(equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1).employee, self.driver)
 
     def test_excel_import_rejects_an_old_date_and_other_roles(self):

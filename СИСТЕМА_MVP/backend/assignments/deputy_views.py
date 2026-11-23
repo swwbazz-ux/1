@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import date
+from hashlib import sha256
 from urllib.parse import quote, urlencode
 
 from django.core.exceptions import ValidationError
@@ -34,7 +35,12 @@ from users.work_profiles import (
 )
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
-from .crew_excel_import import MAX_FILE_SIZE, publish_crew_excel, read_crew_excel
+from .crew_excel_import import (
+    DraftConfirmationRequired,
+    MAX_FILE_SIZE,
+    publish_crew_excel,
+    read_crew_excel,
+)
 from .models import (
     AssignmentStatus,
     CrewPlan,
@@ -1275,6 +1281,7 @@ def deputy_mining_manager_import_view(request):
         return redirect('role_home')
     work_date = production_work_date()
     context = {'access': access, 'work_date': work_date}
+    status = 200
     if request.method == 'POST':
         try:
             if request.POST.get('work_date') != work_date.isoformat():
@@ -1282,19 +1289,33 @@ def deputy_mining_manager_import_view(request):
             upload = request.FILES.get('workbook')
             if upload is None or not upload.name.lower().endswith('.xlsx'):
                 raise ValidationError('Выбери файл в формате .xlsx.')
-            grouped, skipped = read_crew_excel(upload.read(MAX_FILE_SIZE + 1))
+            contents = upload.read(MAX_FILE_SIZE + 1)
+            grouped, skipped = read_crew_excel(contents)
             context['skipped_categories'] = sorted(skipped.items())
-            publications = publish_crew_excel(grouped, work_date=work_date, access=access)
+            confirmation = request.POST.get('draft_confirmation', '')
+            publications = publish_crew_excel(
+                grouped, work_date=work_date, access=access,
+                file_digest=sha256(contents).hexdigest(), confirmation=confirmation,
+            )
             context['publications'] = [
                 (plan, TARGET_ROLE_LABELS[plan.role.code], count)
                 for plan, count in publications
             ]
             context['processed'] = True
+            context['replaced_draft'] = bool(confirmation)
+        except DraftConfirmationRequired as review:
+            status = 409
+            context['draft_changed'] = bool(confirmation)
+            context['draft_confirmation'] = review.token
+            context['draft_categories'] = [
+                (TARGET_ROLE_LABELS[role_code], count) for role_code, count in review.categories
+            ]
         except ValidationError as error:
+            status = 400
             context['errors'] = error.messages
     response = render(
         request, 'assignments/deputy_mining_manager_import.html', context,
-        status=400 if 'errors' in context else 200,
+        status=status,
     )
     response['Cache-Control'] = 'private, no-store'
     return response

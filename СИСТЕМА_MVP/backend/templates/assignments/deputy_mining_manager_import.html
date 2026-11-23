@@ -5,7 +5,8 @@
 {% block body_class %}deputy-mining-manager-screen deputy-reports-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261123-excel">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261123-excel-replace">
+<script src="{% static 'js/deputy-crew-excel-import-v1.js' %}" defer></script>
 {% endblock %}
 
 {% block body %}
@@ -21,38 +22,7 @@
                 </div>
             </header>
             <div class="deputy-publications-list">
-                {% if errors %}
-                    <div class="message error" role="alert">
-                        <strong>Расстановка не опубликована</strong>
-                        <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
-                    </div>
-                {% endif %}
-                {% if processed %}
-                    <div class="message success" role="status">
-                        {% if publications %}
-                            <strong>Расстановка опубликована</strong>
-                            <ul>
-                                {% for plan, category, changed in publications %}
-                                    <li>
-                                        <a href="{% url 'deputy_mining_manager_placement' %}?role={{ plan.role.code }}&amp;plan={{ plan.pk }}">
-                                            {{ category }} · r{{ plan.revision }}
-                                        </a>
-                                        · Изменено сменных ячеек: {{ changed }}
-                                    </li>
-                                {% endfor %}
-                            </ul>
-                        {% else %}
-                            Назначения уже совпадают с расстановкой в Excel.
-                        {% endif %}
-                    </div>
-                {% endif %}
-                {% if skipped_categories %}
-                    <div class="message info">
-                        <strong>Строки вне импорта</strong>
-                        <ul>{% for category, count in skipped_categories %}<li>{{ category }} · {{ count }}</li>{% endfor %}</ul>
-                    </div>
-                {% endif %}
-                <form method="post" enctype="multipart/form-data">
+                <form method="post" enctype="multipart/form-data" data-crew-import-form>
                     {% csrf_token %}
                     <input type="hidden" name="work_date" value="{{ work_date|date:'Y-m-d' }}">
                     <p>Данные берутся с «Лист1». Пустые ячейки сохраняют назначения. Чтобы снять экипаж, впиши «Снять».</p>
@@ -61,10 +31,65 @@
                         <input type="file" id="deputy-crew-workbook" name="workbook"
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
                     </p>
-                    <div class="deputy-dialog-actions">
-                        <button class="admin-button admin-button-primary" type="submit">Загрузить и опубликовать</button>
-                        <a class="admin-button admin-button-secondary" href="{% url 'deputy_mining_manager_placement' %}">К расстановке</a>
+                    <div data-crew-import-result>
+                        {% if draft_confirmation %}
+                            <div class="message info" role="status" data-crew-import-message>
+                                <strong>В черновике есть ручные правки</strong>
+                                {% if draft_changed %}
+                                    <p>Черновик или файл изменились. Подтверди замену заново.</p>
+                                {% endif %}
+                                <ul>
+                                    {% for category, count in draft_categories %}
+                                        <li>{{ category }} · Изменено сменных ячеек: {{ count }}</li>
+                                    {% endfor %}
+                                </ul>
+                                <p>Подтверждение уберёт ручные правки в этих категориях и применит Excel.
+                                   Для пустых ячеек будут использованы действующие назначения.</p>
+                            </div>
+                            <input type="hidden" name="draft_confirmation" value="{{ draft_confirmation }}">
+                        {% endif %}
+                        {% if errors %}
+                            <div class="message error" role="alert" data-crew-import-message>
+                                <strong>Расстановка не опубликована</strong>
+                                <ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>
+                            </div>
+                        {% endif %}
+                        {% if processed %}
+                            <div class="message success" role="status" data-crew-import-message>
+                                {% if publications %}
+                                    <strong>Расстановка опубликована</strong>
+                                    <ul>
+                                        {% for plan, category, changed in publications %}
+                                            <li>
+                                                <a href="{% url 'deputy_mining_manager_placement' %}?role={{ plan.role.code }}&amp;plan={{ plan.pk }}">
+                                                    {{ category }} · r{{ plan.revision }}
+                                                </a>
+                                                · Изменено сменных ячеек: {{ changed }}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% elif replaced_draft %}
+                                    Черновик заменён. Действующие назначения уже совпадают с Excel.
+                                {% else %}
+                                    Назначения уже совпадают с расстановкой в Excel.
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                        {% if skipped_categories %}
+                            <div class="message info" data-crew-import-message>
+                                <strong>Строки вне импорта</strong>
+                                <ul>{% for category, count in skipped_categories %}<li>{{ category }} · {{ count }}</li>{% endfor %}</ul>
+                            </div>
+                        {% endif %}
+                        <div class="deputy-dialog-actions">
+                            <button class="admin-button admin-button-primary" type="submit"
+                                    data-upload-label="Загрузить и опубликовать">
+                                {% if draft_confirmation %}Заменить черновик и опубликовать{% else %}Загрузить и опубликовать{% endif %}
+                            </button>
+                            <a class="admin-button admin-button-secondary" href="{% url 'deputy_mining_manager_placement' %}">К расстановке</a>
+                        </div>
                     </div>
+                    <p data-crew-import-feedback role="status" hidden></p>
                 </form>
             </div>
         </section>
