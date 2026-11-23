@@ -2,6 +2,7 @@
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from .protected_cards import protected_writes_allowed
@@ -61,18 +62,22 @@ def expire_due_temporary_work_transfers(*, as_of=None):
     return expired
 
 
-def active_temporary_work_transfer(employee, *, as_of=None):
-    if not employee or not employee.pk:
-        return None
-    as_of = as_of or timezone.localdate()
+def _effective_work_transfers(as_of):
     return (
         TemporaryWorkTransfer.objects.filter(
-            employee=employee,
             status=TemporaryWorkTransfer.Status.APPROVED,
             effective_from__lte=as_of,
             effective_to__gte=as_of,
         )
         .select_related('target_specialization', 'target_specialization__access_role')
+    )
+
+
+def active_temporary_work_transfer(employee, *, as_of=None):
+    if not employee or not employee.pk:
+        return None
+    return (
+        _effective_work_transfers(as_of or timezone.localdate()).filter(employee=employee)
         .order_by('-reviewed_at', '-id')
         .first()
     )
@@ -84,6 +89,28 @@ def effective_specialization(employee, *, as_of=None):
     if transfer:
         return transfer.target_specialization
     return getattr(employee, 'base_specialization', None)
+
+
+def effective_specializations_by_employee_id(employees, *, as_of=None):
+    specializations = {employee.pk: employee.base_specialization for employee in employees}
+    if not specializations:
+        return specializations
+    transferred = {}
+    for transfer in _effective_work_transfers(as_of or timezone.localdate()).filter(
+        employee_id__in=specializations,
+    ).order_by('employee_id', '-reviewed_at', '-id'):
+        transferred.setdefault(transfer.employee_id, transfer.target_specialization)
+    specializations.update(transferred)
+    return specializations
+
+
+def _specialization_matches_role(specialization, role_code):
+    return bool(
+        specialization
+        and specialization.is_active
+        and specialization.access_role_id
+        and specialization.access_role.code == role_code
+    )
 
 
 def employee_has_effective_access_role(
@@ -121,33 +148,40 @@ def employee_has_effective_access_role(
             is_active=True,
         ).exists()
 
-    specialization = effective_specialization(employee, as_of=as_of)
-    return bool(
-        specialization
-        and specialization.is_active
-        and specialization.access_role_id
-        and specialization.access_role.code == role_code
-    )
+    return _specialization_matches_role(effective_specialization(employee, as_of=as_of), role_code)
 
 
 def eligible_employee_ids_for_work_role(role_code, *, as_of=None):
     """Evaluate eligibility in one place so deputy planning and admin agree."""
     as_of = as_of or timezone.localdate()
-    employees = (
-        Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE)
-        .select_related(
-            'personnel_position',
-            'base_specialization',
-            'base_specialization__access_role',
-            'contractor_organization',
-        )
-        .prefetch_related('accesses__role')
-        .order_by('id')
+    eligible = Employee.objects.filter(
+        Employee.work_eligibility_q(as_of),
+        is_active=True,
+        status=Employee.Status.ACTIVE,
     )
-    return {
-        employee.id
-        for employee in employees
-        if employee_has_effective_access_role(employee, role_code, as_of=as_of)
+    if role_code not in PRODUCTION_APP_ROLE_CODES:
+        return set(eligible.values_list('id', flat=True))
+
+    legacy_access = EmployeeAccess.objects.filter(
+        employee_id=OuterRef('pk'),
+        role__code=role_code,
+        role__is_active=True,
+        status=EmployeeAccess.Status.ACTIVATED,
+        is_active=True,
+    )
+    legacy_ids = set(
+        eligible.filter(personnel_position__isnull=True).filter(
+            Q(work_category=role_code)
+            | (Q(work_category=Employee.WorkCategory.OTHER) & Exists(legacy_access)),
+        ).values_list('id', flat=True)
+    )
+    specialized = eligible.filter(personnel_position__isnull=False).select_related(
+        'base_specialization__access_role',
+    )
+    return legacy_ids | {
+        employee_id
+        for employee_id, specialization in effective_specializations_by_employee_id(specialized, as_of=as_of).items()
+        if _specialization_matches_role(specialization, role_code)
     }
 
 

@@ -180,6 +180,14 @@ class ElementStub extends EventTargetStub {
         return child;
     }
 
+    insertBefore(child, reference) {
+        child.remove();
+        const index = reference ? this.children.indexOf(reference) : this.children.length;
+        child.parentNode = this;
+        this.children.splice(index, 0, child);
+        return child;
+    }
+
     replaceChildren(...children) {
         this.children.forEach((child) => {
             child.parentNode = null;
@@ -328,6 +336,9 @@ function planningPayload({assigned = false, version = 1} = {}) {
                     employee: null,
                 },
             ],
+        }, {
+            equipment: {id: 502, label: "БЕЛАЗ 502"},
+            slots: [],
         }],
     };
 }
@@ -414,6 +425,8 @@ function createDeputyRuntime(options = {}) {
             return 1;
         },
         clearTimeout() {},
+        requestAnimationFrame() { return 1; },
+        cancelAnimationFrame() {},
         isAppRoleReadonly() {
             return false;
         },
@@ -577,6 +590,7 @@ test("unlocked deputy drag-and-drop persists exactly once", async () => {
     const runtime = createDeputyRuntime({locked: false});
     const card = runtime.employeeList.querySelector(".deputy-employee-card");
     const slot = runtime.board.querySelector(".deputy-crew-position");
+    const unrelatedRow = runtime.board.querySelector('[data-equipment-id="502"]');
 
     assert.equal(card.draggable, true);
     card.dispatchEvent(dragEvent("dragstart"));
@@ -585,6 +599,7 @@ test("unlocked deputy drag-and-drop persists exactly once", async () => {
 
     assert.equal(runtime.fetchCalls.length, 1);
     assert.equal(runtime.fetchCalls[0].init.method, "POST");
+    assert.equal(runtime.board.querySelector('[data-equipment-id="502"]'), unrelatedRow);
     assert.ok(
         runtime.board.querySelector(".deputy-slot-person"),
         "server payload was not applied after the single unlocked POST"

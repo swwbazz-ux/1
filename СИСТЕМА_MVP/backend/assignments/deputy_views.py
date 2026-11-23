@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.gzip import gzip_page
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -28,6 +29,7 @@ from users.role_apps import (
 )
 from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
+    effective_specializations_by_employee_id,
     eligible_employee_ids_for_work_role,
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
@@ -51,9 +53,9 @@ from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
     WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
-    employee_is_excavator_assistant,
     employee_matches_work_role,
     get_or_create_crew_draft,
+    is_excavator_assistant_specialization,
     production_work_date,
     publish_crew_plan,
     update_crew_draft_slot,
@@ -511,16 +513,13 @@ def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
             status=Employee.Status.ACTIVE,
         )
         .exclude(id__in=primary_employee_ids)
-        .select_related(
-            'base_specialization',
-            'base_specialization__access_role',
-        )
+        .select_related('base_specialization')
         .order_by('id')
     )
     return primary_employee_ids | {
-        employee.id
-        for employee in employees
-        if employee_is_excavator_assistant(employee)
+        employee_id
+        for employee_id, specialization in effective_specializations_by_employee_id(employees).items()
+        if is_excavator_assistant_specialization(specialization)
     }
 
 
@@ -1349,6 +1348,7 @@ def _validation_response(error):
 
 
 @require_POST
+@gzip_page
 def deputy_mining_manager_slot_view(request):
     access = deputy_access_from_request(request)
     if not access:

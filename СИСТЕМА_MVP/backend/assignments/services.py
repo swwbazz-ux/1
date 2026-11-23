@@ -186,8 +186,7 @@ def employee_matches_work_role(employee, role):
     return employee_has_effective_access_role(employee, role.code)
 
 
-def employee_is_excavator_assistant(employee):
-    specialization = effective_specialization(employee)
+def is_excavator_assistant_specialization(specialization):
     return bool(
         specialization
         and specialization.is_active
@@ -199,7 +198,9 @@ def secondary_employee_matches_work_role(employee, role):
     if role.code == 'driver':
         return employee_matches_work_role(employee, role)
     if role.code == 'excavator_operator':
-        return employee_matches_work_role(employee, role) or employee_is_excavator_assistant(employee)
+        return employee_matches_work_role(employee, role) or is_excavator_assistant_specialization(
+            effective_specialization(employee),
+        )
     return False
 
 

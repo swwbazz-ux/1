@@ -124,6 +124,9 @@
     var currentBrigade = "all";
     var currentSlot = null;
     var candidateEmployees = [];
+    var equipmentRowNodes = new Map();
+    var employeeCardNodes = new Map();
+    var boardBody = null;
     var activeEquipmentId = "";
     var dragSourceEquipmentId = "";
     var dragTargetEquipmentId = "";
@@ -131,6 +134,10 @@
     var toastTimer = null;
     var dragPayload = null;
     var dragPreview = null;
+    var dragPreviewFrame = null;
+    var dragPreviewPoint = null;
+    var dragPreviewWidth = 0;
+    var dragPreviewHeight = 0;
     var transparentDragImage = null;
     var noticeActionHandler = null;
 
@@ -366,52 +373,54 @@
         return textValue(row && row.equipment && row.equipment.id);
     }
 
-    function syncEquipmentRowStates() {
-        if (!board) return;
-        Array.prototype.slice.call(board.querySelectorAll(".deputy-equipment-row")).forEach(function (rowNode) {
-            var rowId = textValue(rowNode.getAttribute("data-equipment-id"));
-            var isActive = Boolean(activeEquipmentId) && rowId === activeEquipmentId;
-            var isDragSource = Boolean(dragSourceEquipmentId) && rowId === dragSourceEquipmentId;
-            var isDropTarget = Boolean(dragTargetEquipmentId) && rowId === dragTargetEquipmentId;
-            var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
-            var stateBadge = rowNode.querySelector(".deputy-equipment-state");
-            rowNode.classList.toggle("is-active-equipment", isActive);
-            rowNode.classList.toggle("is-drag-source", isDragSource);
-            rowNode.classList.toggle("is-drop-target", isDropTarget);
-            if (isActive) {
-                rowNode.setAttribute("aria-current", "true");
-            } else {
-                rowNode.removeAttribute("aria-current");
-            }
-            if (stateBadge) {
-                stateBadge.textContent = interactionLabel || "Выбрано";
-                stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
-            }
-        });
+    function syncEquipmentRowState(rowId) {
+        var entry = equipmentRowNodes.get(rowId);
+        if (!entry) return;
+        var rowNode = entry.node;
+        var isActive = rowId === activeEquipmentId;
+        var isDragSource = rowId === dragSourceEquipmentId;
+        var isDropTarget = rowId === dragTargetEquipmentId;
+        var interactionLabel = isDropTarget ? "Сюда" : (isDragSource ? "Отсюда" : (isActive ? "Выбрано" : ""));
+        var stateBadge = rowNode.querySelector(".deputy-equipment-state");
+        rowNode.classList.toggle("is-active-equipment", isActive);
+        rowNode.classList.toggle("is-drag-source", isDragSource);
+        rowNode.classList.toggle("is-drop-target", isDropTarget);
+        if (isActive) {
+            rowNode.setAttribute("aria-current", "true");
+        } else {
+            rowNode.removeAttribute("aria-current");
+        }
+        if (stateBadge) {
+            stateBadge.textContent = interactionLabel || "Выбрано";
+            stateBadge.classList.toggle("is-visible", Boolean(interactionLabel));
+        }
     }
 
     function setActiveEquipmentRow(row) {
-        activeEquipmentId = equipmentRowId(row);
-        syncEquipmentRowStates();
+        var nextId = equipmentRowId(row);
+        var previousId = activeEquipmentId;
+        if (previousId === nextId) return;
+        activeEquipmentId = nextId;
+        syncEquipmentRowState(previousId);
+        syncEquipmentRowState(nextId);
     }
 
     function clearActiveEquipmentRow() {
-        if (!activeEquipmentId) return;
-        activeEquipmentId = "";
-        syncEquipmentRowStates();
+        setActiveEquipmentRow(null);
     }
 
     function setDragTargetEquipmentRow(row) {
         var nextId = equipmentRowId(row);
-        if (dragTargetEquipmentId === nextId) return;
+        var previousId = dragTargetEquipmentId;
+        if (previousId === nextId) return;
         dragTargetEquipmentId = nextId;
-        syncEquipmentRowStates();
+        syncEquipmentRowState(previousId);
+        syncEquipmentRowState(nextId);
     }
 
     function clearDragTargetEquipmentRow(row) {
         if (row && dragTargetEquipmentId !== equipmentRowId(row)) return;
-        dragTargetEquipmentId = "";
-        syncEquipmentRowStates();
+        setDragTargetEquipmentRow(null);
     }
 
     function temporaryTransferData() {
@@ -743,13 +752,19 @@
 
     function moveDragPreview(event) {
         if (!dragPreview || !event || typeof event.clientX !== "number" || typeof event.clientY !== "number") return;
+        dragPreviewPoint = { x: event.clientX, y: event.clientY };
+        if (dragPreviewFrame === null) {
+            dragPreviewFrame = window.requestAnimationFrame(paintDragPreview);
+        }
+    }
+
+    function paintDragPreview() {
+        dragPreviewFrame = null;
+        if (!dragPreview || !dragPreviewPoint) return;
         var padding = 8;
-        var width = dragPreview.offsetWidth || 280;
-        var height = dragPreview.offsetHeight || 56;
-        var left = Math.min(event.clientX - width / 2, window.innerWidth - width - padding);
-        var top = Math.min(event.clientY - height / 2, window.innerHeight - height - padding);
-        dragPreview.style.left = Math.max(padding, left) + "px";
-        dragPreview.style.top = Math.max(padding, top) + "px";
+        var left = Math.min(dragPreviewPoint.x - dragPreviewWidth / 2, window.innerWidth - dragPreviewWidth - padding);
+        var top = Math.min(dragPreviewPoint.y - dragPreviewHeight / 2, window.innerHeight - dragPreviewHeight - padding);
+        dragPreview.style.transform = "translate3d(" + Math.max(padding, left) + "px, " + Math.max(padding, top) + "px, 0)";
     }
 
     function clearDropHighlights() {
@@ -759,6 +774,9 @@
     }
 
     function removeDragPreview() {
+        if (dragPreviewFrame !== null) window.cancelAnimationFrame(dragPreviewFrame);
+        dragPreviewFrame = null;
+        dragPreviewPoint = null;
         if (dragPreview) {
             dragPreview.remove();
             dragPreview = null;
@@ -786,13 +804,15 @@
     }
 
     function finishDrag() {
+        if (!dragPayload && !dragPreview && !dragSourceEquipmentId && !dragTargetEquipmentId) return;
         Array.prototype.slice.call(root.querySelectorAll(".is-dragging")).forEach(function (node) {
             node.classList.remove("is-dragging");
         });
         clearDropHighlights();
+        var previousSourceId = dragSourceEquipmentId;
         dragSourceEquipmentId = "";
-        dragTargetEquipmentId = "";
-        syncEquipmentRowStates();
+        clearDragTargetEquipmentRow();
+        syncEquipmentRowState(previousSourceId);
         removeDragPreview();
         dragPayload = null;
     }
@@ -809,6 +829,10 @@
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
         dragPreview = preview;
+        dragPreviewWidth = preview.offsetWidth || 280;
+        dragPreviewHeight = preview.offsetHeight || 56;
+        preview.style.left = "0px";
+        preview.style.top = "0px";
         moveDragPreview(event);
 
         transparentDragImage = createElement("span", "deputy-transparent-drag-image");
@@ -836,7 +860,7 @@
                 sourcePosition: source.source_position
             };
             dragSourceEquipmentId = textValue(source.source_equipment_id);
-            syncEquipmentRowStates();
+            syncEquipmentRowState(dragSourceEquipmentId);
             visual.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
@@ -874,7 +898,18 @@
         return card;
     }
 
-    function renderEmployees() {
+    function reconcileChildren(container, nodes) {
+        var wanted = new Set(nodes);
+        Array.from(container.children).forEach(function (node) {
+            if (!wanted.has(node)) node.remove();
+        });
+        nodes.forEach(function (node, index) {
+            var current = container.children[index] || null;
+            if (current !== node) container.insertBefore(node, current);
+        });
+    }
+
+    function renderEmployees(reuseNodes) {
         if (!employeeList) return;
         var context = searchContext();
         var visible = context.brigadeEmployees;
@@ -883,10 +918,18 @@
         } else if (context.query && !context.rowMatches.length) {
             visible = [];
         }
-        employeeList.replaceChildren();
-        visible.forEach(function (employee) {
-            employeeList.appendChild(createEmployeeCard(employee));
+        var nextEmployeeNodes = new Map();
+        var cards = visible.map(function (employee) {
+            var id = textValue(employee.id);
+            var fingerprint = JSON.stringify(employee);
+            var previous = reuseNodes && employeeCardNodes.get(id);
+            var node = previous && previous.fingerprint === fingerprint ? previous.node : createEmployeeCard(employee);
+            nextEmployeeNodes.set(id, { node: node, fingerprint: fingerprint });
+            return node;
         });
+        employeeCardNodes = nextEmployeeNodes;
+        if (reuseNodes) reconcileChildren(employeeList, cards);
+        else employeeList.replaceChildren.apply(employeeList, cards);
         employeeList.hidden = visible.length === 0;
         if (availableCount) {
             availableCount.textContent = context.query && context.employeeMode
@@ -1208,12 +1251,13 @@
         button.addEventListener("dragover", function (event) {
             if (!planEditable() || saving) return;
             event.preventDefault();
-            button.classList.add("is-drag-over");
+            if (!button.classList.contains("is-drag-over")) button.classList.add("is-drag-over");
             setActiveEquipmentRow(row);
             setDragTargetEquipmentRow(row);
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
         });
-        button.addEventListener("dragleave", function () {
+        button.addEventListener("dragleave", function (event) {
+            if (event.relatedTarget && button.contains(event.relatedTarget)) return;
             button.classList.remove("is-drag-over");
             clearDragTargetEquipmentRow(row);
         });
@@ -1266,57 +1310,80 @@
         return wrapper;
     }
 
-    function renderBoard() {
+    function renderBoard(reuseNodes) {
         if (!board) return;
         var context = searchContext();
         var rows = state.rows.filter(rowMatchesFilter);
         if (context.query && !context.employeeMode) {
             rows = rows.filter(function (row) { return rowSearchRank(row, context.query) !== null; });
         }
-        board.replaceChildren();
         if (!rows.length) {
+            board.replaceChildren();
+            boardBody = null;
+            equipmentRowNodes = new Map();
             if (boardEmpty) boardEmpty.hidden = false;
             return;
         }
         if (boardEmpty) boardEmpty.hidden = true;
 
-        var table = createElement("table", "deputy-assignment-table");
-        var thead = document.createElement("thead");
-        var headRow = document.createElement("tr");
-        headRow.appendChild(createElement("th", "", "Техника"));
-        var firstSlots = rows[0].slots || [];
-        headRow.appendChild(createElement("th", "", firstSlots[0] && firstSlots[0].label || "Смена 1"));
-        headRow.appendChild(createElement("th", "", firstSlots[1] && firstSlots[1].label || "Смена 2"));
-        thead.appendChild(headRow);
-        table.appendChild(thead);
+        var retainTable = reuseNodes && boardBody;
+        if (!retainTable) {
+            var table = createElement("table", "deputy-assignment-table");
+            var thead = document.createElement("thead");
+            var headRow = document.createElement("tr");
+            headRow.appendChild(createElement("th", "", "Техника"));
+            var firstSlots = rows[0].slots || [];
+            headRow.appendChild(createElement("th", "", firstSlots[0] && firstSlots[0].label || "Смена 1"));
+            headRow.appendChild(createElement("th", "", firstSlots[1] && firstSlots[1].label || "Смена 2"));
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+            boardBody = document.createElement("tbody");
+            table.appendChild(boardBody);
+            board.replaceChildren(table);
+        }
 
-        var tbody = document.createElement("tbody");
-        rows.forEach(function (row) {
-            var tr = document.createElement("tr");
-            tr.classList.add("deputy-equipment-row");
-            tr.setAttribute("data-equipment-id", equipmentRowId(row));
-            tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
-            tr.classList.toggle("has-conflict", rowHasConflict(row));
-            tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
-            tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
-            var equipmentCell = document.createElement("td");
-            equipmentCell.appendChild(createEquipmentCell(row));
-            tr.appendChild(equipmentCell);
-            [0, 1].forEach(function (index) {
-                var slot = (row.slots || [])[index] || {
-                    shift_type: index === 0 ? "day" : "night",
-                    label: index === 0 ? "Смена 1" : "Смена 2",
-                    employee: null
-                };
-                var cell = document.createElement("td");
-                cell.appendChild(createSlot(row, slot));
-                tr.appendChild(cell);
-            });
-            tbody.appendChild(tr);
+        var nextRowNodes = new Map();
+        var rebuiltIds = [];
+        var rowNodes = rows.map(function (row) {
+            var id = equipmentRowId(row);
+            var fingerprint = JSON.stringify(row);
+            var previous = retainTable && equipmentRowNodes.get(id);
+            var entry = previous;
+            if (!previous || previous.fingerprint !== fingerprint) {
+                entry = { node: createEquipmentRow(row), fingerprint: fingerprint };
+                rebuiltIds.push(id);
+            }
+            nextRowNodes.set(id, entry);
+            return entry.node;
         });
-        table.appendChild(tbody);
-        board.appendChild(table);
-        syncEquipmentRowStates();
+        equipmentRowNodes = nextRowNodes;
+        if (retainTable) reconcileChildren(boardBody, rowNodes);
+        else boardBody.replaceChildren.apply(boardBody, rowNodes);
+        rebuiltIds.forEach(syncEquipmentRowState);
+    }
+
+    function createEquipmentRow(row) {
+        var tr = document.createElement("tr");
+        tr.classList.add("deputy-equipment-row");
+        tr.setAttribute("data-equipment-id", equipmentRowId(row));
+        tr.classList.toggle("has-attention", Boolean(row.attention || row.issue));
+        tr.classList.toggle("has-conflict", rowHasConflict(row));
+        tr.addEventListener("pointerdown", function () { setActiveEquipmentRow(row); });
+        tr.addEventListener("focusin", function () { setActiveEquipmentRow(row); });
+        var equipmentCell = document.createElement("td");
+        equipmentCell.appendChild(createEquipmentCell(row));
+        tr.appendChild(equipmentCell);
+        [0, 1].forEach(function (index) {
+            var slot = (row.slots || [])[index] || {
+                shift_type: index === 0 ? "day" : "night",
+                label: index === 0 ? "Смена 1" : "Смена 2",
+                employee: null
+            };
+            var cell = document.createElement("td");
+            cell.appendChild(createSlot(row, slot));
+            tr.appendChild(cell);
+        });
+        return tr;
     }
 
     function updatePublishButton() {
@@ -1350,11 +1417,11 @@
         }
     }
 
-    function renderAll() {
+    function renderAll(reuseNodes) {
         renderCategories();
         renderSummary();
-        renderEmployees();
-        renderBoard();
+        renderEmployees(reuseNodes);
+        renderBoard(reuseNodes);
         updatePublishButton();
         updateTemporaryTransferButton();
     }
@@ -1396,9 +1463,13 @@
         return result.payload;
     }
 
-    function applyPayload(payload) {
-        state = normalizeState(payload);
-        renderAll();
+    function applyPayload(payload, reuseNodes) {
+        var nextState = normalizeState(payload);
+        var sameBoard = state.plan.id === nextState.plan.id
+            && state.plan.editable === nextState.plan.editable
+            && state.role.code === nextState.role.code;
+        state = nextState;
+        renderAll(reuseNodes && sameBoard);
     }
 
     async function saveSlot(row, slot, employeeId, source, position) {
@@ -1423,7 +1494,7 @@
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
         try {
             var payload = await postJson(state.endpoints.slot, body);
-            applyPayload(payload);
+            applyPayload(payload, true);
             hideNotice();
             var savedLabel = state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены";
             updateAutosave("saved", savedLabel);
@@ -1597,9 +1668,8 @@
                 || !payload.sourceShiftType
             ) return;
             event.preventDefault();
-            employeePool.classList.add("is-drag-over");
+            if (!employeePool.classList.contains("is-drag-over")) employeePool.classList.add("is-drag-over");
             if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-            moveDragPreview(event);
         });
         employeePool.addEventListener("dragleave", function (event) {
             if (!event.relatedTarget || !employeePool.contains(event.relatedTarget)) {
