@@ -1377,6 +1377,7 @@
     cursor: grab;
     font-size: calc(11 * var(--settlement-density-unit));
     line-height: 1.2;
+    overflow-wrap: anywhere;
     opacity: 0;
     pointer-events: none;
     transform: translateY(-50%);

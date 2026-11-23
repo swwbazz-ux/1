@@ -6308,8 +6308,11 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertContains(response, 'Временное')
         self.assertContains(response, 'data-occupied="true"')
         content = response.content.decode('utf-8')
+        expected_free_beds = PhysicalBed.objects.filter(
+            room__transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+        ).count() - 1
         self.assertEqual(content.count('data-bed-state="occupied"'), 1)
-        self.assertEqual(content.count('data-bed-state="free"'), 269)
+        self.assertEqual(content.count('data-bed-state="free"'), expected_free_beds)
         self.assertEqual(content.count('data-bed-state="unavailable"'), 78)
         occupied_card = re.search(
             r'<button(?=[^>]*data-bed-id="'
@@ -6322,8 +6325,11 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertIn('data-bed-person-label', occupied_card.group(1))
         self.assertIn('data-bed-shift-badge', occupied_card.group(1))
         self.assertIn('>Д</span>', occupied_card.group(1))
+        self.assertIn(f'<strong>{self.candidate.full_name}</strong>', occupied_card.group(1))
+        self.assertIn(f'<span>Техника: {equipment}</span>', occupied_card.group(1))
+        self.assertNotIn('Должность:', occupied_card.group(1))
         self.assertEqual(response.context['summary']['occupied_beds'], 1)
-        self.assertEqual(response.context['summary']['free_beds'], 269)
+        self.assertEqual(response.context['summary']['free_beds'], expected_free_beds)
 
     def test_occupied_beds_use_canonical_employee_photo_and_initials_fallback(self):
         image_bytes = (

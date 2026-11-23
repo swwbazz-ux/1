@@ -312,19 +312,17 @@
             bed.appendChild(hoverCard);
         }
 
-        var shortName = document.createElement("strong");
-        shortName.textContent = shortPersonName(bed.dataset.occupantName);
-        var position = document.createElement("span");
-        position.textContent = bed.dataset.positionLabel || "";
-        var work = document.createElement("span");
-        work.textContent = bed.dataset.workLabel || "";
-        var shiftLabel = String(bed.dataset.shiftLabel || "").trim();
-        hoverCard.replaceChildren(shortName, position, work);
-        if (shiftLabel && shiftLabel !== "Не указано") {
-            var shift = document.createElement("small");
-            shift.textContent = shiftLabel;
-            hoverCard.appendChild(shift);
+        var name = document.createElement("strong");
+        name.textContent = bed.dataset.occupantName || "";
+        var shift = document.createElement("strong");
+        shift.textContent = "Смена: " + (String(bed.dataset.shiftLabel || "").trim() || "Не указано");
+        hoverCard.replaceChildren(name);
+        if (bed.dataset.tooltipWorkLabel) {
+            var work = document.createElement("span");
+            work.textContent = bed.dataset.tooltipWorkLabel;
+            hoverCard.appendChild(work);
         }
+        hoverCard.appendChild(shift);
     }
 
     function isTransferredBed(bed) {
@@ -1779,6 +1777,7 @@
             relocationSourceBed.dataset.occupantPhotoUrl = "";
             relocationSourceBed.dataset.shiftLabel = "";
             relocationSourceBed.dataset.workLabel = "";
+            relocationSourceBed.dataset.tooltipWorkLabel = "";
             relocationSourceBed.dataset.assignmentTypeLabel = "";
             relocationSourceBed.dataset.assignmentType = "";
             relocationSourceBed.classList.remove("is-occupied");
@@ -1793,6 +1792,7 @@
         selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         selectedBed.dataset.shiftLabel = occupancy.shift_label;
         selectedBed.dataset.workLabel = occupancy.work_label;
+        selectedBed.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
         selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
         selectedBed.dataset.assignmentType = occupancy.assignment_type || "";
         selectedBed.classList.remove("is-free");
@@ -1807,7 +1807,8 @@
                 "блок " + selectedBed.dataset.blockLabel,
                 selectedBed.dataset.positionLabel,
                 "занято",
-                occupancy.occupant_name
+                occupancy.occupant_name,
+                "смена: " + (occupancy.shift_label || "Не указано")
             ].join(", ")
         );
 

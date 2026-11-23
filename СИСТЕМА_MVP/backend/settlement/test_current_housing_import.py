@@ -76,7 +76,7 @@ class CurrentHousingPreviewTests(TestCase):
                 shift_selection_basis='Проверка предпросмотра Excel.',
             )
 
-    def upload(self, rows):
+    def upload(self, rows, *, shift='День'):
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = 'КИС 5'
@@ -94,7 +94,7 @@ class CurrentHousingPreviewTests(TestCase):
                 sheet[f'B{index}'] = room
             sheet[f'C{index}'] = bed
             sheet[f'J{index}'] = person.full_name
-            sheet[f'K{index}'] = 'День'
+            sheet[f'K{index}'] = shift
             sheet[f'O{index}'] = self.starts
             sheet[f'P{index}'] = ends
             if blue:
@@ -204,6 +204,26 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 4)
         self.assertEqual(SettlementResident.objects.count(), 4)
         self.assertEqual(SettlementPlacementEvent.objects.count(), 2)
+
+    def test_map_tooltip_shows_imported_shift_and_the_field_for_each_personnel_category(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (3, '03А-1', self.itr, False, self.ends),
+        ], shift='Ночь').read()
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            preview = self.submit(payload)
+            result = self.submit(payload, action='apply', receipt=preview.context['receipt'])
+            self.assertEqual(result.context['application']['placed'], 2)
+            response = self.client.get(reverse('settlement_map'))
+        self.assertContains(response, 'data-shift-label="Ночь"', count=2)
+        self.assertContains(response, 'Смена: Ночь', count=2)
+        self.assertContains(response, 'Смена: День', count=2)
+        self.assertContains(response, f'<strong>{self.workers[0].full_name}</strong>')
+        self.assertContains(response, f'<strong>{self.itr.full_name}</strong>')
+        self.assertContains(response, '<span>Техника: не назначена</span>')
+        self.assertContains(response, f'<span>Должность: {self.itr.personnel_position.name}</span>')
 
     def test_apply_rechecks_holds_and_leaves_unconfirmed_rows_alone(self):
         self.use_clerk_session()

@@ -92,6 +92,7 @@ from .personnel_categories import (
     MISSING_CATEGORY_MESSAGE,
     ROOM_CATEGORY_CONFLICT,
     ROOM_CATEGORY_CONFLICT_MESSAGE,
+    employee_settlement_category,
 )
 from .preview_corrections import (
     exclude_settlement_preview_resident,
@@ -318,13 +319,6 @@ def _resident_photo_url(resident):
 def _person_initials(full_name):
     parts = [part for part in str(full_name or '').split() if part]
     return ''.join(part[0].upper() for part in parts[:2])
-
-
-def _person_short_label(full_name):
-    parts = [part for part in str(full_name or '').split() if part]
-    if len(parts) < 2:
-        return ' '.join(parts)
-    return f"{parts[0]} {''.join(f'{part[0]}.' for part in parts[1:])}"
 
 
 def settlement_clerk_access_from_request(request, *, allow_admin=True):
@@ -569,6 +563,7 @@ def _employee_profiles(employees):
     employees = list(employees)
     employee_ids = [employee.pk for employee in employees]
     equipment_by_employee = {}
+    equipment_labels_by_shift = defaultdict(dict)
     shift_by_employee = {}
 
     if employee_ids:
@@ -591,6 +586,9 @@ def _employee_profiles(employees):
         )
         for assignment in equipment_assignments:
             equipment_by_employee.setdefault(assignment.employee_id, assignment)
+            equipment_labels_by_shift[assignment.employee_id].setdefault(
+                assignment.shift_type, str(assignment.equipment),
+            )
 
         open_shifts = (
             EmployeeShift.objects
@@ -604,6 +602,10 @@ def _employee_profiles(employees):
         )
         for shift in open_shifts:
             shift_by_employee.setdefault(shift.employee_id, shift)
+            if shift.equipment_id:
+                equipment_labels_by_shift[shift.employee_id].setdefault(
+                    shift.shift_type, str(shift.equipment),
+                )
 
     profiles = {}
     for employee in employees:
@@ -624,11 +626,15 @@ def _employee_profiles(employees):
             if employee.personnel_position_id
             else employee.position.strip()
         )
+        equipment_label = str(equipment) if equipment is not None else ''
         profiles[employee.pk] = {
             'photo_url': _employee_photo_url(employee),
             'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
             'position_label': position_label or UNKNOWN_LABEL,
-            'work_label': str(equipment) if equipment is not None else (position_label or UNKNOWN_LABEL),
+            'work_label': equipment_label or position_label or UNKNOWN_LABEL,
+            'equipment_label': equipment_label,
+            'equipment_by_shift': equipment_labels_by_shift.get(employee.pk, {}),
+            'personnel_category': employee_settlement_category(employee),
         }
     return profiles
 
@@ -662,6 +668,20 @@ def _unsettled_employee_cards(moment):
     ]
 
 
+def _bed_tooltip_work_label(occupancy, profile):
+    if profile is None:
+        return occupancy.resident.organization
+    if profile['personnel_category'] == PersonnelPosition.SettlementCategory.WORKER:
+        equipment = (
+            profile['equipment_by_shift'].get(occupancy.work_shift)
+            if occupancy.work_shift else profile['equipment_label']
+        )
+        return f"Техника: {equipment or 'не назначена'}"
+    if profile['personnel_category'] == PersonnelPosition.SettlementCategory.ITR:
+        return f"Должность: {profile['position_label']}"
+    return 'Категория должности не указана'
+
+
 def _attach_occupancy_view(rooms):
     beds = [bed for room in rooms for bed in room.beds.all()]
     occupancies = [
@@ -683,29 +703,27 @@ def _attach_occupancy_view(rooms):
             bed.preview_rows = []
             if occupancy is None:
                 bed.occupant_name = UNKNOWN_LABEL
-                bed.occupant_short_name = UNKNOWN_LABEL
                 bed.occupant_photo_url = ''
                 bed.shift_label = UNKNOWN_LABEL
                 bed.work_label = UNKNOWN_LABEL
-                bed.position_label = UNKNOWN_LABEL
+                bed.tooltip_work_label = ''
                 bed.assignment_type_label = UNKNOWN_LABEL
                 continue
 
             resident = occupancy.resident
             room.occupied_bed_count += 1
             bed.occupant_name = resident.display_name
-            bed.occupant_short_name = _person_short_label(resident.display_name)
-            if resident.employee_id:
-                profile = profiles[resident.employee_id]
+            profile = profiles.get(resident.employee_id)
+            if profile:
                 bed.occupant_photo_url = profile['photo_url']
                 bed.shift_label = profile['shift_label']
                 bed.work_label = profile['work_label']
-                bed.position_label = profile['position_label']
             else:
                 bed.occupant_photo_url = _resident_photo_url(resident)
                 bed.shift_label = UNKNOWN_LABEL
                 bed.work_label = resident.organization or UNKNOWN_LABEL
-                bed.position_label = resident.position_title or UNKNOWN_LABEL
+            bed.shift_label = DAY_NIGHT_LABELS.get(occupancy.work_shift, bed.shift_label)
+            bed.tooltip_work_label = _bed_tooltip_work_label(occupancy, profile)
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
 
@@ -1953,6 +1971,7 @@ def settlement_control_release_view(request):
 
 def _occupancy_response(occupancy):
     resident = occupancy.resident
+    profile = None
     if resident.employee_id:
         employee = resident.employee
         profile = _employee_profiles([employee])[employee.pk]
@@ -1990,8 +2009,9 @@ def _occupancy_response(occupancy):
             'bed_stable_id': bed.stable_id,
             'occupant_name': resident.display_name,
             'photo_url': photo_url,
-            'shift_label': shift_label,
+            'shift_label': DAY_NIGHT_LABELS.get(occupancy.work_shift, shift_label),
             'work_label': work_label,
+            'tooltip_work_label': _bed_tooltip_work_label(occupancy, profile),
             'assignment_type': occupancy.assignment_type,
             'assignment_type_label': occupancy.get_assignment_type_display(),
             'placement_reason': occupancy.placement_reason,
