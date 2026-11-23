@@ -76,7 +76,7 @@ class CurrentHousingPreviewTests(TestCase):
                 shift_selection_basis='Проверка предпросмотра Excel.',
             )
 
-    def upload(self, rows, *, shift='День'):
+    def upload(self, rows, *, shift='День', edits=None):
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = 'КИС 5'
@@ -100,6 +100,8 @@ class CurrentHousingPreviewTests(TestCase):
             if blue:
                 sheet[f'J{index}'].fill = PatternFill('solid', fgColor=Color(theme=4, tint=.6))
         sheet.merge_cells(start_row=room_start, end_row=index, start_column=2, end_column=2)
+        for coordinate, value in (edits or {}).items():
+            sheet[coordinate] = value
         data = BytesIO()
         workbook.save(data)
         workbook.close()
@@ -131,12 +133,13 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertIn('no-store', response['Cache-Control'])
         groups = {item['code']: item['rows'] for item in response.context['report_groups']}
         self.assertEqual({key: len(rows) for key, rows in groups.items()}, {
-            'ready': 1, 'needs_resident': 1, 'conflict': 4, 'interwatch': 1, 'outside': 1, 'existing': 1,
+            'ready': 1, 'needs_resident': 3, 'conflict': 2, 'interwatch': 1, 'outside': 1, 'existing': 1,
         })
         self.assertEqual(groups['interwatch'][0].source, 'КИС 5!J5')
-        self.assertEqual(groups['needs_resident'][0].bed_id, 'KIS5-F1-R03-A1')
+        self.assertEqual([row.bed_id for row in groups['needs_resident']], [
+            'KIS5-F1-R01-A1', 'KIS5-F1-R01-A2', 'KIS5-F1-R03-A1',
+        ])
         self.assertEqual(groups['ready'][0].bed_id, 'KIS5-F1-R03-A2')
-        self.assertContains(response, 'В одну комнату попадают и рабочие, и ИТР.', count=2)
         self.assertContains(response, 'Койка занята другим жильцом')
         self.assertContains(response, 'Комната отсутствует в жилфонде')
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
@@ -167,9 +170,9 @@ class CurrentHousingPreviewTests(TestCase):
         hold.refresh_from_db()
         self.assertEqual(hold.status, SettlementBedPreparation.Status.PREPARED)
 
-    def submit(self, payload, **extra):
+    def submit(self, payload, *, filename='housing.xlsx', **extra):
         return self.client.post(reverse('settlement_current_housing_import'), {
-            'workbook': SimpleUploadedFile('housing.xlsx', payload), 'as_of': self.as_of.isoformat(), **extra,
+            'workbook': SimpleUploadedFile(filename, payload), 'as_of': self.as_of.isoformat(), **extra,
         })
 
     def test_apply_creates_missing_resident_and_is_idempotent(self):
@@ -209,7 +212,7 @@ class CurrentHousingPreviewTests(TestCase):
         self.use_clerk_session()
         payload = self.upload([
             (1, '01А-1', self.workers[0], False, self.ends),
-            (3, '03А-1', self.itr, False, self.ends),
+            (1, '01А-2', self.itr, False, self.ends),
         ], shift='Ночь').read()
         start, _ = production_day_bounds(self.as_of)
         with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
@@ -224,6 +227,49 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertContains(response, f'<strong>{self.itr.full_name}</strong>')
         self.assertContains(response, '<span>Техника: не назначена</span>')
         self.assertContains(response, f'<span>Должность: {self.itr.personnel_position.name}</span>')
+
+    def test_factual_import_uses_dated_duplicate_and_ignores_previous_resident_note(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, None),
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-2', self.workers[1], False, None),
+            (1, '01А-3', self.workers[3], True, self.ends),
+        ], edits={
+            'J4': f'заезд 20.11. {self.workers[0].full_name}',
+            'R4': 'Прежний Жилец Комнаты увольнение 19.11.',
+            'O3': None, 'O5': None, 'K5': None,
+        }).read()
+        filename = 'РАССЕЛЕНИЕ на 30.10. по 14.12. АБК.xlsx'
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            preview = self.submit(payload, filename=filename)
+            self.assertEqual(preview.context['applicable_count'], 2)
+            self.assertContains(preview, 'Дубли строк')
+            changed_period = self.submit(
+                payload, filename='РАССЕЛЕНИЕ на 30.10. по 15.12.xlsx',
+                action='apply', receipt=preview.context['receipt'],
+            )
+            self.assertContains(changed_period, 'Снова нажмите', status_code=400)
+            result = self.submit(payload, filename=filename, action='apply', receipt=preview.context['receipt'])
+            self.assertEqual(result.context['application'], {'placed': 2, 'residents': 2})
+        first = EmployeeBedOccupancy.objects.get(resident__employee=self.workers[0])
+        second = EmployeeBedOccupancy.objects.get(resident__employee=self.workers[1])
+        self.assertEqual(first.starts_at, production_day_bounds(self.starts)[0])
+        self.assertEqual(second.starts_at, start)
+        self.assertEqual(second.ends_at, production_day_bounds(self.ends)[0])
+        self.assertIsNone(second.work_shift)
+
+    def test_factual_import_keeps_competing_residents_out_of_apply(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, None),
+            (1, '01А-1', self.workers[1], False, self.ends),
+            (1, '01А-2', self.workers[2], False, self.ends),
+        ], edits={'O3': None}).read()
+        result = self.submit(payload, filename='РАССЕЛЕНИЕ на 30.10. по 14.12.xlsx')
+        self.assertEqual(result.context['applicable_count'], 1)
+        self.assertContains(result, 'На эту койку есть несколько записей на выбранную дату.', count=2)
 
     def test_apply_rechecks_holds_and_leaves_unconfirmed_rows_alone(self):
         self.use_clerk_session()
@@ -262,7 +308,7 @@ class CurrentHousingPreviewTests(TestCase):
         start, _ = production_day_bounds(self.as_of)
         with (
             patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)),
-            patch('settlement.current_housing_import._validate_resident_and_destination',
+            patch('settlement.current_housing_import._validate_room_sex',
                   side_effect=ValidationError('Сверьте назначение комнаты.')),
         ):
             response = self.submit(payload, action='apply', receipt=receipt)

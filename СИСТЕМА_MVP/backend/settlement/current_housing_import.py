@@ -33,7 +33,7 @@ from .residents import get_or_create_employee_resident
 from .room_sex import resident_sex
 from .services import (
     _create_occupancy, _locked_related_occupancies, _validate_occupancy_conflicts,
-    _validate_resident_and_destination, validate_placement_input_contract,
+    _validate_resident_state, _validate_room_sex, validate_placement_input_contract,
 )
 from .special_fund import room_anchor_types_by_room
 
@@ -43,9 +43,32 @@ LAYOUT = {5: (10, 11, 15, 16, 18), 6: (8, 9, 13, 14, 16)}
 MAX_SHEET_ROWS = 6000
 BED_LABEL = re.compile(r'(\d{1,5})([АБAB])-([1-3])', re.IGNORECASE)
 NAME_PART = r'[А-ЯЁа-яё]+(?:-[А-ЯЁа-яё]+)*'
-FULL_NAME = re.compile(fr'({NAME_PART})\s+({NAME_PART})\s+({NAME_PART})(?=\s|[,(.]|$)')
+FULL_NAME = re.compile(fr'{NAME_PART}\s+{NAME_PART}\s+{NAME_PART}(?:\s+(?i:оглы|кызы))?(?=\s|[,(.]|$)')
+COMMENT_NAME = re.compile(r'[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+')
+COMMENT_INITIALS = re.compile(r'([А-ЯЁ][а-яё-]+)\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.')
 VACANT = re.compile(r'^(?:свобод?\w*|резерв|пусто|нет\s+места)(?:\W|$)', re.IGNORECASE)
-REVIEW_NOTE = re.compile(r'\b(?:увол\w*|выбыл\w*|убыл\w*|выех\w*|съех\w*|пересел\w*|переех\w*|межвахт\w*)', re.IGNORECASE)
+SHORT_DATE = r'\d{1,2}\.\d{1,2}(?:\.(?:\d{4}|\d{2})\b)?'
+WORKBOOK_PERIOD = re.compile(fr'\bна\s+({SHORT_DATE})\.?\s+по\s+({SHORT_DATE})(?!\d)', re.IGNORECASE)
+ARRIVAL_PREFIX = re.compile(
+    fr'^(?:(?:заезд|заселиться(?:\s+(?:утром|вечером))?)\s+)?({SHORT_DATE})(?:\.\s*|\s+)(?=[А-ЯЁа-яё])',
+    re.IGNORECASE,
+)
+ARRIVAL_NOTE = re.compile(fr'\b(?:заезд|заехал[аи]?|заселил(?:ся|ась)|приехал[аи]?)\s+({SHORT_DATE})', re.IGNORECASE)
+DEPARTURE_NOTE = re.compile(
+    fr'(?:\b(?:увольнение(?:\s+с)?|увол(?:ен[а]?|ился|илась|ьняется)(?:\s+с)?'
+    fr'|уезжает|уедет|выехал[аи]?|съехал[аи]?|продление\)?\s+(?:по|до))'
+    fr'|^\(?\s*до)\s+({SHORT_DATE})(?!\d|\.\d|\.?\s+в\b)',
+    re.IGNORECASE,
+)
+OTHER_ROOM_NOTE = re.compile(
+    r'\bна продлении (?:жив[её]т )?в\s+(?:КИС[\s-]*([56])\s+)?'
+    r'(?:(?:комнате|комн\.?)\s+)?(\d{1,5})([АБAB])?\b',
+    re.IGNORECASE,
+)
+ABSENCE_NOTE = re.compile(
+    r'\b(?:пока\s+на\s+вахту\s+не\s+заезжает|межвахта|увол\w*|выехал[аи]?|съехал[аи]?)\b',
+    re.IGNORECASE,
+)
 CATEGORY_LABELS = {'worker': 'Рабочий', 'itr': 'ИТР'}
 WORK_SHIFTS = {'День': 'day', 'Ночь': 'night'}
 APPLICABLE_GROUPS = ('ready', 'needs_resident')
@@ -64,9 +87,13 @@ class HousingRow:
     source: str
     interwatch: bool
     note: str
+    comment: str = ''
+    arrival_prefix: str = ''
+    other_room: tuple[int, int, str] | None = None
     block: str = ''
     position: int | None = None
     issues: list[str] = field(default_factory=list)
+    date_sources: dict[str, str] = field(default_factory=dict)
     floor: int | None = None
     bed_id: str = ''
     physical_bed_id: int | None = None
@@ -99,6 +126,34 @@ def _date(value):
                 return datetime.strptime(value.strip(), pattern).date()
             except ValueError:
                 pass
+    return None
+
+
+def _short_date(value, year):
+    if not value:
+        return None
+    parts = list(map(int, value.split('.')))
+    if len(parts) == 3:
+        year = parts[2] + 2000 if len(value.rsplit('.', 1)[1]) == 2 else parts[2]
+    try:
+        return date(year, parts[1], parts[0])
+    except ValueError:
+        return None
+
+
+def _workbook_end(filename, as_of):
+    match = WORKBOOK_PERIOD.search(filename)
+    if not match:
+        return None
+    for start_year in (as_of.year, as_of.year - 1):
+        starts = _short_date(match[1], start_year)
+        if not starts:
+            continue
+        ends = _short_date(match[2], starts.year)
+        if ends and ends < starts and match[2].count('.') == 1:
+            ends = _short_date(match[2], starts.year + 1)
+        if ends and starts <= as_of < ends and (ends - starts).days <= 366:
+            return ends
     return None
 
 
@@ -150,24 +205,31 @@ def _parse_sheet(sheet, building):
         if room_number is None and bed_match is None:
             # Ignore sheet legends and totals outside the housing grid.
             continue
-        name_match = FULL_NAME.match(raw_name)
-        name = ' '.join(name_match.groups()) if name_match else raw_name[:250]
-        remainder = raw_name[name_match.end():].strip(' .,') if name_match else ''
-        comment = _text(sheet.cell(number, note_col).value)
+        prefix = ARRIVAL_PREFIX.match(raw_name)
+        name_text = raw_name[prefix.end():] if prefix else raw_name
+        name_match = FULL_NAME.match(name_text)
+        name = name_match[0] if name_match else raw_name[:250]
+        remainder = name_text[name_match.end():].strip(' .,') if name_match else ''
+        comment = str(sheet.cell(number, note_col).value or '').strip()
+        raw_starts = sheet.cell(number, start_col).value
+        raw_ends = sheet.cell(number, end_col).value
         shift = _text(sheet.cell(number, shift_col).value).casefold()
         row = HousingRow(
             building=building, room_number=room_number, bed_label=bed_label,
             name=name, name_key=_name_key(name) if name_match else '',
             shift={'день': 'День', 'ночь': 'Ночь'}.get(shift, shift[:35]),
-            starts=_date(sheet.cell(number, start_col).value), ends=_date(sheet.cell(number, end_col).value),
+            starts=_date(raw_starts), ends=_date(raw_ends),
             source=f'{sheet.title}!{cell.coordinate}', interwatch=_interwatch(cell),
-            note=' '.join((remainder, comment))[:500],
+            note=remainder[:500], comment=comment[:500],
+            arrival_prefix=prefix[1] if prefix else '',
         )
         if bed_match and room_number == int(bed_match[1]):
             row.block = {'А': 'A', 'Б': 'B'}.get(bed_match[2].upper(), bed_match[2].upper())
             row.position = int(bed_match[3])
         else:
             row.issues.append('Номер койки не соответствует комнате в Excel.')
+        if (_text(raw_starts) and not row.starts) or (_text(raw_ends) and not row.ends):
+            row.issues.append('Дата проживания в Excel не распознана.')
         yield row
 
 
@@ -199,46 +261,130 @@ def parse_current_housing_workbook(payload):
         workbook.close()
 
 
-def _excel_conflicts(rows, as_of):
+def _current_person_notes(row):
+    # A comment naming the previous occupant does not describe the resident in
+    # the name column. Split the remaining notes so a next-watch move is not
+    # treated as a current move.
+    yield row.note
+    for part in re.split(fr'\s*(?:[;\n]|\s{{2,}}(?={COMMENT_NAME.pattern}))\s*', row.comment):
+        part = _text(part)
+        named = FULL_NAME.match(part) if COMMENT_NAME.match(part) else None
+        if named and _name_key(named[0]) == row.name_key:
+            yield part[named.end():]
+        elif not named:
+            initials = COMMENT_INITIALS.match(part)
+            if not initials or _name_key(initials[1]) == row.name_key.partition(' ')[0]:
+                yield part[initials.end():] if initials else part
+
+
+def _note_date(value, as_of):
+    dates = [_short_date(value, year) for year in (as_of.year, as_of.year - 1, as_of.year + 1)]
+    return min(filter(None, dates), key=lambda day: abs(day - as_of), default=None)
+
+
+def _resolve_row_dates(row, as_of):
+    notes = tuple(_current_person_notes(row))
+    if row.starts is None:
+        match = next((match for note in notes if (match := ARRIVAL_NOTE.search(note))), None)
+        row.starts = _note_date(row.arrival_prefix or (match[1] if match else ''), as_of)
+
+    departures = {
+        day for note in notes for match in DEPARTURE_NOTE.finditer(note)
+        if not OTHER_ROOM_NOTE.search(note) and (day := _note_date(match[1], as_of))
+    }
+    note_end = next(iter(departures)) if len(departures) == 1 else None
+    if len(departures) > 1 and row.ends is None:
+        row.issues.append('В Excel указано несколько дат выезда.')
+    if row.ends is None:
+        row.ends = note_end
+    elif note_end and note_end <= as_of < row.ends:
+        row.issues.append('Даты проживания и пометка о выезде противоречат друг другу.')
+    move = next((match for note in notes if (match := OTHER_ROOM_NOTE.search(note))), None)
+    if move:
+        block = (move[3] or '').upper().translate(str.maketrans('АБ', 'AB'))
+        destination = (int(move[1] or row.building), int(move[2]), block)
+        if destination[:2] != (row.building, row.room_number) or (block and block != row.block):
+            row.other_room = destination
+    if any(ABSENCE_NOTE.search(note) and not DEPARTURE_NOTE.search(note) for note in notes):
+        row.issues.append('В Excel есть пометка, что сотрудник выбыл или пока не заехал.')
+
+
+def _mark_duplicate_rows(rows):
+    same_place = defaultdict(list)
+    for row in rows:
+        if not row.status and not row.issues and not row.other_room and row.name_key and row.block:
+            same_place[(row.name_key, row.building, row.room_number, row.block, row.position)].append(row)
+    for matches in same_place.values():
+        if len(matches) < 2:
+            continue
+        values = {
+            field: {value for row in matches if (value := getattr(row, field))}
+            for field in ('starts', 'ends', 'shift')
+        }
+        if any(len(alternatives) > 1 for alternatives in values.values()):
+            continue
+        primary = max(matches, key=lambda row: sum(bool(getattr(row, field)) for field in values))
+        for field, alternatives in values.items():
+            if alternatives:
+                setattr(primary, field, next(iter(alternatives)))
+        for row in matches:
+            if row is not primary:
+                row.status = 'duplicate'
+
+
+def _excel_conflicts(rows, as_of, workbook_end):
     active_names = defaultdict(list)
     active_beds = defaultdict(list)
-    undated = defaultdict(list)
     interwatch = set()
     for row in rows:
         if row.interwatch:
             row.status = 'interwatch'
-            if row.name_key:
+            if row.name_key and (not row.starts or row.starts <= as_of) and (not row.ends or as_of < row.ends):
                 interwatch.add(row.name_key)
             continue
-        key = (row.building, row.room_number, row.block, row.position)
-        if not row.starts or not row.ends:
-            row.issues.append('Нет одной или обеих дат проживания.')
-            if row.block:
-                undated[key].append(row)
-        elif row.starts >= row.ends:
+        _resolve_row_dates(row, as_of)
+        if row.starts and row.ends and row.starts >= row.ends:
             row.issues.append('Дата выезда должна быть позже даты заселения.')
-        elif not row.starts <= as_of < row.ends:
+        elif (row.starts and row.starts > as_of) or (row.ends and row.ends <= as_of):
             row.status = 'outside'
+
+    _mark_duplicate_rows(rows)
+    for row in rows:
+        if row.status or not row.other_room:
             continue
+        building, room, block = row.other_room
+        if row.name_key and any(
+            not match.status and not match.other_room and match.name_key == row.name_key
+            and (match.building, match.room_number) == (building, room)
+            and (not block or match.block == block)
+            for match in rows
+        ):
+            row.status = 'duplicate'
         else:
-            if row.name_key:
-                active_names[row.name_key].append(row)
-            if row.block:
-                active_beds[key].append(row)
+            row.issues.append('В Excel указано, что жилец на продлении в другой комнате.')
+    for row in rows:
+        if row.status:
+            continue
+        if row.name_key and not row.other_room:
+            active_names[row.name_key].append(row)
+        if row.block and not row.other_room:
+            active_beds[(row.building, row.room_number, row.block, row.position)].append(row)
+        if not row.ends and workbook_end:
+            row.ends = workbook_end
+            row.date_sources['end'] = 'workbook_filename'
+        if not row.ends:
+            row.issues.append('Нет даты выезда и периода в названии файла.')
+        if not row.starts:
+            # A current snapshot proves presence on the selected date only.
+            row.starts = as_of
+            row.date_sources['start'] = 'snapshot_date'
         if not row.name_key:
             row.issues.append('Уточните ФИО в Excel.')
-        if row.shift not in ('День', 'Ночь'):
-            row.issues.append('Уточните смену в Excel.')
-        if REVIEW_NOTE.search(row.note):
-            row.issues.append('В Excel есть пометка о кадровом изменении или перемещении.')
 
-    for key, overlapping in active_beds.items():
-        for row in overlapping:
-            if len(overlapping) > 1:
+    for overlapping in active_beds.values():
+        if len(overlapping) > 1:
+            for row in overlapping:
                 row.issues.append('На эту койку есть несколько записей на выбранную дату.')
-            if any(other.name_key != row.name_key and {row.shift, other.shift} != {'День', 'Ночь'}
-                   for other in undated[key]):
-                row.issues.append('На эту койку есть строка без полного периода.')
     for name, matches in active_names.items():
         for row in matches:
             if len(matches) > 1:
@@ -280,17 +426,14 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
             resident = occupancy.resident
             if resident.employee_id == employee.pk or not intervals_overlap(starts, ends, *_occupied_interval(occupancy)):
                 continue
-            other_category = employee_settlement_category(resident.employee)
-            if resident.employee_id and other_category != row.category:
-                row.issues.append('Категория жильцов в комнате отличается или не указана.')
             if resident_sex(resident) != employee.sex:
                 row.issues.append('Пол жильцов в комнате отличается или не указан.')
         row.issues = list(dict.fromkeys(row.issues))
     return same
 
 
-def build_current_housing_preview(rows, as_of):
-    _excel_conflicts(rows, as_of)
+def build_current_housing_preview(rows, as_of, *, filename=''):
+    _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
     rooms = defaultdict(list)
     room_query = PhysicalRoom.objects.filter(dormitory__kind=Dormitory.Kind.OWN, dormitory__number__in=['5', '6'])
     for room in room_query.select_related('dormitory'):
@@ -316,7 +459,7 @@ def build_current_housing_preview(rows, as_of):
         if key in needed:
             roster[key].append(person)
 
-    candidates = [row for row in rows if not row.status and row.starts and row.ends and row.starts <= as_of < row.ends]
+    candidates = [row for row in rows if not row.status and not row.other_room and row.ends and row.starts <= as_of < row.ends]
     bed_use, room_use, employee_use = defaultdict(list), defaultdict(list), defaultdict(list)
     if candidates:
         first, _ = production_day_bounds(min(row.starts for row in candidates))
@@ -376,13 +519,9 @@ def build_current_housing_preview(rows, as_of):
             if resident and resident.status != SettlementResident.Status.ACTIVE:
                 row.issues.append('Карточка жильца в архиве. Проверьте её статус.')
             row.category = employee_settlement_category(employee) or ''
-            if not row.category:
-                row.issues.append('В справочнике должностей не указано «Рабочий / ИТР».')
-            elif room and room.room_type == PhysicalRoom.RoomType.ITR and row.category == 'worker':
-                row.issues.append('Это комната ИТР. Сотрудник относится к рабочим.')
             if employee.sex not in (Employee.Sex.MALE, Employee.Sex.FEMALE):
                 row.issues.append('В карточке сотрудника не указан пол.')
-        if bed and row.starts and row.ends and row.starts <= as_of < row.ends:
+        if bed and not row.other_room and row.ends and row.starts <= as_of < row.ends:
             starts, _ = production_day_bounds(row.starts)
             ends, _ = production_day_bounds(row.ends)
             if employee:
@@ -392,15 +531,12 @@ def build_current_housing_preview(rows, as_of):
                 already_placed.add(row.source)
 
     for entries in matched_rooms.values():
-        categories = {row.category for row, _ in entries if row.category}
         sexes = {employee.sex for _, employee in entries if employee.sex in (Employee.Sex.MALE, Employee.Sex.FEMALE)}
         for row, _ in entries:
-            if len(categories) > 1 and row.category:
-                row.issues.append('В одну комнату попадают и рабочие, и ИТР.')
             if len(sexes) > 1:
                 row.issues.append('В одну комнату попадают жильцы разного пола.')
 
-    groups = {key: [] for key in ('ready', 'needs_resident', 'conflict', 'interwatch', 'outside', 'existing')}
+    groups = {key: [] for key in ('ready', 'needs_resident', 'conflict', 'interwatch', 'outside', 'duplicate', 'existing')}
     for row in rows:
         if not row.status:
             if row.issues:
@@ -432,9 +568,11 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
     resident, created = get_or_create_employee_resident(employee_id=row.employee_id, using=using)
     assignment_type = EmployeeBedOccupancy.AssignmentType.TEMPORARY
     source = f'Подтверждено при загрузке текущего расселения из Excel, {row.source}'
-    _validate_resident_and_destination(
-        resident=resident, room=bed.room, starts_at=starts, ends_at=ends,
-        confirm_itr=True, placement_reason=source, using=using,
+    # The locked preview checks the transfer, anchors, reserves and holds. This
+    # import records actual occupancy without applying category rules for new placements.
+    _validate_resident_state(resident=resident)
+    _validate_room_sex(
+        resident=resident, room=bed.room, starts_at=starts, ends_at=ends, using=using,
     )
     validate_placement_input_contract(
         resident=resident, bed_stable_id=bed.stable_id, assignment_type=assignment_type,
@@ -444,13 +582,17 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
         resident_id=resident.pk, bed=bed, starts_at=starts, ends_at=ends,
         persisted_occupancies=_locked_related_occupancies(resident_id=resident.pk, bed_ids=(bed.pk,), using=using),
     )
+    shift = WORK_SHIFTS.get(row.shift)
+    shift_evidence = {
+        'shift_source_kind': EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
+        'shift_source_fingerprint': sha256(f'{workbook_digest}:{row.source}'.encode()).hexdigest(),
+        'shift_selected_by_access': actor,
+        'shift_selected_at': moment,
+        'shift_selection_basis': source,
+    } if shift else {}
     occupancy = _create_occupancy(
         resident=resident, bed=bed, assignment_type=assignment_type, starts_at=starts,
-        ends_at=ends, settled_by=actor.employee, work_shift=WORK_SHIFTS[row.shift],
-        shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
-        shift_source_fingerprint=sha256(f'{workbook_digest}:{row.source}'.encode()).hexdigest(),
-        shift_selected_by_access=actor, shift_selected_at=moment, shift_selection_basis=source,
-        using=using,
+        ends_at=ends, settled_by=actor.employee, work_shift=shift, using=using, **shift_evidence,
     )
     SettlementPlacementEvent.objects.using(using).create(
         event_type=SettlementPlacementEvent.EventType.TEMPORARY_CREATED,
@@ -458,12 +600,13 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
         payload={
             'occupancy_id': occupancy.pk, 'workbook_sha256': workbook_digest,
             'source_row': row.source, 'resident_created': created,
+            'date_sources': row.date_sources,
         },
     )
     return created
 
 
-def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id, session_key):
+def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id, session_key, filename=''):
     # The normal control lease serializes this operation with map edits and other
     # clerk imports. Acquire it before locking the target employees so that all
     # employee rows are acquired in the standard lock order.
@@ -475,13 +618,13 @@ def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id,
         lease_token=grant.lease_token, fencing_revision=grant.fencing_revision,
     )
     groups, created_count = _apply_confirmed_housing(
-        rows, as_of, confirmed=confirmed, workbook_digest=workbook_digest, control=control,
+        rows, as_of, confirmed=confirmed, workbook_digest=workbook_digest, control=control, filename=filename,
     )
     return groups, created_count, grant
 
 
 @transaction.atomic
-def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control):
+def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control, filename):
     using = DEFAULT_DB_ALIAS
     lease = lock_settlement_write_lease(control_context=control, using=using)
     employee_ids = tuple(Employee.objects.filter(
@@ -502,7 +645,7 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
         .select_related('room')
         .filter(pk__in={bed_id for _, bed_id in confirmed.values()}).order_by('pk')
     }
-    groups = build_current_housing_preview(rows, as_of)
+    groups = build_current_housing_preview(rows, as_of, filename=filename)
     groups['applied'] = []
     created_count = 0
     moment = timezone.now()

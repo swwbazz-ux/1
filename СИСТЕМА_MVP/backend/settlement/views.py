@@ -374,18 +374,21 @@ CURRENT_HOUSING_GROUPS = (
     ('conflict', 'Требуется сверка'),
     ('interwatch', 'Межвахта'),
     ('outside', 'Вне выбранного периода'),
+    ('duplicate', 'Дубли строк'),
     ('existing', 'Уже учтено на карте'),
 )
 
 
 def _current_housing_post(request, access, form, context):
     as_of = form.cleaned_data['as_of']
-    payload = form.cleaned_data['workbook'].read(MAX_FILE_SIZE + 1)
+    workbook = form.cleaned_data['workbook']
+    filename = workbook.name
+    payload = workbook.read(MAX_FILE_SIZE + 1)
     workbook_digest = sha256(payload).hexdigest()
     session_key = request.session.session_key or ''
     scope = {
         'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(),
-        'workbook': workbook_digest, 'date': as_of.isoformat(),
+        'workbook': workbook_digest, 'filename': filename, 'date': as_of.isoformat(),
     }
     applying = request.POST.get('action') == 'apply'
     if applying:
@@ -408,7 +411,7 @@ def _current_housing_post(request, access, form, context):
         try:
             groups, created_residents, grant = apply_current_housing(
                 rows, as_of, confirmed=receipt['placements'], workbook_digest=workbook_digest,
-                access_id=access.pk, session_key=session_key,
+                access_id=access.pk, session_key=session_key, filename=filename,
             )
         except ValidationError as error:
             form.add_error(None, error)
@@ -416,7 +419,7 @@ def _current_housing_post(request, access, form, context):
         store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
         context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
     else:
-        groups = build_current_housing_preview(rows, as_of)
+        groups = build_current_housing_preview(rows, as_of, filename=filename)
         placements = preview_placements(groups)
         if placements:
             context['receipt'] = signing.dumps(
@@ -427,7 +430,8 @@ def _current_housing_post(request, access, form, context):
     context.update(as_of=as_of, report_groups=[
         {'code': code, 'label': label, 'rows': groups[code]}
         for code, label in CURRENT_HOUSING_GROUPS
-        if code in groups and (not applying or code not in ('ready', 'needs_resident'))
+        if code in groups and (code != 'duplicate' or groups[code])
+        and (not applying or code not in ('ready', 'needs_resident'))
     ])
 
 
