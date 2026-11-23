@@ -44,11 +44,11 @@ test("экран наследует базу делопроизводителя 
     assert.match(TEMPLATE, /{% block clerk_scripts %}/);
     assert.match(
         TEMPLATE,
-        /css\/settlement-clerk-fund\.css[\s\S]{0,80}-settlement-clerk-fund-v1/
+        /css\/settlement-clerk-fund\.css[\s\S]{0,80}-settlement-clerk-fund-v2/
     );
     assert.match(
         TEMPLATE,
-        /js\/settlement-clerk-fund\.js[\s\S]{0,80}-settlement-clerk-fund-v1/
+        /js\/settlement-clerk-fund\.js[\s\S]{0,80}-settlement-clerk-fund-v2/
     );
     assert.equal(count(TEMPLATE, "async "), 0, "скрипт не должен ломать порядок загрузки");
     assert.match(TEMPLATE, /src="{% static 'js\/settlement-clerk-fund\.js' %}[^"]*" defer><\/script>/);
@@ -105,7 +105,7 @@ test("форма арендованного общежития: номер, ар
     );
 });
 
-test("форма комнаты: этаж 1–2, вместимость 1–6, сторона, позиция, тип", () => {
+test("форма комнаты: этаж, вместимость, тип и поля схемы арендованного фонда", () => {
     const section = formSection("create_room");
     assert.match(section, /name="dormitory" required/);
     assert.match(section, /name="floor" required/);
@@ -117,7 +117,9 @@ test("форма комнаты: этаж 1–2, вместимость 1–6, �
     for (let capacity = 1; capacity <= 6; capacity += 1) {
         assert.match(section, new RegExp('<option value="' + capacity + '">'));
     }
-    assert.match(section, /name="corridor_side" required/);
+    assert.match(section, /name="dormitory" required data-fund-room-dormitory/);
+    assert.match(section, /data-fund-rented-layout hidden/);
+    assert.match(section, /name="corridor_side" disabled required/);
     assert.match(section, /<option value="left">/);
     assert.match(section, /<option value="right">/);
     assert.match(section, /name="side_position" min="1"/);

@@ -453,6 +453,10 @@
     min-width: 0;
 }
 
+.settlement-fund-field[data-fund-rented-layout][hidden] {
+    display: none;
+}
+
 .settlement-fund-field.is-wide {
     grid-column: 1 / -1;
 }

@@ -1,3 +1,4 @@
+from collections import Counter
 from dataclasses import dataclass
 
 from django.core.exceptions import ValidationError
@@ -32,7 +33,7 @@ def _room_specs(
     specs = []
 
     for room_number in room_numbers:
-        corridor_side = 'left' if room_number % 2 else 'right'
+        corridor_side = _numbered_corridor_side(room_number)
         side_positions[corridor_side] += 1
         is_itr = room_number in itr
         specs.append(
@@ -52,6 +53,10 @@ def _room_specs(
             )
         )
     return specs
+
+
+def _numbered_corridor_side(room_number):
+    return 'left' if room_number % 2 else 'right'
 
 
 PHYSICAL_FUND_SPECS = tuple(
@@ -288,12 +293,25 @@ def _bed_stable_id(dormitory, room, block, position):
     )
 
 
-def _dormitory_accepts_rooms(dormitory):
+def _is_own_map_dormitory(dormitory):
     from references.models import Dormitory
 
-    return dormitory.kind == Dormitory.Kind.RENTED or (
-        dormitory.kind == Dormitory.Kind.OWN and dormitory.number in MAP_DORMITORY_NUMBERS
-    )
+    return dormitory.kind == Dormitory.Kind.OWN and dormitory.number in MAP_DORMITORY_NUMBERS
+
+
+def room_map_positions(rooms):
+    """Позиции на каждом этаже карты с отдельной нумерацией по сторонам."""
+    positions = {}
+    numbered_rows = Counter()
+    for room in sorted(rooms, key=lambda room: room.number):
+        side, position = room.corridor_side, room.side_position
+        if _is_own_map_dormitory(room.dormitory):
+            side = _numbered_corridor_side(room.number)
+            row = (room.dormitory_id, room.floor, side)
+            numbered_rows[row] += 1
+            position = numbered_rows[row]
+        positions[room.pk] = (side, position)
+    return positions
 
 
 def fund_dormitory_list():
@@ -327,10 +345,12 @@ def fund_dormitory_list():
 
     rows = []
     for dormitory in dormitories:
+        positions = room_map_positions(dormitory.fund_rooms)
         rooms = []
         bed_total = 0
         capacity_total = 0
-        for room in dormitory.fund_rooms:
+        for room in sorted(dormitory.fund_rooms, key=lambda room: (room.floor, *positions[room.pk])):
+            side, position = positions[room.pk]
             beds = [
                 {
                     'id': bed.pk,
@@ -350,8 +370,8 @@ def fund_dormitory_list():
                 'capacity': room.capacity,
                 'room_type': room.room_type,
                 'room_type_label': room.get_room_type_display(),
-                'corridor_side': room.corridor_side,
-                'side_position': room.side_position,
+                'corridor_side': side,
+                'side_position': position,
                 'transfer_status': room.transfer_status,
                 'beds': beds,
             })
@@ -365,7 +385,9 @@ def fund_dormitory_list():
             'note': dormitory.note,
             'is_active': dormitory.is_active,
             'is_manageable': dormitory.kind == Dormitory.Kind.RENTED,
-            'can_add_room': dormitory.is_active and _dormitory_accepts_rooms(dormitory),
+            'can_add_room': dormitory.is_active and (
+                dormitory.kind == Dormitory.Kind.RENTED or _is_own_map_dormitory(dormitory)
+            ),
             'counts': {
                 'rooms': len(rooms),
                 'beds': bed_total,
@@ -450,8 +472,8 @@ def create_room(
     floor,
     number,
     capacity,
-    corridor_side,
-    side_position,
+    corridor_side=None,
+    side_position=None,
     room_type=None,
     actor_access,
     reason,
@@ -486,17 +508,12 @@ def create_room(
             'Комната ИТР вмещает не более 2 мест.',
             'settlement.fund.itr_capacity_exceeded',
         )
-    if corridor_side not in PhysicalRoom.CorridorSide.values:
-        raise _fund_error(
-            'Укажите сторону коридора.',
-            'settlement.fund.corridor_side_invalid',
-        )
-
     with transaction.atomic():
         dormitory = Dormitory.objects.select_for_update().filter(pk=dormitory.pk).first()
         if dormitory is None:
             raise _fund_error('Общежитие не найдено.', 'settlement.fund.dormitory_required')
-        if not _dormitory_accepts_rooms(dormitory):
+        own = _is_own_map_dormitory(dormitory)
+        if not own and dormitory.kind != Dormitory.Kind.RENTED:
             raise _fund_error(
                 'Комнаты добавляются в КИС-5, КИС-6 и арендованные общежития.',
                 'settlement.fund.dormitory_room_creation_unavailable',
@@ -506,7 +523,11 @@ def create_room(
                 'Общежитие закрыто: сначала откройте его заново.',
                 'settlement.fund.dormitory_closed',
             )
-        own = dormitory.kind == Dormitory.Kind.OWN
+        if own:
+            corridor_side = _numbered_corridor_side(room_number)
+            side_position = None
+        elif corridor_side not in PhysicalRoom.CorridorSide.values:
+            raise _fund_error('Укажите сторону коридора.', 'settlement.fund.corridor_side_invalid')
         floor_rooms = PhysicalRoom.objects.filter(dormitory=dormitory, floor=floor_number)
         if floor_rooms.filter(number=room_number).exists():
             raise _fund_error(
@@ -514,16 +535,10 @@ def create_room(
                 'settlement.fund.room_number_taken',
             )
         side_rooms = floor_rooms.filter(corridor_side=corridor_side)
-        position_is_blank = side_position in (None, '')
-        position_limit = 32767
-        if own or position_is_blank:
-            next_position = (side_rooms.aggregate(last=Max('side_position'))['last'] or 0) + 1
-            if position_is_blank:
-                side_position = next_position
-            if own:
-                position_limit = min(next_position, position_limit)
+        if side_position in (None, ''):
+            side_position = (side_rooms.aggregate(last=Max('side_position'))['last'] or 0) + 1
         side_position_number = _positive_int(
-            side_position, field='Позиция на стороне этажа', maximum=position_limit,
+            side_position, field='Позиция на стороне этажа', maximum=32767,
         )
         if side_rooms.filter(side_position=side_position_number).exists():
             raise _fund_error(

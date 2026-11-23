@@ -1168,8 +1168,6 @@ class FundOwnFundBoundaryTests(FundTestBase):
             'floor': '1',
             'number': '7',
             'capacity': '4',
-            'corridor_side': PhysicalRoom.CorridorSide.LEFT,
-            'side_position': '',
             'reason': 'Подтверждена передача комнаты',
         }
         url = reverse('settlement_fund')
@@ -1182,6 +1180,7 @@ class FundOwnFundBoundaryTests(FundTestBase):
         )
         room = PhysicalRoom.objects.get(dormitory=own, floor=1, number=7)
         self.assertTrue(room.is_transferred)
+        self.assertEqual(room.corridor_side, PhysicalRoom.CorridorSide.LEFT)
         self.assertEqual(room.side_position, 2)
         self.assertCountEqual(
             room.beds.values_list('stable_id', flat=True),
@@ -1196,6 +1195,25 @@ class FundOwnFundBoundaryTests(FundTestBase):
         self.assertEqual(event.actor_access_id, self.clerk_access.pk)
         self.assertEqual(event.reason, payload['reason'])
         self.assertEqual(len(event.payload['beds']), 4)
+
+    def test_own_map_uses_parity_and_number_order_when_rooms_are_added_out_of_order(self):
+        dormitory, _room = self.make_own_room()
+        self.authenticate(self.client, self.clerk_access)
+        for number in (9, 4, 3, 2):
+            create_room(
+                dormitory=dormitory,
+                floor=1,
+                number=number,
+                capacity=1,
+                corridor_side=PhysicalRoom.CorridorSide.RIGHT if number % 2 else PhysicalRoom.CorridorSide.LEFT,
+                side_position=999,
+                actor_access=self.clerk_access,
+                reason='Передана комната',
+            )
+        response = self.client.get(reverse('settlement_map'))
+        rows = response.context['dormitories'][0]['floors'][0]['rows']
+        self.assertEqual([row['left'].number for row in rows if row['left']], [1, 3, 9])
+        self.assertEqual([row['right'].number for row in rows if row['right']], [2, 4])
 
     def test_loading_baseline_preserves_a_room_added_in_the_workplace(self):
         call_command('load_physical_fund', stdout=StringIO())

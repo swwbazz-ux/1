@@ -1,7 +1,7 @@
 /* T-029 этап C: поведение панели жилфонда делопроизводителя.
  *
  * Файл обслуживает только экран /clerk/settlement/fund/ и не трогает карту
- * КИС-5/6. Здесь три небольшие вещи, которые нельзя сделать сервером:
+ * КИС-5/6. Здесь переключение полей, открытие формы и защита от повтора:
  *
  *   1) в форме койко-места выбор общежития сужает список комнат (все комнаты
  *      уже отрисованы сервером, JS только скрывает чужие варианты);
@@ -20,6 +20,23 @@
 
     var OPEN_FORM_KEY = "settlementFundOpenForm";
     var ACTION_PATTERN = /^[a-z_]+$/;
+
+    var roomDormitory = root.querySelector("[data-fund-room-dormitory]");
+    var rentedLayoutFields = root.querySelectorAll("[data-fund-rented-layout]");
+
+    function syncRoomLayout() {
+        var option = roomDormitory.options[roomDormitory.selectedIndex];
+        var rented = option && option.hasAttribute("data-fund-rented");
+        rentedLayoutFields.forEach(function (field) {
+            field.hidden = !rented;
+            field.querySelector("input, select").disabled = !rented;
+        });
+    }
+
+    if (roomDormitory) {
+        roomDormitory.addEventListener("change", syncRoomLayout);
+        syncRoomLayout();
+    }
 
     /* --- 1. Каскад: общежитие -> комнаты в форме койко-места -------------- */
 
@@ -107,6 +124,7 @@
 
     /* Возврат из кеша браузера не должен оставлять форму заблокированной. */
     window.addEventListener("pageshow", function () {
+        if (roomDormitory) syncRoomLayout();
         var blocked = root.querySelectorAll("[data-fund-submitting]");
         Array.prototype.forEach.call(blocked, function (form) {
             form.removeAttribute("data-fund-submitting");

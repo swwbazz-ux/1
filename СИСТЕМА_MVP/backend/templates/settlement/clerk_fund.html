@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-clerk-fund.css' %}?v={{ static_asset_release }}-settlement-clerk-fund-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-clerk-fund.css' %}?v={{ static_asset_release }}-settlement-clerk-fund-v2">
 {% endblock %}
 
 {% block clerk_content %}
@@ -211,11 +211,11 @@
                     <div class="settlement-fund-form-grid">
                         <label class="settlement-fund-field is-wide">
                             <span>Общежитие</span>
-                            <select name="dormitory" required>
+                            <select name="dormitory" required data-fund-room-dormitory>
                                 <option value="">Выберите общежитие</option>
                                 {% for dormitory in fund_dormitories %}
                                 {% if dormitory.can_add_room %}
-                                <option value="{{ dormitory.id }}">Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
+                                <option value="{{ dormitory.id }}"{% if dormitory.kind == 'rented' %} data-fund-rented{% endif %}>Общежитие {{ dormitory.number }}{% if dormitory.contractor_organization %} · {{ dormitory.contractor_organization }}{% endif %}</option>
                                 {% endif %}
                                 {% endfor %}
                             </select>
@@ -242,16 +242,16 @@
                                 <option value="6">6 мест</option>
                             </select>
                         </label>
-                        <label class="settlement-fund-field">
+                        <label class="settlement-fund-field" data-fund-rented-layout hidden>
                             <span>Сторона коридора</span>
-                            <select name="corridor_side" required>
+                            <select name="corridor_side" disabled required>
                                 <option value="left">Левая сторона</option>
                                 <option value="right">Правая сторона</option>
                             </select>
                         </label>
-                        <label class="settlement-fund-field">
+                        <label class="settlement-fund-field" data-fund-rented-layout hidden>
                             <span>Позиция на стороне</span>
-                            <input type="number" name="side_position" min="1" max="32767" step="1" placeholder="В конец ряда">
+                            <input type="number" name="side_position" min="1" max="32767" step="1" placeholder="В конец ряда" disabled>
                         </label>
                         <label class="settlement-fund-field">
                             <span>Тип комнаты</span>
@@ -408,5 +408,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk-fund.js' %}?v={{ static_asset_release }}-settlement-clerk-fund-v1" defer></script>
+<script src="{% static 'js/settlement-clerk-fund.js' %}?v={{ static_asset_release }}-settlement-clerk-fund-v2" defer></script>
 {% endblock %}

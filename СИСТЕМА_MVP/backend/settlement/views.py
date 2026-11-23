@@ -65,6 +65,7 @@ from .fund import (
     create_room as create_fund_room,
     fund_dormitory_list,
     reopen_dormitory as reopen_fund_dormitory,
+    room_map_positions,
 )
 from .models import (
     EmployeeBedOccupancy,
@@ -624,16 +625,12 @@ def _room_view(room):
 
 
 def _floor_view(floor_number, rooms):
-    left = {
-        room.side_position: _room_view(room)
-        for room in rooms
-        if room.corridor_side == PhysicalRoom.CorridorSide.LEFT
-    }
-    right = {
-        room.side_position: _room_view(room)
-        for room in rooms
-        if room.corridor_side == PhysicalRoom.CorridorSide.RIGHT
-    }
+    left, right = {}, {}
+    positions = room_map_positions(rooms)
+    for room in rooms:
+        side, position = positions[room.pk]
+        row = left if side == PhysicalRoom.CorridorSide.LEFT else right
+        row[position] = _room_view(room)
     row_count = max([*left.keys(), *right.keys()], default=0)
     return {
         'number': floor_number,
@@ -1229,7 +1226,7 @@ def _auto_settlement_plan_map(cohort):
     candidates_by_bed = defaultdict(list)
     for candidate in candidates.values():
         candidates_by_bed[candidate.bed_id].append(candidate)
-    rooms = (
+    rooms = list(
         PhysicalRoom.objects
         .select_related('dormitory')
         .prefetch_related('beds')
@@ -1238,8 +1235,10 @@ def _auto_settlement_plan_map(cohort):
             'side_position', 'number', 'pk',
         )
     )
+    positions = room_map_positions(rooms)
     payload = []
-    for room in rooms:
+    for room in sorted(rooms, key=lambda room: (room.dormitory.number, room.floor, *positions[room.pk])):
+        side, position = positions[room.pk]
         beds = []
         for bed in room.beds.all().order_by('block', 'position', 'pk'):
             exact_candidates = candidates_by_bed.get(bed.pk, [])
@@ -1257,8 +1256,8 @@ def _auto_settlement_plan_map(cohort):
             'display': f'КИС-{room.dormitory.number}, комната {room.number}',
             'dormitory': str(room.dormitory.number),
             'floor': room.floor,
-            'corridor_side': room.corridor_side,
-            'side_position': room.side_position,
+            'corridor_side': side,
+            'side_position': position,
             'transferred': room.is_transferred,
             'beds': beds,
         })
