@@ -77,6 +77,20 @@ PERSON_CONFLICT = 'Сотрудник повторяется в строках �
 INTERWATCH_CONFLICT = 'По этому же ФИО в Excel есть голубая строка межвахты.'
 OCCUPIED_BED_CONFLICT = 'Койка занята другим жильцом в пересекающийся период.'
 OTHER_BED_CONFLICT = 'У сотрудника есть размещение на другой койке в этот период.'
+BED_LABEL_MISMATCH = 'Номер койки не соответствует комнате в Excel.'
+BED_MISSING = 'Такой койки нет в жилфонде.'
+ROOM_UNAVAILABLE = 'Комната не передана в распоряжение компании.'
+BED_HELD = 'Койка подготовлена и удерживается до приезда жильца.'
+BED_RESERVED = 'Койка находится в резерве.'
+ROOM_ANCHORED = 'У комнаты есть специальное закрепление. Проверьте назначение жилфонда.'
+BED_PERIOD_CONFLICT = 'В системе уже есть запись на этой койке. Сверьте даты и смену.'
+LIVE_ROOM_SEX_CONFLICT = 'Пол жильцов в комнате отличается или не указан.'
+DRAFT_ROOM_SEX_CONFLICT = 'В одну комнату попадают жильцы разного пола.'
+MANUAL_BED_BLOCKERS = {
+    BED_MISSING, ROOM_UNAVAILABLE, BED_HELD, BED_RESERVED, ROOM_ANCHORED, BED_CONFLICT,
+    OCCUPIED_BED_CONFLICT, OTHER_BED_CONFLICT, BED_PERIOD_CONFLICT,
+    LIVE_ROOM_SEX_CONFLICT, DRAFT_ROOM_SEX_CONFLICT,
+}
 
 GROUPED_ISSUES = {
     BED_CONFLICT, PERSON_CONFLICT, INTERWATCH_CONFLICT, OCCUPIED_BED_CONFLICT, OTHER_BED_CONFLICT,
@@ -115,6 +129,10 @@ class HousingRow:
     floor: int | None = None
     bed_id: str = ''
     physical_bed_id: int | None = None
+    reviewed_bed_id: int | None = None
+    physical_room_id: int | None = None
+    reviewed_place: str = ''
+    excel_place: str = ''
     employee_id: int | None = None
     reviewed_employee: Employee | None = None
     match_identity: int | str = ''
@@ -138,6 +156,8 @@ class HousingRow:
 
     @property
     def place(self):
+        if self.reviewed_place:
+            return self.reviewed_place
         parts = [f'КИС-{self.building}']
         if self.floor:
             parts.append(f'{self.floor} этаж')
@@ -146,6 +166,10 @@ class HousingRow:
         if self.bed_label:
             parts.append(f'койка {self.bed_label}')
         return ' · '.join(parts)
+
+    @property
+    def bed_key(self):
+        return self.physical_bed_id or ((self.building, self.room_number, self.block, self.position) if self.block else None)
 
     @property
     def review_detail_issues(self):
@@ -272,7 +296,7 @@ def _parse_sheet(sheet, building):
             row.block = {'А': 'A', 'Б': 'B'}.get(bed_match[2].upper(), bed_match[2].upper())
             row.position = int(bed_match[3])
         else:
-            row.issues.append('Номер койки не соответствует комнате в Excel.')
+            row.issues.append(BED_LABEL_MISMATCH)
         if (_text(raw_starts) and not row.starts) or (_text(raw_ends) and not row.ends):
             row.invalid_excel_dates = True
             row.review_dates = True
@@ -368,8 +392,8 @@ def _resolve_row_dates(row, as_of):
 def _mark_duplicate_rows(rows):
     same_place = defaultdict(list)
     for row in rows:
-        if not row.status and not row.issues and not row.review_dates and not row.other_room and row.match_identity and row.block:
-            same_place[(row.match_identity, row.building, row.room_number, row.block, row.position)].append(row)
+        if not row.status and not row.issues and not row.review_dates and not row.other_room and row.match_identity and row.bed_key:
+            same_place[row.match_identity, row.bed_key].append(row)
     for matches in same_place.values():
         if len(matches) < 2:
             continue
@@ -427,8 +451,8 @@ def _excel_conflicts(rows, as_of, workbook_end):
             continue
         if row.match_identity and not row.other_room:
             active_names[row.match_identity].append(row)
-        if row.block and not row.other_room:
-            active_beds[(row.building, row.room_number, row.block, row.position)].append(row)
+        if row.bed_key and not row.other_room:
+            active_beds[row.bed_key].append(row)
         if not row.ends and workbook_end:
             row.ends = workbook_end
             row.date_sources['end'] = 'workbook_filename'
@@ -468,19 +492,44 @@ def _bed_for_row(room, row, by_position):
     return by_position.get((room.pk, row.block, row.position))
 
 
+def _housing_room_label(room):
+    dormitory = room.dormitory
+    building = f'КИС-{dormitory.number}' if dormitory.kind == Dormitory.Kind.OWN else str(dormitory)
+    return f'{building} · {room.floor} этаж · комната {room.number}'
+
+
+def _housing_bed_label(bed):
+    return f'{bed.get_block_display()}-{bed.position}'
+
+
+def _housing_rooms():
+    return PhysicalRoom.objects.filter(dormitory__kind=Dormitory.Kind.OWN, dormitory__number__in=['5', '6'])
+
+
+def housing_review_places():
+    rooms = {}
+    transferred = _housing_rooms().filter(
+        dormitory__is_active=True, transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+    )
+    beds = PhysicalBed.objects.filter(room__in=transferred).select_related('room__dormitory').order_by(
+        'room__dormitory__number', 'room__floor', 'room__number', 'block', 'position',
+    )
+    for bed in beds:
+        if bed.room_id not in rooms:
+            rooms[bed.room_id] = {'id': bed.room_id, 'label': _housing_room_label(bed.room), 'beds': []}
+        rooms[bed.room_id]['beds'].append({'id': bed.pk, 'label': _housing_bed_label(bed)})
+    return list(rooms.values())
+
+
 def _occupied_interval(occupancy):
     return occupancy.starts_at, effective_ends_at(occupancy.ends_at, occupancy.terminated_at)
 
 
 def _add_map_match(row, occupancy, begins, finishes):
     bed = occupancy.physical_bed
-    room = bed.room
-    dormitory = room.dormitory
-    building = f'КИС-{dormitory.number}' if dormitory.kind == Dormitory.Kind.OWN else str(dormitory)
     match = HousingMapMatch(
         occupancy.resident.display_name,
-        f'{building} · {room.floor} этаж · комната {room.number} · '
-        f'койка {bed.get_block_display()}-{bed.position}',
+        f'{_housing_room_label(bed.room)} · койка {_housing_bed_label(bed)}',
         business_localtime(begins),
         business_localtime(finishes) if finishes else None,
         next((label for label, shift in WORK_SHIFTS.items() if shift == occupancy.work_shift), ''),
@@ -503,7 +552,7 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
                 and occupancy.work_shift == WORK_SHIFTS.get(row.shift)):
             same = True
         else:
-            row.issues.append('В системе уже есть запись на этой койке. Сверьте даты и смену.')
+            row.issues.append(BED_PERIOD_CONFLICT)
             _add_map_match(row, occupancy, begins, finishes)
     for occupancy in employee_occupancies:
         begins, finishes = _occupied_interval(occupancy)
@@ -516,7 +565,7 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
             if resident.employee_id == employee.pk or not intervals_overlap(starts, ends, *_occupied_interval(occupancy)):
                 continue
             if resident_sex(resident) != employee.sex:
-                row.issues.append('Пол жильцов в комнате отличается или не указан.')
+                row.issues.append(LIVE_ROOM_SEX_CONFLICT)
     row.issues = list(dict.fromkeys(row.issues))
     return same
 
@@ -533,6 +582,9 @@ def _apply_review_decisions(rows, review):
             row.status = 'omitted'
             continue
         row.confirmed_in_review = decision.get('confirm', False)
+        row.reviewed_bed_id = decision.get('bed_id')
+        if row.reviewed_bed_id and BED_LABEL_MISMATCH in row.issues:
+            row.issues.remove(BED_LABEL_MISMATCH)
         if 'employee_id' in decision:
             row.reviewed_employee = employees.get(decision['employee_id'])
             if row.reviewed_employee:
@@ -562,16 +614,33 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
         matches = roster.get(row.name_key, ())
         employee = row.reviewed_employee or (matches[0] if len(matches) == 1 else None)
         row.match_identity = employee.pk if employee else row.name_key
-    _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
     rooms = defaultdict(list)
-    room_query = PhysicalRoom.objects.filter(dormitory__kind=Dormitory.Kind.OWN, dormitory__number__in=['5', '6'])
-    for room in room_query.select_related('dormitory'):
+    rooms_by_id = {}
+    for room in _housing_rooms().select_related('dormitory'):
         rooms[int(room.dormitory.number), room.number].append(room)
-    room_ids = {room.pk for matches in rooms.values() for room in matches}
-    by_position = {
-        (bed.room_id, bed.block, bed.position): bed
-        for bed in PhysicalBed.objects.filter(room_id__in=room_ids)
-    }
+        rooms_by_id[room.pk] = room
+    room_ids = set(rooms_by_id)
+    beds = PhysicalBed.objects.filter(room_id__in=room_ids).in_bulk()
+    by_position = {(bed.room_id, bed.block, bed.position): bed for bed in beds.values()}
+    row_places = {}
+    for row in rows:
+        if row.reviewed_bed_id:
+            bed = beds.get(row.reviewed_bed_id)
+            room = rooms_by_id[bed.room_id] if bed else None
+            if bed:
+                row.excel_place = row.place
+                row.reviewed_place = f'{_housing_room_label(room)} · койка {_housing_bed_label(bed)}'
+                row.bed_label = _housing_bed_label(bed)
+        else:
+            options = rooms[row.building, row.room_number]
+            room = options[0] if len(options) == 1 else None
+            bed = _bed_for_row(room, row, by_position) if room else None
+        row.floor = room.floor if room else None
+        row.physical_room_id = room.pk if room else None
+        row.bed_id = bed.stable_id if bed else ''
+        row.physical_bed_id = bed.pk if bed else None
+        row_places[row.source] = room, bed
+    _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
     anchors = room_anchor_types_by_room(room_ids=room_ids)
     selected_day_start, selected_day_end = production_day_bounds(as_of)
     held_beds = set(SettlementBedPreparation.objects.filter(
@@ -604,26 +673,23 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
     matched_rooms = defaultdict(list)
     already_placed = set()
     for row in rows:
-        options = rooms[row.building, row.room_number]
-        room = options[0] if len(options) == 1 else None
-        bed = _bed_for_row(room, row, by_position) if room else None
-        row.floor = room.floor if room else None
-        row.bed_id = bed.stable_id if bed else ''
-        row.physical_bed_id = bed.pk if bed else None
+        room, bed = row_places[row.source]
         if row.status:
             continue
-        if not room:
+        if row.reviewed_bed_id and not bed:
+            row.issues.append(BED_MISSING)
+        elif not room:
             row.issues.append('Комната отсутствует в жилфонде или номер встречается на нескольких этажах.')
         elif not room.dormitory.is_active or not room.is_transferred:
-            row.issues.append('Комната не передана в распоряжение компании.')
+            row.issues.append(ROOM_UNAVAILABLE)
         elif not bed:
-            row.issues.append('Такой койки нет в жилфонде.')
+            row.issues.append(BED_MISSING)
         elif bed.pk in held_beds:
-            row.issues.append('Койка подготовлена и удерживается до приезда жильца.')
+            row.issues.append(BED_HELD)
         elif bed.pk in reserved_beds:
-            row.issues.append('Койка находится в резерве.')
+            row.issues.append(BED_RESERVED)
         if room and anchors.get(room.pk):
-            row.issues.append('У комнаты есть специальное закрепление. Проверьте назначение жилфонда.')
+            row.issues.append(ROOM_ANCHORED)
 
         people = [row.reviewed_employee] if row.reviewed_employee else roster[row.name_key]
         employee = people[0] if len(people) == 1 else None
@@ -658,7 +724,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
         sexes = {employee.sex for _, employee in entries if employee.sex in (Employee.Sex.MALE, Employee.Sex.FEMALE)}
         for row, _ in entries:
             if len(sexes) > 1:
-                row.issues.append('В одну комнату попадают жильцы разного пола.')
+                row.issues.append(DRAFT_ROOM_SEX_CONFLICT)
 
     groups = {key: [] for key in (
         'ready', 'needs_resident', 'conflict', 'interwatch', 'outside', 'duplicate', 'omitted', 'existing',
@@ -770,6 +836,7 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
             'source_row': row.source, 'resident_created': created,
             'date_sources': row.date_sources,
             'reviewed_by_clerk': row.reviewed,
+            'bed_selected_by_clerk': bool(row.reviewed_bed_id),
         },
     )
     return created

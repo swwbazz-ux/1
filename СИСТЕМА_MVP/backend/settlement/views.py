@@ -63,10 +63,12 @@ from .clerk_shifts import (
 from .cohort_readiness import build_arrival_roster_cohort_overview
 from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
 from .current_housing_import import (
+    MANUAL_BED_BLOCKERS,
     MAX_FILE_SIZE,
     apply_current_housing,
     build_current_housing_preview,
     housing_review_cases,
+    housing_review_places,
     parse_current_housing_workbook,
     preview_placements,
 )
@@ -401,6 +403,21 @@ def _housing_review_choice(request, groups, review, as_of):
             for field in ('starts', 'ends'):
                 if value := getattr(row, field):
                     decision[field] = value.isoformat()
+    elif command == 'move':
+        decision['bed_id'] = forms.IntegerField(
+            min_value=1, max_value=2**63 - 1,
+            error_messages={'required': 'Выберите комнату и койку.', 'invalid': 'Выберите койку из жилфонда.'},
+        ).clean(request.POST.get('review_bed_id'))
+        peers = set(decision.get('peers', ())) | row.review_peers
+        decision['peers'] = sorted(
+            entry.source for entries in groups.values() for entry in entries
+            if entry.source in peers and row.match_identity and entry.match_identity == row.match_identity
+        )
+        decision['confirm'] = True
+        if not row.review_dates:
+            for field in ('starts', 'ends'):
+                if value := getattr(row, field):
+                    decision[field] = value.isoformat()
     elif command == 'edit' and (row.review_identity or row.review_dates):
         number = request.POST.get(f'personnel_number:{source}', '').strip()
         if row.review_identity and number:
@@ -468,6 +485,8 @@ def _housing_draft_report(request, access, context, draft, groups):
         if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
         and (not applying or code not in ('ready', 'needs_resident'))
     ])
+    if groups['conflict']:
+        context['housing_review_places'] = housing_review_places()
 
 
 def _apply_housing_draft(request, access, context, draft, rows):
@@ -525,14 +544,24 @@ def _current_housing_post(request, access, form, context, storage, saved):
     else:
         groups = _housing_draft_groups(draft, rows)
         if review_action:
+            command, _, source = review_action.partition(':')
             try:
                 review = _housing_review_choice(request, groups, draft.review, draft.as_of)
+                revised = draft.with_review(review)
+                revised_groups = _housing_draft_groups(revised)
+                if command == 'move':
+                    moved = next((row for row in revised_groups['conflict'] if row.source == source), None)
+                    if moved:
+                        blockers = [issue for issue in moved.issues if issue in MANUAL_BED_BLOCKERS]
+                        if blockers:
+                            raise ValidationError(' '.join(blockers))
             except ValidationError as error:
-                context['review_error'] = error.message
-                context['review_source'] = review_action.partition(':')[2]
+                context['review_error'] = ' '.join(error.messages)
+                context['review_source'] = source
+                if command == 'move':
+                    context['review_bed_id'] = request.POST.get('review_bed_id', '')
             else:
-                draft = draft.with_review(review)
-                groups = _housing_draft_groups(draft)
+                draft, groups = revised, revised_groups
                 context['review_saved'] = True
     if draft is not saved:
         storage.save(draft)

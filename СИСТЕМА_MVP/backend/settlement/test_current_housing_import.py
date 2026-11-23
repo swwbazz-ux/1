@@ -337,6 +337,73 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertIsNone(choice.context.get('receipt'))
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
 
+    def test_manual_bed_resolves_interwatch_and_is_used_when_applying_saved_draft(self):
+        self.use_clerk_session()
+        person = self.workers[0]
+        destination = PhysicalBed.objects.get(stable_id='KIS5-F1-R03-A2')
+        payload = self.upload([
+            (1, '01Б-1', person, False, self.ends),
+            (1, '01Б-2', person, True, self.ends),
+        ]).read()
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            initial = self.submit(payload)
+            self.assertContains(initial, 'Выбрать другое место')
+            self.assertContains(initial, 'сейчас живёт здесь или на межвахте?')
+            corrected = self.submit(review_action='move:КИС 5!J3', review_bed_id=destination.pk)
+            self.assertEqual(corrected.context['applicable_count'], 1)
+            self.assertContains(corrected, 'КИС-5 · 1 этаж · комната 3 · койка А-2')
+            self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+            reopened = self.client.get(reverse('settlement_current_housing_import'))
+            self.assertContains(reopened, 'Выбрано вручную')
+            self.assertContains(reopened, 'КИС-5 · 1 этаж · комната 3 · койка А-2')
+            applied = self.submit(action='apply', receipt=reopened.context['receipt'])
+            self.assertEqual(applied.context['application'], {'placed': 1, 'residents': 1})
+        occupancy = EmployeeBedOccupancy.objects.get(resident__employee=person)
+        self.assertEqual(occupancy.physical_bed, destination)
+
+    def test_manual_bed_replaces_same_person_alternative_and_keeps_other_person(self):
+        self.use_clerk_session()
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-1', self.workers[1], False, self.ends),
+            (3, '03А-1', self.workers[0], False, self.ends),
+        ]).read())
+        destination = PhysicalBed.objects.get(stable_id='KIS5-F1-R01-A2')
+        choice = self.submit(review_action='move:КИС 5!J3', review_bed_id=destination.pk)
+        self.assertEqual(choice.context['applicable_count'], 2)
+        groups = {group['code']: group['rows'] for group in choice.context['report_groups']}
+        self.assertEqual([row.source for row in groups['omitted']], ['КИС 5!J5'])
+        self.assertCountEqual(
+            [(row.source, row.physical_bed_id) for row in groups['needs_resident']],
+            [('КИС 5!J3', destination.pk), ('КИС 5!J4', PhysicalBed.objects.get(stable_id='KIS5-F1-R01-A1').pk)],
+        )
+        undo = self.submit(review_action='undo:КИС 5!J3')
+        self.assertEqual([case['kind'] for case in undo.context['review_cases']], ['linked'])
+
+    def test_manual_bed_rejects_map_and_workbook_conflicts_without_saving(self):
+        self.use_clerk_session()
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-1', self.workers[1], False, self.ends),
+            (1, '01А-2', self.workers[2], False, self.ends),
+        ]).read())
+        original_revision = self.draft_revision
+        for stable_id, issue in (
+            ('KIS5-F1-R02-A1', 'Койка занята другим жильцом'),
+            ('KIS5-F1-R01-A2', 'На эту койку есть несколько записей'),
+        ):
+            with self.subTest(stable_id=stable_id):
+                bed = PhysicalBed.objects.get(stable_id=stable_id)
+                result = self.submit(review_action='move:КИС 5!J3', review_bed_id=bed.pk)
+                self.assertContains(result, issue)
+                self.assertEqual(result.context['draft'].review, {})
+                self.assertEqual(self.draft_revision, original_revision)
+        missing = self.submit(review_action='move:КИС 5!J3', review_bed_id=2**62)
+        self.assertContains(missing, 'Такой койки нет в жилфонде.')
+        self.assertEqual(missing.context['draft'].review, {})
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
     def test_same_person_options_share_one_question_and_show_both_rooms(self):
         self.use_clerk_session()
         payload = self.upload([

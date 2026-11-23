@@ -44,6 +44,7 @@
                                         {% if row.shift %} · {{ row.shift }}{% endif %}
                                     </p>
                                 </div>
+                                {% if row.excel_place %}<p>В Excel — {{ row.excel_place }}</p>{% endif %}
                                 {% if row.review_interwatch %}
                                     <div class="housing-review__evidence housing-review__evidence--interwatch">
                                         <strong>В Excel также отмечена межвахта</strong>
@@ -108,6 +109,24 @@
                                         {% endif %}
                                     </div>
                                 {% endif %}
+                                {% if housing_review_places %}
+                                    <details class="housing-review__place" data-room-id="{{ row.physical_room_id|default_if_none:'' }}"{% if row.source == review_source and review_bed_id %} data-attempted-bed="{{ review_bed_id }}" open{% endif %}>
+                                        <summary>Выбрать другое место</summary>
+                                        <div class="housing-import__review-fields">
+                                            <label>Комната
+                                                <select data-review-room form="housing-import-form">
+                                                    <option value="">Выберите комнату</option>
+                                                </select>
+                                            </label>
+                                            <label>Койка
+                                                <select data-review-bed form="housing-import-form" disabled>
+                                                    <option value="">Выберите койку</option>
+                                                </select>
+                                            </label>
+                                            <button type="submit" name="review_action" value="move:{{ row.source }}" form="housing-import-form" class="housing-review__primary" disabled>Сохранить место</button>
+                                        </div>
+                                    </details>
+                                {% endif %}
                                 <details class="housing-review__source">
                                     <summary>Строка в Excel</summary>
                                     <p>{{ row.source }}{% for entry in row.review_interwatch %} · межвахта {{ entry.source }}{% endfor %}</p>
@@ -119,4 +138,5 @@
             {% endfor %}
         </ul>
     </div>
+    {% if housing_review_places %}{{ housing_review_places|json_script:"housing-review-places" }}{% endif %}
 {% endif %}

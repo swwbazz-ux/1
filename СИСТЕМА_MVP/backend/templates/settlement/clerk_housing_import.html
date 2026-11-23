@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v5">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v6">
 {% endblock %}
 
 {% block clerk_content %}
@@ -88,8 +88,13 @@
                                         <small>{{ row.category_label }}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
                                     </div>
                                     <div>
-                                        КИС-{{ row.building }}{% if row.floor %} · {{ row.floor }} этаж{% endif %}{% if row.room_number %} · комната {{ row.room_number }}{% endif %}
-                                        <small>{{ row.bed_label|default:"Койка не указана" }} · {{ row.source }}</small>
+                                        {% if row.reviewed_place %}
+                                            {{ row.reviewed_place }}
+                                            <small>Выбрано вручную · {{ row.source }}</small>
+                                        {% else %}
+                                            КИС-{{ row.building }}{% if row.floor %} · {{ row.floor }} этаж{% endif %}{% if row.room_number %} · комната {{ row.room_number }}{% endif %}
+                                            <small>{{ row.bed_label|default:"Койка не указана" }} · {{ row.source }}</small>
+                                        {% endif %}
                                     </div>
                                     <div>
                                         {% if row.starts and row.ends %}
@@ -115,5 +120,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v5" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v6" defer></script>
 {% endblock %}

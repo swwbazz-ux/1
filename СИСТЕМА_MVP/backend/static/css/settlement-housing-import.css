@@ -72,7 +72,8 @@
 }
 
 .housing-import__form input,
-.housing-import__review-fields input {
+.housing-import__review-fields input,
+.housing-review__place select {
     width: 100%;
     min-width: 0;
     min-height: 2.75rem;
@@ -301,9 +302,35 @@
     font-weight: 700;
 }
 
-.housing-review__source summary {
+.housing-review__source summary,
+.housing-review__place summary {
     width: fit-content;
     cursor: pointer;
+}
+
+.housing-review__place summary {
+    min-height: 2.75rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel);
+}
+
+.housing-review__place .housing-import__review-fields {
+    margin-top: 0.5rem;
+}
+
+.housing-review__place .housing-import__review-fields label:first-child {
+    width: min(100%, 18rem);
+}
+
+.housing-review__place .housing-import__review-fields label:nth-child(2) {
+    width: min(100%, 8rem);
+}
+
+.housing-review .housing-review__place button:disabled {
+    opacity: 0.55;
+    cursor: default;
 }
 
 .housing-import__review-fields label {
