@@ -1,1 +1,9 @@
-СИСТЕМА_MVP/backend/templates/users/login.html
+СИСТЕМА_MVP/backend/settlement/fund.py
+СИСТЕМА_MVP/backend/settlement/management/commands/load_physical_fund.py
+СИСТЕМА_MVP/backend/settlement/migrations/0024_add_kis6_room_12.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-clerk-fund.css
+СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
+СИСТЕМА_MVP/backend/static/js/settlement-clerk-fund.js
+СИСТЕМА_MVP/backend/templates/clerk/base.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_fund.html
