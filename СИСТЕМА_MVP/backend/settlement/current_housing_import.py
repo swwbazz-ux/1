@@ -10,7 +10,7 @@ import unicodedata
 
 from django.core.exceptions import ValidationError
 from django.db import DEFAULT_DB_ALIAS, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from openpyxl import load_workbook
 
@@ -23,6 +23,7 @@ from .control import (
     SettlementControlWriteContext, acquire_control_lease,
     lock_settlement_write_access, lock_settlement_write_lease,
 )
+from .fund import room_map_positions
 from .intervals import effective_ends_at, intervals_overlap
 from .models import (
     EmployeeBedOccupancy, PhysicalBed, PhysicalRoom, SettlementBedPreparation, SettlementBedReserve,
@@ -506,19 +507,91 @@ def _housing_rooms():
     return PhysicalRoom.objects.filter(dormitory__kind=Dormitory.Kind.OWN, dormitory__number__in=['5', '6'])
 
 
-def housing_review_places():
-    rooms = {}
-    transferred = _housing_rooms().filter(
-        dormitory__is_active=True, transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
-    )
-    beds = PhysicalBed.objects.filter(room__in=transferred).select_related('room__dormitory').order_by(
-        'room__dormitory__number', 'room__floor', 'room__number', 'block', 'position',
-    )
-    for bed in beds:
-        if bed.room_id not in rooms:
-            rooms[bed.room_id] = {'id': bed.room_id, 'label': _housing_room_label(bed.room), 'beds': []}
-        rooms[bed.room_id]['beds'].append({'id': bed.pk, 'label': _housing_bed_label(bed)})
-    return list(rooms.values())
+def _housing_bed_restrictions(room_ids, day_start, day_end):
+    held = set(SettlementBedPreparation.objects.filter(
+        physical_bed__room_id__in=room_ids, status=SettlementBedPreparation.Status.PREPARED,
+        created_at__lt=day_end, hold_until__gt=day_start,
+    ).values_list('physical_bed_id', flat=True))
+    reserved = set(SettlementBedReserve.objects.filter(
+        physical_bed__room_id__in=room_ids, is_active=True,
+    ).values_list('physical_bed_id', flat=True))
+    return held, reserved
+
+
+def housing_review_map(groups, row, as_of):
+    """Read-only room layout and the placements relevant to this review."""
+    day_start, day_end = production_day_bounds(as_of)
+    start = production_day_bounds(row.starts)[0] if row.starts else day_start
+    end = production_day_bounds(row.ends)[0] if row.ends else day_end
+    if not start <= day_start < end:
+        start, end = day_start, day_end
+    rooms = list(_housing_rooms().select_related('dormitory').prefetch_related(
+        Prefetch('beds', queryset=PhysicalBed.objects.order_by('block', 'position')),
+    ).order_by('dormitory__number', 'floor', 'number'))
+    room_ids = [room.pk for room in rooms]
+    positions = room_map_positions(rooms)
+    anchors = room_anchor_types_by_room(room_ids=room_ids)
+    held, reserved = _housing_bed_restrictions(room_ids, day_start, day_end)
+    occupancies = defaultdict(list)
+    for occupancy in EmployeeBedOccupancy.objects.filter(
+        Q(ends_at__isnull=True) | Q(ends_at__gt=start),
+        Q(terminated_at__isnull=True) | Q(terminated_at__gt=start),
+        physical_bed__room_id__in=room_ids, starts_at__lt=end,
+        replaced_by_application__isnull=True, replaced_by_occupancy__isnull=True,
+    ).select_related('resident__employee').order_by('starts_at', 'pk'):
+        begins, finishes = _occupied_interval(occupancy)
+        if finishes is None or finishes > begins:
+            occupancies[occupancy.physical_bed_id].append((occupancy, finishes))
+    draft_beds = defaultdict(list)
+    for group in ('ready', 'needs_resident', 'conflict'):
+        for entry in groups[group]:
+            if (entry.physical_bed_id and entry.source != row.source
+                    and not entry.other_room and entry.starts and entry.ends
+                    and entry.starts <= as_of < entry.ends
+                    and (not row.match_identity or entry.match_identity != row.match_identity)):
+                draft_beds[entry.physical_bed_id].append(entry.name)
+
+    def bed_payload(bed, room_available):
+        live = occupancies[bed.pk]
+        already_here = bool(live) and row.employee_id and all(
+            occupancy.resident.employee_id == row.employee_id
+            and occupancy.starts_at <= start
+            and (finish is None or finish >= end)
+            and occupancy.work_shift == WORK_SHIFTS.get(row.shift)
+            for occupancy, finish in live
+        )
+        draft_people = draft_beds[bed.pk]
+        if not room_available:
+            status, label = 'unavailable', 'Комната недоступна'
+        elif bed.pk in held or bed.pk in reserved:
+            status, label = 'unavailable', 'Койка в резерве'
+        elif live and not already_here:
+            status, label = 'occupied', 'Занята в этот период'
+        elif draft_people:
+            status, label = 'draft', 'Указана в Excel за другим жильцом'
+        elif already_here:
+            status, label = 'free', 'Жилец уже на этой койке'
+        else:
+            status, label = 'free', 'Свободна'
+        return {
+            'id': bed.pk, 'label': _housing_bed_label(bed), 'block': bed.block,
+            'status': status, 'status_label': label,
+            'residents': [
+                {'name': occupancy.resident.display_name,
+                 'starts': business_localtime(occupancy.starts_at).strftime('%d.%m.%Y'),
+                 'ends': business_localtime(finishes).strftime('%d.%m.%Y') if finishes else '',
+                 'shift': next((name for name, code in WORK_SHIFTS.items() if code == occupancy.work_shift), '')}
+                for occupancy, finishes in live
+            ],
+            'draft': draft_people,
+        }
+
+    return [{
+        'id': room.pk, 'label': _housing_room_label(room), 'number': room.number,
+        'dormitory': room.dormitory.number, 'floor': room.floor, 'side': positions[room.pk][0],
+        'beds': [bed_payload(bed, room.dormitory.is_active and room.is_transferred and not anchors.get(room.pk))
+                 for bed in room.beds.all()],
+    } for room in rooms]
 
 
 def _occupied_interval(occupancy):
@@ -643,13 +716,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
     _excel_conflicts(rows, as_of, _workbook_end(filename, as_of))
     anchors = room_anchor_types_by_room(room_ids=room_ids)
     selected_day_start, selected_day_end = production_day_bounds(as_of)
-    held_beds = set(SettlementBedPreparation.objects.filter(
-        physical_bed__room_id__in=room_ids, status=SettlementBedPreparation.Status.PREPARED,
-        created_at__lt=selected_day_end, hold_until__gt=selected_day_start,
-    ).values_list('physical_bed_id', flat=True))
-    reserved_beds = set(SettlementBedReserve.objects.filter(
-        physical_bed__room_id__in=room_ids, is_active=True,
-    ).values_list('physical_bed_id', flat=True))
+    held_beds, reserved_beds = _housing_bed_restrictions(room_ids, selected_day_start, selected_day_end)
     candidates = [row for row in rows if not row.status and not row.other_room and row.ends and row.starts <= as_of < row.ends]
     bed_use, room_use, employee_use = defaultdict(list), defaultdict(list), defaultdict(list)
     if candidates:

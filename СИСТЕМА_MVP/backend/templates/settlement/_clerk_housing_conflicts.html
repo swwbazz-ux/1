@@ -105,7 +105,7 @@
                                             <p>{{ row.source }}{% for entry in row.review_interwatch %} · межвахта {{ entry.source }}{% endfor %}</p>
                                         </details>
                                     </div>
-                                    {% if draft or review_error or housing_review_places %}
+                                    {% if draft or review_error %}
                                         <div class="housing-review__decisions">
                                             {% if review_error and row.source == review_source %}
                                                 <p class="housing-review__error" tabindex="-1">{{ review_error }}</p>
@@ -151,23 +151,9 @@
                                                     {% endif %}
                                                 </div>
                                             {% endif %}
-                                            {% if housing_review_places %}
-                                                <details class="housing-review__place" data-room-id="{{ row.physical_room_id|default_if_none:'' }}"{% if row.source == review_source and review_bed_id %} data-attempted-bed="{{ review_bed_id }}" open{% endif %}>
-                                                    <summary>Выбрать другое место</summary>
-                                                    <div class="housing-import__review-fields">
-                                                        <label>Комната
-                                                            <select data-review-room form="housing-import-form">
-                                                                <option value="">Выберите комнату</option>
-                                                            </select>
-                                                        </label>
-                                                        <label>Койка
-                                                            <select data-review-bed form="housing-import-form" disabled>
-                                                                <option value="">Выберите койку</option>
-                                                            </select>
-                                                        </label>
-                                                        <button type="submit" name="review_action" value="move:{{ row.source }}" form="housing-import-form" class="housing-review__primary" disabled>Сохранить место</button>
-                                                    </div>
-                                                </details>
+                                            {% if draft %}
+                                                <button type="button" data-open-housing-map aria-haspopup="dialog">Выбрать другое место</button>
+                                                <button type="submit" name="review_action" value="move:{{ row.source }}" form="housing-import-form" data-submit-housing-map hidden>Сохранить койку</button>
                                             {% endif %}
                                         </div>
                                     {% endif %}
@@ -179,5 +165,4 @@
             </ul>
         </div>
     </div>
-    {% if housing_review_places %}{{ housing_review_places|json_script:"housing-review-places" }}{% endif %}
 {% endif %}

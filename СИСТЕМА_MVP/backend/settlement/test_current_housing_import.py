@@ -337,6 +337,31 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertIsNone(choice.context.get('receipt'))
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
 
+    def test_review_map_uses_current_draft_and_shows_live_and_excel_occupants(self):
+        url = reverse('settlement_current_housing_import')
+        query = {'place_map': 'КИС 5!J3'}
+        self.assertEqual(self.client.get(url, query).status_code, 302)
+        self.use_clerk_session()
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-3', self.workers[0], True, self.ends),
+            (1, '01А-2', self.workers[1], False, self.ends),
+        ]).read())
+        self.assertEqual(self.client.get(url, {**query, 'revision': 'old'}).status_code, 409)
+        response = self.client.get(url, {**query, 'revision': self.draft_revision})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        payload = response.json()
+        self.assertEqual(payload['resident'], self.workers[0].full_name)
+        beds = {(room['number'], bed['label']): bed for room in payload['rooms'] for bed in room['beds']}
+        self.assertEqual(beds[1, 'А-1']['status'], 'free')
+        self.assertEqual(beds[1, 'А-2']['status'], 'draft')
+        self.assertEqual(beds[1, 'А-2']['draft'], [self.workers[1].full_name])
+        self.assertEqual(beds[1, 'А-3']['status'], 'free')
+        self.assertEqual(beds[2, 'А-1']['status'], 'occupied')
+        self.assertEqual(beds[2, 'А-1']['residents'][0]['name'], self.workers[4].full_name)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
     def test_manual_bed_resolves_interwatch_and_is_used_when_applying_saved_draft(self):
         self.use_clerk_session()
         person = self.workers[0]

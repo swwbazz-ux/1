@@ -68,7 +68,7 @@ from .current_housing_import import (
     apply_current_housing,
     build_current_housing_preview,
     housing_review_cases,
-    housing_review_places,
+    housing_review_map,
     parse_current_housing_workbook,
     preview_placements,
 )
@@ -486,8 +486,6 @@ def _housing_draft_report(request, access, context, draft, groups):
         if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
         and (not applying or code not in ('ready', 'needs_resident'))
     ])
-    if groups['conflict']:
-        context['housing_review_places'] = housing_review_places()
 
 
 def _apply_housing_draft(request, access, context, draft, rows):
@@ -559,8 +557,6 @@ def _current_housing_post(request, access, form, context, storage, saved):
             except ValidationError as error:
                 context['review_error'] = ' '.join(error.messages)
                 context['review_source'] = source
-                if command == 'move':
-                    context['review_bed_id'] = request.POST.get('review_bed_id', '')
             else:
                 context['review_undone'] = command == 'undo'
                 if source in review:
@@ -573,6 +569,24 @@ def _current_housing_post(request, access, form, context, storage, saved):
     _housing_draft_report(request, access, context, draft, groups)
 
 
+def _housing_review_map_response(request, storage, source):
+    try:
+        with storage.locked():
+            draft = storage.load()
+        if not draft or request.GET.get('revision') != draft.revision:
+            return JsonResponse({'message': 'Черновик изменился. Обновите страницу сверки.'}, status=409)
+        groups = _housing_draft_groups(draft)
+        row = next((entry for entry in groups['conflict'] if entry.source == source), None)
+        if row is None:
+            return JsonResponse({'message': 'Этот вопрос уже изменился. Обновите страницу сверки.'}, status=409)
+        return JsonResponse({
+            'resident': row.name, 'origin': row.place, 'date': draft.as_of.strftime('%d.%m.%Y'),
+            'room_id': row.physical_room_id, 'rooms': housing_review_map(groups, row, draft.as_of),
+        })
+    except (OSError, ValidationError):
+        return JsonResponse({'message': 'Не удалось открыть карту. Попробуйте ещё раз.'}, status=503)
+
+
 @never_cache
 @require_http_methods(['GET', 'POST'])
 def settlement_current_housing_import_view(request):
@@ -582,6 +596,8 @@ def settlement_current_housing_import_view(request):
         return redirect(f'{reverse("clerk_login")}?{next_url}')
 
     storage = CurrentHousingDraftStorage(access.pk)
+    if request.method == 'GET' and 'place_map' in request.GET:
+        return _housing_review_map_response(request, storage, request.GET['place_map'])
     saved = None
     context = {'access': access, 'clerk_active_section': 'settlement'}
     status = 200

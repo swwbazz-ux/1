@@ -72,8 +72,7 @@
 }
 
 .housing-import__form input,
-.housing-import__review-fields input,
-.housing-review__place select {
+.housing-import__review-fields input {
     width: 100%;
     min-width: 0;
     min-height: 2.75rem;
@@ -294,8 +293,7 @@
 }
 
 .housing-review__decisions > p,
-.housing-review__decisions > .housing-import__review-fields,
-.housing-review__place[open] {
+.housing-review__decisions > .housing-import__review-fields {
     flex-basis: 100%;
 }
 
@@ -305,7 +303,7 @@
 
 .housing-import__review button,
 .housing-review button[type="submit"],
-.housing-review__place summary {
+.housing-review [data-open-housing-map] {
     box-sizing: border-box;
     width: auto;
     min-width: 0;
@@ -328,23 +326,15 @@
     font-weight: 700;
 }
 
-.housing-review__source summary,
-.housing-review__place summary {
+.housing-review__source summary {
     width: fit-content;
     cursor: pointer;
-}
-
-.housing-review__source summary {
     text-decoration: underline;
     text-underline-offset: 0.15em;
 }
 
-.housing-review__place {
-    max-width: 100%;
-}
-
-.housing-review__place .housing-import__review-fields {
-    margin-top: 0.375rem;
+.housing-review [hidden] {
+    display: none;
 }
 
 .housing-import__review-fields label {
@@ -355,27 +345,10 @@
     margin: 0;
 }
 
-.housing-review__place label:first-child {
-    flex: 1 1 13rem;
-}
-
-.housing-review__place label:nth-child(2) {
-    flex: 0 1 9.5rem;
-}
-
 .housing-import__review-fields :is(input, select) {
     min-height: var(--review-control-height);
     box-sizing: border-box;
     font: inherit;
-}
-
-.housing-review .housing-review__place button:disabled {
-    opacity: 0.55;
-    cursor: default;
-}
-
-.housing-review [hidden] {
-    display: none;
 }
 
 .housing-review__intro {
@@ -615,4 +588,290 @@
 
 .settlement-map-entry__upload:hover {
     text-decoration: underline;
+}
+
+.housing-map-picker[open] {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    width: min(94vw, 92rem);
+    height: min(88dvh, 58rem);
+    max-width: none;
+    max-height: none;
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.75rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: 0 1rem 3rem #0005;
+    overflow: hidden;
+}
+
+.housing-map-picker::backdrop {
+    background: #101b24b8;
+}
+
+.housing-map-picker__header,
+.housing-map-picker__filters,
+.housing-map-picker__footer {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem 1rem;
+}
+
+.housing-map-picker__header {
+    grid-row: 1;
+    justify-content: space-between;
+    align-items: start;
+    background: var(--admin-green-soft);
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.housing-map-picker__header h2 {
+    font-size: 1.125rem;
+}
+
+.housing-map-picker__header p {
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+}
+
+.housing-map-picker__filters {
+    grid-row: 2;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--admin-line);
+}
+
+.housing-map-picker [hidden] {
+    display: none;
+}
+
+.housing-map-picker__filters label {
+    display: grid;
+    gap: 0.125rem;
+    margin: 0;
+    color: var(--admin-muted);
+    font-size: 0.875rem;
+}
+
+.housing-map-picker button,
+.housing-map-picker select {
+    width: auto;
+    min-height: 2.6rem;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+}
+
+.housing-map-picker button:not(:disabled) {
+    cursor: pointer;
+}
+
+.housing-map-picker button:focus-visible,
+.housing-map-picker select:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: 2px;
+}
+
+.housing-map-picker__header button {
+    flex-shrink: 0;
+}
+
+.housing-map-picker__body {
+    grid-row: 3;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+    background: var(--admin-panel-soft);
+}
+
+.housing-map-picker [data-map-status]:not(:empty) {
+    padding: 0.5rem 1rem;
+    border-block-end: 1px solid var(--admin-line);
+}
+
+.housing-map-picker__plan {
+    overflow: auto;
+    min-width: 0;
+    padding: 0.75rem 1rem;
+}
+
+.housing-map-picker__side {
+    display: flex;
+    gap: 0.5rem;
+    width: max-content;
+    min-width: 100%;
+}
+
+.housing-map-picker__side:empty {
+    display: none;
+}
+
+.housing-map-picker__corridor {
+    min-width: fit-content;
+    margin-block: 0.55rem;
+    padding-block: 0.35rem;
+    border-block: 1px solid var(--admin-line);
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--admin-muted);
+}
+
+.housing-map-picker__room {
+    align-self: stretch;
+    flex: 0 0 10rem;
+    padding: 0.375rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel);
+}
+
+.housing-map-picker__room h3 {
+    min-height: 2.35rem;
+    margin: 0 0 0.35rem;
+    font: inherit;
+    font-weight: 700;
+    text-align: center;
+}
+
+.housing-map-picker__room[data-origin-room] {
+    border-color: var(--admin-green);
+}
+
+.housing-map-picker__room h3 small {
+    display: block;
+    color: var(--admin-muted);
+    font-weight: 400;
+}
+
+.housing-map-picker__beds {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem;
+}
+
+.housing-map-picker__beds--single {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.housing-map-picker__block {
+    display: grid;
+    align-content: start;
+    gap: 0.25rem;
+    min-width: 0;
+}
+
+.housing-map-picker button.housing-map-picker__bed {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    justify-content: stretch;
+    min-width: 0;
+    min-height: 3.8rem;
+    padding: 0.25rem;
+    background: var(--admin-panel-soft);
+    text-align: left;
+    line-height: 1.2;
+}
+
+.housing-map-picker__bed small {
+    font-size: 0.7rem;
+}
+
+.housing-map-picker button[data-bed-status="occupied"] {
+    background: color-mix(in srgb, #3d83b5 20%, var(--admin-panel));
+}
+
+.housing-map-picker button[data-bed-status="draft"] {
+    background: color-mix(in srgb, #c08132 22%, var(--admin-panel));
+}
+
+.housing-map-picker button[data-bed-status="unavailable"] {
+    color: var(--admin-muted);
+}
+
+.housing-map-picker button[aria-pressed="true"] {
+    outline: 2px solid var(--admin-green);
+    outline-offset: -2px;
+}
+
+.housing-map-picker__people {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    font-size: 0.75rem;
+}
+
+.housing-map-picker__footer {
+    grid-row: 4;
+    justify-content: space-between;
+    border-top: 1px solid var(--admin-line);
+}
+
+.housing-map-picker [data-map-selection] {
+    display: grid;
+    gap: 0.1rem;
+    max-height: 7rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    font-size: 0.875rem;
+}
+
+.housing-map-picker [data-map-save]:enabled {
+    background: #15834e;
+    border-color: #15834e;
+    color: white;
+    font-weight: 700;
+}
+
+.housing-map-picker [data-map-save]:disabled {
+    opacity: 0.6;
+}
+
+@media (max-width: 650px) {
+    .housing-map-picker[open] {
+        width: 100vw;
+        height: 100dvh;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .housing-map-picker__header,
+    .housing-map-picker__filters,
+    .housing-map-picker__footer {
+        gap: 0.5rem;
+        padding: 0.5rem 0.65rem;
+    }
+
+    .housing-map-picker__header button {
+        white-space: normal;
+        max-width: 7rem;
+    }
+
+    .housing-map-picker__filters label {
+        flex: 1 1 5rem;
+        min-width: 0;
+    }
+
+    .housing-map-picker button,
+    .housing-map-picker select {
+        min-height: 2.75rem;
+    }
+
+    .housing-map-picker__footer {
+        flex-wrap: wrap;
+    }
+
+    .housing-map-picker__footer button {
+        width: 100%;
+    }
 }

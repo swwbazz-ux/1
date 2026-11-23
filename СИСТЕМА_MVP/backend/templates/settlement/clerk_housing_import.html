@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v8">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v9">
 {% endblock %}
 
 {% block clerk_content %}
@@ -121,9 +121,31 @@
     {% endif %}
     </div>
     </div>
+    <dialog class="housing-map-picker" aria-labelledby="housing-map-title" data-housing-map>
+        <header class="housing-map-picker__header">
+            <div>
+                <h2 id="housing-map-title">Выбор койки для сверки Excel</h2>
+                <p data-map-resident></p>
+            </div>
+            <button type="button" data-map-close autofocus>Закрыть карту</button>
+        </header>
+        <div class="housing-map-picker__filters" data-map-filters hidden>
+            <label>Общежитие <select data-map-building></select></label>
+            <label>Этаж <select data-map-floor></select></label>
+            <label>Комната <select data-map-room></select></label>
+        </div>
+        <div class="housing-map-picker__body">
+            <p data-map-status role="status" tabindex="-1"></p>
+            <div class="housing-map-picker__plan" data-map-plan tabindex="0" aria-label="План этажа"></div>
+        </div>
+        <footer class="housing-map-picker__footer">
+            <div data-map-selection aria-live="polite"></div>
+            <button type="button" data-map-save disabled>Сохранить в черновик</button>
+        </footer>
+    </dialog>
 </main>
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v8" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v9" defer></script>
 {% endblock %}
