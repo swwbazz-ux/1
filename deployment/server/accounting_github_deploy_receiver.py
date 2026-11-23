@@ -281,9 +281,14 @@ SSE_QA_ALLOW_CIDR_SUMMARY = re.compile(
     r"renewal_hook=preserved$"
 )
 APP_ENV_PATH = APP / ".env"
+SETTLEMENT_DIAGNOSTIC_OPERATION = "settlement_current_reconciliation_v1"
+SETTLEMENT_EMPLOYEE_LIMIT = 1200
+SETTLEMENT_BED_LIMIT = 700
+SETTLEMENT_OCCUPANCY_LIMIT = 1200
 DIAGNOSTIC_OPERATIONS = {
     "trip_accounting_incident_v1",
     "infra_capacity_v1",
+    SETTLEMENT_DIAGNOSTIC_OPERATION,
     "sse_production_preflight_v1",
     "sse_qa_http_503_v1",
     "sse_qa_http_403_v1",
@@ -1331,11 +1336,12 @@ def validate_diagnostic_metadata(metadata: object) -> dict[str, object]:
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise ReleaseError("diagnostic operation is not allowlisted")
     if operation in {
-        "infra_capacity_v1", "sse_production_preflight_v1",
+        "infra_capacity_v1", SETTLEMENT_DIAGNOSTIC_OPERATION, "sse_production_preflight_v1",
         "sse_qa_http_503_v1", "sse_qa_http_403_v1",
     }:
         expected_keys = {
             "infra_capacity_v1": INFRA_DIAGNOSTIC_METADATA_KEYS,
+            SETTLEMENT_DIAGNOSTIC_OPERATION: {"operation"},
             "sse_production_preflight_v1": {"operation"},
             "sse_qa_http_503_v1": SSE_QA_HTTP_503_METADATA_KEYS,
             "sse_qa_http_403_v1": SSE_QA_HTTP_403_METADATA_KEYS,
@@ -3255,9 +3261,239 @@ def validate_sse_qa_http_403_report(raw: bytes, metadata: dict[str, object]) -> 
     return report
 
 
+SETTLEMENT_DIAGNOSTIC_SOURCE = r'''
+from datetime import date, timezone as utc
+from hashlib import sha256
+import hmac
+import json
+import os
+import secrets
+import unicodedata
+
+import django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+
+from django.db import connection, transaction
+from django.db.models import Q
+from django.utils import timezone
+from core.production_time import production_day_bounds
+from references.models import Dormitory
+from settlement.intervals import effective_ends_at
+from settlement.models import EmployeeBedOccupancy, PhysicalBed, SettlementResident
+from settlement.special_fund import room_anchor_types_by_room
+from users.models import Employee
+
+
+def limited(query, maximum):
+    rows = list(query[:maximum + 1])
+    if len(rows) > maximum:
+        raise RuntimeError("settlement diagnostic row limit exceeded")
+    return rows
+
+
+def exact_name(name):
+    return " ".join(unicodedata.normalize("NFKC", name).split()).casefold().replace("ё", "е")
+
+
+def token(key, prefix, value):
+    return hmac.new(key, f"{prefix}:{value}".encode("utf-8"), sha256).hexdigest()
+
+
+def collect(key, as_of, start, end):
+    employees = limited(Employee.objects.order_by("pk").values(
+        "id", "full_name", "is_active", "status", "personnel_position__settlement_category",
+        "settlement_resident__status", "sex",
+    ), 1200)
+    own_housing = Q(room__dormitory__number__in=["5", "6"], room__dormitory__kind=Dormitory.Kind.OWN)
+    beds = limited(PhysicalBed.objects.filter(own_housing).order_by("stable_id").values(
+        "stable_id", "room_id", "room__room_type", "room__transfer_status", "room__sex_restriction",
+    ), 700)
+    bed_ids = {bed["stable_id"] for bed in beds}
+    protected = room_anchor_types_by_room(room_ids={bed["room_id"] for bed in beds})
+    occupancies = limited(EmployeeBedOccupancy.objects.filter(
+        Q(ends_at__isnull=True) | Q(ends_at__gt=start),
+        Q(terminated_at__isnull=True) | Q(terminated_at__gt=start),
+        Q(physical_bed__stable_id__in=bed_ids) | Q(resident__employee_id__isnull=False),
+        replaced_by_application__isnull=True, replaced_by_occupancy__isnull=True, starts_at__lt=end,
+    ).order_by("pk").values(
+        "physical_bed__stable_id", "resident__employee_id", "work_shift",
+        "starts_at", "ends_at", "terminated_at",
+    ), 1200)
+    report = {
+        "schema": 1,
+        "operation": "settlement_current_reconciliation_v1",
+        "as_of": as_of.astimezone(utc.utc).isoformat(),
+        "window": [start.astimezone(utc.utc).isoformat(), end.astimezone(utc.utc).isoformat()],
+        "read_only": True,
+        "match_key": key.hex(),
+        "employees": [
+            {
+                "name_match": token(key, "name", exact_name(employee["full_name"])),
+                "person": token(key, "employee", employee["id"]),
+                "active": employee["is_active"] and employee["status"] == Employee.Status.ACTIVE,
+                "category": employee["personnel_position__settlement_category"] or "",
+                "resident_active": employee["settlement_resident__status"] == SettlementResident.Status.ACTIVE,
+                "sex": employee["sex"] or "unknown",
+            }
+            for employee in employees
+        ],
+        "beds": [
+            {
+                "id": bed["stable_id"],
+                "type": bed["room__room_type"],
+                "transferred": bed["room__transfer_status"] == "transferred",
+                "anchors": sorted(protected.get(bed["room_id"], ())),
+                "sex_restriction": bed["room__sex_restriction"],
+            }
+            for bed in beds
+        ],
+        "occupancies": [],
+    }
+    for row in occupancies:
+        effective_end = effective_ends_at(row["ends_at"], row["terminated_at"])
+        if effective_end is not None and effective_end <= row["starts_at"]:
+            continue
+        bed_id = row["physical_bed__stable_id"]
+        employee_id = row["resident__employee_id"]
+        report["occupancies"].append({
+            "bed": bed_id if bed_id in bed_ids else None,
+            "person": token(key, "employee", employee_id) if employee_id is not None else None,
+            "shift": row["work_shift"] or None,
+            "start": row["starts_at"].astimezone(utc.utc).isoformat(),
+            "end": effective_end.astimezone(utc.utc).isoformat() if effective_end is not None else None,
+        })
+    report["summary"] = {
+        "row_count": sum(len(report[section]) for section in ("employees", "beds", "occupancies")),
+        "truncated": False,
+    }
+    return report
+
+
+if connection.vendor != "postgresql":
+    raise RuntimeError("settlement diagnostic requires PostgreSQL")
+with transaction.atomic():
+    with connection.cursor() as cursor:
+        cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        cursor.execute("SET LOCAL statement_timeout = '8000ms'")
+        cursor.execute("SET LOCAL lock_timeout = '1000ms'")
+        cursor.execute("SHOW transaction_read_only")
+        if cursor.fetchone() != ("on",):
+            raise RuntimeError("settlement diagnostic transaction is not read only")
+        cursor.execute("SHOW transaction_isolation")
+        if cursor.fetchone() != ("repeatable read",):
+            raise RuntimeError("settlement diagnostic snapshot is not repeatable read")
+    start, _ = production_day_bounds(date(2026, 10, 28))
+    end, _ = production_day_bounds(date(2026, 12, 14))
+    snapshot = collect(secrets.token_bytes(32), timezone.now(), start, end)
+
+print(json.dumps(snapshot, separators=(",", ":")))
+'''
+
+
+def validate_settlement_diagnostic_report(raw: bytes) -> dict[str, Any]:
+    invalid = "invalid settlement reconciliation diagnostic"
+
+    def valid_hex(value: object) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    def timestamp(value: object) -> datetime:
+        if not isinstance(value, str) or len(value) > 32:
+            raise ReleaseError(invalid)
+        try:
+            result = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ReleaseError(invalid) from exc
+        if result.utcoffset() != timedelta(0):
+            raise ReleaseError(invalid)
+        return result
+
+    if not raw or len(raw) > DIAGNOSTIC_MAX_OUTPUT_BYTES:
+        raise ReleaseError(invalid)
+    try:
+        report = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReleaseError(invalid) from exc
+    if (
+        not isinstance(report, dict)
+        or set(report) != {"schema", "operation", "as_of", "window", "read_only", "match_key",
+                           "employees", "beds", "occupancies", "summary"}
+        or type(report["schema"]) is not int or report["schema"] != 1
+        or report["operation"] != SETTLEMENT_DIAGNOSTIC_OPERATION
+        or report["read_only"] is not True
+        or not valid_hex(report["match_key"])
+    ):
+        raise ReleaseError(invalid)
+    timestamp(report["as_of"])
+    window = report["window"]
+    if not isinstance(window, list) or len(window) != 2:
+        raise ReleaseError(invalid)
+    start, end = map(timestamp, window)
+    if not start < end or end - start > timedelta(days=48):
+        raise ReleaseError(invalid)
+    for section, limit in (
+        ("employees", SETTLEMENT_EMPLOYEE_LIMIT), ("beds", SETTLEMENT_BED_LIMIT),
+        ("occupancies", SETTLEMENT_OCCUPANCY_LIMIT),
+    ):
+        if not isinstance(report[section], list) or len(report[section]) > limit:
+            raise ReleaseError(invalid)
+        if any(not isinstance(row, dict) for row in report[section]):
+            raise ReleaseError(invalid)
+    people = set()
+    for row in report["employees"]:
+        if (
+            set(row) != {"name_match", "person", "active", "category", "resident_active", "sex"}
+            or not valid_hex(row["person"]) or not valid_hex(row["name_match"])
+            or row["person"] in people or type(row["active"]) is not bool
+            or type(row["resident_active"]) is not bool or row["category"] not in ("", "worker", "itr")
+            or row["sex"] not in ("unknown", "male", "female")
+        ):
+            raise ReleaseError(invalid)
+        people.add(row["person"])
+    bed_ids = set()
+    for row in report["beds"]:
+        if (
+            set(row) != {"id", "type", "transferred", "anchors", "sex_restriction"}
+            or not isinstance(row["id"], str)
+            or not re.fullmatch(r"KIS[56]-F[12]-R[0-9]{2,5}-(?:[AB][1-3]|ITR[12])", row["id"])
+            or row["id"] in bed_ids or row["type"] not in ("standard", "itr")
+            or type(row["transferred"]) is not bool or not isinstance(row["anchors"], list)
+            or len(row["anchors"]) > 6
+            or any(value not in ("equipment", "function", "reserve", "group", "service", "protected")
+                   for value in row["anchors"])
+            or row["sex_restriction"] not in ("unknown", "male_only", "female_only")
+        ):
+            raise ReleaseError(invalid)
+        bed_ids.add(row["id"])
+    for row in report["occupancies"]:
+        if (
+            set(row) != {"bed", "person", "shift", "start", "end"}
+            or (row["bed"] is not None and (not isinstance(row["bed"], str) or row["bed"] not in bed_ids))
+            or (row["person"] is not None and (not valid_hex(row["person"]) or row["person"] not in people))
+            or (row["bed"] is None and row["person"] is None)
+            or row["shift"] not in (None, "day", "night")
+        ):
+            raise ReleaseError(invalid)
+        begins = timestamp(row["start"])
+        finishes = timestamp(row["end"]) if row["end"] is not None else None
+        if begins >= end or (finishes is not None and finishes <= max(begins, start)):
+            raise ReleaseError(invalid)
+    summary = report["summary"]
+    count = len(people) + len(bed_ids) + len(report["occupancies"])
+    if (
+        not isinstance(summary, dict) or set(summary) != {"row_count", "truncated"}
+        or type(summary["row_count"]) is not int or summary["row_count"] != count
+        or summary["truncated"] is not False or not people or not bed_ids
+    ):
+        raise ReleaseError(invalid)
+    return report
+
+
 def validate_diagnostic_report(raw: bytes, metadata: dict[str, object]) -> dict[str, Any]:
     if metadata.get("operation") == "infra_capacity_v1":
         return validate_infra_capacity_report(raw, metadata)
+    if metadata.get("operation") == SETTLEMENT_DIAGNOSTIC_OPERATION:
+        return validate_settlement_diagnostic_report(raw)
     if metadata.get("operation") == "sse_qa_http_503_v1":
         return validate_sse_qa_http_503_report(raw, metadata)
     if metadata.get("operation") == "sse_qa_http_403_v1":
@@ -4255,11 +4491,11 @@ def run_diagnostic(manifest: dict[str, Any]) -> dict[str, Any]:
         return collect_sse_qa_http_503_report()
     if metadata["operation"] == "sse_qa_http_403_v1":
         return collect_sse_qa_http_403_report()
-    source = (
-        INFRA_CAPACITY_SOURCE
-        if metadata["operation"] == "infra_capacity_v1"
-        else DIAGNOSTIC_QUERY_SOURCE
-    )
+    source = {
+        "infra_capacity_v1": INFRA_CAPACITY_SOURCE,
+        SETTLEMENT_DIAGNOSTIC_OPERATION: SETTLEMENT_DIAGNOSTIC_SOURCE,
+        "trip_accounting_incident_v1": DIAGNOSTIC_QUERY_SOURCE,
+    }[metadata["operation"]]
     if not source.strip():
         raise ReleaseError("diagnostic helper is unavailable")
     diagnostic_env = os.environ.copy()

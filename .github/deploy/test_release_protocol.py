@@ -974,6 +974,62 @@ class ReleaseProtocolTests(unittest.TestCase):
             with self.assertRaises(receiver.ReleaseError):
                 receiver.validate_diagnostic_metadata({"operation": "infra_capacity_v1", "command": "id"})
 
+    def test_settlement_reconciliation_is_a_fixed_read_only_diagnostic(self):
+        operation = "settlement_current_reconciliation_v1"
+        metadata = {"operation": operation}
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            inputs = {"diagnostic_operation": operation}
+            event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+            self.assertEqual(builder.load_diagnostic_metadata(event_path), metadata)
+            receiver.validate_mode_contract({
+                "schema": 2, "mode": "diagnose", "commit": "a" * 40,
+                "files": [], "metadata": metadata,
+            }, {})
+            inputs["diagnostic_from_utc"] = "2026-11-23T00:00:00Z"
+            event_path.write_text(json.dumps({"inputs": inputs}), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                builder.load_diagnostic_metadata(event_path)
+        with self.assertRaises(receiver.ReleaseError):
+            receiver.validate_diagnostic_metadata({**metadata, "command": "id"})
+
+        source = receiver.SETTLEMENT_DIAGNOSTIC_SOURCE
+        compile(source, "<settlement-diagnostic>", "exec")
+        self.assertIn("REPEATABLE READ, READ ONLY", source)
+        self.assertIn("SHOW transaction_read_only", source)
+        self.assertIn("SHOW transaction_isolation", source)
+
+        report = {
+            "schema": 1, "operation": operation, "as_of": "2026-11-23T00:00:00+00:00",
+            "window": ["2026-10-27T22:00:00+00:00", "2026-12-13T22:00:00+00:00"],
+            "read_only": True, "match_key": "a" * 64,
+            "employees": [{"name_match": "b" * 64, "person": "c" * 64,
+                           "active": True, "category": "worker", "resident_active": False, "sex": "unknown"}],
+            "beds": [{"id": "KIS6-F1-R12-A1", "type": "standard", "transferred": True,
+                      "anchors": [], "sex_restriction": "unknown"}],
+            "occupancies": [{"bed": "KIS6-F1-R12-A1", "person": "c" * 64, "shift": None,
+                             "start": "2026-11-20T22:00:00+00:00", "end": None}],
+            "summary": {"row_count": 3, "truncated": False},
+        }
+        raw = json.dumps(report).encode()
+        with mock.patch.object(receiver.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=raw)) as run:
+            self.assertEqual(receiver.run_diagnostic({"metadata": metadata}), report)
+        self.assertEqual(run.call_args.args[0][1:], ["-c", source])
+        self.assertIn("default_transaction_read_only=on", run.call_args.kwargs["env"]["PGOPTIONS"])
+        for section, field, value in (
+            (None, "read_only", False), ("employees", "full_name", "Пример ФИО"),
+            ("employees", "name_match", "Пример ФИО"), ("occupancies", "bed", "KIS99-F1-R12-A1"),
+            ("occupancies", "person", "f" * 64), ("summary", "truncated", True),
+        ):
+            with self.subTest(section=section, field=field):
+                invalid = json.loads(raw)
+                row = invalid if section is None else invalid[section]
+                if isinstance(row, list):
+                    row = row[0]
+                row[field] = value
+                with self.assertRaises(receiver.ReleaseError):
+                    receiver.validate_diagnostic_report(json.dumps(invalid).encode(), metadata)
+
     def test_production_sse_preflight_has_no_free_form_parameters(self):
         operation = "sse_production_preflight_v1"
         with tempfile.TemporaryDirectory() as directory:
