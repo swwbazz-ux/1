@@ -22,8 +22,8 @@ APP_CATALOG_ROLES = (
     ('admin', 'Системный администратор'),
 )
 APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in APP_CATALOG_ROLES)
-# These cards use the main site's existing entry path. The subdomain
-# readiness list and the role choices for signed-in employees stay separate.
+# These cards use the main site's entry paths on an already served origin.
+# The role subdomain readiness list stays separate.
 MAIN_SITE_CATALOG_ROLES = {'settlement_clerk': 'Делопроизводитель'}
 PUBLIC_APP_CATALOG_ROLES = (*APP_CATALOG_ROLES, *MAIN_SITE_CATALOG_ROLES.items())
 PUBLIC_APP_CATALOG_ROLE_CODES = tuple(role_code for role_code, _ in PUBLIC_APP_CATALOG_ROLES)
@@ -124,13 +124,17 @@ def role_app_qr_target_url(role_code):
     if app is None or role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise KeyError(role_code)
     if role_code in MAIN_SITE_CATALOG_ROLES:
-        return f'https://driverform.ru{app.start_url}'
+        # Старое PWA Driver Form охватывает весь driverform.ru. На www Chrome
+        # предлагает отдельную установку по существующему манифесту роли.
+        return f'https://www.driverform.ru{app.start_url}'
     return f'https://{app.subdomain}.driverform.ru/'
 
 
 def role_app_qr_asset_path(role_code):
     if role_code not in PUBLIC_APP_CATALOG_ROLE_CODES:
         raise KeyError(role_code)
+    if role_code in MAIN_SITE_CATALOG_ROLES:
+        return f'img/pwa/qr/{role_code}-www.png'
     return f'img/pwa/qr/{role_code}.png'
 
 

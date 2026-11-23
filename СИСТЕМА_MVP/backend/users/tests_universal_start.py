@@ -338,14 +338,14 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, '/media/apk/driver-0.1.10.apk')
         self.assertIn('no-cache', response.headers['Cache-Control'])
 
-    @override_settings(ALLOWED_HOSTS=['driverform.ru', '127.0.0.1'])
-    def test_clerk_catalog_card_opens_settlement_on_the_main_site(self):
+    @override_settings(ALLOWED_HOSTS=['driverform.ru', 'www.driverform.ru', '127.0.0.1'])
+    def test_clerk_catalog_card_opens_on_the_install_origin(self):
         self.add_driver_release()
         self.add_excavator_release()
         catalog = reverse('app_catalog')
         clerk_home = reverse('clerk_home')
-        public_url = f'https://driverform.ru{clerk_home}'
-        qr_url = '/static/img/pwa/qr/settlement_clerk.png'
+        public_url = f'https://www.driverform.ru{clerk_home}'
+        qr_url = '/static/img/pwa/qr/settlement_clerk-www.png'
 
         response = self.client.get(catalog, HTTP_HOST='driverform.ru', secure=True)
         self.assertContains(response, 'data-app-name="Делопроизводитель"')
@@ -363,7 +363,9 @@ class UniversalStartTests(TestCase):
             fetch_redirect_response=False,
         )
 
-        login = self.client.get(clerk_home, HTTP_HOST='driverform.ru', secure=True, follow=True)
+        login = self.client.get(
+            clerk_home, HTTP_HOST=urlparse(public_url).netloc, secure=True, follow=True,
+        )
         self.assertEqual(urlparse(login.redirect_chain[-1][0]).path, reverse('clerk_login'))
         self.assertContains(login, 'Вход · Делопроизводитель')
 
@@ -606,19 +608,15 @@ class UniversalStartTests(TestCase):
         self.assertNotContains(response, 'После перехода добавьте значок на экран')
 
 
-@override_settings(ALLOWED_HOSTS=['driverform.ru', '127.0.0.1'])
+@override_settings(ALLOWED_HOSTS=['driverform.ru', 'www.driverform.ru', '127.0.0.1'])
 class AppCatalogClerkCardTests(TestCase):
-    """Карточка делопроизводителя в общем каталоге ``/apps/``.
+    """Карточка ведёт на адрес установки вне области действия Driver Form."""
 
-    У делопроизводителя нет своего поддомена: карточка ведёт на основной сайт
-    по ``start_url`` роли (``/clerk/``), а не на ``settlement.driverform.ru``.
-    """
-
-    def test_clerk_card_opens_settlement_on_the_main_site(self):
+    def test_clerk_card_opens_on_the_install_origin(self):
         catalog = reverse('app_catalog')
         clerk_home = reverse('clerk_home')
-        public_url = f'https://driverform.ru{clerk_home}'
-        qr_url = '/static/img/pwa/qr/settlement_clerk.png'
+        public_url = f'https://www.driverform.ru{clerk_home}'
+        qr_url = '/static/img/pwa/qr/settlement_clerk-www.png'
 
         response = self.client.get(
             catalog,
@@ -656,7 +654,7 @@ class AppCatalogClerkCardTests(TestCase):
 
         login = self.client.get(
             clerk_home,
-            HTTP_HOST='driverform.ru',
+            HTTP_HOST=urlparse(public_url).netloc,
             secure=True,
         )
         self.assertEqual(login.status_code, 302)

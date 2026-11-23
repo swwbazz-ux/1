@@ -1,2 +1,2 @@
-СИСТЕМА_MVP/backend/shifts/services.py
-СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/static/img/pwa/qr/settlement_clerk-www.png
+СИСТЕМА_MVP/backend/users/app_catalog.py
