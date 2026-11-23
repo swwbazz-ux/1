@@ -82,6 +82,7 @@ on:
           - none
           - trip_accounting_incident_v1
           - infra_capacity_v1
+          - settlement_current_reconciliation_v1
           - sse_production_preflight_v1
           - sse_qa_http_503_v1
           - sse_qa_http_403_v1
@@ -661,6 +662,7 @@ jobs:
           summary = report.get("summary") or {}
           if operation not in {
               "trip_accounting_incident_v1", "infra_capacity_v1", "sse_production_preflight_v1",
+              "settlement_current_reconciliation_v1",
               "sse_qa_http_503_v1", "sse_qa_http_403_v1",
           }:
               raise SystemExit("unexpected diagnostic operation")
@@ -677,8 +679,11 @@ jobs:
           truncated = summary.get("truncated")
           if set(summary) != {"row_count", "truncated"}:
               raise SystemExit("invalid diagnostic summary")
-          if isinstance(rows, bool) or not isinstance(rows, int) or rows < 0 or rows > 500 or not isinstance(truncated, bool):
+          max_rows = 3100 if operation == "settlement_current_reconciliation_v1" else 500
+          if type(rows) is not int or not 0 <= rows <= max_rows or not isinstance(truncated, bool):
               raise SystemExit("invalid diagnostic summary")
+          if operation == "settlement_current_reconciliation_v1" and truncated:
+              raise SystemExit("settlement diagnostic must contain a complete snapshot")
           try:
               ciphertext = base64.b64decode(report.get("ciphertext_base64", ""), validate=True)
           except (ValueError, TypeError):

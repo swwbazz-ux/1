@@ -129,6 +129,7 @@ SSE_QA_SEED_FIX_METADATA = {
 DIAGNOSTIC_OPERATIONS = {
     "trip_accounting_incident_v1",
     "infra_capacity_v1",
+    "settlement_current_reconciliation_v1",
     "sse_production_preflight_v1",
     "sse_qa_http_503_v1",
     "sse_qa_http_403_v1",
@@ -197,7 +198,7 @@ def load_diagnostic_metadata(event_path: Path) -> dict[str, object]:
     if operation not in DIAGNOSTIC_OPERATIONS:
         raise SystemExit("diagnostic operation is not allowlisted")
     if operation in {
-        "infra_capacity_v1", "sse_production_preflight_v1",
+        "infra_capacity_v1", "settlement_current_reconciliation_v1", "sse_production_preflight_v1",
         "sse_qa_http_503_v1", "sse_qa_http_403_v1",
     }:
         if any(value not in (None, "") for value in (equipment, from_text, to_text)):
