@@ -1,0 +1,92 @@
+{% extends "clerk/base.html" %}
+{% load static %}
+
+{% block title %}Загрузка текущего расселения{% endblock %}
+
+{% block clerk_extra_head %}
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v1">
+{% endblock %}
+
+{% block clerk_content %}
+<main class="admin-console-page housing-import">
+    <a class="housing-import__back" href="{% url 'settlement_map' %}">К карте расселения</a>
+    <h1>Загрузка текущего расселения</h1>
+    <form id="housing-import-form" class="housing-import__form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div>
+            {{ form.workbook.label_tag }}
+            {{ form.workbook }}
+        </div>
+        <div>
+            {{ form.as_of.label_tag }}
+            {{ form.as_of }}
+        </div>
+        <button type="submit" name="action" value="preview">Проверить Excel</button>
+    </form>
+    <p id="housing-import-feedback" role="status"></p>
+
+    <div id="housing-import-response" tabindex="-1">
+    {% if form.errors %}
+        <div class="housing-import__errors" role="alert">
+            {{ form.workbook.errors }}
+            {{ form.as_of.errors }}
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+    {% if report_groups %}
+        <section class="housing-import__report" aria-label="Предпросмотр расселения">
+            {% if application %}
+                <h2>Результат загрузки</h2>
+                <p role="status">Перенесено на карту — {{ application.placed }}. Создано карточек жильцов — {{ application.residents }}.</p>
+            {% else %}
+            <h2>Предпросмотр на {{ as_of|date:"d.m.Y" }}</h2>
+            <p>Голубые строки учтены как межвахта. Карта расселения не менялась.</p>
+            {% if receipt %}
+                <input type="hidden" name="receipt" value="{{ receipt }}" form="housing-import-form">
+                <div class="housing-import__apply">
+                    <button type="submit" name="action" value="apply" form="housing-import-form">Применить</button>
+                    <span>Проверенных строк — {{ applicable_count }}. Недостающие карточки жильцов будут созданы.</span>
+                </div>
+                <noscript>Для применения снова выберите тот же файл Excel.</noscript>
+            {% endif %}
+            {% endif %}
+            {% for group in report_groups %}
+                <details class="housing-import__group housing-import__group--{{ group.code }}"{% if group.code == 'conflict' and group.rows %} open{% endif %}>
+                    <summary>{{ group.label }} <strong>{{ group.rows|length }}</strong></summary>
+                    {% if group.rows %}
+                        <ul class="housing-import__rows">
+                            {% for row in group.rows %}
+                                <li>
+                                    <div class="housing-import__person">
+                                        <strong>{{ row.name }}</strong>
+                                        <small>{{ row.category_label }}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
+                                    </div>
+                                    <div>
+                                        КИС-{{ row.building }}{% if row.floor %} · {{ row.floor }} этаж{% endif %}{% if row.room_number %} · комната {{ row.room_number }}{% endif %}
+                                        <small>{{ row.bed_label|default:"Койка не указана" }} · {{ row.source }}</small>
+                                    </div>
+                                    <div>
+                                        {% if row.starts and row.ends %}
+                                        <span>{{ row.starts|date:"d.m.Y" }} — {{ row.ends|date:"d.m.Y" }}</span>
+                                        {% endif %}
+                                        {% if row.issues and group.code == 'conflict' %}
+                                            <ul class="housing-import__issues">
+                                                {% for issue in row.issues %}<li>{{ issue }}</li>{% endfor %}
+                                            </ul>
+                                        {% endif %}
+                                    </div>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </details>
+            {% endfor %}
+        </section>
+    {% endif %}
+    </div>
+</main>
+{% endblock %}
+
+{% block clerk_scripts %}
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v1" defer></script>
+{% endblock %}

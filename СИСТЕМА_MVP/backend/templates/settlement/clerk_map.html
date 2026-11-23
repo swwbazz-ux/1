@@ -4,6 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v1">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -42,10 +43,13 @@
 
 {% block clerk_content %}
     <main class="admin-console-page settlement-page">
-        <nav class="settlement-map-modes" aria-label="Режим карты">
-            <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
-            <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
-        </nav>
+        <div class="settlement-map-entry">
+            <nav class="settlement-map-modes" aria-label="Режим карты">
+                <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
+                <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
+            </nav>
+            <a class="settlement-map-entry__upload" href="{% url 'settlement_current_housing_import' %}">Загрузить Excel</a>
+        </div>
 
         <section class="settlement-control-panel"
                  data-control-panel

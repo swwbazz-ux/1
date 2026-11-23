@@ -14,6 +14,7 @@ from .views import (
     settlement_clerk_shift_handover_view,
     settlement_clerk_shift_open_view,
     settlement_clerk_shift_state_view,
+    settlement_current_housing_import_view,
     settlement_employee_search_view,
     settlement_employee_detail_view,
     settlement_external_resident_create_view,
@@ -76,6 +77,11 @@ urlpatterns = [
     ),
     path('clerk/', settlement_map_view, name='clerk_home'),
     path('clerk/settlement/', settlement_map_view, name='settlement_map'),
+    path(
+        'clerk/settlement/current-housing/',
+        settlement_current_housing_import_view,
+        name='settlement_current_housing_import',
+    ),
     path(
         'clerk/settlement/fund/',
         settlement_fund_view,

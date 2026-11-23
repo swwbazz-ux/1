@@ -2,10 +2,12 @@ import json
 from collections import Counter, defaultdict
 from datetime import timedelta
 from functools import wraps
+from hashlib import sha256
 from urllib.parse import urlencode
 
 from django import forms
 from django.contrib import messages
+from django.core import signing
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import Prefetch, Q
@@ -14,6 +16,7 @@ from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
@@ -58,6 +61,13 @@ from .clerk_shifts import (
     open_clerk_shift,
 )
 from .cohort_readiness import build_arrival_roster_cohort_overview
+from .current_housing_import import (
+    MAX_FILE_SIZE,
+    apply_current_housing,
+    build_current_housing_preview,
+    parse_current_housing_workbook,
+    preview_placements,
+)
 from .fund import (
     close_dormitory as close_fund_dormitory,
     create_bed as create_fund_bed,
@@ -342,6 +352,110 @@ def settlement_clerk_access_from_request(request, *, allow_admin=True):
     if not session_state['authenticated'] or not session_state['is_active']:
         return None
     return access
+
+
+class CurrentHousingWorkbookForm(forms.Form):
+    workbook = forms.FileField(
+        label='Файл Excel (.xlsx)',
+        widget=forms.FileInput(attrs={'accept': '.xlsx'}),
+    )
+    as_of = forms.DateField(
+        label='Дата расселения',
+        widget=forms.DateInput(format='%Y-%m-%d', attrs={'type': 'date'}),
+    )
+
+    def clean_workbook(self):
+        workbook = self.cleaned_data['workbook']
+        if not workbook.name.casefold().endswith('.xlsx') or workbook.size > MAX_FILE_SIZE:
+            raise ValidationError('Выберите файл .xlsx размером до 10 МБ.')
+        return workbook
+
+
+CURRENT_HOUSING_PREVIEW_SALT = 'settlement.current_housing.preview'
+CURRENT_HOUSING_PREVIEW_MAX_AGE = 30 * 60
+CURRENT_HOUSING_GROUPS = (
+    ('applied', 'Перенесено на карту'),
+    ('ready', 'Готово к переносу'),
+    ('needs_resident', 'Нужна карточка жильца'),
+    ('conflict', 'Требуется сверка'),
+    ('interwatch', 'Межвахта'),
+    ('outside', 'Вне выбранного периода'),
+    ('existing', 'Уже учтено на карте'),
+)
+
+
+def _current_housing_post(request, access, form, context):
+    as_of = form.cleaned_data['as_of']
+    payload = form.cleaned_data['workbook'].read(MAX_FILE_SIZE + 1)
+    workbook_digest = sha256(payload).hexdigest()
+    session_key = request.session.session_key or ''
+    scope = {
+        'access': access.pk, 'session': sha256(session_key.encode()).hexdigest(),
+        'workbook': workbook_digest, 'date': as_of.isoformat(),
+    }
+    applying = request.POST.get('action') == 'apply'
+    if applying:
+        try:
+            receipt = signing.loads(
+                request.POST.get('receipt', ''), salt=CURRENT_HOUSING_PREVIEW_SALT,
+                max_age=CURRENT_HOUSING_PREVIEW_MAX_AGE,
+            )
+        except signing.BadSignature:
+            receipt = {}
+        if not session_key or receipt.get('scope') != scope or not receipt.get('placements'):
+            form.add_error(None, 'Предпросмотр истёк или изменился. Снова нажмите «Проверить Excel».')
+            return
+    try:
+        rows = parse_current_housing_workbook(payload)
+    except ValidationError as error:
+        form.add_error('workbook', error)
+        return
+    if applying:
+        try:
+            groups, created_residents, grant = apply_current_housing(
+                rows, as_of, confirmed=receipt['placements'], workbook_digest=workbook_digest,
+                access_id=access.pk, session_key=session_key,
+            )
+        except ValidationError as error:
+            form.add_error(None, error)
+            return
+        store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
+        context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
+    else:
+        groups = build_current_housing_preview(rows, as_of)
+        placements = preview_placements(groups)
+        if placements:
+            context['receipt'] = signing.dumps(
+                {'scope': scope, 'placements': placements},
+                salt=CURRENT_HOUSING_PREVIEW_SALT, compress=True,
+            )
+            context['applicable_count'] = len(placements)
+    context.update(as_of=as_of, report_groups=[
+        {'code': code, 'label': label, 'rows': groups[code]}
+        for code, label in CURRENT_HOUSING_GROUPS
+        if code in groups and (not applying or code not in ('ready', 'needs_resident'))
+    ])
+
+
+@never_cache
+@require_http_methods(['GET', 'POST'])
+def settlement_current_housing_import_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        next_url = urlencode({'next': reverse('settlement_current_housing_import')})
+        return redirect(f'{reverse("clerk_login")}?{next_url}')
+
+    form = CurrentHousingWorkbookForm(initial={'as_of': production_work_date()})
+    context = {'access': access, 'form': form, 'clerk_active_section': 'settlement'}
+    status = 200
+    if request.method == 'POST':
+        form = CurrentHousingWorkbookForm(request.POST, request.FILES)
+        context['form'] = form
+        if form.is_valid():
+            _current_housing_post(request, access, form, context)
+        if form.errors:
+            status = 400
+    return render(request, 'settlement/clerk_housing_import.html', context, status=status)
 
 
 @require_GET
