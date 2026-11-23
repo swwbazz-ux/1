@@ -1,3 +1,6 @@
-СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
-СИСТЕМА_MVP/backend/static/js/settlement-housing-import.js
-СИСТЕМА_MVP/backend/templates/settlement/clerk_housing_import.html
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
+СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
+СИСТЕМА_MVP/backend/templates/clerk/base.html
+СИСТЕМА_MVP/backend/templates/settlement/_room_card.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
