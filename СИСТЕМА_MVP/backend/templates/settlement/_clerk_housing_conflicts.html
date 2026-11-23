@@ -1,6 +1,6 @@
 {% if review_cases %}
     <div class="housing-review">
-        <p class="housing-review__intro">Выберите решение прямо здесь. Карта обновится после нажатия «Применить».</p>
+        <p class="housing-review__intro">Решения сохраняются в черновике. Чтобы перенести их на карту, нажмите «Применить».</p>
         <ul class="housing-review__cases">
             {% for case in review_cases %}
                 <li class="housing-review__case" data-housing-review-kind="{{ case.kind }}" aria-labelledby="housing-case-{{ case.first.source|slugify }}">
@@ -23,7 +23,7 @@
                         {% elif case.kind == 'linked' %}
                             <p>Эти строки пересекаются по жильцам или койкам. Выберите подтверждённый вариант, остальные система проверит заново.</p>
                         {% elif case.kind == 'interwatch' %}
-                            <p>В файле есть запись о проживании и отметка о межвахте. Уточните статус на {{ as_of|date:"d.m.Y" }}.</p>
+                            <p>На {{ as_of|date:"d.m.Y" }}</p>
                         {% elif case.kind == 'map' %}
                             <p>Сверьте, кто и где фактически живёт. Уже внесённые места корректируются на карте.</p>
                         {% endif %}
@@ -31,106 +31,112 @@
                     <ul class="housing-review__options">
                         {% for row in case.entries %}
                             <li class="housing-review__option" data-housing-review-source="{{ row.source }}">
-                                <div class="housing-review__facts">
-                                    {% if case.kind == 'bed' or case.kind == 'linked' %}
-                                        <strong>{{ row.name }}</strong>
-                                    {% endif %}
-                                    {% if case.kind != 'bed' %}<strong>{{ row.place }}</strong>{% endif %}
-                                    <p>
-                                        {% if case.kind == 'interwatch' or case.kind == 'map' %}<span class="housing-review__origin">В Excel</span>{% endif %}
-                                        {% if row.starts and row.ends %}{{ row.starts|date:"d.m.Y" }} — {{ row.ends|date:"d.m.Y" }}
-                                        {% elif row.starts %}Заезд {{ row.starts|date:"d.m.Y" }}
-                                        {% elif row.ends %}Выезд {{ row.ends|date:"d.m.Y" }}{% endif %}
-                                        {% if row.shift %} · {{ row.shift }}{% endif %}
-                                    </p>
-                                </div>
-                                {% if row.excel_place %}<p>В Excel — {{ row.excel_place }}</p>{% endif %}
-                                {% if row.review_interwatch %}
-                                    <div class="housing-review__evidence housing-review__evidence--interwatch">
-                                        <strong>В Excel также отмечена межвахта</strong>
-                                        {% for entry in row.review_interwatch %}
-                                            <p>{{ entry.place }}{% if entry.starts %} · с {{ entry.starts|date:"d.m.Y" }}{% endif %}{% if entry.ends %} · до {{ entry.ends|date:"d.m.Y" }}{% endif %}</p>
-                                        {% endfor %}
-                                    </div>
-                                {% endif %}
-                                {% for match in row.review_map_matches %}
-                                    <div class="housing-review__evidence">
-                                        <strong>На карте: {{ match.name }}</strong>
-                                        <p>{{ match.place }} · с {{ match.starts|date:"d.m.Y" }}{% if match.ends %} до {{ match.ends|date:"d.m.Y" }}{% endif %}{% if match.shift %} · {{ match.shift }}{% endif %}</p>
-                                    </div>
-                                {% endfor %}
-                                {% if row.review_source_note %}
-                                    <p class="housing-review__evidence">Пометка в Excel: «{{ row.review_source_note }}»</p>
-                                {% endif %}
-                                {% if row.review_detail_issues %}
-                                    <ul class="housing-import__issues">
-                                        {% for issue in row.review_detail_issues %}<li>{{ issue }}</li>{% endfor %}
-                                    </ul>
-                                {% endif %}
-                                {% if review_error and row.source == review_source %}
-                                    <p class="housing-review__error" tabindex="-1">{{ review_error }}</p>
-                                {% endif %}
-                                {% if draft and row.review_identity or draft and row.review_dates %}
-                                    <div class="housing-import__review-fields">
-                                        {% if row.review_identity %}
-                                            <label>Табельный номер
-                                                <input type="text" name="personnel_number:{{ row.source }}" maxlength="64" form="housing-import-form">
-                                            </label>
+                                <div class="housing-review__record">
+                                    <div class="housing-review__facts">
+                                        {% if case.kind == 'bed' or case.kind == 'linked' %}
+                                            <strong>{{ row.name }}</strong>
                                         {% endif %}
-                                        {% if row.review_dates %}
-                                            <label>Дата заезда
-                                                <input type="date" name="starts:{{ row.source }}" value="{{ row.starts|date:'Y-m-d' }}" form="housing-import-form">
-                                            </label>
-                                            <label>Дата выезда
-                                                <input type="date" name="ends:{{ row.source }}" value="{{ row.ends|date:'Y-m-d' }}" form="housing-import-form">
-                                            </label>
-                                        {% endif %}
-                                        <button type="submit" name="review_action" value="edit:{{ row.source }}" form="housing-import-form" class="housing-review__primary">
-                                            {% if row.review_identity and row.review_dates %}Проверить сотрудника и даты{% elif row.review_identity %}Найти по табельному{% else %}Проверить даты{% endif %}
-                                        </button>
+                                        {% if case.kind != 'bed' %}<strong>{{ row.place }}</strong>{% endif %}
+                                        <p>
+                                            {% if case.kind == 'interwatch' or case.kind == 'map' %}<span class="housing-review__origin">В Excel</span>{% endif %}
+                                            {% if row.starts and row.ends %}{{ row.starts|date:"d.m.Y" }} — {{ row.ends|date:"d.m.Y" }}
+                                            {% elif row.starts %}Заезд {{ row.starts|date:"d.m.Y" }}
+                                            {% elif row.ends %}Выезд {{ row.ends|date:"d.m.Y" }}{% endif %}
+                                            {% if row.shift %} · {{ row.shift }}{% endif %}
+                                        </p>
                                     </div>
-                                    {% if row.review_identity %}<p>Если карточки сотрудника ещё нет, отложите строку до уточнения в ОУП.</p>{% endif %}
-                                {% endif %}
-                                {% if draft %}
-                                    <div class="housing-review__actions">
-                                        {% if row.review_peers or row.review_notes and not row.review_dates %}
-                                            <button type="submit" name="review_action" value="keep:{{ row.source }}" form="housing-import-form" class="housing-review__primary">
-                                                {% if case.kind == 'person' %}Выбрать место {{ row.bed_label }}
-                                                {% elif case.kind == 'bed' %}Выбрать жильца
-                                                {% elif row.review_peers %}Выбрать это размещение
-                                                {% else %}Живёт на этой койке{% endif %}
-                                            </button>
-                                        {% endif %}
-                                        <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">
-                                            {% if case.kind == 'interwatch' %}На межвахте{% else %}Отложить{% endif %}
-                                        </button>
-                                        {% if row.reviewed %}
-                                            <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
-                                        {% endif %}
-                                    </div>
-                                {% endif %}
-                                {% if housing_review_places %}
-                                    <details class="housing-review__place" data-room-id="{{ row.physical_room_id|default_if_none:'' }}"{% if row.source == review_source and review_bed_id %} data-attempted-bed="{{ review_bed_id }}" open{% endif %}>
-                                        <summary>Выбрать другое место</summary>
-                                        <div class="housing-import__review-fields">
-                                            <label>Комната
-                                                <select data-review-room form="housing-import-form">
-                                                    <option value="">Выберите комнату</option>
-                                                </select>
-                                            </label>
-                                            <label>Койка
-                                                <select data-review-bed form="housing-import-form" disabled>
-                                                    <option value="">Выберите койку</option>
-                                                </select>
-                                            </label>
-                                            <button type="submit" name="review_action" value="move:{{ row.source }}" form="housing-import-form" class="housing-review__primary" disabled>Сохранить место</button>
+                                    {% if row.excel_place %}<p>В Excel — {{ row.excel_place }}</p>{% endif %}
+                                    {% if row.review_interwatch %}
+                                        <div class="housing-review__evidence housing-review__evidence--interwatch">
+                                            <strong>В Excel также отмечена межвахта</strong>
+                                            {% for entry in row.review_interwatch %}
+                                                <p>{{ entry.place }}{% if entry.starts %} · с {{ entry.starts|date:"d.m.Y" }}{% endif %}{% if entry.ends %} · до {{ entry.ends|date:"d.m.Y" }}{% endif %}</p>
+                                            {% endfor %}
                                         </div>
+                                    {% endif %}
+                                    {% for match in row.review_map_matches %}
+                                        <div class="housing-review__evidence">
+                                            <strong>На карте: {{ match.name }}</strong>
+                                            <p>{{ match.place }} · с {{ match.starts|date:"d.m.Y" }}{% if match.ends %} до {{ match.ends|date:"d.m.Y" }}{% endif %}{% if match.shift %} · {{ match.shift }}{% endif %}</p>
+                                        </div>
+                                    {% endfor %}
+                                    {% if row.review_source_note %}
+                                        <p class="housing-review__evidence">Пометка в Excel: «{{ row.review_source_note }}»</p>
+                                    {% endif %}
+                                    {% if row.review_detail_issues %}
+                                        <ul class="housing-import__issues">
+                                            {% for issue in row.review_detail_issues %}<li>{{ issue }}</li>{% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                    <details class="housing-review__source">
+                                        <summary>Строка в Excel</summary>
+                                        <p>{{ row.source }}{% for entry in row.review_interwatch %} · межвахта {{ entry.source }}{% endfor %}</p>
                                     </details>
+                                </div>
+                                {% if draft or review_error or housing_review_places %}
+                                    <div class="housing-review__decisions">
+                                        {% if review_error and row.source == review_source %}
+                                            <p class="housing-review__error" tabindex="-1">{{ review_error }}</p>
+                                        {% endif %}
+                                        {% if draft and row.review_identity or draft and row.review_dates %}
+                                            <div class="housing-import__review-fields">
+                                                {% if row.review_identity %}
+                                                    <label>Табельный номер
+                                                        <input type="text" name="personnel_number:{{ row.source }}" maxlength="64" form="housing-import-form">
+                                                    </label>
+                                                {% endif %}
+                                                {% if row.review_dates %}
+                                                    <label>Дата заезда
+                                                        <input type="date" name="starts:{{ row.source }}" value="{{ row.starts|date:'Y-m-d' }}" form="housing-import-form">
+                                                    </label>
+                                                    <label>Дата выезда
+                                                        <input type="date" name="ends:{{ row.source }}" value="{{ row.ends|date:'Y-m-d' }}" form="housing-import-form">
+                                                    </label>
+                                                {% endif %}
+                                                <button type="submit" name="review_action" value="edit:{{ row.source }}" form="housing-import-form" class="housing-review__primary">
+                                                    {% if row.review_identity and row.review_dates %}Проверить сотрудника и даты{% elif row.review_identity %}Найти по табельному{% else %}Проверить даты{% endif %}
+                                                </button>
+                                            </div>
+                                            {% if row.review_identity %}<p>Если карточки сотрудника ещё нет, отложите строку до уточнения в ОУП.</p>{% endif %}
+                                        {% endif %}
+                                        {% if draft %}
+                                            <div class="housing-review__actions">
+                                                {% if row.review_peers or row.review_notes and not row.review_dates %}
+                                                    <button type="submit" name="review_action" value="keep:{{ row.source }}" form="housing-import-form" class="housing-review__primary">
+                                                        {% if case.kind == 'person' %}Выбрать место {{ row.bed_label }}
+                                                        {% elif case.kind == 'bed' %}Выбрать жильца
+                                                        {% elif row.review_peers %}Выбрать это размещение
+                                                        {% else %}Живёт на этой койке{% endif %}
+                                                    </button>
+                                                {% endif %}
+                                                <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">
+                                                    {% if case.kind == 'interwatch' %}На межвахте{% else %}Отложить{% endif %}
+                                                </button>
+                                                {% if row.reviewed %}
+                                                    <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
+                                                {% endif %}
+                                            </div>
+                                        {% endif %}
+                                        {% if housing_review_places %}
+                                            <details class="housing-review__place" data-room-id="{{ row.physical_room_id|default_if_none:'' }}"{% if row.source == review_source and review_bed_id %} data-attempted-bed="{{ review_bed_id }}" open{% endif %}>
+                                                <summary>Выбрать другое место</summary>
+                                                <div class="housing-import__review-fields">
+                                                    <label>Комната
+                                                        <select data-review-room form="housing-import-form">
+                                                            <option value="">Выберите комнату</option>
+                                                        </select>
+                                                    </label>
+                                                    <label>Койка
+                                                        <select data-review-bed form="housing-import-form" disabled>
+                                                            <option value="">Выберите койку</option>
+                                                        </select>
+                                                    </label>
+                                                    <button type="submit" name="review_action" value="move:{{ row.source }}" form="housing-import-form" class="housing-review__primary" disabled>Сохранить место</button>
+                                                </div>
+                                            </details>
+                                        {% endif %}
+                                    </div>
                                 {% endif %}
-                                <details class="housing-review__source">
-                                    <summary>Строка в Excel</summary>
-                                    <p>{{ row.source }}{% for entry in row.review_interwatch %} · межвахта {{ entry.source }}{% endfor %}</p>
-                                </details>
                             </li>
                         {% endfor %}
                     </ul>
