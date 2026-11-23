@@ -14,7 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from core.production_time import production_day_bounds
+from core.production_time import business_localtime, production_day_bounds
 from references.models import Dormitory
 from rotations.arrival_roster_parser import MAX_FILE_SIZE, validate_xlsx_archive
 from users.models import Employee, PersonnelPosition
@@ -72,6 +72,24 @@ ABSENCE_NOTE = re.compile(
 CATEGORY_LABELS = {'worker': 'Рабочий', 'itr': 'ИТР'}
 WORK_SHIFTS = {'День': 'day', 'Ночь': 'night'}
 APPLICABLE_GROUPS = ('ready', 'needs_resident')
+BED_CONFLICT = 'На эту койку есть несколько записей на выбранную дату.'
+PERSON_CONFLICT = 'Сотрудник повторяется в строках на выбранную дату.'
+INTERWATCH_CONFLICT = 'По этому же ФИО в Excel есть голубая строка межвахты.'
+OCCUPIED_BED_CONFLICT = 'Койка занята другим жильцом в пересекающийся период.'
+OTHER_BED_CONFLICT = 'У сотрудника есть размещение на другой койке в этот период.'
+
+GROUPED_ISSUES = {
+    BED_CONFLICT, PERSON_CONFLICT, INTERWATCH_CONFLICT, OCCUPIED_BED_CONFLICT, OTHER_BED_CONFLICT,
+}
+
+
+@dataclass(frozen=True)
+class HousingMapMatch:
+    name: str
+    place: str
+    starts: datetime
+    ends: datetime | None
+    shift: str
 
 
 @dataclass
@@ -103,6 +121,9 @@ class HousingRow:
     reviewed: bool = False
     confirmed_in_review: bool = False
     review_peers: set[str] = field(default_factory=set)
+    review_interwatch: list['HousingRow'] = field(default_factory=list)
+    review_map_matches: list[HousingMapMatch] = field(default_factory=list)
+    review_source_note: str = ''
     review_notes: bool = False
     review_identity: bool = False
     review_dates: bool = False
@@ -114,6 +135,21 @@ class HousingRow:
     @property
     def category_label(self):
         return CATEGORY_LABELS.get(self.category, '—')
+
+    @property
+    def place(self):
+        parts = [f'КИС-{self.building}']
+        if self.floor:
+            parts.append(f'{self.floor} этаж')
+        if self.room_number:
+            parts.append(f'комната {self.room_number}')
+        if self.bed_label:
+            parts.append(f'койка {self.bed_label}')
+        return ' · '.join(parts)
+
+    @property
+    def review_detail_issues(self):
+        return [issue for issue in self.issues if issue not in GROUPED_ISSUES]
 
 
 def _text(value):
@@ -307,11 +343,13 @@ def _resolve_row_dates(row, as_of):
     note_end = next(iter(departures)) if len(departures) == 1 else None
     if len(departures) > 1 and row.ends is None:
         row.review_dates = True
+        row.review_source_note = next(note for note in notes if DEPARTURE_NOTE.search(note))
         row.issues.append('В Excel указано несколько дат выезда.')
     if row.ends is None:
         row.ends = note_end
     elif row.date_sources.get('ends') != 'clerk_review' and note_end and note_end <= as_of < row.ends:
         row.review_notes = True
+        row.review_source_note = next(note for note in notes if DEPARTURE_NOTE.search(note))
         row.issues.append('Даты проживания и пометка о выезде противоречат друг другу.')
     move = next((match for note in notes if (match := OTHER_ROOM_NOTE.search(note))), None)
     if move:
@@ -319,8 +357,11 @@ def _resolve_row_dates(row, as_of):
         destination = (int(move[1] or row.building), int(move[2]), block)
         if destination[:2] != (row.building, row.room_number) or (block and block != row.block):
             row.other_room = destination
-    if any(ABSENCE_NOTE.search(note) and not DEPARTURE_NOTE.search(note) for note in notes):
+            row.review_source_note = next(note for note in notes if OTHER_ROOM_NOTE.search(note))
+    absent = next((note for note in notes if ABSENCE_NOTE.search(note) and not DEPARTURE_NOTE.search(note)), '')
+    if absent:
         row.review_notes = True
+        row.review_source_note = absent
         row.issues.append('В Excel есть пометка, что сотрудник выбыл или пока не заехал.')
 
 
@@ -350,14 +391,14 @@ def _mark_duplicate_rows(rows):
 def _excel_conflicts(rows, as_of, workbook_end):
     active_names = defaultdict(list)
     active_beds = defaultdict(list)
-    interwatch = set()
+    interwatch = defaultdict(list)
     for row in rows:
         if row.status:
             continue
         if row.interwatch:
             row.status = 'interwatch'
             if row.name_key and (not row.starts or row.starts <= as_of) and (not row.ends or as_of < row.ends):
-                interwatch.add(row.name_key)
+                interwatch[row.name_key].append(row)
             continue
         _resolve_row_dates(row, as_of)
         if row.starts and row.ends and row.starts >= row.ends:
@@ -408,15 +449,16 @@ def _excel_conflicts(rows, as_of, workbook_end):
         if len(overlapping) > 1:
             for row in overlapping:
                 row.review_peers.update(other.source for other in overlapping if other is not row)
-                row.issues.append('На эту койку есть несколько записей на выбранную дату.')
+                row.issues.append(BED_CONFLICT)
     for matches in active_names.values():
         for row in matches:
             if len(matches) > 1:
                 row.review_peers.update(other.source for other in matches if other is not row)
-                row.issues.append('Сотрудник повторяется в строках на выбранную дату.')
+                row.issues.append(PERSON_CONFLICT)
             if row.name_key in interwatch and not row.confirmed_in_review:
                 row.review_notes = True
-                row.issues.append('По этому же ФИО в Excel есть голубая строка межвахты.')
+                row.review_interwatch = interwatch[row.name_key]
+                row.issues.append(INTERWATCH_CONFLICT)
 
 
 def _bed_for_row(room, row, by_position):
@@ -430,6 +472,23 @@ def _occupied_interval(occupancy):
     return occupancy.starts_at, effective_ends_at(occupancy.ends_at, occupancy.terminated_at)
 
 
+def _add_map_match(row, occupancy, begins, finishes):
+    bed = occupancy.physical_bed
+    room = bed.room
+    dormitory = room.dormitory
+    building = f'КИС-{dormitory.number}' if dormitory.kind == Dormitory.Kind.OWN else str(dormitory)
+    match = HousingMapMatch(
+        occupancy.resident.display_name,
+        f'{building} · {room.floor} этаж · комната {room.number} · '
+        f'койка {bed.get_block_display()}-{bed.position}',
+        business_localtime(begins),
+        business_localtime(finishes) if finishes else None,
+        next((label for label, shift in WORK_SHIFTS.items() if shift == occupancy.work_shift), ''),
+    )
+    if match not in row.review_map_matches:
+        row.review_map_matches.append(match)
+
+
 def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee_occupancies, room_occupancies):
     same = False
     for occupancy in bed_occupancies:
@@ -437,16 +496,20 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
         if not intervals_overlap(starts, ends, begins, finishes):
             continue
         if not employee or occupancy.resident.employee_id != employee.pk:
-            row.issues.append('Койка занята другим жильцом в пересекающийся период.')
-            break
+            row.issues.append(OCCUPIED_BED_CONFLICT)
+            _add_map_match(row, occupancy, begins, finishes)
+            continue
         if (begins <= starts and (finishes is None or finishes >= ends)
                 and occupancy.work_shift == WORK_SHIFTS.get(row.shift)):
             same = True
         else:
             row.issues.append('В системе уже есть запись на этой койке. Сверьте даты и смену.')
-    if any(occupancy.physical_bed_id != bed.pk and intervals_overlap(starts, ends, *_occupied_interval(occupancy))
-           for occupancy in employee_occupancies):
-        row.issues.append('У сотрудника есть размещение на другой койке в этот период.')
+            _add_map_match(row, occupancy, begins, finishes)
+    for occupancy in employee_occupancies:
+        begins, finishes = _occupied_interval(occupancy)
+        if occupancy.physical_bed_id != bed.pk and intervals_overlap(starts, ends, begins, finishes):
+            row.issues.append(OTHER_BED_CONFLICT)
+            _add_map_match(row, occupancy, begins, finishes)
     if employee:
         for occupancy in room_occupancies:
             resident = occupancy.resident
@@ -454,7 +517,7 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
                 continue
             if resident_sex(resident) != employee.sex:
                 row.issues.append('Пол жильцов в комнате отличается или не указан.')
-        row.issues = list(dict.fromkeys(row.issues))
+    row.issues = list(dict.fromkeys(row.issues))
     return same
 
 
@@ -529,7 +592,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             Q(ends_at__isnull=True) | Q(ends_at__gt=first),
             Q(terminated_at__isnull=True) | Q(terminated_at__gt=first),
             replaced_by_application__isnull=True, replaced_by_occupancy__isnull=True, starts_at__lt=last,
-        ).select_related('physical_bed', 'resident__employee__personnel_position')
+        ).select_related('physical_bed__room__dormitory', 'resident__employee__personnel_position')
         for occupancy in relevant:
             begins, finishes = _occupied_interval(occupancy)
             if finishes is not None and finishes <= begins:
@@ -612,6 +675,48 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
                 row.status = 'ready'
         groups[row.status].append(row)
     return groups
+
+
+def housing_review_cases(conflicts):
+    by_source = {row.source: row for row in conflicts}
+    order = {source: index for index, source in enumerate(by_source)}
+    visited = set()
+    cases = []
+    for row in conflicts:
+        if row.source in visited:
+            continue
+        pending = [row.source]
+        entries = []
+        while pending:
+            source = pending.pop()
+            if source in visited:
+                continue
+            visited.add(source)
+            selected = by_source[source]
+            entries.append(selected)
+            pending.extend(peer for peer in selected.review_peers if peer in by_source and peer not in visited)
+        entries.sort(key=lambda entry: order[entry.source])
+        if len(entries) > 1:
+            if row.match_identity and all(entry.match_identity == row.match_identity for entry in entries):
+                kind = 'person'
+            elif row.physical_bed_id and all(entry.physical_bed_id == row.physical_bed_id for entry in entries):
+                kind = 'bed'
+            else:
+                kind = 'linked'
+        elif row.review_interwatch:
+            kind = 'interwatch'
+        elif row.review_map_matches:
+            kind = 'map'
+        elif row.review_identity:
+            kind = 'identity'
+        elif row.review_dates:
+            kind = 'dates'
+        elif row.review_notes:
+            kind = 'notes'
+        else:
+            kind = 'other'
+        cases.append({'kind': kind, 'first': row, 'entries': entries})
+    return cases
 
 
 def preview_placements(groups):

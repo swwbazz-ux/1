@@ -140,7 +140,7 @@ class CurrentHousingPreviewTests(TestCase):
             'KIS5-F1-R01-A1', 'KIS5-F1-R01-A2', 'KIS5-F1-R03-A1',
         ])
         self.assertEqual(groups['ready'][0].bed_id, 'KIS5-F1-R03-A2')
-        self.assertContains(response, 'Койка занята другим жильцом')
+        self.assertContains(response, f'На карте: {self.resident.display_name}')
         self.assertContains(response, 'Комната отсутствует в жилфонде')
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
         self.assertEqual(SettlementResident.objects.count(), 3)
@@ -269,7 +269,8 @@ class CurrentHousingPreviewTests(TestCase):
         ], edits={'O3': None}).read()
         result = self.submit(payload, filename='РАССЕЛЕНИЕ на 30.10. по 14.12.xlsx')
         self.assertEqual(result.context['applicable_count'], 1)
-        self.assertContains(result, 'На эту койку есть несколько записей на выбранную дату.', count=2)
+        self.assertContains(result, 'Кто занимает койку 01А-1?', count=1)
+        self.assertContains(result, 'Выбрать жильца', count=2)
 
     def test_choose_one_row_undo_and_apply_without_editing_excel(self):
         self.use_clerk_session()
@@ -284,7 +285,8 @@ class CurrentHousingPreviewTests(TestCase):
             self.assertEqual(choice.context['applicable_count'], 1)
             self.assertContains(choice, 'Исключено при сверке')
             undo = self.submit(payload, review_action='undo:КИС 5!J4', review_state=choice.context['review_state'])
-            self.assertContains(undo, 'На эту койку есть несколько записей на выбранную дату.', count=2)
+            self.assertContains(undo, 'Кто занимает койку 01А-1?', count=1)
+            self.assertContains(undo, 'Выбрать жильца', count=2)
             self.assertIsNone(undo.context.get('receipt'))
             self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
             choice = self.submit(payload, review_action='keep:КИС 5!J4', review_state=undo.context['review_state'])
@@ -318,9 +320,21 @@ class CurrentHousingPreviewTests(TestCase):
         ]).read()
         preview = self.submit(payload)
         choice = self.submit(payload, review_action='keep:КИС 5!J3', review_state=preview.context['review_state'])
-        self.assertContains(choice, 'Койка занята другим жильцом')
+        self.assertContains(choice, f'На карте: {self.resident.display_name}')
         self.assertIsNone(choice.context.get('receipt'))
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
+    def test_same_person_options_share_one_question_and_show_both_rooms(self):
+        self.use_clerk_session()
+        payload = self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (3, '03А-1', self.workers[0], False, self.ends),
+        ]).read()
+        response = self.submit(payload)
+        self.assertEqual(len(response.context['review_cases']), 1)
+        self.assertContains(response, f'Где живёт {self.workers[0].full_name}?', count=1)
+        self.assertContains(response, 'Выбрать место 01А-1')
+        self.assertContains(response, 'Выбрать место 03А-1')
 
     def test_apply_rechecks_holds_and_leaves_unconfirmed_rows_alone(self):
         self.use_clerk_session()

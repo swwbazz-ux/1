@@ -170,38 +170,116 @@
     min-width: 0;
 }
 
-.housing-import__review-buttons,
-.housing-import__review-links,
+.housing-review__actions,
 .housing-import__review-fields {
     display: flex;
     flex-wrap: wrap;
-    align-items: end;
+    align-items: flex-end;
     gap: 0.5rem;
 }
 
-.housing-import__review a {
-    color: inherit;
+.housing-review {
+    padding: 0.75rem;
+    overflow-wrap: anywhere;
 }
 
-.housing-import__review button {
+.housing-review__row-count,
+.housing-review__origin,
+.housing-review__source {
+    font-weight: 400;
+    font-size: 0.875rem;
+}
+
+.housing-review__cases,
+.housing-review__options {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.housing-review__cases {
+    margin-top: 0.75rem;
+}
+
+.housing-review__case {
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+}
+
+.housing-review__case h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+.housing-review__options {
+    margin-top: 0.625rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr));
+}
+
+.housing-review__option {
+    min-width: 0;
+    display: grid;
+    gap: 0.5rem;
+    align-content: start;
+    padding: 0.625rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.375rem;
+    background: var(--admin-panel-soft);
+}
+
+.housing-review__facts strong {
+    display: block;
+}
+
+.housing-review__origin {
+    margin-right: 0.5rem;
+}
+
+.housing-review__evidence {
+    padding: 0.35rem 0.55rem;
+    border-left: 3px solid var(--admin-line);
+}
+
+.housing-review__evidence--interwatch {
+    border-left-color: #437eb0;
+}
+
+.housing-review__error {
+    font-weight: 700;
+}
+
+.housing-import__review button,
+.housing-review .housing-review__actions button[type="submit"],
+.housing-review .housing-import__review-fields button[type="submit"] {
+    inline-size: auto;
+    min-inline-size: 0;
+    max-inline-size: 100%;
     min-height: 2.75rem;
     padding: 0.35rem 0.65rem;
     border: 1px solid var(--admin-line);
     border-radius: 0.375rem;
-    background: var(--admin-panel-soft);
+    background: var(--admin-panel);
     color: inherit;
     font: inherit;
     cursor: pointer;
 }
 
-.housing-import__review-editor {
-    width: 100%;
-    min-width: 0;
+.housing-review .housing-review__actions button.housing-review__primary[type="submit"],
+.housing-review .housing-import__review-fields button.housing-review__primary[type="submit"] {
+    border-color: var(--admin-green);
+    background: var(--admin-green-soft);
+    color: var(--admin-ink);
+    font-weight: 700;
 }
 
-.housing-import__review-editor summary {
+.housing-review__source summary {
     width: fit-content;
-    padding-block: 0.5rem;
     cursor: pointer;
 }
 
@@ -210,11 +288,6 @@
     gap: 0.25rem;
     width: min(100%, 11rem);
     min-width: 0;
-}
-
-.housing-import__rows > li:target {
-    outline: 2px solid var(--admin-green);
-    outline-offset: -2px;
 }
 
 @media (max-width: 650px) {

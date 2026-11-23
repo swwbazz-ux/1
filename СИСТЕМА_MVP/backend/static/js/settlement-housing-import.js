@@ -42,7 +42,8 @@
             const result = page.querySelector('#housing-import-response');
             if (!result) throw new Error('Missing import response');
             document.querySelector('#housing-import-response').replaceWith(result);
-            result.focus({ preventScroll: true });
+            const rowError = result.querySelector('.housing-review__error');
+            (rowError || result).focus({ preventScroll: !rowError });
             feedback.textContent = '';
         } catch {
             feedback.textContent = 'Ответ не получен. Снова нажмите «Проверить Excel», чтобы сверить карту.';

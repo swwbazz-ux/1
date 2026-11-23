@@ -65,6 +65,7 @@ from .current_housing_import import (
     MAX_FILE_SIZE,
     apply_current_housing,
     build_current_housing_preview,
+    housing_review_cases,
     parse_current_housing_workbook,
     preview_placements,
 )
@@ -502,7 +503,7 @@ def _current_housing_post(request, access, form, context):
         context['review_state'] = signing.dumps(
             {'scope': scope, 'review': review}, salt=CURRENT_HOUSING_REVIEW_SALT, compress=True,
         )
-    context.update(as_of=as_of, report_groups=[
+    context.update(as_of=as_of, review_cases=housing_review_cases(groups['conflict']), report_groups=[
         {'code': code, 'label': label, 'rows': groups[code]}
         for code, label in CURRENT_HOUSING_GROUPS
         if code in groups and (code not in ('duplicate', 'omitted') or groups[code])
