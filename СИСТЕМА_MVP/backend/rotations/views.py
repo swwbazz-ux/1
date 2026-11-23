@@ -3,11 +3,12 @@ from urllib.parse import quote, urlencode
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Count, Q
+from django.db.models import Case, Count, Q, Value, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 from django.views.decorators.http import require_http_methods, require_POST
 
 from settlement.models import SettlementResident
@@ -110,6 +111,7 @@ from .models import (
     WatchExtensionCase,
 )
 from .services import (
+    approved_watch_extensions_on,
     close_cycle,
     decide_extension,
     mark_documentation_complete,
@@ -1686,6 +1688,11 @@ def _response_form_view(request, *, response, access, is_timekeeper):
             'response': response,
             'form': form,
             'is_timekeeper': is_timekeeper,
+            'current_extension': (
+                None if is_timekeeper else approved_watch_extensions_on(
+                    timezone.localdate(), employee_ids=[access.employee_id],
+                ).get(access.employee_id)
+            ),
             'logout_url': reverse(
                 'timekeeper_logout' if is_timekeeper else 'logout',
             ),
@@ -1723,6 +1730,11 @@ def employee_home_view(request):
     )
     if response:
         return redirect('rotation_employee_response', response_id=response.pk)
+    current_extension = approved_watch_extensions_on(
+        timezone.localdate(), employee_ids=[access.employee_id],
+    ).get(access.employee_id)
+    if current_extension:
+        return redirect('rotation_employee_response', response_id=current_extension.response_id)
     return render(
         request,
         'rotations/employee_empty.html',
@@ -1747,6 +1759,13 @@ def employee_response_view(request, response_id):
     )
 
 
+def site_manager_home_view(request):
+    access, denied = _role_access(request, 'site_manager')
+    if denied:
+        return denied
+    return render(request, 'rotations/site_manager_home.html', {'access': access})
+
+
 def site_manager_queue_view(request):
     access, response = _role_access(request, 'site_manager')
     if response:
@@ -1756,23 +1775,22 @@ def site_manager_queue_view(request):
         WatchExtensionCase.objects
         .select_related(
             'response__employee',
-            'response__cycle__target_watch_period',
+            'response__cycle',
             'decision_by',
         )
-        .order_by('decision_status', 'response__snapshot_full_name')
+        .order_by(
+            Case(When(decision_status='pending', then=Value(0)), default=Value(1)),
+            '-decision_at',
+            'response__snapshot_full_name',
+            'pk',
+        )
     )
     if status in {'pending', 'approved', 'rejected'}:
         cases = cases.filter(decision_status=status)
-    aggregate = WatchExtensionCase.objects.aggregate(
-        total=Count('id'),
-        pending=Count('id', filter=Q(decision_status='pending')),
-        approved=Count('id', filter=Q(decision_status='approved')),
-        rejected=Count('id', filter=Q(decision_status='rejected')),
-    )
     return render(
         request,
         'rotations/site_manager_queue.html',
-        {'access': access, 'cases': cases, 'metrics': aggregate},
+        {'access': access, 'cases': cases},
     )
 
 
@@ -1783,15 +1801,33 @@ def site_manager_decision_view(request, case_id, decision):
         return response
     extension_case = get_object_or_404(WatchExtensionCase, pk=case_id)
     try:
+        approved_end = None
+        if decision == 'approved' and 'approved_end' in request.POST:
+            try:
+                approved_end = parse_date(request.POST['approved_end'])
+            except ValueError as error:
+                raise ValidationError('Укажите корректную дату окончания продления.') from error
+            if approved_end is None:
+                raise ValidationError('Укажите корректную дату окончания продления.')
+        expected_updated_at = None
+        if 'case_updated_at' in request.POST:
+            try:
+                expected_updated_at = parse_datetime(request.POST['case_updated_at'])
+            except ValueError as error:
+                raise ValidationError('Обновите очередь и повторите решение.') from error
+            if expected_updated_at is None:
+                raise ValidationError('Обновите очередь и повторите решение.')
         decide_extension(
             extension_case,
             actor=access.employee,
             decision=decision,
             comment=request.POST.get('comment', ''),
+            approved_end=approved_end,
+            expected_updated_at=expected_updated_at,
         )
         messages.success(
             request,
-            'Продление одобрено и возвращено табельщику.'
+            'Продление согласовано и передано табельщику.'
             if decision == 'approved'
             else 'Продление отклонено. Причина сохранена.',
         )

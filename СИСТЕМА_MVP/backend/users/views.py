@@ -252,7 +252,7 @@ INTERFACE_MAP = [
             {'title': 'Зам. начальника горного участка', 'url': '/deputy-mining-manager/', 'code': 'роль зам. начальника', 'note': 'Расстановка сотрудников по технике на две смены'},
             {'title': 'Отдел управления персоналом', 'url': '/oup/', 'code': '800000 / роль ОУП', 'note': 'Создание, ведение и увольнение сотрудников'},
             {'title': 'Табельщик', 'url': '/timekeeper/', 'code': '900000 / роль табельщика', 'note': 'Сбор данных перевахты, Excel и оформление одобренных продлений'},
-            {'title': 'Начальник участка', 'url': '/site-manager/extensions/', 'code': '910000 / роль начальника участка', 'note': 'Согласование заявок на продление вахты'},
+            {'title': 'Начальник участка', 'url': '/site-manager/', 'code': '910000 / роль начальника участка', 'note': 'Согласование заявок на продление вахты'},
             {'title': 'Ответ сотрудника по перевахте', 'url': '/my/rotation/', 'code': '920000 / любой активный доступ', 'note': 'Маршрут, даты, смена или запрос на продление'},
             {'title': 'Диспетчерский пульт', 'url': '/dispatcher/control/', 'code': '5000', 'note': 'Контроль активных рейсов и назначений'},
             {'title': 'Механическая служба', 'url': '/mechanic/downtimes/', 'code': '7000 / роль механика', 'note': 'Открытие и закрытие механических простоев по технике'},
@@ -1910,7 +1910,7 @@ def role_home_view(request):
     if access.role.code == 'timekeeper':
         return redirect('rotation_timekeeper_dashboard')
     if access.role.code == 'site_manager':
-        return redirect('rotation_site_manager_queue')
+        return redirect('rotation_site_manager_home')
     if access.role.code == 'employee_portal':
         return redirect('rotation_employee_home')
     if access.role.code == 'excavator_operator':

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Начальник участка{% endblock %}
+{% block body_class %}rotation-workplace-screen rotation-manager-screen{% endblock %}
+{% block extra_head %}
+{% include "includes/role_app_pwa_head.html" with role_code="site_manager" manifest_url="/site-manager.webmanifest" service_worker_url="/site-manager-sw.js" legacy_scope="/site-manager/" theme_color="#8A5A23" apple_title="Начальник участка" icon_180="img/pwa/site-manager-180.png" %}
+<link rel="stylesheet" href="{% static 'css/rotation-workplace-v2.css' %}?v=4">
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell admin-exports-shell admin-day rotation-shell rotation-manager-shell" data-admin-theme>
+    <header class="admin-console-header rotation-console-header" aria-label="Рабочая шапка начальника участка">
+        <section class="admin-console-identity">
+            <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Н"|first }}</span>
+            <span>
+                <strong>{{ access.employee.full_name|default:"Начальник участка" }}</strong>
+                <em>Начальник участка</em>
+            </span>
+        </section>
+
+        <section class="admin-console-main">
+            <div class="admin-console-title">
+                <h1>{% block manager_title %}Начальник участка{% endblock %}</h1>
+            </div>
+            <nav class="admin-console-nav rotation-console-nav" aria-label="Разделы начальника участка">
+                {% block manager_nav %}
+                    <a href="{% url 'rotation_site_manager_queue' %}">Продлёнка</a>
+                {% endblock %}
+            </nav>
+        </section>
+
+        <section class="admin-console-actions rotation-console-actions" aria-label="Тема и выход">
+            <button type="button"
+                    class="admin-theme-button"
+                    data-admin-theme-toggle
+                    data-theme-icon="sun"
+                    aria-label="Переключить дневной и ночной режим"
+                    title="Переключить дневной и ночной режим"></button>
+            <a class="admin-utility-link" href="{% url 'logout' %}">Выйти</a>
+        </section>
+    </header>
+
+    <main class="admin-console-page rotation-page rotation-manager-page">
+        {% for message in messages %}
+            <div class="message {{ message.tags|default:'success' }}" role="status">{{ message }}</div>
+        {% endfor %}
+        {% block manager_content %}{% endblock %}
+    </main>
+</div>
+<script src="{% static 'js/rotation-workplace-v1.js' %}?v=1" defer></script>
+{% endblock %}

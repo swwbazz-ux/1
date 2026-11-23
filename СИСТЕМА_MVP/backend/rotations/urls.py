@@ -28,6 +28,7 @@ from .views import (
     employee_home_view,
     employee_response_view,
     site_manager_decision_view,
+    site_manager_home_view,
     site_manager_manifest_view,
     site_manager_queue_view,
     site_manager_service_worker_view,
@@ -197,6 +198,7 @@ urlpatterns = [
     ),
     path('my/rotation/', employee_home_view, name='rotation_employee_home'),
     path('my/rotation/<int:response_id>/', employee_response_view, name='rotation_employee_response'),
+    path('site-manager/', site_manager_home_view, name='rotation_site_manager_home'),
     path('site-manager/extensions/', site_manager_queue_view, name='rotation_site_manager_queue'),
     path(
         'site-manager/extensions/<int:case_id>/<str:decision>/',

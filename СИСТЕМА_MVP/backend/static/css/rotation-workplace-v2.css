@@ -706,8 +706,10 @@
     width: 100%;
 }
 
-.rotation-manager-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+.rotation-queue-heading {
+    margin: 0;
+    color: var(--admin-ink);
+    font-size: 19px;
 }
 
 .rotation-extension-card__header {
@@ -764,6 +766,7 @@
 
 .rotation-decision-form {
     display: grid;
+    align-content: start;
     gap: 9px;
     min-width: 0;
     padding: 13px;
@@ -783,6 +786,10 @@
 
 .rotation-decision-form.is-reject {
     border-color: color-mix(in srgb, var(--admin-red) 34%, var(--admin-line));
+}
+
+.rotation-decision-form .admin-button {
+    min-height: 44px;
 }
 
 .rotation-approve-button {
@@ -1312,8 +1319,7 @@
         width: 100%;
     }
 
-    .rotation-metrics,
-    .rotation-manager-metrics {
+    .rotation-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
@@ -1376,7 +1382,6 @@
 
     .rotation-summary-strip,
     .rotation-metrics,
-    .rotation-manager-metrics,
     .rotation-filter-bar,
     .rotation-response-row,
     .rotation-extension-details,

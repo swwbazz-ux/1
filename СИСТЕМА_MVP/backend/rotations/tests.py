@@ -1,5 +1,6 @@
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -8,8 +9,8 @@ from django.utils import timezone
 from shifts.models import WatchPeriod
 from users.models import AdminConflict, Employee, EmployeeAccess, Role
 
-from .models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
-from .services import close_cycle, open_cycle
+from .models import RotationActionLog, RotationCollectionCycle, RotationResponse, WatchExtensionCase
+from .services import approved_watch_extensions_on, close_cycle, open_cycle
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '.localhost'])
@@ -54,6 +55,7 @@ class RotationWorkflowTests(TestCase):
             personnel_number=access_code[-3:],
             position='Работник участка',
             department='Горный участок',
+            brigade_number=3 if role_code == 'employee_portal' else None,
             status=Employee.Status.ACTIVE,
             is_active=True,
         )
@@ -135,6 +137,7 @@ class RotationWorkflowTests(TestCase):
     def test_employee_submits_extension_and_site_manager_returns_approval(self):
         employee_client = self._client_for(self.employee, 'employee_portal')
         response = self._response_for()
+        agreed_end = self.watch.starts_on + timedelta(days=5)
 
         saved = employee_client.post(
             f'/my/rotation/{response.pk}/',
@@ -152,11 +155,27 @@ class RotationWorkflowTests(TestCase):
         self.assertEqual(response.shift_source, 'employee')
         case = response.extension_case
         self.assertEqual(case.decision_status, 'pending')
+        self.assertEqual(approved_watch_extensions_on(self.watch.starts_on), {})
 
         manager_client = self._client_for(self.site_manager, 'site_manager')
+        self.assertRedirects(
+            manager_client.get('/home/'), '/site-manager/', fetch_redirect_response=False,
+        )
+        self.assertContains(manager_client.get('/site-manager/'), 'Продлёнка')
+        queue = manager_client.get('/site-manager/extensions/')
+        self.assertContains(queue, self.employee.full_name)
+        self.assertContains(queue, 'Запрошенные даты')
+        self.assertContains(queue, '<dd>3</dd>', html=True)
+        self.assertContains(queue, 'Смена на продлении')
+        self.assertContains(queue, 'Согласовать')
+        self.assertContains(queue, 'Отказать')
         approved = manager_client.post(
             f'/site-manager/extensions/{case.pk}/approved/',
-            {'comment': 'Сменность подтверждена.'},
+            {
+                'comment': 'Сменность подтверждена.',
+                'approved_end': agreed_end.isoformat(),
+                'case_updated_at': case.updated_at.isoformat(),
+            },
         )
 
         self.assertRedirects(
@@ -168,6 +187,34 @@ class RotationWorkflowTests(TestCase):
         self.assertEqual(case.decision_status, 'approved')
         self.assertEqual(case.decision_by, self.site_manager)
         self.assertIsNotNone(case.decision_at)
+        self.assertEqual(case.extension_end, agreed_end)
+        self.assertEqual(case.documentation_status, 'not_started')
+        decision_log = RotationActionLog.objects.get(
+            extension_case=case, action_code='rotation_extension_approved',
+        )
+        self.assertEqual(decision_log.details['requested_end'], self._extension_payload()['extension_end'])
+        self.assertEqual(decision_log.details['approved_end'], agreed_end.isoformat())
+        queue = manager_client.get('/site-manager/extensions/')
+        self.assertContains(queue, 'Согласованные даты')
+        self.assertContains(queue, agreed_end.strftime('%d.%m.%Y'))
+        self.assertContains(queue, self.site_manager.full_name, count=2)
+
+        close_cycle(self.cycle, actor=self.timekeeper)
+        for offset in range(6):
+            work_date = self.watch.starts_on + timedelta(days=offset)
+            entry = approved_watch_extensions_on(work_date)[self.employee.pk]
+            self.assertEqual(entry.response.next_shift_type, 'day')
+            self.assertEqual(entry.response.employee.brigade_number, 3)
+            self.assertEqual(entry.extension_end, agreed_end)
+
+        with patch('rotations.views.timezone.localdate', return_value=agreed_end):
+            self.assertContains(employee_client.get('/my/rotation/', follow=True), 'На продлении')
+        next_day = agreed_end + timedelta(days=1)
+        self.assertEqual(approved_watch_extensions_on(next_day), {})
+        with patch('rotations.views.timezone.localdate', return_value=next_day):
+            page = employee_client.get(f'/my/rotation/{response.pk}/')
+            self.assertNotContains(page, 'На продлении')
+            self.assertContains(page, 'Согласованный период')
 
     def test_rejection_requires_comment(self):
         response = self._response_for()
@@ -185,6 +232,50 @@ class RotationWorkflowTests(TestCase):
         case.refresh_from_db()
         self.assertEqual(case.decision_status, 'pending')
         self.assertContains(result, 'При отклонении укажите причину.')
+
+        rejected = manager_client.post(
+            f'/site-manager/extensions/{case.pk}/rejected/',
+            {'comment': 'Следующая вахта укомплектована.'},
+            follow=True,
+        )
+        self.assertContains(rejected, 'Следующая вахта укомплектована.')
+        case.refresh_from_db()
+        self.assertEqual(case.decision_status, 'rejected')
+        self.assertEqual(case.decision_by, self.site_manager)
+        self.assertEqual(approved_watch_extensions_on(self.watch.starts_on), {})
+        with patch('rotations.views.timezone.localdate', return_value=self.watch.starts_on):
+            page = client.get(f'/my/rotation/{response.pk}/')
+            self.assertContains(page, 'Отклонено')
+            self.assertNotContains(page, 'На продлении')
+
+    def test_approval_rejects_invalid_end_and_stale_application(self):
+        response = self._response_for()
+        employee_client = self._client_for(self.employee, 'employee_portal')
+        employee_url = reverse('rotation_employee_response', args=[response.pk])
+        employee_client.post(employee_url, self._extension_payload())
+        case = WatchExtensionCase.objects.get(response=response)
+        manager_client = self._client_for(self.site_manager, 'site_manager')
+        approval_url = reverse('rotation_site_manager_decision', args=[case.pk, 'approved'])
+
+        for invalid_end, message in (
+            ('2026-02-31', 'Укажите корректную дату окончания продления.'),
+            ((case.extension_start - timedelta(days=1)).isoformat(), 'не может быть раньше начала'),
+        ):
+            with self.subTest(invalid_end=invalid_end):
+                result = manager_client.post(approval_url, {'approved_end': invalid_end}, follow=True)
+                self.assertContains(result, message)
+
+        old_revision = case.updated_at.isoformat()
+        employee_client.post(employee_url, self._extension_payload(shift='night'))
+        stale = manager_client.post(
+            approval_url,
+            {'case_updated_at': old_revision, 'approved_end': case.extension_end.isoformat()},
+            follow=True,
+        )
+        self.assertContains(stale, 'Заявка изменилась.')
+        case.refresh_from_db()
+        self.assertEqual(case.decision_status, 'pending')
+        self.assertEqual(case.response.next_shift_type, 'night')
 
     def test_employee_cannot_open_another_employee_response(self):
         client = self._client_for(self.employee, 'employee_portal')
@@ -382,6 +473,9 @@ class RotationWorkflowTests(TestCase):
                 response = self.client.get(f'/{slug}.webmanifest', HTTP_HOST='localhost')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json()['scope'], legacy_scope)
+                if slug == 'site-manager':
+                    self.assertEqual(response.json()['start_url'], '/site-manager/')
+                    self.assertEqual(response.json()['id'], '/site-manager/extensions/')
             with self.subTest(slug=slug, mode='isolated'):
                 response = self.client.get(
                     f'/{slug}.webmanifest',
@@ -393,7 +487,7 @@ class RotationWorkflowTests(TestCase):
     def test_rotation_role_service_workers_use_updated_header_shells(self):
         expected_versions = {
             'timekeeper': 'timekeeper-shell-v8',
-            'site-manager': 'site-manager-shell-v8',
+            'site-manager': 'site-manager-shell-v9',
         }
 
         for slug, expected_version in expected_versions.items():
@@ -431,7 +525,7 @@ class RotationWorkflowTests(TestCase):
         for template_name in (
             'cycle_create.html',
             'response_form.html',
-            'site_manager_queue.html',
+            'site_manager_base.html',
             'timekeeper_cycle.html',
             'timekeeper_dashboard.html',
         ):
