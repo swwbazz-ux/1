@@ -336,6 +336,14 @@ class CrewPlanSlot(models.Model):
         null=True,
         blank=True,
     )
+    reported_employee = models.ForeignKey(
+        'users.Employee', verbose_name='Фактический сотрудник на проверке',
+        on_delete=models.PROTECT, related_name='+', null=True, blank=True,
+    )
+    baseline_reported_employee = models.ForeignKey(
+        'users.Employee', verbose_name='Фактический сотрудник в базовой расстановке',
+        on_delete=models.PROTECT, related_name='+', null=True, blank=True,
+    )
     baseline_employee = models.ForeignKey(
         'users.Employee',
         verbose_name='Сотрудник в базовой расстановке',
@@ -361,6 +369,10 @@ class CrewPlanSlot(models.Model):
             models.UniqueConstraint(
                 fields=['plan', 'equipment', 'shift_type'],
                 name='unique_crew_plan_equipment_shift',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(employee__isnull=True) | models.Q(reported_employee__isnull=True),
+                name='crew_slot_one_primary_source',
             ),
             models.UniqueConstraint(
                 fields=['plan', 'employee'],

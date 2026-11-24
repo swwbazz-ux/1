@@ -222,6 +222,31 @@ class DeputyPlanningViewTests(TestCase):
         robots = [row['equipment'] for row in trucks['rows'] if row['equipment']['is_robot']]
         self.assertEqual([item['label'] for item in robots], ['53 · Робот'])
 
+    def test_reported_primary_visible_in_publication_without_operational_assignment(self):
+        call_command('prepare_deputy_fleet')
+        before = list(EmployeeAccess.objects.values_list('id', 'role_id', 'is_active'))
+        book = self.crew_excel_bytes([['Каток', '', self.driver.full_name, None]])
+        self.assertContains(self.upload_crew_excel(book), 'специализация', status_code=400)
+        request = {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', book),
+        }
+        self.assertContains(self.client.post(reverse('deputy_mining_manager_import'), request), 'Расстановка опубликована')
+        plan = CrewPlan.objects.get(role__code='crew_roller', status=CrewPlanStatus.PUBLISHED)
+        slot = plan.slots.get(shift_type=WorkShiftType.SHIFT_1)
+        self.assertEqual(slot.reported_employee, self.driver)
+        self.assertIsNone(slot.employee_id)
+        self.assertFalse(EquipmentAssignment.objects.filter(role=plan.role).exists())
+        self.assertEqual(before, list(EmployeeAccess.objects.values_list('id', 'role_id', 'is_active')))
+        for params in [{'role': plan.role.code, 'plan': plan.pk}, {'role': plan.role.code}]:
+            page = self.client.get(reverse('deputy_mining_manager_placement'), params)
+            payload = page.context['planning_payload']
+            self.assertEqual(payload['rows'][0]['slots'][0]['reported_name'], self.driver.full_name)
+            self.assertEqual(payload['summary']['assigned_count'], 1)
+        clear = self.upload_crew_excel([['Каток', '', 'Снять', None]])
+        self.assertContains(clear, 'Расстановка опубликована')
+        self.assertFalse(CrewPlan.objects.filter(role=plan.role, status=CrewPlanStatus.PUBLISHED, slots__reported_employee=self.driver).exists())
+
     def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
         response = self.upload_crew_excel([
             ['Самосвал', self.truck_1.garage_number, 'Снять', None],

@@ -641,6 +641,7 @@ def build_crew_plan_payload(plan, *, request=None):
             'secondary_employee__personnel_position',
             'secondary_employee__work_schedule',
             'secondary_employee__contractor_organization',
+            'reported_employee',
             'baseline_employee',
             'baseline_employee__personnel_position',
             'baseline_employee__work_schedule',
@@ -655,7 +656,7 @@ def build_crew_plan_payload(plan, *, request=None):
     assigned_employee_ids = {
         employee_id
         for slot in slots
-        for employee_id in (slot.employee_id, slot.secondary_employee_id)
+        for employee_id in (slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id)
         if employee_id
     }
     expire_due_temporary_work_transfers()
@@ -782,11 +783,14 @@ def build_crew_plan_payload(plan, *, request=None):
                 secondary_issue = secondary_issue or (
                     'Техника недоступна' if slot.secondary_employee_id else ''
                 )
-            changed = slot.employee_id != slot.baseline_employee_id
+            changed = (
+                slot.employee_id != slot.baseline_employee_id
+                or slot.reported_employee_id != slot.baseline_reported_employee_id
+            )
             secondary_changed = (
                 slot.secondary_employee_id != slot.baseline_secondary_employee_id
             )
-            if slot.employee_id:
+            if slot.employee_id or slot.reported_employee_id:
                 assigned_count += 1
             else:
                 unfilled_count += 1
@@ -840,6 +844,7 @@ def build_crew_plan_payload(plan, *, request=None):
                         if slot.secondary_employee_id in employee_ids
                     ],
                 ),
+                'reported_name': slot.reported_employee.full_name if slot.reported_employee_id else '',
                 'secondary_label': secondary_label,
                 'changed': changed,
                 'secondary_changed': secondary_changed,
@@ -872,6 +877,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 equipment.garage_number or '',
                 equipment.model.name if equipment.model_id else '',
                 *[item['employee']['full_name'] for item in row_slots if item['employee']],
+                *[item['reported_name'] for item in row_slots if item['reported_name']],
                 *[
                     item['secondary_employee']['full_name']
                     for item in row_slots
@@ -989,6 +995,8 @@ def _employee_excel_value(employee):
 
 def _crew_slot_excel_value(slot):
     primary = _employee_excel_value(slot.get('employee'))
+    if slot.get('reported_name'):
+        primary = f"{_excel_text(slot['reported_name'])}\nПроверить специализацию"
     secondary = slot.get('secondary_employee')
     if not secondary:
         return primary
@@ -1304,9 +1312,10 @@ def deputy_mining_manager_import_view(request):
             grouped, skipped = read_crew_excel(contents)
             context['skipped_categories'] = sorted(skipped.items())
             confirmation = request.POST.get('draft_confirmation', '')
+            context['factual'] = request.POST.get('factual') == '1'
             publications = publish_crew_excel(
                 grouped, work_date=work_date, access=access,
-                file_digest=sha256(contents).hexdigest(), confirmation=confirmation,
+                file_digest=sha256(contents).hexdigest(), confirmation=confirmation, factual=context['factual'],
             )
             context['publications'] = [
                 (plan, TARGET_ROLE_LABELS[plan.role.code], count)
@@ -1499,7 +1508,7 @@ def deputy_mining_manager_reports_view(request):
         .select_related('role', 'published_by')
         .annotate(
             slot_count=Count('slots'),
-            assigned_count=Count('slots', filter=Q(slots__employee__isnull=False)),
+            assigned_count=Count('slots', filter=Q(slots__employee__isnull=False) | Q(slots__reported_employee__isnull=False)),
         )
         .order_by('-work_date', '-revision')[:30]
     )

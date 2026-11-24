@@ -368,6 +368,14 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
             )
         }
 
+    reported_by_slot = {}
+    if published_plan:
+        reported_by_slot = {
+            (equipment_id, shift): employee_id
+            for equipment_id, shift, employee_id in published_plan.slots.filter(
+                reported_employee__isnull=False,
+            ).values_list('equipment_id', 'shift_type', 'reported_employee_id')
+        }
     used_employee_ids = set(
         plan.slots.exclude(employee_id__isnull=True).values_list('employee_id', flat=True)
     )
@@ -401,6 +409,8 @@ def _sync_crew_draft_equipment_slots(plan, *, actor=None, bump_version=True):
                 shift_type=shift_type,
                 employee_id=employee_id,
                 secondary_employee_id=secondary_employee_id,
+                reported_employee_id=None if employee_id else reported_by_slot.get(slot_key),
+                baseline_reported_employee_id=None if employee_id else reported_by_slot.get(slot_key),
                 baseline_employee_id=employee_id,
                 baseline_secondary_employee_id=secondary_employee_id,
             ))
@@ -511,7 +521,11 @@ def update_crew_draft_slot(
         )
         _validate_crew_employee(employee, role, position=position)
         validate_employee_equipment_organization(employee, equipment)
-    if getattr(target_slot, f'{employee_field}_id') == getattr(employee, 'id', None):
+    replacing_report = position == CREW_SLOT_POSITION_PRIMARY and target_slot.reported_employee_id
+    if replacing_report:
+        target_slot.reported_employee = None
+        target_slot.save(update_fields=['reported_employee'])
+    if not replacing_report and getattr(target_slot, f'{employee_field}_id') == getattr(employee, 'id', None):
         return locked_plan
 
     source_slot = None
@@ -623,6 +637,9 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
             code='stale_baseline',
         )
 
+    reported_ids = [slot.reported_employee_id for slot in slots if slot.reported_employee_id]
+    if len(reported_ids) != len(set(reported_ids)):
+        raise ValidationError('В фактической расстановке сотрудник указан дважды.', code='duplicate_employee')
     target_employee_ids = set()
     for slot in slots:
         _validate_crew_equipment(slot.equipment, role)
@@ -634,7 +651,7 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
                 continue
             _validate_crew_employee(employee, role, position=position)
             validate_employee_equipment_organization(employee, slot.equipment)
-            if employee.id in target_employee_ids:
+            if employee.id in target_employee_ids or employee.id in reported_ids:
                 raise ValidationError(
                     'Сотрудник назначен более чем в одну позицию экипажа.',
                     code='duplicate_employee',

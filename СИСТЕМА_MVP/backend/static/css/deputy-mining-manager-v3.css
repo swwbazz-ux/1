@@ -2178,3 +2178,11 @@ button.deputy-avatar {
         transition: none;
     }
 }
+
+.deputy-employee-main .deputy-specialization-review {
+    color: #744400;
+    background: #ffecad;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: normal;
+}

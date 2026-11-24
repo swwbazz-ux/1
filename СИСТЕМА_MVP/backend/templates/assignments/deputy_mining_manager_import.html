@@ -31,6 +31,7 @@
                         <input type="file" id="deputy-crew-workbook" name="workbook"
                                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
                     </p>
+                    <label><input type="checkbox" name="factual" value="1"{% if factual %} checked{% endif %}> Сохранить фактическую расстановку вспомогательной техники при расхождении специализации</label>
                     <div data-crew-import-result>
                         {% if draft_confirmation %}
                             <div class="message info" role="status" data-crew-import-message>

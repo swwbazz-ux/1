@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from rotations.arrival_roster_parser import validate_xlsx_archive
 from users.models import Employee, Role
 
-from .crew_categories import crew_equipment_number
+from .crew_categories import AUXILIARY_CATEGORIES, crew_equipment_number
 from .models import CrewPlanSlot, WorkShiftType
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
@@ -154,10 +154,15 @@ def _crew_values(value, work_date):
 def _find_employee(value, names):
     if _key(value) == 'снять':
         return None
-    parts = _name_parts(value)
+    name, separator, number = value.partition(' [таб. ')
+    if separator and not number.endswith(']'):
+        raise ValidationError('Проверь табельный номер в квадратных скобках.')
+    parts = _name_parts(name)
     candidates = []
     if parts:
         for tokens, employee in names.get(parts[0], ()):
+            if separator and employee.personnel_number != number[:-1]:
+                continue
             if len(parts) <= len(tokens) and all(
                 source == target or (i > 0 and len(source) == 1 and target.startswith(source))
                 for i, (source, target) in enumerate(zip(parts, tokens))
@@ -170,18 +175,18 @@ def _find_employee(value, names):
 
 
 def _assigned_crew(slot):
-    return slot.employee_id, slot.secondary_employee_id
+    return slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id
 
 
 def _baseline_crew(slot):
-    return slot.baseline_employee_id, slot.baseline_secondary_employee_id
+    return slot.baseline_employee_id, slot.baseline_secondary_employee_id, slot.baseline_reported_employee_id
 
 
-def _stage_plan(plan, slots, records, names, actor):
+def _stage_plan(plan, slots, records, names, actor, *, factual=False):
     original = {slot.pk: _assigned_crew(slot) for slot in slots}
     by_number = defaultdict(list)
     for slot in slots:
-        slot.employee_id, slot.secondary_employee_id = _baseline_crew(slot)
+        slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id = _baseline_crew(slot)
         key = (_number(crew_equipment_number(slot.equipment)), slot.shift_type)
         by_number[key].append(slot)
         if plan.role.code == 'crew_roller' and key[0]:
@@ -200,9 +205,19 @@ def _stage_plan(plan, slots, records, names, actor):
         coordinates[slot.pk] = record.address
         try:
             staff = [_find_employee(value, names) for value in _crew_values(record.value, plan.work_date)]
+            reported_id = None
             for employee, position in zip(staff, (CREW_SLOT_POSITION_PRIMARY, CREW_SLOT_POSITION_SECONDARY)):
                 if employee is not None:
-                    _validate_crew_employee(employee, plan.role, position=position)
+                    try:
+                        _validate_crew_employee(employee, plan.role, position=position)
+                    except ValidationError as error:
+                        if not (
+                            factual and error.code == 'invalid_work_category'
+                            and position == CREW_SLOT_POSITION_PRIMARY
+                            and plan.role.code in AUXILIARY_CATEGORIES
+                        ):
+                            raise
+                        reported_id = employee.pk
                     validate_employee_equipment_organization(employee, slot.equipment)
         except ValidationError as error:
             errors.extend(f'{record.address}. {message}' for message in error.messages)
@@ -212,14 +227,16 @@ def _stage_plan(plan, slots, records, names, actor):
             secondary = staff[1].pk if staff[1] else None
         else:
             secondary = slot.secondary_employee_id if primary else None
-        slot.employee_id, slot.secondary_employee_id = primary, secondary
+        slot.employee_id = None if reported_id else primary
+        slot.secondary_employee_id = secondary
+        slot.reported_employee_id = reported_id
     if errors:
         raise ValidationError(errors)
 
     occupied = {}
     for slot in slots:
         label = coordinates.get(slot.pk) or f'№ {slot.equipment.garage_number}, {slot.get_shift_type_display()}'
-        for employee_id in (slot.employee_id, slot.secondary_employee_id):
+        for employee_id in _assigned_crew(slot):
             if employee_id is not None:
                 if employee_id in occupied:
                     raise ValidationError(f'{label} и {occupied[employee_id]}. Сотрудник оказался назначен дважды.')
@@ -227,9 +244,9 @@ def _stage_plan(plan, slots, records, names, actor):
     changed = [slot for slot in slots if original[slot.pk] != _assigned_crew(slot)]
     if changed:
         CrewPlanSlot.objects.filter(pk__in=[slot.pk for slot in changed]).update(
-            employee=None, secondary_employee=None,
+            employee=None, secondary_employee=None, reported_employee=None,
         )
-        CrewPlanSlot.objects.bulk_update(changed, ['employee', 'secondary_employee'])
+        CrewPlanSlot.objects.bulk_update(changed, ['employee', 'secondary_employee', 'reported_employee'])
         plan.updated_by = actor
         plan.version += 1
         plan.save(update_fields=['updated_by', 'updated_at', 'version'])
@@ -260,7 +277,7 @@ def _require_draft_confirmation(plans, *, confirmation, file_digest, work_date, 
 
 
 @transaction.atomic
-def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=''):
+def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation='', factual=False):
     if work_date != production_work_date():
         raise ValidationError('Производственные сутки изменились. Открой форму загрузки заново.')
     actor, actor_access = _locked_deputy_publish_access(actor_access=access, actor=access.employee)
@@ -272,6 +289,8 @@ def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=
         plan, _ = get_or_create_crew_draft(role=role, work_date=work_date, actor=actor)
         slots = list(plan.slots.select_for_update(of=('self',)).select_related('equipment__equipment_type'))
         plans.append((plan, slots))
+    if factual:
+        file_digest = f"factual:{file_digest}"
     _require_draft_confirmation(
         plans, confirmation=confirmation, file_digest=file_digest, work_date=work_date, access=actor_access,
     )
@@ -283,7 +302,7 @@ def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=
 
     publications = []
     for plan, slots in plans:
-        changed = _stage_plan(plan, slots, grouped[plan.role.code], names, actor)
+        changed = _stage_plan(plan, slots, grouped[plan.role.code], names, actor, factual=factual)
         if changed:
             published = publish_crew_plan(
                 plan=plan, expected_version=plan.version, actor=actor, actor_access=actor_access,

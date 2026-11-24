@@ -706,7 +706,7 @@
         appendRecordField("Серийный номер", equipment.serial_number || "Не указан");
         appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
         (row.slots || []).forEach(function (slot) {
-            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : "Не назначен");
+            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : (slot.reported_name ? slot.reported_name + " · Проверить специализацию" : "Не назначен"));
             if (state.role.supports_secondary === false) return;
             appendRecordField(
                 (slot.label || "Смена") + " · " + (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник"),
@@ -1247,7 +1247,15 @@
                 openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
             });
         } else {
-            var emptyAction = createElement("button", "deputy-slot-empty", isSecondary ? "Добавить" : "Назначить");
+            var reported = !isSecondary && slot.reported_name;
+            if (reported) {
+                var fact = createElement("span", "deputy-employee-main");
+                fact.appendChild(createElement("strong", "", reported));
+                fact.appendChild(createElement("small", "deputy-specialization-review", "Проверить специализацию"));
+                button.appendChild(fact);
+                if (!planEditable()) return button;
+            }
+            var emptyAction = createElement("button", "deputy-slot-empty", reported ? "Заменить" : (isSecondary ? "Добавить" : "Назначить"));
             emptyAction.type = "button";
             emptyAction.disabled = !planEditable();
             emptyAction.setAttribute("aria-label", "Назначить сотрудника: " + textValue(slot.label) + " · " + positionLabel);
