@@ -1,7 +1,6 @@
-СИСТЕМА_MVP/backend/reports/templatetags/management_workplace.py
-СИСТЕМА_MVP/backend/reports/views.py
-СИСТЕМА_MVP/backend/templates/reports/customer_daily_report.html
-СИСТЕМА_MVP/backend/templates/reports/downtime_report.html
-СИСТЕМА_MVP/backend/templates/reports/includes/management_workplace_header.html
-СИСТЕМА_MVP/backend/templates/reports/management_dynamics.html
-СИСТЕМА_MVP/backend/templates/reports/volume_report.html
+СИСТЕМА_MVP/backend/settlement/urls.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
+СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
+СИСТЕМА_MVP/backend/templates/clerk/base.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
