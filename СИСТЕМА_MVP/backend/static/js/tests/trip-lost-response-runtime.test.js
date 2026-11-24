@@ -334,8 +334,9 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
     const classNames = new Set();
     const truckLoadProjections = new WeakMap();
     const notices = [];
+    const voiceCalls = [];
     const card = {
-        dataset: {truckId: "7", assignmentId: "8", eoCanLoad: "1", eoEquipmentState: "assigned"},
+        dataset: {truckId: "7", assignmentId: "8", eoTruckNumber: "21", eoCanLoad: "1", eoEquipmentState: "assigned"},
         className: "eo-truck-card", hidden: false,
         classList: {add: (...keys) => keys.forEach(key => classNames.add(key)), remove: (...keys) => keys.forEach(key => classNames.delete(key))},
         querySelector: () => null,
@@ -389,7 +390,8 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
         addPendingTruckBadge: () => badge,
         confirmTruckLoaded(node) {node.dataset.eoEquipmentState = "loaded_waiting_unload"; node.classList.remove("is-pending");},
         restoreTruckCard() {restoredCards++;},
-        playExcavatorEquipmentVoice() {}, playExcavatorVoice() {}, playExcavatorSound() {},
+        playExcavatorEquipmentVoice(action, number, options) {voiceCalls.push({action, number, ...options});},
+        playExcavatorVoice() {}, playExcavatorSound() {},
         markLastDumpTarget() {},
         showExcavatorNotice: message => notices.push(message),
         newExcavatorFieldId: prefix => prefix + "-" + (++idCount), excavatorInstallDeviceId: () => "device-A",
@@ -432,7 +434,7 @@ function createExcavatorLoadFixture({loseFirstResponse = false, completed = fals
         load: () => context.postTruckLoaded(card, dumpTarget), outbox, restartOutbox: newOutbox,
         refresh: () => window.applyOperationalStateRefresh({version: 101}),
         failRefresh(value) {failFragment = value;},
-        requests, reconcile, card, badge, document, notices,
+        requests, reconcile, card, badge, document, notices, voiceCalls,
         loadProjection: () => truckLoadProjections.get(card),
         serverTripCount: () => serverTripCount, serverActionCount: () => serverActions.size,
         generated: () => idCount, restoredCards: () => restoredCards,
@@ -453,12 +455,19 @@ test("production Excavator load survives a lost response and a restarted durable
     assert.equal(event.event_type, "excavator.trip.loaded");
     assert.equal(event.payload.assignment_id, "8");
     assert.equal(event.payload.dump_point_id, "9");
+    assert.equal(r.voiceCalls.length, 1);
+    assert.equal(r.voiceCalls[0].action, "excavator_truck_sent");
+    assert.equal(r.voiceCalls[0].number, "21");
+    assert.equal(r.voiceCalls[0].dumpPointId, 9);
+    assert.equal(r.voiceCalls[0].dumpPointName, "ККД");
+    assert.equal(r.voiceCalls[0].operationKey, "excavator-load:" + event.event_id);
 
     const restarted = r.restartOutbox();
     await restarted.ready(); await restarted.retryNow(); await flushPromiseChain();
     assert.equal(r.requests.length, 2);
     assert.deepEqual(r.requests[1][0], event, "Retry keeps ID, fact time, sequence, dependencies and immutable payload");
     assert.equal(r.serverTripCount(), 1); assert.equal(r.serverActionCount(), 1);
+    assert.equal(r.voiceCalls.length, 1, "Retry must not announce the same load again");
     assert.equal(r.generated(), 2, "One event ID and one local trip ID are allocated only once");
     assert.deepEqual(await restarted.pending(), []);
     assert.equal(r.badge.dataset.tripId, "501");
