@@ -6,6 +6,7 @@
 """
 
 from io import StringIO
+from urllib.parse import urlsplit
 
 from django.http import HttpResponseRedirect
 from django.test import RequestFactory
@@ -53,7 +54,7 @@ def make_access(employee, role_code, code, *, logged_in=False):
     )
 
 
-@override_settings(ALLOWED_HOSTS=['testserver', '.testserver'])
+@override_settings(ALLOWED_HOSTS=['testserver', '.testserver', '.localhost'])
 class AdminEnterEmployeeTests(TestCase):
     def setUp(self):
         self.admin_employee = make_employee('Админов Админ Админович', '+79990000001')
@@ -104,6 +105,33 @@ class AdminEnterEmployeeTests(TestCase):
         )
         active = latest_active_role_access(self.admin_employee)
         self.assertEqual(active.pk, self.admin_access.pk)
+
+    def test_own_admin_session_opens_management_overview_and_watch_extensions(self):
+        make_access(self.admin_employee, 'site_manager', '100003')
+        make_access(self.admin_employee, 'manager', '100004')
+        apps = self.client.get(reverse('system_admin_enter_employee'), HTTP_HOST='admin.localhost')
+        self.assertEqual(apps.status_code, 200)
+        own_apps = {item['app'].role_code: item['url'] for item in apps.context['own_apps']}
+
+        for role_code, queue_path in (
+            ('site_manager', '/site-manager/extensions/'),
+            ('manager', '/reports/management/extensions/'),
+        ):
+            with self.subTest(role=role_code):
+                url = urlsplit(own_apps[role_code])
+                workplace = self.client.get(f'{url.path}?{url.query}', HTTP_HOST=url.netloc)
+                self.assertTemplateUsed(workplace, 'reports/management_dashboard.html')
+                self.assertContains(workplace, 'Витрина руководства')
+                self.assertContains(workplace, f'<a href="{queue_path}">Продлёнка</a>', html=True)
+
+                queue = self.client.get(f'{queue_path}?{url.query}', HTTP_HOST=url.netloc)
+                self.assertContains(queue, self.admin_employee.full_name)
+                self.assertTrue(queue.context['observer_is_self'])
+                self.assertTrue(queue.context['observer_control'])
+                self.assertEqual(queue.context['access'].employee_id, self.admin_employee.pk)
+
+        self.assertEqual(latest_active_role_access(self.admin_employee).pk, self.admin_access.pk)
+        self.assertEqual(self.client.session['employee_access_id'], self.admin_access.pk)
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', '.testserver'])
