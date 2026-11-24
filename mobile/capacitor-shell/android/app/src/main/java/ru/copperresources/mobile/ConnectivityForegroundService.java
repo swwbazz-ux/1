@@ -499,12 +499,11 @@ public class ConnectivityForegroundService extends Service {
                     );
                 }
                 voiceProcessed = addressed.processed;
-                // A handler that recognized the event owns it even when it stayed
-                // silent: the operation was already announced by the other channel,
-                // or it must be retried. Only an unclaimed version growth is
-                // generic, otherwise the same growth would beep twice.
+                // A claimed event already has an alert owner, even if it stayed silent.
+                // For Driver, other relevant changes only invalidate the displayed state.
                 boolean eventClaimed = dumpPoint.candidate || addressed.candidate;
-                if (voiceProcessed && !eventClaimed && !appIsForeground) {
+                if (!"driver".equals(BuildConfig.APP_PROFILE_ID)
+                        && voiceProcessed && !eventClaimed && !appIsForeground) {
                     notifyGenericOperationalEvent(serverVersion);
                 }
             }

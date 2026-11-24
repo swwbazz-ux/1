@@ -4,16 +4,14 @@ import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-// T-019: доставка при выключенном экране. Специальный обработчик (точка
-// разгрузки, назначение) владеет событием; рост версии, который никто не
-// забрал, получает одно нейтральное уведомление и сигнал. Применение остаётся
-// за WebView, поэтому курсор здесь не двигается.
+// Специальный обработчик владеет оповещением о точке разгрузки или назначении.
+// Водитель применяет остальные обновления тихо даже при скрытом WebView.
 
 const shellRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const javaRoot = resolve(shellRoot, "android/app/src/main/java/ru/copperresources/mobile");
 const java = (name) => readFileSync(resolve(javaRoot, name), "utf8");
 
-test("screen-off version growth without a specific handler raises one neutral alert", () => {
+test("Driver reconciles unclaimed background updates without a generic alert or cue", () => {
   const service = java("ConnectivityForegroundService.java");
   const start = service.indexOf(
     "if (voiceEligible && serverVersion > previousVersion && relevant && caughtUp)"
@@ -23,13 +21,17 @@ test("screen-off version growth without a specific handler raises one neutral al
 
   assert.ok(start >= 0, "the catch-up voice block must stay in runHeartbeat");
   assert.ok(end > start, "the catch-up voice block must end before the cursor commit");
+  assert.match(block, /showLatestDriverDumpPointAlert\(/);
+  assert.match(block, /showLatestAssignmentAlert\(/);
+  assert.match(block, /voiceProcessed = addressed\.processed;/);
   assert.match(block, /VoiceAttempt addressed;/);
   assert.match(block, /boolean eventClaimed = dumpPoint\.candidate \|\| addressed\.candidate;/);
   assert.match(
     block,
-    /if \(voiceProcessed && !eventClaimed && !appIsForeground\)\s*\{\s*notifyGenericOperationalEvent\(serverVersion\)/
+    /if \(!"driver"\.equals\(BuildConfig\.APP_PROFILE_ID\)\s*&& voiceProcessed && !eventClaimed && !appIsForeground\)\s*\{\s*notifyGenericOperationalEvent\(serverVersion\)/
   );
   assert.doesNotMatch(block, /commitApplied|appliedVersion/);
+  assert.match(service.slice(end), /^if \(caughtUp && voiceProcessed\) \{[^}]*OperationalDeliveryLedger\.commitApplied\(this, serverVersion\);/);
 });
 
 test("neutral alert is reserved once per version and never moves the WebView cursor", () => {
