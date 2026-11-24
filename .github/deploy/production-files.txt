@@ -1,2 +1,5 @@
-СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/static/js/excavator-dashboard-drag-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-work-screen-v1.js
+СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
