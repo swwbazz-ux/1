@@ -1,3 +1,1 @@
-СИСТЕМА_MVP/backend/settlement/current_housing_import.py
-СИСТЕМА_MVP/backend/settlement/views.py
-СИСТЕМА_MVP/backend/templates/settlement/clerk_housing_import.html
+СИСТЕМА_MVP/backend/deploy/data_updates/grant_owner_site_manager_20261124.py
