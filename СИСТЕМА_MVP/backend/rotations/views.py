@@ -1800,14 +1800,6 @@ def site_manager_queue_view(request):
                 'management_extension_decision' if access.role.code == 'manager'
                 else 'rotation_site_manager_decision'
             ),
-            'queue_route': (
-                'management_extensions' if access.role.code == 'manager'
-                else 'rotation_site_manager_queue'
-            ),
-            'summary_route': (
-                'management_dashboard' if access.role.code == 'manager'
-                else 'rotation_site_manager_home'
-            ),
         },
     )
 
@@ -1851,9 +1843,13 @@ def site_manager_decision_view(request, case_id, decision):
         )
     except ValidationError as error:
         messages.error(request, _validation_message(error))
-    return redirect(
+    target = reverse(
         'management_extensions' if access.role.code == 'manager' else 'rotation_site_manager_queue',
     )
+    overview_date = request.GET.get('overview_date')
+    if overview_date:
+        target = f"{target}?{urlencode({'overview_date': overview_date})}"
+    return redirect(target)
 
 
 @require_POST

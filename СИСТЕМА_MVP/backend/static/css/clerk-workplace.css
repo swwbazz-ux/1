@@ -15,6 +15,11 @@
     justify-content: end;
 }
 
+.clerk-workplace-header .clerk-console-actions > .app-connection-dot {
+    position: static;
+    z-index: auto;
+}
+
 .clerk-workplace-shell .admin-console-title h1 {
     max-width: 100%;
     overflow: visible;

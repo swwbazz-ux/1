@@ -385,7 +385,6 @@ def fund_dormitory_list():
             'note': dormitory.note,
             'is_active': dormitory.is_active,
             'is_manageable': dormitory.kind == Dormitory.Kind.RENTED,
-            'can_transfer_rooms': dormitory.is_active and _is_own_map_dormitory(dormitory),
             'can_add_room': dormitory.is_active and (
                 dormitory.kind == Dormitory.Kind.RENTED or _is_own_map_dormitory(dormitory)
             ),
@@ -575,14 +574,16 @@ def create_room(
     return room
 
 
-def mark_room_transferred(*, room, actor_access):
-    """Open an existing room on the КИС-5/6 settlement map."""
+def set_room_transfer_status(*, room, status, actor_access):
+    """Change whether a room on the КИС-5/6 map is open for placement."""
     from references.models import Dormitory
     from users.models import AdminActionLog
 
     from .models import PhysicalBed, PhysicalRoom
 
     actor = _required_actor(actor_access)
+    if status not in PhysicalRoom.TransferStatus.values:
+        raise _fund_error('Неизвестный статус передачи комнаты.', 'settlement.fund.room_transfer_invalid')
     with transaction.atomic():
         dormitory = Dormitory.objects.select_for_update().filter(pk=room.dormitory_id).first()
         room = PhysicalRoom.objects.select_for_update().filter(pk=room.pk, dormitory=dormitory).first()
@@ -593,23 +594,39 @@ def mark_room_transferred(*, room, actor_access):
                 'Отметить передачу можно для комнат действующих КИС-5 и КИС-6.',
                 'settlement.fund.room_transfer_unavailable',
             )
-        if room.is_transferred:
+        previous = room.transfer_status
+        if previous == status:
             return room
 
-        if not room.beds.exists():
+        transferred = status == PhysicalRoom.TransferStatus.TRANSFERRED
+        if not transferred:
+            blockers = _fund_close_blockers(physical_bed__room_id=room.pk)
+            reasons = [
+                label for name, label in (
+                    ('occupancies', 'текущие или будущие заселения'),
+                    ('preparations', 'подготовленные места'),
+                    ('reserves', 'резервы'),
+                ) if blockers[name]
+            ]
+            if reasons:
+                raise _fund_error(
+                    'Комнату нельзя закрыть для заселения. В ней есть ' + ', '.join(reasons) + '.',
+                    'settlement.fund.room_has_active_links',
+                )
+        elif not room.beds.exists():
             specs = _room_bed_specs(dormitory.number, room.floor, room.number, room.room_type, room.capacity)
             PhysicalBed.objects.bulk_create([PhysicalBed(room=room, **spec) for spec in specs])
-        room.transfer_status = PhysicalRoom.TransferStatus.TRANSFERRED
+        room.transfer_status = status
         room.save(update_fields=['transfer_status'])
         AdminActionLog.objects.create(
             actor=actor.employee,
-            action='Комната отмечена как переданная',
-            action_code='settlement_room_transferred',
+            action='Комната отмечена как переданная' if transferred else 'Комната закрыта для заселения',
+            action_code='settlement_room_transferred' if transferred else 'settlement_room_not_transferred',
             object_type='PhysicalRoom',
             object_id=str(room.pk),
             object_repr=str(room),
-            old_value=PhysicalRoom.TransferStatus.NOT_TRANSFERRED.label,
-            new_value=PhysicalRoom.TransferStatus.TRANSFERRED.label,
+            old_value=PhysicalRoom.TransferStatus(previous).label,
+            new_value=PhysicalRoom.TransferStatus(status).label,
         )
     return room
 
@@ -755,6 +772,10 @@ def _blocking_occupancy_q(moment):
 
 def dormitory_close_blockers(dormitory, *, moment=None):
     """Считает проживания (текущие и будущие), подготовки и резервы."""
+    return _fund_close_blockers(moment=moment, physical_bed__room__dormitory_id=dormitory.pk)
+
+
+def _fund_close_blockers(*, moment=None, **scope):
     from .models import (
         EmployeeBedOccupancy,
         SettlementBedPreparation,
@@ -764,23 +785,22 @@ def dormitory_close_blockers(dormitory, *, moment=None):
     moment = moment or timezone.now()
     occupancies = (
         EmployeeBedOccupancy.objects
-        .filter(physical_bed__room__dormitory_id=dormitory.pk)
-        .filter(_blocking_occupancy_q(moment))
+        .filter(_blocking_occupancy_q(moment), **scope)
         .count()
     )
     preparations = (
         SettlementBedPreparation.objects
         .filter(
-            physical_bed__room__dormitory_id=dormitory.pk,
             status=SettlementBedPreparation.Status.PREPARED,
+            **scope,
         )
         .count()
     )
     reserves = (
         SettlementBedReserve.objects
         .filter(
-            physical_bed__room__dormitory_id=dormitory.pk,
             is_active=True,
+            **scope,
         )
         .count()
     )

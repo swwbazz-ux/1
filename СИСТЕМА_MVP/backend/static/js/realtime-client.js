@@ -179,6 +179,7 @@
         var realtimeUpdateText = document.querySelector("[data-app-realtime-update-text]");
         var realtimeUpdateButton = document.querySelector("[data-app-realtime-update-button]");
         var manualRefreshMode = screen && screen.mode === "manual";
+        var connectionOnly = screen && screen.mode === "connection";
         var manualRefreshVersion = null;
         var foregroundReconcileEnabled = !!(screen && screen.foregroundReconcile === true);
         var foregroundReconcileRequested = false;
@@ -619,7 +620,9 @@
             var state;
             if (silent || (realtimeConsecutiveFailures >= 3 && !supportingChannelFresh)) state = "lost";
             else if ((realtimeConsecutiveFailures > 0 || transportInterrupted) && !supportingChannelFresh) state = "weak";
-            else if (realtimeLastSuccessAt > 0) state = hasPendingReconcile() ? "recovering" : "ok";
+            else if (realtimeLastSuccessAt > 0) {
+                state = hasPendingReconcile() && !screen.transportIndicator ? "recovering" : "ok";
+            }
             else state = connectionState === "weak" ? "weak" : "unknown";
             publishRealtimeConnectionState(state, {reason: reason || "state_change"});
         }
@@ -1397,10 +1400,11 @@
             if (afterVersion > 0) {
                 url.searchParams.set("after", String(afterVersion));
             }
-            url.searchParams.set("include_events", "1");
+            url.searchParams.set("include_events", connectionOnly ? "0" : "1");
             var roleAppCode = document.body
                 ? String(document.body.dataset.appRoleCode || "")
                 : "";
+            roleAppCode = screen.roleAppCode || roleAppCode;
             if (roleAppCode) {
                 url.searchParams.set("role_app_code", roleAppCode);
             }
@@ -1849,6 +1853,10 @@
                 clearRoleInactive();
                 var version = payload.version;
                 observedVersion = Math.max(observedVersion, version);
+                if (connectionOnly) {
+                    updateConnectionState("transport_success");
+                    return;
+                }
                 if (pendingJournalReplayRequired && capturedAfterVersion > appliedCursor()) {
                     /* This request was built from fresh HTML before the scoped
                        durable cursor was restored. Repeat from that cursor before

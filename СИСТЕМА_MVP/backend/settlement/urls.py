@@ -20,6 +20,7 @@ from .views import (
     settlement_external_resident_create_view,
     settlement_external_resident_search_view,
     settlement_fund_view,
+    settlement_room_transfer_view,
     settlement_control_acquire_view,
     settlement_control_heartbeat_view,
     settlement_control_release_view,
@@ -77,6 +78,7 @@ urlpatterns = [
     ),
     path('clerk/', settlement_map_view, name='clerk_home'),
     path('clerk/settlement/', settlement_map_view, name='settlement_map'),
+    path('clerk/settlement/room-transfer/', settlement_room_transfer_view, name='settlement_room_transfer'),
     path(
         'clerk/settlement/current-housing/',
         settlement_current_housing_import_view,

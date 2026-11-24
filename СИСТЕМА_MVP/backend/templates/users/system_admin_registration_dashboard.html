@@ -5,9 +5,10 @@
 {% block body_class %}{% if management_mode %}dispatcher-control-screen management-registration-dashboard-screen{% else %}system-admin-registration-dashboard-screen{% endif %}{% endblock %}
 {% block extra_head %}
 {% if not management_mode %}{% include "users/includes/system_admin_workspace_styles.html" %}{% endif %}
-<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260909-6">
+<link rel="stylesheet" href="{% static 'css/system-admin-registration-dashboard-v1.css' %}?v=20260909-7">
 {% if management_mode %}
     {% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
+    {% include "reports/includes/management_workplace_assets.html" %}
 {% else %}
     {% include "includes/role_app_pwa_head.html" with role_code="admin" manifest_url="/system-admin.webmanifest" service_worker_url="/system-admin-sw.js" legacy_scope="/system-admin/" theme_color="#53616F" apple_title="Админка" icon_180="img/pwa/admin-180.png" %}
 {% endif %}

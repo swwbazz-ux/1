@@ -1,12 +1,13 @@
-{% extends "base.html" %}
+{% extends "reports/management_linked_base.html" %}
 
 {% block title %}Динамика экскаваторов{% endblock %}
-{% block body_class %}dispatcher-control-screen management-dynamics-page{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
 
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme>
-    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Динамика экскаваторов" data-management-dynamics-refresh-root>
+    <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board" aria-label="Динамика экскаваторов">
         {% include "reports/includes/management_report_header.html" with active="dynamics" title="Динамика экскаваторов" subtitle="Выработка экскаваторов по периоду, сменам, часам и месяцам." section_label="Динамика" %}
+        <div class="management-dynamics-page" data-management-dynamics-refresh-root>
         <div class="management-linked-report-content management-dynamics-content">
             <form id="management-dynamics-filter-form" class="dispatcher-report-filters management-dashboard-filters management-dynamics-filters" method="get" data-auto-filter-form>
                 <label>
@@ -214,6 +215,7 @@
                     </div>
                 </article>
             </section>
+        </div>
         </div>
     </section>
 </main>

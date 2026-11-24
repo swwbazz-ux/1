@@ -122,10 +122,10 @@ class AdminEnterEmployeeTests(TestCase):
                 workplace = self.client.get(f'{url.path}?{url.query}', HTTP_HOST=url.netloc)
                 self.assertTemplateUsed(workplace, 'reports/management_dashboard.html')
                 self.assertContains(workplace, 'Витрина руководства')
-                self.assertContains(workplace, f'<a href="{queue_path}">Продлёнка</a>', html=True)
+                self.assertContains(workplace, f'href="{queue_path}?overview_date=')
 
                 queue = self.client.get(f'{queue_path}?{url.query}', HTTP_HOST=url.netloc)
-                self.assertContains(queue, self.admin_employee.full_name)
+                self.assertContains(queue, '<h1>Витрина руководства</h1>', html=True)
                 self.assertTrue(queue.context['observer_is_self'])
                 self.assertTrue(queue.context['observer_control'])
                 self.assertEqual(queue.context['access'].employee_id, self.admin_employee.pk)

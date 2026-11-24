@@ -165,7 +165,7 @@ class RotationWorkflowTests(TestCase):
         self.assertTemplateUsed(workplace, 'reports/management_dashboard.html')
         self.assertContains(workplace, 'Витрина руководства')
         self.assertContains(workplace, 'Ключевые показатели')
-        self.assertContains(workplace, '<a href="/site-manager/extensions/">Продлёнка</a>', html=True)
+        self.assertContains(workplace, 'href="/site-manager/extensions/?overview_date=')
         self.assertContains(workplace, '<link rel="manifest" href="/site-manager.webmanifest">', html=True)
         queue = manager_client.get('/site-manager/extensions/')
         self.assertContains(queue, self.employee.full_name)
@@ -202,7 +202,7 @@ class RotationWorkflowTests(TestCase):
         queue = manager_client.get('/site-manager/extensions/')
         self.assertContains(queue, 'Согласованные даты')
         self.assertContains(queue, agreed_end.strftime('%d.%m.%Y'))
-        self.assertContains(queue, self.site_manager.full_name, count=2)
+        self.assertContains(queue, self.site_manager.full_name, count=1)
 
         close_cycle(self.cycle, actor=self.timekeeper)
         for offset in range(6):
@@ -286,11 +286,12 @@ class RotationWorkflowTests(TestCase):
 
         reviewer = management_client(self.site_manager)
         dashboard = reviewer.get(dashboard_url, HTTP_HOST=host)
-        self.assertContains(dashboard, '<a href="/reports/management/extensions/">Продлёнка</a>', html=True)
+        self.assertContains(dashboard, 'href="/reports/management/extensions/?overview_date=')
         queue = reviewer.get(queue_url, HTTP_HOST=host)
         self.assertContains(queue, f'action="{decision_url}"')
         self.assertContains(queue, '<link rel="manifest" href="/management.webmanifest">', html=True)
-        self.assertContains(queue, '<a href="/reports/management/">Витрина руководства</a>', html=True)
+        self.assertContains(queue, 'href="/reports/management/?date=')
+        self.assertContains(queue, '<h1>Витрина руководства</h1>', html=True)
         saved = reviewer.post(decision_url, HTTP_HOST=host)
         self.assertRedirects(saved, queue_url, fetch_redirect_response=False)
         case.refresh_from_db()
@@ -574,7 +575,6 @@ class RotationWorkflowTests(TestCase):
         for template_name in (
             'cycle_create.html',
             'response_form.html',
-            'site_manager_base.html',
             'timekeeper_cycle.html',
             'timekeeper_dashboard.html',
         ):

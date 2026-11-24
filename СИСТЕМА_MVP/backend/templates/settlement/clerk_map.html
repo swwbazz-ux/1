@@ -11,6 +11,7 @@
      data-employee-search-url="{% url 'settlement_employee_search' %}"
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
+     data-room-transfer-url="{% url 'settlement_room_transfer' %}"
      data-external-resident-search-url="{% url 'settlement_external_resident_search' %}"
      data-external-resident-create-url="{% url 'settlement_external_resident_create' %}"
      data-control-acquire-url="{% url 'settlement_control_acquire' %}"
@@ -677,8 +678,12 @@
         </header>
 
         <div class="settlement-room-panel-summary">
-            <span data-room-panel-status>Статус не указан</span>
-            <strong><b data-room-occupied-count>0</b> занято · <b data-room-free-count>0</b> свободно</strong>
+            <button type="button" class="settlement-room-transfer" role="switch" aria-checked="false"
+                    aria-label="Комната передана для заселения" data-room-transfer-toggle>
+                <span data-room-panel-status>Не передана</span>
+            </button>
+            <strong><b data-room-occupied-count>0</b> занято · <b data-room-free-count>0</b> <span data-room-free-label>свободно</span></strong>
+            <p class="settlement-room-transfer-message" data-room-transfer-message role="status" hidden></p>
         </div>
 
         <div class="settlement-room-panel-body">
@@ -889,7 +894,7 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-shifts-v2"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-shifts-v3"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-relocation-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
