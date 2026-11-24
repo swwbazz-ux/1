@@ -30,12 +30,12 @@ from users.role_apps import (
 from users.live_monitor import application_presence_by_employee_ids, empty_application_presence
 from users.work_profiles import (
     effective_specializations_by_employee_id,
-    eligible_employee_ids_for_work_role,
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
 )
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
+from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS, crew_equipment_number
 from .crew_excel_import import (
     DraftConfirmationRequired,
     MAX_FILE_SIZE,
@@ -52,7 +52,7 @@ from .models import (
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
-    WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES,
+    eligible_crew_employee_ids,
     employee_matches_work_role,
     get_or_create_crew_draft,
     is_excavator_assistant_specialization,
@@ -63,10 +63,7 @@ from .services import (
 
 
 DEPUTY_ROLE_CODE = 'deputy_mining_manager'
-TARGET_ROLE_LABELS = {
-    'driver': 'Самосвалы',
-    'excavator_operator': 'Экскаваторы',
-}
+TARGET_ROLE_LABELS = CATEGORY_LABELS
 
 DEPUTY_MANIFEST = {
     'id': '/deputy-mining-manager/',
@@ -500,10 +497,10 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
 
 
 def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
-    if role_code not in TARGET_ROLE_LABELS:
+    if role_code not in {'driver', 'excavator_operator'}:
         return set()
     if primary_employee_ids is None:
-        primary_employee_ids = eligible_employee_ids_for_work_role(role_code)
+        primary_employee_ids = eligible_crew_employee_ids(role_code)
     if role_code == 'driver':
         return primary_employee_ids
     employees = (
@@ -525,7 +522,7 @@ def _secondary_eligible_employee_ids(role_code, primary_employee_ids=None):
 
 def _role_from_request(request):
     role_code = request.GET.get('role') or request.POST.get('role') or 'driver'
-    if role_code not in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES:
+    if role_code not in TARGET_ROLE_LABELS:
         role_code = 'driver'
     return get_object_or_404(Role, code=role_code, is_active=True)
 
@@ -573,6 +570,41 @@ def _natural_equipment_sort_key(equipment):
         int(part) if part.isdigit() else part.casefold()
         for part in re.split(r'(\d+)', label)
     )
+
+
+def _crew_category_navigation(work_date):
+    categories = []
+    plans_by_category = {}
+    for item in CrewPlan.objects.filter(
+        work_date=work_date, role__code__in=TARGET_ROLE_LABELS,
+        status__in=[CrewPlanStatus.PUBLISHED, CrewPlanStatus.DRAFT],
+    ).select_related('role').order_by('-revision'):
+        plans_by_category.setdefault((item.role.code, item.status), item)
+    active_codes = set(Role.objects.filter(
+        code__in=TARGET_ROLE_LABELS, is_active=True,
+    ).values_list('code', flat=True))
+    for role_code, label in TARGET_ROLE_LABELS.items():
+        if role_code not in active_codes:
+            continue
+        query = urlencode({'role': role_code, 'date': work_date.isoformat()})
+        published_plan = plans_by_category.get((role_code, CrewPlanStatus.PUBLISHED))
+        draft_plan = plans_by_category.get((role_code, CrewPlanStatus.DRAFT))
+        visible_plan = published_plan or draft_plan
+        categories.append({
+            'code': role_code,
+            'label': label,
+            'url': f'{reverse("deputy_mining_manager_placement")}?{query}',
+            'status': CrewPlanStatus.PUBLISHED if published_plan else CrewPlanStatus.DRAFT,
+            'status_label': 'Опубликовано' if published_plan else 'Черновик',
+            'revision': visible_plan.revision if visible_plan else 1,
+            'published_at_label': (
+                timezone.localtime(published_plan.published_at).strftime('%d.%m.%Y %H:%M')
+                if published_plan and published_plan.published_at
+                else ''
+            ),
+        })
+
+    return categories
 
 
 def build_crew_plan_payload(plan, *, request=None):
@@ -627,7 +659,7 @@ def build_crew_plan_payload(plan, *, request=None):
         if employee_id
     }
     expire_due_temporary_work_transfers()
-    eligible_employee_ids = eligible_employee_ids_for_work_role(plan.role.code)
+    eligible_employee_ids = eligible_crew_employee_ids(plan.role.code)
     secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code, eligible_employee_ids)
     all_eligible_employee_ids = eligible_employee_ids | secondary_eligible_employee_ids
     secondary_position_label = 'Стажёр' if plan.role.code == 'driver' else 'Помощник или стажёр'
@@ -674,10 +706,12 @@ def build_crew_plan_payload(plan, *, request=None):
             .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .order_by('full_name')
         )
+        category = AUXILIARY_CATEGORIES.get(plan.role.code)
+        specialization_filter = {'code': category.specialization} if category else {'access_role': plan.role}
         transfer_specializations = list(
             ProductionSpecialization.objects.filter(
                 is_active=True,
-                access_role=plan.role,
+                **specialization_filter,
             ).order_by('name')
         )
         current_watch_periods = list(
@@ -721,7 +755,7 @@ def build_crew_plan_payload(plan, *, request=None):
     conflict_count = 0
     changed_count = 0
     secondary_assigned_count = 0
-    icon_prefix = 'truck' if plan.role.code == 'driver' else 'excavator'
+    icon_prefix = {'driver': 'truck', 'excavator_operator': 'excavator'}.get(plan.role.code)
     for equipment in equipment_items:
         row_slots = []
         row_attention = False
@@ -814,14 +848,17 @@ def build_crew_plan_payload(plan, *, request=None):
                 'issue': issue,
                 'secondary_issue': secondary_issue,
             })
+        number = crew_equipment_number(equipment)
+        is_robot = plan.role.code == 'driver' and number.lstrip('0') == '53'
         status_label = '' if equipment.is_active else 'Недоступна'
         rows.append({
             'equipment': {
                 'id': equipment.id,
-                'label': equipment.garage_number or str(equipment),
+                'label': f'{number} · Робот' if is_robot else number,
+                'is_robot': is_robot,
                 'type_label': equipment.equipment_type.name,
                 'model_label': equipment.model.name if equipment.model_id else '',
-                'icon_url': static(f'img/equipment/{icon_prefix}-{"green" if equipment.is_active else "gray"}.png'),
+                'icon_url': static(f'img/equipment/{icon_prefix}-{"green" if equipment.is_active else "gray"}.png') if icon_prefix else '',
                 'is_active': equipment.is_active,
                 'status_label': status_label,
                 'serial_number': equipment.vin or '',
@@ -831,6 +868,7 @@ def build_crew_plan_payload(plan, *, request=None):
             'conflict': row_conflict,
             'changed': row_changed,
             'search': ' '.join([
+                'Робот' if is_robot else '',
                 equipment.garage_number or '',
                 equipment.model.name if equipment.model_id else '',
                 *[item['employee']['full_name'] for item in row_slots if item['employee']],
@@ -843,38 +881,6 @@ def build_crew_plan_payload(plan, *, request=None):
             'slots': row_slots,
         })
 
-    categories = []
-    selected_date = plan.work_date.isoformat()
-    for role_code, equipment_type_name in WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.items():
-        query = urlencode({'role': role_code, 'date': selected_date})
-        role_plans = CrewPlan.objects.filter(
-            work_date=plan.work_date,
-            role__code=role_code,
-        )
-        published_plan = (
-            role_plans.filter(status=CrewPlanStatus.PUBLISHED)
-            .order_by('-revision')
-            .first()
-        )
-        draft_plan = (
-            role_plans.filter(status=CrewPlanStatus.DRAFT)
-            .order_by('-revision')
-            .first()
-        )
-        visible_plan = published_plan or draft_plan
-        categories.append({
-            'code': role_code,
-            'label': TARGET_ROLE_LABELS.get(role_code, equipment_type_name),
-            'url': f'{reverse("deputy_mining_manager_placement")}?{query}',
-            'status': CrewPlanStatus.PUBLISHED if published_plan else CrewPlanStatus.DRAFT,
-            'status_label': 'Опубликовано' if published_plan else 'Черновик',
-            'revision': visible_plan.revision if visible_plan else 1,
-            'published_at_label': (
-                timezone.localtime(published_plan.published_at).strftime('%d.%m.%Y %H:%M')
-                if published_plan and published_plan.published_at
-                else ''
-            ),
-        })
 
     return {
         'plan': {
@@ -891,8 +897,10 @@ def build_crew_plan_payload(plan, *, request=None):
             'code': plan.role.code,
             'label': plan.role.name,
             'category_label': TARGET_ROLE_LABELS.get(plan.role.code, plan.role.name),
+            'supports_secondary': plan.role.code not in AUXILIARY_CATEGORIES,
+            'primary_label': 'Водитель' if plan.role.code in {'driver', 'crew_kdm', 'crew_prm', 'crew_bus'} else 'Машинист',
         },
-        'categories': categories,
+        'categories': _crew_category_navigation(plan.work_date),
         'endpoints': {
             'slot': reverse('deputy_mining_manager_slot'),
             'publish': reverse('deputy_mining_manager_publish'),
@@ -1237,6 +1245,9 @@ def deputy_mining_manager_placement_view(request):
             .first()
         )
     payload = build_crew_plan_payload(plan, request=request)
+    if not plan:
+        payload['categories'] = _crew_category_navigation(selected_date)
+        payload['role'] = {'code': role.code, 'label': role.name}
     return render(
         request,
         'assignments/deputy_mining_manager_placement.html',
@@ -1258,7 +1269,7 @@ def deputy_mining_manager_export_view(request, plan_id):
     plan = get_object_or_404(
         CrewPlan.objects
         .select_related('role', 'created_by', 'updated_by', 'published_by')
-        .filter(role__code__in=WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES),
+        .filter(role__code__in=TARGET_ROLE_LABELS),
         id=plan_id,
     )
     workbook = build_deputy_crew_plan_workbook(plan, actor=access.employee)
@@ -1435,7 +1446,9 @@ def deputy_mining_manager_temporary_transfer_request_view(request):
             id=payload.get('target_specialization_id'),
             is_active=True,
         )
-        if specialization.access_role_id != plan.role_id:
+        category = AUXILIARY_CATEGORIES.get(plan.role.code)
+        valid = specialization.code == category.specialization if category else specialization.access_role_id == plan.role_id
+        if not valid:
             raise ValidationError('Выберите специализацию для текущей группы техники.')
         watch_period = get_object_or_404(
             WatchPeriod,

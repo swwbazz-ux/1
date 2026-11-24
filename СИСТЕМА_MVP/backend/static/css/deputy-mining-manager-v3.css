@@ -119,6 +119,8 @@
 }
 
 .deputy-category-nav {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
     display: flex;
     flex: 1 1 auto;
     min-width: 0;
@@ -791,6 +793,11 @@ button.deputy-avatar {
     padding: 2px;
     border-radius: 6px;
     cursor: pointer;
+}
+
+.deputy-equipment-cell.is-robot {
+    border-inline-start: 4px solid #7963cc;
+    background-color: color-mix(in srgb, #7963cc 16%, var(--admin-panel));
 }
 
 .deputy-equipment-cell:hover,
@@ -1948,7 +1955,10 @@ button.deputy-avatar {
         padding: 6px;
     }
 
-    .deputy-category-nav,
+    .deputy-category-nav {
+        flex-wrap: nowrap;
+    }
+
     .deputy-planning-scope,
     .deputy-toolbar-actions {
         grid-column: auto;

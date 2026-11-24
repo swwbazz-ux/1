@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.staticfiles import finders
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -179,17 +180,47 @@ class DeputyPlanningViewTests(TestCase):
         )
         rows = [
             ['Самосвал БЕЛАЗ', self.truck_1.garage_number, 'Петров Н. И.', self.driver.full_name],
-            ['Вахтовый автобус', '103', None, 'Водитель автобуса'],
+            ['Автокран', '103', None, 'Машинист крана'],
         ]
         response = self.upload_crew_excel(rows)
         self.assertContains(response, 'Расстановка опубликована')
-        self.assertContains(response, 'Вахтовый автобус')
+        self.assertContains(response, 'Автокран')
         plan = CrewPlan.objects.get(role=self.driver_role, status=CrewPlanStatus.PUBLISHED)
         self.assertEqual(plan.published_by, self.deputy)
         self.assertEqual(get_active_equipment_assignment(second, 'driver').shift_type, WorkShiftType.SHIFT_1)
         self.assertEqual(get_active_equipment_assignment(self.driver, 'driver').shift_type, WorkShiftType.SHIFT_2)
         self.assertContains(self.upload_crew_excel(rows), 'Назначения уже совпадают')
         self.assertEqual(CrewPlan.objects.filter(role=self.driver_role, published_at__isnull=False).count(), 1)
+
+    def test_auxiliary_fleet_tabs_and_publication(self):
+        from .crew_categories import AUXILIARY_CATEGORIES
+
+        call_command('prepare_deputy_fleet')
+        call_command('prepare_deputy_fleet')
+        for code, category in AUXILIARY_CATEGORIES.items():
+            with self.subTest(category=code):
+                response = self.client.get(reverse('deputy_mining_manager_placement'), {'role': code})
+                payload = response.context['planning_payload']
+                self.assertEqual(len(payload['categories']), 10)
+                self.assertEqual(len(payload['rows']), len(category.numbers))
+                self.assertTrue(all(len(row['slots']) == 2 for row in payload['rows']))
+                self.assertFalse(payload['role']['supports_secondary'])
+                self.assertNotIn(self.driver.id, {e['id'] for e in payload['employees']})
+        self.driver.base_specialization = ProductionSpecialization.objects.get(code='bulldozer_operator')
+        self.driver.save(update_fields=['base_specialization'])
+        self.original_assignment.ended_at = timezone.now()
+        self.original_assignment.save(update_fields=['ended_at'])
+        rows = [['Колесник', 1, None, self.driver.full_name], ['Бульдозер', 1, 'Снять', None]]
+        self.assertContains(self.upload_crew_excel(rows), 'Расстановка опубликована')
+        plan = CrewPlan.objects.get(role__code='crew_wheel_dozer', status=CrewPlanStatus.PUBLISHED)
+        slot = plan.slots.get(employee=self.driver)
+        self.assertEqual(slot.shift_type, WorkShiftType.SHIFT_2)
+        self.assertEqual(slot.equipment.equipment_type.name, 'Колёсный бульдозер')
+        report = self.client.get(reverse('deputy_mining_manager_placement'), {'role': plan.role.code, 'plan': plan.id})
+        self.assertFalse(report.context['planning_payload']['plan']['editable'])
+        trucks = self.client.get(reverse('deputy_mining_manager_placement')).context['planning_payload']
+        robots = [row['equipment'] for row in trucks['rows'] if row['equipment']['is_robot']]
+        self.assertEqual([item['label'] for item in robots], ['53 · Робот'])
 
     def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
         response = self.upload_crew_excel([

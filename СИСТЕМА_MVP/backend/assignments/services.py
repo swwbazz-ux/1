@@ -21,7 +21,11 @@ from core.production_time import production_work_date as contract_production_wor
 from references.models import Equipment
 from shifts.models import EmployeeShift
 from users.models import Employee, EmployeeAccess, Role
-from users.work_profiles import effective_specialization, employee_has_effective_access_role
+from users.work_profiles import (
+    effective_specialization, effective_specializations_by_employee_id,
+    eligible_employee_ids_for_work_role, employee_has_effective_access_role,
+)
+from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS
 
 from .models import (
     AssignmentStatus,
@@ -43,7 +47,7 @@ WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES = {
     'driver': 'Самосвал',
     'excavator_operator': 'Экскаватор',
 }
-CREW_PLAN_ROLE_CODES = frozenset(WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES)
+CREW_PLAN_ROLE_CODES = frozenset(CATEGORY_LABELS)
 
 
 def haul_assignment_effective_at(truck, now):
@@ -183,7 +187,29 @@ def _crew_plan_employee(employee):
 
 
 def employee_matches_work_role(employee, role):
+    category = AUXILIARY_CATEGORIES.get(role.code)
+    if category:
+        specialization = effective_specialization(employee)
+        return bool(
+            employee.contractor_access_is_valid()
+            and specialization
+            and specialization.is_active
+            and specialization.code == category.specialization
+        )
     return employee_has_effective_access_role(employee, role.code)
+
+
+def eligible_crew_employee_ids(role_code):
+    category = AUXILIARY_CATEGORIES.get(role_code)
+    if not category:
+        return eligible_employee_ids_for_work_role(role_code)
+    employees = Employee.objects.filter(
+        Employee.work_eligibility_q(), is_active=True, status=Employee.Status.ACTIVE,
+    ).select_related('base_specialization')
+    return {
+        employee_id for employee_id, spec in effective_specializations_by_employee_id(employees).items()
+        if spec and spec.is_active and spec.code == category.specialization
+    }
 
 
 def is_excavator_assistant_specialization(specialization):
@@ -937,6 +963,8 @@ def publish_crew_plan(*, plan, expected_version, actor=None, actor_access=None):
 
 def equipment_queryset_for_work_role(role_code):
     equipment_type_name = WORK_ASSIGNMENT_ROLE_EQUIPMENT_TYPES.get(str(role_code or ''))
+    if role_code in AUXILIARY_CATEGORIES:
+        equipment_type_name = AUXILIARY_CATEGORIES[role_code].equipment_type
     if not equipment_type_name:
         return Equipment.objects.none()
     return (

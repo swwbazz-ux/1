@@ -707,6 +707,7 @@
         appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
         (row.slots || []).forEach(function (slot) {
             appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : "Не назначен");
+            if (state.role.supports_secondary === false) return;
             appendRecordField(
                 (slot.label || "Смена") + " · " + (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник"),
                 slot.secondary_employee ? employeeName(slot.secondary_employee) : "Не назначен"
@@ -740,6 +741,13 @@
             }
             categoryNav.appendChild(link);
         });
+        var current = categoryNav.querySelector('[aria-current="page"]');
+        if (current && categoryNav.scrollWidth > categoryNav.clientWidth) {
+            var navBox = categoryNav.getBoundingClientRect();
+            var currentBox = current.getBoundingClientRect();
+            if (currentBox.right > navBox.right) categoryNav.scrollLeft += currentBox.right - navBox.right;
+            else if (currentBox.left < navBox.left) categoryNav.scrollLeft += currentBox.left - navBox.left;
+        }
     }
 
     function renderSummary() {
@@ -990,6 +998,7 @@
     function createEquipmentCell(row) {
         var equipment = row.equipment || {};
         var wrapper = createElement("div", "deputy-equipment-cell");
+        if (equipment.is_robot) wrapper.classList.add("is-robot");
         wrapper.tabIndex = 0;
         wrapper.setAttribute("role", "button");
         wrapper.setAttribute("aria-label", "Открыть карточку техники " + textValue(equipment.label));
@@ -1001,7 +1010,7 @@
             icon.alt = "";
             iconWrap.appendChild(icon);
         }
-        wrapper.appendChild(iconWrap);
+        if (equipment.icon_url) wrapper.appendChild(iconWrap);
         var main = createElement("span", "deputy-equipment-main");
         main.appendChild(createElement("strong", "", equipment.label || "Техника"));
         if (equipment.model_label) main.appendChild(createElement("small", "", equipment.model_label));
@@ -1098,7 +1107,7 @@
         var employeeKey = position === "secondary" ? "secondary_employee" : "employee";
         var positionLabel = position === "secondary"
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
-            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+            : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         currentSlot = { row: row, slot: slot, position: position };
         setActiveEquipmentRow(row);
         if (candidateContext) {
@@ -1114,7 +1123,7 @@
         state.rows.forEach(function (candidateRow) {
             (candidateRow.slots || []).forEach(function (candidateSlot) {
                 [
-                    { key: "employee", position: "primary", label: state.role.code === "driver" ? "Водитель" : "Машинист" },
+                    { key: "employee", position: "primary", label: state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист") },
                     { key: "secondary_employee", position: "secondary", label: candidateSlot.secondary_label || state.secondary_employee_label }
                 ].forEach(function (assignment) {
                     var assigned = candidateSlot[assignment.key];
@@ -1183,7 +1192,7 @@
         var issue = isSecondary ? slot.secondary_issue : slot.issue;
         var positionLabel = isSecondary
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
-            : (state.role.code === "driver" ? "Водитель" : "Машинист");
+            : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         var button = createElement("div", "deputy-crew-position is-" + position);
         button.classList.toggle("is-disabled", !planEditable());
         button.classList.toggle("has-employee", Boolean(employee));
@@ -1306,7 +1315,7 @@
     function createSlot(row, slot) {
         var wrapper = createElement("div", "deputy-slot");
         wrapper.appendChild(createCrewPosition(row, slot, "primary"));
-        wrapper.appendChild(createCrewPosition(row, slot, "secondary"));
+        if (state.role.supports_secondary !== false) wrapper.appendChild(createCrewPosition(row, slot, "secondary"));
         return wrapper;
     }
 

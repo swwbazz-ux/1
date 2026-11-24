@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 from rotations.arrival_roster_parser import validate_xlsx_archive
 from users.models import Employee, Role
 
+from .crew_categories import crew_equipment_number
 from .models import CrewPlanSlot, WorkShiftType
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
@@ -28,7 +29,12 @@ from .services import (
 MAX_FILE_SIZE = 2 * 1024 * 1024
 MAX_ROWS = 400
 CONFIRMATION_SALT = 'deputy-crew-excel-replace'
-EXCEL_CATEGORIES = {'самосвал': 'driver', 'экскаватор': 'excavator_operator'}
+EXCEL_CATEGORIES = {
+    'самосвал': 'driver', 'экскаватор': 'excavator_operator', 'робот': 'driver',
+    'вахтовый автобус': 'crew_bus', 'кдм': 'crew_kdm', 'прм': 'crew_prm',
+    'планировщик': 'crew_planner', 'бульдозер': 'crew_dozer', 'колесник': 'crew_wheel_dozer',
+    'грейдер': 'crew_grader', 'каток': 'crew_roller',
+}
 SHIFT_COLUMNS = (WorkShiftType.SHIFT_1, WorkShiftType.SHIFT_2)
 TRANSITION = re.compile(
     r'(.+?)\s*\(\s*(до|по)\s*(\d{1,2})\s*\.\s*(\d{1,2})\s*\.?\s*\)\s*затем\s+(.+)',
@@ -91,13 +97,18 @@ def read_crew_excel(payload):
                 raise ValidationError(f'Таблица расстановки должна занимать до {MAX_ROWS} строк.')
             if any(cell.data_type == 'f' for cell in cells):
                 raise ValidationError(f'Строка {index}. Замени формулы готовыми значениями.')
-            role_code = EXCEL_CATEGORIES.get(_key(category).split(' ', 1)[0])
+            key = _key(category)
+            role_code = EXCEL_CATEGORIES.get(key)
+            if not role_code and key.split(' ', 1)[0] in {'самосвал', 'экскаватор'}:
+                role_code = EXCEL_CATEGORIES[key.split(' ', 1)[0]]
+            if key == 'робот' and _number(number) != '53':
+                raise ValidationError(f'B{index}. Для робота ожидается номер 53.')
             if not role_code:
                 if not category:
                     raise ValidationError(f'Строка {index}. Укажи тип техники в столбце A.')
                 skipped[category] += 1
                 continue
-            if not number:
+            if not number and role_code != 'crew_roller':
                 raise ValidationError(f'Строка {index}. Укажи номер техники в столбце B.')
             for field, shift, value in zip('CD', SHIFT_COLUMNS, assignments):
                 if len(value) > 300:
@@ -111,7 +122,7 @@ def read_crew_excel(payload):
     finally:
         workbook.close()
     if not slots:
-        raise ValidationError('На «Лист1» нет заполненных назначений самосвалов и экскаваторов.')
+        raise ValidationError('На «Лист1» нет заполненных назначений по технике.')
     return slots, skipped
 
 
@@ -171,8 +182,10 @@ def _stage_plan(plan, slots, records, names, actor):
     by_number = defaultdict(list)
     for slot in slots:
         slot.employee_id, slot.secondary_employee_id = _baseline_crew(slot)
-        key = (_number(slot.equipment.garage_number), slot.shift_type)
+        key = (_number(crew_equipment_number(slot.equipment)), slot.shift_type)
         by_number[key].append(slot)
+        if plan.role.code == 'crew_roller' and key[0]:
+            by_number[('', slot.shift_type)].append(slot)
     coordinates = {}
     errors = []
     for record in records:
@@ -257,7 +270,7 @@ def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=
         if role is None:
             raise ValidationError('Категория техники недоступна для публикации.')
         plan, _ = get_or_create_crew_draft(role=role, work_date=work_date, actor=actor)
-        slots = list(plan.slots.select_for_update(of=('self',)).select_related('equipment'))
+        slots = list(plan.slots.select_for_update(of=('self',)).select_related('equipment__equipment_type'))
         plans.append((plan, slots))
     _require_draft_confirmation(
         plans, confirmation=confirmation, file_digest=file_digest, work_date=work_date, access=actor_access,
