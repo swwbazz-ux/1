@@ -11,8 +11,9 @@ def match_number(value):
     return str(int(value)) if value.isdecimal() else value
 
 
-def register_equipment(kind, numbers):
-    existing = list(Equipment.objects.filter(equipment_type=kind).select_related('equipment_type'))
+def register_equipment(kind, numbers, *, dry_run):
+    existing = list(Equipment.objects.filter(equipment_type_id=kind.pk).select_related('equipment_type'))
+    missing = 0
     for number in numbers:
         if number:
             matches = [item for item in existing if match_number(crew_equipment_number(item)) == match_number(number)]
@@ -22,24 +23,44 @@ def register_equipment(kind, numbers):
         if len(matches) > 1:
             raise CommandError(f'{kind.name} {number}: в справочнике несколько подходящих машин.')
         if matches:
+            if not matches[0].is_active:
+                raise CommandError(f'{kind.name} {number}: существующая машина неактивна.')
             continue
         key = number or kind.name
         if kind.name in {'Бульдозер', 'Колёсный бульдозер', 'Автогрейдер'} and number in {'1', '2', '3', '4'}:
             key = f'{kind.name} № {number}'
         if Equipment.objects.filter(garage_number=key).exists():
             raise CommandError(f'Номер {key} занят другим видом техники. Сверьте карточку {kind.name}.')
-        Equipment.objects.create(equipment_type=kind, garage_number=key)
+        missing += 1
+        if not dry_run:
+            Equipment.objects.create(equipment_type=kind, garage_number=key)
+    return missing
 
 
 class Command(BaseCommand):
     help = 'Подготовить категории и технику расстановки по утверждённому списку за ноябрь 2026.'
 
+    def add_arguments(self, parser):
+        parser.add_argument('--dry-run', action='store_true')
+
     @transaction.atomic
     def handle(self, *args, **options):
+        dry_run = options['dry_run']
+        missing = 0
         for code, category in AUXILIARY_CATEGORIES.items():
-            Role.objects.get_or_create(code=code, defaults={'name': category.label})
-            kind, _ = EquipmentType.objects.get_or_create(name=category.equipment_type)
-            register_equipment(kind, category.numbers)
-        truck, _ = EquipmentType.objects.get_or_create(name='Самосвал')
-        register_equipment(truck, ('53',))
-        self.stdout.write('Справочник техники расстановки подготовлен.')
+            role = Role.objects.filter(code=code).first()
+            if role and not role.is_active:
+                raise CommandError(f'Категория {category.label} неактивна.')
+            if not role and not dry_run:
+                Role.objects.create(code=code, name=category.label)
+        fleet = [(item.equipment_type, item.numbers) for item in AUXILIARY_CATEGORIES.values()]
+        for name, numbers in [*fleet, ('Самосвал', ('53',))]:
+            kind = EquipmentType.objects.filter(name=name).first()
+            if kind and not kind.is_active:
+                raise CommandError(f'Вид техники {name} неактивен.')
+            if kind is None:
+                kind = EquipmentType(name=name)
+                if not dry_run:
+                    kind.save()
+            missing += register_equipment(kind, numbers, dry_run=dry_run)
+        self.stdout.write(f'fleet_catalog mode={"preview" if dry_run else "apply"} missing_before={missing}')
