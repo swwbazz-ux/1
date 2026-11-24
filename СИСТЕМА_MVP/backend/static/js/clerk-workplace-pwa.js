@@ -88,6 +88,33 @@
         });
     }
 
+    function initConnectionIndicator() {
+        function setState(state) {
+            if (document.body.dataset.connectionState === state) return;
+            document.body.dataset.connectionState = state;
+            window.dispatchEvent(new CustomEvent("operational-state-connection", {
+                detail: {state: state}
+            }));
+        }
+
+        window.addEventListener("web-heartbeat-success", function (event) {
+            var detail = event.detail || {};
+            if (detail.source === "application-session-heartbeat" && detail.status === 204) {
+                setState("ok");
+            }
+        });
+        window.addEventListener("app:connectiondiagnostic", function (event) {
+            var detail = event.detail || {};
+            if (detail.owner !== "web_heartbeat" || detail.cause === "planned_abort") return;
+            setState(detail.cause === "network_error" || detail.cause === "timeout" ? "lost" : "weak");
+        });
+        window.addEventListener("offline", function () { setState("lost"); });
+        window.addEventListener("online", function () { setState("weak"); });
+        if (navigator.onLine === false) setState("lost");
+        else if (window.AppSessionHeartbeat && window.AppSessionHeartbeat.lastSuccessAtMs > 0) setState("ok");
+    }
+
     window.addEventListener("DOMContentLoaded", initWorkplaceTheme);
+    window.addEventListener("DOMContentLoaded", initConnectionIndicator);
     window.addEventListener("load", retireLegacySettlementPwa);
 }());

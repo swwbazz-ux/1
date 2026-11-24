@@ -97,3 +97,37 @@ test("clerk shell retires only the exact legacy settlement worker and caches", a
     assert.deepEqual(unregisterCalls, ["legacy-narrow", "legacy-root"]);
     assert.deepEqual(deletedCaches, ["settlement-clerk-shell-v1"]);
 });
+
+test("clerk connection indicator follows the authenticated heartbeat", () => {
+    const window = new EventTarget();
+    class CustomEvent extends Event {
+        constructor(type, options) {
+            super(type);
+            this.detail = options.detail;
+        }
+    }
+    const document = {
+        querySelector: () => null,
+        body: {dataset: {connectionState: "unknown"}},
+    };
+    vm.runInNewContext(source, {window, document, navigator: {onLine: true}, CustomEvent});
+    window.dispatchEvent(new Event("DOMContentLoaded"));
+
+    const signal = (type, detail) => window.dispatchEvent(new CustomEvent(type, {detail}));
+    const state = () => document.body.dataset.connectionState;
+    const heartbeat = {source: "application-session-heartbeat", status: 204};
+    signal("web-heartbeat-success", {...heartbeat, status: 200});
+    assert.equal(state(), "unknown");
+    signal("web-heartbeat-success", heartbeat);
+    assert.equal(state(), "ok");
+    signal("app:connectiondiagnostic", {owner: "web_heartbeat", cause: "planned_abort"});
+    assert.equal(state(), "ok");
+    signal("app:connectiondiagnostic", {owner: "web_heartbeat", cause: "timeout"});
+    assert.equal(state(), "lost");
+    window.dispatchEvent(new Event("online"));
+    assert.equal(state(), "weak");
+    signal("web-heartbeat-success", heartbeat);
+    assert.equal(state(), "ok");
+    window.dispatchEvent(new Event("offline"));
+    assert.equal(state(), "lost");
+});
