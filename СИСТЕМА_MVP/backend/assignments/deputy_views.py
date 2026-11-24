@@ -12,7 +12,8 @@ from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.gzip import gzip_page
-from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.cache import never_cache
+from django.views.decorators.http import require_GET, require_http_methods, require_POST, require_safe
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
@@ -45,15 +46,14 @@ from .crew_excel_import import (
     read_crew_excel,
 )
 from .models import (
-    AssignmentStatus,
     CrewPlan,
     CrewPlanStatus,
-    EquipmentAssignment,
     WorkShiftType,
 )
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
     CREW_SLOT_POSITION_SECONDARY,
+    crew_bookings_on_other_equipment,
     eligible_crew_employee_ids,
     employee_matches_work_role,
     get_or_create_crew_draft,
@@ -672,14 +672,6 @@ def build_crew_plan_payload(plan, *, deputy=None):
             'secondary_employee__contractor_organization',
             'reported_employee__personnel_position',
             'reported_employee__base_specialization',
-            'baseline_employee',
-            'baseline_employee__personnel_position',
-            'baseline_employee__work_schedule',
-            'baseline_employee__contractor_organization',
-            'baseline_secondary_employee',
-            'baseline_secondary_employee__personnel_position',
-            'baseline_secondary_employee__work_schedule',
-            'baseline_secondary_employee__contractor_organization',
         )
         .order_by('equipment__garage_number', 'shift_type')
     )
@@ -694,18 +686,8 @@ def build_crew_plan_payload(plan, *, deputy=None):
     secondary_eligible_employee_ids = _secondary_eligible_employee_ids(plan.role.code, eligible_employee_ids)
     all_eligible_employee_ids = eligible_employee_ids | secondary_eligible_employee_ids
     secondary_position_label = 'Стажёр' if plan.role.code == 'driver' else 'Помощник или стажёр'
-    other_role_assignment_employee_ids = set(
-        EquipmentAssignment.objects.filter(
-            employee_id__in=all_eligible_employee_ids,
-            status=AssignmentStatus.ACCEPTED,
-            ended_at__isnull=True,
-            shift__isnull=True,
-            role__isnull=False,
-            shift_type__in=WorkShiftType.values,
-        )
-        .exclude(role=plan.role)
-        .values_list('employee_id', flat=True)
-    )
+    other_bookings = {} if plan.status == CrewPlanStatus.SUPERSEDED else crew_bookings_on_other_equipment(plan)
+    other_role_assignment_employee_ids = set(other_bookings)
     editable = plan.status == CrewPlanStatus.DRAFT and plan.work_date == production_work_date()
     eligible_employees = []
     transfer_candidates = []
@@ -747,7 +729,8 @@ def build_crew_plan_payload(plan, *, deputy=None):
             employee for employee in employees_with_other_specialization if employee.pk not in transfer_pending_employee_ids
         ]
         factual_candidates = [
-            employee for employee in employees_with_other_specialization if employee.pk not in assigned_employee_ids
+            employee for employee in employees_with_other_specialization
+            if employee.pk not in assigned_employee_ids and employee.pk not in other_bookings
         ]
         current_watch_periods = list(
             WatchPeriod.objects.filter(
@@ -764,16 +747,6 @@ def build_crew_plan_payload(plan, *, deputy=None):
     payload_employee_ids = set(all_eligible_employee_ids) | assigned_employee_ids
     payload_employee_ids.update(employee.id for employee in transfer_candidates)
     payload_employee_ids.update(employee.id for employee in factual_candidates)
-    payload_employee_ids.update(slot.employee_id for slot in slots if slot.employee_id)
-    payload_employee_ids.update(
-        slot.secondary_employee_id for slot in slots if slot.secondary_employee_id
-    )
-    payload_employee_ids.update(slot.baseline_employee_id for slot in slots if slot.baseline_employee_id)
-    payload_employee_ids.update(
-        slot.baseline_secondary_employee_id
-        for slot in slots
-        if slot.baseline_secondary_employee_id
-    )
     extensions = approved_watch_extensions_on(plan.work_date, employee_ids=payload_employee_ids) if deputy else {}
     other_watch_employees = []
     if brigades != ALL_BRIGADES:
@@ -795,12 +768,26 @@ def build_crew_plan_payload(plan, *, deputy=None):
         eligible_employees = roster_employees
         transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
         factual_candidates = [employee for employee in factual_candidates if _in_deputy_roster(employee, brigades, extensions)]
-    presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
+    visible_ids = assigned_employee_ids | {employee.pk for employee in eligible_employees}
+    presence_by_employee = application_presence_by_employee_ids(visible_ids)
     reported_employees = {
         slot.reported_employee_id: slot.reported_employee for slot in slots if slot.reported_employee_id
     }
     reported_specializations = effective_specializations_by_employee_id(reported_employees.values())
     required_specialization = ', '.join(spec.name for spec in transfer_specializations) or plan.role.name
+
+    local_bookings = {}
+    repeated = {}
+    for slot in slots:
+        location = f'{slot.equipment.equipment_type.name} {slot.equipment.garage_number}, {slot.get_shift_type_display().lower()}'
+        for employee_id in (slot.employee_id, slot.secondary_employee_id, slot.reported_employee_id):
+            if not employee_id:
+                continue
+            if employee_id in local_bookings:
+                repeated[employee_id] = f'{local_bookings[employee_id]} / {location}'
+            else:
+                local_bookings[employee_id] = location
+    conflicting_bookings = {**other_bookings, **repeated}
 
     equipment_items = []
     seen_equipment_ids = set()
@@ -839,6 +826,11 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 other_role_assignment_employee_ids,
                 equipment=equipment,
             )
+            primary_booking = conflicting_bookings.get(slot.employee_id or slot.reported_employee_id)
+            if primary_booking:
+                issue = f'Уже в экипаже: {primary_booking}'
+            if slot.secondary_employee_id in conflicting_bookings:
+                secondary_issue = f'Уже в экипаже: {conflicting_bookings[slot.secondary_employee_id]}'
             if not equipment.is_active:
                 issue = issue or 'Техника недоступна'
                 secondary_issue = secondary_issue or (
@@ -1048,7 +1040,13 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 and current_watch_periods
             ),
             'candidates': [
-                _employee_payload(employee, presence=presence_by_employee.get(employee.id))
+                {
+                    'id': employee.pk,
+                    'full_name': employee.full_name,
+                    'position_label': employee.personnel_position.name if employee.personnel_position_id else employee.position,
+                    'contractor_label': str(employee.contractor_organization) if employee.contractor_organization_id else '',
+                    'contractor_access_until_label': employee.contractor_access_until.strftime('%d.%m.%Y') if employee.contractor_access_until else '',
+                }
                 for employee in transfer_candidates
             ],
             'target_specializations': [
@@ -1332,9 +1330,14 @@ def _deputy_crew_plan_filename(plan):
     return ascii_name, localized
 
 
-def deputy_mining_manager_placement_view(request):
+@never_cache
+@gzip_page
+@require_safe
+def deputy_mining_manager_placement_view(request, *, data_only=False):
     access = deputy_access_from_request(request)
     if not access:
+        if data_only:
+            return JsonResponse({'error': 'Требуется вход в приложение замначальника.'}, status=403)
         return redirect('role_home')
     role = _role_from_request(request)
     selected_date = _work_date_from_request(request)
@@ -1361,6 +1364,9 @@ def deputy_mining_manager_placement_view(request):
     if not plan:
         payload['categories'] = _crew_category_navigation(selected_date)
         payload['role'] = {'code': role.code, 'label': role.name}
+    if data_only:
+        return JsonResponse({'payload': payload, 'access_id': access.pk,
+                             'current_date': production_work_date().isoformat()})
     return render(
         request,
         'assignments/deputy_mining_manager_placement.html',

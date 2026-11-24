@@ -14,7 +14,8 @@
 
     <main class="admin-console-page deputy-planning-page" data-deputy-planning-root>
         <section class="deputy-planning-toolbar" aria-label="Управление расстановкой">
-            <nav class="deputy-category-nav" data-category-nav aria-label="Категории техники" hidden></nav>
+            <nav class="deputy-category-nav" data-category-nav data-placement-url="{% url 'deputy_mining_manager_placement_data' %}"
+                 data-access-id="{{ access.pk }}" data-current-date="{{ current_production_date|date:'Y-m-d' }}" aria-label="Категории техники" hidden></nav>
             <div class="deputy-planning-scope">
                 <div class="deputy-work-date" aria-label="Выбранные производственные сутки">
                     <span>Производственные сутки</span>
@@ -266,6 +267,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-crew-card" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-fast-tabs" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}
