@@ -9395,7 +9395,7 @@ class SettlementFrontendContractTests(TestCase):
         self.assertNotIn('status-{{ room.transfer_status }}', room_card_template)
         self.assertNotIn('settlement-room-state', room_card_template)
         self.assertIn('function isTransferredBed(bed)', javascript)
-        self.assertIn('root.addEventListener("dragenter"', javascript)
+        self.assertIn('root.addEventListener("dragover"', javascript)
         self.assertIn('!isTransferredBed(targetBed)', javascript)
         self.assertNotIn('data-status-filter', javascript)
         self.assertNotIn('status: "all"', javascript)

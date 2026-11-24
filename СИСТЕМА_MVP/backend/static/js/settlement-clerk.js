@@ -334,6 +334,18 @@
         );
     }
 
+    function syncBedDragHandle(bed) {
+        var dragHandle = bed.querySelector("[data-bed-photo-slot]");
+        if (!dragHandle) return;
+        if (controlHeld && bed.dataset.occupied === "true" && isTransferredBed(bed) && !bed.disabled) {
+            dragHandle.setAttribute("data-bed-drag-handle", "");
+            dragHandle.setAttribute("draggable", "true");
+        } else {
+            dragHandle.removeAttribute("data-bed-drag-handle");
+            dragHandle.removeAttribute("draggable");
+        }
+    }
+
     function renderMapBed(bed) {
         var occupied = bed.dataset.occupied === "true";
         var unavailable = !isTransferredBed(bed) || Boolean(bed.disabled);
@@ -347,24 +359,10 @@
         var person = bed.querySelector("[data-bed-person-label]");
         var status = bed.querySelector("[data-bed-status]");
         var shift = bed.querySelector("[data-bed-shift-badge]");
-        var dragHandle = bed.querySelector("[data-bed-photo-slot]");
-
         bed.dataset.bedState = unavailable ? "unavailable" : (occupied ? "occupied" : "free");
         bed.classList.toggle("is-occupied", occupied);
         bed.classList.toggle("is-free", !occupied);
-        bed.classList.remove("is-drag-source", "is-drop-target", "is-dragging");
-        if (dragHandle) {
-            dragHandle.classList.remove("is-dragging");
-            dragHandle.removeAttribute("aria-grabbed");
-            dragHandle.style.removeProperty("pointer-events");
-            if (controlHeld && occupied && !unavailable) {
-                dragHandle.setAttribute("data-bed-drag-handle", "");
-                dragHandle.setAttribute("draggable", "true");
-            } else {
-                dragHandle.removeAttribute("data-bed-drag-handle");
-                dragHandle.removeAttribute("draggable");
-            }
-        }
+        syncBedDragHandle(bed);
         if (avatar) {
             avatar.textContent = personInitials(bed.dataset.occupantName);
             avatar.hidden = !occupied;
@@ -644,7 +642,7 @@
 
     function updateAssignmentEndVisibility() {
         if (!assignmentEnd || !assignmentEndInput || !assignmentType) return;
-        var temporary = assignmentType.value === "temporary";
+        var temporary = !relocationSourceBed && assignmentType.value === "temporary";
         assignmentEnd.hidden = !temporary;
         assignmentEndInput.required = temporary;
         if (!temporary) assignmentEndInput.value = "";
@@ -1466,7 +1464,8 @@
     function updateSettleButton() {
         if (!settleButton) return;
         var temporaryNeedsEnd = (
-            assignmentType
+            !relocationSourceBed
+            && assignmentType
             && assignmentType.value === "temporary"
             && (!assignmentEndInput || !assignmentEndInput.value)
         );
@@ -1578,9 +1577,6 @@
         if (releaseButton) releaseButton.disabled = Boolean(!controlHeld || saving);
         autoSyncButtons();
         updateSettleButton();
-        root.querySelectorAll("[data-bed]").forEach(renderMapBed);
-        if (!controlHeld) clearDragState();
-        if (placementHint && settlementForm) updatePlacementPanel();
     }
 
     function setControlState(nextState, message) {
@@ -1590,6 +1586,7 @@
             busy: "Управление занято другим сотрудником",
             lost: "Связь с управлением потеряна"
         };
+        var previouslyHeld = controlHeld;
         controlState = labels[nextState] ? nextState : "lost";
         controlHeld = controlState === "held";
         root.dataset.controlState = controlState;
@@ -1597,6 +1594,11 @@
         if (controlPanel) controlPanel.dataset.controlState = controlState;
         if (controlStatus) controlStatus.textContent = labels[controlState];
         if (controlMessage) controlMessage.textContent = message || "";
+        if (previouslyHeld !== controlHeld) {
+            if (!controlHeld) clearDragState();
+            root.querySelectorAll("[data-bed]").forEach(syncBedDragHandle);
+            if (placementHint && settlementForm) updatePlacementPanel();
+        }
         syncControlInteractivity();
     }
 
@@ -1663,7 +1665,6 @@
 
     function scheduleHeartbeatRetry() {
         stopHeartbeatTimer();
-        controlHeld = false;
         if (heartbeatRetryCount >= heartbeatRetryDelays.length) {
             heartbeatRecoveryPending = false;
             setControlState(
@@ -2003,12 +2004,19 @@
     });
 
     var dragSourceBed = null;
+    var dropTargetBed = null;
+
+    function setDropTarget(bed) {
+        if (dropTargetBed === bed) return;
+        if (dropTargetBed) dropTargetBed.classList.remove("is-drop-target");
+        dropTargetBed = bed;
+        if (dropTargetBed) dropTargetBed.classList.add("is-drop-target");
+    }
 
     function clearDragState() {
-        root.querySelectorAll(".is-drag-source, .is-drop-target").forEach(function (bed) {
-            bed.classList.remove("is-drag-source", "is-drop-target");
-        });
+        if (dragSourceBed) dragSourceBed.classList.remove("is-drag-source");
         dragSourceBed = null;
+        setDropTarget(null);
     }
 
     root.addEventListener("dragstart", function (event) {
@@ -2026,31 +2034,24 @@
         event.dataTransfer.setData("application/x-settlement-bed", bed.dataset.bedId);
     });
 
-    root.addEventListener("dragenter", function (event) {
-        var bed = event.target.closest("[data-bed]");
-        if (bed && !isTransferredBed(bed)) {
-            bed.classList.remove("is-drop-target");
-        }
-    });
-
     root.addEventListener("dragover", function (event) {
+        if (!dragSourceBed) return;
         var bed = event.target.closest("[data-bed]");
         if (
             !controlHeld
-            || !dragSourceBed
             || !bed
             || bed === dragSourceBed
             || !isTransferredBed(bed)
             || bed.disabled
             || bed.dataset.occupied === "true"
             || bed.closest("[data-floor-section]").hidden
-        ) return;
+        ) {
+            setDropTarget(null);
+            return;
+        }
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
-        root.querySelectorAll(".is-drop-target").forEach(function (candidate) {
-            if (candidate !== bed) candidate.classList.remove("is-drop-target");
-        });
-        bed.classList.add("is-drop-target");
+        setDropTarget(bed);
     });
 
     root.addEventListener("drop", function (event) {

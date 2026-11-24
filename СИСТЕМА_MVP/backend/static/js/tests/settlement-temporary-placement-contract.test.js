@@ -159,18 +159,60 @@ test("failed state load is shown instead of an empty temporary list", () => {
     assert.match(JS, /clearDrawerMessage\("load"\)/);
 });
 
-test("cancelling the preparation form returns the settlement form", () => {
+test("panel visibility stabilizes after selecting a free bed or opening relocation", () => {
     const syncSource = JS.match(/function syncPanel\(\) \{[\s\S]*?\n    \}\n/)[0];
-    assert.match(syncSource, /function syncPanel|var bed = selectedBed\(\);/);
-    assert.match(syncSource, /setHidden\(prepBlock, true\)/);
-    assert.match(syncSource, /setHidden\(settlementForm, true\)/);
-    // Та же ветка, что у updatePlacementPanel: свободная койка переданной
-    // комнаты без подготовки и без открытой формы подготовки.
-    assert.match(
-        syncSource,
-        /else \{\s+\/\* Те же условия[\s\S]*?setHidden\(settlementForm, false\);/
-    );
-    assert.match(JS, /function closePreparationForm\(\) \{\s+captureDraft\(\);\s+state\.formOpen = false;\s+setHidden\(prepForm, true\);\s+setHidden\(prepExtendBlock, true\);\s+syncPanel\(\);/);
+    const setHiddenSource = JS.match(/function setHidden\(node, hidden\) \{[\s\S]*?\n    \}\n/)[0];
+    let writes = 0;
+    function control(initial) {
+        let hidden = initial;
+        return {
+            get hidden() { return hidden; },
+            set hidden(value) { writes++; hidden = value; },
+        };
+    }
+    const context = {
+        state: {formOpen: false, panelBedId: "some-bed", reserves: {}},
+        selectedBed: () => ({dataset: {bedId: "some-bed", occupied: "false"}}),
+        preparationForBed: () => null,
+        controlHeld: () => true,
+        isTransferredBed: () => true,
+        panel: {hidden: false},
+        captureDraft() {},
+        prepBlock: control(true),
+        prepActions: control(true),
+        reserveActions: control(true),
+        prepForm: control(true),
+        settlementForm: control(true),
+        prepExtendBlock: null,
+        prepExtendOpen: null,
+        prepExtendReasonInput: null,
+        prepExtendHoldInput: null,
+        reserveButton: null,
+    };
+    const sync = vm.runInNewContext(setHiddenSource + syncSource + "syncPanel", context);
+    sync();
+    assert.equal(context.prepActions.hidden, false);
+    assert.equal(context.settlementForm.hidden, false);
+    writes = 0;
+    sync();
+    assert.equal(writes, 0, "the observer's second pass must make no changes");
+
+    context.state.formOpen = true;
+    sync();
+    assert.equal(context.prepForm.hidden, false);
+    assert.equal(context.settlementForm.hidden, true);
+    context.state.formOpen = false;
+    sync();
+    assert.equal(context.settlementForm.hidden, false);
+
+    context.panel.hidden = true;
+    sync();
+    assert.equal(context.prepActions.hidden, true);
+    assert.equal(context.reserveActions.hidden, true);
+    assert.equal(context.settlementForm.hidden, false, "the relocated form belongs to the dialog");
+    writes = 0;
+    sync();
+    assert.equal(writes, 0);
 });
 
 test("relocation suggestion is shown for a temporary row", () => {

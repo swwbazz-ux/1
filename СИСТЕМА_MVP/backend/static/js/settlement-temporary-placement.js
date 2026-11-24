@@ -567,39 +567,26 @@
             if (prepExtendHoldInput) prepExtendHoldInput.value = "";
         }
 
-        setHidden(prepBlock, true);
-        setHidden(prepActions, true);
-        setHidden(reserveActions, true);
-        setHidden(prepForm, true);
+        var available = Boolean(bed && controlHeld() && isTransferredBed(bed) && (!panel || !panel.hidden));
+        var free = available && !preparation && bed.dataset.occupied !== "true";
+        if (!free) state.formOpen = false;
+        var showingForm = free && state.formOpen;
 
-        if (!bed || !controlHeld() || !isTransferredBed(bed)) {
-            state.formOpen = false;
-            return;
-        }
+        setHidden(prepBlock, !available || !preparation);
+        setHidden(prepActions, !free || showingForm);
+        setHidden(reserveActions, !available);
+        setHidden(prepForm, !showingForm);
+        if (!available) return;
 
         if (preparation) {
-            state.formOpen = false;
             renderPreparationBlock(preparation);
-            setHidden(prepBlock, false);
             setHidden(settlementForm, true);
             setHidden(occupiedActions, true);
-        } else if (bed.dataset.occupied === "true") {
-            state.formOpen = false;
-        } else {
-            setHidden(prepActions, false);
-            if (state.formOpen) {
-                setHidden(prepForm, false);
-                state.formBedId = bedId;
-                setHidden(settlementForm, true);
-            } else {
-                /* Те же условия, что у updatePlacementPanel в карте: свободная
-                   койка переданной комнаты при удержании управления. После
-                   «Отмена» в форме подготовки заселение снова доступно. */
-                setHidden(settlementForm, false);
-            }
+        } else if (free) {
+            if (showingForm) state.formBedId = bedId;
+            setHidden(settlementForm, showingForm);
         }
 
-        setHidden(reserveActions, false);
         if (reserveButton) {
             reserveButton.textContent = reserve ? "Снять резерв" : "В резерв";
             reserveButton.dataset.bedReserveMode = reserve ? "clear" : "set";
@@ -1444,9 +1431,8 @@
         }
     }, true);
 
-    /* Карта перерисовывает панель при каждой смене аренды и каждые heartbeat:
-       возвращаем блок подготовки и скрываем форму заселения на подготовленной
-       койке. Второй проход ничего не меняет и цикл останавливается. */
+    /* Обновление должно быть идемпотентным: наблюдатель также получает
+       изменения hidden, которые вносит syncPanel. */
     if (placementPanel && typeof window.MutationObserver === "function") {
         var observer = new window.MutationObserver(function () {
             syncPanel();
