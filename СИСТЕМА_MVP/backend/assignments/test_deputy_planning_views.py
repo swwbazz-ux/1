@@ -247,6 +247,21 @@ class DeputyPlanningViewTests(TestCase):
         self.assertContains(clear, 'Расстановка опубликована')
         self.assertFalse(CrewPlan.objects.filter(role=plan.role, status=CrewPlanStatus.PUBLISHED, slots__reported_employee=self.driver).exists())
 
+    def test_reported_truck_driver_has_no_operational_grant(self):
+        person = Employee.objects.create(full_name='Тестовый водитель без специализации', status=Employee.Status.ACTIVE)
+        response = self.client.post(reverse('deputy_mining_manager_import'), {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', self.crew_excel_bytes([
+                ['Самосвал', self.truck_2.garage_number, person.full_name, None],
+            ])),
+        })
+        self.assertContains(response, 'Расстановка опубликована')
+        slot = CrewPlanSlot.objects.get(plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person)
+        self.assertEqual(slot.equipment, self.truck_2)
+        self.assertIsNone(slot.employee_id)
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
+        self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
+
     def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
         response = self.upload_crew_excel([
             ['Самосвал', self.truck_1.garage_number, 'Снять', None],

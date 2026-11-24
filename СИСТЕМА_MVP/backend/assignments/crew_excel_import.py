@@ -214,7 +214,7 @@ def _stage_plan(plan, slots, records, names, actor, *, factual=False):
                         if not (
                             factual and error.code == 'invalid_work_category'
                             and position == CREW_SLOT_POSITION_PRIMARY
-                            and plan.role.code in AUXILIARY_CATEGORIES
+                            and (plan.role.code == 'driver' or plan.role.code in AUXILIARY_CATEGORIES)
                         ):
                             raise
                         reported_id = employee.pk
