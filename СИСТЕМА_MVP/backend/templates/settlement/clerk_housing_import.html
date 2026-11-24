@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v10">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v11">
 {% endblock %}
 
 {% block clerk_content %}
@@ -90,7 +90,7 @@
                                 <li id="housing-row-{{ row.source|slugify }}">
                                     <div class="housing-import__person">
                                         <strong>{{ row.name }}</strong>
-                                        <small>{{ row.category_label }}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
+                                        <small>{% if row.external_label %}{{ row.external_label }}{% else %}{{ row.category_label }}{% endif %}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
                                     </div>
                                     <div>
                                         {% if row.reviewed_place %}
@@ -148,5 +148,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v10" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v11" defer></script>
 {% endblock %}

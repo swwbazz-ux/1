@@ -290,6 +290,61 @@
         if (submitter && selectedBed?.bed.status === 'free') form.requestSubmit(submitter);
     });
 
+    async function findHousingIdentity(panel) {
+        const query = panel.querySelector('[data-identity-query]').value.trim();
+        const status = panel.querySelector('[data-identity-status]');
+        const results = panel.querySelector('[data-identity-results]');
+        const search = panel.querySelector('[data-find-housing-identity]');
+        results.replaceChildren();
+        if (query.length < 2) {
+            status.textContent = 'Введите хотя бы две буквы фамилии.';
+            return;
+        }
+        const source = panel.closest('[data-housing-review-source]').dataset.housingReviewSource;
+        const url = new URL(window.location.href);
+        url.search = new URLSearchParams({
+            identity_search: query,
+            revision: main.querySelector('[name="draft_revision"]').value,
+        });
+        search.disabled = true;
+        status.textContent = 'Ищем в справочнике и карточках жильцов…';
+        try {
+            const response = await fetch(url, {cache: 'no-store'});
+            if (response.redirected) throw new Error('Войдите в приложение заново.');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message);
+            for (const person of data.results) {
+                const item = document.createElement('li');
+                const button = document.createElement('button');
+                button.type = 'submit';
+                button.name = 'review_action';
+                button.value = 'identify:' + source;
+                button.setAttribute('form', form.id);
+                button.dataset.identitySubject = person.id;
+                button.append(element('strong', person.name));
+                button.append(element('span', [person.kind, person.details].filter(Boolean).join(' · ')));
+                item.append(button);
+                results.append(item);
+            }
+            status.textContent = data.results.length ? '' : 'Совпадений нет. Попробуйте поискать только по фамилии.';
+        } catch (error) {
+            status.textContent = error instanceof SyntaxError || error instanceof TypeError
+                ? 'Не удалось выполнить поиск. Попробуйте ещё раз.' : error.message;
+        } finally {
+            search.disabled = false;
+        }
+    }
+
+    main.addEventListener('click', event => {
+        const search = event.target.closest('[data-find-housing-identity]');
+        if (search && !busy) findHousingIdentity(search.closest('[data-housing-identity-search]'));
+    });
+    main.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || !event.target.matches('[data-identity-query]')) return;
+        event.preventDefault();
+        event.target.closest('[data-housing-identity-search]').querySelector('[data-find-housing-identity]').click();
+    });
+
     initReviewQueue();
 
     form.addEventListener('change', event => {
@@ -299,7 +354,7 @@
     });
 
     main.addEventListener('keydown', event => {
-        if (event.key !== 'Enter' || !event.target.matches('.housing-import__review-fields input')) return;
+        if (event.key !== 'Enter' || !event.target.matches('.housing-import__review-fields input[type="date"]')) return;
         event.preventDefault();
         form.requestSubmit(event.target.closest('.housing-import__review-fields').querySelector('button'));
     });
@@ -315,6 +370,11 @@
         const data = new FormData(form);
         data.set('action', action);
         if (reviewAction) data.set('review_action', event.submitter.value);
+        if (event.submitter?.dataset.identitySubject) data.set('review_subject', event.submitter.dataset.identitySubject);
+        const savingExternal = reviewAction && event.submitter.value.startsWith('external:');
+        for (const key of [...data.keys()]) {
+            if (key.startsWith('external_') && (!savingExternal || !key.endsWith(':' + source))) data.delete(key);
+        }
         const moving = reviewAction && event.submitter.value.startsWith('move:');
         let mapStale = false;
         if (moving) {
@@ -362,7 +422,16 @@
                 dialog.close();
                 if (queueState) queueState.focus();
                 else result.focus();
-            } else if (rowError) rowError.focus();
+            } else if (rowError) {
+                if (savingExternal) {
+                    const editor = rowError.closest('[data-housing-review-source]').querySelector('[data-housing-external]');
+                    if (editor) {
+                        editor.open = true;
+                        for (const input of editor.querySelectorAll('input, select')) input.value = data.get(input.name) || '';
+                    }
+                }
+                rowError.focus();
+            }
             else if (reviewAction && queueState && !result.querySelector('[role="alert"]')) queueState.focus();
             else result.focus({preventScroll: false});
             feedback.textContent = '';

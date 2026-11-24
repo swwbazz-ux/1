@@ -110,26 +110,19 @@
                                             {% if review_error and row.source == review_source %}
                                                 <p class="housing-review__error" tabindex="-1">{{ review_error }}</p>
                                             {% endif %}
-                                            {% if draft and row.review_identity or draft and row.review_dates %}
+                                            {% if draft and row.review_identity %}
+                                                {% include "settlement/_housing_review_identity.html" %}
+                                            {% endif %}
+                                            {% if draft and row.review_dates %}
                                                 <div class="housing-import__review-fields">
-                                                    {% if row.review_identity %}
-                                                        <label>Табельный номер
-                                                            <input type="text" name="personnel_number:{{ row.source }}" maxlength="64" form="housing-import-form">
-                                                        </label>
-                                                    {% endif %}
-                                                    {% if row.review_dates %}
-                                                        <label>Дата заезда
-                                                            <input type="date" name="starts:{{ row.source }}" value="{{ row.starts|date:'Y-m-d' }}" form="housing-import-form">
-                                                        </label>
-                                                        <label>Дата выезда
-                                                            <input type="date" name="ends:{{ row.source }}" value="{{ row.ends|date:'Y-m-d' }}" form="housing-import-form">
-                                                        </label>
-                                                    {% endif %}
-                                                    <button type="submit" name="review_action" value="edit:{{ row.source }}" form="housing-import-form" class="housing-review__primary">
-                                                        {% if row.review_identity and row.review_dates %}Проверить сотрудника и даты{% elif row.review_identity %}Найти по табельному{% else %}Проверить даты{% endif %}
-                                                    </button>
+                                                    <label>Дата заезда
+                                                        <input type="date" name="starts:{{ row.source }}" value="{{ row.starts|date:'Y-m-d' }}" form="housing-import-form">
+                                                    </label>
+                                                    <label>Дата выезда
+                                                        <input type="date" name="ends:{{ row.source }}" value="{{ row.ends|date:'Y-m-d' }}" form="housing-import-form">
+                                                    </label>
+                                                    <button type="submit" name="review_action" value="edit:{{ row.source }}" form="housing-import-form" class="housing-review__primary">Проверить даты</button>
                                                 </div>
-                                                {% if row.review_identity %}<p>Если карточки сотрудника ещё нет, отложите строку до уточнения в ОУП.</p>{% endif %}
                                             {% endif %}
                                             {% if draft %}
                                                 <div class="housing-review__actions">

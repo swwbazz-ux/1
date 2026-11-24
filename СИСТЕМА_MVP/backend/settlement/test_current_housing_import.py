@@ -221,6 +221,87 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(SettlementResident.objects.count(), 4)
         self.assertEqual(SettlementPlacementEvent.objects.count(), 2)
 
+    def test_choose_other_department_employee_by_name_without_personnel_number(self):
+        person = self.workers[0]
+        person.department = 'Горный участок № 1'
+        person.save(update_fields=['department'])
+        self.use_clerk_session()
+        url = reverse('settlement_current_housing_import')
+        self.submit(self.upload([
+            (1, '01А-1', person, False, self.ends),
+        ], edits={'J3': 'Иванов И.И.'}).read())
+        params = {'identity_search': 'иванов', 'revision': self.draft_revision}
+        self.assertEqual(self.client.get(url, {**params, 'revision': 'old'}).status_code, 409)
+        matches = self.client.get(url, params).json()['results']
+        self.assertIn({
+            'id': f'employee:{person.pk}', 'name': person.full_name,
+            'details': 'Горный участок № 1 · Рабочая должность QA', 'kind': 'Сотрудник',
+        }, matches)
+        reply = self.submit(review_action='identify:КИС 5!J3', review_subject=f'employee:{person.pk}')
+        self.assertEqual(reply.context['applicable_count'], 1)
+        self.assertFalse(SettlementResident.objects.filter(employee=person).exists())
+
+    def test_external_housing_uses_existing_guest_and_creates_contractor_on_apply(self):
+        guest = SettlementResident.objects.create(
+            resident_type='BUSINESS_TRIP', full_name='Гостев Гость Гостевич',
+            organization='Горный участок № 1', phone='+79005550111', position_title='Руководитель',
+            external_sex='male', created_by_access=self.access,
+        )
+        self.use_clerk_session()
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (1, '01А-2', self.workers[1], False, self.ends),
+        ], edits={'J3': 'Гостев Гость Гостевич', 'J4': 'Подрядов Петр Петрович'}).read())
+        url = reverse('settlement_current_housing_import')
+        hits = self.client.get(url, {'identity_search': 'гостев', 'revision': self.draft_revision}).json()['results']
+        self.assertEqual(hits[0]['id'], f'resident:{guest.pk}')
+        self.submit(review_action='identify:КИС 5!J3', review_subject=f'resident:{guest.pk}')
+        fields = {
+            'resident_type': 'CONTRACTOR', 'full_name': 'Подрядов Петр Петрович',
+            'organization': 'Подрядная организация', 'position_title': 'Монтажник',
+            'phone': '+79005550112', 'sex': 'male',
+        }
+        reply = self.submit(review_action='external:КИС 5!J4', **{
+            f'external_{field}:КИС 5!J4': value for field, value in fields.items()
+        })
+        self.assertEqual(reply.context['applicable_count'], 2)
+        self.assertFalse(SettlementResident.objects.filter(resident_type='CONTRACTOR').exists())
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            applied = self.submit(action='apply', receipt=reply.context['receipt'])
+            self.assertEqual(applied.context['application'], {'placed': 2, 'residents': 1}, applied.context)
+            reopened = self.client.get(url)
+            self.assertEqual(
+                [row.reviewed_resident.resident_type for group in reopened.context['report_groups']
+                 if group['code'] == 'existing' for row in group['rows']],
+                ['BUSINESS_TRIP', 'CONTRACTOR'],
+            )
+        contractor = SettlementResident.objects.get(resident_type='CONTRACTOR')
+        self.assertIsNone(contractor.employee_id)
+        self.assertEqual(EmployeeBedOccupancy.objects.get(resident=guest).physical_bed.stable_id, 'KIS5-F1-R01-A1')
+        self.assertEqual(EmployeeBedOccupancy.objects.get(resident=contractor).physical_bed.stable_id, 'KIS5-F1-R01-A2')
+
+    def test_existing_external_card_cannot_be_created_again_from_excel(self):
+        self.use_clerk_session()
+        SettlementResident.objects.create(
+            resident_type='BUSINESS_TRIP', full_name='Гостев Гость Гостевич',
+            organization='Горный участок № 1', phone='+79005550111', position_title='Руководитель',
+            external_sex='male', created_by_access=self.access,
+        )
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+        ], edits={'J3': 'Гостев Гость Гостевич'}).read())
+        response = self.submit(review_action='external:КИС 5!J3', **{
+            'external_resident_type:КИС 5!J3': 'BUSINESS_TRIP',
+            'external_full_name:КИС 5!J3': 'гостев гость гостевич',
+            'external_organization:КИС 5!J3': 'горный участок № 1',
+            'external_phone:КИС 5!J3': '+79005550111',
+            'external_position_title:КИС 5!J3': 'Руководитель',
+            'external_sex:КИС 5!J3': 'male',
+        })
+        self.assertContains(response, 'Такая карточка уже есть')
+        self.assertEqual(SettlementResident.objects.filter(resident_type='BUSINESS_TRIP').count(), 1)
+
     def test_map_tooltip_shows_imported_shift_and_the_field_for_each_personnel_category(self):
         self.use_clerk_session()
         payload = self.upload([

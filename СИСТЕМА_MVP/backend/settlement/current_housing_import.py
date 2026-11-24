@@ -29,7 +29,7 @@ from .models import (
     SettlementPlacementEvent, SettlementResident,
 )
 from .personnel_categories import employee_settlement_category
-from .residents import get_or_create_employee_resident
+from .residents import create_external_resident, get_or_create_employee_resident
 from .room_sex import resident_sex
 from .services import (
     _create_occupancy, _locked_related_occupancies, _validate_occupancy_conflicts,
@@ -135,6 +135,10 @@ class HousingRow:
     excel_place: str = ''
     employee_id: int | None = None
     reviewed_employee: Employee | None = None
+    reviewed_resident: SettlementResident | None = None
+    external_draft: dict = field(default_factory=dict)
+    sex: str = ''
+    applied_resident_id: int | None = None
     match_identity: int | str = ''
     reviewed: bool = False
     confirmed_in_review: bool = False
@@ -149,6 +153,22 @@ class HousingRow:
     category: str = ''
     needs_resident: bool = False
     status: str = ''
+
+    @property
+    def placement_subject(self):
+        if self.reviewed_resident:
+            return f'resident:{self.reviewed_resident.pk}'
+        if self.external_draft:
+            return _external_draft_subject(self.external_draft)
+        return self.employee_id
+
+    @property
+    def external_label(self):
+        if self.reviewed_resident:
+            return self.reviewed_resident.get_resident_type_display()
+        if self.external_draft:
+            return SettlementResident.ResidentType(self.external_draft['resident_type']).label
+        return ''
 
     @property
     def category_label(self):
@@ -465,7 +485,7 @@ def _excel_conflicts(rows, as_of, workbook_end):
             row.date_sources['start'] = 'snapshot_date'
         if not row.name_key:
             row.review_identity = True
-            row.issues.append('Уточните ФИО в Excel.')
+            row.issues.append('Уточните ФИО жильца.')
         if row.invalid_excel_dates:
             row.issues.append('Дата проживания в Excel не распознана.')
 
@@ -558,8 +578,8 @@ def housing_review_map(groups, row, as_of):
 
     def bed_payload(bed, room_available):
         live = occupancies[bed.pk]
-        already_here = bool(live) and row.employee_id and all(
-            occupancy.resident.employee_id == row.employee_id
+        already_here = bool(live) and row.placement_subject and all(
+            _occupancy_subject(occupancy) == row.placement_subject
             and occupancy.starts_at <= start
             and (finish is None or finish >= end)
             and occupancy.work_shift == WORK_SHIFTS.get(row.shift)
@@ -631,13 +651,17 @@ def _add_map_match(row, occupancy, begins, finishes):
         row.review_map_matches.append(match)
 
 
-def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee_occupancies, room_occupancies):
+def _occupancy_subject(occupancy):
+    return occupancy.resident.employee_id or f'resident:{occupancy.resident_id}'
+
+
+def _check_occupancy(row, bed, starts, ends, bed_occupancies, subject_occupancies, room_occupancies):
     same = False
     for occupancy in bed_occupancies:
         begins, finishes = _occupied_interval(occupancy)
         if not intervals_overlap(starts, ends, begins, finishes):
             continue
-        if not employee or occupancy.resident.employee_id != employee.pk:
+        if _occupancy_subject(occupancy) != row.placement_subject:
             row.issues.append(OCCUPIED_BED_CONFLICT)
             _add_map_match(row, occupancy, begins, finishes)
             continue
@@ -647,26 +671,84 @@ def _check_occupancy(row, bed, employee, starts, ends, bed_occupancies, employee
         else:
             row.issues.append(BED_PERIOD_CONFLICT)
             _add_map_match(row, occupancy, begins, finishes)
-    for occupancy in employee_occupancies:
+    for occupancy in subject_occupancies:
         begins, finishes = _occupied_interval(occupancy)
         if occupancy.physical_bed_id != bed.pk and intervals_overlap(starts, ends, begins, finishes):
             row.issues.append(OTHER_BED_CONFLICT)
             _add_map_match(row, occupancy, begins, finishes)
-    if employee:
+    if row.sex:
         for occupancy in room_occupancies:
             resident = occupancy.resident
-            if resident.employee_id == employee.pk or not intervals_overlap(starts, ends, *_occupied_interval(occupancy)):
+            if _occupancy_subject(occupancy) == row.placement_subject or not intervals_overlap(starts, ends, *_occupied_interval(occupancy)):
                 continue
-            if resident_sex(resident) != employee.sex:
+            if resident_sex(resident) != row.sex:
                 row.issues.append(LIVE_ROOM_SEX_CONFLICT)
     row.issues = list(dict.fromkeys(row.issues))
     return same
+
+
+def _external_draft_subject(values):
+    key = f"{_name_key(values['full_name'])}|{_name_key(values['organization'])}"
+    return f"external:{sha256(key.encode()).hexdigest()}"
+
+
+def external_housing_card_exists(values):
+    # Also detect archived cards so that the clerk can restore one instead of duplicating it.
+    name = _name_key(values['full_name'])
+    organization = _name_key(values['organization'])
+    phone = re.sub(r'\D', '', values['phone'])
+    return any(
+        _name_key(card_name) == name and (
+            _name_key(card_org) == organization or (phone and re.sub(r'\D', '', card_phone) == phone)
+        )
+        for card_name, card_org, card_phone in SettlementResident.objects.filter(employee_id__isnull=True)
+        .values_list('full_name', 'organization', 'phone').iterator()
+    )
+
+
+def search_housing_subjects(query):
+    """Search the directory across departments and the existing external cards."""
+    tokens = _name_key(query).split()
+    if sum(map(len, tokens)) < 2 or len(query) > 100:
+        return []
+    employees = Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE).order_by(
+        'full_name', 'pk',
+    ).values_list('pk', 'full_name', 'personnel_department__name', 'department',
+                  'personnel_position__name', 'position', 'personnel_number')
+    cards = SettlementResident.objects.filter(employee_id__isnull=True, status='ACTIVE').order_by(
+        'full_name', 'pk',
+    ).values_list('pk', 'full_name', 'organization', 'position_title', 'resident_type')
+    def relevance(full_name):
+        name = _name_key(full_name)
+        surname = name.split(' ', 1)[0]
+        if name == ' '.join(tokens):
+            return 0
+        if surname == tokens[0]:
+            return 1
+        return 2 if surname.startswith(tokens[0]) else 3
+
+    results = []
+    for pk, name, directory_department, department, directory_position, position, personnel_number in employees.iterator():
+        details = ' · '.join(filter(None, (directory_department or department, directory_position or position)))
+        if all(token in _name_key(f'{name} {details} {personnel_number or ""}') for token in tokens):
+            results.append({'id': f'employee:{pk}', 'name': name, 'details': details, 'kind': 'Сотрудник'})
+    for pk, name, organization, position, resident_type in cards.iterator():
+        details = ' · '.join(filter(None, (organization, position)))
+        if all(token in _name_key(f'{name} {details}') for token in tokens):
+            results.append({
+                'id': f'resident:{pk}', 'name': name, 'details': details,
+                'kind': SettlementResident.ResidentType(resident_type).label,
+            })
+    return sorted(results, key=lambda item: relevance(item["name"]))[:24]
 
 
 def _apply_review_decisions(rows, review):
     excluded = {source for decision in review.values() for source in decision.get('peers', ())}
     employees = Employee.objects.select_related('personnel_position', 'settlement_resident').in_bulk(
         [decision['employee_id'] for decision in review.values() if 'employee_id' in decision],
+    )
+    residents = SettlementResident.objects.filter(employee_id__isnull=True, status='ACTIVE').in_bulk(
+        [decision['resident_id'] for decision in review.values() if 'resident_id' in decision],
     )
     for row in rows:
         decision = review.get(row.source, {})
@@ -685,6 +767,21 @@ def _apply_review_decisions(rows, review):
                 row.name_key = _name_key(row.name)
             else:
                 row.issues.append('Выбранная карточка сотрудника больше недоступна.')
+        elif 'resident_id' in decision:
+            row.reviewed_resident = residents.get(decision['resident_id'])
+            if row.reviewed_resident:
+                row.name = row.reviewed_resident.full_name
+                row.name_key = _name_key(row.name)
+            else:
+                row.issues.append('Выбранная карточка жильца больше недоступна.')
+                row.review_identity = True
+        elif 'external' in decision:
+            row.external_draft = decision['external']
+            row.name = row.external_draft['full_name']
+            row.name_key = _name_key(row.name)
+            if external_housing_card_exists(row.external_draft):
+                row.issues.append('Такая карточка жильца уже есть. Найдите её по ФИО или восстановите из архива.')
+                row.review_identity = True
         for field in ('starts', 'ends'):
             if field in decision:
                 setattr(row, field, date.fromisoformat(decision[field]))
@@ -706,7 +803,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
     for row in rows:
         matches = roster.get(row.name_key, ())
         employee = row.reviewed_employee or (matches[0] if len(matches) == 1 else None)
-        row.match_identity = employee.pk if employee else row.name_key
+        row.match_identity = row.placement_subject or (employee.pk if employee else row.name_key)
     rooms = defaultdict(list)
     rooms_by_id = {}
     for room in _housing_rooms().select_related('dormitory'):
@@ -738,13 +835,15 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
     selected_day_start, selected_day_end = production_day_bounds(as_of)
     held_beds, reserved_beds = _housing_bed_restrictions(room_ids, selected_day_start, selected_day_end)
     candidates = [row for row in rows if not row.status and not row.other_room and row.ends and row.starts <= as_of < row.ends]
-    bed_use, room_use, employee_use = defaultdict(list), defaultdict(list), defaultdict(list)
+    bed_use, room_use, subject_use = defaultdict(list), defaultdict(list), defaultdict(list)
     if candidates:
         first, _ = production_day_bounds(min(row.starts for row in candidates))
         last, _ = production_day_bounds(max(row.ends for row in candidates))
         employee_ids = [person.pk for people in roster.values() for person in people]
+        external_ids = [row.reviewed_resident.pk for row in candidates if row.reviewed_resident]
         relevant = EmployeeBedOccupancy.objects.filter(
-            Q(physical_bed__room_id__in=room_ids) | Q(resident__employee_id__in=employee_ids),
+            Q(physical_bed__room_id__in=room_ids) | Q(resident__employee_id__in=employee_ids)
+            | Q(resident_id__in=external_ids),
             Q(ends_at__isnull=True) | Q(ends_at__gt=first),
             Q(terminated_at__isnull=True) | Q(terminated_at__gt=first),
             replaced_by_application__isnull=True, replaced_by_occupancy__isnull=True, starts_at__lt=last,
@@ -755,7 +854,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
                 continue
             bed_use[occupancy.physical_bed_id].append(occupancy)
             room_use[occupancy.physical_bed.room_id].append(occupancy)
-            employee_use[occupancy.resident.employee_id].append(occupancy)
+            subject_use[_occupancy_subject(occupancy)].append(occupancy)
 
     matched_rooms = defaultdict(list)
     already_placed = set()
@@ -779,18 +878,23 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             row.issues.append(ROOM_ANCHORED)
 
         people = [row.reviewed_employee] if row.reviewed_employee else roster[row.name_key]
+        if row.external_label:
+            people = []
+            row.needs_resident = bool(row.external_draft)
+            row.sex = row.reviewed_resident.external_sex if row.reviewed_resident else row.external_draft['sex']
         employee = people[0] if len(people) == 1 else None
         if len(people) > 1:
             row.review_identity = True
-            row.issues.append('По ФИО найдено несколько карточек. Нужен табельный номер.')
+            row.issues.append('По ФИО найдено несколько карточек. Выберите человека по подразделению или должности.')
         elif employee and not (employee.is_active and employee.status == Employee.Status.ACTIVE):
             row.issues.append('Карточка сотрудника неактивна.')
             employee = None
-        elif row.name_key and not employee:
+        elif row.name_key and not employee and not row.external_label:
             row.review_identity = True
-            row.issues.append('Точное ФИО не найдено в справочнике сотрудников.')
+            row.issues.append('По этому ФИО нет точного совпадения. Найдите человека или оформите карточку жильца.')
         if employee:
             row.employee_id = employee.pk
+            row.sex = employee.sex
             resident = getattr(employee, 'settlement_resident', None)
             row.needs_resident = resident is None
             if resident and resident.status != SettlementResident.Status.ACTIVE:
@@ -801,15 +905,15 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
         if bed and not row.other_room and row.ends and row.starts <= as_of < row.ends:
             starts, _ = production_day_bounds(row.starts)
             ends, _ = production_day_bounds(row.ends)
-            if employee:
-                matched_rooms[room.pk].append((row, employee))
-            if _check_occupancy(row, bed, employee, starts, ends, bed_use[bed.pk],
-                                employee_use[employee.pk] if employee else (), room_use[room.pk]):
+            if row.sex:
+                matched_rooms[room.pk].append(row)
+            if _check_occupancy(row, bed, starts, ends, bed_use[bed.pk],
+                                subject_use[row.placement_subject], room_use[room.pk]):
                 already_placed.add(row.source)
 
     for entries in matched_rooms.values():
-        sexes = {employee.sex for _, employee in entries if employee.sex in (Employee.Sex.MALE, Employee.Sex.FEMALE)}
-        for row, _ in entries:
+        sexes = {row.sex for row in entries if row.sex in (Employee.Sex.MALE, Employee.Sex.FEMALE)}
+        for row in entries:
             if len(sexes) > 1:
                 row.issues.append(DRAFT_ROOM_SEX_CONFLICT)
 
@@ -891,18 +995,27 @@ def housing_review_cases(conflicts):
 def preview_placements(groups):
     """Identify the exact people and beds the clerk saw in the preview."""
     return {
-        row.source: [row.employee_id, row.physical_bed_id]
+        row.source: [row.placement_subject, row.physical_bed_id]
         for group in APPLICABLE_GROUPS for row in groups[group]
     }
 
 
-def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
+def _import_one_placement(row, *, bed, actor, control, workbook_digest, moment, using):
     starts, _ = production_day_bounds(row.starts)
     ends, _ = production_day_bounds(row.ends)
     if not starts <= moment < ends:
         raise ValidationError('Период строки не действует на момент применения.')
 
-    resident, created = get_or_create_employee_resident(employee_id=row.employee_id, using=using)
+    created = False
+    if row.reviewed_resident:
+        resident = row.reviewed_resident
+    elif row.external_draft:
+        if external_housing_card_exists(row.external_draft):
+            raise ValidationError('Карточка жильца уже есть. Выберите её по ФИО.')
+        resident = create_external_resident(**row.external_draft, control_context=control, using=using)
+        created = True
+    else:
+        resident, created = get_or_create_employee_resident(employee_id=row.employee_id, using=using)
     assignment_type = EmployeeBedOccupancy.AssignmentType.TEMPORARY
     source = f'Подтверждено при загрузке текущего расселения из Excel, {row.source}'
     # The locked preview checks the transfer, anchors, reserves and holds. This
@@ -942,6 +1055,7 @@ def _import_one_placement(row, *, bed, actor, workbook_digest, moment, using):
             'bed_selected_by_clerk': bool(row.reviewed_bed_id),
         },
     )
+    row.applied_resident_id = resident.pk
     return created
 
 
@@ -968,7 +1082,7 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
     using = DEFAULT_DB_ALIAS
     lease = lock_settlement_write_lease(control_context=control, using=using)
     employee_ids = tuple(Employee.objects.filter(
-        pk__in={employee_id for employee_id, _ in confirmed.values()},
+        pk__in={subject for subject, _ in confirmed.values() if isinstance(subject, int)},
     ).order_by('pk').values_list('pk', flat=True))
     locked = lock_settlement_write_access(
         lease=lease, control_context=control, employee_ids=employee_ids, using=using,
@@ -977,6 +1091,12 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
         pk__in=Employee.objects.filter(pk__in=employee_ids).values('personnel_position_id'),
     ).order_by('pk'))
     actor = locked.access_by_id(control.owner_access_id)
+
+    external_ids = {
+        int(subject.removeprefix('resident:')) for subject, _ in confirmed.values()
+        if isinstance(subject, str) and subject.startswith('resident:')
+    }
+    list(SettlementResident.objects.select_for_update(of=('self',)).filter(pk__in=external_ids).order_by('pk'))
 
     # Housing-fund edits take the dormitory lock in their own service.
     list(Dormitory.objects.select_for_update().filter(number__in=['5', '6']).order_by('pk'))
@@ -991,14 +1111,14 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
     moment = timezone.now()
     for group in APPLICABLE_GROUPS:
         for row in groups[group]:
-            if confirmed.get(row.source) != [row.employee_id, row.physical_bed_id]:
+            if confirmed.get(row.source) != [row.placement_subject, row.physical_bed_id]:
                 row.issues.append('Строка изменилась после предпросмотра. Проверьте Excel повторно.')
             else:
                 try:
                     # A rejected row must not leave a newly created resident by itself.
                     with transaction.atomic():
                         created_count += _import_one_placement(
-                            row, bed=beds[row.physical_bed_id], actor=actor,
+                            row, bed=beds[row.physical_bed_id], actor=actor, control=control,
                             workbook_digest=workbook_digest, moment=moment, using=using,
                         )
                 except ValidationError as error:

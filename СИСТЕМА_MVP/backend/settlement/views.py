@@ -68,10 +68,12 @@ from .current_housing_import import (
     MAX_FILE_SIZE,
     apply_current_housing,
     build_current_housing_preview,
+    external_housing_card_exists,
     housing_review_cases,
     housing_review_map,
     parse_current_housing_workbook,
     preview_placements,
+    search_housing_subjects,
 )
 from .fund import (
     close_dormitory as close_fund_dormitory,
@@ -387,6 +389,39 @@ CURRENT_HOUSING_GROUPS = (
 )
 
 
+def _housing_identity_choice(request, row, decision, command):
+    # Exactly one source of identity per row, while retaining its place and dates.
+    identity = {key: value for key, value in decision.items() if key not in ('employee_id', 'resident_id', 'external')}
+    if command == 'external':
+        values = _validated_external_resident_fields({
+            key: request.POST.get(f'external_{key}:{row.source}', '')
+            for key in ('resident_type', 'full_name', 'position_title', 'organization', 'phone', 'sex')
+        })
+        if values['resident_type'] not in (SettlementResident.ResidentType.CONTRACTOR,
+                                          SettlementResident.ResidentType.BUSINESS_TRIP):
+            raise ValidationError('Выберите «Командированный» или «Сотрудник подрядчика».')
+        for field in ('full_name', 'position_title', 'organization', 'phone'):
+            if len(values[field]) > SettlementResident._meta.get_field(field).max_length:
+                raise ValidationError('Проверьте длину полей карточки жильца.')
+        if not any(char.isdigit() for char in values['phone']):
+            raise ValidationError('Укажите контактный телефон жильца.')
+        if external_housing_card_exists(values):
+            raise ValidationError('Такая карточка уже есть. Найдите её по ФИО или восстановите из архива.')
+        return {**identity, 'external': values}
+
+    kind, _, pk = request.POST.get('review_subject', '').partition(':')
+    subject_id = forms.IntegerField(min_value=1, max_value=2**63 - 1).clean(pk)
+    if kind == 'employee' and Employee.objects.filter(
+        pk=subject_id, is_active=True, status=Employee.Status.ACTIVE,
+    ).exists():
+        return {**identity, 'employee_id': subject_id}
+    if kind == 'resident' and SettlementResident.objects.filter(
+        pk=subject_id, employee_id__isnull=True, status=SettlementResident.Status.ACTIVE,
+    ).exists():
+        return {**identity, 'resident_id': subject_id}
+    raise ValidationError('Карточка больше недоступна. Выполните поиск заново.')
+
+
 def _housing_review_choice(request, groups, review, as_of):
     command, _, source = request.POST['review_action'].partition(':')
     if command == 'undo' and source in review:
@@ -420,6 +455,8 @@ def _housing_review_choice(request, groups, review, as_of):
             for field in ('starts', 'ends'):
                 if value := getattr(row, field):
                     decision[field] = value.isoformat()
+    elif command in ('identify', 'external') and row.review_identity:
+        decision = _housing_identity_choice(request, row, decision, command)
     elif command == 'edit' and (row.review_identity or row.review_dates):
         number = request.POST.get(f'personnel_number:{source}', '').strip()
         if row.review_identity and number:
@@ -428,6 +465,8 @@ def _housing_review_choice(request, groups, review, as_of):
             ).values_list('pk', flat=True)[:2])
             if len(matches) != 1:
                 raise ValidationError('По этому табельному номеру нужна одна активная карточка сотрудника.')
+            decision.pop('external', None)
+            decision.pop('resident_id', None)
             decision['employee_id'] = matches[0]
         if row.review_dates:
             try:
@@ -507,7 +546,14 @@ def _apply_housing_draft(request, access, context, draft, rows):
     )
     store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
     context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
-    return groups
+    review = dict(draft.review)
+    for row in groups['applied']:
+        if row.external_draft:
+            decision = dict(review[row.source])
+            decision.pop('external')
+            decision['resident_id'] = row.applied_resident_id
+            review[row.source] = decision
+    return groups, draft.with_review(review) if review != draft.review else draft
 
 
 def _current_housing_post(request, access, form, context, storage, saved):
@@ -540,7 +586,7 @@ def _current_housing_post(request, access, form, context, storage, saved):
         form.add_error('workbook', error)
         return
     if applying:
-        groups = _apply_housing_draft(request, access, context, draft, rows)
+        groups, draft = _apply_housing_draft(request, access, context, draft, rows)
     else:
         groups = _housing_draft_groups(draft, rows)
         if review_action:
@@ -610,6 +656,14 @@ def settlement_current_housing_import_view(request):
     storage = CurrentHousingDraftStorage(access.pk)
     if request.method == 'GET' and 'place_map' in request.GET:
         return _housing_review_map_response(request, storage, request.GET['place_map'])
+    if request.method == 'GET' and 'identity_search' in request.GET:
+        try:
+            draft = storage.load()
+        except OSError:
+            return JsonResponse({'message': 'Не удалось открыть черновик.'}, status=503)
+        if not draft or request.GET.get('revision') != draft.revision:
+            return JsonResponse({'message': 'Черновик изменился. Обновите страницу сверки.'}, status=409)
+        return JsonResponse({'results': search_housing_subjects(request.GET['identity_search'])})
     saved = None
     context = {'access': access, 'clerk_active_section': 'settlement'}
     status = 200
