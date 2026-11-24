@@ -1,6 +1,7 @@
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -694,7 +695,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v18";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v19";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)
@@ -996,6 +997,9 @@ class DeputyPlanningViewTests(TestCase):
             self.assertNotContains(response, 'data-brigade-filter="3"')
             payload = response.context['planning_payload']
             self.assertEqual({item['full_name'] for item in payload['employees']}, {'Своя', 'Продление'})
+            extension = next(item for item in payload['employees'] if item['id'] == people['Продление'].pk)
+            expiry = datetime.combine(work_date + timedelta(days=1), time(7), ZoneInfo('Asia/Vladivostok'))
+            self.assertEqual(extension['extension_expires_at'], expiry.isoformat())
             plan = CrewPlan.objects.get(pk=payload['plan']['id'])
             blocked = self.client.post(reverse('deputy_mining_manager_slot'), {
                 'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,

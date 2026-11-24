@@ -291,7 +291,7 @@ ROLE_APPS = (
         icon_slug='deputy-mining-manager',
         manifest_url='/deputy-mining-manager.webmanifest',
         service_worker_url='/deputy-mining-manager-sw.js',
-        shell_version='deputy-mining-manager-desktop-shell-v18',
+        shell_version='deputy-mining-manager-desktop-shell-v19',
     ),
     RoleApp(
         role_code='dispatcher',

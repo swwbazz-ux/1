@@ -361,7 +361,7 @@ function createDeputyRuntime(options = {}) {
     const window = new EventTargetStub();
     const shell = appendRootNode(document, "data-admin-theme");
     const root = appendRootNode(document, "data-deputy-planning-root", "main");
-    appendDataNode(document, planningPayload());
+    appendDataNode(document, options.payload || planningPayload());
 
     const searchInput = new ElementStub("input", {"data-planning-search": ""});
     const employeePool = new ElementStub("section", {"data-employee-pool-drop": ""});
@@ -421,10 +421,8 @@ function createDeputyRuntime(options = {}) {
         getComputedStyle() {
             return {getPropertyValue() { return ""; }};
         },
-        setTimeout() {
-            return 1;
-        },
-        clearTimeout() {},
+        setTimeout: options.setTimeout || (() => 1),
+        clearTimeout: options.clearTimeout || (() => {}),
         requestAnimationFrame() { return 1; },
         cancelAnimationFrame() {},
         isAppRoleReadonly() {
@@ -460,6 +458,7 @@ function createDeputyRuntime(options = {}) {
             JSON,
             Math,
             Number,
+            Date: options.Date || Date,
             String,
             Boolean,
             Array,
@@ -584,6 +583,42 @@ test("saveSlot and postJson both recheck a locked contract", async () => {
 
     assert.equal(runtime.fetchCalls.length, 0);
     assert.equal(runtime.autosaveText.textContent, savedLabelBefore);
+});
+
+test("expired extensions leave the other deputy's open sidebar", () => {
+    const deadline = "2026-11-26T07:00:00+10:00";
+    const cutoff = Date.parse(deadline);
+    let now = cutoff - 1000;
+    let timer;
+    const payload = planningPayload();
+    payload.brigades = ["3", "4"];
+    payload.employees[0] = {
+        ...payload.employees[0],
+        brigade_code: "2",
+        extension_until: "25.11.2026",
+        extension_expires_at: deadline,
+    };
+    payload.employees.push({id: 102, full_name: "Свой сотрудник", brigade_code: "3"});
+    const runtime = createDeputyRuntime({payload, locked: false, Date: {
+        now() { return now; },
+        parse(value) { return Date.parse(value); },
+    }, setTimeout(callback, delay) {
+        timer = {callback, delay};
+        return 1;
+    }});
+    const cards = () => Array.from(runtime.employeeList.children);
+    assert.equal(cards().length, 2);
+    assert.ok(cards()[0].querySelector(".deputy-extension-badge"));
+    const ownEmployeeCard = cards()[1];
+    const equipmentRow = runtime.board.querySelector('[data-equipment-id="501"]');
+
+    assert.equal(timer.delay, 1000);
+    now = cutoff;
+    timer.callback();
+
+    assert.deepEqual(cards(), [ownEmployeeCard]);
+    assert.equal(runtime.board.querySelector('[data-equipment-id="501"]'), equipmentRow);
+    assert.equal(runtime.fetchCalls.length, 0);
 });
 
 test("unlocked deputy drag-and-drop persists exactly once", async () => {

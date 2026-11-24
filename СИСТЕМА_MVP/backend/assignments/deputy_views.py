@@ -17,6 +17,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
 
+from core.production_time import production_day_bounds
 from references.models import Equipment
 from shifts.models import WatchPeriod
 from users.models import AdminActionLog, Employee, EmployeeAccess, ProductionSpecialization, Role, TemporaryWorkTransfer
@@ -509,6 +510,7 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None, exten
             else employee.rotation or ''
         ),
         'extension_until': extension.extension_end.strftime('%d.%m.%Y') if extension else '',
+        'extension_expires_at': production_day_bounds(extension.extension_end)[1].isoformat() if extension else '',
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number} {contractor_label}'.strip().lower(),

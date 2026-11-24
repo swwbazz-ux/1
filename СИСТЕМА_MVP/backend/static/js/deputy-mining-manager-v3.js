@@ -126,6 +126,8 @@
     var candidateEmployees = [];
     var equipmentRowNodes = new Map();
     var employeeCardNodes = new Map();
+    var rosterExpiryTimer;
+    var nextRosterExpiry = Infinity;
     var boardBody = null;
     var activeEquipmentId = "";
     var dragSourceEquipmentId = "";
@@ -270,14 +272,18 @@
         });
     }
 
-    function inDeputyRoster(employee) {
-        var brigades = state.brigades || [];
-        return brigades.length !== 2 || Boolean(employee.extension_until) || brigades.includes(employee.brigade_code);
+    function activeRosterExtensionUntil(employee) {
+        return Date.parse(employee.extension_expires_at) <= Date.now() ? "" : employee.extension_until;
     }
 
-    function appendExtensionBadge(container, employee) {
-        if (employee.extension_until) {
-            container.appendChild(createElement("span", "deputy-extension-badge", "На продлении до " + employee.extension_until));
+    function inDeputyRoster(employee) {
+        var brigades = state.brigades || [];
+        return brigades.length !== 2 || Boolean(activeRosterExtensionUntil(employee)) || brigades.includes(employee.brigade_code);
+    }
+
+    function appendExtensionBadge(container, extensionUntil) {
+        if (extensionUntil) {
+            container.appendChild(createElement("span", "deputy-extension-badge", "На продлении до " + extensionUntil));
         }
     }
 
@@ -902,7 +908,7 @@
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
-        appendExtensionBadge(main, employee);
+        appendExtensionBadge(main, activeRosterExtensionUntil(employee));
         card.appendChild(main);
         card.appendChild(createPresenceBadge(employee));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
@@ -942,7 +948,7 @@
         var nextEmployeeNodes = new Map();
         var cards = visible.map(function (employee) {
             var id = textValue(employee.id);
-            var fingerprint = JSON.stringify(employee);
+            var fingerprint = JSON.stringify([employee, activeRosterExtensionUntil(employee)]);
             var previous = reuseNodes && employeeCardNodes.get(id);
             var node = previous && previous.fingerprint === fingerprint ? previous.node : createEmployeeCard(employee);
             nextEmployeeNodes.set(id, { node: node, fingerprint: fingerprint });
@@ -965,6 +971,27 @@
                 ? "Поиск не дал результатов."
                 : (currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
         }
+    }
+
+    function scheduleRosterExpiry() {
+        window.clearTimeout(rosterExpiryTimer);
+        nextRosterExpiry = Infinity;
+        var now = Date.now();
+        state.employees.forEach(function (employee) {
+            var expiry = Date.parse(employee.extension_expires_at);
+            if (expiry > now && expiry < nextRosterExpiry) nextRosterExpiry = expiry;
+        });
+        if (Number.isFinite(nextRosterExpiry)) {
+            rosterExpiryTimer = window.setTimeout(refreshExpiredRoster, Math.min(nextRosterExpiry - now, 2147483647));
+        }
+    }
+
+    function refreshExpiredRoster() {
+        if (Date.now() >= nextRosterExpiry && Number.isFinite(nextRosterExpiry)) {
+            renderEmployees(true);
+            if (candidateDialog && candidateDialog.open) renderCandidatePicker();
+        }
+        scheduleRosterExpiry();
     }
 
     function rowHasConflict(row) {
@@ -1053,14 +1080,15 @@
     function renderCandidatePicker() {
         if (!candidateList || !currentSlot) return;
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
-        var candidates = rankedEmployeeMatches(candidateEmployees, query).map(function (match) {
+        var visibleEmployees = candidateEmployees.filter(employeeMatchesBrigade);
+        var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
             return match.employee;
         });
         candidateList.replaceChildren();
         if (candidateCount) {
             candidateCount.textContent = query
-                ? "Найдено: " + candidates.length + " из " + candidateEmployees.length
-                : "Кандидатов: " + candidateEmployees.length;
+                ? "Найдено: " + candidates.length + " из " + visibleEmployees.length
+                : "Кандидатов: " + visibleEmployees.length;
         }
         if (candidateSearchClear) candidateSearchClear.hidden = !query;
         candidates.forEach(function (employee) {
@@ -1071,7 +1099,7 @@
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
-            appendExtensionBadge(main, employee);
+            appendExtensionBadge(main, activeRosterExtensionUntil(employee));
             button.appendChild(main);
             button.appendChild(createPresenceBadge(employee));
             button.addEventListener("click", function () {
@@ -1153,7 +1181,7 @@
                 });
             });
         });
-        candidateEmployees = Array.from(candidatesById.values()).filter(employeeMatchesBrigade);
+        candidateEmployees = Array.from(candidatesById.values());
         if (candidateSearchInput) candidateSearchInput.value = "";
         renderCandidatePicker();
         if (clearSlotButton) clearSlotButton.hidden = !slot[employeeKey];
@@ -1222,7 +1250,7 @@
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employeeMeta(employee) || positionLabel));
-            appendExtensionBadge(main, employee);
+            appendExtensionBadge(main, employee.extension_until);
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
             flags.appendChild(createPresenceBadge(employee));
@@ -1453,6 +1481,7 @@
         renderCategories();
         renderSummary();
         renderEmployees(reuseNodes);
+        scheduleRosterExpiry();
         renderBoard(reuseNodes);
         updatePublishButton();
         updateTemporaryTransferButton();
@@ -1854,6 +1883,10 @@
         "active-role-state-changed",
         handleMutationAvailabilityChange
     );
+
+    document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && Date.now() >= nextRosterExpiry) refreshExpiredRoster();
+    });
 
     var initialSavedLabel = state.plan.updated_at_label
         ? "Сохранено · " + state.plan.updated_at_label
