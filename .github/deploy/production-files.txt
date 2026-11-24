@@ -1,10 +1,2 @@
-СИСТЕМА_MVP/backend/reports/views.py
-СИСТЕМА_MVP/backend/rotations/urls.py
-СИСТЕМА_MVP/backend/rotations/views.py
-СИСТЕМА_MVP/backend/templates/reports/includes/management_pwa_head.html
-СИСТЕМА_MVP/backend/templates/reports/includes/management_report_header.html
-СИСТЕМА_MVP/backend/templates/reports/management_dashboard.html
-СИСТЕМА_MVP/backend/templates/rotations/site_manager_base.html
-СИСТЕМА_MVP/backend/templates/rotations/site_manager_queue.html
-СИСТЕМА_MVP/backend/users/access_auth.py
-СИСТЕМА_MVP/backend/users/role_apps.py
+СИСТЕМА_MVP/backend/static/css/clerk-workplace.css
+СИСТЕМА_MVP/backend/templates/clerk/base.html
