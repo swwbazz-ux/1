@@ -12,12 +12,24 @@
     var rooms = Array.from(root.querySelectorAll("[data-room-card]"));
     var dormitorySections = Array.from(root.querySelectorAll("[data-dormitory-section]"));
     var floorSections = Array.from(root.querySelectorAll("[data-floor-section]"));
+    var watchExtensionDetails = root.querySelector("[data-watch-extensions]");
+    var watchExtensionStateNode = root.querySelector("#settlement-watch-extension-state");
+    var watchExtensionList = root.querySelector("[data-watch-extension-list]");
+    var watchExtensionCount = root.querySelector("[data-watch-extension-count]");
+    var watchExtensionEmpty = root.querySelector("[data-watch-extension-empty]");
     var selectedRoomCount = root.querySelector("[data-selected-room-count]");
     var selectedTransferredRoomCount = root.querySelector("[data-selected-transferred-room-count]");
     var globalFreeCount = root.querySelector("[data-free-bed-count]");
     var globalOccupiedCount = root.querySelector("[data-occupied-bed-count]");
     var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
     var searchInput = root.querySelector("[data-settlement-search]");
+    var residentFinder = root.querySelector("#settlement-resident-finder");
+    var residentPopup = root.querySelector("[data-resident-popup]");
+    var residentOptions = root.querySelector("#settlement-resident-matches");
+    var residentSearchEmpty = root.querySelector("[data-resident-search-empty]");
+    var residentMatches = [];
+    var activeMatch = -1;
+    var chosenResidentId = "";
     var panel = root.querySelector("[data-room-panel]");
     var panelBackdrop = root.querySelector("[data-room-panel-backdrop]");
     var panelClose = root.querySelector("[data-room-panel-close]");
@@ -111,6 +123,10 @@
     var autoMutationInFlight = false;
     var autoReadSequence = 0;
     var activeMapMode = "current";
+    var watchExtensionState = null;
+    var watchExtensionClockOffset = 0;
+    var watchExtensionTimer = null;
+    var watchExtensionInFlight = false;
     var planDragSource = null;
     var controlHeld = false;
     var controlState = "free";
@@ -466,10 +482,9 @@
     function matchesRoom(room) {
         var dormitoryMatch = room.dataset.dormitory === state.dormitory;
         var floorMatch = room.dataset.floor === state.floor;
-        var searchMatch = (
-            !state.search
-            || String(room.dataset.search || "").includes(state.search)
-        );
+        var searchMatch = /^\d+$/.test(state.search)
+            ? Number(room.dataset.roomNumber) === Number(state.search)
+            : String(room.dataset.search || "").includes(state.search);
         return dormitoryMatch && floorMatch && searchMatch;
     }
 
@@ -535,15 +550,7 @@
             section.querySelectorAll("[data-bed]").forEach(renderMapBed);
         });
 
-        rooms.forEach(function (room) {
-            var match = matchesRoom(room);
-            var selectedFloor = (
-                room.dataset.dormitory === state.dormitory
-                && room.dataset.floor === state.floor
-            );
-            room.classList.toggle("is-filter-muted", selectedFloor && !match);
-            room.setAttribute("data-filter-match", String(match));
-        });
+        highlightRooms();
         root.querySelectorAll("[data-plan-room]").forEach(function (room) {
             room.hidden = (
                 room.dataset.dormitory !== state.dormitory
@@ -554,11 +561,169 @@
         updateSelectionSummary();
     }
 
+    function highlightRooms() {
+        rooms.forEach(function (room) {
+            var match = matchesRoom(room);
+            var selectedFloor = room.dataset.dormitory === state.dormitory && room.dataset.floor === state.floor;
+            room.classList.toggle("is-room-match", Boolean(state.search) && match);
+            room.classList.toggle("is-filter-muted", selectedFloor && !match);
+            room.setAttribute("data-filter-match", String(match));
+        });
+    }
+
+    function closeResidentOptions() {
+        residentPopup.hidden = true;
+        residentFinder.setAttribute("aria-expanded", "false");
+        residentFinder.removeAttribute("aria-activedescendant");
+        activeMatch = -1;
+    }
+
+    function residentSearchName(value) {
+        return normalizeSearch(value).replace(/ё/g, "е").replace(/\s+/g, " ");
+    }
+
+    function rankedResidentMatches(query) {
+        if (!query) return [];
+        var tokens = query.split(" ");
+        var matches = [];
+        root.querySelectorAll('[data-room-card] [data-occupied="true"]').forEach(function (bed) {
+            var name = residentSearchName(bed.dataset.occupantName);
+            if (!tokens.every(function (token) { return name.includes(token); })) return;
+            var surname = name.split(" ", 1)[0];
+            var rank = 3;
+            if (name === query) rank = 0;
+            else if (surname === tokens[0]) rank = 1;
+            else if (surname.startsWith(tokens[0])) rank = 2;
+            matches.push({bed: bed, name: name, rank: rank});
+        });
+        return matches.sort(function (left, right) {
+            return left.rank - right.rank || left.name.localeCompare(right.name, "ru");
+        });
+    }
+
+    function refreshResidentSearch() {
+        if (!residentFinder) return;
+        var query = residentSearchName(residentFinder.value);
+        residentMatches.forEach(function (match) { match.bed.classList.remove("is-resident-match"); });
+        residentMatches = rankedResidentMatches(query);
+        residentMatches.forEach(function (match) {
+            var highlighted = chosenResidentId
+                ? match.bed.dataset.residentId === chosenResidentId
+                : match.rank === residentMatches[0].rank;
+            match.bed.classList.toggle("is-resident-match", highlighted);
+        });
+        closeResidentOptions();
+        residentOptions.replaceChildren();
+        if (!query || document.activeElement !== residentFinder) return;
+        residentMatches.forEach(function (match, index) {
+            var bed = match.bed;
+            var option = element("div");
+            option.id = "settlement-resident-option-" + index;
+            option.dataset.matchIndex = String(index);
+            option.setAttribute("role", "option");
+            option.setAttribute("aria-selected", "false");
+            var location = [bed.dataset.dormitoryLabel, bed.dataset.floorLabel, bed.dataset.roomLabel,
+                "блок " + bed.dataset.blockLabel, bed.dataset.positionLabel].join(" · ");
+            option.append(element("strong", "", bed.dataset.occupantName), element("small", "", location));
+            residentOptions.appendChild(option);
+        });
+        residentSearchEmpty.hidden = residentMatches.length > 0;
+        residentPopup.hidden = false;
+        residentPopup.scrollTop = 0;
+        residentFinder.setAttribute("aria-expanded", "true");
+    }
+
+    function showResidentBed(index) {
+        var match = residentMatches[index];
+        if (!match) return;
+        var bed = match.bed;
+        var room = bed.closest("[data-room-card]");
+        state.dormitory = room.dataset.dormitory;
+        state.floor = room.dataset.floor;
+        syncMapSelectionButtons();
+        persistMapSelection();
+        applyFilters();
+        chosenResidentId = bed.dataset.residentId;
+        residentFinder.value = bed.dataset.occupantName;
+        residentFinder.blur();
+        refreshResidentSearch();
+        bed.focus({preventScroll: true});
+        bed.scrollIntoView({block: "nearest", inline: "nearest"});
+    }
+
     function element(tagName, className, text) {
         var node = document.createElement(tagName);
         if (className) node.className = className;
         if (text !== undefined) node.textContent = text;
         return node;
+    }
+
+    function renderWatchExtensions(entries) {
+        var markedOccupancies = new Set(entries.map(function (entry) { return String(entry.occupancy_id); }));
+        rooms.forEach(function (room) {
+            room.querySelectorAll('[data-occupied="true"]').forEach(function (bed) {
+                var onExtension = markedOccupancies.has(bed.dataset.occupancyId);
+                if (onExtension === (bed.dataset.onExtension === "true")) return;
+                bed.dataset.onExtension = String(onExtension);
+                renderMapBed(bed);
+            });
+        });
+
+        var items = entries.map(function (entry) {
+            var item = element("li");
+            item.append(
+                element("strong", "", entry.name),
+                element("small", "", entry.location + " · по " + entry.ends_on)
+            );
+            return item;
+        });
+        watchExtensionList.replaceChildren(...items);
+        watchExtensionCount.textContent = String(items.length);
+        watchExtensionEmpty.hidden = items.length > 0;
+    }
+
+    function updateWatchExtensions() {
+        window.clearTimeout(watchExtensionTimer);
+        if (!watchExtensionState || document.hidden) return;
+        var now = Date.now() + watchExtensionClockOffset;
+        renderWatchExtensions(watchExtensionState.entries.filter(function (entry) {
+            return Date.parse(entry.expires_at) > now;
+        }));
+        var refreshAt = Date.parse(watchExtensionState.refresh_at);
+        if (refreshAt <= now) {
+            refreshWatchExtensions();
+            refreshAt = now + 60000;
+        }
+        watchExtensionTimer = window.setTimeout(updateWatchExtensions, refreshAt - now);
+    }
+
+    function acceptWatchExtensions(payload, requestedAt) {
+        var serverTime = Date.parse(payload.server_time);
+        if (!Number.isFinite(serverTime) || !Number.isFinite(Date.parse(payload.refresh_at)) || !Array.isArray(payload.entries)) return;
+        watchExtensionClockOffset = serverTime - (requestedAt + Date.now()) / 2;
+        watchExtensionState = payload;
+        updateWatchExtensions();
+    }
+
+    async function refreshWatchExtensions() {
+        if (!watchExtensionState || document.hidden || watchExtensionInFlight) return;
+        watchExtensionInFlight = true;
+        var requestedAt = Date.now();
+        try {
+            var response = await fetch(root.dataset.watchExtensionsUrl, {cache: "no-store"});
+            if (response.ok && !response.redirected) {
+                acceptWatchExtensions(await response.json(), requestedAt);
+            }
+        } catch (error) {
+            // The deadlines already received from the server still apply offline.
+        } finally {
+            watchExtensionInFlight = false;
+        }
+    }
+
+    function resumeWatchExtensions() {
+        updateWatchExtensions();
+        refreshWatchExtensions();
     }
 
     function addBedDetail(list, label, value) {
@@ -986,6 +1151,7 @@
 
     function setMapMode(mode) {
         activeMapMode = mode === "next" ? "next" : "current";
+        if (watchExtensionDetails) watchExtensionDetails.hidden = activeMapMode === "next";
         mapModeButtons.forEach(function (button) {
             var active = button.dataset.mapMode === activeMapMode;
             button.classList.toggle("is-active", active);
@@ -1884,8 +2050,10 @@
         selectedBed.classList.add("is-occupied");
         renderMapBed(selectedBed);
 
+        refreshResidentSearch();
         updateSelectionSummary();
         renderRoom(activeRoom);
+        refreshWatchExtensions();
     }
 
     function submitPlacement() {
@@ -2051,7 +2219,55 @@
     if (searchInput) {
         searchInput.addEventListener("input", function () {
             state.search = searchInput.value.trim().toLowerCase();
-            applyFilters();
+            if (state.search && residentFinder && residentFinder.value) {
+                residentFinder.value = "";
+                chosenResidentId = "";
+                refreshResidentSearch();
+            }
+            highlightRooms();
+        });
+    }
+
+    if (residentFinder) {
+        residentFinder.addEventListener("focus", refreshResidentSearch);
+        residentFinder.addEventListener("click", function () {
+            if (residentPopup.hidden && residentFinder.value) refreshResidentSearch();
+        });
+        residentFinder.addEventListener("input", function () {
+            chosenResidentId = "";
+            if (residentFinder.value && state.search) {
+                state.search = "";
+                searchInput.value = "";
+                highlightRooms();
+            }
+            refreshResidentSearch();
+        });
+        residentFinder.addEventListener("blur", closeResidentOptions);
+        residentFinder.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !residentPopup.hidden) {
+                event.preventDefault();
+                closeResidentOptions();
+            } else if (event.key === "Enter" && !residentPopup.hidden && residentMatches.length) {
+                event.preventDefault();
+                showResidentBed(Math.max(activeMatch, 0));
+            } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && residentMatches.length) {
+                event.preventDefault();
+                if (residentPopup.hidden) refreshResidentSearch();
+                var options = residentOptions.children;
+                if (activeMatch >= 0) options[activeMatch].setAttribute("aria-selected", "false");
+                if (event.key === "ArrowDown") activeMatch = (activeMatch + 1) % options.length;
+                else activeMatch = activeMatch <= 0 ? options.length - 1 : activeMatch - 1;
+                options[activeMatch].setAttribute("aria-selected", "true");
+                residentFinder.setAttribute("aria-activedescendant", options[activeMatch].id);
+                options[activeMatch].scrollIntoView({block: "nearest"});
+            }
+        });
+        residentOptions.addEventListener("pointerdown", function (event) {
+            if (event.target.closest("[data-match-index]")) event.preventDefault();
+        });
+        residentOptions.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-match-index]");
+            if (option) showResidentBed(Number(option.dataset.matchIndex));
         });
     }
 
@@ -2330,6 +2546,14 @@
     restoreMapSelection();
     applyFilters();
     setMapMode("current");
+    if (watchExtensionStateNode) {
+        acceptWatchExtensions(JSON.parse(watchExtensionStateNode.textContent), Date.now());
+        document.addEventListener("visibilitychange", resumeWatchExtensions);
+        document.addEventListener("resume", resumeWatchExtensions);
+        window.addEventListener("focus", resumeWatchExtensions);
+        window.addEventListener("pageshow", resumeWatchExtensions);
+        window.addEventListener("online", resumeWatchExtensions);
+    }
     initializeControlLifecycle();
     if (consumeAutoPreviewOpenOnce()) {
         setAutoPreviewModal(true);

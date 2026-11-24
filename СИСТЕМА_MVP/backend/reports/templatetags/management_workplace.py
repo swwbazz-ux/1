@@ -4,6 +4,7 @@ from django import template
 from django.urls import reverse
 from django.utils import timezone
 
+from core.production_time import production_work_date
 from reports.views import parse_filter_date
 from users.access_auth import can_review_watch_extensions
 
@@ -16,10 +17,14 @@ def management_workplace_header(context, active, export_url=''):
     request = context['request']
     access = context['access']
     site_manager = access.role.code == 'site_manager'
-    date = parse_filter_date(
-        request.GET.get('overview_date') or request.GET.get('date') or request.GET.get('date_from'),
+    date = (
+        parse_filter_date(request.GET.get('date'))
+        or parse_filter_date(context.get('date_from_value'))
+        or parse_filter_date(request.GET.get('date_from'))
+        or parse_filter_date(request.GET.get('overview_date'))
+        or context.get('selected_date')
+        or production_work_date()
     )
-    date = date or context.get('selected_date') or timezone.localdate()
     date_value = date.isoformat()
     shared_date = {'overview_date': date_value}
     summary_route = 'rotation_site_manager_home' if site_manager else 'management_dashboard'
@@ -38,8 +43,8 @@ def management_workplace_header(context, active, export_url=''):
         item('shift_analytics', 'Смена', 'shift_analytics_report', {'date': date_value}),
         item('dynamics', 'Динамика', 'management_dynamics', {'date_from': date_value, 'date_to': date_value}),
         item('daily', 'Сутки', 'customer_daily_report', {'date': date_value}),
-        item('volume', 'Объемы', 'volume_report'),
-        item('downtime', 'Простои', 'downtime_report'),
+        item('volume', 'Объемы', 'volume_report', {'date_from': date_value, 'date_to': date_value}),
+        item('downtime', 'Простои', 'downtime_report', {'date_from': date_value, 'date_to': date_value}),
     ))
     if not site_manager:
         links.extend((

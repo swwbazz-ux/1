@@ -790,7 +790,8 @@
         if (!root || !window.fetch || !window.DOMParser) {
             return Promise.resolve({deferred: true, reason: "management_dynamics_refresh_unavailable"});
         }
-        var url = new URL(window.location.href);
+        var requestedPage = window.location.href;
+        var url = new URL(requestedPage);
         url.searchParams.set("_management_dynamics_refresh", String(Date.now()));
 
         return window.fetch(url.toString(), {
@@ -804,6 +805,9 @@
             }
             return response.text();
         }).then(function (html) {
+            if (window.location.href !== requestedPage) {
+                return {deferred: true, reason: "management_dynamics_filters_changed"};
+            }
             var doc = new DOMParser().parseFromString(html, "text/html");
             var fresh = doc.querySelector("[data-management-dynamics-refresh-root]");
             if (!fresh) {
@@ -814,6 +818,13 @@
                 closeManagementDynamicsChartOverlay(false);
             }
             root.innerHTML = fresh.innerHTML;
+            var dateLabel = document.querySelector("[data-management-overview-date]");
+            var freshDate = doc.querySelector("[data-management-overview-date]");
+            if (dateLabel && freshDate && dateLabel.textContent !== freshDate.textContent) {
+                dateLabel.textContent = freshDate.textContent;
+                var navSelector = "[data-management-workplace-header] nav";
+                document.querySelector(navSelector).replaceChildren(...doc.querySelector(navSelector).children);
+            }
             rebindManagementDynamicsControls(root);
             if (reopenChartOverlay) {
                 window.__managementDynamicsReopenChartOverlay = false;

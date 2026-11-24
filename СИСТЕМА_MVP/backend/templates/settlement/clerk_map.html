@@ -12,6 +12,7 @@
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
      data-room-transfer-url="{% url 'settlement_room_transfer' %}"
+     data-watch-extensions-url="{% url 'settlement_clerk_extensions' %}"
      data-external-resident-search-url="{% url 'settlement_external_resident_search' %}"
      data-external-resident-create-url="{% url 'settlement_external_resident_create' %}"
      data-control-acquire-url="{% url 'settlement_control_acquire' %}"
@@ -50,7 +51,19 @@
                 <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
             </nav>
             <a class="settlement-map-entry__upload" href="{% url 'settlement_current_housing_import' %}">Загрузить Excel</a>
+            <details class="settlement-watch-extensions" data-watch-extensions>
+                <summary>На продлении <b data-watch-extension-count>{{ watch_extensions.entries|length }}</b></summary>
+                <div class="settlement-watch-extensions__content">
+                    <ul data-watch-extension-list aria-label="Жильцы на продлении">
+                        {% for entry in watch_extensions.entries %}
+                            <li><strong>{{ entry.name }}</strong><small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
+                        {% endfor %}
+                    </ul>
+                    <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
+                </div>
+            </details>
         </div>
+        {{ watch_extensions|json_script:"settlement-watch-extension-state" }}
 
         <section class="settlement-control-panel"
                  data-control-panel
@@ -105,14 +118,23 @@
                 </div>
             </fieldset>
 
-            <label class="settlement-search-field" for="settlement-search">
-                <span>Поиск</span>
-                <input id="settlement-search"
-                       type="search"
-                       autocomplete="off"
-                       placeholder="Комната или ID койки"
-                       data-settlement-search>
-            </label>
+            <div class="settlement-map-searches">
+                <label class="settlement-search-field" for="settlement-search">
+                    <span>Номер комнаты или ID койки на этаже</span>
+                    <input id="settlement-search" type="search" autocomplete="off"
+                           placeholder="Номер комнаты" data-settlement-search>
+                </label>
+                <label class="settlement-search-field" for="settlement-resident-finder">
+                    <span>Фамилия жильца во всех общежитиях</span>
+                    <input id="settlement-resident-finder" type="search" autocomplete="off"
+                           placeholder="Фамилия жильца" role="combobox" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="settlement-resident-matches">
+                </label>
+                <div class="settlement-search-popup" data-resident-popup hidden>
+                    <div id="settlement-resident-matches" role="listbox" aria-label="Найденные жильцы"></div>
+                    <p role="status" data-resident-search-empty hidden>Жильцы с таким именем не найдены.</p>
+                </div>
+            </div>
 
             <button type="button"
                     class="settlement-work-badge"
@@ -894,7 +916,7 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-shifts-v3"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-search-v3"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-relocation-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>

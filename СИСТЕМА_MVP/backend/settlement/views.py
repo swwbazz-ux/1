@@ -956,19 +956,23 @@ def _bed_tooltip_work_label(occupancy, profile, official_assignment=None):
     return 'Категория должности не указана'
 
 
-def _attach_occupancy_view(rooms, moment):
-    beds = [bed for room in rooms for bed in room.beds.all()]
-    occupancies = [
+def _clerk_map_occupancies(rooms):
+    return [
         bed.active_occupancies[0]
-        for bed in beds
+        for room in rooms
+        for bed in room.beds.all()
         if bed.active_occupancies
     ]
+
+
+def _attach_occupancy_view(rooms, moment):
+    occupancies = _clerk_map_occupancies(rooms)
     profiles = _employee_profiles(
         occupancy.resident.employee
         for occupancy in occupancies
         if occupancy.resident.employee_id
     )
-    extensions = approved_watch_extensions_on(timezone.localdate(moment), employee_ids=profiles)
+    extensions = approved_watch_extensions_on(production_work_date(moment), employee_ids=profiles)
 
     imported_ids, published = current_housing_official_assignments(occupancies, moment)
 
@@ -1026,6 +1030,7 @@ def _attach_occupancy_view(rooms, moment):
                     bed.tooltip_work_label = 'Техника: проверьте расстановку'
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
+    return extensions
 
 
 def _room_view(room):
@@ -1255,6 +1260,42 @@ def _clerk_map_rooms(moment):
     )
 
 
+def _clerk_map_extension_state(rooms, moment, *, cases=None):
+    work_date = production_work_date(moment)
+    occupancies = _clerk_map_occupancies(rooms)
+    if cases is None:
+        cases = approved_watch_extensions_on(
+            work_date, employee_ids={row.resident.employee_id for row in occupancies if row.resident.employee_id},
+        )
+    entries = []
+    for occupancy in occupancies:
+        case = cases.get(occupancy.resident.employee_id)
+        if case is None:
+            continue
+        bed = occupancy.physical_bed
+        entries.append({
+            'occupancy_id': occupancy.pk,
+            'name': occupancy.resident.display_name,
+            'location': f'{bed.room} · {bed.get_block_display()}-{bed.position}',
+            'ends_on': case.extension_end.strftime('%d.%m.%Y'),
+            'expires_at': production_day_bounds(case.extension_end)[1].isoformat(),
+        })
+    return {
+        'server_time': moment.isoformat(),
+        'refresh_at': production_day_bounds(work_date)[1].isoformat(),
+        'entries': entries,
+    }
+
+
+@never_cache
+@require_GET
+def settlement_clerk_extensions_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'error': 'Нет доступа к расселению.'}, status=403)
+    moment = timezone.now()
+    return JsonResponse(_clerk_map_extension_state(list(_clerk_map_rooms(moment)), moment))
+
+
 @require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
@@ -1282,7 +1323,7 @@ def settlement_map_view(request):
                 'Не удалось выполнить расчёт для указанной даты.',
             )
     rooms = list(_clerk_map_rooms(moment))
-    _attach_occupancy_view(rooms, moment)
+    extension_cases = _attach_occupancy_view(rooms, moment)
     # T-036 backend-23/24: бейджи комнат 36–38 на карте (резерв/защищённая);
     # типы якорей берутся одним пакетным запросом на все комнаты.
     anchor_types_by_room = room_anchor_types_by_room(
@@ -1314,6 +1355,7 @@ def settlement_map_view(request):
         {
             'access': access,
             'dormitories': dormitories,
+            'watch_extensions': _clerk_map_extension_state(rooms, moment, cases=extension_cases),
             'current_date': timezone.localdate(moment),
             'summary': {
                 'rooms': len(rooms),
@@ -2295,7 +2337,7 @@ def _occupancy_response(occupancy):
     room = bed.room
     moment = timezone.now()
     on_extension = (
-        bool(approved_watch_extensions_on(timezone.localdate(moment), employee_ids=[resident.employee_id]))
+        bool(approved_watch_extensions_on(production_work_date(moment), employee_ids=[resident.employee_id]))
         if resident.employee_id and occupancy.is_active_at(moment) else False
     )
     active_in_room = EmployeeBedOccupancy.objects.filter(

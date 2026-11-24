@@ -38,7 +38,7 @@
     </section>
 
     <section class="card dispatcher-linked-filter-card">
-        <form method="get" class="filters">
+        <form method="get" class="filters"{% if access.role.code != 'dispatcher' and not request.mining_master_tablet_control %} data-auto-filter-form{% endif %}>
             <div>
                 <label for="date">Дата отчета</label>
                 <input id="date" type="date" name="date" value="{{ date_input }}">
@@ -49,7 +49,7 @@
         </form>
         <div class="actions">
             <a class="button-link" href="{% url 'customer_daily_report_export' %}?date={{ date_input }}">Выгрузить в Excel</a>
-            <a class="button-link button-secondary" href="{% url 'volume_report' %}">Отчет по объемам</a>
+            <a class="button-link button-secondary" href="{% url 'volume_report' %}{% if access.role.code != 'dispatcher' and not request.mining_master_tablet_control %}?date_from={{ date_input }}&amp;date_to={{ date_input }}{% endif %}">Отчет по объемам</a>
             <a class="button-link button-secondary" href="{% url 'downtime_report' %}?date_from={{ date_input }}&date_to={{ date_input }}">Отчет по простоям</a>
         </div>
     </section>

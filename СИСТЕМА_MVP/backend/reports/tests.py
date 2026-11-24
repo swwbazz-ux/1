@@ -1213,6 +1213,18 @@ class ShiftAnalyticsReportTests(TestCase):
         self.assertContains(response, 'Выгрузка')
         self.assertContains(response, 'Поток смены')
 
+    def test_management_date_defaults_to_workday_and_prefers_explicit_filter(self):
+        workday = self.date + timedelta(days=14)
+        for route in ('management_dashboard', 'customer_daily_report'):
+            with self.subTest(route=route), patch('reports.views.production_work_date', return_value=workday):
+                response = self.client.get(reverse(route))
+                self.assertEqual(response.context['selected_date'], workday)
+                response = self.client.get(reverse(route), {
+                    'date': self.date.isoformat(), 'overview_date': workday.isoformat(),
+                })
+                self.assertEqual(response.context['selected_date'], self.date)
+                self.assertContains(response, f'data-management-overview-date>{self.date:%d.%m.%Y}</strong>')
+
     def test_management_dashboard_refresh_serves_only_the_versioned_overview(self):
         state = bump_operational_state('overview refresh test')
         response = self.client.get(reverse('management_dashboard'), {

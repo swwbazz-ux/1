@@ -4,7 +4,7 @@ import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone as datetime_timezone
+from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -43,7 +43,7 @@ from assignments.models import (
     EquipmentAssignment,
     WorkShiftType,
 )
-from core.production_time import production_work_date
+from core.production_time import production_day_bounds, production_work_date
 from references.models import Dormitory, Equipment, EquipmentType
 from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
@@ -8740,6 +8740,42 @@ class ClerkMapEffectiveOccupancyTests(TestCase):
 
         with mock.patch('settlement.views.timezone.now', return_value=self.moment + timedelta(days=1)):
             self.assertNotContains(self.client.get(reverse('settlement_map')), 'data-on-extension="true"')
+
+    def test_live_watch_extension_expires_at_next_production_day(self):
+        last_day = date(2026, 11, 25)
+        start, cutoff = production_day_bounds(last_day)
+        watch = WatchPeriod.objects.create(name='Продление до 25 ноября', starts_on=last_day, ends_on=last_day)
+        cycle = RotationCollectionCycle.objects.create(
+            name='Согласованное продление', target_watch_period=watch, response_deadline=start,
+        )
+        employee = self.employees[0]
+        reply = RotationResponse.objects.create(cycle=cycle, employee=employee, snapshot_full_name=employee.full_name)
+        WatchExtensionCase.objects.create(
+            response=reply, extension_start=last_day, extension_end=last_day,
+            decision_status=WatchExtensionCase.DecisionStatus.APPROVED, decision_by=self.clerk, decision_at=start,
+        )
+        occupancy = self.create_occupancy(0, starts_at=start)
+        url = reverse('settlement_clerk_extensions')
+
+        with mock.patch('settlement.views.timezone.now', return_value=cutoff - timedelta(minutes=1)):
+            page = self.client.get(reverse('settlement_map'))
+            self.assertContains(page, 'aria-label="Жильцы на продлении"')
+            self.assertContains(page, 'data-on-extension="true"', count=1)
+            self.assertContains(page, 'по 25.11.2026')
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('no-store', response['Cache-Control'])
+            data = response.json()
+            self.assertEqual(data['refresh_at'], '2026-11-26T07:00:00+10:00')
+            self.assertEqual(len(data['entries']), 1)
+            self.assertEqual(data['entries'][0]['occupancy_id'], occupancy.pk)
+            self.assertEqual(data['entries'][0]['expires_at'], data['refresh_at'])
+
+        with mock.patch('settlement.views.timezone.now', return_value=cutoff):
+            self.assertEqual(self.client.get(url).json()['entries'], [])
+            self.assertNotContains(self.client.get(reverse('settlement_map')), 'data-on-extension="true"')
+        occupancy.refresh_from_db()
+        self.assertTrue(occupancy.is_active_at(cutoff))
 
     def test_map_shows_occupancy_starting_exactly_at_moment(self):
         self.create_occupancy(1, starts_at=self.moment)
