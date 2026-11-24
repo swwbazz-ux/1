@@ -2237,22 +2237,38 @@ button.deputy-avatar {
     border-color: var(--admin-line);
 }
 
+.has-specialization-review {
+    container-type: inline-size;
+}
+
 .deputy-specialization-review {
-    margin-top: 4px;
-    padding: 3px 6px;
+    padding: 2px 5px;
     border: 1px solid #c99437;
     border-radius: 4px;
     color: #744400;
     background: #ffecad;
-    font: inherit;
-    font-size: 11px;
-    text-align: left;
-    white-space: normal;
-    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
 }
 
-.deputy-specialization-review:hover {
+.has-specialization-review:hover .deputy-specialization-review {
     text-decoration: underline;
+}
+
+.deputy-review-symbol {
+    display: none;
+}
+
+@container (max-width: 300px) {
+    .deputy-review-label {
+        display: none;
+    }
+
+    .deputy-review-symbol {
+        display: inline;
+        font-weight: 900;
+    }
 }
 
 .deputy-extension-badge {

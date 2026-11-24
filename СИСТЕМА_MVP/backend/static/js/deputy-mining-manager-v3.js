@@ -1324,6 +1324,9 @@
         var isSecondary = position === "secondary";
         var employeeKey = isSecondary ? "secondary_employee" : "employee";
         var employee = slot[employeeKey];
+        var reportedName = !employee && !isSecondary && slot.reported_name;
+        var review = slot.specialization_review || {};
+        var occupant = employee || (reportedName && { full_name: reportedName, position: review.position });
         var changed = isSecondary ? slot.secondary_changed : slot.changed;
         var conflict = isSecondary ? slot.secondary_conflict : slot.conflict;
         var issue = isSecondary ? slot.secondary_issue : slot.issue;
@@ -1332,43 +1335,62 @@
             : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         var button = createElement("div", "deputy-crew-position is-" + position);
         button.classList.toggle("is-disabled", !planEditable());
-        button.classList.toggle("has-employee", Boolean(employee));
+        button.classList.toggle("has-employee", Boolean(occupant));
         button.classList.toggle("has-conflict", Boolean(conflict));
         button.appendChild(createElement("span", "deputy-crew-position-label", positionLabel));
 
-        if (employee) {
-            button.title = "Двойной клик — открыть карточку сотрудника";
-            button.appendChild(createAvatar(employee));
+        if (occupant) {
+            button.appendChild(createAvatar(occupant));
             var person = createElement("button", "deputy-slot-person");
             person.type = "button";
-            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(employee));
+            person.setAttribute("aria-label", "Открыть карточку сотрудника: " + employeeName(occupant));
             var main = createElement("span", "deputy-employee-main");
-            main.appendChild(createElement("strong", "", employeeName(employee)));
-            main.appendChild(createElement("small", "", employeeMeta(employee) || positionLabel));
-            appendExtensionBadge(main, employee.extension_until);
+            main.appendChild(createElement("strong", "", employeeName(occupant)));
+            main.appendChild(createElement("small", "", employeeMeta(occupant) || positionLabel));
+            appendExtensionBadge(main, occupant.extension_until);
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
-            flags.appendChild(createPresenceBadge(employee));
+            if (reportedName) {
+                var warning = !slot.specialization_review || review.warning;
+                var label = warning ? "Специализация отличается" : "Фактический состав";
+                var badge = createElement("span", "deputy-specialization-review" + (warning ? "" : " is-resolved"));
+                badge.appendChild(createElement("span", "deputy-review-label", label));
+                badge.appendChild(createElement("span", "deputy-review-symbol", warning ? "!" : "Ф"));
+                flags.appendChild(badge);
+                person.classList.add("has-specialization-review");
+                person.title = label + " — открыть пояснение";
+                person.setAttribute("aria-label", label + ": " + reportedName);
+                person.setAttribute("data-role-readonly-safe", "");
+                person.addEventListener("click", function () { openSpecializationReview(row, slot); });
+            } else {
+                flags.appendChild(createPresenceBadge(employee));
+            }
             if (changed) flags.appendChild(createElement("span", "deputy-slot-flag", "ИЗМ"));
             if (conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
             button.appendChild(person);
-            bindDragSource(person, Object.assign({}, employee, {
-                source_equipment_id: row.equipment && row.equipment.id,
-                source_shift_type: slot.shift_type,
-                source_position: position
-            }), button);
-            person.title = "Двойной клик — открыть карточку сотрудника";
-            person.addEventListener("click", function (event) {
-                if (event.detail === 0) {
+            if (employee) {
+                bindDragSource(person, Object.assign({}, employee, {
+                    source_equipment_id: row.equipment && row.equipment.id,
+                    source_shift_type: slot.shift_type,
+                    source_position: position
+                }), button);
+                button.title = person.title = "Двойной клик — открыть карточку сотрудника";
+                person.addEventListener("click", function (event) {
+                    if (event.detail === 0) {
+                        openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
+                    }
+                });
+                person.addEventListener("dblclick", function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
                     openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-                }
-            });
-            person.addEventListener("dblclick", function (event) {
-                event.preventDefault();
-                event.stopPropagation();
-                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-            });
+                });
+                button.addEventListener("dblclick", function (event) {
+                    event.preventDefault();
+                    openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
+                });
+            }
             if (planEditable()) {
                 var editButton = createElement("button", "deputy-slot-edit", "Сменить");
                 editButton.type = "button";
@@ -1380,26 +1402,8 @@
                 });
                 button.appendChild(editButton);
             }
-            button.addEventListener("dblclick", function (event) {
-                event.preventDefault();
-                openEmployeeRecord(employee, [row.equipment && row.equipment.label, slot.label, positionLabel].filter(Boolean).join(" · "));
-            });
         } else {
-            var reported = !isSecondary && slot.reported_name;
-            if (reported) {
-                var fact = createElement("span", "deputy-employee-main");
-                fact.appendChild(createElement("strong", "", reported));
-                var warning = !slot.specialization_review || slot.specialization_review.warning;
-                var reviewLink = createElement("button", "deputy-specialization-review" + (warning ? "" : " is-resolved"),
-                    warning ? "Специализация отличается" : "Фактический состав");
-                reviewLink.type = "button";
-                reviewLink.setAttribute("data-role-readonly-safe", "");
-                reviewLink.addEventListener("click", function () { openSpecializationReview(row, slot); });
-                fact.appendChild(reviewLink);
-                button.appendChild(fact);
-                if (!planEditable()) return button;
-            }
-            var emptyAction = createElement("button", "deputy-slot-empty", reported ? "Заменить" : (isSecondary ? "Добавить" : "Назначить"));
+            var emptyAction = createElement("button", "deputy-slot-empty", isSecondary ? "Добавить" : "Назначить");
             emptyAction.type = "button";
             emptyAction.disabled = !planEditable();
             emptyAction.setAttribute("aria-label", "Назначить сотрудника: " + textValue(slot.label) + " · " + positionLabel);
