@@ -81,7 +81,10 @@
 
 <div class="dispatcher-analytics-toolbar">
     <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
-        <a class="{% if active == 'summary' %}is-active{% endif %}" href="{% url 'management_dashboard' %}">Сводка</a>
+        <a class="{% if active == 'summary' %}is-active{% endif %}" href="{% if access.role.code == 'site_manager' %}{% url 'rotation_site_manager_home' %}{% else %}{% url 'management_dashboard' %}{% endif %}">Сводка</a>
+        {% if access.role.code == 'site_manager' %}
+            <a href="{% url 'rotation_site_manager_queue' %}">Продлёнка</a>
+        {% endif %}
         {% if access.role.code == 'manager' or access.role.code == 'admin' %}
             <a class="{% if active == 'registrations' %}is-active{% endif %}" href="{% url 'management_registration_dashboard' %}">Подключение</a>
         {% endif %}
@@ -90,9 +93,11 @@
         <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>
         <a class="{% if active == 'volume' %}is-active{% endif %}" href="{% url 'volume_report' %}">Объемы</a>
         <a class="{% if active == 'downtime' %}is-active{% endif %}" href="{% url 'downtime_report' %}">Простои</a>
-        <a class="{% if active == 'mechanic' %}is-active{% endif %}" href="{% url 'mechanic_dashboard' %}">Механики</a>
-        <a class="{% if active == 'pilot' %}is-active{% endif %}" href="{% url 'pilot_report_checklist' %}">Пилот</a>
-        <a class="{% if active == 'feedback' %}is-active{% endif %}" href="{% url 'pilot_feedback' %}">Замечания</a>
+        {% if access.role.code != 'site_manager' %}
+            <a class="{% if active == 'mechanic' %}is-active{% endif %}" href="{% url 'mechanic_dashboard' %}">Механики</a>
+            <a class="{% if active == 'pilot' %}is-active{% endif %}" href="{% url 'pilot_report_checklist' %}">Пилот</a>
+            <a class="{% if active == 'feedback' %}is-active{% endif %}" href="{% url 'pilot_feedback' %}">Замечания</a>
+        {% endif %}
     </nav>
     <div class="dispatcher-report-actions">
         {% if export_url %}

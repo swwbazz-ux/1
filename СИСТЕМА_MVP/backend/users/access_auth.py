@@ -2,6 +2,25 @@ from .forms import is_valid_russian_mobile_phone, normalize_phone
 from .models import Employee, EmployeeAccess
 
 
+def can_review_watch_extensions(request, access):
+    if access.role.code == 'site_manager':
+        return True
+    if access.role.code != 'manager':
+        return False
+    observer = getattr(request, 'observer_actor_access', None)
+    if observer and observer.employee_id != access.employee_id:
+        return False
+    return EmployeeAccess.objects.filter(
+        employee_id=access.employee_id,
+        role__code='site_manager',
+        role__is_active=True,
+        status=EmployeeAccess.Status.ACTIVATED,
+        is_active=True,
+        blocked_at__isnull=True,
+        deactivated_at__isnull=True,
+    ).exists()
+
+
 def find_employee_access_by_credentials(
     phone,
     access_code,

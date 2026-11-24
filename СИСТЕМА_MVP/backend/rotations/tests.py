@@ -161,7 +161,12 @@ class RotationWorkflowTests(TestCase):
         self.assertRedirects(
             manager_client.get('/home/'), '/site-manager/', fetch_redirect_response=False,
         )
-        self.assertContains(manager_client.get('/site-manager/'), 'Продлёнка')
+        workplace = manager_client.get('/site-manager/', HTTP_HOST='site-manager.localhost')
+        self.assertTemplateUsed(workplace, 'reports/management_dashboard.html')
+        self.assertContains(workplace, 'Витрина руководства')
+        self.assertContains(workplace, 'Ключевые показатели')
+        self.assertContains(workplace, '<a href="/site-manager/extensions/">Продлёнка</a>', html=True)
+        self.assertContains(workplace, '<link rel="manifest" href="/site-manager.webmanifest">', html=True)
         queue = manager_client.get('/site-manager/extensions/')
         self.assertContains(queue, self.employee.full_name)
         self.assertContains(queue, 'Запрошенные даты')
@@ -247,6 +252,50 @@ class RotationWorkflowTests(TestCase):
             page = client.get(f'/my/rotation/{response.pk}/')
             self.assertContains(page, 'Отклонено')
             self.assertNotContains(page, 'На продлении')
+
+    def test_management_workplace_exposes_decisions_only_with_site_manager_access(self):
+        role, _ = Role.objects.get_or_create(code='manager', defaults={'name': 'Руководство'})
+        worker = self._response_for()
+        self._client_for(self.employee, 'employee_portal').post(
+            reverse('rotation_employee_response', args=[worker.pk]), self._extension_payload(),
+        )
+        case = WatchExtensionCase.objects.get(response=worker)
+        host = 'management.localhost'
+        dashboard_url = reverse('management_dashboard')
+        queue_url = reverse('management_extensions')
+        decision_url = reverse('management_extension_decision', args=[case.pk, 'approved'])
+
+        def management_client(employee):
+            access = EmployeeAccess.objects.create(
+                employee=employee, role=role, access_code='710051',
+                status=EmployeeAccess.Status.ACTIVATED, activated_at=timezone.now(),
+            )
+            client = Client()
+            session = client.session
+            session['employee_access_id'] = access.pk
+            session['device_kind'] = 'personal'
+            session.save()
+            return client
+
+        regular = management_client(self.other_employee)
+        self.assertNotContains(regular.get(dashboard_url, HTTP_HOST=host), 'Продлёнка')
+        denied = regular.post(decision_url, HTTP_HOST=host)
+        self.assertRedirects(denied, '/home/', fetch_redirect_response=False)
+        case.refresh_from_db()
+        self.assertEqual(case.decision_status, 'pending')
+
+        reviewer = management_client(self.site_manager)
+        dashboard = reviewer.get(dashboard_url, HTTP_HOST=host)
+        self.assertContains(dashboard, '<a href="/reports/management/extensions/">Продлёнка</a>', html=True)
+        queue = reviewer.get(queue_url, HTTP_HOST=host)
+        self.assertContains(queue, f'action="{decision_url}"')
+        self.assertContains(queue, '<link rel="manifest" href="/management.webmanifest">', html=True)
+        self.assertContains(queue, '<a href="/reports/management/">Витрина руководства</a>', html=True)
+        saved = reviewer.post(decision_url, HTTP_HOST=host)
+        self.assertRedirects(saved, queue_url, fetch_redirect_response=False)
+        case.refresh_from_db()
+        self.assertEqual(case.decision_by, self.site_manager)
+        self.assertEqual(case.decision_status, 'approved')
 
     def test_approval_rejects_invalid_end_and_stale_application(self):
         response = self._response_for()
@@ -487,7 +536,7 @@ class RotationWorkflowTests(TestCase):
     def test_rotation_role_service_workers_use_updated_header_shells(self):
         expected_versions = {
             'timekeeper': 'timekeeper-shell-v8',
-            'site-manager': 'site-manager-shell-v9',
+            'site-manager': 'site-manager-shell-v10',
         }
 
         for slug, expected_version in expected_versions.items():

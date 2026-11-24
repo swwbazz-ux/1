@@ -3,7 +3,7 @@
 {% block title %}Витрина руководства{% endblock %}
 {% block body_class %}dispatcher-control-screen{% endblock %}
 {% block extra_head %}
-{% include "includes/role_app_pwa_head.html" with role_code="manager" manifest_url="/management.webmanifest" service_worker_url="/management-sw.js" legacy_scope="/reports/management/" theme_color="#5058A4" apple_title="Руководство" icon_180="img/pwa/management-180.png" %}
+{% include "reports/includes/management_pwa_head.html" %}
 {% endblock %}
 
 {% block body %}
@@ -34,7 +34,10 @@
 
         <div class="dispatcher-analytics-toolbar">
             <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
-                <a class="is-active" href="{% url 'management_dashboard' %}?date={{ selected_date|date:'Y-m-d' }}">Сводка</a>
+                <a class="is-active" href="{% if access.role.code == 'site_manager' %}{% url 'rotation_site_manager_home' %}{% else %}{% url 'management_dashboard' %}{% endif %}?date={{ selected_date|date:'Y-m-d' }}">Сводка</a>
+                {% if watch_extensions_url %}
+                    <a href="{{ watch_extensions_url }}">Продлёнка</a>
+                {% endif %}
                 {% if access.role.code == 'manager' or access.role.code == 'admin' %}
                     <a href="{% url 'management_registration_dashboard' %}">Подключение</a>
                 {% endif %}
@@ -43,9 +46,11 @@
                 <a href="{% url 'customer_daily_report' %}?date={{ selected_date|date:'Y-m-d' }}">Сутки</a>
                 <a href="{% url 'volume_report' %}">Объемы</a>
                 <a href="{% url 'downtime_report' %}">Простои</a>
-                <a href="{% url 'mechanic_dashboard' %}">Механики</a>
-                <a href="{% url 'pilot_report_checklist' %}">Пилот</a>
-                <a href="{% url 'pilot_feedback' %}">Замечания</a>
+                {% if access.role.code != 'site_manager' %}
+                    <a href="{% url 'mechanic_dashboard' %}">Механики</a>
+                    <a href="{% url 'pilot_report_checklist' %}">Пилот</a>
+                    <a href="{% url 'pilot_feedback' %}">Замечания</a>
+                {% endif %}
             </nav>
             <div class="dispatcher-report-actions">
                 <a href="{% url 'management_dashboard_export' %}?date={{ selected_date|date:'Y-m-d' }}">Excel</a>

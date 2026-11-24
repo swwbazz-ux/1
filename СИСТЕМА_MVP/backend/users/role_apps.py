@@ -368,7 +368,7 @@ ROLE_APPS = (
         subdomain='site-manager',
         name='Начальник участка',
         short_name='Начальник участка',
-        description='Согласование запросов сотрудников на продление вахты.',
+        description='Витрина руководства и согласование продлений вахты.',
         start_url='/site-manager/',
         legacy_scope='/site-manager/',
         manifest_id='/site-manager/extensions/',
@@ -379,7 +379,7 @@ ROLE_APPS = (
         icon_slug='site-manager',
         manifest_url='/site-manager.webmanifest',
         service_worker_url='/site-manager-sw.js',
-        shell_version='site-manager-shell-v9',
+        shell_version='site-manager-shell-v10',
     ),
     RoleApp(
         role_code='mechanic',

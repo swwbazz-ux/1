@@ -46,6 +46,7 @@ from trips.models import (
     Trip,
     TripStatus,
 )
+from users.access_auth import can_review_watch_extensions
 from users.active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
@@ -4341,8 +4342,8 @@ def volume_report_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = get_report_access(request)
-    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
+    if not access:
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4394,8 +4395,8 @@ def volume_report_export_view(request):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return redirect('login')
-    access = get_report_access(request)
-    if not access or (access.role.code not in {'dispatcher', 'admin', 'manager'} and not is_tablet_master_request(request, access)):
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
+    if not access:
         return redirect('role_home')
 
     trips = Trip.objects.filter(status=TripStatus.COMPLETED).select_related(
@@ -4449,7 +4450,7 @@ def shift_analytics_report_context(request):
 
 
 def shift_analytics_report_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4514,10 +4515,11 @@ def management_dynamics_report_context(request):
 
 
 MANAGEMENT_REPORT_ROLE_CODES = frozenset({'admin', 'manager'})
+MANAGEMENT_OVERVIEW_ROLE_CODES = MANAGEMENT_REPORT_ROLE_CODES | {'site_manager'}
 
 
 def management_dynamics_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4546,7 +4548,7 @@ def append_shift_analytics_rows(sheet, title, rows, headers, getters):
 
 
 def shift_analytics_report_export_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     context = shift_analytics_report_context(request)
@@ -4685,7 +4687,7 @@ def downtime_report_context(request):
 
 
 def downtime_report_view(request):
-    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     return render(
@@ -4705,7 +4707,7 @@ def downtime_report_view(request):
 
 
 def downtime_report_export_view(request):
-    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic'})
+    access = get_reports_access(request, {'admin', 'dispatcher', 'manager', 'mechanic', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
     context = downtime_report_context(request)
@@ -4854,6 +4856,10 @@ def get_reports_access(request, allowed_roles):
         'dispatcher' in allowed_roles and is_tablet_master_request(request, access)
     ):
         return None
+    if access.role.code == 'site_manager':
+        from users.views import get_current_access
+
+        return get_current_access(request)
     return access
 
 
@@ -5835,7 +5841,7 @@ def customer_daily_report_context(request):
 
 
 def customer_daily_report_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
@@ -5929,7 +5935,7 @@ def append_customer_reconciliation_sheet(workbook, reconciliation_rows):
 
 
 def customer_daily_report_export_view(request):
-    access = get_reports_access(request, {'dispatcher', 'admin', 'manager'})
+    access = get_reports_access(request, {'dispatcher', 'admin', 'manager', 'site_manager'})
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
@@ -6314,10 +6320,15 @@ def management_dashboard_context(request, access):
 
 
 def management_dashboard_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
-    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+    context = management_dashboard_context(request, access)
+    if can_review_watch_extensions(request, access):
+        context['watch_extensions_url'] = reverse(
+            'rotation_site_manager_queue' if access.role.code == 'site_manager' else 'management_extensions',
+        )
+    return render(request, 'reports/management_dashboard.html', context)
 
 
 @require_GET
@@ -6360,7 +6371,7 @@ def style_management_export_sheet(sheet):
 
 
 def management_dashboard_export_view(request):
-    access = get_reports_access(request, MANAGEMENT_REPORT_ROLE_CODES)
+    access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 

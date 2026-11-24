@@ -31,6 +31,7 @@ from users.role_apps import (
     role_app_service_worker_response,
 )
 from users.session_device import detect_session_device_kind
+from users.access_auth import can_review_watch_extensions
 from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
@@ -131,11 +132,11 @@ def _login_redirect(request):
     return redirect(f"{reverse('login')}?{urlencode({'next': request.get_full_path()})}")
 
 
-def _role_access(request, role_code):
+def _watch_extension_access(request):
     access = get_current_access(request)
     if not access:
         return None, _login_redirect(request)
-    if access.role.code != role_code:
+    if not can_review_watch_extensions(request, access):
         messages.error(request, 'У текущего доступа нет прав на этот рабочий раздел.')
         return None, redirect('role_home')
     return access, None
@@ -1760,14 +1761,16 @@ def employee_response_view(request, response_id):
 
 
 def site_manager_home_view(request):
-    access, denied = _role_access(request, 'site_manager')
+    from reports.views import management_dashboard_view
+
+    _, denied = _watch_extension_access(request)
     if denied:
         return denied
-    return render(request, 'rotations/site_manager_home.html', {'access': access})
+    return management_dashboard_view(request)
 
 
 def site_manager_queue_view(request):
-    access, response = _role_access(request, 'site_manager')
+    access, response = _watch_extension_access(request)
     if response:
         return response
     status = request.GET.get('status', '').strip()
@@ -1790,13 +1793,28 @@ def site_manager_queue_view(request):
     return render(
         request,
         'rotations/site_manager_queue.html',
-        {'access': access, 'cases': cases},
+        {
+            'access': access,
+            'cases': cases,
+            'decision_route': (
+                'management_extension_decision' if access.role.code == 'manager'
+                else 'rotation_site_manager_decision'
+            ),
+            'queue_route': (
+                'management_extensions' if access.role.code == 'manager'
+                else 'rotation_site_manager_queue'
+            ),
+            'summary_route': (
+                'management_dashboard' if access.role.code == 'manager'
+                else 'rotation_site_manager_home'
+            ),
+        },
     )
 
 
 @require_POST
 def site_manager_decision_view(request, case_id, decision):
-    access, response = _role_access(request, 'site_manager')
+    access, response = _watch_extension_access(request)
     if response:
         return response
     extension_case = get_object_or_404(WatchExtensionCase, pk=case_id)
@@ -1833,7 +1851,9 @@ def site_manager_decision_view(request, case_id, decision):
         )
     except ValidationError as error:
         messages.error(request, _validation_message(error))
-    return redirect('rotation_site_manager_queue')
+    return redirect(
+        'management_extensions' if access.role.code == 'manager' else 'rotation_site_manager_queue',
+    )
 
 
 @require_POST

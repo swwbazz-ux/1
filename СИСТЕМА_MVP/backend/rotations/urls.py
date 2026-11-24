@@ -200,6 +200,12 @@ urlpatterns = [
     path('my/rotation/<int:response_id>/', employee_response_view, name='rotation_employee_response'),
     path('site-manager/', site_manager_home_view, name='rotation_site_manager_home'),
     path('site-manager/extensions/', site_manager_queue_view, name='rotation_site_manager_queue'),
+    path('reports/management/extensions/', site_manager_queue_view, name='management_extensions'),
+    path(
+        'reports/management/extensions/<int:case_id>/<str:decision>/',
+        site_manager_decision_view,
+        name='management_extension_decision',
+    ),
     path(
         'site-manager/extensions/<int:case_id>/<str:decision>/',
         site_manager_decision_view,
