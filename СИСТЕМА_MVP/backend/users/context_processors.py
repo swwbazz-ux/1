@@ -121,6 +121,12 @@ def role_app(request):
             request.session.get('pending_activation_target_app_code', '')
         )
     path_app = pending_activation_app or get_role_app_for_path(request.path)
+    # The mechanics report belongs to the management PWA on its dedicated host.
+    if (
+        host_app and host_app.role_code == 'manager'
+        and resolver_match and resolver_match.url_name == 'mechanic_dashboard'
+    ):
+        path_app = host_app
     app = host_app
     if (
         host_app

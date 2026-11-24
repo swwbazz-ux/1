@@ -6322,7 +6322,20 @@ def management_dashboard_view(request):
     access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
-    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
+    version = (
+        OperationalStateVersion.objects.filter(key='production').values_list('version', flat=True).first()
+        or 0
+    )
+    context = management_dashboard_context(request, access)
+    if request.GET.get('_operational_fragment') == 'management-overview':
+        return operational_fragment_response(
+            render(request, 'reports/management_overview_content.html', context),
+            screen='management-overview',
+            selector='[data-management-overview-live]',
+            version=version,
+        )
+    context['operational_state_version'] = version
+    return render(request, 'reports/management_dashboard.html', context)
 
 
 @require_GET

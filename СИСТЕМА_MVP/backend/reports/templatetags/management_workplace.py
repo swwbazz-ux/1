@@ -51,6 +51,7 @@ def management_workplace_header(context, active, export_url=''):
         export_url = f"{reverse('management_dashboard_export')}?{urlencode({'date': date_value})}"
     return {
         'links': links,
+        'role_code': access.role.code,
         'overview_date': date,
         'generated_at': timezone.localtime(),
         'export_url': export_url,

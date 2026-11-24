@@ -1,8 +1,74 @@
 .management-workplace-header {
     display: grid;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    align-self: start;
     min-width: 0;
     gap: 10px;
+    background: var(--gd-bg);
     view-transition-name: management-header;
+}
+
+body:has(.management-connection-dot) > .app-connection-dot {
+    display: none;
+}
+
+.management-connection-line {
+    display: flex;
+    min-height: 11px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.management-workplace-header .management-connection-dot {
+    position: static;
+    padding: 0;
+    background: transparent;
+    pointer-events: auto;
+}
+
+.management-workplace-header .management-connection-dot i {
+    width: 9px;
+    height: 9px;
+}
+
+@media (max-width: 620px) {
+    .dispatcher-analytics-shell:has(.management-workplace-header) {
+        height: 100dvh;
+        min-height: 0;
+    }
+
+    .management-workplace-header {
+        gap: 4px;
+    }
+
+    .management-workplace-header .management-dashboard-header {
+        gap: 8px;
+        padding: 9px 12px;
+    }
+
+    .management-workplace-header .management-dashboard-header-title h1 {
+        font-size: clamp(18px, 6vw, 27px);
+    }
+
+    .management-workplace-header .management-dashboard-header-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .management-workplace-header .management-dashboard-header-meta div {
+        min-height: 46px;
+        padding: 7px 9px;
+    }
+
+    .management-workplace-header .management-dashboard-header-actions {
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+    }
+}
+
+[data-management-overview-live] {
+    display: contents;
 }
 
 .management-section-heading {

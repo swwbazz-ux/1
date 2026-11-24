@@ -2695,8 +2695,25 @@ window.AppRealtimeConfig = {
         "^/reports/management/dynamics/?$"
     ]
 };
+var managementHeader = document.querySelector("[data-management-workplace-header]");
+if (managementHeader) {
+    var managementLiveScreen = document.querySelector(
+        "[data-management-overview-live], [data-shift-analytics-refresh-root], [data-management-dynamics-refresh-root]"
+    );
+    window.AppRealtimeConfig.screens.unshift({
+        name: managementLiveScreen && managementLiveScreen.hasAttribute("data-management-overview-live")
+            ? "management-overview" : "management-workplace",
+        role: "management",
+        roleAppCode: managementHeader.dataset.managementRole,
+        mode: managementLiveScreen ? "custom" : "connection",
+        path: "^/",
+        customRefresh: Boolean(managementLiveScreen),
+        persistDeliveryCursor: false,
+        transportIndicator: true
+    });
+}
 </script>
-<script src="{% static 'js/realtime-client.js' %}?v={{ static_asset_release }}{% if app_role_code == 'admin' %}-admin-realtime-v2{% endif %}"></script>
+<script src="{% static 'js/realtime-client.js' %}?v={{ static_asset_release }}{% if access.role.code == 'manager' or access.role.code == 'site_manager' or access.role.code == 'admin' %}-management-connection-v1{% elif app_role_code == 'admin' %}-admin-realtime-v2{% endif %}"></script>
 <script>
 (function dispatcherBoardSelfHeal() {
     /* Самовосстановление настольного пульта.

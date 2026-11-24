@@ -1,4 +1,4 @@
-<div class="management-workplace-header no-print" data-management-workplace-header>
+<div class="management-workplace-header no-print" data-management-workplace-header data-management-role="{{ role_code }}">
     <header class="management-dashboard-header">
         <div class="management-dashboard-header-title">
             <span>Руководство MVP</span>
@@ -11,7 +11,12 @@
                 <strong>{{ overview_date|date:"d.m.Y" }}</strong>
             </div>
             <div>
-                <span>Сформировано</span>
+                <span class="management-connection-line">
+                    Сформировано
+                    <span class="app-connection-dot management-connection-dot" data-connection-indicator role="status" aria-live="polite" title="Проверяем связь…">
+                        <i aria-hidden="true"></i>
+                    </span>
+                </span>
                 <strong>{{ generated_at|date:"d.m.Y H:i" }}</strong>
             </div>
         </div>
