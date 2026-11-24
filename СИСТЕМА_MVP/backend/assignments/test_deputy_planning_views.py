@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import timedelta
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +23,7 @@ from references.models import (
     EquipmentModel,
     EquipmentType,
 )
+from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, WatchPeriod
 from users.models import (
     DriverPrimaryRegistration,
@@ -692,7 +694,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v17";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v18";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)
@@ -945,6 +947,77 @@ class DeputyPlanningViewTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(missing_response.status_code, 404)
+
+    def create_watch_roster(self):
+        work_date = production_work_date()
+        period = WatchPeriod.objects.create(name='Вахта для продления', starts_on=work_date, ends_on=work_date)
+        cycle = RotationCollectionCycle.objects.create(
+            name='Сбор', target_watch_period=period, response_deadline=timezone.now(),
+        )
+        people = {}
+        for index, (label, brigade, status, start, end) in enumerate([
+            ('Своя', 2, '', 0, 0),
+            ('Чужая', 3, '', 0, 0),
+            ('Продление', 4, 'approved', 0, 0),
+            ('Ожидание', 3, 'pending', -1, 1),
+            ('Отказ', 3, 'rejected', -1, 1),
+            ('Истекло', 4, 'approved', -2, -1),
+            ('Будущее', 4, 'approved', 1, 2),
+        ]):
+            person, _ = self.create_employee_with_access(
+                label, self.driver_role, phone=f'+7900010100{index}', access_code=f'29000{index}',
+                rotation=f'Бригада {brigade}',
+            )
+            people[label] = person
+            if status:
+                response = RotationResponse.objects.create(cycle=cycle, employee=person)
+                WatchExtensionCase.objects.create(
+                    response=response, extension_start=work_date + timedelta(days=start),
+                    extension_end=work_date + timedelta(days=end), decision_status=status,
+                    decision_by=self.deputy if status != 'pending' else None,
+                    decision_at=timezone.now() if status != 'pending' else None,
+                )
+        return people
+
+    def test_watch_roster_includes_only_own_brigades_and_current_approved_extensions(self):
+        work_date = production_work_date()
+        people = self.create_watch_roster()
+        other_deputy, other_access = self.create_employee_with_access(
+            'Второй заместитель', self.deputy_role, phone='+79000102000', access_code='620001',
+        )
+
+        def test_identity(employee):
+            return sha256(f'|{employee.full_name.casefold()}'.encode()).hexdigest()
+
+        watch_map = {test_identity(self.deputy): ('1', '2'), test_identity(other_deputy): ('3', '4')}
+        url = reverse('deputy_mining_manager_placement')
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', watch_map):
+            response = self.client.get(url)
+            self.assertNotContains(response, 'data-brigade-filter="3"')
+            payload = response.context['planning_payload']
+            self.assertEqual({item['full_name'] for item in payload['employees']}, {'Своя', 'Продление'})
+            plan = CrewPlan.objects.get(pk=payload['plan']['id'])
+            blocked = self.client.post(reverse('deputy_mining_manager_slot'), {
+                'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+                'shift_type': WorkShiftType.SHIFT_2, 'employee_id': people['Ожидание'].pk,
+            }, content_type='application/json')
+            self.assertEqual(blocked.status_code, 400)
+            for shift in (WorkShiftType.SHIFT_1, WorkShiftType.SHIFT_2):
+                saved, plan = self.autosave_slot(plan, equipment=self.truck_2, shift_type=shift, employee=people['Продление'])
+                board = saved.json()['payload']
+                self.assertEqual(board['brigades'], ['1', '2'])
+                slot = next(slot for row in board['rows'] for slot in row['slots']
+                            if slot['employee'] and slot['employee']['id'] == people['Продление'].pk)
+                self.assertEqual(slot['shift_type'], shift)
+                self.assertEqual(slot['employee']['extension_until'], work_date.strftime('%d.%m.%Y'))
+            self.authenticate(self.client, other_access)
+            response = self.client.get(url)
+            self.assertNotContains(response, 'data-brigade-filter="1"')
+            board = response.context['planning_payload']
+            self.assertEqual({item['full_name'] for item in board['employees']},
+                             {'Чужая', 'Ожидание', 'Отказ', 'Истекло', 'Будущее'})
+            self.assertFalse(any(item['extension_until'] for item in board['employees']))
+            self.assertEqual(board['summary']['assigned_count'], 2)
 
     def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
         second_driver, _second_access = self.create_employee_with_access(

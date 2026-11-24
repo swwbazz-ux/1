@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261124-factual">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261124-brigades">
 {% endblock %}
 
 {% block body %}
@@ -23,10 +23,9 @@
                 <div class="deputy-brigade-switch" role="group" aria-label="Фильтр сотрудников по бригаде">
                     <span>Бригада</span>
                     <button type="button" class="is-active" data-brigade-filter="all" aria-pressed="true">Все</button>
-                    <button type="button" data-brigade-filter="1" aria-pressed="false">1</button>
-                    <button type="button" data-brigade-filter="2" aria-pressed="false">2</button>
-                    <button type="button" data-brigade-filter="3" aria-pressed="false">3</button>
-                    <button type="button" data-brigade-filter="4" aria-pressed="false">4</button>
+                    {% for brigade in planning_payload.brigades %}
+                    <button type="button" data-brigade-filter="{{ brigade }}" aria-pressed="false">{{ brigade }}</button>
+                    {% endfor %}
                 </div>
             </div>
 
@@ -258,6 +257,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-factual" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-brigades" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

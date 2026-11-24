@@ -270,7 +270,19 @@
         });
     }
 
+    function inDeputyRoster(employee) {
+        var brigades = state.brigades || [];
+        return brigades.length !== 2 || Boolean(employee.extension_until) || brigades.includes(employee.brigade_code);
+    }
+
+    function appendExtensionBadge(container, employee) {
+        if (employee.extension_until) {
+            container.appendChild(createElement("span", "deputy-extension-badge", "На продлении до " + employee.extension_until));
+        }
+    }
+
     function employeeMatchesBrigade(employee) {
+        if (!inDeputyRoster(employee)) return false;
         if (currentBrigade === "all") return true;
         return textValue(employee && employee.brigade_code) === currentBrigade;
     }
@@ -849,7 +861,7 @@
     }
 
     function bindDragSource(node, employee, visualNode) {
-        var canDrag = planEditable() && !employee.disabled && !employee.busy;
+        var canDrag = planEditable() && inDeputyRoster(employee) && !employee.disabled && !employee.busy;
         var visual = visualNode || node;
         node.draggable = canDrag;
         visual.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
@@ -890,6 +902,7 @@
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        appendExtensionBadge(main, employee);
         card.appendChild(main);
         card.appendChild(createPresenceBadge(employee));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
@@ -1058,6 +1071,7 @@
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
+            appendExtensionBadge(main, employee);
             button.appendChild(main);
             button.appendChild(createPresenceBadge(employee));
             button.addEventListener("click", function () {
@@ -1208,6 +1222,7 @@
             var main = createElement("span", "deputy-employee-main");
             main.appendChild(createElement("strong", "", employeeName(employee)));
             main.appendChild(createElement("small", "", employeeMeta(employee) || positionLabel));
+            appendExtensionBadge(main, employee);
             person.appendChild(main);
             var flags = createElement("span", "deputy-slot-flags");
             flags.appendChild(createPresenceBadge(employee));

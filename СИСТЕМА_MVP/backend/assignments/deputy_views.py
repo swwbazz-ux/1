@@ -33,6 +33,7 @@ from users.work_profiles import (
     expire_due_temporary_work_transfers,
     request_temporary_work_transfer,
 )
+from rotations.services import approved_watch_extensions_on
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS, crew_equipment_number
@@ -343,6 +344,27 @@ def deputy_access_from_request(request):
     return access
 
 
+# Match both the personnel number and normalized full name of the two deputies.
+# Keep personnel records out of the source tree.
+DEPUTY_BRIGADES_BY_IDENTITY = {
+    '660112ee99e947cc8162b7d7ce55f4e6925a37e61e2e03e05b39833ad9df786c': ('1', '2'),
+    '715f708a9e6c05675b70bcbb7fdc9f10fcfa2728f141d19f90da63467c632bfe': ('3', '4'),
+}
+ALL_BRIGADES = ('1', '2', '3', '4')
+
+
+def _deputy_brigades(deputy):
+    if deputy is None:
+        return ALL_BRIGADES
+    name = ' '.join(deputy.full_name.casefold().split())
+    identity = f'{(deputy.personnel_number or "").strip()}|{name}'
+    return DEPUTY_BRIGADES_BY_IDENTITY.get(sha256(identity.encode()).hexdigest(), ALL_BRIGADES)
+
+
+def _in_deputy_roster(employee, brigades, extensions):
+    return brigades == ALL_BRIGADES or _employee_brigade_code(employee) in brigades or employee.pk in extensions
+
+
 def _employee_short_name(employee):
     parts = (employee.full_name or '').split()
     if not parts:
@@ -443,7 +465,7 @@ def _application_presence_payload(presence):
     }
 
 
-def _employee_payload(employee, *, presence=None, eligible_positions=None):
+def _employee_payload(employee, *, presence=None, eligible_positions=None, extension=None):
     if not employee:
         return None
     photo_url = ''
@@ -486,6 +508,7 @@ def _employee_payload(employee, *, presence=None, eligible_positions=None):
             if getattr(employee, 'work_schedule_id', None)
             else employee.rotation or ''
         ),
+        'extension_until': extension.extension_end.strftime('%d.%m.%Y') if extension else '',
         'brigade_code': brigade_code,
         'brigade_label': f'Бригада {brigade_code}' if brigade_code else 'Не указана',
         'search': f'{employee.full_name} {employee.personnel_number} {contractor_label}'.strip().lower(),
@@ -607,10 +630,12 @@ def _crew_category_navigation(work_date):
     return categories
 
 
-def build_crew_plan_payload(plan, *, request=None):
+def build_crew_plan_payload(plan, *, deputy=None):
+    brigades = _deputy_brigades(deputy)
     if not plan:
         return {
             'plan': None,
+            'brigades': brigades,
             'role': None,
             'categories': [],
             'endpoints': {},
@@ -739,6 +764,10 @@ def build_crew_plan_payload(plan, *, request=None):
         for slot in slots
         if slot.baseline_secondary_employee_id
     )
+    extensions = approved_watch_extensions_on(plan.work_date, employee_ids=payload_employee_ids) if deputy else {}
+    if brigades != ALL_BRIGADES:
+        eligible_employees = [employee for employee in eligible_employees if _in_deputy_roster(employee, brigades, extensions)]
+        transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
     presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
 
     equipment_items = []
@@ -823,6 +852,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 'employee': _employee_payload(
                     slot.employee,
                     presence=presence_by_employee.get(slot.employee_id),
+                    extension=extensions.get(slot.employee_id),
                     eligible_positions=[
                         position
                         for position, employee_ids in (
@@ -835,6 +865,7 @@ def build_crew_plan_payload(plan, *, request=None):
                 'secondary_employee': _employee_payload(
                     slot.secondary_employee,
                     presence=presence_by_employee.get(slot.secondary_employee_id),
+                    extension=extensions.get(slot.secondary_employee_id),
                     eligible_positions=[
                         position
                         for position, employee_ids in (
@@ -906,6 +937,7 @@ def build_crew_plan_payload(plan, *, request=None):
             'supports_secondary': plan.role.code not in AUXILIARY_CATEGORIES,
             'primary_label': 'Водитель' if plan.role.code in {'driver', 'crew_kdm', 'crew_prm', 'crew_bus'} else 'Машинист',
         },
+        'brigades': brigades,
         'categories': _crew_category_navigation(plan.work_date),
         'endpoints': {
             'slot': reverse('deputy_mining_manager_slot'),
@@ -925,6 +957,7 @@ def build_crew_plan_payload(plan, *, request=None):
             _employee_payload(
                 employee,
                 presence=presence_by_employee.get(employee.id),
+                extension=extensions.get(employee.id),
                 eligible_positions=[
                     position
                     for position, employee_ids in (
@@ -1252,7 +1285,7 @@ def deputy_mining_manager_placement_view(request):
             .order_by('-revision')
             .first()
         )
-    payload = build_crew_plan_payload(plan, request=request)
+    payload = build_crew_plan_payload(plan, deputy=access.employee)
     if not plan:
         payload['categories'] = _crew_category_navigation(selected_date)
         payload['role'] = {'code': role.code, 'label': role.name}
@@ -1379,6 +1412,10 @@ def deputy_mining_manager_slot_view(request):
         equipment = get_object_or_404(Equipment, id=payload.get('equipment_id'))
         employee_id = payload.get('employee_id')
         employee = get_object_or_404(Employee, id=employee_id) if employee_id else None
+        brigades = _deputy_brigades(access.employee)
+        if employee and brigades != ALL_BRIGADES and _employee_brigade_code(employee) not in brigades:
+            if employee.pk not in approved_watch_extensions_on(plan.work_date, employee_ids=[employee.pk]):
+                raise ValidationError('У сотрудника другой бригады нет согласованного продления на эту дату.')
         plan = update_crew_draft_slot(
             plan=plan,
             equipment=equipment,
@@ -1392,7 +1429,7 @@ def deputy_mining_manager_slot_view(request):
         if isinstance(error, ValidationError):
             return _validation_response(error)
         return JsonResponse({'ok': False, 'error': 'Обновите страницу и повторите действие.'}, status=400)
-    return JsonResponse({'ok': True, 'payload': build_crew_plan_payload(plan, request=request)})
+    return JsonResponse({'ok': True, 'payload': build_crew_plan_payload(plan, deputy=access.employee)})
 
 
 @require_POST
@@ -1418,7 +1455,7 @@ def deputy_mining_manager_publish_view(request):
         if isinstance(error, ValidationError):
             return _validation_response(error)
         return JsonResponse({'ok': False, 'error': 'Обновите страницу и повторите действие.'}, status=400)
-    next_payload = build_crew_plan_payload(next_draft, request=request)
+    next_payload = build_crew_plan_payload(next_draft, deputy=access.employee)
     # Сразу после публикации печатается именно утвержденная ревизия. Как только
     # пользователь изменит новый черновик, обычный slot-ответ вернет его URL.
     next_payload['endpoints']['export'] = reverse(
@@ -1494,7 +1531,7 @@ def deputy_mining_manager_temporary_transfer_request_view(request):
         return JsonResponse({'ok': False, 'error': 'Проверьте выбранные данные и повторите запрос.'}, status=400)
     return JsonResponse({
         'ok': True,
-        'payload': build_crew_plan_payload(plan, request=request),
+        'payload': build_crew_plan_payload(plan, deputy=access.employee),
     })
 
 

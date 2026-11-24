@@ -2186,3 +2186,18 @@ button.deputy-avatar {
     border-radius: 3px;
     white-space: normal;
 }
+
+.deputy-extension-badge {
+    display: inline-block;
+    align-self: start;
+    justify-self: start;
+    max-width: 100%;
+    width: fit-content;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: #ffe49a;
+    color: #4e3600;
+    font-size: .75rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
