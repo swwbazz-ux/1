@@ -1,10 +1,7 @@
-СИСТЕМА_MVP/backend/assignments/crew_categories.py
-СИСТЕМА_MVP/backend/assignments/crew_excel_import.py
-СИСТЕМА_MVP/backend/assignments/deputy_views.py
-СИСТЕМА_MVP/backend/assignments/management/commands/prepare_deputy_fleet.py
-СИСТЕМА_MVP/backend/assignments/services.py
-СИСТЕМА_MVP/backend/static/css/deputy-mining-manager-v3.css
-СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_import.html
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
-СИСТЕМА_MVP/backend/deploy/data_updates/deputy_fleet_20261124.py
+СИСТЕМА_MVP/backend/settlement/current_housing_import.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
+СИСТЕМА_MVP/backend/static/js/settlement-housing-import.js
+СИСТЕМА_MVP/backend/templates/settlement/_clerk_housing_conflicts.html
+СИСТЕМА_MVP/backend/templates/settlement/_housing_review_identity.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_housing_import.html
