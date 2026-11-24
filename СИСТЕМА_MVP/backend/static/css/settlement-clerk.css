@@ -466,11 +466,6 @@
     background: var(--admin-green-soft);
 }
 
-.settlement-room .settlement-bed.is-resident-match {
-    outline: 3px solid var(--settlement-accent);
-    outline-offset: -2px;
-}
-
 .settlement-search-field span {
     position: absolute;
     width: 1px;
@@ -1685,6 +1680,27 @@
 .settlement-room.is-filter-muted:hover,
 .settlement-room.is-filter-muted:focus-within {
     opacity: .46;
+}
+
+.settlement-room.is-room-match,
+.settlement-room .settlement-bed.is-resident-match {
+    --search-glow: #39f68b;
+    outline: 3px solid var(--search-glow);
+    outline-offset: -3px;
+    box-shadow: 0 0 0 1px #08613c, 0 0 8px 2px var(--search-glow);
+    scale: 1.06;
+    z-index: 2;
+}
+
+.settlement-room.is-room-match {
+    scale: 1.02;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .settlement-room.is-room-match,
+    .settlement-room .settlement-bed.is-resident-match {
+        transition: scale 150ms ease-out, box-shadow 150ms ease-out;
+    }
 }
 
 .settlement-layout-note {

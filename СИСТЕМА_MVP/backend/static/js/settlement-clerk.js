@@ -565,6 +565,7 @@
         rooms.forEach(function (room) {
             var match = matchesRoom(room);
             var selectedFloor = room.dataset.dormitory === state.dormitory && room.dataset.floor === state.floor;
+            room.classList.toggle("is-room-match", Boolean(state.search) && match);
             room.classList.toggle("is-filter-muted", selectedFloor && !match);
             room.setAttribute("data-filter-match", String(match));
         });
@@ -581,24 +582,41 @@
         return normalizeSearch(value).replace(/ё/g, "е").replace(/\s+/g, " ");
     }
 
+    function rankedResidentMatches(query) {
+        if (!query) return [];
+        var tokens = query.split(" ");
+        var matches = [];
+        root.querySelectorAll('[data-room-card] [data-occupied="true"]').forEach(function (bed) {
+            var name = residentSearchName(bed.dataset.occupantName);
+            if (!tokens.every(function (token) { return name.includes(token); })) return;
+            var surname = name.split(" ", 1)[0];
+            var rank = 3;
+            if (name === query) rank = 0;
+            else if (surname === tokens[0]) rank = 1;
+            else if (surname.startsWith(tokens[0])) rank = 2;
+            matches.push({bed: bed, name: name, rank: rank});
+        });
+        return matches.sort(function (left, right) {
+            return left.rank - right.rank || left.name.localeCompare(right.name, "ru");
+        });
+    }
+
     function refreshResidentSearch() {
         if (!residentFinder) return;
         var query = residentSearchName(residentFinder.value);
-        residentMatches.forEach(function (bed) { bed.classList.remove("is-resident-match"); });
-        residentMatches = query ? Array.from(root.querySelectorAll('[data-room-card] [data-occupied="true"]'))
-            .filter(function (bed) {
-                return residentSearchName(bed.dataset.occupantName).includes(query);
-            })
-            .sort(function (left, right) {
-                return left.dataset.occupantName.localeCompare(right.dataset.occupantName, "ru");
-            }) : [];
-        residentMatches.forEach(function (bed) {
-            bed.classList.toggle("is-resident-match", !chosenResidentId || bed.dataset.residentId === chosenResidentId);
+        residentMatches.forEach(function (match) { match.bed.classList.remove("is-resident-match"); });
+        residentMatches = rankedResidentMatches(query);
+        residentMatches.forEach(function (match) {
+            var highlighted = chosenResidentId
+                ? match.bed.dataset.residentId === chosenResidentId
+                : match.rank === residentMatches[0].rank;
+            match.bed.classList.toggle("is-resident-match", highlighted);
         });
         closeResidentOptions();
         residentOptions.replaceChildren();
         if (!query || document.activeElement !== residentFinder) return;
-        residentMatches.forEach(function (bed, index) {
+        residentMatches.forEach(function (match, index) {
+            var bed = match.bed;
             var option = element("div");
             option.id = "settlement-resident-option-" + index;
             option.dataset.matchIndex = String(index);
@@ -611,12 +629,14 @@
         });
         residentSearchEmpty.hidden = residentMatches.length > 0;
         residentPopup.hidden = false;
+        residentPopup.scrollTop = 0;
         residentFinder.setAttribute("aria-expanded", "true");
     }
 
     function showResidentBed(index) {
-        var bed = residentMatches[index];
-        if (!bed) return;
+        var match = residentMatches[index];
+        if (!match) return;
+        var bed = match.bed;
         var room = bed.closest("[data-room-card]");
         state.dormitory = room.dataset.dormitory;
         state.floor = room.dataset.floor;
