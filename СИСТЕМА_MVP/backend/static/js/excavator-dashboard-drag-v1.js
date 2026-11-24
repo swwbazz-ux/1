@@ -324,7 +324,9 @@
                 activeDrag.started = true;
                 activeDrag.card.classList.add("is-dragging");
                 createPreview(activeDrag);
-                createComet(activeDrag, options.gradientId || "eo-drag-comet-light");
+                if (options.showComet !== false) {
+                    createComet(activeDrag, options.gradientId || "eo-drag-comet-light");
+                }
             }
             movePreview(activeDrag, dx, dy);
             var cancelling = specialCancel(activeDrag, dx, dy);

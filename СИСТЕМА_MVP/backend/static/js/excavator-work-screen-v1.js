@@ -1894,6 +1894,7 @@ window.initExcavatorWorkShell = function () {
 
     var excavatorDashboardDrag = window.ExcavatorDashboardDrag.attach({
         shell: shell,
+        showComet: false,
         canDrag: canTruckLoad,
         isInactive: isInactiveTruck,
         isBlocked: isTruckLoadBlocked,
