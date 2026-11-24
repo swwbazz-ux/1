@@ -22,7 +22,12 @@
                 </div>
                 <div class="deputy-brigade-switch" role="group" aria-label="Фильтр сотрудников по бригаде">
                     <span>Бригада</span>
+                    {% if planning_payload.brigades|length == 2 %}
+                    <button type="button" class="is-active" data-brigade-filter="watch" aria-pressed="true">Моя вахта</button>
+                    <button type="button" data-brigade-filter="all" aria-pressed="false">Все</button>
+                    {% else %}
                     <button type="button" class="is-active" data-brigade-filter="all" aria-pressed="true">Все</button>
+                    {% endif %}
                     {% for brigade in planning_payload.brigades %}
                     <button type="button" data-brigade-filter="{{ brigade }}" aria-pressed="false">{{ brigade }}</button>
                     {% endfor %}
@@ -257,6 +262,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-extension-expiry" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-all-watches" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

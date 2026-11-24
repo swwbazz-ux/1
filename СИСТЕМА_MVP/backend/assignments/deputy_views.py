@@ -649,6 +649,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 'changed_count': 0,
             },
             'employees': [],
+            'other_watch_employees': [],
             'secondary_employee_label': '',
             'rows': [],
         }
@@ -767,8 +768,24 @@ def build_crew_plan_payload(plan, *, deputy=None):
         if slot.baseline_secondary_employee_id
     )
     extensions = approved_watch_extensions_on(plan.work_date, employee_ids=payload_employee_ids) if deputy else {}
+    other_watch_employees = []
     if brigades != ALL_BRIGADES:
-        eligible_employees = [employee for employee in eligible_employees if _in_deputy_roster(employee, brigades, extensions)]
+        roster_employees = []
+        for employee in eligible_employees:
+            if _in_deputy_roster(employee, brigades, extensions):
+                roster_employees.append(employee)
+                continue
+            brigade_code = _employee_brigade_code(employee)
+            if brigade_code in ALL_BRIGADES:
+                other_watch_employees.append({
+                    'id': employee.pk,
+                    'full_name': employee.full_name,
+                    'brigade_code': brigade_code,
+                    'position_label': (
+                        employee.personnel_position.name if employee.personnel_position_id else employee.position or ''
+                    ),
+                })
+        eligible_employees = roster_employees
         transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
     presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
 
@@ -971,6 +988,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
             )
             for employee in eligible_employees
         ],
+        'other_watch_employees': other_watch_employees,
         'secondary_employee_label': secondary_position_label,
         'temporary_transfer': {
             'available': bool(

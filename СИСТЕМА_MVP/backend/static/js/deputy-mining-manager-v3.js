@@ -56,6 +56,10 @@
                 ? employee.eligible_positions
                 : ["primary"];
         });
+        var otherWatchEmployees = Array.isArray(payload.other_watch_employees) ? payload.other_watch_employees : [];
+        payload.allWatchEmployees = payload.employees.concat(otherWatchEmployees).sort(function (left, right) {
+            return employeeName(left).localeCompare(employeeName(right), "ru", { sensitivity: "base" });
+        });
         payload.rows = Array.isArray(payload.rows) ? payload.rows : [];
         payload.temporary_transfer.candidates = Array.isArray(payload.temporary_transfer.candidates)
             ? payload.temporary_transfer.candidates
@@ -121,7 +125,7 @@
     var noticeAction = notice && notice.querySelector("[data-notice-action]");
     var noticeClose = notice && notice.querySelector("[data-notice-close]");
     var currentFilter = "all";
-    var currentBrigade = "all";
+    var currentBrigade = state.brigades && state.brigades.length === 2 ? "watch" : "all";
     var currentSlot = null;
     var candidateEmployees = [];
     var equipmentRowNodes = new Map();
@@ -288,8 +292,9 @@
     }
 
     function employeeMatchesBrigade(employee) {
+        if (currentBrigade === "all") return Boolean(employee.brigade_code) || inDeputyRoster(employee);
         if (!inDeputyRoster(employee)) return false;
-        if (currentBrigade === "all") return true;
+        if (currentBrigade === "watch") return true;
         return textValue(employee && employee.brigade_code) === currentBrigade;
     }
 
@@ -328,7 +333,8 @@
 
     function searchContext() {
         var query = currentQuery();
-        var brigadeEmployees = state.employees.filter(employeeMatchesBrigade);
+        var source = currentBrigade === "all" ? state.allWatchEmployees : state.employees;
+        var brigadeEmployees = source.filter(employeeMatchesBrigade);
         var employeeMatches = query ? rankedEmployeeMatches(brigadeEmployees, query) : [];
         var rowMatches = query ? state.rows.filter(rowMatchesFilter).map(function (row) {
             return { row: row, rank: rowSearchRank(row, query) };
@@ -902,14 +908,19 @@
     function createEmployeeCard(employee) {
         var card = createElement("article", "deputy-employee-card");
         card.setAttribute("role", "listitem");
-        card.tabIndex = 0;
-        card.title = "Двойной клик — открыть карточку сотрудника";
+        var canAssign = inDeputyRoster(employee);
         card.appendChild(createAvatar(employee));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
         appendExtensionBadge(main, activeRosterExtensionUntil(employee));
         card.appendChild(main);
+        if (!canAssign) {
+            main.appendChild(createElement("small", "", "Бригада " + employee.brigade_code + " · только просмотр"));
+            return card;
+        }
+        card.tabIndex = 0;
+        card.title = "Двойной клик — открыть карточку сотрудника";
         card.appendChild(createPresenceBadge(employee));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
@@ -969,7 +980,7 @@
             employeeEmpty.hidden = visible.length !== 0;
             employeeEmpty.textContent = context.query
                 ? "Поиск не дал результатов."
-                : (currentBrigade === "all" ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
+                : ((currentBrigade === "all" || currentBrigade === "watch") ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
         }
     }
 
@@ -1080,7 +1091,9 @@
     function renderCandidatePicker() {
         if (!candidateList || !currentSlot) return;
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
-        var visibleEmployees = candidateEmployees.filter(employeeMatchesBrigade);
+        var visibleEmployees = candidateEmployees.filter(function (employee) {
+            return inDeputyRoster(employee) && employeeMatchesBrigade(employee);
+        });
         var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
             return match.employee;
         });
@@ -1116,7 +1129,7 @@
             if (query) {
                 emptyMessage = "По вашему запросу сотрудники не найдены.";
             } else {
-                emptyMessage = currentBrigade === "all"
+                emptyMessage = currentBrigade === "all" || currentBrigade === "watch"
                     ? "Свободных сотрудников нет."
                     : "В бригаде " + currentBrigade + " подходящих сотрудников нет.";
             }
@@ -1330,7 +1343,7 @@
                 finishDrag();
                 return;
             }
-            var employee = state.employees.concat(
+            var employee = state.allWatchEmployees.concat(
                 state.rows.reduce(function (items, candidateRow) {
                     (candidateRow.slots || []).forEach(function (candidateSlot) {
                         if (candidateSlot.employee) items.push(candidateSlot.employee);
@@ -1341,7 +1354,7 @@
             ).find(function (candidate) {
                 return textValue(candidate.id) === textValue(payload.employeeId);
             });
-            if (employee && !employeeCanFillPosition(employee, position)) {
+            if (employee && (!inDeputyRoster(employee) || !employeeCanFillPosition(employee, position))) {
                 finishDrag();
                 return;
             }

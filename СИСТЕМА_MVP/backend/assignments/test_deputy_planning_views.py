@@ -695,7 +695,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v19";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v20";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)
@@ -983,6 +983,10 @@ class DeputyPlanningViewTests(TestCase):
     def test_watch_roster_includes_only_own_brigades_and_current_approved_extensions(self):
         work_date = production_work_date()
         people = self.create_watch_roster()
+        excavator_operator, _ = self.create_employee_with_access(
+            'Машинист чужой вахты', self.excavator_role, phone='+79000102001', access_code='620002',
+            rotation='Бригада 3',
+        )
         other_deputy, other_access = self.create_employee_with_access(
             'Второй заместитель', self.deputy_role, phone='+79000102000', access_code='620001',
         )
@@ -997,6 +1001,13 @@ class DeputyPlanningViewTests(TestCase):
             self.assertNotContains(response, 'data-brigade-filter="3"')
             payload = response.context['planning_payload']
             self.assertEqual({item['full_name'] for item in payload['employees']}, {'Своя', 'Продление'})
+            self.assertContains(response, 'data-brigade-filter="watch" aria-pressed="true"')
+            other_watch = {item['id']: item for item in payload['other_watch_employees']}
+            self.assertIn(people['Чужая'].pk, other_watch)
+            self.assertNotIn(excavator_operator.pk, other_watch)
+            self.assertNotIn('phone', other_watch[people['Чужая'].pk])
+            excavators = self.client.get(url, {'role': self.excavator_role.code}).context['planning_payload']
+            self.assertEqual([item['id'] for item in excavators['other_watch_employees']], [excavator_operator.pk])
             extension = next(item for item in payload['employees'] if item['id'] == people['Продление'].pk)
             expiry = datetime.combine(work_date + timedelta(days=1), time(7), ZoneInfo('Asia/Vladivostok'))
             self.assertEqual(extension['extension_expires_at'], expiry.isoformat())
