@@ -18,7 +18,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from references.models import Dormitory
-from users.models import ContractorOrganization, Employee, EmployeeAccess, Role
+from users.models import AdminActionLog, ContractorOrganization, Employee, EmployeeAccess, Role
 
 from .fund import (
     close_dormitory,
@@ -644,6 +644,54 @@ class FundPanelAccessTests(FundTestBase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse('clerk_login'), response['Location'])
         self.assertFalse(Dormitory.objects.filter(number='АР-7').exists())
+
+    def test_clerk_marks_existing_room_transferred_and_keeps_the_bed(self):
+        dormitory, _ = Dormitory.objects.get_or_create(number='5')
+        room = PhysicalRoom.objects.create(
+            dormitory=dormitory, floor=1, number=100, capacity=1, corridor_side='right', side_position=100,
+        )
+        bed = PhysicalBed.objects.create(room=room, block='A', position=1)
+        url = reverse('settlement_fund')
+        payload = {'action': 'mark_room_transferred', 'room': room.pk}
+        self.authenticate(self.client, self.driver_access)
+        denied = self.client.post(url, payload)
+        self.assertIn(reverse('clerk_login'), denied['Location'])
+        room.refresh_from_db()
+        self.assertFalse(room.is_transferred)
+
+        self.authenticate(self.client, self.clerk_access)
+        page = self.client.get(url)
+        self.assertContains(page, 'Отметить как переданную')
+        changed = self.client.post(url, payload, follow=True)
+        self.assertContains(changed, 'комната № 100 доступна для заселения')
+        room.refresh_from_db()
+        self.assertTrue(room.is_transferred)
+        self.assertEqual(list(room.beds.values_list('pk', flat=True)), [bed.pk])
+        self.client.post(url, payload)
+        audit = AdminActionLog.objects.get(action_code='settlement_room_transferred', object_id=str(room.pk))
+        self.assertEqual(audit.actor, self.clerk_employee)
+
+    def test_transfer_opens_empty_room_with_configured_beds_and_rejects_closed_fund(self):
+        dormitory, _ = Dormitory.objects.get_or_create(number='6')
+        dormitory.is_active = False
+        dormitory.save(update_fields=['is_active'])
+        room = PhysicalRoom.objects.create(
+            dormitory=dormitory, floor=1, number=101, capacity=2, corridor_side='left', side_position=101,
+        )
+        self.authenticate(self.client, self.clerk_access)
+        url = reverse('settlement_fund')
+        payload = {'action': 'mark_room_transferred', 'room': room.pk}
+        denied = self.client.post(url, payload, follow=True)
+        self.assertContains(denied, 'Отметить передачу можно для комнат действующих КИС-5 и КИС-6.')
+        self.assertFalse(room.beds.exists())
+        dormitory.is_active = True
+        dormitory.save(update_fields=['is_active'])
+        self.client.post(url, payload)
+        room.refresh_from_db()
+        self.assertTrue(room.is_transferred)
+        self.assertEqual(
+            set(room.beds.values_list('stable_id', flat=True)), {'KIS6-F1-R101-A1', 'KIS6-F1-R101-A2'},
+        )
 
     def test_other_role_cannot_manage_fund(self):
         self.authenticate(self.client, self.driver_access)

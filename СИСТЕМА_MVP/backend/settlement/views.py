@@ -84,6 +84,7 @@ from .fund import (
     create_dormitory as create_fund_dormitory,
     create_room as create_fund_room,
     fund_dormitory_list,
+    mark_room_transferred,
     reopen_dormitory as reopen_fund_dormitory,
     room_map_positions,
 )
@@ -3612,6 +3613,12 @@ def _settlement_fund_post(request, access):
                 success_text = f'Добавлена комната № {room.number} в КИС-{dormitory.number}. Койко-мест создано {room.capacity}.'
             else:
                 success_text = 'Комната добавлена и отмечена как переданная.'
+        elif action == 'mark_room_transferred':
+            room = _fund_form_object(
+                PhysicalRoom, request.POST.get('room'), not_found_message='Комната не найдена.',
+            )
+            room = mark_room_transferred(room=room, actor_access=access)
+            success_text = f'КИС-{room.dormitory.number}, {room.floor} этаж, комната № {room.number} доступна для заселения.'
         elif action == 'create_bed':
             room = _fund_form_object(
                 PhysicalRoom,

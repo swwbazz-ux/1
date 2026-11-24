@@ -146,8 +146,8 @@ def expected_fund_totals():
 # Панель делопроизводителя собирает фонд существующими моделями
 # ``references.Dormitory`` -> ``PhysicalRoom`` -> ``PhysicalBed``. Через панель
 # добавляются комнаты КИС-5/6 и управляется арендованный фонд.
-# Каждое изменение пишется в неизменяемый журнал ``SettlementPlacementEvent``
-# отдельным `FUND_*` событием с причиной и автором.
+# Создание комнат и операции арендованного фонда записываются в
+# ``SettlementPlacementEvent``. Передача существующей комнаты — в журнал действий.
 # ---------------------------------------------------------------------------
 
 # Номера собственного фонда, которые жёстко зашиты в карту (views.py: карта 5/6).
@@ -385,6 +385,7 @@ def fund_dormitory_list():
             'note': dormitory.note,
             'is_active': dormitory.is_active,
             'is_manageable': dormitory.kind == Dormitory.Kind.RENTED,
+            'can_transfer_rooms': dormitory.is_active and _is_own_map_dormitory(dormitory),
             'can_add_room': dormitory.is_active and (
                 dormitory.kind == Dormitory.Kind.RENTED or _is_own_map_dormitory(dormitory)
             ),
@@ -570,6 +571,45 @@ def create_room(
                 'after': _room_snapshot(room),
                 'beds': [_bed_snapshot(bed) for bed in beds],
             },
+        )
+    return room
+
+
+def mark_room_transferred(*, room, actor_access):
+    """Open an existing room on the КИС-5/6 settlement map."""
+    from references.models import Dormitory
+    from users.models import AdminActionLog
+
+    from .models import PhysicalBed, PhysicalRoom
+
+    actor = _required_actor(actor_access)
+    with transaction.atomic():
+        dormitory = Dormitory.objects.select_for_update().filter(pk=room.dormitory_id).first()
+        room = PhysicalRoom.objects.select_for_update().filter(pk=room.pk, dormitory=dormitory).first()
+        if room is None:
+            raise _fund_error('Комната не найдена.', 'settlement.fund.room_required')
+        if not _is_own_map_dormitory(dormitory) or not dormitory.is_active:
+            raise _fund_error(
+                'Отметить передачу можно для комнат действующих КИС-5 и КИС-6.',
+                'settlement.fund.room_transfer_unavailable',
+            )
+        if room.is_transferred:
+            return room
+
+        if not room.beds.exists():
+            specs = _room_bed_specs(dormitory.number, room.floor, room.number, room.room_type, room.capacity)
+            PhysicalBed.objects.bulk_create([PhysicalBed(room=room, **spec) for spec in specs])
+        room.transfer_status = PhysicalRoom.TransferStatus.TRANSFERRED
+        room.save(update_fields=['transfer_status'])
+        AdminActionLog.objects.create(
+            actor=actor.employee,
+            action='Комната отмечена как переданная',
+            action_code='settlement_room_transferred',
+            object_type='PhysicalRoom',
+            object_id=str(room.pk),
+            object_repr=str(room),
+            old_value=PhysicalRoom.TransferStatus.NOT_TRANSFERRED.label,
+            new_value=PhysicalRoom.TransferStatus.TRANSFERRED.label,
         )
     return room
 
