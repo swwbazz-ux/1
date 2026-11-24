@@ -130,7 +130,8 @@ test("assets stay on v39 with four versioned scripts in load order", () => {
     const externalIndex = TEMPLATE.indexOf("js/settlement-external-residents.js");
     assert.ok(mapIndex > 0 && shiftIndex > mapIndex, "shift panel loads after the map");
     assert.ok(externalIndex > shiftIndex, "external residents stay last");
-    assert.equal((TEMPLATE.match(/<script src=/g) || []).length, 6);
+    assert.ok(TEMPLATE.indexOf("js/settlement-bed-checkin.js") < mapIndex);
+    assert.equal((TEMPLATE.match(/<script src=/g) || []).length, 7);
     assert.equal(
         (TEMPLATE.match(/<script src="[^"]*-settlement-map-v39/g) || []).length,
         4

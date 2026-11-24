@@ -1,0 +1,139 @@
+/* Оформление фактического проживания из выбранной койки. */
+window.createSettlementBedCheckin = function (form, applied) {
+    "use strict";
+    if (!form) return null;
+    const fields = form.elements;
+    const name = fields.namedItem("full_name");
+    const card = form.querySelector("[data-checkin-card]");
+    const results = form.querySelector("[data-checkin-results]");
+    const message = form.querySelector("[data-checkin-message]");
+    const newButton = form.querySelector("[data-checkin-new]");
+    const submit = form.querySelector('[type="submit"]');
+    let target = null;
+    let subject = "";
+    let timer;
+    let request = 0;
+    let saving = false;
+
+    function notify(text) {
+        message.textContent = text;
+        message.hidden = !text;
+    }
+
+    function clearResults() {
+        clearTimeout(timer);
+        request += 1;
+        results.replaceChildren();
+        results.hidden = true;
+    }
+
+    function toggleCard(open) {
+        card.hidden = card.disabled = !open;
+        newButton.textContent = open ? "Найти в справочнике" : "Новый жилец";
+        subject = open ? "new" : "";
+        name.setCustomValidity("");
+        clearResults();
+        notify("");
+    }
+
+    function search() {
+        clearResults();
+        name.setCustomValidity("");
+        notify("");
+        if (!card.hidden) return;
+        subject = "";
+        const query = name.value.trim();
+        if (!target || query.length < 2) return;
+        const version = request;
+        timer = setTimeout(async function () {
+            try {
+                const url = new URL(form.dataset.searchUrl, location.href);
+                url.searchParams.set("q", query);
+                const response = await fetch(url, {credentials: "same-origin"});
+                if (!response.ok) throw new Error();
+                const data = await response.json();
+                if (version !== request) return;
+                for (const person of data.results) {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.className = "settlement-employee-result";
+                    const label = document.createElement("strong");
+                    label.textContent = person.name;
+                    const meta = document.createElement("small");
+                    meta.textContent = [person.kind, person.details].filter(Boolean).join(" · ");
+                    button.append(label, meta);
+                    button.addEventListener("click", function () {
+                        subject = person.id;
+                        name.value = person.name;
+                        name.setCustomValidity("");
+                        clearResults();
+                        notify(meta.textContent);
+                    });
+                    results.append(button);
+                }
+                results.hidden = !data.results.length;
+                if (!data.results.length) notify("Совпадений нет. Проверьте ФИО или выберите «Новый жилец».");
+            } catch {
+                if (version === request) notify("Не удалось проверить справочник. Повторите поиск.");
+            }
+        }, 180);
+    }
+
+    name.addEventListener("input", search);
+    newButton.addEventListener("click", function () {
+        toggleCard(card.hidden);
+        if (card.hidden) search();
+        (card.hidden || !name.value.trim() ? name : fields.resident_type).focus();
+    });
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        if (!target || saving || form.hidden) return;
+        if (!subject) {
+            name.setCustomValidity("Выберите человека в результатах поиска или нажмите «Новый жилец».");
+            name.reportValidity();
+            return;
+        }
+        const bed = target;
+        const payload = Object.fromEntries(new FormData(form));
+        delete payload.csrfmiddlewaretoken;
+        payload.subject = subject;
+        payload.bed_stable_id = bed.dataset.bedId;
+        payload.confirm_itr = fields.confirm_itr.checked && !fields.confirm_itr.disabled;
+        saving = submit.disabled = true;
+        notify("Сохраняем заселение…");
+        try {
+            const response = await fetch(form.action, {
+                method: "POST", credentials: "same-origin",
+                headers: {"Content-Type": "application/json", "X-CSRFToken": fields.csrfmiddlewaretoken.value},
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!response.ok || !result.ok) throw new Error(result.error || "Не удалось заселить жильца.");
+            applied(result, bed);
+        } catch (error) {
+            if (target === bed) notify(error.message || "Проверьте соединение с сервером.");
+        } finally {
+            saving = submit.disabled = false;
+        }
+    });
+    return {
+        select(bed) {
+            if (target === bed) return;
+            target = bed;
+            form.reset();
+            toggleCard(false);
+            form.dataset.targetBed = bed ? bed.dataset.bedId : "";
+            form.hidden = !bed;
+            if (!bed) return;
+            form.querySelector("[data-checkin-place]").textContent = bed.dataset.bedNumber;
+            const room = bed.closest("[data-room-card]");
+            const reserve = Boolean(room.querySelector('[data-room-anchor="reserve"]'));
+            const itr = !reserve && (room.querySelectorAll("[data-bed]").length <= 2 || Boolean(room.querySelector('[data-room-anchor="protected"]')));
+            fields.basis.disabled = form.querySelector("[data-checkin-basis]").hidden = !reserve && !itr;
+            fields.basis.required = reserve;
+            fields.confirm_itr.disabled = form.querySelector("[data-checkin-itr]").hidden = !itr;
+            const today = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Vladivostok"}).format(new Date());
+            fields.arrival.max = fields.arrival.value = fields.departure.min = today;
+        }
+    };
+};

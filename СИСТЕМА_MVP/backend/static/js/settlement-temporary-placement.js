@@ -19,6 +19,7 @@
     var takeoverButton = root.querySelector("[data-control-takeover]");
 
     var prepBlock = root.querySelector("[data-bed-preparation]");
+    var checkinForm = root.querySelector("[data-bed-checkin]");
     var prepResidentLabel = root.querySelector("[data-bed-preparation-resident]");
     var prepHoldLabel = root.querySelector("[data-bed-preparation-hold]");
     var prepBasisLabel = root.querySelector("[data-bed-preparation-basis]");
@@ -571,6 +572,7 @@
         var free = available && !preparation && bed.dataset.occupied !== "true";
         if (!free) state.formOpen = false;
         var showingForm = free && state.formOpen;
+        if (checkinForm) setHidden(checkinForm, !free || showingForm || !checkinForm.dataset.targetBed);
 
         setHidden(prepBlock, !available || !preparation);
         setHidden(prepActions, !free || showingForm);
@@ -1454,5 +1456,6 @@
         }
     }
 
+    root.addEventListener("settlement:checked-in", loadState);
     loadState();
 }());

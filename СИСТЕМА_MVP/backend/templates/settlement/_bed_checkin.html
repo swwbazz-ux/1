@@ -1,0 +1,35 @@
+<form class="settlement-checkin settlement-placement-panel" data-bed-checkin
+      action="{% url 'settlement_bed_checkin' %}" data-search-url="{% url 'settlement_bed_checkin_people' %}"
+      aria-labelledby="bed-checkin-title" hidden>
+    {% csrf_token %}
+    <h3 id="bed-checkin-title">Заселить на койку <span data-checkin-place></span></h3>
+    <label class="settlement-employee-search">
+        <span>ФИО жильца</span>
+        <input name="full_name" type="search" required maxlength="255" placeholder="Начните вводить фамилию" autocomplete="off">
+    </label>
+    <div class="settlement-employee-results" data-checkin-results aria-label="Найденные люди" hidden></div>
+    <button type="button" class="settlement-bed-prep-secondary" data-checkin-new>Новый жилец</button>
+    <fieldset class="settlement-checkin-fields" data-checkin-card hidden disabled>
+        <legend>Новая карточка жильца</legend>
+        <label class="settlement-assignment-type"><span id="bed-checkin-type">Тип жильца</span>
+            <select name="resident_type" aria-labelledby="bed-checkin-type" required>
+                <option value="">Выберите тип</option><option value="BUSINESS_TRIP">Командированный</option>
+                <option value="CONTRACTOR">Подрядчик</option><option value="EXTERNAL_OTHER">Другой жилец</option>
+            </select>
+        </label>
+        <label class="settlement-assignment-type"><span id="bed-checkin-sex">Пол</span>
+            <select name="sex" aria-labelledby="bed-checkin-sex" required><option value="">Выберите пол</option><option value="male">Мужской</option><option value="female">Женский</option></select>
+        </label>
+        <label class="settlement-employee-search"><span>Организация</span><input name="organization" required maxlength="255"></label>
+        <label class="settlement-employee-search"><span>Должность или профессия</span><input name="position_title" required maxlength="255"></label>
+        <label class="settlement-employee-search"><span>Телефон</span><input name="phone" type="tel" required maxlength="32"></label>
+    </fieldset>
+    <div class="settlement-checkin-fields">
+        <label class="settlement-employee-search"><span>Дата заселения</span><input name="arrival" type="date" required></label>
+        <label class="settlement-employee-search"><span>Дата выезда, если известна · 07:00</span><input name="departure" type="date"></label>
+    </div>
+    <label class="settlement-employee-search" data-checkin-basis hidden><span>Основание размещения</span><input name="basis" maxlength="512"></label>
+    <label data-checkin-itr hidden><input type="checkbox" name="confirm_itr"> Подтверждаю категорию ИТР</label>
+    <p data-checkin-message role="status" class="settlement-placement-feedback" hidden></p>
+    <button type="submit" class="settlement-place-button">Заселить</button>
+</form>

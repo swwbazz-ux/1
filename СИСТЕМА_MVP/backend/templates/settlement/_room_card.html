@@ -38,6 +38,7 @@
                                 data-bed-state="{% if not room.is_transferred %}unavailable{% elif bed.active_occupancy %}occupied{% else %}free{% endif %}"
                                 data-occupied="{% if bed.active_occupancy %}true{% else %}false{% endif %}"
                                 data-occupancy-id="{% if bed.active_occupancy %}{{ bed.active_occupancy.pk }}{% endif %}"
+                                {% if bed.active_occupancy and not picker %}data-stay-start="{{ bed.stay_period.start }}" data-stay-end="{{ bed.stay_period.end }}"{% endif %}
                                 data-resident-id="{% if bed.active_occupancy %}{{ bed.active_occupancy.resident_id }}{% endif %}"
                                 data-occupant-id="{% if bed.active_occupancy and bed.active_occupancy.resident.employee_id %}{{ bed.active_occupancy.resident.employee_id }}{% endif %}"
                                 data-occupant-name="{{ bed.occupant_name }}"
@@ -54,8 +55,7 @@
                                 data-room-label="комната {{ room.number }}"
                                 data-block-label="{{ block.label }}"
                                 data-position-label="место {{ bed.position }}"
-                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% if bed.on_extension %}, на продлении{% endif %}{% else %}, свободно{% endif %}"
-                                {% if not room.is_transferred and not picker %}disabled{% endif %}>
+                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% if bed.on_extension %}, на продлении{% endif %}{% elif not room.is_transferred %}, недоступно{% else %}, свободно{% endif %}">
                             <span class="settlement-bed-visual"
                                   data-bed-photo-slot{% if bed.active_occupancy and not picker %}
                                   data-bed-drag-handle draggable="true"{% endif %}

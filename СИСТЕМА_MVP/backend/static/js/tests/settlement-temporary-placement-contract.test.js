@@ -172,6 +172,7 @@ test("panel visibility stabilizes after selecting a free bed or opening relocati
     }
     const context = {
         state: {formOpen: false, panelBedId: "some-bed", reserves: {}},
+        checkinForm: Object.assign(control(true), {dataset: {targetBed: "some-bed"}}),
         selectedBed: () => ({dataset: {bedId: "some-bed", occupied: "false"}}),
         preparationForBed: () => null,
         controlHeld: () => true,

@@ -4841,11 +4841,11 @@ class SettlementMapAccessTests(TestCase):
         self.assertIn('не передана и недоступна для расселения', not_transferred_room_tag.group(1))
         self.assertEqual(
             len(re.findall(r'data-bed-id="[^"]+"[^>]*\sdisabled', content)),
-            78,
+            0,
         )
         unavailable_buttons = re.findall(
             r'<button(?=[^>]*data-bed-card)(?=[^>]*data-bed-state="unavailable")'
-            r'(?=[^>]*\sdisabled)[^>]*>',
+            r'[^>]*>',
             content,
         )
         self.assertEqual(len(unavailable_buttons), 78)
@@ -8700,6 +8700,28 @@ class ClerkMapEffectiveOccupancyTests(TestCase):
 
         self.assert_map_visibility(0, visible=True)
 
+    def test_bed_stay_period_uses_effective_dates_in_vladivostok_on_all_map_views(self):
+        start = self.moment - timedelta(hours=21)
+        occupancies = [
+            self.create_occupancy(
+                0, starts_at=start, ends_at=self.moment + timedelta(days=3),
+                terminated_at=self.moment + timedelta(hours=5),
+            ),
+            self.create_occupancy(1, starts_at=start),
+        ]
+        with mock.patch('settlement.views.timezone.now', return_value=self.moment):
+            page = self.client.get(reverse('settlement_map'))
+            for index, end in enumerate(('06.08.2026 03:00', '')):
+                with self.subTest(end=end):
+                    period = {'start': '05.08.2026 01:00', 'end': end}
+                    detail = self.client.get(reverse('settlement_employee_detail', args=[self.employees[index].pk]))
+                    self.assertEqual(detail.json()['employee']['stay_period'], period)
+                    self.assertEqual(_occupancy_response(occupancies[index])['occupancy']['stay_period'], period)
+                    self.assertContains(page, f'data-stay-start="05.08.2026 01:00" data-stay-end="{end}"', count=1)
+            self.assertContains(page, 'data-stay-start=', count=2)
+            unassigned = self.client.get(reverse('settlement_employee_detail', args=[self.employees[2].pk]))
+            self.assertIsNone(unassigned.json()['employee']['stay_period'])
+
     def test_map_marks_only_occupied_beds_with_current_approved_extensions(self):
         work_date = timezone.localdate(self.moment)
         watch = WatchPeriod.objects.create(
@@ -9312,7 +9334,7 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('photo.classList.add("is-loaded")', javascript)
         self.assertIn('floorSection && floorSection.hidden', javascript)
         self.assertIn('section.querySelectorAll("[data-bed]").forEach(renderMapBed)', javascript)
-        self.assertIn('renderMapBed(selectedBed);', javascript)
+        self.assertIn('renderMapBed(destination);', javascript)
         self.assertIn('classList.toggle("is-filter-muted"', javascript)
         self.assertNotIn('style.display', javascript)
         self.assertIn('fetch(root.dataset.employeeSearchUrl', javascript)
@@ -9327,7 +9349,7 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('if (relocationSourceBed) {\n            submitPlacement();', javascript)
         self.assertIn('dragHandle.setAttribute("data-bed-drag-handle", "");', javascript)
         self.assertIn('dragHandle.setAttribute("draggable", "true");', javascript)
-        self.assertIn('selectedBed.dataset.occupantId = String(movedEmployeeId || "");', javascript)
+        self.assertIn('destination.dataset.occupantId = String(movedEmployeeId || "");', javascript)
         self.assertIn('action: "release"', javascript)
         self.assertIn('function confirmRelease()', javascript)
         self.assertIn('function startRelocation()', javascript)
@@ -9383,7 +9405,7 @@ class SettlementFrontendContractTests(TestCase):
             'function closePanel()',
             1,
         )[0]
-        self.assertLess(open_room_source.index('renderRoom(room);'), open_room_source.index('if (bed)'))
+        self.assertLess(open_room_source.index('selectBed(bed);'), open_room_source.index('renderRoom(room);'))
         self.assertIn('overflow-x: auto', stylesheet)
         self.assertIn('.settlement-dormitory[hidden]', stylesheet)
         self.assertIn(

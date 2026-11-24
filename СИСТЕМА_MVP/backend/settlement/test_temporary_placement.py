@@ -401,6 +401,89 @@ class TemporaryPlacementBase(TestCase):
         )
 
 
+class BedCheckinTests(TemporaryPlacementBase):
+    def setUp(self):
+        self.authenticate()
+        self.today = timezone.localdate()
+        self.payload = {
+            'bed_stable_id': self.beds[0].stable_id, 'subject': 'new',
+            'resident_type': 'CONTRACTOR', 'full_name': 'Тестовый Новый Жилец',
+            'position_title': 'Монтажник', 'organization': 'Тестовая организация',
+            'sex': 'male', 'phone': '89000000001',
+            'arrival': (self.today - timedelta(days=2)).isoformat(),
+            'departure': (self.today + timedelta(days=3)).isoformat(),
+        }
+
+    def checkin(self, **changes):
+        return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
+
+    def test_new_card_and_stay_are_saved_once_with_selected_dates(self):
+        self.acquire()
+        result = self.checkin()
+        self.assertEqual(result.status_code, 201, result.content)
+        occupancy = EmployeeBedOccupancy.objects.get(pk=result.json()['occupancy']['id'])
+        self.assertEqual(occupancy.physical_bed, self.beds[0])
+        self.assertEqual(occupancy.resident.full_name, self.payload['full_name'])
+        self.assertEqual(result.json()['occupancy']['stay_period']['end'],
+                         (self.today + timedelta(days=3)).strftime('%d.%m.%Y 07:00'))
+        self.assertGreaterEqual(self.checkin().status_code, 400)
+        self.assertEqual(SettlementResident.objects.filter(full_name=self.payload['full_name']).count(), 1)
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
+
+    def test_no_control_and_occupied_or_untransferred_bed_leave_no_card(self):
+        self.assertGreaterEqual(self.checkin().status_code, 400)
+        self.acquire()
+        self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0])
+        for bed in (self.beds[0], self.untransferred_bed):
+            self.assertGreaterEqual(self.checkin(bed_stable_id=bed.stable_id).status_code, 400)
+        self.assertFalse(SettlementResident.objects.filter(full_name=self.payload['full_name']).exists())
+        self.assertFalse(SettlementBedPreparation.objects.exists())
+
+    def test_directory_employee_without_card_and_existing_external(self):
+        person = Employee.objects.create(
+            full_name='Сотрудник Проверочный', is_active=True, status=Employee.Status.ACTIVE,
+            phone='+79000003555', personnel_position=self.worker_position, sex=Employee.Sex.MALE,
+        )
+        url = reverse('settlement_bed_checkin_people')
+        ids = [row['id'] for row in self.client.get(url, {'q': 'Проверочный'}).json()['results']]
+        self.assertIn(f'employee:{person.pk}', ids)
+        self.assertFalse(SettlementResident.objects.filter(employee=person).exists())
+        self.acquire()
+        for subject, bed in ((f'employee:{person.pk}', self.beds[0]), (f'resident:{self.external_resident.pk}', self.beds[1])):
+            result = self.checkin(subject=subject, bed_stable_id=bed.stable_id, departure='')
+            self.assertEqual(result.status_code, 201, result.content)
+            self.assertEqual(result.json()['occupancy']['stay_period']['end'], '')
+        self.assertEqual(SettlementResident.objects.filter(employee=person).count(), 1)
+
+    def test_backdated_conflict_and_invalid_dates_rollback_preparation(self):
+        self.acquire()
+        self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0],
+                              starts_at=timezone.now() - timedelta(days=3), ends_at=timezone.now() - timedelta(days=1))
+        for changes in ({}, {'arrival': 'ошибка'}, {'arrival': (self.today + timedelta(days=1)).isoformat()},
+                        {'departure': (self.today - timedelta(days=1)).isoformat()}):
+            self.assertGreaterEqual(self.checkin(**changes).status_code, 400)
+        self.assertFalse(SettlementBedPreparation.objects.exists())
+        self.assertFalse(SettlementResident.objects.filter(full_name=self.payload['full_name']).exists())
+
+    def test_prepared_bed_and_vip_reserve_keep_their_restrictions(self):
+        self.authenticate()
+        self.acquire()
+        result = self.post_json('settlement_bed_preparation_prepare', {
+            'resident_id': self.candidate_resident.pk, 'bed_stable_id': self.beds[0].stable_id,
+            'arrival_date': self.today.isoformat(), 'basis': 'Пропуск',
+        })
+        self.assertEqual(result.status_code, 201, result.content)
+        self.assertGreaterEqual(self.checkin().status_code, 400)
+        self.assertFalse(SettlementResident.objects.filter(full_name=self.payload['full_name']).exists())
+        room, beds = self.create_special_room(anchor_type=AccommodationAnchor.AnchorType.RESERVE, suffix='checkin')
+        PhysicalRoom.objects.filter(pk=room.pk).update(sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY)
+        guest = self.business_trip_resident()
+        booking = {'subject': f'resident:{guest.pk}', 'bed_stable_id': beds[0].stable_id}
+        self.assertGreaterEqual(self.checkin(**booking).status_code, 400)
+        result = self.checkin(**booking, basis='Распоряжение о командировке')
+        self.assertEqual(result.status_code, 201, result.content)
+
+
 class BedPreparationServiceTests(TemporaryPlacementBase):
     def test_prepare_bed_holds_place_until_end_of_arrival_day(self):
         arrival = timezone.localdate()

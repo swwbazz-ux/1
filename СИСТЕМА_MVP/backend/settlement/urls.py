@@ -1,6 +1,8 @@
 from django.urls import path
 
 from .views import (
+    settlement_bed_checkin_people_view,
+    settlement_bed_checkin_view,
     legacy_settlement_entry_view,
     legacy_settlement_login_view,
     legacy_settlement_service_worker_view,
@@ -51,6 +53,8 @@ from .views import (
 
 
 urlpatterns = [
+    path('clerk/settlement/check-in/people/', settlement_bed_checkin_people_view, name='settlement_bed_checkin_people'),
+    path('clerk/settlement/check-in/', settlement_bed_checkin_view, name='settlement_bed_checkin'),
     path(
         'clerk/manifest.webmanifest',
         settlement_manifest_view,

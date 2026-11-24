@@ -13,6 +13,7 @@
     var shiftStatus = root.querySelector("[data-clerk-shift-status]");
     var shiftWatch = root.querySelector("[data-clerk-shift-watch]");
     var openButton = root.querySelector("[data-clerk-shift-open]");
+    var checkinStart = root.querySelector("[data-checkin-start]");
     var closeButton = root.querySelector("[data-clerk-shift-close]");
     var handoverButton = root.querySelector("[data-clerk-shift-handover]");
     var controlFeedback = root.querySelector("[data-control-feedback]");
@@ -133,6 +134,7 @@
 
     function syncButtons() {
         var mode = state.saving ? "" : shiftMode(state.payload);
+        if (checkinStart) checkinStart.textContent = mode === "open" ? "Открыть смену и начать работу" : "Начать работу";
         if (openButton) {
             setHidden(openButton, mode !== "open");
             openButton.disabled = mode !== "open";
@@ -295,6 +297,11 @@
     /* --- Обработчики ------------------------------------------------------ */
 
     if (openButton) openButton.addEventListener("click", openShift);
+    if (checkinStart) checkinStart.addEventListener("click", function () {
+        if (state.saving) return;
+        if (shiftMode(state.payload) === "open") openShift();
+        else ensureControlLease();
+    });
     if (closeButton) closeButton.addEventListener("click", closeShift);
     if (handoverButton) handoverButton.addEventListener("click", handoverShift);
 

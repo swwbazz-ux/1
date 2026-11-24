@@ -360,7 +360,7 @@
         <div class="settlement-external-residents-body">
             <p class="settlement-external-residents-registry-hint"
                id="settlement-external-residents-registry-hint">
-                Заселение: 38 — только «Подготовить место» → «Гость» (командированный из центрального офиса), вручную и с основанием; остальные внешние — через «Подготовить место»; прямой «Заселить» внешнего вне 38 запрещён; переселение — освободить и заселить заново.
+                Чтобы оформить проживание, нажмите свободную койку на карте. Для будущего приезда выберите «Подготовить место».
             </p>
 
             <label class="settlement-external-residents-search" for="settlement-external-residents-search">
@@ -686,15 +686,18 @@
 
     <div class="settlement-room-panel-backdrop" data-room-panel-backdrop hidden></div>
     <aside class="settlement-room-panel"
-           data-room-panel
+           data-room-panel data-panel-view="room" role="dialog"
            aria-labelledby="settlement-room-panel-title"
            aria-hidden="true"
            hidden>
         <header class="settlement-room-panel-header">
             <div>
-                <span>Комната</span>
-                <h2 id="settlement-room-panel-title" data-room-panel-title>Не выбрана</h2>
-                <p data-room-panel-location>Выберите комнату или койко-место на карте</p>
+                <span data-panel-kind>Комната</span>
+                <h2 id="settlement-room-panel-title" data-room-panel-title tabindex="-1">Не выбрана</h2>
+                <div class="settlement-panel-location">
+                    <p data-room-panel-location></p>
+                    <button type="button" class="settlement-room-link" data-panel-room-link hidden></button>
+                </div>
             </div>
             <button type="button" class="settlement-room-panel-close" data-room-panel-close aria-label="Закрыть панель">×</button>
         </header>
@@ -709,15 +712,17 @@
         </div>
 
         <div class="settlement-room-panel-body">
+            {% include "settlement/_bed_checkin.html" %}
             <section class="settlement-room-bed-section" aria-labelledby="settlement-room-beds-title">
                 <div class="settlement-room-panel-section-title">
                     <div>
                         <span>Физический фонд</span>
                         <h3 id="settlement-room-beds-title">Койко-места комнаты</h3>
                     </div>
-                    <small>Выберите свободное место</small>
+                    <small>Выберите место</small>
                 </div>
                 <div class="settlement-room-bed-list" data-room-panel-beds></div>
+                <button type="button" class="settlement-bed-prep-secondary" data-panel-employee-link hidden>Карточка сотрудника</button>
             </section>
 
             <section class="settlement-placement-panel" data-placement-panel aria-live="polite">
@@ -730,6 +735,9 @@
                 <p class="settlement-placement-hint" data-placement-hint>
                     Выберите свободное койко-место в переданной комнате.
                 </p>
+                <button type="button" class="settlement-bed-prep-secondary" data-checkin-start hidden>Начать работу</button>
+                <details class="settlement-roster-placement" data-roster-placement>
+                <summary>Заселить из утверждённого списка заезда</summary>
                 <form data-settlement-form hidden>
                     {% csrf_token %}
                     <label class="settlement-employee-search" for="settlement-employee-search">
@@ -767,6 +775,7 @@
                         Заселить
                     </button>
                 </form>
+                </details>
                 <div class="settlement-occupied-actions" data-occupied-actions hidden>
                     <button type="button" class="settlement-place-button" data-relocate-button disabled>
                         Переселить сотрудника
@@ -916,9 +925,10 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-search-v3"></script>
-<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-relocation-v1"></script>
-<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-panel-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
+<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>

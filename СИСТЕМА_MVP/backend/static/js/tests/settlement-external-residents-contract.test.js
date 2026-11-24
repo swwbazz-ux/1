@@ -42,10 +42,8 @@ test("dialog carries modal semantics and the registry hint", () => {
     assert.match(modalRegion, /aria-describedby="settlement-external-residents-registry-hint"/);
     assert.match(modalRegion, /id="settlement-external-residents-registry-hint"/);
     // T-044: подсказка описывает фактический путь заселения, а не «реестр».
-    assert.match(modalRegion, /38 — только «Подготовить место» → «Гость» \(командированный из центрального офиса\), вручную и с основанием/);
-    assert.match(modalRegion, /остальные внешние — через «Подготовить место»/);
-    assert.match(modalRegion, /прямой «Заселить» внешнего вне 38 запрещён/);
-    assert.match(modalRegion, /переселение — освободить и заселить заново/);
+    assert.match(modalRegion, /нажмите свободную койку на карте/);
+    assert.match(modalRegion, /будущего приезда выберите «Подготовить место»/);
     assert.doesNotMatch(modalRegion, /через утверждённый реестр заезда/);
 });
 

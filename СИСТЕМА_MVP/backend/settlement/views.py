@@ -1,6 +1,6 @@
 import json
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from functools import wraps
 from hashlib import sha256
 from urllib.parse import urlencode
@@ -9,7 +9,7 @@ from django import forms
 from django.contrib import messages
 from django.core import signing
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
@@ -21,7 +21,9 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import AssignmentStatus, EquipmentAssignment
-from core.production_time import production_day_bounds, production_work_date
+from core.production_time import (
+    BUSINESS_TIME_ZONE, DAY_SHIFT_START, business_localtime, production_day_bounds, production_work_date,
+)
 from references.models import Dormitory
 from shifts.models import EmployeeShift
 from users.active_role import role_session_state
@@ -45,6 +47,7 @@ from .control import (
     clear_control_session_credentials,
     control_session_credentials_from_session,
     heartbeat_control_lease,
+    lock_settlement_write_lease,
     release_control_lease,
     store_control_session_credentials,
     takeover_control_lease,
@@ -88,6 +91,7 @@ from .fund import (
     room_map_positions,
     set_room_transfer_status,
 )
+from .intervals import occupancy_interval
 from .models import (
     EmployeeBedOccupancy,
     PhysicalBed,
@@ -112,7 +116,7 @@ from .preview_corrections import (
     restore_settlement_preview_resident,
 )
 from .resolver import _slot_candidates as _resolver_slot_candidates
-from .residents import create_external_resident
+from .residents import create_external_resident, get_or_create_employee_resident
 from .saved_previews import (
     confirm_settlement_preview_run,
     create_settlement_preview_run,
@@ -965,6 +969,14 @@ def _clerk_map_occupancies(rooms):
     ]
 
 
+def _bed_stay_period(occupancy):
+    start, end = occupancy_interval(occupancy)
+    return {
+        'start': business_localtime(start).strftime('%d.%m.%Y %H:%M'),
+        'end': business_localtime(end).strftime('%d.%m.%Y %H:%M') if end else '',
+    }
+
+
 def _attach_occupancy_view(rooms, moment):
     occupancies = _clerk_map_occupancies(rooms)
     profiles = _employee_profiles(
@@ -995,6 +1007,7 @@ def _attach_occupancy_view(rooms, moment):
             resident = occupancy.resident
             room.occupied_bed_count += 1
             bed.on_extension = resident.employee_id in extensions
+            bed.stay_period = _bed_stay_period(occupancy)
             bed.occupant_name = resident.display_name
             bed.occupant_initials = _person_initials(bed.occupant_name)
             profile = profiles.get(resident.employee_id)
@@ -1494,6 +1507,7 @@ def settlement_employee_detail_view(request, employee_id):
             'sex': employee.get_sex_display(),
             'phone': employee.phone or UNKNOWN_LABEL,
             'residence': residence,
+            'stay_period': _bed_stay_period(occupancy) if occupancy else None,
         },
     })
 
@@ -2366,6 +2380,7 @@ def _occupancy_response(occupancy):
             'photo_url': photo_url,
             'shift_label': DAY_NIGHT_LABELS.get(occupancy.work_shift, shift_label),
             'on_extension': on_extension,
+            'stay_period': _bed_stay_period(occupancy),
             'work_label': work_label,
             'tooltip_work_label': _bed_tooltip_work_label(occupancy, profile, official),
             'assignment_type': occupancy.assignment_type,
@@ -2562,7 +2577,7 @@ def _normalized_external_required(value):
 def _validated_external_resident_fields(payload):
     """Repeat the domain's fail-closed checks before any duplicate warning."""
     resident_type = payload.get('resident_type')
-    if resident_type not in EXTERNAL_RESIDENT_TYPES:
+    if not isinstance(resident_type, str) or resident_type not in EXTERNAL_RESIDENT_TYPES:
         raise ValidationError(
             'Для внешней карточки требуется внешний тип жильца.',
             code='settlement.resident.invalid_type',
@@ -2926,6 +2941,80 @@ def _bed_reserve_payload(reserve):
             if reserve.deactivated_at else None
         ),
     }
+
+
+@require_GET
+@never_cache
+def settlement_bed_checkin_people_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    return JsonResponse({'results': search_housing_subjects(request.GET.get('q', ''))})
+
+
+def _bed_checkin_resident(payload, control):
+    subject = payload.get('subject')
+    if subject == 'new':
+        values = _validated_external_resident_fields(payload)
+        if external_housing_card_exists(values):
+            raise ValidationError('Такая карточка уже есть. Выберите жильца по ФИО. Если карточка в архиве, восстановите её.')
+        return create_external_resident(**values, control_context=control).pk
+    if isinstance(subject, str):
+        kind, _, key = subject.partition(':')
+        if key.isascii() and key.isdigit() and len(key) <= 19 and 0 < int(key) <= 2**63 - 1:
+            pk = int(key)
+            if kind == 'employee' and Employee.objects.filter(
+                pk=pk, is_active=True, status=Employee.Status.ACTIVE,
+            ).exists():
+                resident, _ = get_or_create_employee_resident(employee_id=pk)
+                return resident.pk
+            if kind == 'resident' and SettlementResident.objects.filter(pk=pk, employee__isnull=True).exists():
+                return pk
+    raise ValidationError('Выберите человека из списка или создайте нового жильца.')
+
+
+class BedCheckinDatesForm(forms.Form):
+    arrival = forms.DateField(input_formats=['%Y-%m-%d'])
+    departure = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
+
+
+@require_POST
+def settlement_bed_checkin_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    try:
+        payload = _temporary_placement_payload(request)
+        control = _temporary_placement_write_context(request)
+        period = BedCheckinDatesForm(payload)
+        if not period.is_valid():
+            raise ValidationError('Проверьте даты заселения и выезда.')
+        arrival, departure = period.cleaned_data['arrival'], period.cleaned_data['departure']
+        with transaction.atomic():
+            lock_settlement_write_lease(control_context=control, using='default')
+            now = timezone.now()
+            today = business_localtime(now).date()
+            if arrival > today:
+                raise ValidationError('Для будущего заезда выберите «Подготовить место».')
+            start = now if arrival == today else datetime.combine(arrival, DAY_SHIFT_START, BUSINESS_TIME_ZONE)
+            end = datetime.combine(departure, DAY_SHIFT_START, BUSINESS_TIME_ZONE) if departure else None
+            if end is not None and end <= now:
+                raise ValidationError('Выезд должен быть позже текущего времени.')
+            resident_id = _bed_checkin_resident(payload, control)
+            confirm_itr = payload.get('confirm_itr') is True
+            prepared = prepare_bed(
+                resident_id=resident_id, bed_stable_id=payload.get('bed_stable_id'),
+                arrival_date=arrival, hold_until=end or now + timedelta(minutes=1),
+                basis=payload.get('basis', ''), control_context=control, confirm_itr=confirm_itr, current_arrival=True,
+            )
+            occupancy = confirm_bed_preparation(
+                preparation_id=prepared.pk, control_context=control,
+                starts_at=start, ends_at=end, confirm_itr=confirm_itr, placement_reason=payload.get('basis', ''),
+            )
+            result = _occupancy_response(occupancy)
+    except ValidationError as error:
+        if (_validation_error_details(error)[1] or '').startswith('settlement.control.'):
+            return _temporary_placement_control_error(request, error)
+        return _temporary_placement_error_response(error)
+    return _temporary_placement_json_response(result, status=201)
 
 
 @require_POST

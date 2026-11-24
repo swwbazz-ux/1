@@ -351,6 +351,8 @@ def prepare_bed(
     basis='',
     hold_until=None,
     control_context=None,
+    confirm_itr=False,
+    current_arrival=False,
 ):
     """Подготовить койку за жильцом до приезда (не проживание)."""
     using = router.db_for_write(SettlementBedPreparation)
@@ -365,7 +367,7 @@ def prepare_bed(
         basis_text = _normalized_text(
             basis,
             field_label='Основание',
-            required=True,
+            required=not current_arrival,
         )
         _ensure_resident_exists(resident_id=resident_id, using=using)
         resident_plan = build_settlement_resident_lock_plan(
@@ -417,12 +419,15 @@ def prepare_bed(
             room=room,
             starts_at=moment,
             ends_at=hold_until_moment,
+            confirm_itr=confirm_itr,
             # T-036 backend-18: основание подготовки — основание размещения
             # для резервной комнаты (38); иначе правило её не пропустит.
             placement_reason=basis_text,
             using=using,
         )
 
+        if current_arrival and not basis_text:
+            basis_text = 'Заселение с карты делопроизводителем'
         persisted_occupancies = _locked_related_occupancies(
             resident_id=resident.pk,
             bed_ids=(bed.pk,),
@@ -499,8 +504,11 @@ def prepare_bed(
     return preparation
 
 
-def confirm_bed_preparation(*, preparation_id, control_context=None):
-    """Превратить подготовку в временное проживание до утверждения."""
+def confirm_bed_preparation(
+    *, preparation_id, control_context=None, starts_at=None, ends_at=None, confirm_itr=False,
+    placement_reason=None,
+):
+    """Зафиксировать приезд. При заданном выезде оформляется срочное проживание на указанный период."""
     using = router.db_for_write(EmployeeBedOccupancy)
     with transaction.atomic(using=using):
         lease = lock_settlement_write_lease(
@@ -520,6 +528,9 @@ def confirm_bed_preparation(*, preparation_id, control_context=None):
             using=using,
         )
         moment = timezone.now()
+        start = starts_at if starts_at is not None else moment
+        if start > moment or (ends_at is not None and ends_at <= moment):
+            raise _settlement_error('Период проживания должен включать текущий момент.', 'settlement.invalid_stay')
         occupancy_snapshot = _related_occupancy_snapshot(
             resident_id=resident_id,
             bed_ids=(bed_id,),
@@ -552,11 +563,12 @@ def confirm_bed_preparation(*, preparation_id, control_context=None):
         _validate_resident_and_destination(
             resident=resident,
             room=room,
-            starts_at=moment,
-            ends_at=None,
+            starts_at=start,
+            ends_at=ends_at,
+            confirm_itr=confirm_itr,
             # Основание подготовки уже проверено и сохранено; оно же служит
             # основанием размещения в спецфонде (резервная комната).
-            placement_reason=snapshot['basis'],
+            placement_reason=snapshot['basis'] if placement_reason is None else placement_reason,
             using=using,
         )
 
@@ -600,8 +612,8 @@ def confirm_bed_preparation(*, preparation_id, control_context=None):
         _validate_occupancy_conflicts(
             resident_id=resident.pk,
             bed=bed,
-            starts_at=moment,
-            ends_at=None,
+            starts_at=start,
+            ends_at=ends_at,
             persisted_occupancies=persisted_occupancies,
         )
 
@@ -610,9 +622,9 @@ def confirm_bed_preparation(*, preparation_id, control_context=None):
                 occupancy = _create_occupancy(
                     resident=resident,
                     bed=bed,
-                    assignment_type=TEMPORARY_ASSIGNMENT_TYPE,
-                    starts_at=moment,
-                    ends_at=None,
+                    assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY if ends_at else TEMPORARY_ASSIGNMENT_TYPE,
+                    starts_at=start,
+                    ends_at=ends_at,
                     settled_by=settled_by,
                     using=using,
                     placement_reason=preparation.basis,

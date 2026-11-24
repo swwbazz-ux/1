@@ -1165,11 +1165,11 @@
     background: var(--settlement-untransferred-room-surface);
 }
 
-.settlement-room.is-not-transferred [data-bed]:disabled {
+.settlement-room.is-not-transferred [data-bed] {
     border-color: var(--settlement-untransferred-bed-border);
     background: var(--settlement-untransferred-bed-surface);
     color: var(--settlement-untransferred-secondary);
-    cursor: default;
+    cursor: pointer;
 }
 
 .settlement-room.is-not-transferred [data-bed].is-occupied {
@@ -1219,12 +1219,16 @@
     transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.settlement-bed.is-free:not(:disabled):hover,
-.settlement-bed.is-free:not(:disabled):focus-visible {
+.settlement-room.is-transferred .settlement-bed.is-free:not(:disabled):hover,
+.settlement-room.is-transferred .settlement-bed.is-free:not(:disabled):focus-visible {
     transform: translateY(-1px);
     border-color: var(--settlement-accent);
     background: var(--settlement-accent-soft);
     box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 20%, transparent);
+}
+
+.settlement-room.is-not-transferred [data-bed]:focus-visible {
+    outline: 2px solid var(--admin-muted);
 }
 
 .settlement-bed-visual {
@@ -2270,6 +2274,46 @@
     overflow-y: auto;
     overscroll-behavior: contain;
 }
+
+.settlement-room-panel[data-panel-view="bed"] {
+    width: min(100vw, 480px);
+    grid-template-rows: auto minmax(0, 1fr);
+}
+.settlement-room-panel[data-panel-view="bed"] .settlement-room-panel-summary,
+.settlement-room-panel[data-panel-view="bed"] .settlement-room-bed-section > .settlement-room-panel-section-title,
+.settlement-room-panel[data-panel-view="bed"] .settlement-room-bed-section:has([data-room-panel-beds]:empty),
+.settlement-room-panel[data-panel-view="room"] [data-placement-panel] { display: none; }
+.settlement-panel-location { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 10px; }
+.settlement-room-panel-header .settlement-room-link {
+    width: auto; min-height: 0; padding: 0; border: 0; background: transparent;
+    color: var(--settlement-accent); font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer;
+}
+.settlement-room-panel [data-panel-employee-link]:not([hidden]) { margin-top: 10px; }
+.settlement-room-panel [data-panel-employee-link][hidden], .settlement-room-link[hidden] { display: none; }
+.settlement-room-panel[data-panel-view="bed"] .settlement-room-bed-card { display: block; cursor: default; }
+
+.settlement-checkin:not([hidden]) {
+    display: grid;
+    gap: 10px;
+    order: -1;
+}
+.settlement-checkin h3 { margin: 0; }
+.settlement-checkin [hidden], .settlement-checkin[hidden] { display: none; }
+.settlement-checkin-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr));
+    gap: 10px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    margin: 0;
+}
+.settlement-checkin legend { margin-bottom: 8px; }
+.settlement-checkin input, .settlement-checkin select { min-width: 0; }
+.settlement-checkin [data-checkin-new] { justify-self: start; }
+.settlement-room-panel-body > [data-placement-panel]:has([data-checkin-start]:not([hidden])) { order: -1; }
+.settlement-roster-placement:not(:has(> form:not([hidden]))) { display: none; }
+.settlement-roster-placement > summary { cursor: pointer; padding-block: 8px; }
 
 .settlement-relocation-modal-header {
     display: grid;
