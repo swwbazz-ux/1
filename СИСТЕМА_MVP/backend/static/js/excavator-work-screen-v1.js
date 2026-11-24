@@ -1673,6 +1673,7 @@ window.initExcavatorWorkShell = function () {
                 fallbackVoice: "voice_truck_sent",
                 dumpPointId: dumpPointId,
                 dumpPointName: dumpPointName,
+                operationKey: "excavator-load:" + event.event_id,
                 eventVersion: 0,
                 eventKey: "excavator_operator_truck_sent"
             });
