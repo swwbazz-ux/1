@@ -7893,6 +7893,88 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(reused_bed.status_code, 201)
         self.assertEqual(reused_employee.status_code, 201)
 
+    def _excel_placement(self, moment):
+        from .models import SettlementPlacementEvent
+
+        occupancy = EmployeeBedOccupancy.objects.create(
+            resident=self.second_candidate_resident,
+            physical_bed=self.transferred_beds[0],
+            assignment_type=EmployeeBedOccupancy.AssignmentType.TEMPORARY,
+            starts_at=moment - timedelta(hours=2),
+            ends_at=moment + timedelta(hours=4),
+            settled_by=self.clerk,
+            work_shift='day',
+            shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
+            shift_source_fingerprint='a' * 64,
+            shift_selected_by_access=self.clerk_access,
+            shift_selected_at=moment - timedelta(hours=2),
+            shift_selection_basis='Загрузка текущего расселения из Excel.',
+        )
+        SettlementPlacementEvent.objects.create(
+            event_type=SettlementPlacementEvent.EventType.TEMPORARY_CREATED,
+            resident=occupancy.resident, physical_bed=occupancy.physical_bed,
+            actor_access=self.clerk_access, reason='Загрузка текущего расселения из Excel.',
+            payload={'occupancy_id': occupancy.pk, 'workbook_sha256': 'b' * 64, 'source_row': 'КИС 5!J3'},
+        )
+        return occupancy
+
+    def test_excel_placement_uses_published_shift_on_map_and_relocation(self):
+        moment = timezone.now()
+        imported = self._excel_placement(moment)
+        self.authenticate(self.client, self.clerk_access)
+
+        card = self.client.get(reverse('settlement_map'))
+        self.assertContains(card, 'data-shift-label="Ночь"')
+        self.assertContains(card, 'Ночь · по расстановке, в Excel — день')
+        moved = self.post_settle(
+            action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
+        )
+
+        self.assertEqual(moved.status_code, 201, moved.content)
+        self.assertEqual(moved.json()['occupancy']['shift_label'], 'Ночь')
+        imported.refresh_from_db()
+        replacement = imported.replaced_by_occupancy
+        self.assertIsNotNone(imported.terminated_at)
+        self.assertEqual(imported.work_shift, 'day')
+        self.assertEqual(replacement.work_shift, 'night')
+        self.assertEqual(replacement.watch_period_id, self.watch_period.pk)
+        self.assertIsNotNone(replacement.shift_official_assignment_id)
+        self.assertEqual(replacement.ends_at, imported.ends_at)
+
+    def test_excel_relocation_requires_unambiguous_current_watch(self):
+        imported = self._excel_placement(timezone.now())
+        WatchPeriod.objects.create(
+            name='Пересекающаяся вахта', watch_composition=self.watch_composition,
+            starts_on=self.watch_period.starts_on, ends_on=self.watch_period.ends_on, is_active=True,
+        )
+        self.authenticate(self.client, self.clerk_access)
+        response = self.post_settle(
+            action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.manual.period_ambiguous')
+        imported.refresh_from_db()
+        self.assertIsNone(imported.terminated_at)
+        self.assertIsNone(imported.replaced_by_occupancy_id)
+
+    def test_excel_placement_without_published_shift_shows_excel_and_blocks_move(self):
+        imported = self._excel_placement(timezone.now())
+        EquipmentAssignment._base_manager.filter(employee=self.second_candidate).update(
+            status=AssignmentStatus.CANCELLED,
+        )
+        self.authenticate(self.client, self.clerk_access)
+
+        self.assertContains(self.client.get(reverse('settlement_map')), 'День · по Excel')
+        response = self.post_settle(
+            action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()['code'], 'settlement.cohort.shift_review_required')
+        imported.refresh_from_db()
+        self.assertIsNone(imported.terminated_at)
+
     def test_legacy_relocation_is_forbidden_but_exact_release_is_allowed(self):
         moment = timezone.now().replace(microsecond=0)
         legacy = EmployeeBedOccupancy.objects.create(
@@ -9265,7 +9347,9 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('object-fit: cover', stylesheet)
         self.assertIn('.settlement-bed.is-occupied.no-photo', stylesheet)
         occupied_styles = stylesheet.split('.settlement-bed.is-occupied {', 1)[1].split('}', 1)[0]
-        self.assertIn('border: var(--settlement-strong-line) solid var(--admin-cyan)', occupied_styles)
+        self.assertIn('border: var(--settlement-strong-line) solid var(--bed-shift-ink)', occupied_styles)
+        self.assertIn('data-shift-label="День"', stylesheet)
+        self.assertIn('data-shift-label="Ночь"', stylesheet)
         self.assertRegex(
             stylesheet,
             r'\.settlement-bed-position,\s*'

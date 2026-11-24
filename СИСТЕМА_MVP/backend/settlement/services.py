@@ -25,7 +25,11 @@ from .models import (
     SettlementPreviewRun,
     SettlementResident,
 )
-from .cohorts import resolve_internal_official_shift_source
+from .cohorts import (
+    eligible_official_assignments,
+    official_assignment_matches_period,
+    resolve_internal_official_shift_source,
+)
 from .personnel_categories import (
     MISSING_CATEGORY,
     MISSING_CATEGORY_MESSAGE,
@@ -832,6 +836,88 @@ def _lock_occupancy_context_rows(*, snapshot, using):
         ).get(pk=application_id)
 
 
+def current_housing_import_occupancy_ids(placements, *, using=None):
+    """Identify factual Excel imports by their placement event, including older rows."""
+    if not placements:
+        return set()
+    events = SettlementPlacementEvent.objects.using(using).filter(
+        event_type=SettlementPlacementEvent.EventType.TEMPORARY_CREATED,
+        resident_id__in={resident_id for resident_id, _ in placements.values()},
+        payload__occupancy_id__in=placements,
+        payload__has_keys=['workbook_sha256', 'source_row'],
+    ).values_list('payload', 'resident_id', 'physical_bed_id')
+    return {
+        payload['occupancy_id'] for payload, resident_id, bed_id in events
+        if placements.get(payload.get('occupancy_id')) == (resident_id, bed_id)
+    }
+
+
+def _current_import_watch_periods(composition_ids, moment, *, using=None):
+    as_of = production_work_date(moment)
+    return WatchPeriod.objects.using(using).filter(
+        is_active=True, watch_composition__is_active=True, watch_composition_id__in=composition_ids,
+        starts_on__lte=as_of, ends_on__gte=as_of,
+    ).order_by('pk')
+
+
+def current_housing_official_assignments(occupancies, moment):
+    """Read the unambiguous published assignments for imported residents in bulk."""
+    placements = {
+        occupancy.pk: (occupancy.resident_id, occupancy.physical_bed_id)
+        for occupancy in occupancies if occupancy.watch_period_id is None and occupancy.resident.employee_id
+    }
+    imported_ids = current_housing_import_occupancy_ids(placements)
+    employees_by_composition = defaultdict(set)
+    for occupancy in occupancies:
+        if occupancy.pk in imported_ids:
+            employee = occupancy.resident.employee
+            employees_by_composition[employee.watch_composition_id].add(employee.pk)
+    periods_by_composition = defaultdict(list)
+    for period in _current_import_watch_periods(employees_by_composition, moment):
+        periods_by_composition[period.watch_composition_id].append(period)
+    assignments_by_employee = defaultdict(list)
+    for composition_id, periods in periods_by_composition.items():
+        if len(periods) != 1:
+            continue
+        period = periods[0]
+        for assignment in eligible_official_assignments(
+            employee_ids=employees_by_composition[composition_id], period=period,
+        ):
+            assignments_by_employee[assignment.employee_id].append((assignment, period))
+    verified = {
+        employee_id: entries[0][0]
+        for employee_id, entries in assignments_by_employee.items()
+        if len(entries) == 1 and official_assignment_matches_period(*entries[0])
+    }
+    return imported_ids, verified
+
+
+def _lock_import_relocation_shift(resident, occupancy_snapshot, moment, *, using):
+    occupancy_id, resident_id, bed_id, period_id = occupancy_snapshot[:4]
+    if period_id or not resident.employee_id or not current_housing_import_occupancy_ids(
+        {occupancy_id: (resident_id, bed_id)}, using=using,
+    ):
+        return None, None
+
+    periods = list(_current_import_watch_periods(
+        [resident.employee.watch_composition_id], moment, using=using,
+    ).select_for_update(of=('self',))[:2])
+    if len(periods) != 1:
+        raise _settlement_error(
+            'Для сотрудника нужна одна действующая вахта. Проверьте состав вахты.',
+            'settlement.manual.period_ambiguous',
+        )
+    period = periods[0]
+    try:
+        source = resolve_internal_official_shift_source(resident=resident, period=period)
+    except ValidationError as error:
+        raise _settlement_error(
+            'Проверьте технику и смену сотрудника в опубликованной расстановке на эту вахту.',
+            'settlement.cohort.shift_review_required',
+        ) from error
+    return period, source
+
+
 def _official_manual_source_for_occupancy(*, occupancy, resident):
     # T-036 backend-16: у командированного размещения нет проверенной смены,
     # поэтому сначала называем настоящую причину, а не «историческое» placement.
@@ -1540,6 +1626,9 @@ def relocate_resident_to_bed(
         )
         resident = resident_rows.resident_by_id(resident_id)
         _lock_occupancy_context_rows(snapshot=occupancy_snapshot, using=using)
+        import_period, shift_source = _lock_import_relocation_shift(
+            resident, occupancy_snapshot, moment, using=using,
+        )
         if target_bed_id == current_bed_id:
             raise _settlement_error(
                 'Нельзя переселить сотрудника на то же койко-место.',
@@ -1616,10 +1705,11 @@ def relocate_resident_to_bed(
                 'Переселение невозможно в момент начала текущего размещения.',
                 'settlement_relocation_same_moment',
             )
-        shift_source = _official_manual_source_for_occupancy(
-            occupancy=current_occupancy,
-            resident=resident,
-        )
+        if shift_source is None:
+            shift_source = _official_manual_source_for_occupancy(
+                occupancy=current_occupancy,
+                resident=resident,
+            )
         _validate_assignment_interval(
             assignment_type=current_occupancy.assignment_type,
             starts_at=moment,
@@ -1647,9 +1737,9 @@ def relocate_resident_to_bed(
             placement_reason=(
                 placement_reason or current_occupancy.placement_reason
             ),
-            watch_period=current_occupancy.watch_period,
+            watch_period=import_period or current_occupancy.watch_period,
             cohort_member=current_occupancy.cohort_member,
-            work_shift=current_occupancy.work_shift,
+            work_shift=shift_source['work_shift'],
             shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
             shift_source_fingerprint=shift_source['shift_source_fingerprint'],
             shift_official_assignment=shift_source['official_equipment_assignment'],

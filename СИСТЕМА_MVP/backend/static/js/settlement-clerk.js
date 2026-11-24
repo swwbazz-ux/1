@@ -291,10 +291,10 @@
 
     function compactShiftLabel(value) {
         var label = String(value || "").trim();
-        if (!label || label === "Не указано") return "";
+        if (!label || label === "Не указано") return "?";
         if (label === "День") return "Д";
         if (label === "Ночь") return "Н";
-        return label;
+        return "?";
     }
 
     function renderBedHoverCard(bed, occupied) {
@@ -315,7 +315,7 @@
         var name = document.createElement("strong");
         name.textContent = bed.dataset.occupantName || "";
         var shift = document.createElement("strong");
-        shift.textContent = "Смена: " + (String(bed.dataset.shiftLabel || "").trim() || "Не указано");
+        shift.textContent = "Смена: " + (String(bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel || "").trim() || "Не указано");
         hoverCard.replaceChildren(name);
         if (bed.dataset.tooltipWorkLabel) {
             var work = document.createElement("span");
@@ -1777,6 +1777,7 @@
             relocationSourceBed.dataset.occupantName = "";
             relocationSourceBed.dataset.occupantPhotoUrl = "";
             relocationSourceBed.dataset.shiftLabel = "";
+            relocationSourceBed.dataset.tooltipShiftLabel = "";
             relocationSourceBed.dataset.workLabel = "";
             relocationSourceBed.dataset.tooltipWorkLabel = "";
             relocationSourceBed.dataset.assignmentTypeLabel = "";
@@ -1792,6 +1793,7 @@
         selectedBed.dataset.occupantName = occupancy.occupant_name;
         selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         selectedBed.dataset.shiftLabel = occupancy.shift_label;
+        selectedBed.dataset.tooltipShiftLabel = occupancy.shift_label;
         selectedBed.dataset.workLabel = occupancy.work_label;
         selectedBed.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
         selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;

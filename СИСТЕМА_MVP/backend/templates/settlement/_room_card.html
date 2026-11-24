@@ -42,6 +42,7 @@
                                 data-occupant-name="{{ bed.occupant_name }}"
                                 data-occupant-photo-url="{{ bed.occupant_photo_url }}"
                                 data-shift-label="{{ bed.shift_label }}"
+                                data-tooltip-shift-label="{{ bed.tooltip_shift_label }}"
                                 data-work-label="{{ bed.work_label }}"
                                 data-tooltip-work-label="{{ bed.tooltip_work_label }}"
                                 data-assignment-type-label="{{ bed.assignment_type_label }}"
@@ -76,14 +77,14 @@
                             <span class="settlement-bed-status"
                                   data-bed-status{% if bed.active_occupancy %} hidden{% endif %}>{% if room.is_transferred %}Свободна{% else %}Недоступна{% endif %}</span>
                             <span class="settlement-bed-shift"
-                                  data-bed-shift-badge{% if not bed.active_occupancy %} hidden{% endif %}>{% if bed.shift_label == "День" %}Д{% elif bed.shift_label == "Ночь" %}Н{% elif bed.shift_label != "Не указано" %}{{ bed.shift_label }}{% else %}—{% endif %}</span>
+                                  data-bed-shift-badge{% if not bed.active_occupancy %} hidden{% endif %}>{% if bed.shift_label == "День" %}Д{% elif bed.shift_label == "Ночь" %}Н{% else %}?{% endif %}</span>
                             {% if bed.active_occupancy %}
                                 <span class="settlement-bed-hover-card"
                                       data-bed-hover-card
                                       aria-hidden="true">
                                     <strong>{{ bed.occupant_name }}</strong>
                                     {% if bed.tooltip_work_label %}<span>{{ bed.tooltip_work_label }}</span>{% endif %}
-                                    <strong>Смена: {{ bed.shift_label }}</strong>
+                                    <strong>Смена: {{ bed.tooltip_shift_label }}</strong>
                                 </span>
                             {% endif %}
                             <span class="settlement-bed-state-indicator" data-bed-state-indicator aria-hidden="true"></span>

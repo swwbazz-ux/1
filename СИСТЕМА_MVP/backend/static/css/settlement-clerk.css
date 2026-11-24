@@ -1,5 +1,7 @@
 .settlement-shell {
     --admin-interface-scale: 1;
+    --settlement-night-ink: #7247af;
+    --settlement-night-soft: #eee5ff;
     --settlement-density-unit: clamp(
         1px,
         min(
@@ -842,6 +844,42 @@
     display: none;
 }
 
+.settlement-shift-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .2rem .7rem;
+    color: var(--admin-muted);
+    font-size: calc(9 * var(--settlement-density-unit));
+    font-weight: 700;
+}
+
+.settlement-floor > header .settlement-shift-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    white-space: nowrap;
+}
+
+.settlement-shift-legend b {
+    min-width: 1.15em;
+    padding: 1px 3px;
+    border-radius: 3px;
+    color: var(--admin-muted);
+    background: var(--admin-gray-soft);
+    text-align: center;
+}
+
+.settlement-shift-legend .is-day {
+    color: var(--admin-cyan);
+    background: var(--admin-cyan-soft);
+}
+
+.settlement-shift-legend .is-night {
+    color: var(--settlement-night-ink);
+    background: var(--settlement-night-soft);
+}
+
 .settlement-floor > header p {
     margin: 0;
     color: var(--admin-muted);
@@ -1180,9 +1218,9 @@
     max-width: none;
     height: 100%;
     aspect-ratio: auto;
-    border-color: color-mix(in srgb, var(--admin-cyan) 26%, var(--admin-line));
-    background: color-mix(in srgb, var(--admin-cyan-soft) 84%, var(--admin-panel));
-    color: var(--admin-cyan);
+    border-color: color-mix(in srgb, var(--bed-shift-ink) 26%, var(--admin-line));
+    background: color-mix(in srgb, var(--bed-shift-soft) 84%, var(--admin-panel));
+    color: var(--bed-shift-ink);
 }
 
 .settlement-bed.is-occupied.no-photo .settlement-bed-avatar-initial {
@@ -1330,10 +1368,39 @@
     box-shadow: 0 0 0 calc(2 * var(--settlement-density-unit)) color-mix(in srgb, var(--settlement-accent) 24%, transparent);
 }
 
+.settlement-shell.admin-night {
+    --settlement-night-ink: #c7a5ff;
+    --settlement-night-soft: #382552;
+}
+
 .settlement-bed.is-occupied {
-    border: var(--settlement-strong-line) solid var(--admin-cyan);
-    background: color-mix(in srgb, var(--admin-cyan-soft) 72%, var(--admin-panel));
-    color: var(--admin-cyan);
+    --bed-shift-ink: var(--admin-muted);
+    --bed-shift-soft: var(--admin-gray-soft);
+    border: var(--settlement-strong-line) solid var(--bed-shift-ink);
+    background: color-mix(in srgb, var(--bed-shift-soft) 72%, var(--admin-panel));
+    color: var(--bed-shift-ink);
+}
+
+.settlement-bed.is-occupied[data-shift-label="День"] {
+    --bed-shift-ink: var(--admin-cyan);
+    --bed-shift-soft: var(--admin-cyan-soft);
+}
+
+.settlement-bed.is-occupied[data-shift-label="Ночь"] {
+    --bed-shift-ink: var(--settlement-night-ink);
+    --bed-shift-soft: var(--settlement-night-soft);
+}
+
+.settlement-room.is-transferred:has(.settlement-bed.is-occupied[data-shift-label="День"]):has(.settlement-bed.is-occupied[data-shift-label="Ночь"])
+.settlement-room-number::after {
+    position: absolute;
+    inset-inline-start: 4px;
+    padding: 2px 3px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--admin-cyan-soft) 50%, var(--settlement-night-soft) 50%);
+    color: var(--admin-ink);
+    font-size: calc(8 * var(--settlement-density-unit));
+    content: "Д+Н";
 }
 
 .settlement-bed.is-occupied .settlement-bed-visual {
@@ -1431,6 +1498,19 @@
     font-size: calc(10 * var(--settlement-density-unit));
 }
 
+.settlement-room.is-transferred .settlement-bed.is-occupied .settlement-bed-shift:not([hidden]) {
+    display: grid !important;
+    inset: auto calc(3 * var(--settlement-density-unit)) calc(3 * var(--settlement-density-unit)) auto;
+    min-height: calc(14 * var(--settlement-density-unit));
+    min-width: calc(14 * var(--settlement-density-unit));
+    max-width: none;
+    border-color: var(--bed-shift-ink);
+    background: var(--admin-panel);
+    color: var(--bed-shift-ink);
+    font-weight: 900;
+    pointer-events: none;
+}
+
 .settlement-bed.is-occupied .settlement-bed-person {
     color: #fff;
     text-shadow: 0 1px 1px rgb(0 0 0 / 35%);
@@ -1494,8 +1574,8 @@
 .settlement-auto-preview-legend .is-preview { border: var(--settlement-line) dashed var(--settlement-accent); background: var(--settlement-accent-soft); }
 
 .settlement-bed.is-occupied.is-selected {
-    border-color: var(--admin-cyan);
-    background: var(--admin-cyan);
+    border-color: var(--bed-shift-ink);
+    background: var(--bed-shift-ink);
     color: #fff;
 }
 

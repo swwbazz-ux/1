@@ -112,6 +112,7 @@ from .saved_previews import (
     settlement_preview_is_stale,
 )
 from .services import (
+    current_housing_official_assignments,
     current_roster_resolution,
     build_auto_settlement_preview,
     effective_occupancy_at_q,
@@ -825,10 +826,12 @@ def _unsettled_employee_cards(moment):
     ]
 
 
-def _bed_tooltip_work_label(occupancy, profile):
+def _bed_tooltip_work_label(occupancy, profile, official_assignment=None):
     if profile is None:
         return occupancy.resident.organization
     if profile['personnel_category'] == PersonnelPosition.SettlementCategory.WORKER:
+        if official_assignment:
+            return f'Техника: {official_assignment.equipment}'
         equipment = (
             profile['equipment_by_shift'].get(occupancy.work_shift)
             if occupancy.work_shift else profile['equipment_label']
@@ -839,7 +842,7 @@ def _bed_tooltip_work_label(occupancy, profile):
     return 'Категория должности не указана'
 
 
-def _attach_occupancy_view(rooms):
+def _attach_occupancy_view(rooms, moment):
     beds = [bed for room in rooms for bed in room.beds.all()]
     occupancies = [
         bed.active_occupancies[0]
@@ -852,6 +855,8 @@ def _attach_occupancy_view(rooms):
         if occupancy.resident.employee_id
     )
 
+    imported_ids, published = current_housing_official_assignments(occupancies, moment)
+
     for room in rooms:
         room.occupied_bed_count = 0
         for bed in room.beds.all():
@@ -862,6 +867,7 @@ def _attach_occupancy_view(rooms):
                 bed.occupant_name = UNKNOWN_LABEL
                 bed.occupant_photo_url = ''
                 bed.shift_label = UNKNOWN_LABEL
+                bed.tooltip_shift_label = UNKNOWN_LABEL
                 bed.work_label = UNKNOWN_LABEL
                 bed.tooltip_work_label = ''
                 bed.assignment_type_label = UNKNOWN_LABEL
@@ -879,8 +885,28 @@ def _attach_occupancy_view(rooms):
                 bed.occupant_photo_url = _resident_photo_url(resident)
                 bed.shift_label = UNKNOWN_LABEL
                 bed.work_label = resident.organization or UNKNOWN_LABEL
-            bed.shift_label = DAY_NIGHT_LABELS.get(occupancy.work_shift, bed.shift_label)
-            bed.tooltip_work_label = _bed_tooltip_work_label(occupancy, profile)
+            recorded_shift = DAY_NIGHT_LABELS.get(occupancy.work_shift)
+            from_excel = occupancy.pk in imported_ids
+            official = published.get(resident.employee_id) if from_excel else occupancy.shift_official_assignment
+            if from_excel:
+                bed.shift_label = DAY_NIGHT_LABELS[official.shift_type] if official else (recorded_shift or UNKNOWN_LABEL)
+                bed.tooltip_shift_label = bed.shift_label
+                if official:
+                    bed.tooltip_shift_label += ' · по расстановке'
+                    if recorded_shift and recorded_shift != bed.shift_label:
+                        bed.tooltip_shift_label += f', в Excel — {recorded_shift.lower()}'
+                elif recorded_shift:
+                    bed.tooltip_shift_label += ' · по Excel'
+            else:
+                bed.shift_label = recorded_shift or bed.shift_label
+                bed.tooltip_shift_label = bed.shift_label
+            bed.tooltip_work_label = _bed_tooltip_work_label(occupancy, profile, official)
+            if profile and profile['personnel_category'] == PersonnelPosition.SettlementCategory.WORKER:
+                if official:
+                    bed.work_label = str(official.equipment)
+                elif from_excel:
+                    bed.work_label = UNKNOWN_LABEL
+                    bed.tooltip_work_label = 'Техника: проверьте расстановку'
             bed.assignment_type_label = occupancy.get_assignment_type_display()
         room.free_bed_count = len(room.beds.all()) - room.occupied_bed_count
 
@@ -1109,6 +1135,8 @@ def settlement_map_view(request):
                                     'resident',
                                     'resident__employee',
                                     'resident__employee__personnel_position',
+                                'shift_official_assignment__equipment__equipment_type',
+                                'shift_official_assignment__equipment__model',
                                 )
                             ),
                             to_attr='active_occupancies',
@@ -1133,7 +1161,7 @@ def settlement_map_view(request):
             'number',
         )
     )
-    _attach_occupancy_view(rooms)
+    _attach_occupancy_view(rooms, moment)
     # T-036 backend-23/24: бейджи комнат 36–38 на карте (резерв/защищённая);
     # типы якорей берутся одним пакетным запросом на все комнаты.
     anchor_types_by_room = room_anchor_types_by_room(
@@ -2139,6 +2167,9 @@ def _occupancy_response(occupancy):
         photo_url = _resident_photo_url(resident)
         shift_label = UNKNOWN_LABEL
         work_label = resident.organization or UNKNOWN_LABEL
+    official = occupancy.shift_official_assignment
+    if official and profile and profile['personnel_category'] == PersonnelPosition.SettlementCategory.WORKER:
+        work_label = str(official.equipment)
     bed = occupancy.physical_bed
     room = bed.room
     moment = timezone.now()
@@ -2168,7 +2199,7 @@ def _occupancy_response(occupancy):
             'photo_url': photo_url,
             'shift_label': DAY_NIGHT_LABELS.get(occupancy.work_shift, shift_label),
             'work_label': work_label,
-            'tooltip_work_label': _bed_tooltip_work_label(occupancy, profile),
+            'tooltip_work_label': _bed_tooltip_work_label(occupancy, profile, official),
             'assignment_type': occupancy.assignment_type,
             'assignment_type_label': occupancy.get_assignment_type_display(),
             'placement_reason': occupancy.placement_reason,

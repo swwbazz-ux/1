@@ -7,6 +7,7 @@ from assignments.models import (
     AssignmentStatus,
     CrewPlan,
     CrewPlanSlot,
+    CrewPlanStatus,
     EquipmentAssignment,
     WorkShiftType,
 )
@@ -85,11 +86,12 @@ def _watch_period_start(period):
     )
 
 
-def _eligible_official_assignments(*, employee_id, period):
+def eligible_official_assignments(*, employee_ids, period, using=None):
     effective_at = _watch_period_start(period)
-    return list(
-        EquipmentAssignment.objects.filter(
-            employee_id=employee_id,
+    return (
+        EquipmentAssignment.objects.using(using)
+        .filter(
+            employee_id__in=employee_ids,
             status=AssignmentStatus.ACCEPTED,
             shift__isnull=True,
             role__isnull=False,
@@ -102,9 +104,23 @@ def _eligible_official_assignments(*, employee_id, period):
         .filter(Q(accepted_at__isnull=True) | Q(accepted_at__lte=effective_at))
         .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=effective_at))
         .select_related(
-            'employee', 'equipment', 'role', 'source_crew_plan_slot__plan',
+            'employee', 'equipment__equipment_type', 'equipment__model', 'role',
+            'source_crew_plan_slot__plan',
         )
         .order_by('pk')
+    )
+
+
+def official_assignment_matches_period(assignment, period):
+    slot = assignment.source_crew_plan_slot
+    return (
+        slot.plan.status in (CrewPlanStatus.PUBLISHED, CrewPlanStatus.SUPERSEDED)
+        and slot.employee_id == assignment.employee_id
+        and slot.equipment_id == assignment.equipment_id
+        and slot.plan.role_id == assignment.role_id
+        and slot.shift_type == assignment.shift_type
+        and slot.plan.work_date == period.starts_on
+        and assignment.shift_type in WorkShiftType.values
     )
 
 
@@ -119,10 +135,9 @@ def resolve_internal_official_shift_source(
         raise _shift_review_required('внутренний жилец не связан с Employee.')
     if require_expected_assignment and expected_assignment_id is None:
         raise _shift_review_required('не указано точное официальное назначение.')
-    assignments = _eligible_official_assignments(
-        employee_id=resident.employee_id,
-        period=period,
-    )
+    assignments = list(eligible_official_assignments(
+        employee_ids=(resident.employee_id,), period=period, using=resident._state.db,
+    )[:2])
     if len(assignments) != 1:
         raise _shift_review_required(
             'на начало WatchPeriod требуется ровно одно официальное назначение.',
@@ -134,14 +149,7 @@ def resolve_internal_official_shift_source(
     ):
         raise _shift_review_required('переданное назначение не является единственным действующим.')
     slot = assignment.source_crew_plan_slot
-    if (
-        slot.employee_id != resident.employee_id
-        or slot.equipment_id != assignment.equipment_id
-        or slot.plan.role_id != assignment.role_id
-        or slot.shift_type != assignment.shift_type
-        or slot.plan.work_date != period.starts_on
-        or assignment.shift_type not in WorkShiftType.values
-    ):
+    if not official_assignment_matches_period(assignment, period):
         raise _shift_review_required('назначение не соответствует Employee, технике, роли, смене или периоду.')
     try:
         assignment.full_clean()

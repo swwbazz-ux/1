@@ -177,6 +177,11 @@
                                             <span>Выбранный план</span>
                                             <h2>{{ dormitory.label }} · {{ floor.number }} этаж</h2>
                                         </div>
+                                        <div class="settlement-shift-legend" aria-label="Обозначения смен">
+                                            <span><b class="is-day">Д</b> День</span>
+                                            <span><b class="is-night">Н</b> Ночь</span>
+                                            <span><b class="is-unknown">?</b> Смена неизвестна</span>
+                                        </div>
                                         <p>{{ floor.transferred_count }} из {{ floor.room_count }} комнат передано</p>
                                     </header>
                                     <div class="settlement-floor-scroll">
@@ -944,7 +949,7 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-relocation-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-shifts-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-relocation-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
