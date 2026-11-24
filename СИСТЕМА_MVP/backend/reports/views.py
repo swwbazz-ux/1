@@ -5828,8 +5828,19 @@ def build_customer_daily_report(selected_date):
     }
 
 
-def customer_daily_report_context(request):
-    selected_date = parse_customer_report_date(request)
+def management_report_date(request):
+    return (
+        parse_filter_date(request.GET.get('date'))
+        or parse_filter_date(request.GET.get('overview_date'))
+        or production_work_date()
+    )
+
+
+def customer_daily_report_context(request, access):
+    if access.role.code in MANAGEMENT_OVERVIEW_ROLE_CODES and not getattr(request, 'mining_master_tablet_control', False):
+        selected_date = management_report_date(request)
+    else:
+        selected_date = parse_customer_report_date(request)
     report = build_customer_daily_report(selected_date)
     return {
         **report,
@@ -5844,7 +5855,7 @@ def customer_daily_report_view(request):
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
-    report_context = customer_daily_report_context(request)
+    report_context = customer_daily_report_context(request, access)
     return render(
         request,
         'reports/customer_daily_report.html',
@@ -5938,7 +5949,7 @@ def customer_daily_report_export_view(request):
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
 
-    context = customer_daily_report_context(request)
+    context = customer_daily_report_context(request, access)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Суточный отчет'
@@ -6039,7 +6050,7 @@ def management_dashboard_context(request, access):
         .select_related('equipment', 'equipment__equipment_type', 'reason', 'employee')
         .order_by('started_at')
     )
-    selected_date = parse_customer_report_date(request)
+    selected_date = management_report_date(request)
     shift_analytics_source = load_shift_analytics_data(selected_date)
     shift_analytics = build_shift_analytics(
         selected_date,

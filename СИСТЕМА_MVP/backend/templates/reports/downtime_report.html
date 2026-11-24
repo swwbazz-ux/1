@@ -47,7 +47,7 @@
                 <a class="button-link button-secondary" href="{% url 'dispatcher_control' %}">{% if request.mining_master_tablet_control %}Пульт горного мастера{% else %}Диспетчерский пульт{% endif %}</a>
             {% endif %}
             {% if access.role.code == 'manager' or access.role.code == 'admin' %}
-                <a class="button-link button-secondary" href="{% url 'management_dashboard' %}">Витрина руководства</a>
+                <a class="button-link button-secondary" href="{% url 'management_dashboard' %}{% if filters.date_from %}?date={{ filters.date_from|urlencode }}{% endif %}">Витрина руководства</a>
             {% endif %}
             {% if selected_single_date %}
                 <a class="button-link button-secondary" href="{% url 'customer_daily_report' %}?date={{ selected_single_date }}">Суточный отчет за дату</a>
