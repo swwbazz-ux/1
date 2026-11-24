@@ -56,7 +56,7 @@
         <section class="housing-import__report" aria-label="Предпросмотр расселения">
             {% if review_saved %}
                 <div class="housing-import__saved-choice">
-                    <p role="status">{% if review_undone %}Решение отменено.{% elif review_marked_interwatch %}Отметка сохранена в разделе «Межвахта». Уже занятое место освобождается на карте расселения.{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
+                    <p role="status">{% if review_undone %}Решение отменено.{% elif review_marked_interwatch %}Отметка сохранена в разделе «Межвахта».{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
                     {% if last_review_source %}
                         <button type="submit" name="review_action" value="undo:{{ last_review_source }}" form="housing-import-form">Отменить решение</button>
                     {% endif %}
@@ -64,7 +64,7 @@
             {% endif %}
             {% if application %}
                 <h2>Результат загрузки</h2>
-                <p role="status">Перенесено на карту — {{ application.placed }}. Создано карточек жильцов — {{ application.residents }}.</p>
+                <p role="status">Перенесено на карту — {{ application.placed }}. Создано карточек жильцов — {{ application.residents }}. Освобождено коек — {{ released_count }}.</p>
             {% else %}
             <h2>Предпросмотр на {{ as_of|date:"d.m.Y" }}</h2>
             <p>Голубые строки учтены как межвахта. Карта расселения не менялась.</p>
@@ -72,7 +72,7 @@
                 <input type="hidden" name="receipt" value="{{ receipt }}" form="housing-import-form">
                 <div class="housing-import__apply">
                     <button type="submit" name="action" value="apply" form="housing-import-form">Применить</button>
-                    <span>Проверенных строк — {{ applicable_count }}. Недостающие карточки жильцов будут созданы.</span>
+                    <span>{% if applicable_count %}Проверенных строк — {{ applicable_count }}. Недостающие карточки жильцов будут созданы.{% endif %}{% if release_count %} Коек к освобождению — {{ release_count }}.{% endif %}</span>
                 </div>
             {% endif %}
             {% endif %}
@@ -93,6 +93,9 @@
                                         {% if row.marked_interwatch %}
                                             <small>На межвахте · отмечено при сверке</small>
                                         {% endif %}
+                                        {% if row.interwatch_occupancy and not application %}
+                                            <small>Освободится после «Применить» · {{ row.interwatch_release_place }}</small>
+                                        {% endif %}
                                         <small>{% if row.external_label %}{{ row.external_label }}{% else %}{{ row.category_label }}{% endif %}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
                                     </div>
                                     <div>
@@ -112,6 +115,11 @@
                                     {% if row.reviewed and draft %}
                                         <div class="housing-import__review">
                                             <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>
+                                        </div>
+                                    {% endif %}
+                                    {% if group.code == 'existing' and draft %}
+                                        <div class="housing-import__review">
+                                            <button type="submit" name="review_action" value="interwatch:{{ row.source }}" form="housing-import-form">На межвахте</button>
                                         </div>
                                     {% endif %}
                                 </li>

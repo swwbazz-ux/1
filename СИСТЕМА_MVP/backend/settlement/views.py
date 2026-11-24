@@ -71,8 +71,10 @@ from .current_housing_import import (
     external_housing_card_exists,
     housing_review_cases,
     housing_review_map,
+    interwatch_occupancy_id,
     parse_current_housing_workbook,
     preview_placements,
+    preview_releases,
     search_housing_subjects,
 )
 from .fund import (
@@ -422,16 +424,24 @@ def _housing_identity_choice(request, row, decision, command):
     raise ValidationError('Карточка больше недоступна. Выполните поиск заново.')
 
 
+def _housing_review_row(groups, command, source):
+    group_codes = ('conflict', 'existing') if command == 'interwatch' else ('conflict',)
+    return next((row for code in group_codes for row in groups[code] if row.source == source), None)
+
+
 def _housing_review_choice(request, groups, review, as_of):
     command, _, source = request.POST['review_action'].partition(':')
     if command == 'undo' and source in review:
         remaining = {key: value for key, value in review.items() if key != source}
         if 'interwatch_rows' in review[source]:
-            previous = {key: value for key, value in review[source].items() if key != 'interwatch_rows'}
+            previous = {
+                key: value for key, value in review[source].items()
+                if key not in ('interwatch_rows', 'interwatch_occupancy_id')
+            }
             if previous:
                 remaining[source] = previous
         return remaining
-    row = next((entry for entry in groups['conflict'] if entry.source == source), None)
+    row = _housing_review_row(groups, command, source)
     if row is None:
         raise ValidationError('Строка изменилась. Выберите её в обновлённом списке.')
     decision = dict(review.get(source, {}))
@@ -442,10 +452,11 @@ def _housing_review_choice(request, groups, review, as_of):
         subject = row.placement_subject
         decision['interwatch_rows'] = sorted({source} | {
             entry.source
-            for group in ('conflict', 'ready', 'needs_resident')
+            for group in ('conflict', 'ready', 'needs_resident', 'existing')
             for entry in groups[group]
             if subject is not None and entry.placement_subject == subject
         })
+        decision['interwatch_occupancy_id'] = interwatch_occupancy_id(row)
     elif command == 'keep' and (row.review_peers or (row.review_notes and not row.review_dates)):
         if row.review_peers:
             decision['peers'] = sorted(set(decision.get('peers', ())) | row.review_peers)
@@ -528,12 +539,14 @@ def _housing_draft_report(request, access, context, draft, groups):
     applying = 'application' in context
     if not applying:
         placements = preview_placements(groups)
-        if placements:
+        releases = preview_releases(groups)
+        if placements or releases:
             context['receipt'] = signing.dumps(
-                {'scope': _housing_draft_scope(request, access, draft), 'placements': placements},
+                {'scope': _housing_draft_scope(request, access, draft), 'placements': placements, 'releases': releases},
                 salt=CURRENT_HOUSING_PREVIEW_SALT, compress=True,
             )
             context['applicable_count'] = len(placements)
+            context['release_count'] = len(releases)
     context.update(draft=draft, as_of=draft.as_of, review_cases=housing_review_cases(groups['conflict']), report_groups=[
         {'code': code, 'label': label, 'rows': groups[code]}
         for code, label in CURRENT_HOUSING_GROUPS
@@ -552,14 +565,16 @@ def _apply_housing_draft(request, access, context, draft, rows):
         receipt = {}
     session_key = request.session.session_key or ''
     if (not session_key or receipt.get('scope') != _housing_draft_scope(request, access, draft)
-            or not receipt.get('placements')):
+            or not (receipt.get('placements') or receipt.get('releases'))):
         raise ValidationError('Предпросмотр изменился. Проверьте обновлённый список перед применением.')
     groups, created_residents, grant = apply_current_housing(
         rows, draft.as_of, confirmed=receipt['placements'], workbook_digest=draft.digest,
         access_id=access.pk, session_key=session_key, filename=draft.filename, review=draft.review,
+        confirmed_releases=receipt.get('releases', {}),
     )
     store_control_session_credentials(request.session, owner_access_id=access.pk, grant=grant)
     context['application'] = {'placed': len(groups['applied']), 'residents': created_residents}
+    context['released_count'] = len(groups['released'])
     review = dict(draft.review)
     for row in groups['applied']:
         if row.external_draft:
@@ -623,7 +638,7 @@ def _current_housing_post(request, access, form, context, storage, saved):
                 context['review_marked_interwatch'] = command == 'interwatch'
                 if command != 'undo' and source in review:
                     context['last_review_source'] = source
-                    context['last_review_name'] = next(row.name for row in groups['conflict'] if row.source == source)
+                    context['last_review_name'] = _housing_review_row(groups, command, source).name
                 draft, groups = revised, revised_groups
                 context['review_saved'] = True
     if draft is not saved:

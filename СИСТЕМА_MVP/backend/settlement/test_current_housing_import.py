@@ -478,7 +478,7 @@ class CurrentHousingPreviewTests(TestCase):
         reopened = self.submit(review_action=f'undo:{source}')
         self.assertEqual(reopened.context['draft'].review, previous)
 
-    def test_interwatch_excludes_other_options_for_resident_and_keeps_live_bed(self):
+    def test_interwatch_excludes_other_options_and_releases_live_bed_on_apply(self):
         self.use_clerk_session()
         self.submit(self.upload([
             (1, '01А-1', self.workers[6], False, self.ends),
@@ -486,18 +486,63 @@ class CurrentHousingPreviewTests(TestCase):
             (3, '03А-1', self.workers[6], False, self.ends),
         ]).read())
         start, _ = production_day_bounds(self.as_of)
-        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+        moment = start + timedelta(hours=4)
+        with patch('django.utils.timezone.now', return_value=moment):
             marked = self.submit(review_action='interwatch:КИС 5!J3')
             groups = {group['code']: group['rows'] for group in marked.context['report_groups']}
             self.assertEqual([row.source for row in groups['interwatch']], ['КИС 5!J3', 'КИС 5!J5'])
             self.assertEqual([row.source for row in groups['needs_resident']], ['КИС 5!J4'])
             self.assertContains(marked, 'value="undo:КИС 5!J3"', count=2)  # Feedback and the interwatch section.
             self.assertNotContains(marked, 'value="undo:КИС 5!J5"')
+            self.assertContains(marked, 'Коек к освобождению — 1')
+            current = EmployeeBedOccupancy.objects.get(resident=self.current_resident)
+            self.assertIsNone(current.terminated_at)
             applied = self.submit(action='apply', receipt=marked.context['receipt'])
             self.assertEqual(applied.context['application']['placed'], 1)
-        current = EmployeeBedOccupancy.objects.get(resident=self.current_resident)
-        self.assertIsNone(current.terminated_at)
-        self.assertEqual(current.physical_bed.stable_id, 'KIS5-F1-R04-A1')
+            self.assertContains(applied, 'Освобождено коек — 1')
+        current.refresh_from_db()
+        self.assertEqual(current.terminated_at, moment)
+        self.assertFalse(current.is_active_at(moment))
+        self.assertIsNone(EmployeeBedOccupancy.objects.get(resident=self.resident).terminated_at)
+
+    def test_already_on_map_can_be_marked_and_applied_without_new_placements(self):
+        self.use_clerk_session()
+        start, _ = production_day_bounds(self.as_of)
+        moment = start + timedelta(hours=4)
+        with patch('django.utils.timezone.now', return_value=moment):
+            preview = self.submit(self.upload([
+                (4, '04А-1', self.workers[6], False, self.ends),
+                (2, '02А-1', self.workers[4], True, self.ends),
+            ]).read())
+            self.assertContains(preview, 'value="interwatch:КИС 5!J3"')
+            marked = self.submit(review_action='interwatch:КИС 5!J3')
+            self.assertEqual(marked.context['applicable_count'], 0)
+            self.assertEqual(marked.context['release_count'], 1)
+            receipt = marked.context['receipt']
+            self.assertEqual(self.submit(action='apply', receipt=receipt).context['released_count'], 1)
+            self.assertEqual(self.submit(action='apply', receipt=receipt).context['released_count'], 0)
+        self.assertIsNone(EmployeeBedOccupancy.objects.get(resident=self.resident).terminated_at)
+
+    def test_interwatch_never_releases_a_replacement_placement(self):
+        self.use_clerk_session()
+        start, _ = production_day_bounds(self.as_of)
+        moment = start + timedelta(hours=4)
+        with patch('django.utils.timezone.now', return_value=moment):
+            self.submit(self.upload([(4, '04А-1', self.workers[6], False, self.ends)]).read())
+            marked = self.submit(review_action='interwatch:КИС 5!J3')
+            current = EmployeeBedOccupancy.objects.get(resident=self.current_resident)
+            current.terminated_at = moment - timedelta(minutes=1)
+            current.save(update_fields=['terminated_at'])
+            replacement = EmployeeBedOccupancy.objects.create(
+                resident=self.current_resident,
+                physical_bed=PhysicalBed.objects.get(stable_id='KIS5-F1-R03-A1'),
+                assignment_type='temporary', starts_at=current.terminated_at, ends_at=current.ends_at,
+                settled_by=self.access.employee,
+            )
+            applied = self.submit(action='apply', receipt=marked.context['receipt'])
+            self.assertEqual(applied.context['released_count'], 0)
+        replacement.refresh_from_db()
+        self.assertTrue(replacement.is_active_at(moment))
 
     def test_manual_bed_resolves_interwatch_and_is_used_when_applying_saved_draft(self):
         self.use_clerk_session()

@@ -33,7 +33,8 @@ from .residents import create_external_resident, get_or_create_employee_resident
 from .room_sex import resident_sex
 from .services import (
     _create_occupancy, _locked_related_occupancies, _validate_occupancy_conflicts,
-    _validate_resident_state, _validate_room_sex, validate_placement_input_contract,
+    _validate_resident_state, _validate_room_sex, effective_occupancy_at_q,
+    release_resident_from_bed, validate_placement_input_contract,
 )
 from .special_fund import room_anchor_types_by_room
 
@@ -142,6 +143,7 @@ class HousingRow:
     match_identity: int | str = ''
     reviewed: bool = False
     marked_interwatch: bool = False
+    interwatch_occupancy: EmployeeBedOccupancy | None = None
     confirmed_in_review: bool = False
     review_peers: set[str] = field(default_factory=set)
     review_interwatch: list['HousingRow'] = field(default_factory=list)
@@ -195,6 +197,11 @@ class HousingRow:
     @property
     def review_detail_issues(self):
         return [issue for issue in self.issues if issue not in GROUPED_ISSUES]
+
+    @property
+    def interwatch_release_place(self):
+        bed = self.interwatch_occupancy.physical_bed
+        return f'{_housing_room_label(bed.room)} · койка {_housing_bed_label(bed)}'
 
 
 def _text(value):
@@ -656,6 +663,21 @@ def _occupancy_subject(occupancy):
     return occupancy.resident.employee_id or f'resident:{occupancy.resident_id}'
 
 
+def interwatch_occupancy_id(row):
+    if row.reviewed_resident:
+        subject = Q(resident_id=row.reviewed_resident.pk)
+    elif row.employee_id:
+        subject = Q(resident__employee_id=row.employee_id)
+    else:
+        return None
+    active = list(EmployeeBedOccupancy.objects.filter(
+        subject, effective_occupancy_at_q(timezone.now()),
+    ).order_by('pk').values_list('pk', flat=True)[:2])
+    if len(active) > 1:
+        raise ValidationError('На карте несколько действующих размещений жильца. Уточните, какое место освободить.')
+    return active[0] if active else None
+
+
 def _check_occupancy(row, bed, starts, ends, bed_occupancies, subject_occupancies, room_occupancies):
     same = False
     for occupancy in bed_occupancies:
@@ -937,6 +959,17 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             else:
                 row.status = 'ready'
         groups[row.status].append(row)
+    if review:
+        release_ids = {
+            decision['interwatch_occupancy_id'] for decision in review.values()
+            if decision.get('interwatch_rows') and decision.get('interwatch_occupancy_id')
+        }
+        if release_ids:
+            active = EmployeeBedOccupancy.objects.filter(
+                effective_occupancy_at_q(timezone.now()),
+            ).select_related('physical_bed__room__dormitory').in_bulk(release_ids)
+            for row in groups['interwatch']:
+                row.interwatch_occupancy = active.get(review.get(row.source, {}).get('interwatch_occupancy_id'))
     return groups
 
 
@@ -1006,6 +1039,13 @@ def preview_placements(groups):
     }
 
 
+def preview_releases(groups):
+    return {
+        row.source: [row.interwatch_occupancy.pk, row.interwatch_occupancy.physical_bed_id]
+        for row in groups['interwatch'] if row.interwatch_occupancy
+    }
+
+
 def _import_one_placement(row, *, bed, actor, control, workbook_digest, moment, using):
     starts, _ = production_day_bounds(row.starts)
     ends, _ = production_day_bounds(row.ends)
@@ -1065,7 +1105,9 @@ def _import_one_placement(row, *, bed, actor, control, workbook_digest, moment, 
     return created
 
 
-def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id, session_key, filename='', review=None):
+def apply_current_housing(
+    rows, as_of, *, confirmed, confirmed_releases, workbook_digest, access_id, session_key, filename='', review=None,
+):
     # The normal control lease serializes this operation with map edits and other
     # clerk imports. Acquire it before locking the target employees so that all
     # employee rows are acquired in the standard lock order.
@@ -1078,17 +1120,22 @@ def apply_current_housing(rows, as_of, *, confirmed, workbook_digest, access_id,
     )
     groups, created_count = _apply_confirmed_housing(
         rows, as_of, confirmed=confirmed, workbook_digest=workbook_digest, control=control, filename=filename,
-        review=review,
+        review=review, confirmed_releases=confirmed_releases,
     )
     return groups, created_count, grant
 
 
 @transaction.atomic
-def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control, filename, review):
+def _apply_confirmed_housing(rows, as_of, *, confirmed, confirmed_releases, workbook_digest, control, filename, review):
     using = DEFAULT_DB_ALIAS
     lease = lock_settlement_write_lease(control_context=control, using=using)
+    release_ids = {occupancy_id for occupancy_id, _ in confirmed_releases.values()}
+    release_employees = EmployeeBedOccupancy.objects.filter(
+        pk__in=release_ids, resident__employee_id__isnull=False,
+    ).values_list('resident__employee_id', flat=True)
     employee_ids = tuple(Employee.objects.filter(
-        pk__in={subject for subject, _ in confirmed.values() if isinstance(subject, int)},
+        Q(pk__in={subject for subject, _ in confirmed.values() if isinstance(subject, int)})
+        | Q(pk__in=release_employees),
     ).order_by('pk').values_list('pk', flat=True))
     locked = lock_settlement_write_access(
         lease=lease, control_context=control, employee_ids=employee_ids, using=using,
@@ -1112,6 +1159,17 @@ def _apply_confirmed_housing(rows, as_of, *, confirmed, workbook_digest, control
         .filter(pk__in={bed_id for _, bed_id in confirmed.values()}).order_by('pk')
     }
     groups = build_current_housing_preview(rows, as_of, filename=filename, review=review)
+    groups['released'] = []
+    pending_releases = preview_releases(groups)
+    for row in groups['interwatch']:
+        occupancy = row.interwatch_occupancy
+        if occupancy and pending_releases[row.source] == confirmed_releases.get(row.source):
+            release_resident_from_bed(
+                occupancy_id=occupancy.pk, bed_stable_id=occupancy.physical_bed.stable_id,
+                reason='Жилец на межвахте, подтверждено при сверке Excel.', control_context=control,
+            )
+            groups['released'].append(row)
+
     groups['applied'] = []
     created_count = 0
     moment = timezone.now()
