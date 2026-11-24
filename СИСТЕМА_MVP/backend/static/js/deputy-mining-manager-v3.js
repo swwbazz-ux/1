@@ -192,7 +192,7 @@
         };
     }
 
-    function createPresenceBadge(employee) {
+    function createPresenceBadge(employee, showClients) {
         var presence = employeePresence(employee);
         var wrapper = createElement("span", "application-presence is-compact deputy-presence");
         wrapper.setAttribute("data-application-presence", presence.status);
@@ -207,7 +207,7 @@
         }
         wrapper.appendChild(line);
 
-        if (presence.clientBadges.length) {
+        if (showClients !== false && presence.clientBadges.length) {
             var clients = createElement(
                 "small",
                 "application-presence__clients admin-live-client-badges"
@@ -856,7 +856,7 @@
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
         main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
-        main.appendChild(createPresenceBadge(employee));
+        main.appendChild(createPresenceBadge(employee, false));
         preview.appendChild(main);
         applyDragPreviewTheme(preview);
         document.body.appendChild(preview);
@@ -912,7 +912,10 @@
         card.appendChild(createAvatar(employee));
         var main = createElement("span", "deputy-employee-main");
         main.appendChild(createElement("strong", "", employeeName(employee)));
-        main.appendChild(createElement("small", "", employeeMeta(employee) || "Сотрудник"));
+        var positionLabel = employeeMeta(employee) || "Сотрудник";
+        var position = createElement("small", "", positionLabel);
+        position.title = positionLabel;
+        main.appendChild(position);
         appendExtensionBadge(main, activeRosterExtensionUntil(employee));
         card.appendChild(main);
         if (!canAssign) {
@@ -921,7 +924,7 @@
         }
         card.tabIndex = 0;
         card.title = "Двойной клик — открыть карточку сотрудника";
-        card.appendChild(createPresenceBadge(employee));
+        main.appendChild(createPresenceBadge(employee, false));
         card.appendChild(createElement("span", "deputy-drag-mark", "⠿"));
         bindDragSource(card, employee);
         card.addEventListener("dblclick", function (event) {

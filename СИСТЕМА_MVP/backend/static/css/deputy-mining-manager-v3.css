@@ -495,6 +495,7 @@
 
 .deputy-employee-list {
     display: grid;
+    grid-auto-rows: max-content;
     align-content: start;
     gap: 6px;
     min-height: 0;
@@ -505,7 +506,7 @@
 
 .deputy-employee-card {
     display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) auto 16px;
+    grid-template-columns: 38px minmax(0, 1fr) 16px;
     gap: 8px;
     align-items: center;
     min-height: 52px;
@@ -609,6 +610,18 @@
     color: var(--admin-muted);
     font-size: 11px;
     font-weight: 800;
+}
+
+.deputy-employee-card .deputy-employee-main strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.deputy-employee-card .deputy-presence {
+    display: grid;
+    justify-items: start;
+    max-width: 100%;
+    margin-top: 4px;
 }
 
 .deputy-drag-mark {
@@ -2035,20 +2048,6 @@ button.deputy-avatar {
         grid-auto-columns: minmax(220px, 76vw);
         overflow-x: auto;
         overflow-y: hidden;
-    }
-
-    .deputy-employee-card {
-        grid-template-columns: 38px minmax(0, 1fr) 16px;
-    }
-
-    .deputy-employee-card > .deputy-presence {
-        grid-column: 2;
-        justify-self: start;
-    }
-
-    .deputy-employee-card > .deputy-drag-mark {
-        grid-column: 3;
-        grid-row: 1 / span 2;
     }
 
     .deputy-employee-drop-hint {

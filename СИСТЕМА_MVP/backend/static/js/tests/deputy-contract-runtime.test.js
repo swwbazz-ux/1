@@ -585,6 +585,24 @@ test("saveSlot and postJson both recheck a locked contract", async () => {
     assert.equal(runtime.autosaveText.textContent, savedLabelBefore);
 });
 
+test("sidebar presence shows the connection status without app badges", () => {
+    const payload = planningPayload();
+    payload.employees[0].presence = {
+        status_code: "offline",
+        status_label: "Нет связи",
+        last_seen_time: "16:00:19",
+        client_badges: [
+            {app_label: "Руководство", label: "PWA", kind: "pwa"},
+            {app_label: "Расстановка", label: "Браузер", kind: "browser"},
+        ],
+    };
+    const runtime = createDeputyRuntime({payload});
+    const card = runtime.employeeList.querySelector(".deputy-employee-card");
+
+    assert.equal(card.querySelector(".application-presence__line").querySelector("b").textContent, "Нет связи");
+    assert.equal(card.querySelector(".application-presence__clients"), null);
+});
+
 test("expired extensions leave the other deputy's open sidebar", () => {
     const deadline = "2026-11-26T07:00:00+10:00";
     const cutoff = Date.parse(deadline);
