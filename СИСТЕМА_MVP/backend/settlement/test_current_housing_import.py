@@ -449,6 +449,56 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(beds[2, 'А-1']['residents'][0]['name'], self.workers[4].full_name)
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
 
+    def test_conflicting_note_can_be_resolved_as_interwatch_without_blue_mark(self):
+        self.use_clerk_session()
+        initial = self.submit(self.upload([
+            (1, '01А-1', self.workers[0], False, self.ends),
+        ], edits={'R3': 'пока на вахту не заезжает'}).read())
+        self.assertContains(initial, 'Живёт на койке 01А-1')
+        self.assertContains(initial, 'value="interwatch:КИС 5!J3"')
+        marked = self.submit(review_action='interwatch:КИС 5!J3')
+        self.assertIsNone(marked.context.get('receipt'))
+        self.assertContains(marked, 'На межвахте · отмечено при сверке')
+        reopened = self.client.get(reverse('settlement_current_housing_import'))
+        self.assertEqual(reopened.context['review_cases'], [])
+        self.assertContains(reopened, 'value="undo:КИС 5!J3"')
+        undo = self.submit(review_action='undo:КИС 5!J3')
+        self.assertContains(undo, 'Живёт на койке 01А-1')
+        self.assertEqual(EmployeeBedOccupancy.objects.count(), 2)
+
+    def test_undo_interwatch_preserves_other_review_decisions(self):
+        self.use_clerk_session()
+        source = 'КИС 5!J3'
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[6], False, self.ends),
+        ], edits={'R3': 'пока на вахту не заезжает'}).read())
+        previous = self.submit(review_action=f'keep:{source}').context['draft'].review
+        self.assertTrue(previous[source]['confirm'])
+        self.submit(review_action=f'interwatch:{source}')
+        reopened = self.submit(review_action=f'undo:{source}')
+        self.assertEqual(reopened.context['draft'].review, previous)
+
+    def test_interwatch_excludes_other_options_for_resident_and_keeps_live_bed(self):
+        self.use_clerk_session()
+        self.submit(self.upload([
+            (1, '01А-1', self.workers[6], False, self.ends),
+            (1, '01А-1', self.workers[0], False, self.ends),
+            (3, '03А-1', self.workers[6], False, self.ends),
+        ]).read())
+        start, _ = production_day_bounds(self.as_of)
+        with patch('django.utils.timezone.now', return_value=start + timedelta(hours=4)):
+            marked = self.submit(review_action='interwatch:КИС 5!J3')
+            groups = {group['code']: group['rows'] for group in marked.context['report_groups']}
+            self.assertEqual([row.source for row in groups['interwatch']], ['КИС 5!J3', 'КИС 5!J5'])
+            self.assertEqual([row.source for row in groups['needs_resident']], ['КИС 5!J4'])
+            self.assertContains(marked, 'value="undo:КИС 5!J3"', count=2)  # Feedback and the interwatch section.
+            self.assertNotContains(marked, 'value="undo:КИС 5!J5"')
+            applied = self.submit(action='apply', receipt=marked.context['receipt'])
+            self.assertEqual(applied.context['application']['placed'], 1)
+        current = EmployeeBedOccupancy.objects.get(resident=self.current_resident)
+        self.assertIsNone(current.terminated_at)
+        self.assertEqual(current.physical_bed.stable_id, 'KIS5-F1-R04-A1')
+
     def test_manual_bed_resolves_interwatch_and_is_used_when_applying_saved_draft(self):
         self.use_clerk_session()
         person = self.workers[0]

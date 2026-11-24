@@ -425,13 +425,27 @@ def _housing_identity_choice(request, row, decision, command):
 def _housing_review_choice(request, groups, review, as_of):
     command, _, source = request.POST['review_action'].partition(':')
     if command == 'undo' and source in review:
-        return {key: value for key, value in review.items() if key != source}
+        remaining = {key: value for key, value in review.items() if key != source}
+        if 'interwatch_rows' in review[source]:
+            previous = {key: value for key, value in review[source].items() if key != 'interwatch_rows'}
+            if previous:
+                remaining[source] = previous
+        return remaining
     row = next((entry for entry in groups['conflict'] if entry.source == source), None)
     if row is None:
         raise ValidationError('Строка изменилась. Выберите её в обновлённом списке.')
     decision = dict(review.get(source, {}))
     if command == 'omit':
         decision = {'omit': True}
+    elif command == 'interwatch':
+        # Exclude the other current alternatives only when the subject is known.
+        subject = row.placement_subject
+        decision['interwatch_rows'] = sorted({source} | {
+            entry.source
+            for group in ('conflict', 'ready', 'needs_resident')
+            for entry in groups[group]
+            if subject is not None and entry.placement_subject == subject
+        })
     elif command == 'keep' and (row.review_peers or (row.review_notes and not row.review_dates)):
         if row.review_peers:
             decision['peers'] = sorted(set(decision.get('peers', ())) | row.review_peers)
@@ -606,7 +620,8 @@ def _current_housing_post(request, access, form, context, storage, saved):
                 context['review_source'] = source
             else:
                 context['review_undone'] = command == 'undo'
-                if source in review:
+                context['review_marked_interwatch'] = command == 'interwatch'
+                if command != 'undo' and source in review:
                     context['last_review_source'] = source
                     context['last_review_name'] = next(row.name for row in groups['conflict'] if row.source == source)
                 draft, groups = revised, revised_groups

@@ -56,7 +56,7 @@
         <section class="housing-import__report" aria-label="Предпросмотр расселения">
             {% if review_saved %}
                 <div class="housing-import__saved-choice">
-                    <p role="status">{% if review_undone %}Решение отменено.{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
+                    <p role="status">{% if review_undone %}Решение отменено.{% elif review_marked_interwatch %}Отметка сохранена в разделе «Межвахта». Уже занятое место освобождается на карте расселения.{% else %}Решение сохранено в черновике.{% if last_review_name %} {{ last_review_name }}.{% endif %}{% endif %}</p>
                     {% if last_review_source %}
                         <button type="submit" name="review_action" value="undo:{{ last_review_source }}" form="housing-import-form">Отменить решение</button>
                     {% endif %}
@@ -90,6 +90,9 @@
                                 <li id="housing-row-{{ row.source|slugify }}">
                                     <div class="housing-import__person">
                                         <strong>{{ row.name }}</strong>
+                                        {% if row.marked_interwatch %}
+                                            <small>На межвахте · отмечено при сверке</small>
+                                        {% endif %}
                                         <small>{% if row.external_label %}{{ row.external_label }}{% else %}{{ row.category_label }}{% endif %}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
                                     </div>
                                     <div>

@@ -52,9 +52,9 @@
                                                 <span>{{ row.place }}</span>
                                                 <small>{% if row.starts %}С {{ row.starts|date:"d.m.Y" }} {% endif %}{% if row.ends %}до {{ row.ends|date:"d.m.Y" }}{% endif %}{% if row.shift %} · {{ row.shift }}{% endif %}</small>
                                             </button>
-                                            <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">
+                                            <button type="submit" name="review_action" value="interwatch:{{ row.source }}" form="housing-import-form">
                                                 <strong>На межвахте</strong>
-                                                <span>Пропустить заселение по этой строке</span>
+                                                <span>Исключить из загрузки расселения</span>
                                                 {% for entry in row.review_interwatch %}
                                                     <small>Голубая строка · {{ entry.place }}{% if entry.starts %} · с {{ entry.starts|date:"d.m.Y" }}{% endif %}{% if entry.ends %} до {{ entry.ends|date:"d.m.Y" }}{% endif %}</small>
                                                 {% endfor %}
@@ -135,9 +135,8 @@
                                                                 {% else %}Живёт на койке {{ row.bed_label }}{% endif %}
                                                             </button>
                                                         {% endif %}
-                                                        <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">
-                                                            {% if case.kind == 'interwatch' %}На межвахте{% else %}Отложить{% endif %}
-                                                        </button>
+                                                        <button type="submit" name="review_action" value="interwatch:{{ row.source }}" form="housing-import-form">На межвахте</button>
+                                                        <button type="submit" name="review_action" value="omit:{{ row.source }}" form="housing-import-form">Отложить</button>
                                                     {% endif %}
                                                     {% if row.reviewed %}
                                                         <button type="submit" name="review_action" value="undo:{{ row.source }}" form="housing-import-form">Отменить решение</button>

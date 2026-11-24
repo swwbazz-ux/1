@@ -141,6 +141,7 @@ class HousingRow:
     applied_resident_id: int | None = None
     match_identity: int | str = ''
     reviewed: bool = False
+    marked_interwatch: bool = False
     confirmed_in_review: bool = False
     review_peers: set[str] = field(default_factory=set)
     review_interwatch: list['HousingRow'] = field(default_factory=list)
@@ -744,6 +745,7 @@ def search_housing_subjects(query):
 
 def _apply_review_decisions(rows, review):
     excluded = {source for decision in review.values() for source in decision.get('peers', ())}
+    interwatch = {source for decision in review.values() for source in decision.get('interwatch_rows', ())}
     employees = Employee.objects.select_related('personnel_position', 'settlement_resident').in_bulk(
         [decision['employee_id'] for decision in review.values() if 'employee_id' in decision],
     )
@@ -753,7 +755,11 @@ def _apply_review_decisions(rows, review):
     for row in rows:
         decision = review.get(row.source, {})
         row.reviewed = bool(decision)
-        if row.source in excluded or decision.get('omit'):
+        if row.source in interwatch:
+            row.marked_interwatch = True
+            row.reviewed = 'interwatch_rows' in decision
+            row.status = 'interwatch'
+        elif row.source in excluded or decision.get('omit'):
             row.status = 'omitted'
             continue
         row.confirmed_in_review = decision.get('confirm', False)
