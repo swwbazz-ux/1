@@ -323,6 +323,12 @@
             hoverCard.appendChild(work);
         }
         hoverCard.appendChild(shift);
+        if (bed.dataset.onExtension === "true") {
+            var extension = document.createElement("span");
+            extension.className = "settlement-bed-extension-label";
+            extension.textContent = "На продлении";
+            hoverCard.appendChild(extension);
+        }
     }
 
     function isTransferredBed(bed) {
@@ -359,6 +365,20 @@
         var person = bed.querySelector("[data-bed-person-label]");
         var status = bed.querySelector("[data-bed-status]");
         var shift = bed.querySelector("[data-bed-shift-badge]");
+        var label = [
+            bed.dataset.dormitoryLabel,
+            bed.dataset.floorLabel,
+            bed.dataset.roomLabel,
+            "блок " + bed.dataset.blockLabel,
+            bed.dataset.positionLabel
+        ];
+        if (occupied) {
+            label.push("занято", bed.dataset.occupantName, "смена: " + (bed.dataset.shiftLabel || "Не указано"));
+            if (bed.dataset.onExtension === "true") label.push("на продлении");
+        } else {
+            label.push(unavailable ? "недоступно" : "свободно");
+        }
+        bed.setAttribute("aria-label", label.join(", "));
         bed.dataset.bedState = unavailable ? "unavailable" : (occupied ? "occupied" : "free");
         bed.classList.toggle("is-occupied", occupied);
         bed.classList.toggle("is-free", !occupied);
@@ -1778,6 +1798,7 @@
             relocationSourceBed.dataset.occupantPhotoUrl = "";
             relocationSourceBed.dataset.shiftLabel = "";
             relocationSourceBed.dataset.tooltipShiftLabel = "";
+            delete relocationSourceBed.dataset.onExtension;
             relocationSourceBed.dataset.workLabel = "";
             relocationSourceBed.dataset.tooltipWorkLabel = "";
             relocationSourceBed.dataset.assignmentTypeLabel = "";
@@ -1794,6 +1815,7 @@
         selectedBed.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         selectedBed.dataset.shiftLabel = occupancy.shift_label;
         selectedBed.dataset.tooltipShiftLabel = occupancy.shift_label;
+        selectedBed.dataset.onExtension = occupancy.on_extension ? "true" : "false";
         selectedBed.dataset.workLabel = occupancy.work_label;
         selectedBed.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
         selectedBed.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
@@ -1801,19 +1823,6 @@
         selectedBed.classList.remove("is-free");
         selectedBed.classList.add("is-occupied");
         renderMapBed(selectedBed);
-        selectedBed.setAttribute(
-            "aria-label",
-            [
-                selectedBed.dataset.dormitoryLabel,
-                selectedBed.dataset.floorLabel,
-                selectedBed.dataset.roomLabel,
-                "блок " + selectedBed.dataset.blockLabel,
-                selectedBed.dataset.positionLabel,
-                "занято",
-                occupancy.occupant_name,
-                "смена: " + (occupancy.shift_label || "Не указано")
-            ].join(", ")
-        );
 
         updateSelectionSummary();
         renderRoom(activeRoom);

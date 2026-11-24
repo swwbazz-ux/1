@@ -44,6 +44,7 @@
                                 data-occupant-photo-url="{{ bed.occupant_photo_url }}"
                                 data-shift-label="{{ bed.shift_label }}"
                                 data-tooltip-shift-label="{{ bed.tooltip_shift_label }}"
+                                {% if bed.on_extension %}data-on-extension="true"{% endif %}
                                 data-work-label="{{ bed.work_label }}"
                                 data-tooltip-work-label="{{ bed.tooltip_work_label }}"
                                 data-assignment-type-label="{{ bed.assignment_type_label }}"
@@ -53,7 +54,7 @@
                                 data-room-label="комната {{ room.number }}"
                                 data-block-label="{{ block.label }}"
                                 data-position-label="место {{ bed.position }}"
-                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% else %}, свободно{% endif %}"
+                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% if bed.on_extension %}, на продлении{% endif %}{% else %}, свободно{% endif %}"
                                 {% if not room.is_transferred and not picker %}disabled{% endif %}>
                             <span class="settlement-bed-visual"
                                   data-bed-photo-slot{% if bed.active_occupancy and not picker %}
@@ -86,6 +87,7 @@
                                     <strong>{{ bed.occupant_name }}</strong>
                                     {% if bed.tooltip_work_label %}<span>{{ bed.tooltip_work_label }}</span>{% endif %}
                                     <strong>Смена: {{ bed.tooltip_shift_label }}</strong>
+                                    {% if bed.on_extension %}<span class="settlement-bed-extension-label">На продлении</span>{% endif %}
                                 </span>
                             {% endif %}
                             {% if picker and bed.review_badge %}<span class="housing-map-picker__bed-badge">{{ bed.review_badge }}</span>{% endif %}

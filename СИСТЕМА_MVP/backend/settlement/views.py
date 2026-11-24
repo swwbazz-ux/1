@@ -37,6 +37,7 @@ from users.role_apps import (
     role_app_service_worker_response,
 )
 from rotations.arrival_roster_routing import settlement_clerk_arrival_roster_routing_queue
+from rotations.services import approved_watch_extensions_on
 
 from .control import (
     SettlementControlWriteContext,
@@ -966,6 +967,7 @@ def _attach_occupancy_view(rooms, moment):
         for occupancy in occupancies
         if occupancy.resident.employee_id
     )
+    extensions = approved_watch_extensions_on(timezone.localdate(moment), employee_ids=profiles)
 
     imported_ids, published = current_housing_official_assignments(occupancies, moment)
 
@@ -987,6 +989,7 @@ def _attach_occupancy_view(rooms, moment):
 
             resident = occupancy.resident
             room.occupied_bed_count += 1
+            bed.on_extension = resident.employee_id in extensions
             bed.occupant_name = resident.display_name
             bed.occupant_initials = _person_initials(bed.occupant_name)
             profile = profiles.get(resident.employee_id)
@@ -2286,6 +2289,10 @@ def _occupancy_response(occupancy):
     bed = occupancy.physical_bed
     room = bed.room
     moment = timezone.now()
+    on_extension = (
+        bool(approved_watch_extensions_on(timezone.localdate(moment), employee_ids=[resident.employee_id]))
+        if resident.employee_id and occupancy.is_active_at(moment) else False
+    )
     active_in_room = EmployeeBedOccupancy.objects.filter(
         effective_occupancy_at_q(moment),
         physical_bed__room=room,
@@ -2311,6 +2318,7 @@ def _occupancy_response(occupancy):
             'occupant_name': resident.display_name,
             'photo_url': photo_url,
             'shift_label': DAY_NIGHT_LABELS.get(occupancy.work_shift, shift_label),
+            'on_extension': on_extension,
             'work_label': work_label,
             'tooltip_work_label': _bed_tooltip_work_label(occupancy, profile, official),
             'assignment_type': occupancy.assignment_type,

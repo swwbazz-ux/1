@@ -45,6 +45,7 @@ from assignments.models import (
 )
 from core.production_time import production_work_date
 from references.models import Dormitory, Equipment, EquipmentType
+from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, ShiftType, WatchPeriod
 from users.active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
@@ -8698,6 +8699,47 @@ class ClerkMapEffectiveOccupancyTests(TestCase):
         )
 
         self.assert_map_visibility(0, visible=True)
+
+    def test_map_marks_only_occupied_beds_with_current_approved_extensions(self):
+        work_date = timezone.localdate(self.moment)
+        watch = WatchPeriod.objects.create(
+            name='Вахта для проверки продления', starts_on=work_date,
+            ends_on=work_date + timedelta(days=14),
+        )
+        cycle = RotationCollectionCycle.objects.create(
+            name='Сбор для проверки продления', target_watch_period=watch, response_deadline=self.moment,
+        )
+        occupancies = [
+            self.create_occupancy(index, starts_at=self.moment - timedelta(days=2))
+            for index in range(3)
+        ]
+        for index, decision, offset in (
+            (0, WatchExtensionCase.DecisionStatus.APPROVED, 0),
+            (1, WatchExtensionCase.DecisionStatus.PENDING, 0),
+            (2, WatchExtensionCase.DecisionStatus.APPROVED, -1),
+            (3, WatchExtensionCase.DecisionStatus.APPROVED, 0),
+        ):
+            employee = self.employees[index]
+            reply = RotationResponse.objects.create(cycle=cycle, employee=employee, snapshot_full_name=employee.full_name)
+            approved = decision == WatchExtensionCase.DecisionStatus.APPROVED
+            WatchExtensionCase.objects.create(
+                response=reply, decision_status=decision,
+                extension_start=work_date - timedelta(days=1), extension_end=work_date + timedelta(days=offset),
+                decision_by=self.clerk if approved else None, decision_at=self.moment if approved else None,
+            )
+
+        with mock.patch('settlement.views.timezone.now', return_value=self.moment):
+            page = self.client.get(reverse('settlement_map'))
+            self.assertContains(page, 'data-on-extension="true"', count=1)
+            self.assertContains(page, f'{self.employees[0].full_name}, смена:')
+            self.assertContains(page, '<span class="settlement-bed-extension-label">На продлении</span>', html=True)
+            self.assertEqual(
+                [_occupancy_response(occupancy)['occupancy']['on_extension'] for occupancy in occupancies],
+                [True, False, False],
+            )
+
+        with mock.patch('settlement.views.timezone.now', return_value=self.moment + timedelta(days=1)):
+            self.assertNotContains(self.client.get(reverse('settlement_map')), 'data-on-extension="true"')
 
     def test_map_shows_occupancy_starting_exactly_at_moment(self):
         self.create_occupancy(1, starts_at=self.moment)

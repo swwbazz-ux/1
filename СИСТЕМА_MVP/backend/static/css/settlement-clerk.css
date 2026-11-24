@@ -880,6 +880,12 @@
     background: var(--settlement-night-soft);
 }
 
+.settlement-shift-legend .is-extension {
+    height: .85em;
+    border: 1px solid var(--admin-yellow);
+    background: var(--admin-yellow-soft);
+}
+
 .settlement-floor > header p {
     margin: 0;
     color: var(--admin-muted);
@@ -1389,6 +1395,18 @@
 .settlement-bed.is-occupied[data-shift-label="Ночь"] {
     --bed-shift-ink: var(--settlement-night-ink);
     --bed-shift-soft: var(--settlement-night-soft);
+}
+
+.settlement-bed.is-occupied[data-on-extension="true"] {
+    --bed-shift-ink: var(--admin-yellow);
+    --bed-shift-soft: var(--admin-yellow-soft);
+}
+
+.settlement-bed-extension-label {
+    color: var(--admin-ink);
+    background: var(--admin-yellow-soft);
+    border-radius: 3px;
+    padding: 2px 4px;
 }
 
 .settlement-room.is-transferred:has(.settlement-bed.is-occupied[data-shift-label="День"]):has(.settlement-bed.is-occupied[data-shift-label="Ночь"])
