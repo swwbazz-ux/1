@@ -41,7 +41,7 @@ CODE_PROTECTED_ROOM_FORBIDDEN = 'protected_room_forbidden'
 
 _MESSAGES = {
     CODE_ITR_ROOM_REQUIRES_ITR: (
-        'Двухместная комната доступна только ИТР по подтверждённому основанию.'
+        'В эту двухместную комнату можно заселить сотрудника категории ИТР. Для выбранного жильца выберите другую комнату.'
     ),
     CODE_ITR_ROOM_MANUAL_ONLY: (
         'Двухместная комната не используется авторасселением.'
@@ -51,8 +51,8 @@ _MESSAGES = {
         'вручную и с основанием.'
     ),
     CODE_PROTECTED_ROOM_FORBIDDEN: (
-        'Комната защищённого фонда: размещение доступно только держателям '
-        'или по правилу комнаты.'
+        'Комната закреплена за другим жильцом на выбранный период. '
+        'Выберите другую комнату или проверьте закрепление.'
     ),
 }
 
@@ -217,8 +217,13 @@ def itr_rejection(resident, *, confirm_itr=False, placement_reason=''):
     }:
         return CODE_ITR_ROOM_REQUIRES_ITR, _MESSAGES[CODE_ITR_ROOM_REQUIRES_ITR]
     if work_category == Employee.WorkCategory.OTHER:
-        if not confirm_itr or not (placement_reason or '').strip():
-            return CODE_ITR_ROOM_REQUIRES_ITR, _MESSAGES[CODE_ITR_ROOM_REQUIRES_ITR]
+        has_reason = bool((placement_reason or '').strip())
+        if not confirm_itr and not has_reason:
+            return CODE_ITR_ROOM_REQUIRES_ITR, 'Укажите основание размещения и подтвердите категорию ИТР.'
+        if not confirm_itr:
+            return CODE_ITR_ROOM_REQUIRES_ITR, 'Отметьте подтверждение категории ИТР.'
+        if not has_reason:
+            return CODE_ITR_ROOM_REQUIRES_ITR, 'Укажите основание размещения в двухместной комнате.'
         return None
     return CODE_ITR_ROOM_REQUIRES_ITR, _MESSAGES[CODE_ITR_ROOM_REQUIRES_ITR]
 

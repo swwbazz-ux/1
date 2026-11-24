@@ -120,10 +120,15 @@
 
             <div class="settlement-map-searches">
                 <label class="settlement-search-field" for="settlement-search">
-                    <span>Номер комнаты или ID койки на этаже</span>
+                    <span>Номер комнаты или ID койки во всех общежитиях</span>
                     <input id="settlement-search" type="search" autocomplete="off"
-                           placeholder="Номер комнаты" data-settlement-search>
+                           placeholder="Номер комнаты" role="combobox" aria-autocomplete="list"
+                           aria-expanded="false" aria-controls="settlement-room-matches" data-settlement-search>
                 </label>
+                <div class="settlement-search-popup" data-room-popup hidden>
+                    <div id="settlement-room-matches" role="listbox" aria-label="Найденные комнаты"></div>
+                    <p role="status" hidden>Комнаты не найдены.</p>
+                </div>
                 <label class="settlement-search-field" for="settlement-resident-finder">
                     <span>Фамилия жильца во всех общежитиях</span>
                     <input id="settlement-resident-finder" type="search" autocomplete="off"
@@ -925,8 +930,8 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v1"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-panel-v1"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v2"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-room-search-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>

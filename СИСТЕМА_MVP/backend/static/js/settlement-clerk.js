@@ -24,11 +24,10 @@
     var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
     var searchInput = root.querySelector("[data-settlement-search]");
     var residentFinder = root.querySelector("#settlement-resident-finder");
-    var residentPopup = root.querySelector("[data-resident-popup]");
-    var residentOptions = root.querySelector("#settlement-resident-matches");
-    var residentSearchEmpty = root.querySelector("[data-resident-search-empty]");
+    var renderRoomOptions = bindSearchList(searchInput, root.querySelector("[data-room-popup]"), refreshRoomOptions, showFoundRoom);
+    var renderResidentOptions = bindSearchList(residentFinder, root.querySelector("[data-resident-popup]"), refreshResidentSearch, showResidentBed);
     var residentMatches = [];
-    var activeMatch = -1;
+    var chosenRoomId = "";
     var chosenResidentId = "";
     var panel = root.querySelector("[data-room-panel]");
     var panelBackdrop = root.querySelector("[data-room-panel-backdrop]");
@@ -495,7 +494,7 @@
         var searchMatch = /^\d+$/.test(state.search)
             ? Number(room.dataset.roomNumber) === Number(state.search)
             : String(room.dataset.search || "").includes(state.search);
-        return dormitoryMatch && floorMatch && searchMatch;
+        return dormitoryMatch && floorMatch && searchMatch && (!chosenRoomId || room.dataset.roomId === chosenRoomId);
     }
 
     function selectedFloorRooms() {
@@ -581,11 +580,101 @@
         });
     }
 
-    function closeResidentOptions() {
-        residentPopup.hidden = true;
-        residentFinder.setAttribute("aria-expanded", "false");
-        residentFinder.removeAttribute("aria-activedescendant");
-        activeMatch = -1;
+    function bindSearchList(input, popup, refresh, choose) {
+        if (!input || !popup) return function () {};
+        var list = popup.querySelector('[role="listbox"]');
+        var empty = popup.querySelector('[role="status"]');
+        var matches = [];
+        var active = -1;
+        function close() {
+            popup.hidden = true;
+            input.setAttribute("aria-expanded", "false");
+            input.removeAttribute("aria-activedescendant");
+            active = -1;
+        }
+        input.addEventListener("focus", refresh);
+        input.addEventListener("click", function () {
+            if (popup.hidden && input.value) refresh();
+        });
+        input.addEventListener("blur", close);
+        input.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !popup.hidden) {
+                event.preventDefault();
+                close();
+            } else if (event.key === "Enter" && !popup.hidden && matches.length) {
+                event.preventDefault();
+                choose(matches[Math.max(active, 0)]);
+            } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && input.value.trim()) {
+                if (popup.hidden) refresh();
+                if (!matches.length) return;
+                event.preventDefault();
+                if (active >= 0) list.children[active].setAttribute("aria-selected", "false");
+                if (event.key === "ArrowDown") active = (active + 1) % matches.length;
+                else active = active <= 0 ? matches.length - 1 : active - 1;
+                var option = list.children[active];
+                option.setAttribute("aria-selected", "true");
+                input.setAttribute("aria-activedescendant", option.id);
+                option.scrollIntoView({block: "nearest"});
+            }
+        });
+        list.addEventListener("pointerdown", function (event) {
+            if (event.target.closest('[role="option"]')) event.preventDefault();
+        });
+        list.addEventListener("click", function (event) {
+            var option = event.target.closest("[data-match-index]");
+            if (option) choose(matches[Number(option.dataset.matchIndex)]);
+        });
+        return function render(items, describe) {
+            close();
+            matches = items;
+            list.replaceChildren();
+            if (!input.value.trim() || document.activeElement !== input) return;
+            matches.forEach(function (match, index) {
+                var option = element("div");
+                option.id = list.id + "-" + index;
+                option.dataset.matchIndex = String(index);
+                option.setAttribute("role", "option");
+                option.setAttribute("aria-selected", "false");
+                var labels = describe(match);
+                option.append(element("strong", "", labels[0]), element("small", "", labels[1]));
+                list.appendChild(option);
+            });
+            empty.hidden = matches.length > 0;
+            popup.hidden = false;
+            popup.scrollTop = 0;
+            input.setAttribute("aria-expanded", "true");
+        };
+    }
+
+    function refreshRoomOptions() {
+        var query = state.search;
+        var numeric = /^\d+$/.test(query);
+        var matches = query ? rooms.filter(function (room) {
+            return numeric ? room.dataset.roomNumber.startsWith(query) : String(room.dataset.search || "").includes(query);
+        }) : [];
+        matches.sort(function (left, right) {
+            return Number(left.dataset.roomNumber) - Number(right.dataset.roomNumber)
+                || Number(left.dataset.dormitory) - Number(right.dataset.dormitory)
+                || Number(left.dataset.floor) - Number(right.dataset.floor);
+        });
+        renderRoomOptions(matches, function (room) {
+            return ["Комната " + room.dataset.roomNumber, "КИС-" + room.dataset.dormitory + " · " + room.dataset.floor + " этаж"];
+        });
+    }
+
+    function showFoundRoom(room) {
+        if (!room.isConnected) {
+            var id = room.dataset.roomId;
+            room = rooms.find(function (current) { return current.dataset.roomId === id; });
+            if (!room) return refreshRoomOptions();
+        }
+        chosenRoomId = room.dataset.roomId;
+        state.search = room.dataset.roomNumber;
+        searchInput.value = state.search;
+        showMapFloor(room);
+        var header = room.querySelector("[data-room-open]");
+        header.focus({preventScroll: true});
+        room.scrollIntoView({block: "nearest", inline: "nearest"});
     }
 
     function residentSearchName(value) {
@@ -622,37 +711,25 @@
                 : match.rank === residentMatches[0].rank;
             match.bed.classList.toggle("is-resident-match", highlighted);
         });
-        closeResidentOptions();
-        residentOptions.replaceChildren();
-        if (!query || document.activeElement !== residentFinder) return;
-        residentMatches.forEach(function (match, index) {
+        renderResidentOptions(residentMatches, function (match) {
             var bed = match.bed;
-            var option = element("div");
-            option.id = "settlement-resident-option-" + index;
-            option.dataset.matchIndex = String(index);
-            option.setAttribute("role", "option");
-            option.setAttribute("aria-selected", "false");
             var location = [bed.dataset.dormitoryLabel, bed.dataset.floorLabel, bed.dataset.roomLabel,
                 "блок " + bed.dataset.blockLabel, bed.dataset.positionLabel].join(" · ");
-            option.append(element("strong", "", bed.dataset.occupantName), element("small", "", location));
-            residentOptions.appendChild(option);
+            return [bed.dataset.occupantName, location];
         });
-        residentSearchEmpty.hidden = residentMatches.length > 0;
-        residentPopup.hidden = false;
-        residentPopup.scrollTop = 0;
-        residentFinder.setAttribute("aria-expanded", "true");
     }
 
-    function showResidentBed(index) {
-        var match = residentMatches[index];
-        if (!match) return;
-        var bed = match.bed;
-        var room = bed.closest("[data-room-card]");
+    function showMapFloor(room) {
         state.dormitory = room.dataset.dormitory;
         state.floor = room.dataset.floor;
         syncMapSelectionButtons();
         persistMapSelection();
         applyFilters();
+    }
+
+    function showResidentBed(match) {
+        var bed = match.bed;
+        showMapFloor(bed.closest("[data-room-card]"));
         chosenResidentId = bed.dataset.residentId;
         residentFinder.value = bed.dataset.occupantName;
         residentFinder.blur();
@@ -2268,56 +2345,30 @@
 
     if (searchInput) {
         searchInput.addEventListener("input", function () {
-            state.search = searchInput.value.trim().toLowerCase();
+            var query = searchInput.value.trim().toLowerCase();
+            var number = /^(?:№\s*)?0*(\d+)$/.exec(query);
+            state.search = number ? number[1] : query;
+            chosenRoomId = "";
             if (state.search && residentFinder && residentFinder.value) {
                 residentFinder.value = "";
                 chosenResidentId = "";
                 refreshResidentSearch();
             }
             highlightRooms();
+            refreshRoomOptions();
         });
     }
 
     if (residentFinder) {
-        residentFinder.addEventListener("focus", refreshResidentSearch);
-        residentFinder.addEventListener("click", function () {
-            if (residentPopup.hidden && residentFinder.value) refreshResidentSearch();
-        });
         residentFinder.addEventListener("input", function () {
             chosenResidentId = "";
             if (residentFinder.value && state.search) {
                 state.search = "";
+                chosenRoomId = "";
                 searchInput.value = "";
                 highlightRooms();
             }
             refreshResidentSearch();
-        });
-        residentFinder.addEventListener("blur", closeResidentOptions);
-        residentFinder.addEventListener("keydown", function (event) {
-            if (event.key === "Escape" && !residentPopup.hidden) {
-                event.preventDefault();
-                closeResidentOptions();
-            } else if (event.key === "Enter" && !residentPopup.hidden && residentMatches.length) {
-                event.preventDefault();
-                showResidentBed(Math.max(activeMatch, 0));
-            } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && residentMatches.length) {
-                event.preventDefault();
-                if (residentPopup.hidden) refreshResidentSearch();
-                var options = residentOptions.children;
-                if (activeMatch >= 0) options[activeMatch].setAttribute("aria-selected", "false");
-                if (event.key === "ArrowDown") activeMatch = (activeMatch + 1) % options.length;
-                else activeMatch = activeMatch <= 0 ? options.length - 1 : activeMatch - 1;
-                options[activeMatch].setAttribute("aria-selected", "true");
-                residentFinder.setAttribute("aria-activedescendant", options[activeMatch].id);
-                options[activeMatch].scrollIntoView({block: "nearest"});
-            }
-        });
-        residentOptions.addEventListener("pointerdown", function (event) {
-            if (event.target.closest("[data-match-index]")) event.preventDefault();
-        });
-        residentOptions.addEventListener("click", function (event) {
-            var option = event.target.closest("[data-match-index]");
-            if (option) showResidentBed(Number(option.dataset.matchIndex));
         });
     }
 

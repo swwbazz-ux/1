@@ -417,6 +417,34 @@ class BedCheckinTests(TemporaryPlacementBase):
     def checkin(self, **changes):
         return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
 
+    def test_checkin_after_release_explains_each_missing_itr_confirmation(self):
+        self.acquire()
+        room, beds = self.create_special_room(anchor_type=AccommodationAnchor.AnchorType.PROTECTED, suffix='replace')
+        PhysicalRoom.objects.filter(pk=room.pk).update(sex_restriction=PhysicalRoom.SexRestriction.MALE_ONLY)
+        itr = PersonnelPosition.objects.create(code='qa-engineer', name='Тестовый инженер',
+                                                settlement_category=PersonnelPosition.SettlementCategory.ITR)
+        Employee.objects.filter(pk=self.candidate.pk).update(personnel_position=itr, work_category=Employee.WorkCategory.OTHER)
+        old = self.create_occupancy(resident=self.second_candidate_resident, bed=beds[0])
+        released = self.post_json('settlement_occupancy_create', {
+            'action': 'release', 'occupancy_id': old.pk, 'bed_stable_id': beds[0].stable_id, 'reason': 'Выезд',
+        })
+        self.assertEqual(released.status_code, 200, released.content)
+        booking = {'subject': f'employee:{self.candidate.pk}', 'bed_stable_id': beds[0].stable_id,
+                   'arrival': self.today.isoformat()}
+        for fields, message in (
+            ({}, 'Укажите основание размещения и подтвердите категорию ИТР.'),
+            ({'basis': 'Распоряжение'}, 'Отметьте подтверждение категории ИТР.'),
+            ({'confirm_itr': True}, 'Укажите основание размещения в двухместной комнате.'),
+        ):
+            with self.subTest(fields=fields):
+                result = self.checkin(**booking, **fields)
+                self.assertEqual(result.status_code, 409)
+                self.assertEqual(result.json()['error'], message)
+                self.assertEqual(EmployeeBedOccupancy.objects.filter(physical_bed=beds[0]).count(), 1)
+        result = self.checkin(**booking, basis='Распоряжение', confirm_itr=True)
+        self.assertEqual(result.status_code, 201, result.content)
+        self.assertEqual(result.json()['occupancy']['employee_id'], self.candidate.pk)
+
     def test_new_card_and_stay_are_saved_once_with_selected_dates(self):
         self.acquire()
         result = self.checkin()

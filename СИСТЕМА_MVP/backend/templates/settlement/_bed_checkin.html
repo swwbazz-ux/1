@@ -3,6 +3,7 @@
       aria-labelledby="bed-checkin-title" hidden>
     {% csrf_token %}
     <h3 id="bed-checkin-title">Заселить на койку <span data-checkin-place></span></h3>
+    <p class="settlement-placement-hint" data-checkin-room-rule hidden></p>
     <label class="settlement-employee-search">
         <span>ФИО жильца</span>
         <input name="full_name" type="search" required maxlength="255" placeholder="Начните вводить фамилию" autocomplete="off">

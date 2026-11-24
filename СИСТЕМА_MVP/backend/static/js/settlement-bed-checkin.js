@@ -15,9 +15,11 @@ window.createSettlementBedCheckin = function (form, applied) {
     let request = 0;
     let saving = false;
 
-    function notify(text) {
+    function notify(text, isError = false) {
         message.textContent = text;
         message.hidden = !text;
+        message.classList.toggle("is-error", isError);
+        if (isError) message.scrollIntoView({block: "nearest"});
     }
 
     function clearResults() {
@@ -67,19 +69,28 @@ window.createSettlementBedCheckin = function (form, applied) {
                         name.value = person.name;
                         name.setCustomValidity("");
                         clearResults();
-                        notify(meta.textContent);
+                        notify("Выбран: " + person.name);
                     });
                     results.append(button);
                 }
                 results.hidden = !data.results.length;
-                if (!data.results.length) notify("Совпадений нет. Проверьте ФИО или выберите «Новый жилец».");
+                notify(data.results.length
+                    ? "Нажмите на ФИО в списке, чтобы выбрать жильца."
+                    : "Совпадений нет. Проверьте ФИО или выберите «Новый жилец».");
             } catch {
-                if (version === request) notify("Не удалось проверить справочник. Повторите поиск.");
+                if (version === request) notify("Не удалось проверить справочник. Повторите поиск.", true);
             }
         }, 180);
     }
 
     name.addEventListener("input", search);
+    form.addEventListener("invalid", function (event) {
+        const field = event.target;
+        if (field !== form.querySelector("input:invalid, select:invalid")) return;
+        const label = field.labels?.[0]?.querySelector("span")?.textContent;
+        const prefix = label && !field.validity.customError ? label + " — " : "";
+        notify(prefix + field.validationMessage, true);
+    }, true);
     newButton.addEventListener("click", function () {
         toggleCard(card.hidden);
         if (card.hidden) search();
@@ -89,8 +100,8 @@ window.createSettlementBedCheckin = function (form, applied) {
         event.preventDefault();
         if (!target || saving || form.hidden) return;
         if (!subject) {
-            name.setCustomValidity("Выберите человека в результатах поиска или нажмите «Новый жилец».");
-            name.reportValidity();
+            notify("Нажмите на ФИО в результатах поиска. Если человека нет в справочнике, выберите «Новый жилец».", true);
+            name.focus();
             return;
         }
         const bed = target;
@@ -107,11 +118,16 @@ window.createSettlementBedCheckin = function (form, applied) {
                 headers: {"Content-Type": "application/json", "X-CSRFToken": fields.csrfmiddlewaretoken.value},
                 body: JSON.stringify(payload)
             });
-            const result = await response.json();
-            if (!response.ok || !result.ok) throw new Error(result.error || "Не удалось заселить жильца.");
+            const result = await response.json().catch(() => null);
+            if (!result) throw new Error(response.redirected || response.status === 403
+                ? "Сеанс мог завершиться. Откройте карту и проверьте вход."
+                : "Сервер не подтвердил заселение. Проверьте койку на карте перед повторной попыткой.");
+            if (!response.ok || !result.ok) throw new Error(result.error || "Сервер не подтвердил заселение. Проверьте койку на карте.");
             applied(result, bed);
         } catch (error) {
-            if (target === bed) notify(error.message || "Проверьте соединение с сервером.");
+            if (target === bed) notify(error instanceof TypeError
+                ? "Нет подтверждения от сервера. Проверьте связь и состояние койки на карте."
+                : error.message, true);
         } finally {
             saving = submit.disabled = false;
         }
@@ -128,7 +144,14 @@ window.createSettlementBedCheckin = function (form, applied) {
             form.querySelector("[data-checkin-place]").textContent = bed.dataset.bedNumber;
             const room = bed.closest("[data-room-card]");
             const reserve = Boolean(room.querySelector('[data-room-anchor="reserve"]'));
-            const itr = !reserve && (room.querySelectorAll("[data-bed]").length <= 2 || Boolean(room.querySelector('[data-room-anchor="protected"]')));
+            const protectedRoom = Boolean(room.querySelector('[data-room-anchor="protected"]'));
+            const capacity = Number(room.dataset.roomCapacity) || room.querySelectorAll("[data-bed]").length;
+            const itr = !reserve && (capacity <= 2 || protectedRoom);
+            const rule = form.querySelector("[data-checkin-room-rule]");
+            rule.hidden = !itr;
+            rule.textContent = protectedRoom
+                ? "Если комната закреплена за сотрудником, заселить можно только его. При отсутствии закрепления укажите основание и подтвердите категорию ИТР."
+                : "Для заселения в двухместную комнату укажите основание и подтвердите категорию ИТР.";
             fields.basis.disabled = form.querySelector("[data-checkin-basis]").hidden = !reserve && !itr;
             fields.basis.required = reserve;
             fields.confirm_itr.disabled = form.querySelector("[data-checkin-itr]").hidden = !itr;
