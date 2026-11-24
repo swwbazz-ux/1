@@ -1556,6 +1556,54 @@ button.deputy-avatar {
     white-space: nowrap;
 }
 
+.deputy-record-dialog.is-specialization {
+    width: min(840px, calc(100% - 28px));
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+}
+
+.is-specialization .deputy-record-head h2,
+.is-specialization .deputy-record-head p,
+.is-specialization .deputy-record-field dd,
+.is-specialization .deputy-dialog-actions button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.is-specialization .deputy-record-fields {
+    max-height: none;
+    overflow: visible;
+}
+
+.is-specialization .deputy-record-field {
+    padding: 12px 16px;
+}
+
+.is-specialization .deputy-record-field dd {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.is-specialization .deputy-record-field dt {
+    font-size: 12px;
+}
+
+.is-specialization .is-summary {
+    grid-column: 1 / -1;
+}
+
+.is-specialization .is-warning {
+    border-inline-start: 4px solid var(--admin-yellow);
+    background: var(--admin-yellow-soft);
+}
+
+.is-specialization .deputy-dialog-actions {
+    flex-wrap: wrap;
+}
+
 .deputy-toast {
     position: fixed;
     right: 18px;

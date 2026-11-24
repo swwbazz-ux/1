@@ -740,7 +740,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v22";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v23";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)

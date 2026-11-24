@@ -671,10 +671,10 @@
         return avatar;
     }
 
-    function appendRecordField(label, value) {
+    function appendRecordField(label, value, modifier) {
         value = textValue(value).trim();
         if (!recordFields || !value) return;
-        var item = createElement("div", "deputy-record-field");
+        var item = createElement("div", "deputy-record-field" + (modifier ? " " + modifier : ""));
         item.appendChild(createElement("dt", "", label));
         item.appendChild(createElement("dd", "", value));
         recordFields.appendChild(item);
@@ -684,6 +684,7 @@
         if (!recordDialog || !recordFields || !recordVisual) return false;
         closeDialog(candidateDialog);
         closeDialog(photoDialog);
+        recordDialog.classList.remove("is-specialization");
         recordVisual.replaceChildren();
         recordFields.replaceChildren();
         if (recordActions) {
@@ -735,19 +736,30 @@
 
     function openSpecializationReview(row, slot) {
         var review = slot.specialization_review || {};
-        var context = [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · ");
+        var equipment = row.equipment || {};
+        var context = [equipment.type_label, equipment.label, slot.label].filter(Boolean).join(" · ");
         if (!prepareRecordDialog("Специализация", slot.reported_name, context)) return;
+        recordDialog.classList.add("is-specialization");
         recordVisual.appendChild(createAvatar({full_name: slot.reported_name}, false));
-        appendRecordField("Запись в расстановке", "Фактический состав можно сохранить и опубликовать. Производственный допуск оформляется по данным справочника.");
+
+        var required = review.required || state.role.label;
+        if (review.warning) {
+            var reason = review.current
+                ? "В карточке сотрудника указана другая специализация."
+                : "В карточке сотрудника не указана производственная специализация.";
+            appendRecordField("Почему появилась пометка", reason + " Для этой техники требуется «" + required + "».", "is-summary is-warning");
+        } else {
+            appendRecordField("Результат проверки", review.issue || (review.employee_id
+                ? "Сотрудник подходит для этого места." : "Требуется сверка карточки сотрудника."), "is-summary");
+        }
         appendRecordField("Штатная должность", review.position || "Не указана");
-        appendRecordField("Текущая специализация", review.current || "Не указана");
-        appendRecordField("Требуется для техники", review.required || state.role.label);
-        appendRecordField("Результат проверки", review.issue || (review.employee_id
-            ? "По текущим данным сотрудник подходит для этого места." : "Требуется сверка карточки сотрудника."));
+        appendRecordField("Специализация в справочнике", review.current || "Не указана");
+        if (!review.warning) appendRecordField("Требуется для техники", required);
+        if (review.warning) {
+            appendRecordField("Что делать", "Если сотрудник действительно работает на этой машине, оставьте его в смене. "
+                + "Расстановку с этой пометкой можно сохранить и опубликовать. Чтобы убрать пометку, попросите ОУП проверить карточку и указать подходящую специализацию.", "is-summary");
+        }
         if (planEditable()) {
-            if (review.issue === "Не соответствует производственной специализации") {
-                appendRecordField("Если в справочнике ошибка", "Передайте в ОУП ФИО, вид техники и требуемую специализацию.");
-            }
             if (review.can_assign) {
                 addReviewAction("Назначить сотрудника", function () {
                     saveSlot(row, slot, review.employee_id, null, "primary");
