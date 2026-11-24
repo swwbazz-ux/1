@@ -24,6 +24,7 @@
     var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
     var searchInput = root.querySelector("[data-settlement-search]");
     var residentFinder = root.querySelector("#settlement-resident-finder");
+    var quickSearchOrigin = null;
     var renderRoomOptions = bindSearchList(searchInput, root.querySelector("[data-room-popup]"), refreshRoomOptions, showFoundRoom);
     var renderResidentOptions = bindSearchList(residentFinder, root.querySelector("[data-resident-popup]"), refreshResidentSearch, showResidentBed);
     var residentMatches = [];
@@ -594,13 +595,22 @@
         }
         input.addEventListener("focus", refresh);
         input.addEventListener("click", function () {
+            quickSearchOrigin = null;
             if (popup.hidden && input.value) refresh();
         });
-        input.addEventListener("blur", close);
+        input.addEventListener("blur", function () {
+            quickSearchOrigin = null;
+            close();
+        });
         input.addEventListener("keydown", function (event) {
             if (event.key === "Escape" && !popup.hidden) {
                 event.preventDefault();
                 close();
+                if (quickSearchOrigin) {
+                    var origin = quickSearchOrigin;
+                    input.blur();
+                    origin.focus({preventScroll: true});
+                }
             } else if (event.key === "Enter" && !popup.hidden && matches.length) {
                 event.preventDefault();
                 choose(matches[Math.max(active, 0)]);
@@ -2341,6 +2351,31 @@
                 selectFilter(buttons, button, stateKey, button.dataset[datasetKey]);
             });
         });
+    });
+
+    document.addEventListener("keydown", function (event) {
+        if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing
+            || activeMapMode !== "current" || dragSourceBed || relocationSourceBed
+            || !/^[0-9\p{L}]$/u.test(event.key)) return;
+
+        var input = /^\d$/.test(event.key) ? searchInput : residentFinder;
+        var target = event.target;
+        if (!input || target === input) return;
+        var switchingSearch = quickSearchOrigin && (target === searchInput || target === residentFinder);
+        if (!(target instanceof HTMLElement) || target.isContentEditable
+            || (!switchingSearch && target.closest('input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"]'))
+            || (!root.contains(target) && target !== document.body && target !== document.documentElement)) return;
+
+        var overlays = document.querySelectorAll('dialog[open], [role="dialog"]:not([hidden]), [data-unsettled-panel]:not([hidden]), [data-employee-panel]:not([hidden])');
+        if (Array.from(overlays).some(function (overlay) { return overlay.getClientRects().length > 0; })) return;
+
+        var origin = quickSearchOrigin || target;
+        event.preventDefault();
+        input.focus();
+        quickSearchOrigin = origin;
+        input.value = event.key;
+        input.setSelectionRange(input.value.length, input.value.length);
+        input.dispatchEvent(new Event("input", {bubbles: true}));
     });
 
     if (searchInput) {
