@@ -113,7 +113,7 @@
                                 <td>
                                     {{ room.number }}
                                     {% if fund_can_manage and dormitory.can_transfer_rooms and room.transfer_status == 'not_transferred' %}
-                                        <form method="post" class="settlement-fund-form-actions">
+                                        <form method="post" class="settlement-fund-form-actions" action="{% url 'settlement_fund' %}" data-fund-action="mark_room_transferred">
                                             {% csrf_token %}
                                             <input type="hidden" name="action" value="mark_room_transferred">
                                             <input type="hidden" name="room" value="{{ room.id }}">

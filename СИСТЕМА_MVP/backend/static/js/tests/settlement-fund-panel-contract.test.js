@@ -63,10 +63,11 @@ test("в шапке рабочего места есть ссылка «Жилф
     assert.match(HEADER, />Жилфонд<\/a>/);
 });
 
-test("пять действий панели совпадают с серверным контрактом", () => {
+test("шесть действий панели совпадают с серверным контрактом", () => {
     [
         "create_dormitory",
         "create_room",
+        "mark_room_transferred",
         "create_bed",
         "close_dormitory",
         "reopen_dormitory"
@@ -77,18 +78,18 @@ test("пять действий панели совпадают с сервер�
             new RegExp('<input type="hidden" name="action" value="' + action + '">')
         );
     });
-    assert.equal(count(TEMPLATE, "{% csrf_token %}"), 5, "CSRF в каждой форме");
+    assert.equal(count(TEMPLATE, "{% csrf_token %}"), 6, "CSRF в каждой форме");
     assert.equal(
         count(TEMPLATE, 'name="reason" maxlength="255"'),
         5,
-        "основание обязательно в каждой форме"
+        "основание обязательно в формах управления"
     );
     assert.equal(
         count(TEMPLATE, 'name="reason" maxlength="255" autocomplete="off" required>'),
         5,
         "поле основания помечено required"
     );
-    assert.equal(count(TEMPLATE, "<form "), 5);
+    assert.equal(count(TEMPLATE, "<form "), 6);
     assert.match(TEMPLATE, /action="{% url 'settlement_fund' %}"/);
 });
 
@@ -184,7 +185,7 @@ test("собственный фонд доступен для добавлени
 test("панель объясняет границу с картой и авторасселением", () => {
     assert.match(TEMPLATE, /не попадает на карту КИС-5\/6/);
     assert.match(TEMPLATE, /авторасселение в него не селит/);
-    assert.match(TEMPLATE, /журнал расселения/);
+    assert.match(TEMPLATE, /Изменения жилфонда записываются в журнал/);
 });
 
 test("сообщения и ошибки сервера выводятся без перерисовки", () => {
