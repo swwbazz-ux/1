@@ -417,6 +417,60 @@
     margin: 0;
 }
 
+.settlement-map-searches {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: .4rem;
+    min-width: 0;
+}
+
+.settlement-search-popup {
+    position: absolute;
+    z-index: 35;
+    inset: calc(100% + .25rem) 0 auto auto;
+    width: min(100%, 26rem);
+    max-height: min(19rem, 40dvh);
+    overflow: auto;
+    overscroll-behavior: contain;
+    border: 1px solid var(--admin-line);
+    border-radius: .5rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-search-popup [role="option"],
+.settlement-search-popup p {
+    padding: .5rem .75rem;
+    margin: 0;
+    line-height: 1.3;
+}
+
+.settlement-search-popup [role="option"] {
+    display: grid;
+    gap: .125rem;
+    cursor: pointer;
+}
+
+.settlement-search-popup [role="option"] + [role="option"] {
+    border-top: 1px solid var(--admin-line-soft);
+}
+
+.settlement-search-popup small {
+    color: var(--admin-muted);
+}
+
+.settlement-search-popup [role="option"]:hover,
+.settlement-search-popup [aria-selected="true"] {
+    background: var(--admin-green-soft);
+}
+
+.settlement-room .settlement-bed.is-resident-match {
+    outline: 3px solid var(--settlement-accent);
+    outline-offset: -2px;
+}
+
 .settlement-search-field span {
     position: absolute;
     width: 1px;
@@ -3124,7 +3178,7 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-toolbar {
-        grid-template-columns: auto auto auto minmax(90px, 1fr) auto auto;
+        grid-template-columns: minmax(0, 1fr) auto auto;
         align-items: end;
     }
 
@@ -3271,7 +3325,7 @@ body.settlement-auto-preview-modal-open {
     }
 
     .settlement-current-date,
-    .settlement-search-field {
+    .settlement-map-searches {
         grid-column: 1 / -1;
     }
 
@@ -3335,6 +3389,78 @@ body.settlement-auto-preview-modal-open {
 
     .settlement-room-bed-card dl {
         grid-template-columns: 1fr;
+    }
+}
+
+.settlement-map-entry,
+.settlement-watch-extensions {
+    position: relative;
+}
+
+.settlement-watch-extensions summary {
+    min-height: 2.75rem;
+    padding: .6rem .75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: .375rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.settlement-watch-extensions summary b {
+    margin-inline-start: .35rem;
+    padding: .1rem .4rem;
+    border-radius: .25rem;
+    background: var(--admin-yellow-soft);
+}
+
+.settlement-watch-extensions__content {
+    position: absolute;
+    z-index: 40;
+    inset-block-start: calc(100% + .25rem);
+    inset-inline-start: 0;
+    width: min(24rem, calc(100vw - 2rem));
+    max-height: min(20rem, 45dvh);
+    overflow: auto;
+    border: 1px solid var(--admin-line);
+    border-radius: .5rem;
+    background: var(--admin-panel);
+    box-shadow: var(--admin-shadow);
+}
+
+.settlement-watch-extensions__content ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.settlement-watch-extensions__content ul:empty {
+    display: none;
+}
+
+.settlement-watch-extensions__content li,
+.settlement-watch-extensions__content p {
+    margin: 0;
+    padding: .55rem .75rem;
+}
+
+.settlement-watch-extensions__content li + li {
+    border-top: 1px solid var(--admin-line);
+}
+
+.settlement-watch-extensions__content small {
+    display: block;
+    color: var(--admin-muted);
+}
+
+@media (max-width: 720px) {
+    .settlement-watch-extensions {
+        position: static;
+    }
+
+    .settlement-watch-extensions__content {
+        width: min(24rem, 100%);
     }
 }
 
