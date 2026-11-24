@@ -1,0 +1,5 @@
+{% for dormitory in dormitories %}
+    {% for floor in dormitory.floors %}
+        {% include "settlement/_map_floor.html" with dormitory=dormitory floor=floor picker=True only %}
+    {% endfor %}
+{% endfor %}

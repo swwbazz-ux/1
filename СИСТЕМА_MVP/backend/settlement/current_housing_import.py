@@ -23,7 +23,6 @@ from .control import (
     SettlementControlWriteContext, acquire_control_lease,
     lock_settlement_write_access, lock_settlement_write_lease,
 )
-from .fund import room_map_positions
 from .intervals import effective_ends_at, intervals_overlap
 from .models import (
     EmployeeBedOccupancy, PhysicalBed, PhysicalRoom, SettlementBedPreparation, SettlementBedReserve,
@@ -529,7 +528,6 @@ def housing_review_map(groups, row, as_of):
         Prefetch('beds', queryset=PhysicalBed.objects.order_by('block', 'position')),
     ).order_by('dormitory__number', 'floor', 'number'))
     room_ids = [room.pk for room in rooms]
-    positions = room_map_positions(rooms)
     anchors = room_anchor_types_by_room(room_ids=room_ids)
     held, reserved = _housing_bed_restrictions(room_ids, day_start, day_end)
     occupancies = defaultdict(list)
@@ -538,7 +536,11 @@ def housing_review_map(groups, row, as_of):
         Q(terminated_at__isnull=True) | Q(terminated_at__gt=start),
         physical_bed__room_id__in=room_ids, starts_at__lt=end,
         replaced_by_application__isnull=True, replaced_by_occupancy__isnull=True,
-    ).select_related('resident__employee').order_by('starts_at', 'pk'):
+    ).select_related(
+        'resident__employee__personnel_position',
+        'shift_official_assignment__equipment__equipment_type',
+        'shift_official_assignment__equipment__model',
+    ).order_by('starts_at', 'pk'):
         begins, finishes = _occupied_interval(occupancy)
         if finishes is None or finishes > begins:
             occupancies[occupancy.physical_bed_id].append((occupancy, finishes))
@@ -551,6 +553,9 @@ def housing_review_map(groups, row, as_of):
                     and (not row.match_identity or entry.match_identity != row.match_identity)):
                 draft_beds[entry.physical_bed_id].append(entry.name)
 
+    now = timezone.now()
+    map_time = now if day_start <= now < day_end else day_start
+
     def bed_payload(bed, room_available):
         live = occupancies[bed.pk]
         already_here = bool(live) and row.employee_id and all(
@@ -561,6 +566,10 @@ def housing_review_map(groups, row, as_of):
             for occupancy, finish in live
         )
         draft_people = draft_beds[bed.pk]
+        bed.active_occupancies = [
+            occupancy for occupancy, finish in live
+            if occupancy.starts_at <= map_time and (finish is None or map_time < finish)
+        ]
         if not room_available:
             status, label = 'unavailable', 'Комната недоступна'
         elif bed.pk in held or bed.pk in reserved:
@@ -573,11 +582,18 @@ def housing_review_map(groups, row, as_of):
             status, label = 'free', 'Жилец уже на этой койке'
         else:
             status, label = 'free', 'Свободна'
+        bed.review_badge = ''
+        if status == 'draft':
+            bed.review_badge = 'Excel'
+        elif room_available and status == 'unavailable':
+            bed.review_badge = 'Резерв'
+        elif status == 'occupied' and not bed.active_occupancies:
+            bed.review_badge = 'Занята по датам'
         return {
-            'id': bed.pk, 'label': _housing_bed_label(bed), 'block': bed.block,
+            'id': bed.pk, 'label': _housing_bed_label(bed),
             'status': status, 'status_label': label,
             'residents': [
-                {'name': occupancy.resident.display_name,
+                {'id': occupancy.pk, 'name': occupancy.resident.display_name,
                  'starts': business_localtime(occupancy.starts_at).strftime('%d.%m.%Y'),
                  'ends': business_localtime(finishes).strftime('%d.%m.%Y') if finishes else '',
                  'shift': next((name for name, code in WORK_SHIFTS.items() if code == occupancy.work_shift), '')}
@@ -586,12 +602,16 @@ def housing_review_map(groups, row, as_of):
             'draft': draft_people,
         }
 
-    return [{
+    for room in rooms:
+        room.anchor_types = anchors.get(room.pk, frozenset())
+
+    catalog = [{
         'id': room.pk, 'label': _housing_room_label(room), 'number': room.number,
-        'dormitory': room.dormitory.number, 'floor': room.floor, 'side': positions[room.pk][0],
-        'beds': [bed_payload(bed, room.dormitory.is_active and room.is_transferred and not anchors.get(room.pk))
+        'dormitory': room.dormitory.number, 'floor': room.floor,
+        'beds': [bed_payload(bed, room.dormitory.is_active and room.is_transferred and not room.anchor_types)
                  for bed in room.beds.all()],
     } for room in rooms]
+    return rooms, catalog, map_time
 
 
 def _occupied_interval(occupancy):

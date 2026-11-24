@@ -4,7 +4,7 @@
 {% block title %}Загрузка текущего расселения{% endblock %}
 
 {% block clerk_extra_head %}
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v9">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v10">
 {% endblock %}
 
 {% block clerk_content %}
@@ -135,6 +135,7 @@
             <label>Комната <select data-map-room></select></label>
         </div>
         <div class="housing-map-picker__body">
+            <div data-map-summary hidden>{% include "settlement/_map_floor_summary.html" %}</div>
             <p data-map-status role="status" tabindex="-1"></p>
             <div class="housing-map-picker__plan" data-map-plan tabindex="0" aria-label="План этажа"></div>
         </div>
@@ -147,5 +148,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v9" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v10" defer></script>
 {% endblock %}

@@ -19,7 +19,7 @@
     <button type="button"
             class="settlement-room-number"
             data-room-open
-            aria-label="Открыть комнату {{ room.number }}">{{ room.number }}</button>
+            aria-label="{% if picker %}Показать только комнату{% else %}Открыть комнату{% endif %} {{ room.number }}">{{ room.number }}</button>
     <span class="settlement-room-content" style="--settlement-block-count: {{ room.view_blocks|length }};">
         {% for block in room.view_blocks %}
             <span class="settlement-bed-block"
@@ -29,10 +29,11 @@
                 <span class="settlement-bed-row" style="--settlement-bed-count: {{ block.beds|length }};">
                     {% for bed in block.beds %}
                         <button type="button"
-                                class="settlement-bed{% if bed.active_occupancy %} is-occupied{% else %} is-free{% endif %}"
+                                class="settlement-bed{% if bed.active_occupancy %} is-occupied{% if picker %} no-photo{% endif %}{% else %} is-free{% endif %}"
                                 data-bed
                                 data-bed-card
                                 data-bed-id="{{ bed.stable_id }}"
+                                {% if picker %}data-picker-bed-id="{{ bed.pk }}" aria-pressed="false"{% endif %}
                                 data-bed-number="{{ block.label }}{{ bed.position }}"
                                 data-bed-state="{% if not room.is_transferred %}unavailable{% elif bed.active_occupancy %}occupied{% else %}free{% endif %}"
                                 data-occupied="{% if bed.active_occupancy %}true{% else %}false{% endif %}"
@@ -53,9 +54,9 @@
                                 data-block-label="{{ block.label }}"
                                 data-position-label="место {{ bed.position }}"
                                 aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% else %}, свободно{% endif %}"
-                                {% if not room.is_transferred %}disabled{% endif %}>
+                                {% if not room.is_transferred and not picker %}disabled{% endif %}>
                             <span class="settlement-bed-visual"
-                                  data-bed-photo-slot{% if bed.active_occupancy %}
+                                  data-bed-photo-slot{% if bed.active_occupancy and not picker %}
                                   data-bed-drag-handle draggable="true"{% endif %}
                                   aria-hidden="true">
                                 <img class="settlement-bed-photo"
@@ -66,7 +67,7 @@
                                 <span class="settlement-bed-photo-placeholder"
                                       data-bed-photo-fallback>
                                     <span class="settlement-bed-avatar-initial"
-                                          data-bed-avatar-initial{% if not bed.active_occupancy %} hidden{% endif %}>{{ bed.occupant_name|slice:":1" }}</span>
+                                          data-bed-avatar-initial{% if not bed.active_occupancy %} hidden{% endif %}>{% if picker %}{{ bed.occupant_initials }}{% else %}{{ bed.occupant_name|slice:":1" }}{% endif %}</span>
                                     <span class="settlement-bed-empty-icon"
                                           data-bed-empty-icon{% if bed.active_occupancy %} hidden{% endif %}></span>
                                 </span>
@@ -87,6 +88,7 @@
                                     <strong>Смена: {{ bed.tooltip_shift_label }}</strong>
                                 </span>
                             {% endif %}
+                            {% if picker and bed.review_badge %}<span class="housing-map-picker__bed-badge">{{ bed.review_badge }}</span>{% endif %}
                             <span class="settlement-bed-state-indicator" data-bed-state-indicator aria-hidden="true"></span>
                         </button>
                     {% endfor %}

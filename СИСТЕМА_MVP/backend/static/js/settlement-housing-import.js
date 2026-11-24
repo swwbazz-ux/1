@@ -81,6 +81,7 @@
     const map = {
         close: dialog.querySelector('[data-map-close]'),
         filters: dialog.querySelector('[data-map-filters]'),
+        summary: dialog.querySelector('[data-map-summary]'),
         building: dialog.querySelector('[data-map-building]'),
         floor: dialog.querySelector('[data-map-floor]'),
         room: dialog.querySelector('[data-map-room]'),
@@ -96,6 +97,7 @@
     let mapRooms = [];
     let originRoomId;
     let selectedBed;
+    let mapBeds = new Map();
 
     function element(tag, text, className) {
         const node = document.createElement(tag);
@@ -112,8 +114,10 @@
     }
 
     function selectBed(room, bed, button) {
+        selectedBed?.button.classList.remove('is-selected');
         selectedBed?.button.setAttribute('aria-pressed', 'false');
         selectedBed = {bed, button};
+        button.classList.add('is-selected');
         button.setAttribute('aria-pressed', 'true');
         const details = [element('strong', room.label + ' · койка ' + bed.label), element('span', bed.status_label)];
         for (const occupant of bed.residents) {
@@ -126,57 +130,59 @@
         map.status.textContent = '';
     }
 
-    function renderRoom(room) {
-        const card = element('section', '', 'housing-map-picker__room');
-        const heading = element('h3', 'Комната ' + room.number);
-        if (room.id === originRoomId) {
-            card.dataset.originRoom = '';
-            heading.append(element('small', 'Место из сверки'));
+    function loadMapPhotos(floor) {
+        for (const button of floor.querySelectorAll('[data-occupied="true"][data-occupant-photo-url]')) {
+            const photo = button.querySelector('[data-bed-photo-image]');
+            const url = button.dataset.occupantPhotoUrl;
+            if (!url || photo.hasAttribute('src')) continue;
+            photo.addEventListener('load', () => {
+                photo.classList.add('is-loaded');
+                button.classList.remove('no-photo');
+                button.classList.add('has-photo');
+                button.querySelector('[data-bed-photo-fallback]').hidden = true;
+            }, {once: true});
+            photo.src = url;
         }
-        card.append(heading);
-        const blocks = new Map();
-        const beds = element('div', '', 'housing-map-picker__beds');
-        for (const bed of room.beds) {
-            const button = element('button', '', 'housing-map-picker__bed');
-            button.type = 'button';
-            button.dataset.bedStatus = bed.status;
-            button.dataset.bedId = bed.id;
-            button.setAttribute('aria-pressed', 'false');
-            const people = [...bed.residents.map(item => item.name), ...bed.draft];
-            const labels = {draft: 'В Excel', occupied: 'Занята', unavailable: 'Недоступна'};
-            const label = labels[bed.status] || bed.status_label;
-            button.append(element('strong', bed.label), element('small', label));
-            if (people.length) button.append(element('span', people.join(', '), 'housing-map-picker__people'));
-            button.setAttribute('aria-label', [room.label, bed.label, bed.status_label, ...people].join(', '));
-            button.addEventListener('click', () => selectBed(room, bed, button));
-            if (!blocks.has(bed.block)) {
-                const block = element('div', '', 'housing-map-picker__block');
-                blocks.set(bed.block, block);
-                beds.append(block);
-            }
-            blocks.get(bed.block).append(button);
-        }
-        if (blocks.size < 2) beds.classList.add('housing-map-picker__beds--single');
-        if (!blocks.size) beds.append(element('p', 'Коек нет'));
-        card.append(beds);
-        return card;
     }
 
     function renderMap() {
+        selectedBed?.button.classList.remove('is-selected');
+        selectedBed?.button.setAttribute('aria-pressed', 'false');
         selectedBed = null;
         map.save.disabled = true;
         map.selection.textContent = 'Выберите койку на карте';
         map.status.textContent = '';
-        const rooms = mapRooms.filter(room => room.dormitory === map.building.value
-            && String(room.floor) === map.floor.value && (!map.room.value || String(room.id) === map.room.value));
-        const sides = ['left', 'right'].map(side => {
-            const row = element('div', '', 'housing-map-picker__side');
-            row.append(...rooms.filter(room => room.side === side).map(renderRoom));
-            return row;
-        });
-        map.plan.replaceChildren(sides[0], element('div', 'Коридор', 'housing-map-picker__corridor'), sides[1]);
-        if (!rooms.length) map.status.textContent = 'На этом этаже нет комнат.';
-        map.plan.scrollLeft = 0;
+        let floor;
+        for (const section of map.plan.querySelectorAll('[data-floor-section]')) {
+            section.hidden = section.dataset.dormitory !== map.building.value || section.dataset.floorSection !== map.floor.value;
+            if (!section.hidden) floor = section;
+        }
+        map.summary.hidden = !floor;
+        if (!floor) {
+            map.status.textContent = 'На этом этаже нет комнат.';
+            return;
+        }
+        const rooms = [...floor.querySelectorAll('[data-room-card]')];
+        const transferred = rooms.filter(room => room.dataset.transferStatus === 'transferred');
+        const count = (items, key) => items.reduce((total, item) => total + Number(item.dataset[key]), 0);
+        const stats = {
+            'selected-room-count': rooms.length,
+            'selected-transferred-room-count': transferred.length,
+            'free-bed-count': count(transferred, 'freeBeds'),
+            'occupied-bed-count': count(transferred, 'occupiedBeds'),
+            'selected-unavailable-bed-count': count(rooms, 'freeBeds') + count(rooms, 'occupiedBeds')
+                - count(transferred, 'freeBeds') - count(transferred, 'occupiedBeds'),
+        };
+        for (const [name, value] of Object.entries(stats)) map.summary.querySelector('[data-' + name + ']').textContent = value;
+        let target;
+        for (const room of rooms) {
+            const match = room.dataset.roomId === map.room.value;
+            room.classList.toggle('is-filter-muted', Boolean(map.room.value) && !match);
+            if (match || (!map.room.value && room.dataset.roomId === String(originRoomId))) target = room;
+        }
+        loadMapPhotos(floor);
+        floor.querySelector('.settlement-floor-scroll').scrollLeft = 0;
+        target?.scrollIntoView({block: 'nearest', inline: 'nearest'});
     }
 
     function updateMapFilters(preferred = null) {
@@ -198,6 +204,7 @@
         selectedBed = null;
         map.save.disabled = true;
         map.filters.hidden = true;
+        map.summary.hidden = true;
         map.filters.inert = false;
         map.plan.inert = false;
         map.plan.replaceChildren();
@@ -220,15 +227,24 @@
             if (!response.ok || !Array.isArray(data.rooms)) throw new Error(data.message);
             if (controller.signal.aborted) return;
             mapRooms = data.rooms;
+            mapBeds = new Map(mapRooms.flatMap(room => room.beds.map(bed => [String(bed.id), {room, bed}])));
+            const template = document.createElement('template');
+            template.innerHTML = data.plan;
+            map.plan.replaceChildren(template.content);
+            for (const button of map.plan.querySelectorAll('[data-picker-bed-id]')) {
+                const entry = mapBeds.get(button.dataset.pickerBedId);
+                button.dataset.reviewBedStatus = entry.bed.status;
+                button.setAttribute('aria-label', button.getAttribute('aria-label') + ', ' + entry.bed.status_label);
+            }
             map.resident.textContent = data.resident + ' · ' + data.date + ' · Место из сверки: ' + data.origin;
             originRoomId = data.room_id;
+            if (originRoomId) map.plan.querySelector('[data-room-id="' + originRoomId + '"]')?.setAttribute('data-origin-room', '');
             const origin = mapRooms.find(room => room.id === originRoomId);
             const buildings = [...new Set(mapRooms.map(room => room.dormitory))];
             fillOptions(map.building, buildings.map(number => [number, 'КИС-' + number]), origin?.dormitory);
             updateMapFilters(origin);
             map.filters.hidden = !buildings.length;
-            const originCard = map.plan.querySelector('[data-origin-room]');
-            originCard?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+
         } catch (error) {
             if (!controller.signal.aborted) {
                 map.status.textContent = error instanceof SyntaxError || error instanceof TypeError
@@ -255,6 +271,20 @@
     map.building.addEventListener('change', () => updateMapFilters());
     map.floor.addEventListener('change', () => updateMapFilters());
     map.room.addEventListener('change', renderMap);
+    map.plan.addEventListener('click', event => {
+        const button = event.target.closest('[data-picker-bed-id]');
+        if (button) {
+            const {room, bed} = mapBeds.get(button.dataset.pickerBedId);
+            selectBed(room, bed, button);
+            return;
+        }
+        const heading = event.target.closest('[data-room-open]');
+        if (heading) {
+            const roomId = heading.closest('[data-room-card]').dataset.roomId;
+            map.room.value = map.room.value === roomId ? '' : roomId;
+            renderMap();
+        }
+    });
     map.save.addEventListener('click', () => {
         const submitter = mapMoveSubmitter();
         if (submitter && selectedBed?.bed.status === 'free') form.requestSubmit(submitter);

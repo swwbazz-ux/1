@@ -13,6 +13,7 @@ from django.db import IntegrityError
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -579,9 +580,20 @@ def _housing_review_map_response(request, storage, source):
         row = next((entry for entry in groups['conflict'] if entry.source == source), None)
         if row is None:
             return JsonResponse({'message': 'Этот вопрос уже изменился. Обновите страницу сверки.'}, status=409)
+        rooms, catalog, map_time = housing_review_map(groups, row, draft.as_of)
+        _attach_occupancy_view(rooms, map_time)
+        shift_labels = {
+            bed.active_occupancy.pk: bed.tooltip_shift_label
+            for room in rooms for bed in room.beds.all() if bed.active_occupancy
+        }
+        for room in catalog:
+            for bed in room['beds']:
+                for resident in bed['residents']:
+                    resident['shift'] = shift_labels.get(resident['id'], resident['shift'])
+        plan = render_to_string('settlement/_housing_review_map.html', {'dormitories': _dormitory_views(rooms)})
         return JsonResponse({
             'resident': row.name, 'origin': row.place, 'date': draft.as_of.strftime('%d.%m.%Y'),
-            'room_id': row.physical_room_id, 'rooms': housing_review_map(groups, row, draft.as_of),
+            'room_id': row.physical_room_id, 'rooms': catalog, 'plan': plan,
         })
     except (OSError, ValidationError):
         return JsonResponse({'message': 'Не удалось открыть карту. Попробуйте ещё раз.'}, status=503)
@@ -892,6 +904,7 @@ def _attach_occupancy_view(rooms, moment):
             resident = occupancy.resident
             room.occupied_bed_count += 1
             bed.occupant_name = resident.display_name
+            bed.occupant_initials = _person_initials(bed.occupant_name)
             profile = profiles.get(resident.employee_id)
             if profile:
                 bed.occupant_photo_url = profile['photo_url']

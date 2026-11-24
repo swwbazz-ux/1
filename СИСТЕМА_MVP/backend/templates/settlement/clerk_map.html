@@ -134,33 +134,7 @@
             </button>
         </section>
 
-        <section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
-            <article>
-                <span>Комнаты</span>
-                <strong data-selected-room-count>—</strong>
-                <small>на выбранном этаже</small>
-            </article>
-            <article class="is-primary">
-                <span>Передано</span>
-                <strong data-selected-transferred-room-count>—</strong>
-                <small>комнат</small>
-            </article>
-            <article>
-                <span>Свободно</span>
-                <strong data-free-bed-count>—</strong>
-                <small>коек</small>
-            </article>
-            <article>
-                <span>Занято</span>
-                <strong data-occupied-bed-count>—</strong>
-                <small>коек</small>
-            </article>
-            <article class="is-unavailable">
-                <span>Недоступно</span>
-                <strong data-selected-unavailable-bed-count>—</strong>
-                <small>коек</small>
-            </article>
-        </section>
+        {% include "settlement/_map_floor_summary.html" %}
 
         {% if dormitories %}
             <section class="settlement-map-list" id="settlement-map-list" aria-label="Физическая карта общежитий">
@@ -169,41 +143,7 @@
                              data-dormitory-section="{{ dormitory.model.number }}"{% if dormitory.model.number != "5" %} hidden{% endif %}>
                         <div class="settlement-floors">
                             {% for floor in dormitory.floors %}
-                                <section class="settlement-floor"
-                                         data-dormitory="{{ dormitory.model.number }}"
-                                         data-floor-section="{{ floor.number }}"{% if dormitory.model.number != "5" or floor.number != 1 %} hidden{% endif %}>
-                                    <header>
-                                        <div>
-                                            <span>Выбранный план</span>
-                                            <h2>{{ dormitory.label }} · {{ floor.number }} этаж</h2>
-                                        </div>
-                                        <div class="settlement-shift-legend" aria-label="Обозначения смен">
-                                            <span><b class="is-day">Д</b> День</span>
-                                            <span><b class="is-night">Н</b> Ночь</span>
-                                            <span><b class="is-unknown">?</b> Смена неизвестна</span>
-                                        </div>
-                                        <p>{{ floor.transferred_count }} из {{ floor.room_count }} комнат передано</p>
-                                    </header>
-                                    <div class="settlement-floor-scroll">
-                                        <div class="settlement-floor-plan"
-                                             data-side-slots="{{ floor.rows|length }}"
-                                             style="--settlement-side-slots: {{ floor.rows|length }};">
-                                            <div class="settlement-side settlement-side-left" aria-label="Верхний ряд комнат">
-                                                {% for row in floor.rows %}
-                                                    {% include "settlement/_room_card.html" with room=row.left side="left" only %}
-                                                {% endfor %}
-                                            </div>
-                                            <div class="settlement-corridor">
-                                                <span>Коридор</span>
-                                            </div>
-                                            <div class="settlement-side settlement-side-right" aria-label="Нижний ряд комнат">
-                                                {% for row in floor.rows %}
-                                                    {% include "settlement/_room_card.html" with room=row.right side="right" only %}
-                                                {% endfor %}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
+                                {% include "settlement/_map_floor.html" with dormitory=dormitory floor=floor only %}
                             {% endfor %}
                         </div>
                     </article>

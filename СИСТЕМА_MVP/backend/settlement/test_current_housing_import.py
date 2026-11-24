@@ -352,6 +352,12 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('no-store', response['Cache-Control'])
         payload = response.json()
+        plan = payload['plan']
+        self.assertIn('class="settlement-floor-plan"', plan)
+        self.assertIn('class="settlement-corridor"', plan)
+        self.assertIn('data-picker-bed-id=', plan)
+        self.assertIn(self.workers[4].full_name, plan)
+        self.assertNotIn('data-bed-drag-handle', plan)
         self.assertEqual(payload['resident'], self.workers[0].full_name)
         beds = {(room['number'], bed['label']): bed for room in payload['rooms'] for bed in room['beds']}
         self.assertEqual(beds[1, 'А-1']['status'], 'free')
