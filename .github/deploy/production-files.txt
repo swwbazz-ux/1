@@ -1,3 +1,4 @@
-СИСТЕМА_MVP/backend/static/css/management-workplace-v1.css
-СИСТЕМА_MVP/backend/templates/reports/includes/management_workplace_assets.html
-СИСТЕМА_MVP/backend/templates/reports/includes/management_workplace_header.html
+СИСТЕМА_MVP/backend/static/css/deputy-mining-manager-v3.css
+СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
+СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
+СИСТЕМА_MVP/backend/users/role_apps.py
