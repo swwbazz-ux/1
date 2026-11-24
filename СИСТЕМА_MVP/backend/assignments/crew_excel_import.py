@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from rotations.arrival_roster_parser import validate_xlsx_archive
 from users.models import Employee, Role
 
-from .crew_categories import AUXILIARY_CATEGORIES, crew_equipment_number
+from .crew_categories import crew_equipment_number
 from .models import CrewPlanSlot, WorkShiftType
 from .services import (
     CREW_SLOT_POSITION_PRIMARY,
@@ -214,7 +214,6 @@ def _stage_plan(plan, slots, records, names, actor, *, factual=False):
                         if not (
                             factual and error.code == 'invalid_work_category'
                             and position == CREW_SLOT_POSITION_PRIMARY
-                            and (plan.role.code == 'driver' or plan.role.code in AUXILIARY_CATEGORIES)
                         ):
                             raise
                         reported_id = employee.pk

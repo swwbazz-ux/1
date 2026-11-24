@@ -251,10 +251,49 @@ class DeputyPlanningViewTests(TestCase):
             self.assertEqual(review['required'], ProductionSpecialization.objects.get(code='roller_operator').name)
             self.assertEqual(review['issue'], 'Не соответствует производственной специализации')
             self.assertFalse(review['can_assign'])
+            self.assertTrue(review['warning'])
             self.assertEqual(payload['summary']['assigned_count'], 1)
         clear = self.upload_crew_excel([['Каток', '', 'Снять', None]])
         self.assertContains(clear, 'Расстановка опубликована')
         self.assertFalse(CrewPlan.objects.filter(role=plan.role, status=CrewPlanStatus.PUBLISHED, slots__reported_employee=self.driver).exists())
+
+    def test_manual_factual_placement_publishes_with_nonblocking_specialization_warning(self):
+        person, _ = self.create_employee_with_access(
+            'Машинист из фактической смены', self.excavator_role,
+            phone='+79000000091', access_code='219991', rotation='Бригада 1',
+        )
+        placement_url = reverse('deputy_mining_manager_placement')
+        response = self.client.get(placement_url)
+        data = response.context['planning_payload']
+        self.assertIn(person.pk, {item['id'] for item in data['factual_candidates']})
+        self.assertNotIn(person.pk, {item['id'] for item in data['employees']})
+        slot_url = reverse('deputy_mining_manager_slot')
+        body = {
+            'plan_id': data['plan']['id'], 'expected_version': data['plan']['version'],
+            'equipment_id': self.truck_2.pk, 'shift_type': WorkShiftType.SHIFT_2,
+            'employee_id': person.pk,
+        }
+        response = self.client.post(slot_url, body, content_type='application/json')
+        self.assertEqual(response.json()['code'], 'invalid_work_category')
+
+        response = self.client.post(slot_url, {**body, 'factual': True}, content_type='application/json')
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()['payload']
+        slots = [slot for row in data['rows'] for slot in row['slots']]
+        flagged = next(slot for slot in slots if slot.get('reported_name') == person.full_name)
+        self.assertTrue(flagged['specialization_review']['warning'])
+        self.assertEqual(data['summary']['conflict_count'], 0)
+
+        response = self.client.post(
+            reverse('deputy_mining_manager_publish'),
+            {'plan_id': body['plan_id'], 'expected_version': data['plan']['version']},
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(CrewPlanSlot.objects.filter(
+            plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person, equipment=self.truck_2,
+        ).exists())
+        self.assertFalse(EquipmentAssignment.objects.filter(employee=person, role=self.driver_role).exists())
 
     def test_reported_truck_driver_has_no_operational_grant(self):
         person = Employee.objects.create(full_name='Тестовый водитель без специализации', status=Employee.Status.ACTIVE)

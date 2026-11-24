@@ -2178,6 +2178,17 @@ button.deputy-avatar {
     }
 }
 
+.deputy-factual-candidates {
+    padding: 0 16px 8px;
+    font-size: 13px;
+}
+
+.deputy-specialization-review.is-resolved {
+    color: var(--admin-muted);
+    background: var(--admin-panel-soft);
+    border-color: var(--admin-line);
+}
+
 .deputy-specialization-review {
     margin-top: 4px;
     padding: 3px 6px;

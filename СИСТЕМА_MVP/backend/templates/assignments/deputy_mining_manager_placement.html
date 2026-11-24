@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261124-specialization-review">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261124-factual-warning">
 {% endblock %}
 
 {% block body %}
@@ -157,6 +157,10 @@
         </div>
         <span class="deputy-candidate-count" data-candidate-count role="status" aria-live="polite"></span>
     </div>
+    <label class="deputy-factual-candidates" data-factual-candidates-control hidden>
+        <input type="checkbox" data-factual-candidates>
+        Показать сотрудников с другой специализацией
+    </label>
     <div class="deputy-candidate-list" id="deputy-candidate-list" data-candidate-list></div>
     <div class="deputy-dialog-actions">
         <button type="button" class="admin-button admin-button-secondary" data-clear-slot hidden>Снять назначение</button>
@@ -262,6 +266,6 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-specialization-review" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261124-factual-warning" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}

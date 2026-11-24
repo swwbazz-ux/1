@@ -650,6 +650,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
             },
             'employees': [],
             'other_watch_employees': [],
+            'factual_candidates': [],
             'secondary_employee_label': '',
             'rows': [],
         }
@@ -708,6 +709,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
     editable = plan.status == CrewPlanStatus.DRAFT and plan.work_date == production_work_date()
     eligible_employees = []
     transfer_candidates = []
+    factual_candidates = []
     transfer_specializations = []
     current_watch_periods = []
     if editable or any(slot.reported_employee_id for slot in slots):
@@ -724,24 +726,29 @@ def build_crew_plan_payload(plan, *, deputy=None):
             .exclude(id__in=other_role_assignment_employee_ids)
             .order_by('full_name')
         )
-        transfer_pending_employee_ids = TemporaryWorkTransfer.objects.filter(
+        transfer_pending_employee_ids = set(TemporaryWorkTransfer.objects.filter(
             status__in=[
                 TemporaryWorkTransfer.Status.REQUESTED,
                 TemporaryWorkTransfer.Status.APPROVED,
             ],
             effective_to__gte=timezone.localdate(),
-        ).values_list('employee_id', flat=True)
-        transfer_candidates = list(
+        ).values_list('employee_id', flat=True))
+        employees_with_other_specialization = list(
             Employee.objects.filter(
                 Employee.work_eligibility_q(),
                 is_active=True,
                 status=Employee.Status.ACTIVE,
             )
             .exclude(id__in=eligible_employee_ids)
-            .exclude(id__in=transfer_pending_employee_ids)
             .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .order_by('full_name')
         )
+        transfer_candidates = [
+            employee for employee in employees_with_other_specialization if employee.pk not in transfer_pending_employee_ids
+        ]
+        factual_candidates = [
+            employee for employee in employees_with_other_specialization if employee.pk not in assigned_employee_ids
+        ]
         current_watch_periods = list(
             WatchPeriod.objects.filter(
                 is_active=True,
@@ -756,6 +763,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
 
     payload_employee_ids = set(all_eligible_employee_ids) | assigned_employee_ids
     payload_employee_ids.update(employee.id for employee in transfer_candidates)
+    payload_employee_ids.update(employee.id for employee in factual_candidates)
     payload_employee_ids.update(slot.employee_id for slot in slots if slot.employee_id)
     payload_employee_ids.update(
         slot.secondary_employee_id for slot in slots if slot.secondary_employee_id
@@ -786,6 +794,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                 })
         eligible_employees = roster_employees
         transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
+        factual_candidates = [employee for employee in factual_candidates if _in_deputy_roster(employee, brigades, extensions)]
     presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
     reported_employees = {
         slot.reported_employee_id: slot.reported_employee for slot in slots if slot.reported_employee_id
@@ -887,6 +896,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     'current': spec.name if spec else '',
                     'required': required_specialization,
                     'issue': review_issue,
+                    'warning': review_issue == 'Не соответствует производственной специализации',
                     'can_assign': editable and not review_issue,
                 }
             row_slots.append({
@@ -1015,6 +1025,20 @@ def build_crew_plan_payload(plan, *, deputy=None):
             for employee in eligible_employees
         ],
         'other_watch_employees': other_watch_employees,
+        'factual_candidates': [
+            {
+                'id': employee.pk,
+                'full_name': employee.full_name,
+                'brigade_code': _employee_brigade_code(employee),
+                'position_label': employee.personnel_position.name if employee.personnel_position_id else employee.position,
+                'extension_until': extensions[employee.pk].extension_end.strftime('%d.%m.%Y') if employee.pk in extensions else '',
+                'extension_expires_at': (
+                    production_day_bounds(extensions[employee.pk].extension_end)[1].isoformat()
+                    if employee.pk in extensions else ''
+                ),
+            }
+            for employee in factual_candidates
+        ],
         'secondary_employee_label': secondary_position_label,
         'temporary_transfer': {
             'available': bool(
@@ -1075,7 +1099,9 @@ def _employee_excel_value(employee):
 def _crew_slot_excel_value(slot):
     primary = _employee_excel_value(slot.get('employee'))
     if slot.get('reported_name'):
-        primary = f"{_excel_text(slot['reported_name'])}\nПроверить специализацию"
+        primary = _excel_text(slot['reported_name'])
+        if (slot.get('specialization_review') or {}).get('warning', True):
+            primary += '\nСпециализация отличается'
     secondary = slot.get('secondary_employee')
     if not secondary:
         return primary
@@ -1470,6 +1496,7 @@ def deputy_mining_manager_slot_view(request):
             expected_version=int(payload.get('expected_version')),
             actor=access.employee,
             position=payload.get('position') or CREW_SLOT_POSITION_PRIMARY,
+            allow_factual=payload.get('factual') is True,
         )
     except (TypeError, ValueError, ValidationError) as error:
         if isinstance(error, ValidationError):

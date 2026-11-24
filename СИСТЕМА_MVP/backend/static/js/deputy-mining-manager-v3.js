@@ -51,6 +51,7 @@
         payload.temporary_transfer = payload.temporary_transfer || {};
         payload.categories = Array.isArray(payload.categories) ? payload.categories : [];
         payload.employees = Array.isArray(payload.employees) ? payload.employees : [];
+        payload.factual_candidates = Array.isArray(payload.factual_candidates) ? payload.factual_candidates : [];
         payload.employees.forEach(function (employee) {
             employee.eligible_positions = Array.isArray(employee.eligible_positions)
                 ? employee.eligible_positions
@@ -99,6 +100,8 @@
     var candidateCount = document.querySelector("[data-candidate-count]");
     var candidateList = document.querySelector("[data-candidate-list]");
     var clearSlotButton = document.querySelector("[data-clear-slot]");
+    var factualCandidatesControl = document.querySelector("[data-factual-candidates-control]");
+    var factualCandidates = document.querySelector("[data-factual-candidates]");
     var photoDialog = document.querySelector("[data-photo-dialog]");
     var photoImage = document.querySelector("[data-photo-image]");
     var photoCaption = document.querySelector("[data-photo-caption]");
@@ -735,7 +738,7 @@
         var context = [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · ");
         if (!prepareRecordDialog("Специализация", slot.reported_name, context)) return;
         recordVisual.appendChild(createAvatar({full_name: slot.reported_name}, false));
-        appendRecordField("Запись в расстановке", "Фактический состав из Excel. Действующее назначение на технику ещё не оформлено.");
+        appendRecordField("Запись в расстановке", "Фактический состав можно сохранить и опубликовать. Производственный допуск оформляется по данным справочника.");
         appendRecordField("Штатная должность", review.position || "Не указана");
         appendRecordField("Текущая специализация", review.current || "Не указана");
         appendRecordField("Требуется для техники", review.required || state.role.label);
@@ -784,7 +787,7 @@
         appendRecordField("Серийный номер", equipment.serial_number || "Не указан");
         appendRecordField("Принадлежность", equipment.ownership_label || "Не указана");
         (row.slots || []).forEach(function (slot) {
-            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : (slot.reported_name ? slot.reported_name + " · Проверить специализацию" : "Не назначен"));
+            appendRecordField(slot.label || "Смена", slot.employee ? employeeName(slot.employee) : (slot.reported_name ? slot.reported_name + (slot.specialization_review && slot.specialization_review.warning ? " · Специализация отличается" : "") : "Не назначен"));
             if (state.role.supports_secondary === false) return;
             appendRecordField(
                 (slot.label || "Смена") + " · " + (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник"),
@@ -1045,7 +1048,7 @@
         window.clearTimeout(rosterExpiryTimer);
         nextRosterExpiry = Infinity;
         var now = Date.now();
-        state.employees.forEach(function (employee) {
+        state.employees.concat(state.factual_candidates).forEach(function (employee) {
             var expiry = Date.parse(employee.extension_expires_at);
             if (expiry > now && expiry < nextRosterExpiry) nextRosterExpiry = expiry;
         });
@@ -1148,7 +1151,9 @@
     function renderCandidatePicker() {
         if (!candidateList || !currentSlot) return;
         var query = normalizeSearch(candidateSearchInput && candidateSearchInput.value);
-        var visibleEmployees = candidateEmployees.filter(function (employee) {
+        var showFactual = currentSlot.position === "primary" && factualCandidates && factualCandidates.checked;
+        var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees;
+        var visibleEmployees = candidatesForPosition.filter(function (employee) {
             return inDeputyRoster(employee) && employeeMatchesBrigade(employee);
         });
         var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
@@ -1171,13 +1176,17 @@
             main.appendChild(createElement("small", "", employee.busy_reason || employee.assigned_label || employeeMeta(employee) || "Сотрудник"));
             appendExtensionBadge(main, activeRosterExtensionUntil(employee));
             button.appendChild(main);
-            button.appendChild(createPresenceBadge(employee));
+            if (showFactual) {
+                main.appendChild(createElement("small", "", "Фактический состав с предупреждением"));
+            } else {
+                button.appendChild(createPresenceBadge(employee));
+            }
             button.addEventListener("click", function () {
                 var source = sourceForEmployee(employee);
                 var target = currentSlot;
                 closeDialog(candidateDialog, { preserveEquipmentActive: true });
                 setActiveEquipmentRow(target.row);
-                saveSlot(target.row, target.slot, employee.id, source, target.position);
+                saveSlot(target.row, target.slot, employee.id, source, target.position, showFactual);
             });
             candidateList.appendChild(button);
         });
@@ -1252,6 +1261,10 @@
             });
         });
         candidateEmployees = Array.from(candidatesById.values());
+        if (factualCandidates) factualCandidates.checked = false;
+        if (factualCandidatesControl) {
+            factualCandidatesControl.hidden = position !== "primary" || !state.factual_candidates.some(employeeMatchesBrigade);
+        }
         if (candidateSearchInput) candidateSearchInput.value = "";
         renderCandidatePicker();
         if (clearSlotButton) clearSlotButton.hidden = !(slot[employeeKey] || (position === "primary" && slot.reported_name));
@@ -1364,7 +1377,9 @@
             if (reported) {
                 var fact = createElement("span", "deputy-employee-main");
                 fact.appendChild(createElement("strong", "", reported));
-                var reviewLink = createElement("button", "deputy-specialization-review", "Причина и действия");
+                var warning = !slot.specialization_review || slot.specialization_review.warning;
+                var reviewLink = createElement("button", "deputy-specialization-review" + (warning ? "" : " is-resolved"),
+                    warning ? "Специализация отличается" : "Фактический состав");
                 reviewLink.type = "button";
                 reviewLink.setAttribute("data-role-readonly-safe", "");
                 reviewLink.addEventListener("click", function () { openSpecializationReview(row, slot); });
@@ -1607,7 +1622,7 @@
         renderAll(reuseNodes && sameBoard);
     }
 
-    async function saveSlot(row, slot, employeeId, source, position) {
+    async function saveSlot(row, slot, employeeId, source, position, allowFactual) {
         if (
             saving
             || !mutationAllowed()
@@ -1625,6 +1640,7 @@
             employee_id: employeeId === null ? null : employeeId,
             position: position === "secondary" ? "secondary" : "primary"
         };
+        if (allowFactual) body.factual = true;
         if (source && source.source_equipment_id) body.source_equipment_id = source.source_equipment_id;
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
         try {
@@ -1773,6 +1789,7 @@
             renderBoard();
         });
     }
+    if (factualCandidates) factualCandidates.addEventListener("change", renderCandidatePicker);
     if (candidateSearchInput) {
         candidateSearchInput.addEventListener("input", renderCandidatePicker);
         candidateSearchInput.addEventListener("keydown", function (event) {

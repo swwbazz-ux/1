@@ -479,6 +479,7 @@ def update_crew_draft_slot(
     expected_version,
     actor=None,
     position=CREW_SLOT_POSITION_PRIMARY,
+    allow_factual=False,
 ):
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
@@ -519,8 +520,34 @@ def update_crew_draft_slot(
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
-        _validate_crew_employee(employee, role, position=position)
+        record_fact = False
+        try:
+            _validate_crew_employee(employee, role, position=position)
+        except ValidationError as error:
+            if not (allow_factual and position == CREW_SLOT_POSITION_PRIMARY and error.code == 'invalid_work_category'):
+                raise
+            record_fact = True
         validate_employee_equipment_organization(employee, equipment)
+        other_reports = locked_plan.slots.filter(reported_employee=employee)
+        if position == CREW_SLOT_POSITION_PRIMARY:
+            other_reports = other_reports.exclude(pk=target_slot.pk)
+        if other_reports.exists():
+            raise ValidationError('Сотрудник уже указан в фактическом составе.', code='duplicate_employee')
+        if record_fact:
+            occupied = locked_plan.slots.filter(
+                Q(employee=employee) | Q(secondary_employee=employee),
+            ).exclude(pk=target_slot.pk)
+            if target_slot.secondary_employee_id == employee.pk or occupied.exists():
+                raise ValidationError('Сотрудник уже назначен в экипаж.', code='duplicate_employee')
+            if target_slot.reported_employee_id == employee.pk:
+                return locked_plan
+            target_slot.employee = None
+            target_slot.reported_employee = employee
+            target_slot.save(update_fields=['employee', 'reported_employee'])
+            locked_plan.version += 1
+            locked_plan.updated_by = actor
+            locked_plan.save(update_fields=['version', 'updated_by', 'updated_at'])
+            return locked_plan
     replacing_report = position == CREW_SLOT_POSITION_PRIMARY and target_slot.reported_employee_id
     if replacing_report:
         target_slot.reported_employee = None
