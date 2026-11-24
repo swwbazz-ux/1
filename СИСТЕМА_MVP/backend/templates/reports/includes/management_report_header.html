@@ -1,3 +1,4 @@
+{% load management_workplace %}
 {% if access.role.code == 'dispatcher' or request.mining_master_tablet_control %}
 <header class="dispatcher-topbar dispatcher-unified-topbar no-print" aria-label="{% if request.mining_master_tablet_control %}Горный мастер{% else %}Горный диспетчер{% endif %} — {{ title }}">
     {% include "includes/dispatcher_header.html" with dispatcher_nav_active="reports" dispatcher_header_screen=title %}
@@ -56,54 +57,6 @@
     </div>
 </div>
 {% else %}
-<header class="management-dashboard-header">
-    <div class="management-dashboard-header-title">
-        <span>Руководство MVP</span>
-        <h1>{{ title }}</h1>
-        <p>{{ subtitle }}</p>
-    </div>
-    <div class="management-dashboard-header-meta" aria-label="Параметры раздела">
-        <div>
-            <span>Раздел</span>
-            <strong>{{ section_label|default:title }}</strong>
-        </div>
-        <div>
-            <span>Сформировано</span>
-            <strong>{% now "d.m.Y H:i" %}</strong>
-        </div>
-    </div>
-    <div class="management-dashboard-header-actions">
-        <button type="button" class="management-dashboard-theme" data-dispatcher-theme-toggle data-theme-icon="moon" aria-label="Включить дневную тему" title="Дневной режим"></button>
-        <a href="{% url 'role_home' %}">Главная</a>
-        <a href="{% url 'logout' %}">Выйти</a>
-    </div>
-</header>
-
-<div class="dispatcher-analytics-toolbar">
-    <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
-        <a class="{% if active == 'summary' %}is-active{% endif %}" href="{% if access.role.code == 'site_manager' %}{% url 'rotation_site_manager_home' %}{% else %}{% url 'management_dashboard' %}{% endif %}">Сводка</a>
-        {% if access.role.code == 'site_manager' %}
-            <a href="{% url 'rotation_site_manager_queue' %}">Продлёнка</a>
-        {% endif %}
-        {% if access.role.code == 'manager' or access.role.code == 'admin' %}
-            <a class="{% if active == 'registrations' %}is-active{% endif %}" href="{% url 'management_registration_dashboard' %}">Подключение</a>
-        {% endif %}
-        <a class="{% if active == 'shift_analytics' %}is-active{% endif %}" href="{% url 'shift_analytics_report' %}">Смена</a>
-        <a class="{% if active == 'dynamics' %}is-active{% endif %}" href="{% url 'management_dynamics' %}">Динамика</a>
-        <a class="{% if active == 'daily' %}is-active{% endif %}" href="{% url 'customer_daily_report' %}">Сутки</a>
-        <a class="{% if active == 'volume' %}is-active{% endif %}" href="{% url 'volume_report' %}">Объемы</a>
-        <a class="{% if active == 'downtime' %}is-active{% endif %}" href="{% url 'downtime_report' %}">Простои</a>
-        {% if access.role.code != 'site_manager' %}
-            <a class="{% if active == 'mechanic' %}is-active{% endif %}" href="{% url 'mechanic_dashboard' %}">Механики</a>
-            <a class="{% if active == 'pilot' %}is-active{% endif %}" href="{% url 'pilot_report_checklist' %}">Пилот</a>
-            <a class="{% if active == 'feedback' %}is-active{% endif %}" href="{% url 'pilot_feedback' %}">Замечания</a>
-        {% endif %}
-    </nav>
-    <div class="dispatcher-report-actions">
-        {% if export_url %}
-            <a href="{{ export_url }}">Excel</a>
-        {% endif %}
-        <button type="button" onclick="window.print()">Печать</button>
-    </div>
-</div>
+{% management_workplace_header active export_url %}
+<h2 class="management-section-heading">{{ title }}</h2>
 {% endif %}

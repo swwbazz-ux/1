@@ -46,7 +46,6 @@ from trips.models import (
     Trip,
     TripStatus,
 )
-from users.access_auth import can_review_watch_extensions
 from users.active_role import (
     ACTIVE_ROLE_CODE_SESSION_KEY,
     ACTIVE_ROLE_GENERATION_SESSION_KEY,
@@ -6323,12 +6322,7 @@ def management_dashboard_view(request):
     access = get_reports_access(request, MANAGEMENT_OVERVIEW_ROLE_CODES)
     if not access:
         return redirect('login' if not request.session.get('employee_access_id') else 'role_home')
-    context = management_dashboard_context(request, access)
-    if can_review_watch_extensions(request, access):
-        context['watch_extensions_url'] = reverse(
-            'rotation_site_manager_queue' if access.role.code == 'site_manager' else 'management_extensions',
-        )
-    return render(request, 'reports/management_dashboard.html', context)
+    return render(request, 'reports/management_dashboard.html', management_dashboard_context(request, access))
 
 
 @require_GET

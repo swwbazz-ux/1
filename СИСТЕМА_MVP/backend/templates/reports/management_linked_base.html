@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+{% if not request.mining_master_tablet_control %}
+    {% if access.role.code == 'manager' or access.role.code == 'admin' or access.role.code == 'site_manager' %}
+        {% include "reports/includes/management_workplace_assets.html" %}
+    {% endif %}
+{% endif %}
+{% endblock %}

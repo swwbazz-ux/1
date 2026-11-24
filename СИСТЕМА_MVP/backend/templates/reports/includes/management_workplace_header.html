@@ -1,0 +1,40 @@
+<div class="management-workplace-header no-print" data-management-workplace-header>
+    <header class="management-dashboard-header">
+        <div class="management-dashboard-header-title">
+            <span>Руководство MVP</span>
+            <h1>Витрина руководства</h1>
+            <p>Оперативный срез по производственному контуру.</p>
+        </div>
+        <div class="management-dashboard-header-meta" aria-label="Параметры витрины">
+            <div>
+                <span>Дата среза</span>
+                <strong>{{ overview_date|date:"d.m.Y" }}</strong>
+            </div>
+            <div>
+                <span>Сформировано</span>
+                <strong>{{ generated_at|date:"d.m.Y H:i" }}</strong>
+            </div>
+        </div>
+        <div class="management-dashboard-header-actions">
+            <button type="button" class="management-dashboard-theme" data-dispatcher-theme-toggle data-theme-icon="moon" aria-label="Включить дневную тему" title="Дневной режим"></button>
+            <a href="{% url 'role_home' %}">Главная</a>
+            <a href="{% url 'logout' %}">Выйти</a>
+        </div>
+    </header>
+
+    <div class="dispatcher-analytics-toolbar">
+        <nav class="dispatcher-subnav" aria-label="Разделы витрины руководства">
+            {% for link in links %}
+                <a href="{{ link.href }}"{% if link.active %} class="is-active" aria-current="page"{% endif %}>{{ link.label }}</a>
+            {% endfor %}
+        </nav>
+        <div class="dispatcher-report-actions">
+            {% if export_url %}
+                <a href="{{ export_url }}">Excel</a>
+            {% else %}
+                <button type="button" disabled>Excel</button>
+            {% endif %}
+            <button type="button" onclick="window.print()">Печать</button>
+        </div>
+    </div>
+</div>

@@ -1,11 +1,6 @@
 {% extends "rotations/site_manager_base.html" %}
 
 {% block title %}Продлёнка — начальник участка{% endblock %}
-{% block manager_title %}Продлёнка{% endblock %}
-{% block manager_nav %}
-    <a href="{% url summary_route %}">Витрина руководства</a>
-    <a class="is-active" href="{% url queue_route %}" aria-current="page">Продлёнка</a>
-{% endblock %}
 
 {% block manager_content %}
 <section class="rotation-manager-queue" aria-label="Заявки на продление">
@@ -65,7 +60,7 @@
                 {% if case.decision_status == 'pending' %}
                     <div class="rotation-decision-grid">
                         <form method="post"
-                              action="{% url decision_route case.id 'approved' %}"
+                              action="{% url decision_route case.id 'approved' %}{% if request.GET.overview_date %}?overview_date={{ request.GET.overview_date|urlencode }}{% endif %}"
                               class="rotation-decision-form is-approve">
                             {% csrf_token %}
                             <input type="hidden" name="case_updated_at" value="{{ case.updated_at|date:'c' }}">
@@ -81,7 +76,7 @@
                         </form>
 
                         <form method="post"
-                              action="{% url decision_route case.id 'rejected' %}"
+                              action="{% url decision_route case.id 'rejected' %}{% if request.GET.overview_date %}?overview_date={{ request.GET.overview_date|urlencode }}{% endif %}"
                               class="rotation-decision-form is-reject">
                             {% csrf_token %}
                             <input type="hidden" name="case_updated_at" value="{{ case.updated_at|date:'c' }}">
