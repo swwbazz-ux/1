@@ -669,7 +669,8 @@ def build_crew_plan_payload(plan, *, deputy=None):
             'secondary_employee__personnel_position',
             'secondary_employee__work_schedule',
             'secondary_employee__contractor_organization',
-            'reported_employee',
+            'reported_employee__personnel_position',
+            'reported_employee__base_specialization',
             'baseline_employee',
             'baseline_employee__personnel_position',
             'baseline_employee__work_schedule',
@@ -709,6 +710,12 @@ def build_crew_plan_payload(plan, *, deputy=None):
     transfer_candidates = []
     transfer_specializations = []
     current_watch_periods = []
+    if editable or any(slot.reported_employee_id for slot in slots):
+        category = AUXILIARY_CATEGORIES.get(plan.role.code)
+        specialization_filter = {'code': category.specialization} if category else {'access_role': plan.role}
+        transfer_specializations = list(
+            ProductionSpecialization.objects.filter(is_active=True, **specialization_filter).order_by('name')
+        )
     if editable:
         eligible_employees = list(
             Employee.objects.filter(id__in=all_eligible_employee_ids)
@@ -735,14 +742,6 @@ def build_crew_plan_payload(plan, *, deputy=None):
             .select_related('personnel_position', 'work_schedule', 'contractor_organization')
             .order_by('full_name')
         )
-        category = AUXILIARY_CATEGORIES.get(plan.role.code)
-        specialization_filter = {'code': category.specialization} if category else {'access_role': plan.role}
-        transfer_specializations = list(
-            ProductionSpecialization.objects.filter(
-                is_active=True,
-                **specialization_filter,
-            ).order_by('name')
-        )
         current_watch_periods = list(
             WatchPeriod.objects.filter(
                 is_active=True,
@@ -755,7 +754,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
     for slot in slots:
         slot_map[(slot.equipment_id, slot.shift_type)] = slot
 
-    payload_employee_ids = set(all_eligible_employee_ids)
+    payload_employee_ids = set(all_eligible_employee_ids) | assigned_employee_ids
     payload_employee_ids.update(employee.id for employee in transfer_candidates)
     payload_employee_ids.update(slot.employee_id for slot in slots if slot.employee_id)
     payload_employee_ids.update(
@@ -788,6 +787,11 @@ def build_crew_plan_payload(plan, *, deputy=None):
         eligible_employees = roster_employees
         transfer_candidates = [employee for employee in transfer_candidates if _in_deputy_roster(employee, brigades, extensions)]
     presence_by_employee = application_presence_by_employee_ids(payload_employee_ids)
+    reported_employees = {
+        slot.reported_employee_id: slot.reported_employee for slot in slots if slot.reported_employee_id
+    }
+    reported_specializations = effective_specializations_by_employee_id(reported_employees.values())
+    required_specialization = ', '.join(spec.name for spec in transfer_specializations) or plan.role.name
 
     equipment_items = []
     seen_equipment_ids = set()
@@ -864,6 +868,27 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     or employee_matches_work_role(slot.secondary_employee, plan.role)
                     else 'Помощник машиниста'
                 )
+            specialization_review = None
+            if slot.reported_employee_id:
+                reported_employee = slot.reported_employee
+                spec = reported_specializations[reported_employee.id]
+                review_issue = _slot_employee_issue(
+                    reported_employee, eligible_employee_ids, other_role_assignment_employee_ids,
+                    equipment=equipment,
+                )
+                if editable and not review_issue and not _in_deputy_roster(reported_employee, brigades, extensions):
+                    review_issue = 'Сотрудник другой вахты без действующей продлёнки'
+                specialization_review = {
+                    'employee_id': reported_employee.pk,
+                    'position': (
+                        reported_employee.personnel_position.name if reported_employee.personnel_position_id
+                        else reported_employee.position
+                    ),
+                    'current': spec.name if spec else '',
+                    'required': required_specialization,
+                    'issue': review_issue,
+                    'can_assign': editable and not review_issue,
+                }
             row_slots.append({
                 'shift_type': shift_type,
                 'label': 'Первая смена' if shift_type == WorkShiftType.SHIFT_1 else 'Вторая смена',
@@ -895,6 +920,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     ],
                 ),
                 'reported_name': slot.reported_employee.full_name if slot.reported_employee_id else '',
+                'specialization_review': specialization_review,
                 'secondary_label': secondary_label,
                 'changed': changed,
                 'secondary_changed': secondary_changed,
@@ -1003,7 +1029,7 @@ def build_crew_plan_payload(plan, *, deputy=None):
             ],
             'target_specializations': [
                 {'id': specialization.id, 'name': specialization.name}
-                for specialization in transfer_specializations
+                for specialization in transfer_specializations if editable
             ],
             'watch_periods': [
                 {

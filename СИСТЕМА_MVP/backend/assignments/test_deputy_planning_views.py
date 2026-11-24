@@ -245,6 +245,12 @@ class DeputyPlanningViewTests(TestCase):
             page = self.client.get(reverse('deputy_mining_manager_placement'), params)
             payload = page.context['planning_payload']
             self.assertEqual(payload['rows'][0]['slots'][0]['reported_name'], self.driver.full_name)
+            review = payload['rows'][0]['slots'][0]['specialization_review']
+            self.assertEqual(review['employee_id'], self.driver.pk)
+            self.assertEqual(review['position'], self.driver.position)
+            self.assertEqual(review['required'], ProductionSpecialization.objects.get(code='roller_operator').name)
+            self.assertEqual(review['issue'], 'Не соответствует производственной специализации')
+            self.assertFalse(review['can_assign'])
             self.assertEqual(payload['summary']['assigned_count'], 1)
         clear = self.upload_crew_excel([['Каток', '', 'Снять', None]])
         self.assertContains(clear, 'Расстановка опубликована')
@@ -695,7 +701,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v21";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v22";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)

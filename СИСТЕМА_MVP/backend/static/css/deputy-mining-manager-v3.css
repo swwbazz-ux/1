@@ -2178,12 +2178,22 @@ button.deputy-avatar {
     }
 }
 
-.deputy-employee-main .deputy-specialization-review {
+.deputy-specialization-review {
+    margin-top: 4px;
+    padding: 3px 6px;
+    border: 1px solid #c99437;
+    border-radius: 4px;
     color: #744400;
     background: #ffecad;
-    padding: 1px 4px;
-    border-radius: 3px;
+    font: inherit;
+    font-size: 11px;
+    text-align: left;
     white-space: normal;
+    cursor: pointer;
+}
+
+.deputy-specialization-review:hover {
+    text-decoration: underline;
 }
 
 .deputy-extension-badge {

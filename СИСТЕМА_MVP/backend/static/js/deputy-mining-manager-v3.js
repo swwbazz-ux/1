@@ -108,6 +108,7 @@
     var recordSubtitle = document.querySelector("[data-record-subtitle]");
     var recordVisual = document.querySelector("[data-record-visual]");
     var recordFields = document.querySelector("[data-record-fields]");
+    var recordActions = document.querySelector("[data-record-actions]");
     var publishDialog = document.querySelector("[data-publish-dialog]");
     var publishSummary = document.querySelector("[data-publish-summary]");
     var publishConfirm = document.querySelector("[data-publish-confirm]");
@@ -682,6 +683,9 @@
         closeDialog(photoDialog);
         recordVisual.replaceChildren();
         recordFields.replaceChildren();
+        if (recordActions) {
+            recordActions.querySelectorAll("[data-review-action]").forEach(function (action) { action.remove(); });
+        }
         if (recordKicker) recordKicker.textContent = kicker;
         if (recordTitle) recordTitle.textContent = title;
         if (recordSubtitle) recordSubtitle.textContent = subtitle || "";
@@ -709,6 +713,56 @@
                         + (client.version ? " · " + textValue(client.version) : "");
                 }).join(", ")
             );
+        }
+        openDialog(recordDialog);
+    }
+
+    function addReviewAction(label, callback) {
+        if (!recordActions) return;
+        var action = createElement("button", "admin-button admin-button-secondary", label);
+        action.type = "button";
+        action.setAttribute("data-review-action", "");
+        action.addEventListener("click", function () {
+            if (!planEditable() || saving) return;
+            closeDialog(recordDialog);
+            callback();
+        });
+        recordActions.insertBefore(action, recordActions.lastElementChild);
+    }
+
+    function openSpecializationReview(row, slot) {
+        var review = slot.specialization_review || {};
+        var context = [row.equipment && row.equipment.label, slot.label].filter(Boolean).join(" · ");
+        if (!prepareRecordDialog("Специализация", slot.reported_name, context)) return;
+        recordVisual.appendChild(createAvatar({full_name: slot.reported_name}, false));
+        appendRecordField("Запись в расстановке", "Фактический состав из Excel. Действующее назначение на технику ещё не оформлено.");
+        appendRecordField("Штатная должность", review.position || "Не указана");
+        appendRecordField("Текущая специализация", review.current || "Не указана");
+        appendRecordField("Требуется для техники", review.required || state.role.label);
+        appendRecordField("Результат проверки", review.issue || (review.employee_id
+            ? "По текущим данным сотрудник подходит для этого места." : "Требуется сверка карточки сотрудника."));
+        if (planEditable()) {
+            if (review.issue === "Не соответствует производственной специализации") {
+                appendRecordField("Если в справочнике ошибка", "Передайте в ОУП ФИО, вид техники и требуемую специализацию.");
+            }
+            if (review.can_assign) {
+                addReviewAction("Назначить сотрудника", function () {
+                    saveSlot(row, slot, review.employee_id, null, "primary");
+                });
+            } else if (canRequestTemporaryTransfer() && temporaryTransferData().candidates.some(function (employee) {
+                return employee.id === review.employee_id;
+            })) {
+                addReviewAction("Запросить перевод", function () {
+                    openTemporaryTransferDialog();
+                    temporaryTransferEmployee.value = textValue(review.employee_id);
+                    if (temporaryTransferData().target_specializations.length === 1) {
+                        temporaryTransferSpecialization.value = textValue(temporaryTransferData().target_specializations[0].id);
+                    }
+                });
+            }
+            addReviewAction("Заменить сотрудника", function () {
+                openCandidatePicker(row, slot, "primary");
+            });
         }
         openDialog(recordDialog);
     }
@@ -1200,7 +1254,7 @@
         candidateEmployees = Array.from(candidatesById.values());
         if (candidateSearchInput) candidateSearchInput.value = "";
         renderCandidatePicker();
-        if (clearSlotButton) clearSlotButton.hidden = !slot[employeeKey];
+        if (clearSlotButton) clearSlotButton.hidden = !(slot[employeeKey] || (position === "primary" && slot.reported_name));
         openDialog(candidateDialog);
         var coarseMobilePointer = window.matchMedia
             && window.matchMedia("(max-width: 720px) and (pointer: coarse)").matches;
@@ -1310,7 +1364,11 @@
             if (reported) {
                 var fact = createElement("span", "deputy-employee-main");
                 fact.appendChild(createElement("strong", "", reported));
-                fact.appendChild(createElement("small", "deputy-specialization-review", "Проверить специализацию"));
+                var reviewLink = createElement("button", "deputy-specialization-review", "Причина и действия");
+                reviewLink.type = "button";
+                reviewLink.setAttribute("data-role-readonly-safe", "");
+                reviewLink.addEventListener("click", function () { openSpecializationReview(row, slot); });
+                fact.appendChild(reviewLink);
                 button.appendChild(fact);
                 if (!planEditable()) return button;
             }
