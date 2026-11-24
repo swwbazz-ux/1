@@ -29,6 +29,8 @@ urlpatterns = [
         deputy_mining_manager_arrival_roster_routing_view,
         name='deputy_mining_manager_arrival_roster_routing',
     ),
+    path('deputy-mining-manager/api/placement/', deputy_mining_manager_placement_view,
+         {'data_only': True}, name='deputy_mining_manager_placement_data'),
     path('deputy-mining-manager/', deputy_mining_manager_placement_view, name='deputy_mining_manager_placement'),
     path('deputy-mining-manager/import/', deputy_mining_manager_import_view, name='deputy_mining_manager_import'),
     path('deputy-mining-manager/plans/<int:plan_id>/excel/', deputy_mining_manager_export_view, name='deputy_mining_manager_export'),

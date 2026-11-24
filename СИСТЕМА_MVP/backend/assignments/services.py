@@ -250,7 +250,7 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
             f'Производственная специализация сотрудника не соответствует позиции {position_label}.',
             code='invalid_work_category',
         )
-    has_other_role_assignment = (
+    other_assignment = (
         EquipmentAssignment.objects
         .filter(
             employee=employee,
@@ -261,11 +261,13 @@ def _validate_crew_employee(employee, role, *, position=CREW_SLOT_POSITION_PRIMA
             shift_type__in=WorkShiftType.values,
         )
         .exclude(role=role)
-        .exists()
+        .select_related('equipment__equipment_type')
+        .first()
     )
-    if has_other_role_assignment:
+    if other_assignment:
         raise ValidationError(
-            'Сотрудник уже назначен по другой рабочей роли.',
+            f'{employee.full_name} уже назначен: {other_assignment.equipment.equipment_type.name} '
+            f'{other_assignment.equipment.garage_number}, {other_assignment.get_shift_type_display().lower()}.',
             code='assignment_conflict',
         )
 
@@ -289,6 +291,51 @@ def validate_employee_equipment_organization(employee, equipment):
             'Организация сотрудника не совпадает с владельцем техники.',
             code='contractor_organization_mismatch',
         )
+
+
+def crew_bookings_on_other_equipment(plan, employee_ids=None):
+    """Other categories that reserve a worker on this production date, in any crew position."""
+    bookings = {}
+    slots = CrewPlanSlot.objects.filter(
+        plan__work_date=plan.work_date, plan__status__in=(CrewPlanStatus.DRAFT, CrewPlanStatus.PUBLISHED),
+    ).exclude(plan__role_id=plan.role_id)
+    assignments = EquipmentAssignment.objects.filter(
+        status=AssignmentStatus.ACCEPTED, ended_at__isnull=True, shift__isnull=True,
+        role__isnull=False, shift_type__in=WorkShiftType.values,
+    ).exclude(role_id=plan.role_id)
+    if employee_ids is not None:
+        employee_ids = set(employee_ids)
+        if not employee_ids:
+            return bookings
+        slots = slots.filter(Q(employee_id__in=employee_ids) | Q(secondary_employee_id__in=employee_ids)
+                             | Q(reported_employee_id__in=employee_ids))
+        assignments = assignments.filter(employee_id__in=employee_ids)
+
+    def remember(employee_id, equipment_type, number, shift, status):
+        if employee_id and (employee_ids is None or employee_id in employee_ids):
+            bookings.setdefault(employee_id, f'{equipment_type} {number}, {WorkShiftType(shift).label.lower()} ({status})')
+
+    for kind, number, shift, status, primary, secondary, reported in slots.order_by('pk').values_list(
+        'equipment__equipment_type__name', 'equipment__garage_number', 'shift_type', 'plan__status',
+        'employee_id', 'secondary_employee_id', 'reported_employee_id',
+    ):
+        for employee_id in (primary, secondary, reported):
+            remember(employee_id, kind, number, shift, CrewPlanStatus(status).label.lower())
+    if plan.work_date == production_work_date():
+        for employee_id, kind, number, shift in assignments.order_by('pk').values_list(
+            'employee_id', 'equipment__equipment_type__name', 'equipment__garage_number', 'shift_type',
+        ):
+            remember(employee_id, kind, number, shift, 'действующее назначение')
+    return bookings
+
+
+def validate_other_crew_bookings(plan, employee_ids):
+    bookings = crew_bookings_on_other_equipment(plan, employee_ids)
+    if bookings:
+        employee_id, location = next(iter(bookings.items()))
+        name = Employee.objects.values_list('full_name', flat=True).get(pk=employee_id)
+        raise ValidationError(f'{name} уже в экипаже: {location}. Сначала освободите прежнее место.',
+                              code='duplicate_employee')
 
 
 def _validate_crew_equipment(equipment, role):
@@ -528,6 +575,7 @@ def update_crew_draft_slot(
                 raise
             record_fact = True
         validate_employee_equipment_organization(employee, equipment)
+        validate_other_crew_bookings(locked_plan, [employee.pk])
         other_reports = locked_plan.slots.filter(reported_employee=employee)
         if position == CREW_SLOT_POSITION_PRIMARY:
             other_reports = other_reports.exclude(pk=target_slot.pk)
@@ -567,6 +615,9 @@ def update_crew_draft_slot(
             )
             .order_by('pk')
         )
+        if len(source_slots) > 1 or (source_slots and source_slots[0].employee_id == source_slots[0].secondary_employee_id):
+            raise ValidationError('Сотрудник уже занимает два места. Сначала освободите лишнее место.',
+                                  code='duplicate_employee')
         if source_slots:
             source_slot = source_slots[0]
             source_position = (
@@ -583,6 +634,7 @@ def update_crew_draft_slot(
         )
         displaced_employee = getattr(target_slot, employee_field)
         if displaced_employee:
+            validate_other_crew_bookings(locked_plan, [displaced_employee.pk])
             _validate_crew_employee(
                 displaced_employee,
                 role,
@@ -685,10 +737,11 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
                 )
             target_employee_ids.add(employee.id)
 
-    if target_employee_ids:
+    occupied_ids = target_employee_ids.union(reported_ids)
+    if occupied_ids:
         list(
             Employee.objects.select_for_update()
-            .filter(id__in=target_employee_ids)
+            .filter(id__in=occupied_ids)
             .order_by('id')
         )
         refreshed_employees = (
@@ -985,15 +1038,20 @@ def _publish_crew_plan_once(*, plan, expected_version, actor=None, actor_access=
     return locked_plan
 
 
+def validate_plan_crew_bookings(plan):
+    people = plan.slots.values_list('employee_id', 'secondary_employee_id', 'reported_employee_id')
+    validate_other_crew_bookings(plan, {pk for crew in people for pk in crew if pk})
+
+
 def publish_crew_plan(*, plan, expected_version, actor=None, actor_access=None):
     """Publish once; retain a controlled OUP-role review outside a rolled-back draft."""
     try:
-        return _publish_crew_plan_once(
-            plan=plan,
-            expected_version=expected_version,
-            actor=actor,
-            actor_access=actor_access,
-        )
+        with transaction.atomic():
+            published = _publish_crew_plan_once(
+                plan=plan, expected_version=expected_version, actor=actor, actor_access=actor_access,
+            )
+            validate_plan_crew_bookings(published)
+            return published
     except ValidationError as error:
         if actor_access is not None and getattr(error, 'code', '') == 'invalid_work_category':
             from rotations.arrival_roster_routing import _record_crew_plan_role_review

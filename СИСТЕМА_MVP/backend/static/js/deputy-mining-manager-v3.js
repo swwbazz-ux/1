@@ -42,6 +42,8 @@
         state = {};
     }
 
+    var nameOrder = new Intl.Collator("ru", { sensitivity: "base" });
+
     function normalizeState(payload) {
         payload = payload && typeof payload === "object" ? payload : {};
         payload.plan = payload.plan || {};
@@ -59,7 +61,7 @@
         });
         var otherWatchEmployees = Array.isArray(payload.other_watch_employees) ? payload.other_watch_employees : [];
         payload.allWatchEmployees = payload.employees.concat(otherWatchEmployees).sort(function (left, right) {
-            return employeeName(left).localeCompare(employeeName(right), "ru", { sensitivity: "base" });
+            return nameOrder.compare(employeeName(left), employeeName(right));
         });
         payload.rows = Array.isArray(payload.rows) ? payload.rows : [];
         payload.temporary_transfer.candidates = Array.isArray(payload.temporary_transfer.candidates)
@@ -128,6 +130,8 @@
     var noticeMessage = notice && notice.querySelector("[data-notice-message]");
     var noticeAction = notice && notice.querySelector("[data-notice-action]");
     var noticeClose = notice && notice.querySelector("[data-notice-close]");
+    var categoryRequest = null;
+    var pausedPanels = [];
     var currentFilter = "all";
     var currentBrigade = state.brigades && state.brigades.length === 2 ? "watch" : "all";
     var currentSlot = null;
@@ -275,7 +279,7 @@
             return match.rank !== null;
         }).sort(function (left, right) {
             return left.rank - right.rank
-                || employeeName(left.employee).localeCompare(employeeName(right.employee), "ru", { sensitivity: "base" })
+                || nameOrder.compare(employeeName(left.employee), employeeName(right.employee))
                 || left.index - right.index;
         });
     }
@@ -809,6 +813,92 @@
         openDialog(recordDialog);
     }
 
+    function pauseCategoryControls() {
+        if (pausedPanels.length) return;
+        var toolbar = categoryNav.parentElement;
+        var panels = Array.from(root.children).concat(Array.from(toolbar.children));
+        pausedPanels = panels.filter(function (panel) {
+            return panel !== toolbar && panel !== categoryNav && !panel.inert;
+        });
+        pausedPanels.forEach(function (panel) { panel.inert = true; });
+        root.setAttribute("aria-busy", "true");
+    }
+
+    function resumeCategoryControls() {
+        pausedPanels.forEach(function (panel) { panel.inert = false; });
+        pausedPanels = [];
+        root.removeAttribute("aria-busy");
+    }
+
+    async function switchCategory(url, fromHistory) {
+        if (categoryRequest) categoryRequest.abort();
+        var controller = new AbortController();
+        categoryRequest = controller;
+        var api = new URL(categoryNav.dataset.placementUrl, location.origin);
+        api.search = url.search;
+        pauseCategoryControls();
+        updateAutosave("saving", "Загружаю расстановку…");
+        try {
+            var response = await fetch(api, {credentials: "same-origin", cache: "no-store",
+                headers: {"Accept": "application/json"}, signal: controller.signal});
+            if (controller !== categoryRequest) return;
+            if (response.status === 403 || response.redirected) {
+                location.assign(url.href);
+                return;
+            }
+            if (!response.ok) throw Error();
+            var result = await response.json();
+            if (controller !== categoryRequest) return;
+            var payload = result.payload;
+            if (textValue(result.access_id) !== categoryNav.dataset.accessId ||
+                result.current_date !== categoryNav.dataset.currentDate ||
+                JSON.stringify(payload.brigades) !== JSON.stringify(state.brigades)) {
+                location.assign(url.href);
+                return;
+            }
+            clearActiveEquipmentRow();
+            currentSlot = null;
+            hideNotice();
+            applyPayload(payload, false);
+            if (!fromHistory && url.href !== location.href) history.pushState(null, "", url.href);
+            updateAutosave("saved", state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены");
+        } catch (error) {
+            if (controller !== categoryRequest || controller.signal.aborted) return;
+            if (fromHistory) {
+                location.reload();
+                return;
+            }
+            updateAutosave("error", "Не удалось загрузить вкладку");
+            showNotice("Проверьте связь и попробуйте ещё раз.", {title: "Вкладка не открылась"});
+        } finally {
+            if (controller === categoryRequest) {
+                categoryRequest = null;
+                resumeCategoryControls();
+            }
+        }
+    }
+
+    if (categoryNav && categoryNav.dataset.placementUrl) {
+        categoryNav.addEventListener("click", function (event) {
+            var link = event.target.closest("a[href]");
+            if (!link || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey ||
+                event.shiftKey || event.altKey || link.target || !window.AbortController) return;
+            event.preventDefault();
+            if (saving) {
+                showToast("Дождитесь сохранения расстановки.");
+                return;
+            }
+            switchCategory(new URL(link.href), false);
+        });
+        window.addEventListener("popstate", function () {
+            if (saving || document.querySelector("dialog[open]") || !window.AbortController) {
+                location.reload();
+                return;
+            }
+            switchCategory(new URL(location.href), true);
+        });
+    }
+
     function renderCategories() {
         if (!categoryNav) return;
         categoryNav.replaceChildren();
@@ -1019,9 +1109,9 @@
         });
     }
 
-    function renderEmployees(reuseNodes) {
+    function renderEmployees(reuseNodes, context) {
         if (!employeeList) return;
-        var context = searchContext();
+        context = context || searchContext();
         var visible = context.brigadeEmployees;
         if (context.query && context.employeeMode) {
             visible = context.employeeMatches.map(function (match) { return match.employee; });
@@ -1475,12 +1565,12 @@
         return wrapper;
     }
 
-    function renderBoard(reuseNodes) {
+    function renderBoard(reuseNodes, context) {
         if (!board) return;
-        var context = searchContext();
+        context = context || searchContext();
         var rows = state.rows.filter(rowMatchesFilter);
         if (context.query && !context.employeeMode) {
-            rows = rows.filter(function (row) { return rowSearchRank(row, context.query) !== null; });
+            rows = context.rowMatches.map(function (match) { return match.row; });
         }
         if (!rows.length) {
             board.replaceChildren();
@@ -1585,9 +1675,10 @@
     function renderAll(reuseNodes) {
         renderCategories();
         renderSummary();
-        renderEmployees(reuseNodes);
+        var context = searchContext();
+        renderEmployees(reuseNodes, context);
         scheduleRosterExpiry();
-        renderBoard(reuseNodes);
+        renderBoard(reuseNodes, context);
         updatePublishButton();
         updateTemporaryTransferButton();
     }
@@ -1801,8 +1892,9 @@
 
     if (searchInput) {
         searchInput.addEventListener("input", function () {
-            renderEmployees();
-            renderBoard();
+            var context = searchContext();
+            renderEmployees(true, context);
+            renderBoard(true, context);
         });
     }
     if (factualCandidates) factualCandidates.addEventListener("change", renderCandidatePicker);
@@ -1967,8 +2059,12 @@
     document.addEventListener("dragover", moveDragPreview);
     document.addEventListener("drop", finishDrag);
 
+    var lastMutationAllowed = mutationAllowed();
     function handleMutationAvailabilityChange() {
-        if (!mutationAllowed()) {
+        var allowed = mutationAllowed();
+        if (allowed === lastMutationAllowed) return;
+        lastMutationAllowed = allowed;
+        if (!allowed) {
             finishDrag();
             currentSlot = null;
             closeDialog(candidateDialog);

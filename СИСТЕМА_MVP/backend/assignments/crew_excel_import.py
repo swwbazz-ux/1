@@ -21,7 +21,8 @@ from .services import (
     _validate_crew_employee,
     get_or_create_crew_draft,
     production_work_date,
-    publish_crew_plan,
+    _publish_crew_plan_once,
+    validate_plan_crew_bookings,
     validate_employee_equipment_organization,
 )
 
@@ -303,8 +304,16 @@ def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=
     for plan, slots in plans:
         changed = _stage_plan(plan, slots, grouped[plan.role.code], names, actor, factual=factual)
         if changed:
-            published = publish_crew_plan(
+            published = _publish_crew_plan_once(
                 plan=plan, expected_version=plan.version, actor=actor, actor_access=actor_access,
             )
             publications.append((published, changed))
+    # Validate the final workbook as one transaction so a slot cleared on a later
+    # sheet/category does not look like a second booking.
+    # A confirmed import can restore a draft to baseline without publishing a revision.
+    # Reserve those people too, as manual slot edits take the same employee row locks.
+    occupants = {pk for _, slots in plans for slot in slots for pk in _assigned_crew(slot) if pk}
+    list(Employee.objects.select_for_update().filter(pk__in=occupants).order_by('pk').values_list('pk', flat=True))
+    for plan, _ in plans:
+        validate_plan_crew_bookings(plan)
     return publications

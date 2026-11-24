@@ -227,6 +227,9 @@ class DeputyPlanningViewTests(TestCase):
 
     def test_reported_primary_visible_in_publication_without_operational_assignment(self):
         call_command('prepare_deputy_fleet')
+        # The worker must be released from the current truck before joining a roller crew.
+        self.original_assignment.ended_at = timezone.now()
+        self.original_assignment.save(update_fields=['ended_at'])
         before = list(EmployeeAccess.objects.values_list('id', 'role_id', 'is_active'))
         book = self.crew_excel_bytes([['Каток', '', self.driver.full_name, None]])
         self.assertContains(self.upload_crew_excel(book), 'специализация', status_code=400)
@@ -256,6 +259,83 @@ class DeputyPlanningViewTests(TestCase):
         clear = self.upload_crew_excel([['Каток', '', 'Снять', None]])
         self.assertContains(clear, 'Расстановка опубликована')
         self.assertFalse(CrewPlan.objects.filter(role=plan.role, status=CrewPlanStatus.PUBLISHED, slots__reported_employee=self.driver).exists())
+
+    def test_other_category_reserves_all_seats_in_draft_and_current_publication(self):
+        call_command('prepare_deputy_fleet')
+        spare, _ = self.create_employee_with_access('Тестовый Свободный Водитель', self.driver_role,
+                                                     phone='+79000000087', access_code='219987')
+        truck_plan = self.create_draft()
+        roller, _ = get_or_create_crew_draft(role='crew_roller')
+        slot = roller.slots.filter(shift_type=WorkShiftType.SHIFT_2).get()
+        url = reverse('deputy_mining_manager_slot')
+        body = dict(plan_id=truck_plan.pk, expected_version=truck_plan.version, equipment_id=self.truck_2.pk,
+                    shift_type=WorkShiftType.SHIFT_1, employee_id=spare.pk)
+        for status in (CrewPlanStatus.DRAFT, CrewPlanStatus.PUBLISHED):
+            roller.status = status
+            roller.save(update_fields=['status'])
+            for field in ('employee', 'secondary_employee', 'reported_employee'):
+                with self.subTest(field=field, status=status):
+                    setattr(slot, field, spare)
+                    slot.save(update_fields=[field])
+                    response = self.client.post(url, body, content_type='application/json')
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(response.json()['code'], 'duplicate_employee')
+                    for detail in ('Каток', 'вторая смена', spare.full_name):
+                        self.assertIn(detail, response.json()['error'])
+                    plan = self.client.get(reverse('deputy_mining_manager_placement')).context['planning_payload']
+                    self.assertNotIn(spare.pk, [p['id'] for p in plan['employees']])
+                    setattr(slot, field, None)
+                    slot.save(update_fields=[field])
+        slot.reported_employee = spare
+        slot.save(update_fields=['reported_employee'])
+        roller.status = CrewPlanStatus.SUPERSEDED
+        roller.save(update_fields=['status'])
+        self.assertEqual(self.client.post(url, body, content_type='application/json').status_code, 200)
+
+    def test_factual_excel_duplicates_between_tabs_roll_back_the_whole_workbook(self):
+        call_command('prepare_deputy_fleet')
+        person = Employee.objects.create(full_name='Проверочный Рабочий Участка', status=Employee.Status.ACTIVE)
+        rows = [['Вахтовый автобус', '103', person.full_name, None], ['Каток', '', person.full_name, None]]
+        response = self.client.post(reverse('deputy_mining_manager_import'), {
+            'work_date': production_work_date().isoformat(), 'factual': '1',
+            'workbook': SimpleUploadedFile('Расстановка.xlsx', self.crew_excel_bytes(rows)),
+        })
+        self.assertContains(response, person.full_name, status_code=400)
+        self.assertContains(response, 'уже в экипаже', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        self.assertFalse(CrewPlanSlot.objects.filter(reported_employee=person).exists())
+
+    def test_excel_can_release_previous_factual_place_later_in_same_workbook(self):
+        call_command('prepare_deputy_fleet')
+        person = Employee.objects.create(full_name='Переводимый Рабочий Участка', status=Employee.Status.ACTIVE)
+
+        def publish(rows):
+            response = self.client.post(reverse('deputy_mining_manager_import'), {
+                'work_date': production_work_date().isoformat(), 'factual': '1',
+                'workbook': SimpleUploadedFile('Перенос.xlsx', self.crew_excel_bytes(rows)),
+            })
+            self.assertContains(response, 'Расстановка опубликована')
+
+        publish([['Каток', '', person.full_name, None]])
+        publish([['Вахтовый автобус', '103', person.full_name, None], ['Каток', '', 'Снять', None]])
+        current = CrewPlanSlot.objects.filter(plan__status=CrewPlanStatus.PUBLISHED, reported_employee=person)
+        self.assertEqual(list(current.values_list('plan__role__code', flat=True)), ['crew_bus'])
+
+    def test_existing_double_booking_visible_and_single_plan_publication_rejected(self):
+        call_command('prepare_deputy_fleet')
+        plan, _ = get_or_create_crew_draft(role='crew_roller')
+        slot = plan.slots.get(shift_type=WorkShiftType.SHIFT_1)
+        slot.reported_employee = self.driver
+        slot.save(update_fields=['reported_employee'])
+        payload = self.client.get(reverse('deputy_mining_manager_placement'), {'role': 'crew_roller'}).context['planning_payload']
+        self.assertEqual(payload['summary']['conflict_count'], 1)
+        self.assertIn(self.truck_1.garage_number, payload['rows'][0]['slots'][0]['issue'])
+        response = self.client.post(reverse('deputy_mining_manager_publish'),
+                                    {'plan_id':plan.pk, 'expected_version':plan.version}, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(self.truck_1.garage_number, response.json()['error'])
+        plan.refresh_from_db()
+        self.assertEqual(plan.status, CrewPlanStatus.DRAFT)
 
     def test_manual_factual_placement_publishes_with_nonblocking_specialization_warning(self):
         person, _ = self.create_employee_with_access(
@@ -544,6 +624,23 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(categories['excavator_operator']['revision'], excavator_plan.revision)
         self.assertEqual(categories['excavator_operator']['published_at_label'], '')
 
+    def test_category_data_uses_the_same_plan_and_permissions_as_page(self):
+        endpoint = reverse('deputy_mining_manager_placement_data')
+        for client in (Client(), self.client):
+            if client is self.client:
+                self.authenticate(client, self.driver_access)
+            self.assertEqual(client.get(endpoint).status_code, 403)
+        self.authenticate(self.client, self.deputy_access)
+        for query in ({'role': 'driver'}, {'role': 'excavator_operator'},
+                      {'role': 'driver', 'date': (production_work_date() - timedelta(days=1)).isoformat()}):
+            page = self.client.get(reverse('deputy_mining_manager_placement'), query)
+            response = self.client.get(endpoint, query)
+            initial = re.search(r'<script id="deputy-planning-data" type="application/json">(.*?)</script>',
+                                page.content.decode(), re.S)
+            self.assertEqual(response.json()['payload'], json.loads(initial.group(1)))
+            self.assertEqual(response.json()['access_id'], self.deputy_access.pk)
+            self.assertIn('no-store', response.headers['Cache-Control'])
+
     def test_profile_is_available_only_to_deputy_and_role_home_routes_to_board(self):
         response = self.client.get(reverse('role_home'), HTTP_HOST='localhost')
         self.assertRedirects(
@@ -740,7 +837,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v24";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v25";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)
