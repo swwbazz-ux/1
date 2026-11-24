@@ -1,9 +1,5 @@
 .management-workplace-header {
     display: grid;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    align-self: start;
     min-width: 0;
     gap: 10px;
     background: var(--gd-bg);
@@ -14,16 +10,14 @@ body:has(.management-connection-dot) > .app-connection-dot {
     display: none;
 }
 
-.management-connection-line {
-    display: flex;
-    min-height: 11px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+.management-workplace-header .management-dashboard-header-actions {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(10px, 1fr);
 }
 
 .management-workplace-header .management-connection-dot {
     position: static;
+    place-self: center end;
     padding: 0;
     background: transparent;
     pointer-events: auto;
@@ -34,12 +28,13 @@ body:has(.management-connection-dot) > .app-connection-dot {
     height: 9px;
 }
 
-@media (max-width: 620px) {
-    .dispatcher-analytics-shell:has(.management-workplace-header) {
-        height: 100dvh;
-        min-height: 0;
+@media (max-width: 1180px) {
+    .management-workplace-header .management-dashboard-header-actions {
+        justify-self: stretch;
     }
+}
 
+@media (max-width: 620px) {
     .management-workplace-header {
         gap: 4px;
     }
@@ -63,7 +58,7 @@ body:has(.management-connection-dot) > .app-connection-dot {
     }
 
     .management-workplace-header .management-dashboard-header-actions {
-        grid-template-columns: 44px repeat(2, minmax(0, 1fr));
+        grid-template-columns: 44px repeat(2, minmax(0, 1fr)) 10px;
     }
 }
 
