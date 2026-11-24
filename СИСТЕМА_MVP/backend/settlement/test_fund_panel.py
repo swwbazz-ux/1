@@ -645,53 +645,20 @@ class FundPanelAccessTests(FundTestBase):
         self.assertIn(reverse('clerk_login'), response['Location'])
         self.assertFalse(Dormitory.objects.filter(number='АР-7').exists())
 
-    def test_clerk_marks_existing_room_transferred_and_keeps_the_bed(self):
+    def test_fund_only_displays_existing_room_transfer_status(self):
         dormitory, _ = Dormitory.objects.get_or_create(number='5')
         room = PhysicalRoom.objects.create(
             dormitory=dormitory, floor=1, number=100, capacity=1, corridor_side='right', side_position=100,
         )
-        bed = PhysicalBed.objects.create(room=room, block='A', position=1)
         url = reverse('settlement_fund')
-        payload = {'action': 'mark_room_transferred', 'room': room.pk}
-        self.authenticate(self.client, self.driver_access)
-        denied = self.client.post(url, payload)
-        self.assertIn(reverse('clerk_login'), denied['Location'])
-        room.refresh_from_db()
-        self.assertFalse(room.is_transferred)
-
         self.authenticate(self.client, self.clerk_access)
         page = self.client.get(url)
-        self.assertContains(page, 'Отметить как переданную')
-        changed = self.client.post(url, payload, follow=True)
-        self.assertContains(changed, 'комната № 100 доступна для заселения')
+        self.assertContains(page, 'Не передана')
+        self.assertNotContains(page, 'Отметить как переданную')
+        obsolete = self.client.post(url, {'action': 'mark_room_transferred', 'room': room.pk}, follow=True)
+        self.assertContains(obsolete, 'Неизвестное действие панели жилфонда.')
         room.refresh_from_db()
-        self.assertTrue(room.is_transferred)
-        self.assertEqual(list(room.beds.values_list('pk', flat=True)), [bed.pk])
-        self.client.post(url, payload)
-        audit = AdminActionLog.objects.get(action_code='settlement_room_transferred', object_id=str(room.pk))
-        self.assertEqual(audit.actor, self.clerk_employee)
-
-    def test_transfer_opens_empty_room_with_configured_beds_and_rejects_closed_fund(self):
-        dormitory, _ = Dormitory.objects.get_or_create(number='6')
-        dormitory.is_active = False
-        dormitory.save(update_fields=['is_active'])
-        room = PhysicalRoom.objects.create(
-            dormitory=dormitory, floor=1, number=101, capacity=2, corridor_side='left', side_position=101,
-        )
-        self.authenticate(self.client, self.clerk_access)
-        url = reverse('settlement_fund')
-        payload = {'action': 'mark_room_transferred', 'room': room.pk}
-        denied = self.client.post(url, payload, follow=True)
-        self.assertContains(denied, 'Отметить передачу можно для комнат действующих КИС-5 и КИС-6.')
-        self.assertFalse(room.beds.exists())
-        dormitory.is_active = True
-        dormitory.save(update_fields=['is_active'])
-        self.client.post(url, payload)
-        room.refresh_from_db()
-        self.assertTrue(room.is_transferred)
-        self.assertEqual(
-            set(room.beds.values_list('stable_id', flat=True)), {'KIS6-F1-R101-A1', 'KIS6-F1-R101-A2'},
-        )
+        self.assertFalse(room.is_transferred)
 
     def test_other_role_cannot_manage_fund(self):
         self.authenticate(self.client, self.driver_access)
@@ -763,6 +730,87 @@ class FundPanelAccessTests(FundTestBase):
         stored = self.client.session['settlement_fund_message']
         self.assertEqual(stored['level'], 'error')
         self.assertTrue(stored['errors'])
+
+
+class MapRoomTransferTests(FundTestBase):
+    def setUp(self):
+        dormitory, _ = Dormitory.objects.get_or_create(number='5')
+        self.room = PhysicalRoom.objects.create(
+            dormitory=dormitory, floor=1, number=101, capacity=2,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT, side_position=101,
+        )
+        self.url = reverse('settlement_room_transfer')
+        self.authenticate(self.client, self.clerk_access)
+
+    def transfer(self, status):
+        return self.client.post(self.url, {'room': self.room.pk, 'status': status})
+
+    def test_map_switch_creates_missing_beds_and_preserves_them_when_closed(self):
+        opened = self.transfer('transferred')
+        self.assertEqual(opened.status_code, 200)
+        self.assertIn('data-transfer-status="transferred"', opened.json()['room_card'])
+        bed_ids = set(self.room.beds.values_list('pk', flat=True))
+        self.assertEqual(len(bed_ids), 2)
+
+        closed = self.transfer('not_transferred')
+        self.assertEqual(closed.status_code, 200)
+        self.assertIn('data-transfer-status="not_transferred"', closed.json()['room_card'])
+        self.assertIn('data-bed-state="unavailable"', closed.json()['room_card'])
+        self.assertEqual(set(self.room.beds.values_list('pk', flat=True)), bed_ids)
+        self.assertEqual(self.transfer('not_transferred').status_code, 200)
+        audit = AdminActionLog.objects.get(action_code='settlement_room_not_transferred', object_id=str(self.room.pk))
+        self.assertEqual(audit.actor, self.clerk_employee)
+
+    def test_map_switch_rejects_closed_dormitory(self):
+        Dormitory.objects.filter(pk=self.room.dormitory_id).update(is_active=False)
+        rejected = self.transfer('transferred')
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn('для комнат действующих КИС-5 и КИС-6', rejected.json()['error'])
+        self.assertFalse(self.room.beds.exists())
+        self.room.refresh_from_db()
+        self.assertFalse(self.room.is_transferred)
+
+    def assert_map_switch_cannot_close_room_with_stay(self, offset):
+        self.assertEqual(self.transfer('transferred').status_code, 200)
+        self.make_occupancy(bed=self.room.beds.first(), starts_at=timezone.now() + timedelta(days=offset))
+        blocked = self.transfer('not_transferred')
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn('заселения', blocked.json()['error'])
+        self.room.refresh_from_db()
+        self.assertTrue(self.room.is_transferred)
+
+    def test_map_switch_cannot_close_room_for_current_stay(self):
+        self.assert_map_switch_cannot_close_room_with_stay(-1)
+
+    def test_map_switch_cannot_close_room_for_future_stay(self):
+        self.assert_map_switch_cannot_close_room_with_stay(7)
+
+    def test_map_switch_cannot_close_a_reserved_room(self):
+        self.assertEqual(self.transfer('transferred').status_code, 200)
+        SettlementBedReserve.objects.create(
+            physical_bed=self.room.beds.first(), created_by_access=self.clerk_access, reason='Резерв',
+        )
+        blocked = self.transfer('not_transferred')
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn('резервы', blocked.json()['error'])
+
+    def test_map_switch_cannot_close_room_with_prepared_bed(self):
+        self.assertEqual(self.transfer('transferred').status_code, 200)
+        SettlementBedPreparation.objects.create(
+            resident=self.make_resident(), physical_bed=self.room.beds.first(),
+            arrival_date=timezone.localdate(), hold_until=timezone.now() + timedelta(hours=2),
+            created_by_access=self.clerk_access, basis='Готово к заезду',
+        )
+        blocked = self.transfer('not_transferred')
+        self.assertEqual(blocked.status_code, 409)
+        self.assertIn('подготовленные места', blocked.json()['error'])
+
+    def test_map_switch_rejects_invalid_values_and_other_roles(self):
+        self.assertEqual(self.transfer('unknown').status_code, 400)
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.transfer('transferred').status_code, 403)
+        self.room.refresh_from_db()
+        self.assertFalse(self.room.is_transferred)
 
 
 class FundPanelMapIsolationTests(FundTestBase):

@@ -84,9 +84,9 @@ from .fund import (
     create_dormitory as create_fund_dormitory,
     create_room as create_fund_room,
     fund_dormitory_list,
-    mark_room_transferred,
     reopen_dormitory as reopen_fund_dormitory,
     room_map_positions,
+    set_room_transfer_status,
 )
 from .models import (
     EmployeeBedOccupancy,
@@ -1208,6 +1208,53 @@ self.addEventListener("fetch", event => {
     return response
 
 
+def _clerk_map_rooms(moment):
+    return (
+        PhysicalRoom.objects
+        .select_related('dormitory')
+        .prefetch_related(
+            Prefetch(
+                'beds',
+                queryset=(
+                    PhysicalBed.objects
+                    .prefetch_related(
+                        Prefetch(
+                            'occupancies',
+                            queryset=(
+                                EmployeeBedOccupancy.objects
+                                .filter(effective_occupancy_at_q(moment))
+                                .select_related(
+                                    'resident',
+                                    'resident__employee',
+                                    'resident__employee__personnel_position',
+                                    'shift_official_assignment__equipment__equipment_type',
+                                    'shift_official_assignment__equipment__model',
+                                )
+                            ),
+                            to_attr='active_occupancies',
+                        )
+                    )
+                    .order_by('block', 'position')
+                ),
+            )
+        )
+        .filter(
+            dormitory__number__in=['5', '6'],
+            # T-029 m3 (review-8): карта только собственный фонд. Арендованное
+            # общежитие с номером 5/6 (заведённое в обход панели) на карту не
+            # попадает и в счётчики не входит.
+            dormitory__kind=Dormitory.Kind.OWN,
+        )
+        .order_by(
+            'dormitory__number',
+            'floor',
+            'corridor_side',
+            'side_position',
+            'number',
+        )
+    )
+
+
 @require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
@@ -1234,50 +1281,7 @@ def settlement_map_view(request):
                 'effective_date',
                 'Не удалось выполнить расчёт для указанной даты.',
             )
-    rooms = list(
-        PhysicalRoom.objects
-        .select_related('dormitory')
-        .prefetch_related(
-            Prefetch(
-                'beds',
-                queryset=(
-                    PhysicalBed.objects
-                    .prefetch_related(
-                        Prefetch(
-                            'occupancies',
-                            queryset=(
-                                EmployeeBedOccupancy.objects
-                                .filter(effective_occupancy_at_q(moment))
-                                .select_related(
-                                    'resident',
-                                    'resident__employee',
-                                    'resident__employee__personnel_position',
-                                'shift_official_assignment__equipment__equipment_type',
-                                'shift_official_assignment__equipment__model',
-                                )
-                            ),
-                            to_attr='active_occupancies',
-                        )
-                    )
-                    .order_by('block', 'position')
-                ),
-            )
-        )
-        .filter(
-            dormitory__number__in=['5', '6'],
-            # T-029 m3 (review-8): карта только собственный фонд. Арендованное
-            # общежитие с номером 5/6 (заведённое в обход панели) на карту не
-            # попадает и в счётчики не входит.
-            dormitory__kind=Dormitory.Kind.OWN,
-        )
-        .order_by(
-            'dormitory__number',
-            'floor',
-            'corridor_side',
-            'side_position',
-            'number',
-        )
-    )
+    rooms = list(_clerk_map_rooms(moment))
     _attach_occupancy_view(rooms, moment)
     # T-036 backend-23/24: бейджи комнат 36–38 на карте (резерв/защищённая);
     # типы якорей берутся одним пакетным запросом на все комнаты.
@@ -3547,6 +3551,33 @@ FUND_MESSAGE_SESSION_KEY = 'settlement_fund_message'
 FUND_MANAGE_ROLE_CODES = frozenset({'settlement_clerk', 'admin'})
 
 
+@never_cache
+@require_POST
+def settlement_room_transfer_view(request):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Нет доступа к управлению жилфондом.'}, status=403)
+    try:
+        room = _fund_form_object(
+            PhysicalRoom, request.POST.get('room'), not_found_message='Комната не найдена.',
+        )
+        room = set_room_transfer_status(room=room, status=request.POST.get('status'), actor_access=access)
+    except ValidationError as error:
+        message, code = _validation_error_details(error)
+        status = 409 if code == 'settlement.fund.room_has_active_links' else 400
+        return JsonResponse({'error': message}, status=status)
+    except IntegrityError:
+        return JsonResponse({'error': 'Данные жилфонда изменились. Обновите карту и повторите действие.'}, status=409)
+
+    moment = timezone.now()
+    room = _clerk_map_rooms(moment).get(pk=room.pk)
+    _attach_occupancy_view([room], moment)
+    room.anchor_types = room_anchor_types_by_room(room_ids=[room.pk]).get(room.pk, frozenset())
+    side, _ = room_map_positions([room])[room.pk]
+    card = render_to_string('settlement/_room_card.html', {'room': _room_view(room), 'side': side})
+    return JsonResponse({'room_card': card})
+
+
 def _fund_redirect(request, *, level, text, errors=()):
     request.session[FUND_MESSAGE_SESSION_KEY] = {
         'level': level,
@@ -3613,12 +3644,6 @@ def _settlement_fund_post(request, access):
                 success_text = f'Добавлена комната № {room.number} в КИС-{dormitory.number}. Койко-мест создано {room.capacity}.'
             else:
                 success_text = 'Комната добавлена и отмечена как переданная.'
-        elif action == 'mark_room_transferred':
-            room = _fund_form_object(
-                PhysicalRoom, request.POST.get('room'), not_found_message='Комната не найдена.',
-            )
-            room = mark_room_transferred(room=room, actor_access=access)
-            success_text = f'КИС-{room.dormitory.number}, {room.floor} этаж, комната № {room.number} доступна для заселения.'
         elif action == 'create_bed':
             room = _fund_form_object(
                 PhysicalRoom,

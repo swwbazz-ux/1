@@ -63,11 +63,10 @@ test("в шапке рабочего места есть ссылка «Жилф
     assert.match(HEADER, />Жилфонд<\/a>/);
 });
 
-test("шесть действий панели совпадают с серверным контрактом", () => {
+test("пять действий панели совпадают с серверным контрактом", () => {
     [
         "create_dormitory",
         "create_room",
-        "mark_room_transferred",
         "create_bed",
         "close_dormitory",
         "reopen_dormitory"
@@ -78,7 +77,7 @@ test("шесть действий панели совпадают с серве�
             new RegExp('<input type="hidden" name="action" value="' + action + '">')
         );
     });
-    assert.equal(count(TEMPLATE, "{% csrf_token %}"), 6, "CSRF в каждой форме");
+    assert.equal(count(TEMPLATE, "{% csrf_token %}"), 5, "CSRF в каждой форме");
     assert.equal(
         count(TEMPLATE, 'name="reason" maxlength="255"'),
         5,
@@ -89,7 +88,7 @@ test("шесть действий панели совпадают с серве�
         5,
         "поле основания помечено required"
     );
-    assert.equal(count(TEMPLATE, "<form "), 6);
+    assert.equal(count(TEMPLATE, "<form "), 5);
     assert.match(TEMPLATE, /action="{% url 'settlement_fund' %}"/);
 });
 

@@ -29,8 +29,11 @@
     var panelTitle = root.querySelector("[data-room-panel-title]");
     var panelLocation = root.querySelector("[data-room-panel-location]");
     var panelStatus = root.querySelector("[data-room-panel-status]");
+    var roomTransferToggle = root.querySelector("[data-room-transfer-toggle]");
+    var roomTransferMessage = root.querySelector("[data-room-transfer-message]");
     var panelOccupiedCount = root.querySelector("[data-room-occupied-count]");
     var panelFreeCount = root.querySelector("[data-room-free-count]");
+    var panelFreeLabel = root.querySelector("[data-room-free-label]");
     var panelBeds = root.querySelector("[data-room-panel-beds]");
     var placementHint = root.querySelector("[data-placement-hint]");
     var placementPanel = root.querySelector("[data-placement-panel]");
@@ -100,6 +103,7 @@
     var searchTimer = null;
     var searchSequence = 0;
     var saving = false;
+    var roomTransferPending = false;
     var unsettledShift = "all";
     var unsettledPanelTrigger = null;
     var autoPreviewOpenOnceKey = "settlement:auto-preview-open-once";
@@ -505,6 +509,9 @@
         if (selectedTransferredRoomCount) {
             selectedTransferredRoomCount.textContent = String(transferredRooms.length);
         }
+        var floor = floorSections.find(function (section) { return !section.hidden; });
+        var floorTransferredCount = floor && floor.querySelector("[data-floor-transferred-count]");
+        if (floorTransferredCount) floorTransferredCount.textContent = String(transferredRooms.length);
         if (globalFreeCount) globalFreeCount.textContent = String(freeBeds);
         if (globalOccupiedCount) globalOccupiedCount.textContent = String(occupiedBeds);
         if (selectedUnavailableBedCount) {
@@ -570,18 +577,20 @@
         panelBeds.replaceChildren();
         Array.from(activeRoom.querySelectorAll("[data-bed]")).forEach(function (bed) {
             var occupied = bed.dataset.occupied === "true";
+            var available = isTransferredBed(bed);
             var card = element(
                 "button",
-                "settlement-room-bed-card " + (occupied ? "is-occupied" : "is-free")
+                "settlement-room-bed-card " + (occupied ? "is-occupied" : available ? "is-free" : "")
             );
             card.type = "button";
+            card.disabled = !available && !occupied;
             card.dataset.panelBedId = bed.dataset.bedId;
             card.classList.toggle("is-selected", selectedBed === bed);
             card.setAttribute("aria-pressed", String(selectedBed === bed));
 
             var main = element("span", "settlement-room-bed-card-main");
             main.appendChild(element("strong", "", bedLabel(bed)));
-            main.appendChild(element("span", "", occupied ? "Занято" : "Свободно"));
+            main.appendChild(element("span", "", occupied ? "Занято" : available ? "Свободно" : "Недоступно"));
             card.appendChild(main);
 
             var details = document.createElement("dl");
@@ -690,6 +699,11 @@
         if (occupiedActions) occupiedActions.hidden = true;
         updateEmployeeSearchAvailability();
 
+        if (activeRoom && activeRoom.dataset.transferStatus !== "transferred") {
+            if (placementTitle) placementTitle.textContent = "Заселение сотрудника";
+            placementHint.textContent = "Комната не передана. Заселение в неё недоступно.";
+            return;
+        }
         if (!controlHeld) {
             if (placementTitle) placementTitle.textContent = "Действия недоступны";
             placementHint.textContent = "Сначала начните работу и дождитесь подтверждения управления.";
@@ -713,11 +727,6 @@
             if (occupiedActions) occupiedActions.hidden = false;
             return;
         }
-        if (!activeRoom || activeRoom.dataset.transferStatus !== "transferred") {
-            placementHint.textContent = "Комната не передана. Заселение в неё недоступно.";
-            return;
-        }
-
         if (placementTitle) {
             placementTitle.textContent = relocationSourceBed
                 ? "Переселение сотрудника"
@@ -759,23 +768,23 @@
 
     function renderRoom(room) {
         var counts = roomCounts(room);
+        var transferred = room.dataset.transferStatus === "transferred";
         room.dataset.occupiedBeds = String(counts.occupied);
         room.dataset.freeBeds = String(counts.free);
         panelTitle.textContent = "Комната " + room.dataset.roomNumber;
         panelLocation.textContent = "КИС-" + room.dataset.dormitory + " · " + room.dataset.floor + " этаж";
-        panelStatus.textContent = (
-            room.dataset.transferStatus === "transferred"
-                ? "Передана для расселения"
-                : "Не передана · действия недоступны"
-        );
+        panelStatus.textContent = transferred ? "Передана" : "Не передана";
+        if (roomTransferToggle) roomTransferToggle.setAttribute("aria-checked", String(transferred));
         panelOccupiedCount.textContent = String(counts.occupied);
         panelFreeCount.textContent = String(counts.free);
+        if (panelFreeLabel) panelFreeLabel.textContent = transferred ? "свободно" : "недоступно";
         renderBedCards();
         updatePlacementPanel();
     }
 
     function openRoom(room, bed) {
         closeUnsettledPanel(false);
+        if (activeRoom !== room || panel.hidden) showRoomTransferMessage("");
         activeRoom = room;
         if (selectedBed && !room.contains(selectedBed)) {
             selectedBed.classList.remove("is-selected");
@@ -789,6 +798,57 @@
         renderRoom(room);
         if (bed) {
             selectBed(bed);
+        }
+    }
+
+    function showRoomTransferMessage(message, isError) {
+        if (!roomTransferMessage) return;
+        roomTransferMessage.hidden = !message;
+        roomTransferMessage.textContent = message;
+        roomTransferMessage.classList.toggle("is-error", Boolean(isError));
+    }
+
+    async function changeRoomTransfer() {
+        if (!activeRoom || roomTransferPending || saving || relocationSourceBed) return;
+        var room = activeRoom;
+        var transferStatus = room.dataset.transferStatus === "transferred" ? "not_transferred" : "transferred";
+        var failure = "Не удалось изменить статус комнаты. Повторите попытку.";
+        roomTransferPending = true;
+        roomTransferToggle.disabled = true;
+        showRoomTransferMessage("Сохраняем статус комнаты…");
+        try {
+            var response = await fetch(root.dataset.roomTransferUrl, {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {"X-CSRFToken": csrfToken()},
+                body: new URLSearchParams({room: room.dataset.roomId, status: transferStatus})
+            });
+            var payload = await response.json().catch(function () { return {}; });
+            if (!response.ok) {
+                if (activeRoom === room) showRoomTransferMessage(payload.error || failure, true);
+                return;
+            }
+            var fragment = document.createElement("template");
+            fragment.innerHTML = payload.room_card || "";
+            var updatedRoom = fragment.content.firstElementChild;
+            if (!updatedRoom || updatedRoom.dataset.roomId !== room.dataset.roomId) throw new Error(failure);
+            rooms[rooms.indexOf(room)] = updatedRoom;
+            room.replaceWith(updatedRoom);
+            if (activeRoom === room) {
+                activeRoom = updatedRoom;
+                if (selectedBed && room.contains(selectedBed)) {
+                    selectedBed = null;
+                    resetEmployeeSelection();
+                }
+                renderRoom(updatedRoom);
+                showRoomTransferMessage("");
+            }
+            applyFilters();
+        } catch (error) {
+            if (activeRoom === room) showRoomTransferMessage(failure, true);
+        } finally {
+            roomTransferPending = false;
+            roomTransferToggle.disabled = false;
         }
     }
 
@@ -2179,6 +2239,7 @@
         openEmployeePanel(Number(bed.dataset.occupantId));
     });
     panelClose.addEventListener("click", closePanel);
+    if (roomTransferToggle) roomTransferToggle.addEventListener("click", changeRoomTransfer);
     panelBackdrop.addEventListener("click", closePanel);
     if (employeePanelClose) employeePanelClose.addEventListener("click", closeEmployeePanel);
     if (employeePanelBackdrop) employeePanelBackdrop.addEventListener("click", closeEmployeePanel);

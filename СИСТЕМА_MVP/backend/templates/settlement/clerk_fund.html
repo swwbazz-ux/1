@@ -110,17 +110,7 @@
                             {% for room in dormitory.rooms %}
                             <tr data-fund-room="{{ room.id }}">
                                 <td>{{ room.floor }}</td>
-                                <td>
-                                    {{ room.number }}
-                                    {% if fund_can_manage and dormitory.can_transfer_rooms and room.transfer_status == 'not_transferred' %}
-                                        <form method="post" class="settlement-fund-form-actions" action="{% url 'settlement_fund' %}" data-fund-action="mark_room_transferred">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="action" value="mark_room_transferred">
-                                            <input type="hidden" name="room" value="{{ room.id }}">
-                                            <button type="submit">Отметить как переданную</button>
-                                        </form>
-                                    {% endif %}
-                                </td>
+                                <td>{{ room.number }}</td>
                                 <td>{{ room.room_type_label }}</td>
                                 <td>{% if room.corridor_side == 'left' %}Левая{% else %}Правая{% endif %}</td>
                                 <td>{{ room.side_position }}</td>

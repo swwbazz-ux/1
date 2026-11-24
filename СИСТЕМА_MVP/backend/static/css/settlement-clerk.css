@@ -2134,7 +2134,8 @@
 
 .settlement-room-panel-summary {
     display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 6px 12px;
     align-items: center;
     justify-content: space-between;
     padding: 10px 20px;
@@ -2145,9 +2146,51 @@
     font-weight: 800;
 }
 
-.settlement-room-panel-summary > span {
-    color: var(--settlement-accent);
+.settlement-room-panel-summary .settlement-room-transfer {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 8px;
+    border: 1px solid var(--admin-line);
+    border-radius: 6px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
     font-weight: 900;
+    text-align: left;
+    cursor: pointer;
+}
+
+.settlement-room-transfer::before {
+    content: "";
+    width: 28px;
+    height: 16px;
+    border-radius: 999px;
+    background: radial-gradient(circle at 8px 50%, white 5px, transparent 6px) var(--admin-muted);
+}
+
+.settlement-room-transfer[aria-checked="true"]::before {
+    background: radial-gradient(circle at 20px 50%, white 5px, transparent 6px) var(--settlement-accent);
+}
+
+.settlement-room-transfer:focus-visible {
+    outline: 2px solid var(--settlement-accent);
+    outline-offset: 2px;
+}
+
+.settlement-room-transfer:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+
+.settlement-room-transfer-message {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.settlement-room-transfer-message.is-error {
+    color: var(--admin-red);
 }
 
 .settlement-room-panel-body {
