@@ -316,6 +316,8 @@ body.login-page.login-unified-v2 .login-v2 .login-pin-shell input {
 
 /* Глаз — внутри поля, справа, а не блоком под ним */
 body.login-page.login-unified-v2 .login-v2 .login-pin-reveal {
+    position: static;
+    transform: none;
     display: grid;
     place-items: center;
     width: 64px;

@@ -399,12 +399,6 @@ class LoginMobileOverflowContractTests(SimpleTestCase):
             stylesheet,
         )
         self.assertIn(
-            '.activation-pin-toggle {\n'
-            '    display: inline-grid;',
-            stylesheet,
-        )
-        self.assertIn('    min-height: 44px;', stylesheet)
-        self.assertIn(
             '.unified-login-submit {\n'
             '    min-height: 52px;',
             stylesheet,

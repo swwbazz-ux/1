@@ -72,26 +72,19 @@
                         </span>
                         <small>Введите номер телефона в формате {% if request.mining_master_tablet_control %}+7 000 000 00 00{% else %}+7 XXX-XXX-XX-XX{% endif %}</small>
                     </label>
-                    <label class="shared-shift-login-field">
-                        <span>{{ dispatcher_header.shift_reauth_code_label|default:"Код мастера" }}</span>
-                        <input type="{% if request.mining_master_tablet_control %}password{% else %}text{% endif %}" name="reauth_access_code" inputmode="numeric"{% if request.mining_master_tablet_control %} enterkeyhint="done"{% endif %} autocomplete="{% if request.mining_master_tablet_control %}off{% else %}one-time-code{% endif %}" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" data-shared-shift-code required>
-                        <small>Код состоит из 6 цифр</small>
-                    </label>
+                    <div class="shared-shift-login-field shared-shift-pin-field">
+                        <div class="credential-field credential-field--labeled">
+                            <label class="shared-shift-login-field" for="shared-shift-pin">
+                                <span>{{ dispatcher_header.shift_reauth_code_label|default:"Код мастера" }}</span>
+                                <input id="shared-shift-pin" type="password" name="reauth_access_code" inputmode="numeric"{% if request.mining_master_tablet_control %} enterkeyhint="done"{% endif %} autocomplete="off" placeholder="00-00-00" maxlength="8" pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}" aria-describedby="shared-shift-pin-hint" data-shared-shift-code required>
+                            </label>
+                            {% include "includes/credential_visibility_button.html" with field_id="shared-shift-pin" only %}
+                        </div>
+                        <small id="shared-shift-pin-hint">Код состоит из 6 цифр</small>
+                    </div>
+                    <input type="hidden" name="device_kind" value="shared">
                     {% if request.mining_master_tablet_control %}
-                        <input type="hidden" name="device_kind" value="shared">
                         <a href="{% url 'mining_master_tablet_login' %}?intent=start_shift" class="shared-shift-first-entry">Первый вход сотрудника</a>
-                    {% else %}
-                    <fieldset class="shared-shift-device-choice">
-                        <legend>Устройство</legend>
-                        <label class="shared-shift-device-option">
-                            <input type="radio" name="device_kind" value="personal" {% if dispatcher_header.session_device_kind == "personal" %}checked{% endif %}>
-                            <span>Личное</span>
-                        </label>
-                        <label class="shared-shift-device-option">
-                            <input type="radio" name="device_kind" value="shared" {% if dispatcher_header.session_device_kind != "personal" %}checked{% endif %}>
-                            <span>Общее</span>
-                        </label>
-                    </fieldset>
                     {% endif %}
                     <input type="hidden" name="{{ dispatcher_header.shift_action_field_name|default:'shift_action' }}" value="{{ dispatcher_header.shift_start_value|default:'start' }}">
                 </div>

@@ -175,6 +175,11 @@ class EmployeeAccessAdmin(admin.ModelAdmin):
     search_fields = ('employee__full_name', 'role__name')
     list_filter = ('role', 'status', 'is_active')
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == 'access_code':
+            kwargs['widget'] = forms.PasswordInput(attrs={'autocomplete': 'off'}, render_value=True)
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
 
 @admin.register(ActiveApplicationSession)
 class ActiveApplicationSessionAdmin(admin.ModelAdmin):

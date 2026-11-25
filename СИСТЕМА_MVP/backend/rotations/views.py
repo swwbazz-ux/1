@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods, require_POST
 
 from settlement.models import SettlementResident
@@ -22,6 +23,7 @@ from shifts.models import (
     WatchPeriodBrigadePhaseRow,
     WatchPeriodBrigadePhaseVersion,
 )
+from users.forms import is_valid_russian_mobile_phone, normalize_phone
 from users.models import Employee, WatchComposition, WorkSchedule
 
 from users.role_apps import (
@@ -31,7 +33,7 @@ from users.role_apps import (
     role_app_service_worker_response,
 )
 from users.session_device import detect_session_device_kind
-from users.access_auth import can_review_watch_extensions
+from users.access_auth import can_review_watch_extensions, format_phone_for_display
 from users.views import get_current_access
 
 from .documents import build_extension_data_packet, document_bytes
@@ -165,6 +167,7 @@ def _private_no_store(response):
     return response
 
 
+@sensitive_post_parameters('access_code')
 @require_http_methods(['GET', 'POST'])
 def timekeeper_login_view(request):
     if timekeeper_app_access_from_request(request):
@@ -177,22 +180,25 @@ def timekeeper_login_view(request):
     )
     if selected_device_kind not in {'personal', 'shared'}:
         selected_device_kind = detect_session_device_kind(request)
+    phone = ''
+    login_step = 'phone'
     if request.method == 'POST':
-        access = authenticate_timekeeper_app_access(
-            phone=request.POST.get('phone', ''),
-            access_code=request.POST.get('access_code', ''),
-        )
-        if access:
-            start_timekeeper_app_session(
-                request,
-                access,
-                device_kind=selected_device_kind,
+        phone = normalize_phone(request.POST.get('phone', ''))
+        if len(phone) == 10:
+            phone = f'7{phone}'
+        if is_valid_russian_mobile_phone(phone):
+            login_step = 'pin'
+        if request.POST.get('action') != 'continue':
+            access = authenticate_timekeeper_app_access(
+                phone=phone,
+                access_code=request.POST.get('access_code', '').strip().replace('-', ''),
             )
-            return redirect('rotation_timekeeper_dashboard')
-        messages.error(
-            request,
-            'Телефон или пинкод указаны неверно для приложения «Табельщик».',
-        )
+            if access:
+                start_timekeeper_app_session(request, access, device_kind=selected_device_kind)
+                return redirect('rotation_timekeeper_dashboard')
+            messages.error(request, 'Телефон или пинкод указаны неверно для приложения «Табельщик».')
+        elif login_step == 'phone':
+            messages.error(request, 'Введите мобильный номер телефона для входа в приложение «Табельщик».')
     return _private_no_store(render(
         request,
         'users/login.html',
@@ -200,6 +206,9 @@ def timekeeper_login_view(request):
             'selected_device_kind': selected_device_kind,
             'next_url': '',
             'login_role_app': get_role_app('timekeeper'),
+            'login_step': login_step,
+            'submitted_phone': format_phone_for_display(phone),
+            'change_login_phone_url': reverse('timekeeper_login'),
         },
     ))
 

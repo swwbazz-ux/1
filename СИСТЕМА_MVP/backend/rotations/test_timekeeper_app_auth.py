@@ -187,6 +187,25 @@ class TimekeeperAppAuthTests(TestCase):
             original_last_login_at,
         )
 
+    def test_timekeeper_phone_step_opens_masked_pin_and_accepts_formatted_pin(self):
+        self.assertNotContains(self.client.get(self.login_url), 'id="login-pin"')
+        phone = '900-700-00-01'
+        response = self.client.post(self.login_url, {'action': 'continue', 'phone': phone})
+        self.assertContains(response, 'id="login-pin" name="access_code" type="password"')
+        self.assertContains(response, 'aria-controls="login-pin"')
+        self.assertNotIn(TIMEKEEPER_APP_ACCESS_SESSION_KEY, self.client.session)
+
+        credentials = {'action': 'login', 'phone': phone}
+        error = self.client.post(self.login_url, {**credentials, 'access_code': '00-00-00'})
+        self.assertContains(error, 'id="login-pin" name="access_code" type="password"')
+        self.assertNotIn(TIMEKEEPER_APP_ACCESS_SESSION_KEY, self.client.session)
+
+        code = self.timekeeper_access.access_code
+        formatted = '-'.join((code[:2], code[2:4], code[4:]))
+        response = self.client.post(self.login_url, {**credentials, 'access_code': formatted})
+        self.assertRedirects(response, self.dashboard_url, fetch_redirect_response=False)
+        self._assert_namespaced_session(self.client, self.timekeeper_access)
+
     def test_exact_admin_login_uses_actual_admin_access_and_label(self):
         original_last_login_at = self.admin_access.last_login_at
         response = self._login(self.admin_access)

@@ -1,0 +1,8 @@
+{% extends "admin/base.html" %}
+{% block extrahead %}
+    {{ block.super }}
+    {% include "includes/credential_visibility_assets.html" %}
+    <template data-admin-credential-button>
+        {% include "includes/credential_visibility_button.html" with credential_label="пароль" only %}
+    </template>
+{% endblock %}
