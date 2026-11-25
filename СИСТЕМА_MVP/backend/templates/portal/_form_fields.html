@@ -8,7 +8,14 @@
             <label class="toggle-control" for="{{ field.id_for_label }}">{{ field }}<span><strong>{{ field.label }}</strong>{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</span></label>
         {% else %}
             <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required-mark" aria-label="обязательное поле">*</span>{% endif %}</label>
-            {{ field }}
+            {% if field.field.widget.input_type == 'password' %}
+                <span class="credential-field">
+                    {{ field }}
+                    {% include "includes/credential_visibility_button.html" with field_id=field.id_for_label credential_label="код доступа" only %}
+                </span>
+            {% else %}
+                {{ field }}
+            {% endif %}
             {% if field.help_text %}<small class="form-help">{{ field.help_text }}</small>{% endif %}
         {% endif %}
         {% for error in field.errors %}<span class="field-error" role="alert">{{ error }}</span>{% endfor %}

@@ -20,7 +20,7 @@
     {% endif %}
     {% endif %}
     {% if activation_role_app and activation_role_app.role_code == 'driver' or activation_role_app and activation_role_app.role_code == 'excavator_operator' %}
-    <link rel="stylesheet" href="{% static 'css/mobile-role-activation-v1.css' %}?v={{ activation_role_app.shell_version }}-pin2">
+    <link rel="stylesheet" href="{% static 'css/mobile-role-activation-v1.css' %}?v={{ activation_role_app.shell_version }}-pin3">
     {% endif %}
 {% endblock %}
 {% block body_class %}login-page dispatcher-shell dispatcher-night unified-login-screen unified-activation-screen{% if activation_role_app %} login-role-{{ activation_role_app.role_code }}{% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %} login-fullscreen login-combined login-activation is-app-installed{% endif %}{% endif %}{% endblock %}
@@ -71,25 +71,26 @@
         <div class="message error" role="alert">{{ error }}</div>
         {% endfor %}
 
-        <label class="shared-shift-login-field" for="{{ form.new_access_code.id_for_label }}">
-            <span>{{ form.new_access_code.label }}</span>
-            {{ form.new_access_code }}
+        <div class="shared-shift-login-field">
+            <span><label for="{{ form.new_access_code.id_for_label }}">{{ form.new_access_code.label }}</label></span>
+            <span class="credential-field login-pin-shell">
+                {{ form.new_access_code }}
+                {% include "includes/credential_visibility_button.html" with field_id=form.new_access_code.id_for_label credential_label="новый PIN" only %}
+            </span>
             <small id="activation-new-pin-hint" class="input-hint{% if form.new_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.new_access_code.id_for_label }}"{% if form.new_access_code.errors %} data-server-error="1"{% endif %}>
                 {% if form.new_access_code.errors %}{{ form.new_access_code.errors.0 }}{% else %}6 цифр, без простых последовательностей.{% endif %}
             </small>
-        </label>
-        <label class="shared-shift-login-field" for="{{ form.confirm_access_code.id_for_label }}">
-            <span>{{ form.confirm_access_code.label }}</span>
-            {{ form.confirm_access_code }}
+        </div>
+        <div class="shared-shift-login-field">
+            <span><label for="{{ form.confirm_access_code.id_for_label }}">{{ form.confirm_access_code.label }}</label></span>
+            <span class="credential-field login-pin-shell">
+                {{ form.confirm_access_code }}
+                {% include "includes/credential_visibility_button.html" with field_id=form.confirm_access_code.id_for_label credential_label="повторный PIN" only %}
+            </span>
             <small id="activation-confirm-pin-hint" class="input-hint{% if form.confirm_access_code.errors %} is-invalid{% endif %}" data-input-hint-for="{{ form.confirm_access_code.id_for_label }}"{% if form.confirm_access_code.errors %} data-server-error="1"{% endif %}>
                 {% if form.confirm_access_code.errors %}{{ form.confirm_access_code.errors.0 }}{% else %}Повторите тот же PIN.{% endif %}
             </small>
-        </label>
-
-        <label class="activation-pin-toggle">
-            <input type="checkbox" data-pin-visibility>
-            <span>Показать PIN</span>
-        </label>
+        </div>
 
         <div class="app-confirm-actions{% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %} unified-login-actions{% endif %}">
             {% if activation_role_app.role_code == 'driver' or activation_role_app.role_code == 'excavator_operator' %}
@@ -114,7 +115,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
     var submitButton = form.querySelector('button[type="submit"]');
     var pinInputs = Array.from(form.querySelectorAll('[data-pin-input]'));
-    var visibilityToggle = form.querySelector('[data-pin-visibility]');
     var loginPage = document.body;
     var activationViewportBaselineHeight = 0;
     var activationViewportBaselineWidth = 0;
@@ -237,13 +237,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    if (visibilityToggle) {
-        visibilityToggle.addEventListener('change', function () {
-            pinInputs.forEach(function (input) {
-                input.type = visibilityToggle.checked ? 'text' : 'password';
-            });
-        });
-    }
 
     form.addEventListener('submit', function (event) {
         pinInputs.forEach(function (input) {

@@ -28,9 +28,12 @@
                     >
                 </span>
             </label>
-            <label for="tablet-pin">PIN
-                <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" enterkeyhint="done" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
-            </label>
+            <div class="credential-field credential-field--labeled">
+                <label for="tablet-pin">PIN
+                    <input id="tablet-pin" name="access_code" type="password" inputmode="numeric" enterkeyhint="done" autocomplete="off" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="tablet-pin-hint" required>
+                </label>
+                {% include "includes/credential_visibility_button.html" with field_id="tablet-pin" only %}
+            </div>
         </div>
         <p class="tablet-auth-hint" id="tablet-pin-hint">PIN состоит из 6 цифр. При первом входе введите PIN из карточки сотрудника.</p>
         <div class="tablet-auth-actions">

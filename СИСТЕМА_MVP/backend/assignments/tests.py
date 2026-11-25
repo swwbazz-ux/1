@@ -1690,9 +1690,8 @@ class MiningMasterAssignmentsViewTests(TestCase):
         self.assertContains(response, 'placeholder="00-00-00"')
         self.assertContains(response, 'maxlength="8"')
         self.assertContains(response, 'pattern="[0-9]{2}-[0-9]{2}-[0-9]{2}"')
-        self.assertContains(response, 'name="device_kind"')
-        self.assertContains(response, 'value="personal"')
-        self.assertContains(response, 'value="shared"')
+        self.assertContains(response, 'type="hidden" name="device_kind" value="shared"')
+        self.assertNotContains(response, 'shared-shift-device-choice')
         self.assertContains(response, 'на этом устройстве')
 
         response = self.client.post(reverse('mining_master_assignments'), {'action': 'start_shift'})

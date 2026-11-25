@@ -118,39 +118,42 @@
             modals = [scope];
         }
         modals.forEach(function (modal) {
-            if (modal.hasAttribute('data-tablet-personal-login') && modal.tabletClose) return;
+            if (modal.closeSharedShiftLogin) return;
             var container = modal.parentElement || document;
             var openButtons = container.querySelectorAll("[data-shared-shift-login-open]");
             var cancelButtons = modal.querySelectorAll("[data-shared-shift-login-cancel]");
             var firstInput = modal.querySelector("[data-shared-shift-phone]");
             var codeInput = modal.querySelector("[data-shared-shift-code]");
             var tabletPortal = modal.hasAttribute('data-tablet-personal-login');
-            var home = null;
-            if (tabletPortal) {
-                home = document.createComment('tablet shift login');
-                modal.parentNode.insertBefore(home, modal);
-            }
+            var theme = container.closest(".dispatcher-shell");
+            var home = document.createComment('shared shift login');
+            modal.parentNode.insertBefore(home, modal);
             function normalizeCode() {
                 if (codeInput) codeInput.value = formatAccessCode(codeInput.value);
             }
+            function resetCode() {
+                if (global.hideCredentialFields) global.hideCredentialFields(modal);
+                if (codeInput) codeInput.value = '';
+            }
             function closeModal() {
                 modal.hidden = true;
-                if (modal.hasAttribute('data-tablet-personal-login') && codeInput) codeInput.value = '';
-                if (tabletPortal) {
-                    if (home.parentNode) home.parentNode.insertBefore(modal, home.nextSibling);
-                    else modal.remove();
-                }
+                resetCode();
+                if (home.parentNode) home.parentNode.insertBefore(modal, home.nextSibling);
+                else modal.remove();
             }
-            if (tabletPortal) modal.tabletClose = closeModal;
+            modal.closeSharedShiftLogin = closeModal;
             openButtons.forEach(function (openButton) {
                 if (openButton.dataset.sharedShiftLoginBound === "true") return;
                 openButton.dataset.sharedShiftLoginBound = "true";
                 openButton.addEventListener("click", function () {
-                    if (modal.hasAttribute('data-tablet-personal-login') && codeInput) codeInput.value = '';
-                    if (tabletPortal) {
-                        modal.classList.add('tablet-personal-login-portal');
-                        document.body.appendChild(modal);
+                    resetCode();
+                    modal.classList.add('dispatcher-shell');
+                    if (tabletPortal) modal.classList.add('tablet-personal-login-portal');
+                    if (theme) {
+                        modal.classList.toggle('dispatcher-day', theme.classList.contains('dispatcher-day'));
+                        modal.classList.toggle('dispatcher-night', theme.classList.contains('dispatcher-night'));
                     }
+                    document.body.appendChild(modal);
                     modal.hidden = false;
                     normalizePhoneInput(firstInput);
                     if (firstInput) {
@@ -189,12 +192,7 @@
             document.addEventListener("keydown", function (event) {
                 if (event.key !== "Escape") return;
                 document.querySelectorAll("[data-shared-shift-login-modal]").forEach(function (modal) {
-                    if (typeof modal.tabletClose === 'function') { modal.tabletClose(); return; }
-                    if (!modal.hidden) modal.hidden = true;
-                    if (modal.hasAttribute('data-tablet-personal-login')) {
-                        var pin = modal.querySelector('[data-shared-shift-code]');
-                        if (pin) pin.value = '';
-                    }
+                    if (!modal.hidden && modal.closeSharedShiftLogin) modal.closeSharedShiftLogin();
                 });
             });
         }

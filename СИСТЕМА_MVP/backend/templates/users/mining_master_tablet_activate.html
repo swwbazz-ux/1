@@ -21,12 +21,18 @@
     <form method="post" action="{% url 'mining_master_tablet_activate' %}" autocomplete="off" data-tablet-shift-entry>
         {% csrf_token %}
         <div class="tablet-auth-fields">
-            <label for="id_new_access_code">Придумайте PIN
-                {{ form.new_access_code }}
-            </label>
-            <label for="id_confirm_access_code">Повторите PIN
-                {{ form.confirm_access_code }}
-            </label>
+            <div class="credential-field credential-field--labeled">
+                <label for="{{ form.new_access_code.id_for_label }}">Придумайте PIN
+                    {{ form.new_access_code }}
+                </label>
+                {% include "includes/credential_visibility_button.html" with field_id=form.new_access_code.id_for_label credential_label="новый PIN" only %}
+            </div>
+            <div class="credential-field credential-field--labeled">
+                <label for="{{ form.confirm_access_code.id_for_label }}">Повторите PIN
+                    {{ form.confirm_access_code }}
+                </label>
+                {% include "includes/credential_visibility_button.html" with field_id=form.confirm_access_code.id_for_label credential_label="повторный PIN" only %}
+            </div>
         </div>
         <p class="tablet-auth-hint" id="activation-new-pin-hint">6 цифр, без простых последовательностей.</p>
         <span id="activation-confirm-pin-hint" class="tablet-auth-sr">Введите тот же PIN ещё раз.</span>
