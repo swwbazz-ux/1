@@ -1774,6 +1774,19 @@ button.deputy-avatar {
     border: 0;
 }
 
+.deputy-import-choice {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+.deputy-import-choice select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+}
+
 .deputy-publication-row {
     display: grid;
     grid-template-columns: minmax(0, .8fr) minmax(0, .9fr) minmax(0, 1.2fr) clamp(18rem, 29%, 24rem);

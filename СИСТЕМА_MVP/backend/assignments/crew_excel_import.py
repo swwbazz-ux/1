@@ -58,6 +58,12 @@ class DraftConfirmationRequired(Exception):
         self.token = token
 
 
+class EmployeeChoiceRequired(Exception):
+    def __init__(self, choices, errors):
+        self.choices = choices
+        self.errors = errors
+
+
 def _text(value):
     return str(value).strip() if value is not None else ''
 
@@ -171,11 +177,12 @@ def _similar_directory_names(parts, names, personnel_number):
             # A full three-part name has two corroborating fields. For a short
             # name, also require a close spelling of the differing field.
             if len(parts) == 3 or score >= 0.75:
-                ranked[employee.full_name] = score
-    return sorted(ranked, key=lambda name: (-ranked[name], name))[:5]
+                ranked[employee.pk] = (score, employee)
+    ranked_people = sorted(ranked.values(), key=lambda item: (-item[0], item[1].full_name, item[1].pk))
+    return [employee for _, employee in ranked_people[:5]]
 
 
-def _find_employee(value, names):
+def _employee_matches(value, names):
     if _key(value) == 'снять':
         return None
     name, separator, number = value.partition(' [таб. ')
@@ -195,21 +202,59 @@ def _find_employee(value, names):
     if len(candidates) == 1:
         return candidates[0]
     if candidates:
-        raise ValidationError(
-            f'В справочнике несколько действующих сотрудников с ФИО «{name}». '
-            'Уточни полное ФИО или добавь табельный номер в формате [таб. 123].'
-        )
+        return sorted(candidates, key=lambda employee: (employee.full_name, employee.personnel_number, employee.pk))
     similar = _similar_directory_names(parts, names, number[:-1] if separator else None)
     if similar:
-        variants = ', '.join(f'«{full_name}»' for full_name in similar)
-        raise ValidationError(
-            f'В Excel — «{value}». Похожие записи в справочнике — {variants}. '
-            'Сверь, кто назначен на смену, и укажи его ФИО из справочника.'
-        )
+        return similar
     raise ValidationError(
         f'Среди действующих сотрудников справочника нет совпадения для «{value}». '
         'Проверь написание ФИО и статус карточки.'
     )
+
+
+def _resolve_crew(grouped, work_date, selections):
+    names = defaultdict(list)
+    for employee in Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE):
+        parts = _name_parts(employee.full_name)
+        if parts:
+            names[parts[0]].append((parts, employee))
+
+    resolved = {}
+    choices = []
+    accepted = {}
+    errors = []
+    for records in grouped.values():
+        for record in records:
+            try:
+                values = _crew_values(record.value, work_date)
+            except ValidationError as error:
+                errors.extend(f'{record.address}. {message}' for message in error.messages)
+                continue
+            staff = []
+            for position, value in enumerate(values, start=1):
+                try:
+                    match = _employee_matches(value, names)
+                except ValidationError as error:
+                    errors.extend(f'{record.address}. {message}' for message in error.messages)
+                    continue
+                if isinstance(match, list):
+                    field = f'employee_{record.address}_{position}'
+                    selected = next((person for person in match if str(person.pk) == selections.get(field)), None)
+                    if selected is None:
+                        choices.append({
+                            'field': field, 'record': record, 'source': value,
+                            'position': position, 'options': match,
+                        })
+                    else:
+                        accepted[field] = selected.pk
+                    match = selected
+                staff.append(match)
+            resolved[record.address] = staff
+    if choices:
+        raise EmployeeChoiceRequired(choices, errors)
+    if errors:
+        raise ValidationError(errors)
+    return resolved, accepted
 
 
 def _assigned_crew(slot):
@@ -220,7 +265,7 @@ def _baseline_crew(slot):
     return slot.baseline_employee_id, slot.baseline_secondary_employee_id, slot.baseline_reported_employee_id
 
 
-def _stage_plan(plan, slots, records, names, actor, *, factual=False):
+def _stage_plan(plan, slots, records, resolved, actor, *, factual=False):
     original = {slot.pk: _assigned_crew(slot) for slot in slots}
     by_number = defaultdict(list)
     for slot in slots:
@@ -242,7 +287,7 @@ def _stage_plan(plan, slots, records, names, actor, *, factual=False):
             continue
         coordinates[slot.pk] = record.address
         try:
-            staff = [_find_employee(value, names) for value in _crew_values(record.value, plan.work_date)]
+            staff = resolved[record.address]
             reported_id = None
             for employee, position in zip(staff, (CREW_SLOT_POSITION_PRIMARY, CREW_SLOT_POSITION_SECONDARY)):
                 if employee is not None:
@@ -314,10 +359,16 @@ def _require_draft_confirmation(plans, *, confirmation, file_digest, work_date, 
 
 
 @transaction.atomic
-def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation='', factual=False):
+def publish_crew_excel(
+    grouped, *, work_date, access, file_digest, confirmation='', factual=False, selections=None,
+):
     if work_date != production_work_date():
         raise ValidationError('Производственные сутки изменились. Открой форму загрузки заново.')
     actor, actor_access = _locked_deputy_publish_access(actor_access=access, actor=access.employee)
+    resolved, accepted = _resolve_crew(grouped, work_date, selections or {})
+    if accepted:
+        selection_key = ','.join(f'{field}={pk}' for field, pk in sorted(accepted.items()))
+        file_digest = f'{file_digest}:{selection_key}'
     plans = []
     for code in sorted(grouped):
         role = Role.objects.filter(code=code, is_active=True).first()
@@ -331,15 +382,9 @@ def publish_crew_excel(grouped, *, work_date, access, file_digest, confirmation=
     _require_draft_confirmation(
         plans, confirmation=confirmation, file_digest=file_digest, work_date=work_date, access=actor_access,
     )
-    names = defaultdict(list)
-    for employee in Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE):
-        parts = _name_parts(employee.full_name)
-        if parts:
-            names[parts[0]].append((parts, employee))
-
     publications = []
     for plan, slots in plans:
-        changed = _stage_plan(plan, slots, grouped[plan.role.code], names, actor, factual=factual)
+        changed = _stage_plan(plan, slots, grouped[plan.role.code], resolved, actor, factual=factual)
         if changed:
             published = _publish_crew_plan_once(
                 plan=plan, expected_version=plan.version, actor=actor, actor_access=actor_access,

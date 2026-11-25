@@ -44,7 +44,10 @@
             if (!nextResult) throw new Error("Upload response is missing its result.");
             result.replaceChildren(...nextResult.childNodes);
             announce("");
-            if (result.querySelector("[name=draft_confirmation]")) {
+            const employeeChoice = result.querySelector(".deputy-import-choice select");
+            if (employeeChoice) {
+                employeeChoice.focus();
+            } else if (result.querySelector("[name=draft_confirmation]")) {
                 result.querySelector("button[type=submit]").focus();
             }
         } catch {

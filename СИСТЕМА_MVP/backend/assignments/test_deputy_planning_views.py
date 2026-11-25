@@ -158,7 +158,7 @@ class DeputyPlanningViewTests(TestCase):
         workbook.save(data)
         return data.getvalue()
 
-    def upload_crew_excel(self, rows, *, work_date=None, confirmation=''):
+    def upload_crew_excel(self, rows, *, work_date=None, confirmation='', selections=None):
         payload = rows if isinstance(rows, bytes) else self.crew_excel_bytes(rows)
         return self.client.post(
             reverse('deputy_mining_manager_import'),
@@ -166,6 +166,7 @@ class DeputyPlanningViewTests(TestCase):
                 'work_date': (work_date or production_work_date()).isoformat(),
                 'workbook': SimpleUploadedFile('Расстановка.xlsx', payload),
                 'draft_confirmation': confirmation,
+                **(selections or {}),
             },
         )
 
@@ -399,11 +400,43 @@ class DeputyPlanningViewTests(TestCase):
                 response = self.upload_crew_excel([
                     ['Самосвал', self.truck_2.garage_number, misspelled, None],
                 ])
-                self.assertContains(response, f'C2. В Excel — «{misspelled}».', status_code=400)
-                self.assertContains(response, f'записи в справочнике — «{self.driver.full_name}»', status_code=400)
+                self.assertContains(response, f'В Excel — «{misspelled}»', status_code=422)
+                self.assertContains(response, 'name="employee_C2_1"', status_code=422)
+                self.assertContains(response, f'{self.driver.full_name} · таб. Т-001', status_code=422)
         self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
         self.original_assignment.refresh_from_db()
         self.assertIsNone(self.original_assignment.ended_at)
+
+    def test_excel_employee_choice_is_explicit_and_carried_into_draft_confirmation(self):
+        plan = self.create_draft()
+        self.autosave_slot(plan, equipment=self.truck_2, shift_type=WorkShiftType.SHIFT_1, employee=self.driver)
+        namesake, _ = self.create_employee_with_access(
+            self.driver.full_name, self.driver_role, personnel_number='Т-009',
+            phone='+79000000009', access_code='210009', position='Водитель самосвала',
+        )
+        workbook = self.crew_excel_bytes([
+            ['Самосвал', self.truck_1.garage_number, 'Снять', self.driver.full_name],
+        ])
+        invalid = self.upload_crew_excel(workbook, selections={'employee_D2_1': str(self.deputy.pk)})
+        self.assertContains(invalid, 'name="employee_D2_1"', status_code=422)
+        self.assertContains(invalid, 'таб. Т-009', status_code=422)
+        selection = {'employee_D2_1': str(self.driver.pk)}
+        review = self.upload_crew_excel(workbook, selections=selection)
+        self.assertEqual(review.status_code, 409)
+        self.assertContains(
+            review, f'type="hidden" name="employee_D2_1" value="{self.driver.pk}"', status_code=409,
+        )
+        token = review.context['draft_confirmation']
+        changed = self.upload_crew_excel(
+            workbook, confirmation=token, selections={'employee_D2_1': str(namesake.pk)},
+        )
+        self.assertEqual(changed.status_code, 409)
+        self.assertFalse(CrewPlan.objects.filter(status=CrewPlanStatus.PUBLISHED).exists())
+        final = self.upload_crew_excel(workbook, confirmation=token, selections=selection)
+        self.assertContains(final, 'Расстановка опубликована')
+        self.assertEqual(
+            plan.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2).employee, self.driver,
+        )
 
     def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
         response = self.upload_crew_excel([

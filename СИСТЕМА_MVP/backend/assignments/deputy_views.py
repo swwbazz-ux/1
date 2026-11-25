@@ -41,6 +41,7 @@ from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS, crew_equipment_number
 from .crew_excel_import import (
     DraftConfirmationRequired,
+    EmployeeChoiceRequired,
     MAX_FILE_SIZE,
     publish_crew_excel,
     read_crew_excel,
@@ -1423,17 +1424,34 @@ def deputy_mining_manager_import_view(request):
             grouped, skipped = read_crew_excel(contents)
             context['skipped_categories'] = sorted(skipped.items())
             confirmation = request.POST.get('draft_confirmation', '')
+            selections = {}
+            for records in grouped.values():
+                for record in records:
+                    for position in (1, 2):
+                        field = f'employee_{record.address}_{position}'
+                        value = request.POST.get(field, '')
+                        if value.isascii() and value.isdigit() and len(value) <= 20:
+                            selections[field] = value
+            context['retained_employee_selections'] = selections
             context['factual'] = request.POST.get('factual') == '1'
             publications = publish_crew_excel(
                 grouped, work_date=work_date, access=access,
                 file_digest=sha256(contents).hexdigest(), confirmation=confirmation, factual=context['factual'],
+                selections=selections,
             )
             context['publications'] = [
                 (plan, TARGET_ROLE_LABELS[plan.role.code], count)
                 for plan, count in publications
             ]
             context['processed'] = True
+            context.pop('retained_employee_selections', None)
             context['replaced_draft'] = bool(confirmation)
+        except EmployeeChoiceRequired as review:
+            status = 422
+            for choice in review.choices:
+                selections.pop(choice['field'], None)
+            context['employee_choices'] = review.choices
+            context['errors'] = review.errors
         except DraftConfirmationRequired as review:
             status = 409
             context['draft_changed'] = bool(confirmation)
