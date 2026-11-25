@@ -7963,39 +7963,63 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertIsNotNone(replacement.shift_official_assignment_id)
         self.assertEqual(replacement.ends_at, imported.ends_at)
 
-    def test_excel_relocation_requires_unambiguous_current_watch(self):
-        imported = self._excel_placement(timezone.now())
-        WatchPeriod.objects.create(
-            name='Пересекающаяся вахта', watch_composition=self.watch_composition,
-            starts_on=self.watch_period.starts_on, ends_on=self.watch_period.ends_on, is_active=True,
-        )
-        self.authenticate(self.client, self.clerk_access)
-        response = self.post_settle(
-            action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
-        )
+    def test_excel_relocation_keeps_recorded_shift_without_matching_watch(self):
+        from .models import SettlementPlacementEvent
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()['code'], 'settlement.manual.period_ambiguous')
-        imported.refresh_from_db()
-        self.assertIsNone(imported.terminated_at)
-        self.assertIsNone(imported.replaced_by_occupancy_id)
+        for watch in ('нет действующей', 'две действующих'):
+            with self.subTest(watch=watch), transaction.atomic():
+                imported = self._excel_placement(timezone.now())
+                if watch == 'нет действующей':
+                    WatchPeriod.objects.filter(pk=self.watch_period.pk).update(is_active=False)
+                else:
+                    WatchPeriod.objects.create(
+                        name='Пересекающаяся вахта', watch_composition=self.watch_composition,
+                        starts_on=self.watch_period.starts_on, ends_on=self.watch_period.ends_on, is_active=True,
+                    )
+                EquipmentAssignment._base_manager.filter(employee=self.second_candidate).update(
+                    status=AssignmentStatus.CANCELLED,
+                )
+                self.client = Client()
+                self.authenticate(self.client, self.clerk_access)
+                response = self.post_settle(
+                    action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
+                )
+                self.assertEqual(response.status_code, 201, response.json())
+                imported.refresh_from_db()
+                replacement = imported.replaced_by_occupancy
+                self.assertIsNotNone(imported.terminated_at)
+                self.assertIsNone(replacement.watch_period_id)
+                self.assertEqual(replacement.ends_at, imported.ends_at)
+                self.assertEqual(replacement.shift_source_kind, imported.shift_source_kind)
+                self.assertEqual(replacement.shift_source_fingerprint, imported.shift_source_fingerprint)
+                self.assertEqual(replacement.shift_selected_by_access_id, imported.shift_selected_by_access_id)
+                self.assertEqual(replacement.work_shift, 'day')
+                self.assertEqual(response.json()['occupancy']['tooltip_shift_label'], 'День · по Excel')
+                event = SettlementPlacementEvent.objects.get(payload__occupancy_id=replacement.pk)
+                self.assertEqual(event.physical_bed_id, replacement.physical_bed_id)
+                self.assertEqual(event.payload['previous_occupancy_id'], imported.pk)
+                self.assertEqual(event.payload['source_row'], 'КИС 5!J3')
+                again = self.post_settle(
+                    action='relocate', bed=self.transferred_beds[2], employee=self.second_candidate,
+                )
+                self.assertEqual(again.status_code, 201, again.json())
+                transaction.set_rollback(True)
 
-    def test_excel_placement_without_published_shift_shows_excel_and_blocks_move(self):
+    def test_excel_relocation_keeps_excel_shift_without_published_assignment(self):
         imported = self._excel_placement(timezone.now())
         EquipmentAssignment._base_manager.filter(employee=self.second_candidate).update(
             status=AssignmentStatus.CANCELLED,
         )
         self.authenticate(self.client, self.clerk_access)
-
         self.assertContains(self.client.get(reverse('settlement_map')), 'День · по Excel')
         response = self.post_settle(
             action='relocate', bed=self.transferred_beds[1], employee=self.second_candidate,
         )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()['code'], 'settlement.cohort.shift_review_required')
+        self.assertEqual(response.status_code, 201, response.json())
         imported.refresh_from_db()
-        self.assertIsNone(imported.terminated_at)
+        self.assertIsNotNone(imported.terminated_at)
+        self.assertEqual(imported.replaced_by_occupancy.work_shift, 'day')
+        self.assertIsNone(imported.replaced_by_occupancy.shift_official_assignment_id)
 
     def test_legacy_relocation_is_forbidden_but_exact_release_is_allowed(self):
         moment = timezone.now().replace(microsecond=0)

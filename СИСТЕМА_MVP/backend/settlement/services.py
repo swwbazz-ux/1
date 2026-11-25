@@ -836,18 +836,24 @@ def _lock_occupancy_context_rows(*, snapshot, using):
         ).get(pk=application_id)
 
 
-def current_housing_import_occupancy_ids(placements, *, using=None):
+def _current_housing_import_sources(placements, *, using=None):
     """Identify factual Excel imports by their placement event, including older rows."""
     if not placements:
-        return set()
+        return {}
     events = SettlementPlacementEvent.objects.using(using).filter(
-        event_type=SettlementPlacementEvent.EventType.TEMPORARY_CREATED,
+        event_type__in=(
+            SettlementPlacementEvent.EventType.TEMPORARY_CREATED,
+            SettlementPlacementEvent.EventType.TEMPORARY_RELOCATED,
+        ),
         resident_id__in={resident_id for resident_id, _ in placements.values()},
         payload__occupancy_id__in=placements,
         payload__has_keys=['workbook_sha256', 'source_row'],
     ).values_list('payload', 'resident_id', 'physical_bed_id')
     return {
-        payload['occupancy_id'] for payload, resident_id, bed_id in events
+        payload['occupancy_id']: {
+            'workbook_sha256': payload['workbook_sha256'], 'source_row': payload['source_row'],
+        }
+        for payload, resident_id, bed_id in events
         if placements.get(payload.get('occupancy_id')) == (resident_id, bed_id)
     }
 
@@ -866,7 +872,7 @@ def current_housing_official_assignments(occupancies, moment):
         occupancy.pk: (occupancy.resident_id, occupancy.physical_bed_id)
         for occupancy in occupancies if occupancy.watch_period_id is None and occupancy.resident.employee_id
     }
-    imported_ids = current_housing_import_occupancy_ids(placements)
+    imported_ids = set(_current_housing_import_sources(placements))
     employees_by_composition = defaultdict(set)
     for occupancy in occupancies:
         if occupancy.pk in imported_ids:
@@ -892,29 +898,19 @@ def current_housing_official_assignments(occupancies, moment):
     return imported_ids, verified
 
 
-def _lock_import_relocation_shift(resident, occupancy_snapshot, moment, *, using):
-    occupancy_id, resident_id, bed_id, period_id = occupancy_snapshot[:4]
-    if period_id or not resident.employee_id or not current_housing_import_occupancy_ids(
-        {occupancy_id: (resident_id, bed_id)}, using=using,
-    ):
-        return None, None
-
+def _lock_import_relocation_shift(resident, moment, *, using):
     periods = list(_current_import_watch_periods(
         [resident.employee.watch_composition_id], moment, using=using,
     ).select_for_update(of=('self',))[:2])
     if len(periods) != 1:
-        raise _settlement_error(
-            'Для сотрудника нужна одна действующая вахта. Проверьте состав вахты.',
-            'settlement.manual.period_ambiguous',
-        )
+        return None, None
     period = periods[0]
     try:
         source = resolve_internal_official_shift_source(resident=resident, period=period)
     except ValidationError as error:
-        raise _settlement_error(
-            'Проверьте технику и смену сотрудника в опубликованной расстановке на эту вахту.',
-            'settlement.cohort.shift_review_required',
-        ) from error
+        if error.code != 'settlement.cohort.shift_review_required':
+            raise
+        return None, None
     return period, source
 
 
@@ -1626,9 +1622,14 @@ def relocate_resident_to_bed(
         )
         resident = resident_rows.resident_by_id(resident_id)
         _lock_occupancy_context_rows(snapshot=occupancy_snapshot, using=using)
-        import_period, shift_source = _lock_import_relocation_shift(
-            resident, occupancy_snapshot, moment, using=using,
-        )
+        import_source = None
+        import_period = shift_source = None
+        if resident.employee_id and occupancy_snapshot[3] is None:
+            import_source = _current_housing_import_sources(
+                {occupancy_id: (resident_id, current_bed_id)}, using=using,
+            ).get(occupancy_id)
+            if import_source:
+                import_period, shift_source = _lock_import_relocation_shift(resident, moment, using=using)
         if target_bed_id == current_bed_id:
             raise _settlement_error(
                 'Нельзя переселить сотрудника на то же койко-место.',
@@ -1705,11 +1706,28 @@ def relocate_resident_to_bed(
                 'Переселение невозможно в момент начала текущего размещения.',
                 'settlement_relocation_same_moment',
             )
-        if shift_source is None:
-            shift_source = _official_manual_source_for_occupancy(
-                occupancy=current_occupancy,
-                resident=resident,
-            )
+        if import_source and shift_source is None:
+            # A bed move can retain the imported facts even when an official
+            # work shift cannot be determined. Preserve their original evidence.
+            shift_evidence = {
+                'work_shift': current_occupancy.work_shift,
+                'shift_source_kind': current_occupancy.shift_source_kind,
+                'shift_source_fingerprint': current_occupancy.shift_source_fingerprint,
+                'shift_selected_by_access': current_occupancy.shift_selected_by_access,
+                'shift_selected_at': current_occupancy.shift_selected_at,
+                'shift_selection_basis': current_occupancy.shift_selection_basis,
+            }
+        else:
+            if shift_source is None:
+                shift_source = _official_manual_source_for_occupancy(
+                    occupancy=current_occupancy, resident=resident,
+                )
+            shift_evidence = {
+                'work_shift': shift_source['work_shift'],
+                'shift_source_kind': EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
+                'shift_source_fingerprint': shift_source['shift_source_fingerprint'],
+                'shift_official_assignment': shift_source['official_equipment_assignment'],
+            }
         _validate_assignment_interval(
             assignment_type=current_occupancy.assignment_type,
             starts_at=moment,
@@ -1739,13 +1757,23 @@ def relocate_resident_to_bed(
             ),
             watch_period=import_period or current_occupancy.watch_period,
             cohort_member=current_occupancy.cohort_member,
-            work_shift=shift_source['work_shift'],
-            shift_source_kind=EmployeeBedOccupancy.ShiftSourceKind.OFFICIAL_ASSIGNMENT,
-            shift_source_fingerprint=shift_source['shift_source_fingerprint'],
-            shift_official_assignment=shift_source['official_equipment_assignment'],
+            **shift_evidence,
         )
         current_occupancy.replaced_by_occupancy = occupancy
         current_occupancy.save(update_fields=['replaced_by_occupancy'])
+        if import_source:
+            SettlementPlacementEvent.objects.using(using).create(
+                event_type=SettlementPlacementEvent.EventType.TEMPORARY_RELOCATED,
+                resident=resident,
+                physical_bed=target_bed,
+                actor_access=owner_access,
+                reason='Перенос жильца из текущего расселения.',
+                payload={
+                    **import_source,
+                    'occupancy_id': occupancy.pk,
+                    'previous_occupancy_id': current_occupancy.pk,
+                },
+            )
 
     return occupancy
 

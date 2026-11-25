@@ -1,6 +1,1 @@
-СИСТЕМА_MVP/backend/settlement/control.py
-СИСТЕМА_MVP/backend/settlement/migrations/0026_move_active_admin_control.py
-СИСТЕМА_MVP/backend/static/js/settlement-clerk-shift.js
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
-СИСТЕМА_MVP/backend/users/access_auth.py
-СИСТЕМА_MVP/backend/users/views.py
+СИСТЕМА_MVP/backend/settlement/services.py
