@@ -141,8 +141,10 @@ def role_app(request):
         else ''
     )
     state = getattr(request, 'role_session_state', None) or role_session_state(request)
+    from trips.dispatcher_duty import recorder_shift_id
     is_yandex_android = _is_yandex_android(request)
     return {
+        'dispatcher_duty_shift_id': recorder_shift_id(request, state),
         'role_app': app,
         'role_app_isolated': app is not None,
         'role_app_pwa_scope': metadata_scope if app else '',

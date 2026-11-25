@@ -171,6 +171,7 @@
         var requestController = window.AbortController ? new window.AbortController() : null;
         controller = requestController;
         var body = new URLSearchParams();
+        if (window.DispatcherDutyRecorder) window.DispatcherDutyRecorder.attach(body);
         body.set("path", window.location.pathname);
         body.set("client_kind", clientKind());
         body.set("client_version", document.body?.dataset.nativeClientVersion || "");

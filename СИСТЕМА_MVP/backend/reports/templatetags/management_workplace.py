@@ -34,6 +34,8 @@ def management_workplace_header(context, active, export_url=''):
         return {'label': label, 'href': f'{reverse(route)}?{query}', 'active': key == active}
 
     links = [item('summary', 'Сводка', summary_route, {'date': date_value})]
+    if access.role.code == 'manager' and not getattr(request, 'observer_mode', False):
+        links.append(item('dispatcher_duty', 'Смены диспетчеров', 'management_dispatcher_duty', {'date': date_value}))
     if can_review_watch_extensions(request, access):
         queue_route = 'rotation_site_manager_queue' if site_manager else 'management_extensions'
         links.append(item('extensions', 'Продлёнка', queue_route))

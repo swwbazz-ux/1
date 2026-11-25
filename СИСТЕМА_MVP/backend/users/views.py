@@ -1900,6 +1900,8 @@ def activate_access_view(request):
 
 
 def logout_view(request):
+    from trips.dispatcher_duty import record_dispatcher_logout
+    record_dispatcher_logout(request)
     request.session.flush()
     return redirect('login')
 

@@ -1,4 +1,5 @@
 from django.urls import path
+from .dispatcher_duty import management_dispatcher_duty
 
 from .views import (
     customer_daily_report_export_view,
@@ -178,6 +179,7 @@ urlpatterns = [
     path('reports/downtimes/', downtime_report_view, name='downtime_report'),
     path('reports/downtimes/export/', downtime_report_export_view, name='downtime_report_export'),
     path('reports/management/', management_dashboard_view, name='management_dashboard'),
+    path('reports/management/dispatcher-shifts/', management_dispatcher_duty, name='management_dispatcher_duty'),
     path(
         'reports/management/registrations/',
         management_registration_dashboard_view,

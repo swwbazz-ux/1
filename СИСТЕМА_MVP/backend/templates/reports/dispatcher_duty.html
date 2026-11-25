@@ -1,0 +1,47 @@
+{% extends "reports/management_linked_base.html" %}
+{% load static management_workplace %}
+{% block title %}Смены диспетчеров{% endblock %}
+{% block body_class %}dispatcher-control-screen{% endblock %}
+{% block extra_head %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=1">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=1" defer></script>
+{% endblock %}
+{% block body %}
+<main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
+  <section class="dispatcher-analytics-board management-dashboard-board management-linked-report-board">
+    {% management_workplace_header 'dispatcher_duty' %}
+    <section class="duty-report">
+      <div class="duty-heading">
+        <h2>Смены диспетчеров</h2>
+        <form method="get" class="duty-date-form">
+          <label for="duty-date">Дата начала смен</label>
+          <input id="duty-date" type="date" name="date" required value="{{ report.date }}">
+          <button type="submit">Показать</button>
+        </form>
+      </div>
+      <div class="duty-legend" aria-label="Обозначения шкалы">
+        <span><i class="duty-on"></i>В пульте</span><span><i class="duty-out"></i>Вне пульта</span>
+        <span><i class="duty-unknown"></i>Нет данных</span><span><i class="duty-future"></i>Предстоит</span>
+        <span><i class="duty-diamond"></i>Операция</span>
+      </div>
+      {% include "reports/includes/dispatcher_duty_slots.html" %}
+      <span class="duty-refresh-status" role="status"></span>
+    </section>
+  </section>
+  <dialog class="duty-dialog" aria-labelledby="duty-journal-title">
+    <div class="duty-dialog-head">
+      <div><small data-duty-period></small><h2 id="duty-journal-title">Журнал смены</h2></div>
+      <button type="button" data-duty-close autofocus>Закрыть</button>
+    </div>
+    <p class="duty-selection" data-duty-selection hidden></p>
+    <div class="duty-journal-summary"><p data-duty-staff></p><p data-duty-operation-summary></p></div>
+    <label class="duty-filter">Показать
+      <select data-duty-filter><option value="all">Все события</option><option value="operation">Только операции</option><option value="duty">Смена и связь</option></select>
+    </label>
+    <p data-duty-none hidden>За этот период событий нет.</p>
+    <div data-duty-log></div>
+  </dialog>
+</main>
+{% include 'reports/includes/management_report_theme.html' %}
+{% endblock %}

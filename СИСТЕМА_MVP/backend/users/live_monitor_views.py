@@ -10,6 +10,7 @@ from django.views.decorators.http import require_POST
 
 from shifts.models import EmployeeShift
 from shifts.services import equipment_is_truck
+from trips.dispatcher_duty import DUTY_PAGE_PREFIXES, WindowState, record_window
 
 from .active_role import active_access_for_employee_role, latest_active_role_access
 from .application_connection import begin_application_connection_probe
@@ -58,6 +59,10 @@ def application_session_heartbeat_view(request):
         client_version=client_version,
     ):
         return HttpResponse(status=401)
+    if request.POST.get('duty_shift') and request.POST.get('path', '').startswith(DUTY_PAGE_PREFIXES):
+        # Duty recording uses its own authorization; the common connection
+        # heartbeat still reports the original authenticated transport result.
+        record_window(request, WindowState.VISIBLE)
     response = HttpResponse(status=204)
     response['Cache-Control'] = 'private, no-store'
     return response

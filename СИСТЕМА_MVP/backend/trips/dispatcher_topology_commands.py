@@ -10,7 +10,8 @@ from assignments.command_guards import (
     begin_client_action,
     complete_client_action,
 )
-from assignments.models import ExcavatorPlacement
+from assignments.models import ExcavatorPlacement, HaulAssignment, HaulAssignmentAction
+from .dispatcher_dashboard_projection import dispatcher_complex_label
 from assignments.services import (
     HaulAssignmentStateConflict,
     projected_haul_assignments_for_excavator,
@@ -51,6 +52,15 @@ def required_projected_assignment_states(payload):
             'Экран открыт в старой версии. Обновите пульт перед массовым действием.'
         )
     return payload.get('expected_assignment_states')
+
+
+def assignment_duty_detail(truck, previous_id, destination, created):
+    # The optimistic guard verified this exact previous assignment inside the transaction.
+    previous = HaulAssignment.objects.select_related('excavator').filter(pk=previous_id, truck=truck).first() if previous_id else None
+    source = dispatcher_complex_label(previous.excavator) if previous and previous.action == HaulAssignmentAction.ASSIGN else 'Гараж'
+    target = dispatcher_complex_label(destination) if destination else 'Гараж'
+    result = 'Ожидает подтверждения' if created else 'Без изменений'
+    return f'Самосвал № {truck.garage_number} · {source} → {target} · {result}'
 
 
 def execute_dispatcher_move_excavator(
@@ -159,9 +169,10 @@ def execute_dispatcher_move_excavator(
         summary = f'{equipment_label(excavator)} переведен в активную смену'
 
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=summary,
+        duty_detail='Самосвалы: ' + ', '.join(equipment_label(a.truck) for a in scheduled_assignments) if scheduled_assignments else '',
     )
     response_payload = {
         'ok': True,
@@ -249,9 +260,10 @@ def execute_dispatcher_assign_truck(
             return dispatcher_client_action_error(payload, error, code='state_conflict')
         scheduled = len(scheduled_assignments)
         action_logger(
-            actor=access.employee,
+            actor=access.employee, access=access, request=request,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_label(excavator)}: снятие назначений ожидает ({scheduled})',
+            duty_detail=' · '.join(f'№ {equipment_label(a.truck)}: {dispatcher_complex_label(excavator)} → Гараж' for a in scheduled_assignments),
         )
         response_payload = {
             'ok': True,
@@ -293,9 +305,10 @@ def execute_dispatcher_assign_truck(
         except HaulAssignmentStateConflict as error:
             return dispatcher_client_action_error(payload, error, code='state_conflict')
         action_logger(
-            actor=access.employee,
+            actor=access.employee, access=access, request=request,
             action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
             target_summary=f'{equipment_label(truck)} снят с комплекса и возвращен в гараж',
+            duty_detail=assignment_duty_detail(truck, expected_state_id, None, created),
         )
         response_payload = {
             'ok': True,
@@ -343,9 +356,10 @@ def execute_dispatcher_assign_truck(
     except HaulAssignmentStateConflict as error:
         return dispatcher_client_action_error(payload, error, code='state_conflict')
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         target_summary=f'{equipment_label(truck)} назначен под {equipment_label(excavator)}',
+        duty_detail=assignment_duty_detail(truck, expected_state_id, excavator, created),
         haul_assignment=assignment,
     )
     response_payload = {

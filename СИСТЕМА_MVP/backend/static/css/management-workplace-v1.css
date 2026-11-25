@@ -28,6 +28,10 @@ body:has(.management-connection-dot) > .app-connection-dot {
     height: 9px;
 }
 
+.management-workplace-header .dispatcher-subnav a {
+    flex: 0 0 auto;
+}
+
 @media (max-width: 1180px) {
     .management-workplace-header .management-dashboard-header-actions {
         justify-self: stretch;

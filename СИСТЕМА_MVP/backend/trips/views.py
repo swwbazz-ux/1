@@ -203,6 +203,7 @@ from .dispatcher_topology_commands import (
 )
 from .forms import TripCreateForm
 from .models import DispatcherActionLog, DispatcherActionType, OPEN_TRIP_STATUSES, Trip, TripClientAction, TripStatus
+from .dispatcher_duty import log_dispatcher_action
 from .trip_creation import (
     calculate_trip_volume_and_tonnage,
     create_loaded_waiting_unload_trip,
@@ -3352,18 +3353,6 @@ def build_dispatcher_dashboard_context(
         'current_time': production_context.local_datetime.strftime('%H:%M'),
         'current_date': production_context.production_date.strftime('%d.%m.%Y'),
     }
-
-
-def log_dispatcher_action(*, actor, action_type, target_summary, trip=None, shift=None, haul_assignment=None, reason=''):
-    DispatcherActionLog.objects.create(
-        actor=actor,
-        action_type=action_type,
-        trip=trip,
-        shift=shift,
-        haul_assignment=haul_assignment,
-        target_summary=target_summary,
-        reason=str(reason or '').strip(),
-    )
 
 
 def lock_dispatcher_mutation_access(request, access):

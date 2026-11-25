@@ -38,6 +38,7 @@ from shifts.services import (
     shift_plan_totals_for_dates,
 )
 from trips.dispatcher_header import build_dispatcher_header_context
+from trips.dispatcher_duty import log_dispatcher_action
 from trips.tablet_control import get_control_shift, is_tablet_master_request
 from trips.models import (
     DispatcherActionLog,
@@ -3587,6 +3588,7 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
             'downtime_text': trip.downtime_text,
             'note': trip.note,
         }
+        before_names = {'rock_type_id': trip.rock_type, 'actual_dump_point_id': trip.actual_dump_point}
         try:
             trip.volume_m3 = parse_report_decimal(
                 request.POST.get('volume_m3'), 'Объём', Decimal('99999999.99'),
@@ -3638,12 +3640,24 @@ def update_shift_report_trip(request, access, selected_date, shift_type, report_
         }
         changed = [field for field in before if before[field] != after[field]]
         if changed:
-            DispatcherActionLog.objects.create(
-                actor=access.employee,
+            labels = {'volume_m3': 'Объём, м³', 'tonnage': 'Масса, т', 'transport_distance_km': 'Плечо, км',
+                      'loading_horizon': 'Горизонт', 'loading_block': 'Блок', 'rock_type_id': 'Порода',
+                      'actual_dump_point_id': 'Точка разгрузки', 'downtime_text': 'Простой', 'note': 'Примечание'}
+            after_names = {'rock_type_id': trip.rock_type, 'actual_dump_point_id': trip.actual_dump_point}
+            def display(value):
+                return '—' if value is None or value == '' else str(value)
+
+            changes = [
+                f'{labels[key]}: {display(before_names.get(key, before[key]))} → {display(after_names.get(key, after[key]))}'
+                for key in changed
+            ]
+            log_dispatcher_action(
+                actor=access.employee, access=access, request=request,
                 action_type='report_source_correction',
                 trip=trip,
                 shift=trip.loading_shift or trip.unloading_shift,
                 target_summary=f'Коррекция рейса №{trip.id}: {", ".join(changed)}'[:255],
+                duty_detail=' · '.join(changes),
                 reason=reason[:255],
             )
         messages.success(request, f'Данные рейса №{trip.id} обновлены. Отчёт пересчитан.')

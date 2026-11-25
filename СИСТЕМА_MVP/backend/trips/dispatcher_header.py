@@ -37,7 +37,7 @@ WORKPLACE_ROLE_CODES = {
 }
 
 
-def dispatcher_shift_queryset():
+def dispatcher_shift_queryset(*, open_only=True):
     dispatcher_access = EmployeeAccess.objects.filter(
         employee_id=OuterRef('employee_id'),
         role__code='dispatcher',
@@ -52,9 +52,11 @@ def dispatcher_shift_queryset():
         is_active=True,
         status=EmployeeAccess.Status.ACTIVATED,
     )
+    shifts = EmployeeShift.objects.all()
+    if open_only:
+        shifts = shifts.filter(closed_at__isnull=True)
     return (
-        EmployeeShift.objects
-        .filter(closed_at__isnull=True)
+        shifts
         .annotate(
             has_dispatcher_access=Exists(dispatcher_access),
             has_other_workplace_access=Exists(other_workplace_access),

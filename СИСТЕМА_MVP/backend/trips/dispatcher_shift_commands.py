@@ -418,7 +418,7 @@ def execute_dispatcher_service_close_shift(
         **({'now': request.field_verified_occurred_at} if getattr(request, 'field_verified_occurred_at', None) else {}),
     )
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT,
         shift=shift,
         target_summary=(

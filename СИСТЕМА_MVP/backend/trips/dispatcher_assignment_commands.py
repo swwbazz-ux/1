@@ -80,16 +80,19 @@ def execute_dispatcher_cancel_assignment(
             )
             return redirect(redirect_url)
         logged_assignment = pending_release or assignment
+        result = 'Снятие с комплекса ожидает подтверждения'
     else:
         assignment.status = AssignmentStatus.CANCELLED
         assignment.ended_at = command_time(request)
         assignment.save(update_fields=['status', 'ended_at'])
         logged_assignment = assignment
+        result = 'Ожидающее назначение отменено'
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.CANCEL_ASSIGNMENT,
         haul_assignment=logged_assignment,
         target_summary=f'{assignment.truck} под {assignment.excavator}',
+        duty_detail=result,
         reason=reason,
     )
     messages.success(

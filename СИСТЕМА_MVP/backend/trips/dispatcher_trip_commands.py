@@ -107,9 +107,10 @@ def execute_dispatcher_cancel_trip(
     close_free_bucket_acceptance_for_trip(trip, closed_at=trip.cancelled_at)
     reconcile_excavator(trip.excavator)
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.CANCEL_TRIP,
         trip=trip,
+        duty_detail=f'Рейс № {trip.pk} отменён',
         target_summary=f'{trip.truck} -> {trip.dump_point}',
         reason=reason,
     )
@@ -244,9 +245,10 @@ def execute_dispatcher_complete_trip(
         **({'occurred_at': request.field_verified_occurred_at} if getattr(request, 'field_verified_occurred_at', None) else {}),
     )
     action_logger(
-        actor=access.employee,
+        actor=access.employee, access=access, request=request,
         action_type=DispatcherActionType.COMPLETE_TRIP,
         trip=trip,
+        duty_detail=f'Рейс № {trip.pk} завершён',
         target_summary=f'{trip.truck} -> {trip.dump_point}',
         reason=reason,
     )
@@ -463,9 +465,10 @@ def execute_dispatcher_manual_trip(
             ),
         )
         action_logger(
-            actor=access.employee,
+            actor=access.employee, access=access, request=request,
             action_type=DispatcherActionType.MANUAL_TRIP,
             trip=trip,
+            duty_detail=f'Рейс № {trip.pk} · {excavator} · {rock_type} · {volume_m3} м³',
             target_summary=f'{truck} -> {dump_point}',
             reason=reason,
         )
