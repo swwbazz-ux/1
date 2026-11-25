@@ -642,6 +642,10 @@ class DeputyPlanningViewTests(TestCase):
         self.assertNotContains(page, 'data-gd-setting-save')
         self.assertEqual(fragment.status_code, 200)
         self.assertIn('Только просмотр', fragment.json()['html'])
+        for html in (page.content.decode(), fragment.json()['html']):
+            self.assertIn(f'href="{reverse("deputy_mining_manager_placement")}">← Вернуться в расстановку</a>', html)
+            self.assertNotIn(f'href="{reverse("logout")}"', html)
+            self.assertNotIn('Ручной рейс', html)
         self.assertEqual(card.status_code, 200)
         self.assertEqual(self.client.post(board).status_code, 405)
         self.assertEqual(self.client.post(detail).status_code, 403)

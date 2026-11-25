@@ -5,13 +5,13 @@
 
     <section class="dispatcher-command-main" aria-label="{% if dispatcher_main_label %}{{ dispatcher_main_label }}{% else %}Текущий раздел{% endif %}">
         <div class="dispatcher-command-context">
-            <strong>{% if dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
+            <strong>{% if deputy_dispatcher_viewer %}Диспетчерский пульт{% elif dispatcher_header_screen %}{{ dispatcher_header_screen }}{% else %}Пульт смены{% endif %}</strong>
             <span class="dispatcher-command-shift-name">{% if dispatcher_header_shift_label %}{{ dispatcher_header_shift_label }}{% elif dispatcher_header.shift_label %}{{ dispatcher_header.shift_label }}{% elif shift_label %}{{ shift_label }}{% else %}Первая смена{% endif %}</span>
             <span class="dispatcher-command-date">{% if dispatcher_header_shift_date %}{{ dispatcher_header_shift_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% elif current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
         {% if deputy_dispatcher_viewer %}
-            <span>Диспетчерский пульт · Только просмотр</span>
+            <span>Зам. начальника горного участка · Только просмотр</span>
         {% else %}
             {% include "includes/dispatcher_nav.html" %}
         {% endif %}
@@ -25,9 +25,14 @@
         {% endif %}
     </section>
 
+    {% if deputy_dispatcher_viewer %}
+    <nav class="dispatcher-command-actions deputy-board-navigation" aria-label="Навигация замначальника">
+        <a class="dispatcher-utility-link" href="{% url 'deputy_mining_manager_placement' %}">← Вернуться в расстановку</a>
+    </nav>
+    {% else %}
     <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
         <span class="dispatcher-shift-slot">
-            {% if not deputy_dispatcher_viewer %}{% include "includes/dispatcher_shift_action.html" %}{% endif %}
+            {% include "includes/dispatcher_shift_action.html" %}
         </span>
         {% if not request.mining_master_tablet_control %}
         <div class="dispatcher-command-utility"{% if access.role.code == 'dispatcher' %} style="width: calc(100% + 88px); max-width: 388px; grid-template-columns: 38px 38px 38px repeat(2, minmax(0, 1fr)); column-gap: 8px;"{% endif %}>
@@ -61,12 +66,13 @@
                 </button>
             {% endif %}
             <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
-            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% if deputy_dispatcher_viewer %}{% url 'deputy_mining_manager_placement' %}{% else %}{% url 'role_home' %}{% endif %}"><span aria-hidden="true"></span>{% if deputy_dispatcher_viewer %}Расстановка{% else %}Назад{% endif %}</a>
+            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
             <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
         </div>
         {% endif %}
     </section>
 
+    {% endif %}
     <section class="dispatcher-clock dispatcher-radial-clock" aria-label="{% if dispatcher_clock_label %}{{ dispatcher_clock_label }}{% else %}Текущее время{% endif %}">
         <svg class="dispatcher-radial-clock-ring" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
             <circle class="dispatcher-radial-clock-base" cx="60" cy="60" r="52"></circle>

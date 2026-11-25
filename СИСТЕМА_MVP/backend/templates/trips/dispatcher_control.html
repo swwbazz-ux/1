@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{% if dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
+{% block title %}{% if deputy_dispatcher_viewer %}Диспетчерский пульт · Зам. начальника участка{% elif dispatcher_page_title %}{{ dispatcher_page_title }}{% else %}Горный диспетчер{% endif %}{% endblock %}
 {% block app_stylesheets %}
     {% if mining_master_mobile_enabled %}
         {{ block.super }}
@@ -28,6 +28,17 @@
         <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v165" defer></script>
     {% elif deputy_dispatcher_viewer %}
         {% include "includes/deputy_mining_manager_pwa_head.html" %}
+        <style>
+            .dispatcher-shell .dispatcher-command-actions.deputy-board-navigation {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .deputy-board-navigation .dispatcher-utility-link {
+                width: auto;
+                padding-inline: 1em;
+            }
+        </style>
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">

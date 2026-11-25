@@ -147,7 +147,6 @@
                             <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
                         </div>
                     </section>
-{% endif %}
 
                     <section class="gd-detail-manual-trip" data-gd-detail-manual-trip hidden>
                         <div class="gd-detail-settings-head">
@@ -157,7 +156,6 @@
                             </div>
                         </div>
                         <p class="gd-detail-manual-trip-blocked" data-gd-detail-manual-trip-blocked hidden></p>
-{% if not deputy_dispatcher_viewer %}
                         <form class="gd-detail-shift-close gd-detail-manual-trip-form" data-gd-detail-manual-trip-form method="post" action="" hidden>
                             {% csrf_token %}
                             <input type="hidden" name="excavator_id" value="">
@@ -193,8 +191,8 @@
                                 </div>
                             </div>
                         </form>
-{% endif %}
                     </section>
+{% endif %}
 
                     <div class="gd-detail-load-state" data-gd-detail-load-state hidden>
                         <span data-gd-detail-load-message>Загружаю свежие данные…</span>
