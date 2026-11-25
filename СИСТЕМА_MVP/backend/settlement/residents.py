@@ -425,6 +425,7 @@ def create_external_resident(
     phone,
     control_context,
     sex=_UNSET,
+    require_phone=True,
     photo=None,
     using=DEFAULT_DB_ALIAS,
 ):
@@ -440,7 +441,7 @@ def create_external_resident(
         full_name=_normalized_required(full_name, 'ФИО'),
         position_title=_normalized_required(position_title, 'Должность или профессия'),
         organization=_normalized_required(organization, 'Организация'),
-        phone=_normalized_required(phone, 'Телефон'),
+        phone=_normalized_required(phone, 'Телефон') if require_phone else ' '.join(str(phone or '').split()),
         external_sex=_normalized_external_sex(sex),
         photo=photo,
         created_by_access=actor_access,

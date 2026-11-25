@@ -2673,7 +2673,6 @@ class SettlementResident(StableIdentifierModel):
                         & ~models.Q(full_name='')
                         & ~models.Q(position_title='')
                         & ~models.Q(organization='')
-                        & ~models.Q(phone='')
                     )
                 ),
                 name='settlement_resident_subject_valid',
@@ -2763,7 +2762,7 @@ class SettlementResident(StableIdentifierModel):
                 self.ResidentType.EXTERNAL_OTHER,
             }:
                 errors['resident_type'] = 'Неизвестный тип внешнего жильца.'
-            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            for field_name in ('full_name', 'position_title', 'organization'):
                 if not getattr(self, field_name):
                     errors[field_name] = 'Поле обязательно для внешнего жильца.'
             if not self.created_by_access_id:

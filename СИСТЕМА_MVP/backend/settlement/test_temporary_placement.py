@@ -452,11 +452,26 @@ class BedCheckinTests(TemporaryPlacementBase):
         occupancy = EmployeeBedOccupancy.objects.get(pk=result.json()['occupancy']['id'])
         self.assertEqual(occupancy.physical_bed, self.beds[0])
         self.assertEqual(occupancy.resident.full_name, self.payload['full_name'])
+        self.assertEqual(occupancy.resident.phone, self.payload['phone'])
         self.assertEqual(result.json()['occupancy']['stay_period']['end'],
                          (self.today + timedelta(days=3)).strftime('%d.%m.%Y 07:00'))
         self.assertGreaterEqual(self.checkin().status_code, 400)
         self.assertEqual(SettlementResident.objects.filter(full_name=self.payload['full_name']).count(), 1)
         self.assertEqual(EmployeeBedOccupancy.objects.count(), 1)
+
+    def test_new_card_without_phone_can_be_checked_in_once(self):
+        self.acquire()
+        self.payload.pop('phone')
+        result = self.checkin()
+        self.assertEqual(result.status_code, 201, result.content)
+        occupancy = EmployeeBedOccupancy.objects.get(pk=result.json()['occupancy']['id'])
+        self.assertEqual(occupancy.physical_bed, self.beds[0])
+        self.assertEqual(occupancy.resident.phone, '')
+
+        duplicate = self.checkin(bed_stable_id=self.beds[1].stable_id, phone='  ')
+        self.assertGreaterEqual(duplicate.status_code, 400)
+        self.assertIn('Такая карточка уже есть', duplicate.json()['error'])
+        self.assertEqual(SettlementResident.objects.filter(full_name=self.payload['full_name']).count(), 1)
 
     def test_no_control_and_occupied_or_untransferred_bed_leave_no_card(self):
         self.assertGreaterEqual(self.checkin().status_code, 400)

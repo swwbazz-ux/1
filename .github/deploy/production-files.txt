@@ -1,5 +1,5 @@
-СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
-СИСТЕМА_MVP/backend/static/js/settlement-bed-checkin.js
-СИСТЕМА_MVP/backend/templates/clerk/base.html
+СИСТЕМА_MVP/backend/settlement/models.py
+СИСТЕМА_MVP/backend/settlement/residents.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/settlement/migrations/0025_allow_external_resident_without_phone.py
 СИСТЕМА_MVP/backend/templates/settlement/_bed_checkin.html
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html

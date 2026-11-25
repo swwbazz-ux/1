@@ -2574,7 +2574,7 @@ def _normalized_external_required(value):
     return ' '.join(str(value or '').split())
 
 
-def _validated_external_resident_fields(payload):
+def _validated_external_resident_fields(payload, *, require_phone=True):
     """Repeat the domain's fail-closed checks before any duplicate warning."""
     resident_type = payload.get('resident_type')
     if not isinstance(resident_type, str) or resident_type not in EXTERNAL_RESIDENT_TYPES:
@@ -2585,7 +2585,7 @@ def _validated_external_resident_fields(payload):
     values = {'resident_type': resident_type}
     for field_name, field_label in EXTERNAL_RESIDENT_REQUIRED_FIELDS:
         normalized = _normalized_external_required(payload.get(field_name))
-        if not normalized:
+        if not normalized and (field_name != 'phone' or require_phone):
             raise ValidationError(
                 f'{field_label} обязательно.',
                 code='settlement.resident.required_field',
@@ -2954,10 +2954,10 @@ def settlement_bed_checkin_people_view(request):
 def _bed_checkin_resident(payload, control):
     subject = payload.get('subject')
     if subject == 'new':
-        values = _validated_external_resident_fields(payload)
+        values = _validated_external_resident_fields(payload, require_phone=False)
         if external_housing_card_exists(values):
             raise ValidationError('Такая карточка уже есть. Выберите жильца по ФИО. Если карточка в архиве, восстановите её.')
-        return create_external_resident(**values, control_context=control).pk
+        return create_external_resident(**values, control_context=control, require_phone=False).pk
     if isinstance(subject, str):
         kind, _, key = subject.partition(':')
         if key.isascii() and key.isdigit() and len(key) <= 19 and 0 < int(key) <= 2**63 - 1:
