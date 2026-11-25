@@ -390,6 +390,21 @@ class DeputyPlanningViewTests(TestCase):
         self.assertFalse(EquipmentAssignment.objects.filter(employee=person).exists())
         self.assertFalse(EmployeeAccess.objects.filter(employee=person).exists())
 
+    def test_excel_shows_sheet_and_directory_spellings_without_assigning_a_similar_name(self):
+        for misspelled in (
+            'Иванов Сергей Павлович', 'Иванов Серегй Петрович', 'Ивнаов Сергей Петрович',
+            'Иванов Серегй',
+        ):
+            with self.subTest(name=misspelled):
+                response = self.upload_crew_excel([
+                    ['Самосвал', self.truck_2.garage_number, misspelled, None],
+                ])
+                self.assertContains(response, f'C2. В Excel — «{misspelled}».', status_code=400)
+                self.assertContains(response, f'записи в справочнике — «{self.driver.full_name}»', status_code=400)
+        self.assertFalse(CrewPlan.objects.filter(published_at__isnull=False).exists())
+        self.original_assignment.refresh_from_db()
+        self.assertIsNone(self.original_assignment.ended_at)
+
     def test_excel_import_rolls_back_all_categories_on_an_invalid_row(self):
         response = self.upload_crew_excel([
             ['Самосвал', self.truck_1.garage_number, 'Снять', None],

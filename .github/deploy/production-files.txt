@@ -1,3 +1,1 @@
-СИСТЕМА_MVP/backend/templates/includes/dispatcher_header.html
-СИСТЕМА_MVP/backend/templates/trips/dispatcher_control.html
-СИСТЕМА_MVP/backend/templates/trips/includes/dispatcher_equipment_detail.html
+СИСТЕМА_MVP/backend/assignments/crew_excel_import.py

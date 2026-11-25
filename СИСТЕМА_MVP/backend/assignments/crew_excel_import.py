@@ -2,6 +2,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
+from difflib import SequenceMatcher
 from io import BytesIO
 
 from django.core import signing
@@ -152,6 +153,28 @@ def _crew_values(value, work_date):
     return values
 
 
+def _similar_directory_names(parts, names, personnel_number):
+    if len(parts) not in (2, 3) or any(len(part) < 2 for part in parts):
+        return []
+    ranked = {}
+    for surname_group in names.values():
+        for tokens, employee in surname_group:
+            if personnel_number is not None and employee.personnel_number != personnel_number:
+                continue
+            if len(tokens) < len(parts):
+                continue
+            differences = [(source, target) for source, target in zip(parts, tokens) if source != target]
+            if len(differences) != 1:
+                continue
+            source, target = differences[0]
+            score = SequenceMatcher(None, source, target).ratio()
+            # A full three-part name has two corroborating fields. For a short
+            # name, also require a close spelling of the differing field.
+            if len(parts) == 3 or score >= 0.75:
+                ranked[employee.full_name] = score
+    return sorted(ranked, key=lambda name: (-ranked[name], name))[:5]
+
+
 def _find_employee(value, names):
     if _key(value) == 'снять':
         return None
@@ -169,10 +192,24 @@ def _find_employee(value, names):
                 for i, (source, target) in enumerate(zip(parts, tokens))
             ):
                 candidates.append(employee)
-    if len(candidates) != 1:
-        issue = 'ФИО неоднозначно' if candidates else 'Сотрудник не найден'
-        raise ValidationError(f'{issue} — {value}. Укажи ФИО из справочника.')
-    return candidates[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    if candidates:
+        raise ValidationError(
+            f'В справочнике несколько действующих сотрудников с ФИО «{name}». '
+            'Уточни полное ФИО или добавь табельный номер в формате [таб. 123].'
+        )
+    similar = _similar_directory_names(parts, names, number[:-1] if separator else None)
+    if similar:
+        variants = ', '.join(f'«{full_name}»' for full_name in similar)
+        raise ValidationError(
+            f'В Excel — «{value}». Похожие записи в справочнике — {variants}. '
+            'Сверь, кто назначен на смену, и укажи его ФИО из справочника.'
+        )
+    raise ValidationError(
+        f'Среди действующих сотрудников справочника нет совпадения для «{value}». '
+        'Проверь написание ФИО и статус карточки.'
+    )
 
 
 def _assigned_crew(slot):
