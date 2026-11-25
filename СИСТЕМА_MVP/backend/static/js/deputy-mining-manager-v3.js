@@ -131,6 +131,7 @@
     var noticeAction = notice && notice.querySelector("[data-notice-action]");
     var noticeClose = notice && notice.querySelector("[data-notice-close]");
     var categoryRequest = null;
+    var peopleSearch = null;
     var pausedPanels = [];
     var currentFilter = "all";
     var currentBrigade = state.brigades && state.brigades.length === 2 ? "watch" : "all";
@@ -333,6 +334,7 @@
         var ranks = [equipmentSearchRank(row, query)];
         (row.slots || []).forEach(function (slot) {
             if (slot.employee) ranks.push(employeeSearchRank(slot.employee, query));
+            if (slot.reported_name) ranks.push(employeeSearchRank({full_name: slot.reported_name}, query));
             if (slot.secondary_employee) ranks.push(employeeSearchRank(slot.secondary_employee, query));
         });
         ranks = ranks.filter(function (rank) { return rank !== null; });
@@ -343,6 +345,19 @@
         var query = currentQuery();
         var source = currentBrigade === "all" ? state.allWatchEmployees : state.employees;
         var brigadeEmployees = source.filter(employeeMatchesBrigade);
+        var hit = peopleSearch && peopleSearch.target();
+        if (hit && hit.place.role === state.role.code) {
+            var free = state.allWatchEmployees.find(function (employee) {
+                return employee.id === hit.person.id && (inDeputyRoster(employee) || employee.brigade_code);
+            });
+            return {
+                query: query, brigadeEmployees: brigadeEmployees, employeeMode: !hit.place.equipment,
+                employeeMatches: free ? [{employee: free}] : [],
+                rowMatches: state.rows.filter(function (row) {
+                    return row.equipment.id === hit.place.equipment;
+                }).map(function (row) { return {row: row}; })
+            };
+        }
         var employeeMatches = query ? rankedEmployeeMatches(brigadeEmployees, query) : [];
         var rowMatches = query ? state.rows.filter(rowMatchesFilter).map(function (row) {
             return { row: row, rank: rowSearchRank(row, query) };
@@ -818,7 +833,7 @@
         var toolbar = categoryNav.parentElement;
         var panels = Array.from(root.children).concat(Array.from(toolbar.children));
         pausedPanels = panels.filter(function (panel) {
-            return panel !== toolbar && panel !== categoryNav && !panel.inert;
+            return panel !== toolbar && panel !== categoryNav && panel !== searchInput?.parentElement && !panel.inert;
         });
         pausedPanels.forEach(function (panel) { panel.inert = true; });
         root.setAttribute("aria-busy", "true");
@@ -862,6 +877,7 @@
             applyPayload(payload, false);
             if (!fromHistory && url.href !== location.href) history.pushState(null, "", url.href);
             updateAutosave("saved", state.plan.updated_at_label ? "Сохранено · " + state.plan.updated_at_label : "Все изменения сохранены");
+            return true;
         } catch (error) {
             if (controller !== categoryRequest || controller.signal.aborted) return;
             if (fromHistory) {
@@ -888,6 +904,7 @@
                 showToast("Дождитесь сохранения расстановки.");
                 return;
             }
+            if (peopleSearch) peopleSearch.clear(true);
             switchCategory(new URL(link.href), false);
         });
         window.addEventListener("popstate", function () {
@@ -895,6 +912,7 @@
                 location.reload();
                 return;
             }
+            if (peopleSearch) peopleSearch.clear(true);
             switchCategory(new URL(location.href), true);
         });
     }
@@ -1066,6 +1084,7 @@
 
     function createEmployeeCard(employee) {
         var card = createElement("article", "deputy-employee-card");
+        card.setAttribute("data-search-employee", employee.id);
         card.setAttribute("role", "listitem");
         var canAssign = inDeputyRoster(employee);
         card.appendChild(createAvatar(employee));
@@ -1133,7 +1152,7 @@
         employeeList.hidden = visible.length === 0;
         if (availableCount) {
             availableCount.textContent = context.query && context.employeeMode
-                ? visible.length + " из " + context.brigadeEmployees.length
+                ? (peopleSearch && peopleSearch.target() ? textValue(visible.length) : visible.length + " из " + context.brigadeEmployees.length)
                 : (context.query && !context.rowMatches.length
                     ? "0 из " + context.brigadeEmployees.length
                     : textValue(context.brigadeEmployees.length));
@@ -1141,7 +1160,7 @@
         if (employeeEmpty) {
             employeeEmpty.hidden = visible.length !== 0;
             employeeEmpty.textContent = context.query
-                ? "Поиск не дал результатов."
+                ? "Среди свободных сотрудников совпадений нет."
                 : ((currentBrigade === "all" || currentBrigade === "watch") ? "Свободных сотрудников нет." : "В бригаде " + currentBrigade + " свободных сотрудников нет.");
         }
     }
@@ -1424,6 +1443,12 @@
             ? (slot.secondary_label || state.secondary_employee_label || "Дополнительный участник")
             : (state.role.primary_label || (state.role.code === "driver" ? "Водитель" : "Машинист"));
         var button = createElement("div", "deputy-crew-position is-" + position);
+        if (occupant) {
+            button.setAttribute("data-search-employee", employee ? employee.id : review.employee_id);
+            button.setAttribute("data-search-equipment", row.equipment.id);
+            button.setAttribute("data-search-shift", slot.shift_type);
+            button.setAttribute("data-search-position", position);
+        }
         button.classList.toggle("is-disabled", !planEditable());
         button.classList.toggle("has-employee", Boolean(occupant));
         button.classList.toggle("has-conflict", Boolean(conflict));
@@ -1679,6 +1704,7 @@
         renderEmployees(reuseNodes, context);
         scheduleRosterExpiry();
         renderBoard(reuseNodes, context);
+        markSearchBadge();
         updatePublishButton();
         updateTemporaryTransferButton();
     }
@@ -1725,6 +1751,7 @@
         var sameBoard = state.plan.id === nextState.plan.id
             && state.plan.editable === nextState.plan.editable
             && state.role.code === nextState.role.code;
+        if (peopleSearch && !categoryRequest && currentQuery()) peopleSearch.clear(true);
         state = nextState;
         renderAll(reuseNodes && sameBoard);
     }
@@ -1868,6 +1895,11 @@
     filterButtons.forEach(function (button) {
         button.addEventListener("click", function () {
             currentFilter = button.getAttribute("data-row-filter") || "all";
+            if (peopleSearch && currentQuery()) {
+                peopleSearch.clear(true);
+                renderEmployees(true);
+                markSearchBadge();
+            }
             filterButtons.forEach(function (item) {
                 var active = item === button;
                 item.classList.toggle("is-active", active);
@@ -1880,6 +1912,11 @@
     brigadeButtons.forEach(function (button) {
         button.addEventListener("click", function () {
             currentBrigade = button.getAttribute("data-brigade-filter") || "all";
+            if (peopleSearch && currentQuery()) {
+                peopleSearch.clear(true);
+                renderBoard(true);
+                markSearchBadge();
+            }
             brigadeButtons.forEach(function (item) {
                 var active = item === button;
                 item.classList.toggle("is-active", active);
@@ -1890,12 +1927,94 @@
         });
     });
 
-    if (searchInput) {
-        searchInput.addEventListener("input", function () {
-            var context = searchContext();
-            renderEmployees(true, context);
-            renderBoard(true, context);
+    function markSearchBadge() {
+        if (!peopleSearch) return;
+        board.removeAttribute("data-found-shift");
+        root.querySelectorAll(".is-person-search-hit").forEach(function (node) {
+            node.classList.remove("is-person-search-hit");
         });
+        var hit = peopleSearch.target();
+        var rowFilter = currentFilter;
+        var brigadeFilter = currentBrigade;
+        if (hit && hit.place.role === state.role.code) {
+            var row = state.rows.find(function (item) { return item.equipment.id === hit.place.equipment; });
+            var free = !hit.place.equipment && state.allWatchEmployees.find(function (item) { return item.id === hit.person.id; });
+            if (row && !rowMatchesFilter(row)) rowFilter = "all";
+            if (free && !employeeMatchesBrigade(free)) brigadeFilter = "all";
+        }
+        function reflectFilter(buttons, attribute, selected) {
+            buttons.forEach(function (button) {
+                var active = button.getAttribute(attribute) === selected;
+                button.classList.toggle("is-active", active);
+                button.setAttribute("aria-pressed", String(active));
+            });
+        }
+        reflectFilter(filterButtons, "data-row-filter", rowFilter);
+        reflectFilter(brigadeButtons, "data-brigade-filter", brigadeFilter);
+        if (!hit || hit.place.role !== state.role.code) return;
+        var selector = '[data-search-employee="' + hit.person.id + '"]';
+        if (hit.place.equipment) {
+            selector += '[data-search-equipment="' + hit.place.equipment + '"][data-search-shift="' +
+                hit.place.shift + '"][data-search-position="' + hit.place.position + '"]';
+        } else selector += ".deputy-employee-card";
+        var badge = root.querySelector(selector);
+        if (badge) {
+            badge.classList.add("is-person-search-hit");
+            if (hit.place.equipment) board.setAttribute("data-found-shift", hit.place.shift);
+        }
+        return badge;
+    }
+
+    function renderSearch() {
+        var context = searchContext();
+        renderEmployees(true, context);
+        renderBoard(true, context);
+        markSearchBadge();
+    }
+
+    async function loadSearchPeople() {
+        // A report opened by revision must show only employees of that snapshot.
+        if (new URL(location.href).searchParams.has("plan")) {
+            var people = new Map();
+            state.rows.forEach(function (row) {
+                row.slots.forEach(function (slot) {
+                    var primary = slot.employee || (slot.reported_name && {
+                        id: slot.specialization_review.employee_id, full_name: slot.reported_name
+                    });
+                    [primary, slot.secondary_employee].forEach(function (employee, index) {
+                        if (!employee) return;
+                        if (!people.has(employee.id)) people.set(employee.id, Object.assign({}, employee, {places: []}));
+                        people.get(employee.id).places.push({role: state.role.code, equipment: row.equipment.id,
+                            number: row.equipment.label, shift: slot.shift_type, position: index ? "secondary" : "primary"});
+                    });
+                });
+            });
+            return Array.from(people.values());
+        }
+        var response = await fetch(searchInput.dataset.peopleUrl, {credentials: "same-origin", cache: "no-store"});
+        if (!response.ok) throw Error();
+        var result = await response.json();
+        if (textValue(result.access_id) !== categoryNav.dataset.accessId) throw Error();
+        return result.people;
+    }
+
+    if (searchInput && window.deputyPeopleSearch && searchInput.dataset.peopleUrl) {
+        function categoryFor(code) { return state.categories.find(function (item) { return item.code === code; }); }
+        peopleSearch = window.deputyPeopleSearch({
+            input: searchInput, query: currentQuery, rank: employeeSearchRank, role: function () { return state.role.code; },
+            load: loadSearchPeople, render: renderSearch, findBadge: markSearchBadge, busy: function () { return saving; },
+            isSnapshot: function () { return new URL(location.href).searchParams.has("plan"); },
+            categoryLabel: function (code) { return categoryFor(code)?.label || code; },
+            categoryUrl: function (code) { return categoryFor(code)?.url || location.href; },
+            navigate: function (code) { return switchCategory(new URL(categoryFor(code).url, location.origin), false); },
+            cancelNavigation: function () { if (categoryRequest) categoryRequest.abort(); },
+            hasLocalMatches: function () {
+                var context = searchContext();
+                return context.rowMatches.length || context.employeeMatches.length;
+            }
+        });
+    } else if (searchInput) {
+        searchInput.addEventListener("input", renderSearch);
     }
     if (factualCandidates) factualCandidates.addEventListener("change", renderCandidatePicker);
     if (candidateSearchInput) {

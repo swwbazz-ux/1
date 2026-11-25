@@ -227,6 +227,40 @@ class DeputyPlanningViewTests(TestCase):
         robots = [row['equipment'] for row in trucks['rows'] if row['equipment']['is_robot']]
         self.assertEqual([item['label'] for item in robots], ['53 · Робот'])
 
+    def test_people_search_before_visiting_category_and_after_draft_change(self):
+        url = reverse('deputy_placement_people')
+        self.assertEqual(Client().get(url).status_code, 403)
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.authenticate(self.client, self.deputy_access)
+        second, _ = self.create_employee_with_access(
+            self.driver.full_name, self.driver_role, phone='+79000000401', access_code='210401',
+            personnel_number='Т-402',
+        )
+        def people():
+            response = self.client.get(url)
+            self.assertIn('no-store', response['Cache-Control'])
+            return {p['id']: p for p in response.json()['people']}
+
+        entries = people()
+        self.assertFalse(CrewPlan.objects.exists())
+        self.assertEqual(entries[self.driver.pk]['places'], [
+            dict(role='driver', equipment=self.truck_1.pk, number='Т-01', shift='day', position='primary'),
+        ])
+        self.assertEqual(entries[second.pk]['places'], [])
+        self.assertEqual(entries[second.pk]['roles'], ['driver'])
+        self.assertNotIn(self.deputy.pk, entries)
+        plan = self.create_draft()
+        plan.slots.filter(employee=self.driver).update(employee=None)
+        plan.slots.filter(equipment=self.truck_2, shift_type='night').update(
+            reported_employee=second, secondary_employee=self.driver,
+        )
+        entries = people()
+        for person, position in [(second, 'primary'), (self.driver, 'secondary')]:
+            self.assertEqual(entries[person.pk]['places'], [
+                dict(role='driver', equipment=self.truck_2.pk, number='Т-02', shift='night', position=position),
+            ])
+
     def test_reported_primary_visible_in_publication_without_operational_assignment(self):
         call_command('prepare_deputy_fleet')
         # The worker must be released from the current truck before joining a roller crew.

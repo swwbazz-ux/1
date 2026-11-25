@@ -39,6 +39,7 @@ from rotations.services import approved_watch_extensions_on
 from rotations.arrival_roster_routing import deputy_arrival_roster_routing_queue
 
 from .crew_categories import AUXILIARY_CATEGORIES, CATEGORY_LABELS, crew_equipment_number
+from .crew_search import placement_people_index
 from .crew_excel_import import (
     DraftConfirmationRequired,
     EmployeeChoiceRequired,
@@ -134,6 +135,7 @@ const CORE_ASSETS = [
   "/static/css/deputy-mining-manager-v3.css",
   "/static/js/role-readonly.js",
   "/static/js/deputy-mining-manager-v3.js",
+  "/static/js/deputy-people-search.js",
   "/static/js/deputy-mining-manager-pwa-v1.js",
   "/static/favicon.ico",
   "/static/img/pwa/deputy-mining-manager-180.png",
@@ -1071,6 +1073,23 @@ def build_crew_plan_payload(plan, *, deputy=None):
 
 DEPUTY_XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 DEPUTY_XLSX_TABLE_HEADER_ROW = 7
+
+
+@never_cache
+@gzip_page
+@require_GET
+def deputy_placement_people(request):
+    access = deputy_access_from_request(request)
+    if not access:
+        return JsonResponse({'error': 'Требуется вход в расстановку.'}, status=403)
+    brigades = _deputy_brigades(access.employee)
+    people = placement_people_index(
+        _work_date_from_request(request),
+        visible_free=lambda employee, extensions: (
+            _in_deputy_roster(employee, brigades, extensions) or _employee_brigade_code(employee) in ALL_BRIGADES
+        ),
+    )
+    return JsonResponse({'access_id': access.pk, 'people': people})
 
 
 def _excel_text(value):
