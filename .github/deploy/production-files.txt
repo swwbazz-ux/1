@@ -1,4 +1,8 @@
-СИСТЕМА_MVP/backend/core/realtime.py
-СИСТЕМА_MVP/backend/core/urls.py
-СИСТЕМА_MVP/backend/core/views.py
-СИСТЕМА_MVP/backend/templates/base.html
+СИСТЕМА_MVP/backend/settlement/cohort_readiness.py
+СИСТЕМА_MVP/backend/settlement/cohorts.py
+СИСТЕМА_MVP/backend/settlement/resolver.py
+СИСТЕМА_MVP/backend/settlement/urls.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/templates/settlement/arrival_roster_routing_queue.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/templates/settlement/provisional_plan.html

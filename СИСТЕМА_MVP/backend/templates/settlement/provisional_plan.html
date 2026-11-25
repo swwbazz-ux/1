@@ -1,0 +1,20 @@
+{% extends "clerk/base.html" %}
+{% block clerk_content %}
+<main class="admin-console-page settlement-page settlement-routing-page">
+  <section class="admin-console-section">
+    <a href="{% url 'settlement_arrival_roster_routing' %}">К спискам заезда</a>
+    <h2>Предварительное расселение</h2>
+    {% if period %}<p>{{ period.name }} · {{ period.starts_on|date:"d.m.Y" }} — {{ period.ends_on|date:"d.m.Y" }}</p>{% endif %}
+    <form method="get"><button type="submit">Пересчитать план</button></form>
+    {% if error %}<p role="alert">{{ error }}</p>{% else %}
+    <p>Расчёт показывает предложенные места. Фактическое заселение выполняется отдельно.</p>
+    <h3>Предложено место · {{ proposed|length }}</h3>
+    {% for name, bed in proposed %}<p><strong>{{ name }}</strong> · {{ bed }}</p>{% empty %}<p>Пока нет предложенных мест.</p>{% endfor %}
+    {% if waiting %}<h3>Ожидают данных · {{ waiting|length }}</h3>
+    {% for name, reason in waiting %}<p><strong>{{ name }}</strong> · {{ reason }}</p>{% endfor %}{% endif %}
+    {% if exceptions %}<h3>Требуется подбор места · {{ exceptions|length }}</h3>
+    {% for name, reason in exceptions %}<p><strong>{{ name }}</strong> · {{ reason }}</p>{% endfor %}{% endif %}
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

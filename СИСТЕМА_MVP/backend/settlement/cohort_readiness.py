@@ -200,6 +200,7 @@ class SettlementCohortReadiness:
 
 @dataclass(frozen=True, slots=True)
 class SettlementCohortBatchOverview:
+    watch_period_id: int
     batch_id: int
     watch_period_name: str
     watch_period_dates: str
@@ -711,6 +712,7 @@ def build_arrival_roster_cohort_overview():
                 blocker.message for blocker in readiness.blockers
             ))
         overview.append(SettlementCohortBatchOverview(
+            watch_period_id=batch.watch_period_id,
             batch_id=batch.pk,
             watch_period_name=batch.watch_period.name,
             watch_period_dates=(

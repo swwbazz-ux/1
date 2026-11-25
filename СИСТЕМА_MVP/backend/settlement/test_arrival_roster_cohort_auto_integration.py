@@ -237,6 +237,41 @@ class ArrivalRosterCohortAutoIntegrationTests(TestCase):
             self._anchor(bed=self.beds[0], position=position, suffix='position')
         return cohort, member, row
 
+    def test_provisional_plan_recalculates_after_assignment_and_roster_replacement(self):
+        from django.urls import reverse
+
+        self._confirm_calendar()
+        worker = self._internal_employee('Готовый жилец')
+        self._direct_row(employee=worker)
+        self._anchor(bed=self.beds[0], position=worker.personnel_position)
+        pending = self._internal_employee('Ожидающий водитель', production=True)
+        row = self._routing_row(employee=pending)
+        url = reverse('settlement_provisional_plan', args=[self.period.pk])
+        self.assertEqual(self.client.get(url).status_code, 302)
+        session = self.client.session
+        session['employee_access_id'] = self.clerk_access.pk
+        session.save()
+        response = self.client.get(url)
+        self.assertEqual(response.context['proposed'], [(worker.full_name, str(self.beds[0]))])
+        self.assertEqual([name for name, reason in response.context['waiting']], [pending.full_name])
+        self.assertTrue(response.context['waiting'][0][1])
+        event = self._publish_event(row)
+        self._anchor(bed=self.beds[1], equipment=event.equipment_assignment.equipment, suffix='truck')
+        refreshed = self.client.get(url)
+        self.assertCountEqual(refreshed.context['proposed'], [
+            (worker.full_name, str(self.beds[0])), (pending.full_name, str(self.beds[1])),
+        ])
+        self.assertFalse(refreshed.context['waiting'])
+        self.version, self.batch = cohort_fixtures.ArrivalRosterCohortCreationTests._supersede_source_and_create_batch(self)
+        replacement = self._internal_employee('Новый участник')
+        self._direct_row(employee=replacement)
+        latest = self.client.get(url)
+        self.assertNotContains(latest, worker.full_name)
+        self.assertNotContains(latest, pending.full_name)
+        self.assertContains(latest, replacement.full_name)
+        for model in (SettlementCohort, SettlementPreviewRun, SettlementPreviewApplication, EmployeeBedOccupancy):
+            self.assertFalse(model.objects.exists())
+
     def test_production_uses_exact_assignment_through_preview_confirm_and_apply(self):
         cohort, member, _row = self._production_cohort()
 

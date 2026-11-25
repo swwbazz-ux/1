@@ -760,7 +760,6 @@ def resolve_settlement_cohort(
         )
         .order_by('resident__stable_id', 'pk')
     )
-    active_members = [item for item in members if item.participates_in_accommodation]
     routing_context = None
     if cohort.routing_batch_id is not None:
         routing_context = revalidate_routing_cohort_members(
@@ -768,6 +767,21 @@ def resolve_settlement_cohort(
             members=members,
             allow_unverified_watch_profile=True,
         )
+    return _resolve_members(
+        cohort=cohort, members=members, routing_context=routing_context,
+        materialized_preview_run_id=materialized_preview_run_id,
+    )
+
+
+def resolve_ready_arrivals(*, batch, readiness, rows):
+    from .cohorts import build_provisional_members
+
+    cohort, members, routing = build_provisional_members(batch=batch, readiness=readiness, rows=rows)
+    return _resolve_members(cohort=cohort, members=members, routing_context=routing, provisional=True)
+
+
+def _resolve_members(*, cohort, members, routing_context, materialized_preview_run_id=None, provisional=False):
+    active_members = [item for item in members if item.participates_in_accommodation]
     candidates, slot_snapshot = _slot_candidates(cohort)
     # T-029: подготовленные и резервные койки в плановое распределение не идут.
     # Два множества нужны раздельно, чтобы назвать фактическое правило R095/R096.
@@ -1369,7 +1383,7 @@ def resolve_settlement_cohort(
         )
 
     cohort_failure_reason = None
-    if cohort.status != SettlementCohort.Status.APPROVED:
+    if not provisional and cohort.status != SettlementCohort.Status.APPROVED:
         cohort_failure_reason = REASON_COHORT_NOT_APPROVED
     elif cohort.watch_period.watch_composition_id != cohort.watch_composition_id:
         cohort_failure_reason = REASON_STALE_CALENDAR
