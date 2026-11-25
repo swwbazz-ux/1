@@ -102,6 +102,7 @@ from .free_bucket import (
     reconcile_expired_free_bucket_acceptances,
 )
 from users.active_role import role_session_state
+from users.app_catalog import role_app_public_url
 from users.role_apps import (
     role_app_manifest_response,
     role_app_service_worker_response,
@@ -6448,8 +6449,9 @@ def dispatcher_equipment_detail_view(request, category, equipment_id, *, deputy_
     if not access:
         return dispatcher_equipment_detail_error('authentication_required', status=401)
     if deputy_viewer:
-        state = role_session_state(request, access)
-        allowed = access.role.code == 'deputy_mining_manager' and state['is_active']
+        allowed = access.role.code == 'deputy_mining_manager'
+        if allowed and not role_session_state(request, access)['is_active']:
+            return dispatcher_equipment_detail_error('authentication_required', status=401)
     else:
         allowed = control_access_allowed(request, access, role_codes={'dispatcher', 'admin', 'manager'})
     if not allowed:
@@ -6529,12 +6531,20 @@ def dispatcher_equipment_detail_view(request, category, equipment_id, *, deputy_
 @require_GET
 @never_cache
 def deputy_dispatcher_control_view(request):
-    from assignments.deputy_views import deputy_access_from_request
-
-    access = deputy_access_from_request(request)
-    if not access:
+    state = role_session_state(request)
+    access = state['access']
+    if access and access.role.code != 'deputy_mining_manager':
         return JsonResponse({'authenticated': False}, status=403)
-    return dispatcher_control_view(request, access_override=access, deputy_viewer=True)
+    if not access or not state['is_active']:
+        if request.GET.get('_operational_fragment') == 'dispatcher':
+            return JsonResponse({'authenticated': False}, status=401)
+        return redirect(role_app_public_url(request, 'deputy_mining_manager'))
+    return dispatcher_control_view(
+        request,
+        access_override=access,
+        deputy_viewer=True,
+        context_overrides={'deputy_dispatcher_login_url': role_app_public_url(request, 'deputy_mining_manager')},
+    )
 
 
 def dispatcher_control_view(

@@ -161,8 +161,12 @@ def operational_state_version_view(request, *, deputy_dispatcher_viewer=False):
     requested_role_app = get_role_app(request.GET.get('role_app_code', ''))
     role_app = host_role_app or requested_role_app or get_role_app(access.role.code)
     session_role_code = role_state.get('session_role_code', access.role.code)
-    if deputy_dispatcher_viewer and (access.role.code != 'deputy_mining_manager' or not role_state['is_active']):
-        return JsonResponse({'authenticated': False}, status=403)
+    if deputy_dispatcher_viewer:
+        if access.role.code != 'deputy_mining_manager':
+            return JsonResponse({'authenticated': False}, status=403)
+        if not role_state['is_active']:
+            return JsonResponse({'authenticated': False}, status=401)
+        role_app = get_role_app('deputy_mining_manager')
     role_is_active_for_app = role_state['is_active'] and (
         role_app is None or session_role_code == role_app.role_code
     )

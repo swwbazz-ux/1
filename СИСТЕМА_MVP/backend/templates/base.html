@@ -2662,7 +2662,7 @@ window.AppRealtimeConfig = {
     sseHeartbeatTimeoutMs: 30000,
     sseReconnectMaxMs: 30000,
     sseTruthRefreshIntervalMs: 60000,
-    loginUrl: window.location.pathname.indexOf('/mining-master/tablet/') === 0 ? '/mining-master/tablet/login/' : '/',
+    loginUrl: {% if deputy_dispatcher_viewer %}"{{ deputy_dispatcher_login_url|escapejs }}"{% else %}window.location.pathname.indexOf('/mining-master/tablet/') === 0 ? '/mining-master/tablet/login/' : '/'{% endif %},
     initialVersion: Number(document.body.dataset.operationalStateVersion || 0),
     workPollIntervalMs: 5000,
     observerPollIntervalMs: 15000,

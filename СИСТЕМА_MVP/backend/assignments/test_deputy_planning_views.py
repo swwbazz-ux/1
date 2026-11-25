@@ -10,7 +10,7 @@ from unittest.mock import patch
 from django.contrib.staticfiles import finders
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
@@ -26,6 +26,7 @@ from references.models import (
 )
 from rotations.models import RotationCollectionCycle, RotationResponse, WatchExtensionCase
 from shifts.models import EmployeeShift, WatchPeriod
+from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
 from users.models import (
     DriverPrimaryRegistration,
     Employee,
@@ -699,10 +700,39 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(self.client.post(detail).status_code, 403)
         for name in ('dispatcher_assign_truck', 'dispatcher_move_excavator'):
             self.assertEqual(self.client.post(reverse(name), {}, content_type='application/json').status_code, 403)
-        self.assertEqual(Client().get(board).status_code, 403)
+        self.assertRedirects(Client().get(board), 'https://deputy.driverform.ru/', fetch_redirect_response=False)
         self.authenticate(self.client, self.driver_access)
         self.assertEqual(self.client.get(board).status_code, 403)
         self.assertEqual(self.client.get(detail, {'state_version': version}).status_code, 403)
+
+    @override_settings(ALLOWED_HOSTS=['www.driverform.ru', 'deputy.driverform.ru', 'dispatcher.driverform.ru'])
+    def test_deputy_dispatcher_expired_session_returns_to_deputy_login_from_each_host(self):
+        board = reverse('deputy_dispatcher_control')
+        poll = reverse('deputy_dispatcher_state')
+        detail = reverse('deputy_dispatcher_equipment_detail', args=('equipment', self.truck_1.pk))
+        login_url = 'https://deputy.driverform.ru/'
+        self.deputy_access.last_login_at = timezone.now()
+        self.deputy_access.save(update_fields=['last_login_at'])
+
+        for host in ('www.driverform.ru', 'deputy.driverform.ru', 'dispatcher.driverform.ru'):
+            with self.subTest(host=host):
+                session = self.client.session
+                session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = self.deputy_access.last_login_at.isoformat()
+                session.save()
+                page = self.client.get(board, HTTP_HOST=host)
+                self.assertContains(page, f'loginUrl: "{login_url}"')
+                self.assertTrue(self.client.get(poll, HTTP_HOST=host).json()['role_active'])
+
+                session = self.client.session
+                session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = (self.deputy_access.last_login_at - timedelta(seconds=1)).isoformat()
+                session.save()
+                self.assertRedirects(self.client.get(board, HTTP_HOST=host), login_url, fetch_redirect_response=False)
+                for response in (
+                    self.client.get(poll, HTTP_HOST=host),
+                    self.client.get(board, {'_operational_fragment': 'dispatcher'}, HTTP_HOST=host),
+                    self.client.get(detail, {'state_version': page.context['operational_state_version']}, HTTP_HOST=host),
+                ):
+                    self.assertEqual(response.status_code, 401)
 
     def test_dispatcher_viewer_polls_production_events_without_running_reconciliation(self):
         from core.models import bump_operational_state
