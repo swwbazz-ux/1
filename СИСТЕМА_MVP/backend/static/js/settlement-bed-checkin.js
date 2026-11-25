@@ -7,7 +7,10 @@ window.createSettlementBedCheckin = function (form, applied) {
     const card = form.querySelector("[data-checkin-card]");
     const results = form.querySelector("[data-checkin-results]");
     const message = form.querySelector("[data-checkin-message]");
+    const findButton = form.querySelector("[data-checkin-find]");
     const newButton = form.querySelector("[data-checkin-new]");
+    const dates = form.querySelector("[data-checkin-dates]");
+    const period = form.querySelector("[data-checkin-period]");
     const submit = form.querySelector('[type="submit"]');
     let target = null;
     let subject = "";
@@ -31,11 +34,20 @@ window.createSettlementBedCheckin = function (form, applied) {
 
     function toggleCard(open) {
         card.hidden = card.disabled = !open;
-        newButton.textContent = open ? "Найти в справочнике" : "Новый жилец";
+        findButton.setAttribute("aria-pressed", String(!open));
+        newButton.setAttribute("aria-pressed", String(open));
+        name.placeholder = open ? "Фамилия Имя Отчество" : "Начните вводить фамилию";
         subject = open ? "new" : "";
         name.setCustomValidity("");
         clearResults();
         notify("");
+    }
+
+    function updatePeriod() {
+        const arrival = fields.arrival.value;
+        const departure = fields.departure.value;
+        const start = arrival === fields.arrival.max ? "Сегодня" : arrival.split("-").reverse().join(".");
+        period.textContent = [start, departure && "до " + departure.split("-").reverse().join(".")].filter(Boolean).join(" · ");
     }
 
     function search() {
@@ -87,14 +99,30 @@ window.createSettlementBedCheckin = function (form, applied) {
     form.addEventListener("invalid", function (event) {
         const field = event.target;
         if (field !== form.querySelector("input:invalid, select:invalid")) return;
-        const label = field.labels?.[0]?.querySelector("span")?.textContent;
-        const prefix = label && !field.validity.customError ? label + " — " : "";
-        notify(prefix + field.validationMessage, true);
+        if (dates.contains(field)) dates.open = true;
+        if (field.type === "radio") {
+            notify(field.name === "sex" ? "Выберите пол жильца." : "Выберите тип жильца.", true);
+        } else {
+            const label = field.labels?.[0]?.querySelector("span")?.textContent;
+            const prefix = label && !field.validity.customError ? label + " — " : "";
+            notify(prefix + field.validationMessage, true);
+        }
     }, true);
+    form.addEventListener("input", function () {
+        if (message.classList.contains("is-error")) notify("");
+    });
+    dates.addEventListener("input", updatePeriod);
+    findButton.addEventListener("click", function () {
+        if (!card.hidden) {
+            toggleCard(false);
+            search();
+        }
+        name.focus();
+    });
     newButton.addEventListener("click", function () {
-        toggleCard(card.hidden);
-        if (card.hidden) search();
-        (card.hidden || !name.value.trim() ? name : fields.resident_type).focus();
+        if (card.hidden) toggleCard(true);
+        const type = card.querySelector('[name="resident_type"]:checked') || fields.resident_type[0];
+        (name.value.trim() ? type : name).focus();
     });
     form.addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -137,6 +165,7 @@ window.createSettlementBedCheckin = function (form, applied) {
             if (target === bed) return;
             target = bed;
             form.reset();
+            dates.open = false;
             toggleCard(false);
             form.dataset.targetBed = bed ? bed.dataset.bedId : "";
             form.hidden = !bed;
@@ -147,16 +176,18 @@ window.createSettlementBedCheckin = function (form, applied) {
             const protectedRoom = Boolean(room.querySelector('[data-room-anchor="protected"]'));
             const capacity = Number(room.dataset.roomCapacity) || room.querySelectorAll("[data-bed]").length;
             const itr = !reserve && (capacity <= 2 || protectedRoom);
+            form.querySelector("[data-checkin-room]").hidden = !reserve && !itr;
             const rule = form.querySelector("[data-checkin-room-rule]");
             rule.hidden = !itr;
             rule.textContent = protectedRoom
-                ? "Если комната закреплена за сотрудником, заселить можно только его. При отсутствии закрепления укажите основание и подтвердите категорию ИТР."
-                : "Для заселения в двухместную комнату укажите основание и подтвердите категорию ИТР.";
+                ? "В закреплённую комнату можно заселить её жильца. Если закрепления нет, укажите основание и подтвердите ИТР."
+                : "Для двухместной комнаты укажите основание и подтвердите ИТР.";
             fields.basis.disabled = form.querySelector("[data-checkin-basis]").hidden = !reserve && !itr;
             fields.basis.required = reserve;
             fields.confirm_itr.disabled = form.querySelector("[data-checkin-itr]").hidden = !itr;
             const today = new Intl.DateTimeFormat("sv-SE", {timeZone: "Asia/Vladivostok"}).format(new Date());
             fields.arrival.max = fields.arrival.value = fields.departure.min = today;
+            updatePeriod();
         }
     };
 };

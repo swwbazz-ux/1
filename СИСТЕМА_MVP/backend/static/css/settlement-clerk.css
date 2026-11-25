@@ -2305,18 +2305,129 @@
 }
 .settlement-checkin h3 { margin: 0; }
 .settlement-checkin [hidden], .settlement-checkin[hidden] { display: none; }
-.settlement-checkin-fields {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr));
-    gap: 10px;
+.settlement-checkin-card,
+.settlement-checkin-choice {
     min-width: 0;
     padding: 0;
     border: 0;
     margin: 0;
 }
-.settlement-checkin legend { margin-bottom: 8px; }
-.settlement-checkin input, .settlement-checkin select { min-width: 0; }
-.settlement-checkin [data-checkin-new] { justify-self: start; }
+.settlement-checkin-card,
+.settlement-checkin-room {
+    display: grid;
+    gap: 10px;
+}
+.settlement-checkin-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+.settlement-checkin-card .settlement-checkin-fields > :first-child {
+    grid-column: 1 / -1;
+}
+.settlement-checkin label { margin: 0; }
+.settlement-checkin .settlement-employee-search input { min-width: 0; }
+.settlement-checkin legend,
+.settlement-checkin .settlement-employee-search > span {
+    margin-bottom: 4px;
+    color: var(--admin-muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: none;
+    letter-spacing: normal;
+}
+.settlement-checkin .settlement-employee-search > span { margin: 0; }
+.settlement-checkin-modes,
+.settlement-checkin-options {
+    display: flex;
+    gap: 6px;
+}
+.settlement-checkin-modes > button,
+.settlement-checkin-options > label {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.settlement-checkin-options > label {
+    position: relative;
+    cursor: pointer;
+}
+.settlement-checkin-options input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+.settlement-checkin-modes > button,
+.settlement-checkin-options label > span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 4px 6px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+    color: var(--admin-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    text-align: center;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+.settlement-checkin-modes > [aria-pressed="true"],
+.settlement-checkin-options input:checked + span {
+    border-color: var(--settlement-accent);
+    background: color-mix(in srgb, var(--settlement-accent) 18%, var(--admin-panel));
+    box-shadow: inset 0 -2px var(--settlement-accent);
+}
+.settlement-checkin-modes > button:focus-visible,
+.settlement-checkin-options input:focus-visible + span {
+    outline: 2px solid var(--settlement-accent);
+    outline-offset: 2px;
+}
+.settlement-checkin-options b { font-size: 18px; line-height: 1; }
+.settlement-checkin-dates {
+    padding: 0 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel-soft);
+}
+.settlement-checkin-dates > summary {
+    min-height: 42px;
+    padding: 10px 0;
+    font-size: 13px;
+    cursor: pointer;
+}
+.settlement-checkin-dates strong {
+    margin-inline-start: 6px;
+    color: var(--admin-muted);
+}
+.settlement-checkin-dates > div { padding-block: 0 10px; }
+.settlement-checkin-room {
+    padding: 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+}
+.settlement-checkin-confirm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    font-weight: 800;
+    cursor: pointer;
+}
+.settlement-checkin-confirm input {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--settlement-accent);
+}
 .settlement-room-panel-body > [data-placement-panel]:has([data-checkin-start]:not([hidden])) { order: -1; }
 .settlement-roster-placement:not(:has(> form:not([hidden]))) { display: none; }
 .settlement-roster-placement > summary { cursor: pointer; padding-block: 8px; }
