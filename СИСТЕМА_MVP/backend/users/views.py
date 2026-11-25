@@ -1256,6 +1256,13 @@ def login_view(
         ),
     )
     current_access = get_current_access(request) if request.method == 'GET' else None
+    if (
+        current_access
+        and role_app
+        and role_app.role_code == 'deputy_mining_manager'
+        and not role_session_state(request, current_access)['is_active']
+    ):
+        current_access = None
     rating_tv_reauthentication_required = bool(
         current_access
         and next_url == reverse('driver_rating_tv')

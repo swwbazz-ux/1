@@ -734,6 +734,42 @@ class DeputyPlanningViewTests(TestCase):
                 ):
                     self.assertEqual(response.status_code, 401)
 
+    @override_settings(ALLOWED_HOSTS=['deputy.driverform.ru'])
+    def test_relogin_after_deputy_dispatcher_session_expiry_opens_placement_and_allows_roundtrip(self):
+        host = {'HTTP_HOST': 'deputy.driverform.ru', 'secure': True}
+        board = reverse('deputy_dispatcher_control')
+        placement = reverse('deputy_mining_manager_placement')
+        login = reverse('login')
+        for stale_session in (False, True):
+            with self.subTest(stale_session=stale_session):
+                client = Client()
+                if stale_session:
+                    self.deputy_access.last_login_at = timezone.now()
+                    self.deputy_access.save(update_fields=['last_login_at'])
+                    self.authenticate(client, self.deputy_access)
+                    session = client.session
+                    session[ACTIVE_ROLE_GENERATION_SESSION_KEY] = (
+                        self.deputy_access.last_login_at - timedelta(seconds=1)
+                    ).isoformat()
+                    session.save()
+
+                expired = client.get(board, **host)
+                self.assertRedirects(expired, 'https://deputy.driverform.ru/', fetch_redirect_response=False)
+                self.assertContains(client.get(login, **host), 'Вход · Расстановка')
+                signed_in = client.post(
+                    login,
+                    {'phone': self.deputy.phone, 'access_code': '610001'},
+                    HTTP_X_REQUESTED_WITH='XMLHttpRequest',
+                    **host,
+                )
+                self.assertEqual(signed_in.json(), {'ok': True, 'redirect_url': placement})
+                roster = client.get(placement, **host)
+                self.assertContains(roster, self.deputy.full_name)
+                self.assertContains(roster, f'href="{board}">Диспетчерский пульт</a>')
+                in_board = client.get(board, **host)
+                self.assertContains(in_board, f'href="{placement}">← Вернуться в расстановку</a>')
+                self.assertContains(client.get(placement, **host), self.deputy.full_name)
+
     def test_dispatcher_viewer_polls_production_events_without_running_reconciliation(self):
         from core.models import bump_operational_state
 
