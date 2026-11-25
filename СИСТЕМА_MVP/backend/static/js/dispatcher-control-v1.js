@@ -12,9 +12,9 @@ document.addEventListener("DOMContentLoaded", function () {
     var dispatcherMoveExcavatorUrl = runtimeConfig.dispatcherMoveUrl || "";
     var dispatcherAssignTruckUrl = runtimeConfig.dispatcherAssignUrl || "";
     var initialDispatcherBoard = document.querySelector(".dispatcher-board");
-    var dispatcherShiftOpen = !viewOnly && Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
+    var dispatcherShiftOpen = Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
     function syncDispatcherShiftRuntime(freshBoard) {
-        if (viewOnly || !freshBoard) return dispatcherShiftOpen;
+        if (!freshBoard) return dispatcherShiftOpen;
         var fragmentShiftOpen = freshBoard.dataset
             ? freshBoard.dataset.dispatcherShiftOpen
             : "";
