@@ -216,8 +216,7 @@
 .deputy-search-field {
     position: relative;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 7px;
+    gap: 4px;
     align-items: center;
     min-width: 0;
 }
@@ -249,18 +248,19 @@
 }
 
 .deputy-search-results {
-    position: absolute;
-    z-index: 12;
-    inset: calc(100% + 4px) 0 auto;
-    max-height: min(38dvh, 340px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 6px;
+    grid-column: 1 / -1;
+    min-width: 0;
     border: 1px solid var(--admin-line);
     border-radius: 6px;
     background: var(--admin-panel);
     color: var(--admin-ink);
-    box-shadow: var(--admin-shadow);
+}
+
+.deputy-search-results [data-search-choices] {
+    max-height: min(23dvh, 220px);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
 }
 
 .deputy-search-announcement {
@@ -272,17 +272,17 @@
 }
 
 .deputy-search-results [role=status] {
-    padding: 4px 6px;
+    padding: 6px 10px;
     color: var(--admin-muted);
     font-size: 13px;
 }
 
 .deputy-search-results a {
     display: grid;
-    width: 100%;
-    gap: 3px;
-    padding: 7px;
-    border: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 12px;
+    padding: 7px 10px;
     border-top: 1px solid var(--admin-line);
     background: transparent;
     color: inherit;
@@ -291,6 +291,17 @@
     text-align: left;
     overflow-wrap: anywhere;
     cursor: pointer;
+}
+
+.deputy-search-results small {
+    color: var(--admin-muted);
+}
+
+.deputy-placement-screen .employee-search-highlight {
+    padding: 0;
+    border-radius: 3px;
+    background: var(--admin-yellow-soft);
+    box-shadow: inset 0 -1px 0 var(--admin-yellow);
 }
 
 .deputy-search-results a:hover,
@@ -1996,6 +2007,11 @@ button.deputy-avatar {
 }
 
 @media (max-width: 720px) {
+    .deputy-search-results a {
+        grid-template-columns: minmax(0, 1fr);
+        min-height: 44px;
+    }
+
     .deputy-shell {
         --admin-console-header-height: 108px;
     }

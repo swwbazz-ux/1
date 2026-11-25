@@ -341,6 +341,16 @@
         return ranks.length ? Math.min.apply(Math, ranks) : null;
     }
 
+    function personMatchesSearch(employee, query) {
+        return employee && peopleSearch.matches(employeeName(employee), query);
+    }
+
+    function crewMatchesSearch(slot, query) {
+        return personMatchesSearch(slot.employee, query)
+            || personMatchesSearch(slot.secondary_employee, query)
+            || (slot.reported_name && peopleSearch.matches(slot.reported_name, query));
+    }
+
     function searchContext() {
         var query = currentQuery();
         var source = currentBrigade === "all" ? state.allWatchEmployees : state.employees;
@@ -356,6 +366,22 @@
                 rowMatches: state.rows.filter(function (row) {
                     return row.equipment.id === hit.place.equipment;
                 }).map(function (row) { return {row: row}; })
+            };
+        }
+        if (query && peopleSearch) {
+            var matchingFree = brigadeEmployees.filter(function (employee) {
+                return personMatchesSearch(employee, query);
+            });
+            var matchingRows = state.rows.filter(rowMatchesFilter).filter(function (row) {
+                return equipmentSearchRank(row, query) !== null || row.slots.some(function (slot) {
+                    return crewMatchesSearch(slot, query);
+                });
+            });
+            return {
+                query: query, brigadeEmployees: brigadeEmployees,
+                employeeMode: matchingFree.length > 0,
+                employeeMatches: matchingFree.map(function (employee) { return {employee: employee}; }),
+                rowMatches: matchingRows.map(function (row) { return {row: row}; })
             };
         }
         var employeeMatches = query ? rankedEmployeeMatches(brigadeEmployees, query) : [];
@@ -1594,7 +1620,7 @@
         if (!board) return;
         context = context || searchContext();
         var rows = state.rows.filter(rowMatchesFilter);
-        if (context.query && !context.employeeMode) {
+        if (context.query && (!context.employeeMode || (peopleSearch && !peopleSearch.target()))) {
             rows = context.rowMatches.map(function (match) { return match.row; });
         }
         if (!rows.length) {
@@ -1897,8 +1923,8 @@
             currentFilter = button.getAttribute("data-row-filter") || "all";
             if (peopleSearch && currentQuery()) {
                 peopleSearch.clear(true);
-                renderEmployees(true);
-                markSearchBadge();
+                renderSearch();
+                return;
             }
             filterButtons.forEach(function (item) {
                 var active = item === button;
@@ -1933,6 +1959,11 @@
         root.querySelectorAll(".is-person-search-hit").forEach(function (node) {
             node.classList.remove("is-person-search-hit");
         });
+        var markedNames = new Set();
+        root.querySelectorAll(".deputy-planning-workspace mark.employee-search-highlight").forEach(function (mark) {
+            markedNames.add(mark.parentNode);
+        });
+        markedNames.forEach(function (name) { name.textContent = name.textContent; });
         var hit = peopleSearch.target();
         var rowFilter = currentFilter;
         var brigadeFilter = currentBrigade;
@@ -1951,7 +1982,12 @@
         }
         reflectFilter(filterButtons, "data-row-filter", rowFilter);
         reflectFilter(brigadeButtons, "data-brigade-filter", brigadeFilter);
-        if (!hit || hit.place.role !== state.role.code) return;
+        if (!hit || hit.place.role !== state.role.code) {
+            var query = currentQuery();
+            if (query) root.querySelectorAll(".deputy-planning-workspace [data-search-employee] .deputy-employee-main strong")
+                .forEach(function (name) { peopleSearch.highlight(name, query); });
+            return;
+        }
         var selector = '[data-search-employee="' + hit.person.id + '"]';
         if (hit.place.equipment) {
             selector += '[data-search-equipment="' + hit.place.equipment + '"][data-search-shift="' +
@@ -1960,6 +1996,8 @@
         var badge = root.querySelector(selector);
         if (badge) {
             badge.classList.add("is-person-search-hit");
+            var name = badge.querySelector(".deputy-employee-main strong");
+            if (name) peopleSearch.highlight(name, currentQuery());
             if (hit.place.equipment) board.setAttribute("data-found-shift", hit.place.shift);
         }
         return badge;
@@ -2001,7 +2039,7 @@
     if (searchInput && window.deputyPeopleSearch && searchInput.dataset.peopleUrl) {
         function categoryFor(code) { return state.categories.find(function (item) { return item.code === code; }); }
         peopleSearch = window.deputyPeopleSearch({
-            input: searchInput, query: currentQuery, rank: employeeSearchRank, role: function () { return state.role.code; },
+            input: searchInput, query: currentQuery, normalize: normalizeSearch, role: function () { return state.role.code; },
             load: loadSearchPeople, render: renderSearch, findBadge: markSearchBadge, busy: function () { return saving; },
             isSnapshot: function () { return new URL(location.href).searchParams.has("plan"); },
             categoryLabel: function (code) { return categoryFor(code)?.label || code; },

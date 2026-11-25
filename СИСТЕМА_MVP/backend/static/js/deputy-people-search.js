@@ -14,6 +14,39 @@ window.deputyPeopleSearch = function (ui) {
     let revealed = null;
     let alternatives = [];
 
+    // The directory highlights a match at the start of a name or a hyphenated part.
+    function nameMatch(name, query) {
+        if (!query) return null;
+        const words = Array.from(name.matchAll(/[^\s-]+/gu));
+        const parts = query.split(/[\s-]+/u).filter(Boolean).sort((a, b) => b.length - a.length);
+        const ranges = [];
+        for (const part of parts) {
+            const word = words.find(item => !ranges.some(range => range.start === item.index)
+                && ui.normalize(item[0]).startsWith(part));
+            if (!word) return null;
+            ranges.push({start: word.index, length: Math.min(part.length, word[0].length)});
+        }
+        return ranges.length ? ranges.sort((a, b) => a.start - b.start) : null;
+    }
+
+    function highlight(node, query) {
+        const name = node.textContent;
+        const ranges = nameMatch(name, query);
+        if (!ranges) return;
+        const content = document.createDocumentFragment();
+        let offset = 0;
+        for (const range of ranges) {
+            content.append(name.slice(offset, range.start));
+            const mark = document.createElement("mark");
+            mark.className = "employee-search-highlight";
+            offset = range.start + range.length;
+            mark.textContent = name.slice(range.start, offset);
+            content.append(mark);
+        }
+        content.append(name.slice(offset));
+        node.replaceChildren(content);
+    }
+
     function hidePanel() {
         choices.replaceChildren();
         panel.hidden = true;
@@ -49,6 +82,7 @@ window.deputyPeopleSearch = function (ui) {
     }
 
     async function select(hit, ticket) {
+        if (ticket !== generation) return;
         if (ui.busy()) {
             message("Дождитесь сохранения расстановки и повторите поиск.");
             return;
@@ -90,13 +124,15 @@ window.deputyPeopleSearch = function (ui) {
         if (hits.length === 1) return select(hits[0], ticket);
         ui.render();
         if (!hits.length && ui.hasLocalMatches()) return hidePanel();
-        message(hits.length ? "Совпадений: " + hits.length + ". Выберите сотрудника." : "Совпадений нет");
+        message(hits.length ? new Set(hits.map(hit => hit.person.id)).size + " найдено" : "Совпадений нет");
+        const query = ui.query();
         for (const hit of hits) {
             const button = document.createElement("a");
             button.href = ui.categoryUrl(hit.place.role);
             button.setAttribute("data-role-readonly-safe", "");
             const name = document.createElement("strong");
             name.textContent = hit.person.full_name;
+            highlight(name, query);
             const location = document.createElement("small");
             location.textContent = description(hit);
             button.append(name, location);
@@ -120,13 +156,12 @@ window.deputyPeopleSearch = function (ui) {
             if (ticket !== generation) return;
             const hits = [];
             for (const person of people) {
-                const rank = ui.rank(person, query);
-                if (rank == null || rank >= 20) continue;
+                if (!nameMatch(person.full_name, query)) continue;
                 const places = person.places.length ? person.places :
                     [{role: person.roles.includes(ui.role()) ? ui.role() : person.roles[0]}];
-                for (const place of places) hits.push({person, place, rank});
+                for (const place of places) hits.push({person, place});
             }
-            hits.sort((a, b) => a.rank - b.rank || a.person.full_name.localeCompare(b.person.full_name, "ru") ||
+            hits.sort((a, b) => a.person.full_name.localeCompare(b.person.full_name, "ru") ||
                 a.person.id - b.person.id || description(a).localeCompare(description(b), "ru", {numeric: true}));
             await show(hits, ticket);
         } catch (error) {
@@ -140,19 +175,25 @@ window.deputyPeopleSearch = function (ui) {
     function update() {
         const query = ui.query();
         const ticket = ++generation;
+        const hadTarget = Boolean(target);
         clearTimeout(timer);
         if (choosing) ui.cancelNavigation();
         choosing = false;
         target = revealed = null;
         alternatives = [];
         if (announcement) announcement.textContent = "";
-        hidePanel();
         if (!query || !/\p{L}/u.test(query)) {
+            hidePanel();
             request = null;
             ui.render();
             return;
         }
-        timer = setTimeout(() => search(ticket, query), 150);
+        if (hadTarget) ui.render();
+        if (request) search(ticket, query);
+        else {
+            message("Ищу сотрудников…");
+            timer = setTimeout(() => search(ticket, query), 150);
+        }
     }
 
     input.addEventListener("input", update);
@@ -163,10 +204,7 @@ window.deputyPeopleSearch = function (ui) {
         }
     }
     input.addEventListener("click", reopen);
-    input.parentElement.addEventListener("focusout", event => {
-        if (event.relatedTarget && !input.parentElement.contains(event.relatedTarget)) hidePanel();
-    });
-    input.parentElement.addEventListener("keydown", event => {
+    function handleKeys(event) {
         if (event.key === "Escape" && input.value) {
             event.preventDefault();
             clear(true);
@@ -186,6 +224,8 @@ window.deputyPeopleSearch = function (ui) {
             event.preventDefault();
             buttons[0].focus();
         }
-    });
-    return {target: () => target, clear, update};
+    }
+    input.addEventListener("keydown", handleKeys);
+    choices.addEventListener("keydown", handleKeys);
+    return {target: () => target, matches: nameMatch, highlight, clear};
 };

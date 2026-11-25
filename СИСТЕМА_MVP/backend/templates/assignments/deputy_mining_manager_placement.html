@@ -5,7 +5,7 @@
 {% block body_class %}deputy-mining-manager-screen deputy-placement-screen{% endblock %}
 {% block extra_head %}
 {% include "includes/deputy_mining_manager_pwa_head.html" %}
-<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261125-person-search">
+<link rel="stylesheet" href="{% static 'css/deputy-mining-manager-v3.css' %}?v=20261126-directory-search">
 {% endblock %}
 
 {% block body %}
@@ -36,20 +36,16 @@
             </div>
 
             <div class="deputy-search-field">
-                <label for="deputy-planning-search">Поиск</label>
+                <label for="deputy-planning-search">Поиск по ФИО или технике</label>
                 <input id="deputy-planning-search"
                        type="search"
                        autocomplete="off"
-                       placeholder="Сотрудник или техника"
+                       spellcheck="false"
+                       placeholder="Введите ФИО или номер машины"
                        data-people-url="{% url 'deputy_placement_people' %}?date={{ selected_date|date:'Y-m-d' }}"
                        aria-controls="deputy-search-results" data-planning-search>
                 <output class="deputy-search-announcement" aria-live="polite" data-search-announcement></output>
-                <div class="deputy-search-results" id="deputy-search-results" hidden>
-                    <div role="status" data-search-status></div>
-                    <div data-search-choices></div>
-                </div>
             </div>
-
             <div class="deputy-toolbar-actions">
                 <span class="deputy-autosave-state" data-autosave-state role="status" aria-live="polite">
                     <span class="deputy-autosave-dot" aria-hidden="true"></span>
@@ -75,6 +71,10 @@
                         type="button"
                         data-publish-button>Опубликовать</button>
             </div>
+            <section class="deputy-search-results" id="deputy-search-results" aria-label="Результаты поиска" hidden>
+                <div role="status" data-search-status></div>
+                <div data-search-choices></div>
+            </section>
         </section>
 
         <section class="deputy-filter-counts" aria-label="Фильтры расстановки">
@@ -273,7 +273,7 @@
 {% else %}
     {{ planning_payload|json_script:"deputy-planning-data" }}
 {% endif %}
-<script src="{% static 'js/deputy-people-search.js' %}?v=1" defer></script>
-<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261125-person-search" defer></script>
+<script src="{% static 'js/deputy-people-search.js' %}?v=2" defer></script>
+<script src="{% static 'js/deputy-mining-manager-v3.js' %}?v=20261126-directory-search" defer></script>
 <script src="{% static 'js/deputy-mining-manager-pwa-v1.js' %}" defer></script>
 {% endblock %}
