@@ -132,9 +132,13 @@
         return "";
     }
 
+    function needsShiftForCheckin() {
+        return root.dataset.controlRole !== "admin" && shiftMode(state.payload) === "open";
+    }
+
     function syncButtons() {
         var mode = state.saving ? "" : shiftMode(state.payload);
-        if (checkinStart) checkinStart.textContent = mode === "open" ? "Открыть смену и начать работу" : "Начать работу";
+        if (checkinStart) checkinStart.textContent = needsShiftForCheckin() ? "Открыть смену и начать работу" : "Начать работу";
         if (openButton) {
             setHidden(openButton, mode !== "open");
             openButton.disabled = mode !== "open";
@@ -299,7 +303,7 @@
     if (openButton) openButton.addEventListener("click", openShift);
     if (checkinStart) checkinStart.addEventListener("click", function () {
         if (state.saving) return;
-        if (shiftMode(state.payload) === "open") openShift();
+        if (needsShiftForCheckin()) openShift();
         else ensureControlLease();
     });
     if (closeButton) closeButton.addEventListener("click", closeShift);

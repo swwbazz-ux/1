@@ -284,6 +284,25 @@ def _ensure_control_lease_locked(
     return lease
 
 
+def _admin_scope(access_id):
+    return f'{CONTROL_SCOPE}:admin:{access_id}'
+
+
+def _lock_session_lease(*, owner_access_id, lease_token, using):
+    # The shared row also serializes writes to beds across both workspaces.
+    if isinstance(owner_access_id, bool) or not isinstance(owner_access_id, int) or owner_access_id <= 0:
+        raise _validation_error('invalid_access', 'Доступ сотрудника не найден.')
+    shared = _ensure_control_lease_locked(scope=CONTROL_SCOPE, using=using)
+    if shared.owner_access_id == owner_access_id and str(shared.lease_token) == str(lease_token):
+        return shared
+    personal = (
+        SettlementControlLease.objects.using(using).select_for_update(of=('self',))
+        .filter(scope=_admin_scope(owner_access_id), owner_access_id=owner_access_id,
+                owner_access__role__code=ADMIN_ROLE_CODE).first()
+    )
+    return personal or shared
+
+
 def ensure_control_lease(*, scope: str = CONTROL_SCOPE) -> SettlementControlLease:
     scope = _validated_scope(scope)
     using = router.db_for_write(SettlementControlLease)
@@ -512,6 +531,10 @@ def acquire_control_lease(
             owner_access_id=owner_access_id,
             using=using,
         )
+        if owner_access.role.code == ADMIN_ROLE_CODE and not (
+            lease.owner_access_id == owner_access.pk and lease.expires_at > current_time
+        ):
+            lease = _ensure_control_lease_locked(scope=_admin_scope(owner_access.pk), using=using)
         if owner_access.role.code == CLERK_ROLE_CODE:
             _require_clerk_shift_for_write(
                 owner_access=owner_access,
@@ -911,7 +934,11 @@ def lock_settlement_write_lease(
     if not control_context.raw_session_key:
         raise _validation_error('not_held', 'Управление расселением свободно.')
 
-    lease = _ensure_control_lease_locked(scope=CONTROL_SCOPE, using=using)
+    lease = _lock_session_lease(
+        owner_access_id=control_context.owner_access_id,
+        lease_token=control_context.lease_token,
+        using=using,
+    )
     _validated_held_lease(
         lease,
         owner_access_id=control_context.owner_access_id,
@@ -956,7 +983,9 @@ def lock_settlement_write_access(
             'Доступ сотрудника не найден.',
         ) from None
 
-    if owner_access.role_id != expected_role_id:
+    if owner_access.role_id != expected_role_id or (
+        lease.scope != CONTROL_SCOPE and owner_access.role.code != ADMIN_ROLE_CODE
+    ):
         raise _validation_error(
             'invalid_access',
             'Доступ сотрудника не найден.',
@@ -1011,7 +1040,7 @@ def heartbeat_control_lease(
     grant: ControlLeaseGrant | None = None
 
     with transaction.atomic(using=using):
-        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        lease = _lock_session_lease(owner_access_id=owner_access_id, lease_token=lease_token, using=using)
         _validated_held_lease(
             lease,
             owner_access_id=owner_access_id,
@@ -1072,7 +1101,7 @@ def release_control_lease(
     transition: ControlLeaseTransition | None = None
 
     with transaction.atomic(using=using):
-        lease = _ensure_control_lease_locked(scope=scope, using=using)
+        lease = _lock_session_lease(owner_access_id=owner_access_id, lease_token=lease_token, using=using)
         _validated_held_lease(
             lease,
             owner_access_id=owner_access_id,

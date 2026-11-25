@@ -12,7 +12,7 @@ from io import StringIO
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -82,7 +82,7 @@ def _codes(error):
     return [item.code for item in error.error_list]
 
 
-class TemporaryPlacementBase(TestCase):
+class TemporaryPlacementFixtures:
     @classmethod
     def setUpTestData(cls):
         call_command('load_physical_fund', stdout=StringIO())
@@ -224,6 +224,8 @@ class TemporaryPlacementBase(TestCase):
             .first()
         )
 
+
+class TemporaryPlacementBase(TemporaryPlacementFixtures, TestCase):
     def session_key(self):
         session = self.client.session
         if not session.session_key:
@@ -495,6 +497,25 @@ class BedCheckinTests(TemporaryPlacementBase):
                     self.assertNotContains(page, 'data-assignment-warning="Не назначена техника"')
                 transaction.set_rollback(True)
 
+    def test_admin_and_clerk_can_check_in_without_releasing_each_others_control(self):
+        admin = self.authenticate(access=self.admin_access, client=Client())
+        self.assertEqual(self.acquire(admin).status_code, 200)
+        self.assertEqual(self.acquire().status_code, 200)
+        first = self.post_json('settlement_bed_checkin', self.payload, client=admin)
+        self.assertEqual(first.status_code, 201, first.content)
+        second = dict(self.payload, full_name='Второй жилец', phone='')
+        conflict = self.post_json('settlement_bed_checkin', second)
+        self.assertEqual(conflict.status_code, 409, conflict.content)
+        self.assertFalse(SettlementResident.objects.filter(full_name=second['full_name']).exists())
+        second['bed_stable_id'] = self.beds[1].stable_id
+        accepted = self.post_json('settlement_bed_checkin', second)
+        self.assertEqual(accepted.status_code, 201, accepted.content)
+        self.assertEqual(admin.post(reverse('settlement_control_release')).status_code, 200)
+        self.assertEqual(self.client.post(reverse('settlement_control_heartbeat')).status_code, 200)
+        self.assertEqual(self.acquire(admin).status_code, 200)
+        self.assertEqual(self.client.post(reverse('settlement_control_release')).status_code, 200)
+        self.assertEqual(admin.post(reverse('settlement_control_heartbeat')).status_code, 200)
+
     def test_checkin_after_release_explains_each_missing_itr_confirmation(self):
         self.acquire()
         room, beds = self.create_special_room(anchor_type=AccommodationAnchor.AnchorType.PROTECTED, suffix='replace')
@@ -603,6 +624,42 @@ class BedCheckinTests(TemporaryPlacementBase):
         self.assertGreaterEqual(self.checkin(**booking).status_code, 400)
         result = self.checkin(**booking, basis='Распоряжение о командировке')
         self.assertEqual(result.status_code, 201, result.content)
+
+
+class ParallelBedCheckinTests(TemporaryPlacementFixtures, TransactionTestCase):
+    def test_two_writers_racing_for_one_bed(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        from django.db import connection, connections
+
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent bed check-in requires PostgreSQL row locks.')
+        self.setUpTestData()
+        clients = [Client(), Client()]
+        for client, access in zip(clients, [self.admin_access, self.clerk_access]):
+            TemporaryPlacementBase.authenticate(self, access, client)
+            self.assertEqual(client.post(reverse('settlement_control_acquire')).status_code, 200)
+        barrier = Barrier(2)
+        bed_id = self.beds[0].stable_id
+
+        def checkin(client, name):
+            try:
+                barrier.wait(timeout=10)
+                return client.post(reverse('settlement_bed_checkin'), {
+                    'bed_stable_id': bed_id, 'subject': 'new', 'resident_type': 'CONTRACTOR',
+                    'full_name': name, 'organization': 'Строители', 'position_title': 'Монтажник',
+                    'sex': 'male', 'arrival': timezone.localdate().isoformat(),
+                }, content_type='application/json')
+            finally:
+                connections.close_all()
+
+        names = ['Первый тестовый жилец', 'Второй тестовый жилец']
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(checkin, clients, names))
+        self.assertCountEqual([response.status_code for response in responses], [201, 409],
+                              [response.json() for response in responses])
+        self.assertEqual(EmployeeBedOccupancy.objects.filter(physical_bed=self.beds[0]).count(), 1)
+        self.assertEqual(SettlementResident.objects.filter(full_name__in=names).count(), 1)
 
 
 class BedPreparationServiceTests(TemporaryPlacementBase):

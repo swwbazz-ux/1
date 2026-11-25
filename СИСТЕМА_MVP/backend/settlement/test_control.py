@@ -416,10 +416,27 @@ class SettlementControlLifecycleTests(
                 self.assertEqual(self.lease_state(), baseline_lease)
                 self.assertEqual(self.event_state(), baseline_events)
 
+    def test_upgrade_preserves_active_admin_credentials_and_unblocks_clerk(self):
+        from importlib import import_module
+        from django.apps import apps
+
+        # The old release stored an admin grant on the shared row.
+        admin = self.takeover(session='legacy-admin')
+        migration = import_module('settlement.migrations.0026_move_active_admin_control')
+        with transaction.atomic():
+            migration.move_admin_control(apps, connection.schema_editor())
+        self.acquire(session='new-clerk')
+        renewed = heartbeat_control_lease(
+            owner_access_id=self.admin_access.pk, raw_session_key='legacy-admin',
+            lease_token=admin.lease_token, fencing_revision=admin.fencing_revision, now=self.now,
+        )
+        self.assertEqual(renewed.lease_token, admin.lease_token)
+        self.assertEqual(SettlementControlLease.objects.get(scope='settlement').owner_access_id, self.clerk_access.pk)
+
     def test_activated_admin_access_is_allowed(self):
         grant = self.acquire(access=self.admin_access, session='admin-session')
 
-        lease = SettlementControlLease.objects.get(scope='settlement')
+        lease = SettlementControlLease.objects.get(scope=f'settlement:admin:{self.admin_access.pk}')
         self.assertEqual(lease.owner_access_id, self.admin_access.pk)
         self.assertEqual(grant.fencing_revision, 1)
         self.assertEqual(
@@ -1684,9 +1701,9 @@ class SettlementControlHttpLifecycleTests(
         self.authenticate(self.client, self.clerk_access)
         self.client.post(self.acquire_url)
         lease = SettlementControlLease.objects.get()
-        previous_expiry = lease.expires_at
+        previous_expiry = timezone.now() + timedelta(seconds=10)
         SettlementControlLease.objects.filter(pk=lease.pk).update(
-            expires_at=timezone.now() + timedelta(seconds=10),
+            expires_at=previous_expiry,
         )
 
         response = self.client.post(self.heartbeat_url)
@@ -2854,7 +2871,7 @@ class SettlementControlConcurrencyTests(
         )
         self.assertTrue(all(result[0] in {'success', 'validation'} for result in results))
 
-    def run_two_acquires(self):
+    def run_two_acquires(self, second_access=None):
         barrier = threading.Barrier(2)
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = (
@@ -2868,12 +2885,22 @@ class SettlementControlConcurrencyTests(
                 executor.submit(
                     self.acquire_in_thread,
                     barrier=barrier,
-                    access_id=self.second_clerk_access.pk,
+                    access_id=(second_access or self.second_clerk_access).pk,
                     session_key='concurrent-session-two',
                     now=self.now,
                 ),
             )
             return [future.result(timeout=20) for future in futures]
+
+    def test_admin_and_clerk_can_acquire_at_the_same_time(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Concurrent row locking is PostgreSQL-only.')
+        results = self.run_two_acquires(second_access=self.admin_access)
+        self.assertEqual([result[0] for result in results], ['acquired', 'acquired'], results)
+        self.assertCountEqual(
+            SettlementControlLease.objects.values_list('owner_access_id', flat=True),
+            [self.admin_access.pk, self.clerk_access.pk],
+        )
 
     def assert_single_concurrency_winner(self, results):
         self.assertEqual(

@@ -26,6 +26,7 @@ def find_employee_access_by_credentials(
     access_code,
     role_code=None,
     role_codes=None,
+    preferred_role_code=None,
 ):
     phone = (phone or '').strip()
     normalized_phone = normalize_phone(phone)
@@ -67,6 +68,13 @@ def find_employee_access_by_credentials(
         return None
     if role_code and len(matches) != 1:
         return None
+    if preferred_role_code:
+        preferred = [access for access in matches if access.role.code == preferred_role_code
+                     and access.status == EmployeeAccess.Status.ACTIVATED]
+        if len(preferred) > 1:
+            return None
+        if preferred:
+            return preferred[0]
     return matches[0] if matches else None
 
 

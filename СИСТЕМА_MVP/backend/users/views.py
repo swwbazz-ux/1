@@ -1063,6 +1063,8 @@ def app_choose_view(request):
             messages.error(request, 'Это приложение вам не назначено.')
             return redirect('app_choose')
         app, target = selected
+        if app.role_code == 'settlement_clerk' and access.role.code == 'admin':
+            return redirect(app.start_url)
         if app.role_code != target.role.code and target.pk == access.pk:
             return redirect(app.start_url)
         try:
@@ -1481,6 +1483,7 @@ def login_view(
                 else None
             ),
             role_codes=allowed_role_codes,
+            preferred_role_code='admin' if target_role_app and target_role_app.role_code == 'settlement_clerk' else None,
         )
         if access and not employee_has_effective_access_role(
             access.employee,

@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
+     data-control-role="{{ access.role.code }}"
      data-employee-search-url="{% url 'settlement_employee_search' %}"
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
@@ -935,7 +936,7 @@
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v3"></script>
 <script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-position-equipment-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
-<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
+<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>

@@ -4503,6 +4503,27 @@ class SettlementMapAccessTests(TestCase):
         self.assertEqual(self.client.session[ACTIVE_ROLE_CODE_SESSION_KEY], 'admin')
         self.assertTemplateUsed(self.client.get(reverse('clerk_home')), 'settlement/clerk_map.html')
 
+    def test_shared_pin_opens_personal_admin_control_in_clerk_app(self):
+        admin = EmployeeAccess.objects.create(
+            employee=self.clerk_employee, role=self.admin_role, access_code=self.clerk_access.access_code,
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        response = self.client.post(reverse('clerk_login'), {
+            'phone': self.clerk_employee.phone, 'access_code': admin.access_code, 'device_kind': 'personal',
+        })
+        self.assertRedirects(response, reverse('clerk_home'), fetch_redirect_response=False)
+        self.assertEqual(self.client.session['employee_access_id'], admin.pk)
+
+    def test_chooser_preserves_admin_session_even_with_assigned_clerk_role(self):
+        EmployeeAccess.objects.create(
+            employee=self.admin_employee, role=self.clerk_role, access_code='990099',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        self.authenticate(self.client, self.admin_access)
+        response = self.client.post(reverse('app_choose'), {'role_code': 'settlement_clerk'})
+        self.assertRedirects(response, reverse('clerk_home'), fetch_redirect_response=False)
+        self.assertEqual(self.client.session['employee_access_id'], self.admin_access.pk)
+
     def test_app_chooser_opens_clerk_as_admin_without_assigning_a_clerk_role(self):
         phone_data = {'phone': self.admin_employee.phone, 'device_kind': 'personal'}
         chooser = reverse('app_choose')

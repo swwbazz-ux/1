@@ -247,7 +247,7 @@ class ClerkShiftServiceTests(ClerkShiftBase):
 
         close_clerk_shift(access_id=self.clerk_access.pk)
 
-        lease = SettlementControlLease.objects.get(scope='settlement')
+        lease = SettlementControlLease.objects.get(scope=f'settlement:admin:{self.admin_access.pk}')
         self.assertEqual(lease.owner_access_id, self.admin_access.pk)
         with transaction.atomic():
             still_admin = lock_settlement_write_lease(
@@ -375,8 +375,9 @@ class ClerkShiftServiceTests(ClerkShiftBase):
         )
 
         self.assertEqual(shift.clerk_access_id, self.second_clerk_access.pk)
-        self.assertIsNone(grant)
-        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertIsNotNone(grant)
+        self.assertEqual(SettlementControlLease.objects.get(scope='settlement').owner_access_id, self.second_clerk_access.pk)
+        lease = SettlementControlLease.objects.get(scope=f'settlement:admin:{self.admin_access.pk}')
         self.assertEqual(lease.owner_access_id, self.admin_access.pk)
         self.assertFalse(
             SettlementControlEvent.objects.filter(
@@ -406,8 +407,9 @@ class ClerkShiftServiceTests(ClerkShiftBase):
         )
 
         self.assertEqual(shift.clerk_access_id, self.clerk_access.pk)
-        self.assertIsNone(grant)
-        lease = SettlementControlLease.objects.get(scope='settlement')
+        self.assertIsNotNone(grant)
+        self.assertEqual(SettlementControlLease.objects.get(scope='settlement').owner_access_id, self.clerk_access.pk)
+        lease = SettlementControlLease.objects.get(scope=f'settlement:admin:{self.admin_access.pk}')
         self.assertEqual(lease.owner_access_id, self.admin_access.pk)
         self.assertFalse(
             SettlementControlEvent.objects.filter(
