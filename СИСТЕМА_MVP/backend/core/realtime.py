@@ -293,7 +293,7 @@ def serialize_event(event):
     }
 
 
-def relevant_event_page(events_queryset, access, *, limit):
+def relevant_event_page(events_queryset, access, *, limit, deputy_dispatcher_viewer=False):
     scanned_events = list(events_queryset[:MAX_EVENT_SCAN + 1])
     scan_truncated = len(scanned_events) > MAX_EVENT_SCAN
     scan_window = scanned_events[:MAX_EVENT_SCAN]
@@ -312,7 +312,8 @@ def relevant_event_page(events_queryset, access, *, limit):
     relevant = [
         event
         for event in events
-        if event_is_relevant(event, access, equipment_ids=equipment_ids, driver_shift_ids=driver_shift_ids)
+        if (deputy_dispatcher_viewer and event.event_type in PRODUCTION_EVENT_TYPES)
+        or event_is_relevant(event, access, equipment_ids=equipment_ids, driver_shift_ids=driver_shift_ids)
     ]
     returned_events = relevant[:limit]
     relevant_truncated = len(relevant) > limit
@@ -328,8 +329,12 @@ def relevant_event_page(events_queryset, access, *, limit):
         )
     else:
         scanned_through_version = scan_window[-1].version if scan_window else None
+    serialized = [serialize_event(event) for event in returned_events]
+    if deputy_dispatcher_viewer:
+        # The board only needs an invalidation signal. Details use the protected fragment.
+        serialized = [{'version': event['version'], 'type': event['type']} for event in serialized]
     return (
-        [serialize_event(event) for event in returned_events],
+        serialized,
         scan_truncated or relevant_truncated,
         scanned_through_version,
     )

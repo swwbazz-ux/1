@@ -2655,7 +2655,7 @@ window.AppOperationalFragment = (function () {
 /* OPERATIONAL_FRAGMENT_CLIENT_END */
 
 window.AppRealtimeConfig = {
-    stateUrl: "{% url 'operational_state_version' %}",
+    stateUrl: "{% if deputy_dispatcher_viewer %}{% url 'deputy_dispatcher_state' %}{% else %}{% url 'operational_state_version' %}{% endif %}",
     sseUrl: "/realtime/stream/",
     sseEnabled: document.body.dataset.ssePilotEnabled === "true",
     sseHeartbeatTimeoutMs: 30000,

@@ -137,7 +137,7 @@ def offline_events_sync_view(request):
 
 
 @require_GET
-def operational_state_version_view(request):
+def operational_state_version_view(request, *, deputy_dispatcher_viewer=False):
     access_id = request.session.get('employee_access_id')
     if not access_id:
         return JsonResponse({'authenticated': False}, status=401)
@@ -161,6 +161,8 @@ def operational_state_version_view(request):
     requested_role_app = get_role_app(request.GET.get('role_app_code', ''))
     role_app = host_role_app or requested_role_app or get_role_app(access.role.code)
     session_role_code = role_state.get('session_role_code', access.role.code)
+    if deputy_dispatcher_viewer and (access.role.code != 'deputy_mining_manager' or not role_state['is_active']):
+        return JsonResponse({'authenticated': False}, status=403)
     role_is_active_for_app = role_state['is_active'] and (
         role_app is None or session_role_code == role_app.role_code
     )
@@ -186,7 +188,7 @@ def operational_state_version_view(request):
         background_role and role_is_active_for_app and has_active_shift
     )
 
-    if role_is_active_for_app:
+    if role_is_active_for_app and not deputy_dispatcher_viewer:
         native_app, native_version = parse_native_app_marker(request)
         if native_app and role_app:
             touch_application_session(
@@ -242,6 +244,7 @@ def operational_state_version_view(request):
             events_queryset.order_by('version'),
             access,
             limit=limit,
+            deputy_dispatcher_viewer=deputy_dispatcher_viewer,
         )
         if scanned_version is not None:
             scanned_through_version = scanned_version

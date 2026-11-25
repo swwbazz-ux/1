@@ -652,6 +652,22 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(self.client.get(board).status_code, 403)
         self.assertEqual(self.client.get(detail, {'state_version': version}).status_code, 403)
 
+    def test_dispatcher_viewer_polls_production_events_without_running_reconciliation(self):
+        from core.models import bump_operational_state
+
+        endpoint = reverse('deputy_dispatcher_state')
+        current = self.client.get(reverse('deputy_dispatcher_control')).context['operational_state_version']
+        bump_operational_state(event_type='trip_changed', payload={'internal_detail': 'hidden'})
+        with patch('assignments.services.reconcile_due_haul_assignments_throttled') as reconcile:
+            response = self.client.get(endpoint, {'after': current, 'role_app_code': 'deputy_mining_manager'})
+        reconcile.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['role_active'])
+        self.assertEqual(response.json()['events'], [{'type': 'trip_changed', 'version': current + 1}])
+        self.assertFalse(self.client.get(reverse('operational_state_version'), {'after': current}).json()['events'])
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(endpoint, {'after': current}).status_code, 403)
+
     def test_category_data_uses_the_same_plan_and_permissions_as_page(self):
         endpoint = reverse('deputy_mining_manager_placement_data')
         for client in (Client(), self.client):
