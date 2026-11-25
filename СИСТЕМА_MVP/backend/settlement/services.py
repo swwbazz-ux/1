@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from core.production_time import production_work_date
 from shifts.models import WatchPeriod
-from users.models import Employee
+from users.models import Employee, PersonnelPosition
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
 from .models import (
@@ -34,7 +34,6 @@ from .personnel_categories import (
     MISSING_CATEGORY,
     MISSING_CATEGORY_MESSAGE,
     ROOM_CATEGORY_CONFLICT,
-    ROOM_CATEGORY_CONFLICT_MESSAGE,
     employee_settlement_category,
     room_allows_personnel_category,
 )
@@ -1078,9 +1077,8 @@ def _validate_room_personnel_category(
     )
     if exclude_ids:
         occupancies = occupancies.exclude(pk__in=exclude_ids)
-    roommate_categories = [
-        employee_settlement_category(occupancy.resident.employee)
-        for occupancy in occupancies
+    roommates = [
+        (occupancy.resident, 'проживание') for occupancy in occupancies
         if not occupancy.resident.is_external
     ]
     # T-036 D1 (QA-21): ручной путь обязан видеть и подтверждённые плановые
@@ -1133,9 +1131,12 @@ def _validate_room_personnel_category(
             continue
         if binding.resident.is_external:
             continue
-        roommate_categories.append(
-            employee_settlement_category(binding.resident.employee),
-        )
+        roommates.append((binding.resident, 'закрепление'))
+    entries = [
+        (roommate.display_name, employee_settlement_category(roommate.employee), kind)
+        for roommate, kind in roommates
+    ]
+    roommate_categories = [other_category for _, other_category, _ in entries]
     if not room_allows_personnel_category(
         room.room_type, category, roommate_categories,
     ):
@@ -1146,10 +1147,20 @@ def _validate_room_personnel_category(
                 MISSING_CATEGORY_MESSAGE,
                 MISSING_CATEGORY,
             )
-        raise _settlement_error(
-            ROOM_CATEGORY_CONFLICT_MESSAGE,
-            ROOM_CATEGORY_CONFLICT,
-        )
+        if room.room_type == PhysicalRoom.RoomType.ITR and category != PersonnelPosition.SettlementCategory.ITR:
+            message = f'Комната {room.number} предназначена для ИТР.'
+        else:
+            categories = PersonnelPosition.SettlementCategory
+            conflicts = sorted({
+                f'{name} — {categories(other_category).label} ({kind})'
+                for name, other_category, kind in entries if other_category != category
+            })
+            message = (
+                f'{resident.display_name} — {categories(category).label}. '
+                f'В комнате {room.number} на эти даты есть жильцы другой категории. '
+                + '. '.join(conflicts) + '.'
+            )
+        raise _settlement_error(message, ROOM_CATEGORY_CONFLICT)
 
 
 def _validate_resident_and_destination(

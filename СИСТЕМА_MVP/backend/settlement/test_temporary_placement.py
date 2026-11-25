@@ -419,6 +419,26 @@ class BedCheckinTests(TemporaryPlacementBase):
     def checkin(self, **changes):
         return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
 
+    def test_backdated_checkin_reports_roommate_with_another_category(self):
+        room = self.beds[0].room
+        target = room.beds.exclude(pk=self.beds[0].pk).first()
+        itr_position = PersonnelPosition.objects.create(
+            code='checkin-itr-conflict', name='Руководитель тестового подразделения',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        roommate = self.second_candidate_resident.employee
+        roommate.personnel_position = itr_position
+        roommate.save(update_fields=['personnel_position'])
+        self.create_occupancy(resident=self.second_candidate_resident, bed=self.beds[0])
+        self.acquire()
+
+        result = self.checkin(bed_stable_id=target.stable_id, subject=f'employee:{self.candidate.pk}')
+
+        self.assertFalse(result.json()['ok'])
+        self.assertEqual(result.json()['code'], 'settlement_room_personnel_category_conflict')
+        self.assertIn(f'{roommate.full_name} — ИТР (проживание)', result.json()['error'])
+        self.assertFalse(EmployeeBedOccupancy.objects.filter(physical_bed=target).exists())
+
     def test_map_snapshot_tracks_published_shift_without_changing_occupancy(self):
         from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus
         from references.models import Equipment, EquipmentType

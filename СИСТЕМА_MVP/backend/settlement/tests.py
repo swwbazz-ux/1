@@ -18085,6 +18085,7 @@ class PersonnelCategoryRoomRuleTests(TestCase):
             captured.exception.error_list[0].code,
             'settlement_room_personnel_category_conflict',
         )
+        self.assertIn(f'{self.itr_resident.display_name} — ИТР (проживание)', captured.exception.messages[0])
 
     def test_itr_room_accepts_only_itr(self):
         now = timezone.now()
@@ -18319,6 +18320,7 @@ class PersonnelCategoryRoomRuleTests(TestCase):
             captured.exception.error_list[0].code,
             'settlement_room_personnel_category_conflict',
         )
+        self.assertIn('KAT ИТР с привязкой — ИТР (закрепление)', captured.exception.messages[0])
 
     def test_confirmed_binding_outside_dates_does_not_block(self):
         now = timezone.now()
