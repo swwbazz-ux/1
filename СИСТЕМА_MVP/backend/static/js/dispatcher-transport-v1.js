@@ -83,7 +83,7 @@
         }
 
         function roleIsReadonly() {
-            return (
+            return options.viewOnly === true || (
                 typeof global.isAppRoleReadonly === "function"
                 && global.isAppRoleReadonly()
             );

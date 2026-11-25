@@ -18,6 +18,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from assignments.models import (
@@ -6426,7 +6427,9 @@ def dispatcher_close_downtime_view(request, event_id):
 
 
 @require_http_methods(['GET', 'POST'])
-def dispatcher_equipment_detail_view(request, category, equipment_id):
+def dispatcher_equipment_detail_view(request, category, equipment_id, *, deputy_viewer=False):
+    if deputy_viewer and request.method != 'GET':
+        return dispatcher_equipment_detail_error('forbidden', status=403)
     access_id = request.session.get('employee_access_id')
     access = (
         EmployeeAccess.objects
@@ -6444,9 +6447,12 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
     )
     if not access:
         return dispatcher_equipment_detail_error('authentication_required', status=401)
-    if not control_access_allowed(
-        request, access, role_codes={'dispatcher', 'admin', 'manager'},
-    ):
+    if deputy_viewer:
+        state = role_session_state(request, access)
+        allowed = access.role.code == 'deputy_mining_manager' and state['is_active']
+    else:
+        allowed = control_access_allowed(request, access, role_codes={'dispatcher', 'admin', 'manager'})
+    if not allowed:
         return dispatcher_equipment_detail_error('forbidden', status=403)
     if category not in {'equipment', 'complex'}:
         return dispatcher_equipment_detail_error('card_not_found', status=404)
@@ -6512,11 +6518,23 @@ def dispatcher_equipment_detail_view(request, category, equipment_id):
         request,
         access_override=access,
         **tablet_overrides,
+        deputy_viewer=deputy_viewer,
         equipment_detail={
             'card_key': card_key,
             'state_version': state_version,
         },
     )
+
+
+@require_GET
+@never_cache
+def deputy_dispatcher_control_view(request):
+    from assignments.deputy_views import deputy_access_from_request
+
+    access = deputy_access_from_request(request)
+    if not access:
+        return JsonResponse({'authenticated': False}, status=403)
+    return dispatcher_control_view(request, access_override=access, deputy_viewer=True)
 
 
 def dispatcher_control_view(
@@ -6527,11 +6545,13 @@ def dispatcher_control_view(
     dispatcher_header_override=None,
     context_overrides=None,
     equipment_detail=None,
+    deputy_viewer=False,
 ):
     requested_fragment = request.GET.get('_operational_fragment', '').strip()
-    reconcile_due_haul_assignments()
-    reconcile_expired_free_bucket_acceptances()
-    reconcile_expired_manual_trips()
+    if not deputy_viewer:
+        reconcile_due_haul_assignments()
+        reconcile_expired_free_bucket_acceptances()
+        reconcile_expired_manual_trips()
     # Просроченные смены закрывает сервер по таймеру (close_expired_shifts),
     # а не загрузка пульта: момент закрытия не должен зависеть от того, открыл
     # ли кто-то браузер.
@@ -6550,7 +6570,8 @@ def dispatcher_control_view(
         if equipment_detail:
             return dispatcher_equipment_detail_error('authentication_required', status=401)
         return redirect('role_home')
-    if enforce_dispatcher_access and access.role.code not in {'dispatcher', 'admin', 'manager'}:
+    role_codes = {'deputy_mining_manager'} if deputy_viewer else {'dispatcher', 'admin', 'manager'}
+    if enforce_dispatcher_access and access.role.code not in role_codes:
         if equipment_detail:
             return dispatcher_equipment_detail_error('forbidden', status=403)
         return redirect('role_home')
@@ -6602,6 +6623,7 @@ def dispatcher_control_view(
         return protect_dispatcher_equipment_detail_response(response)
     context = {
             'access': access,
+            'deputy_dispatcher_viewer': deputy_viewer,
             'dispatcher_header': dispatcher_header,
             'dispatcher_dashboard': dispatcher_dashboard,
             'dispatcher_page_title': 'Горный диспетчер',

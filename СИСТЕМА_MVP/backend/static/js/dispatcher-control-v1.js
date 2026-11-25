@@ -7,13 +7,14 @@ document.addEventListener("DOMContentLoaded", function () {
     var themeToggles = document.querySelectorAll("[data-dispatcher-theme-toggle]");
     var saved = localStorage.getItem("dispatcher-theme") || "night";
     var runtimeConfig = shell ? shell.dataset : {};
+    var viewOnly = runtimeConfig.dispatcherViewOnly === "true";
     var staticPrefix = runtimeConfig.staticPrefix || "/static/";
     var dispatcherMoveExcavatorUrl = runtimeConfig.dispatcherMoveUrl || "";
     var dispatcherAssignTruckUrl = runtimeConfig.dispatcherAssignUrl || "";
     var initialDispatcherBoard = document.querySelector(".dispatcher-board");
-    var dispatcherShiftOpen = Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
+    var dispatcherShiftOpen = !viewOnly && Boolean(initialDispatcherBoard && initialDispatcherBoard.dataset.dispatcherShiftOpen === "true");
     function syncDispatcherShiftRuntime(freshBoard) {
-        if (!freshBoard) return dispatcherShiftOpen;
+        if (viewOnly || !freshBoard) return dispatcherShiftOpen;
         var fragmentShiftOpen = freshBoard.dataset
             ? freshBoard.dataset.dispatcherShiftOpen
             : "";
@@ -67,6 +68,7 @@ document.addEventListener("DOMContentLoaded", function () {
         throw new Error("Dispatcher transport module is not loaded");
     }
     var dispatcherTransport = window.createDispatcherTransport({
+        viewOnly: viewOnly,
         getCsrfToken: getCsrfToken,
         onServerError: showDispatcherDnDError,
         onStateChange: updateDispatcherSyncIndicator
@@ -312,7 +314,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
 
     // 6. Dispatcher service worker and runtime diagnostics.
-    if ("serviceWorker" in navigator) {
+    if (!viewOnly && "serviceWorker" in navigator) {
 
         navigator.serviceWorker.register("/dispatcher-sw.js", {
             scope: runtimeConfig.dispatcherServiceWorkerScope || "/dispatcher/"

@@ -14,6 +14,7 @@ from .views import (
     dispatcher_cancel_trip_view,
     dispatcher_assign_truck_view,
     dispatcher_complete_trip_view,
+    deputy_dispatcher_control_view,
     dispatcher_control_view,
     dispatcher_close_downtime_view,
     dispatcher_equipment_detail_view,
@@ -39,6 +40,13 @@ urlpatterns = [
     path('dispatcher-sw.js', dispatcher_service_worker_view, name='dispatcher_service_worker'),
     path('excavator.webmanifest', excavator_manifest_view, name='excavator_manifest'),
     path('excavator-sw.js', excavator_service_worker_view, name='excavator_service_worker'),
+    path('deputy-mining-manager/dispatcher/', deputy_dispatcher_control_view, name='deputy_dispatcher_control'),
+    path(
+        'deputy-mining-manager/dispatcher/card/<str:category>/<int:equipment_id>/',
+        dispatcher_equipment_detail_view,
+        {'deputy_viewer': True},
+        name='deputy_dispatcher_equipment_detail',
+    ),
     path('dispatcher/control/', dispatcher_control_view, name='dispatcher_control'),
     path(
         'dispatcher/control/downtime/<int:event_id>/close/',

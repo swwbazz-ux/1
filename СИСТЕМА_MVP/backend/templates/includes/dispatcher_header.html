@@ -10,7 +10,11 @@
             <span class="dispatcher-command-date">{% if dispatcher_header_shift_date %}{{ dispatcher_header_shift_date }}{% elif dispatcher_header.current_date %}{{ dispatcher_header.current_date }}{% elif current_date %}{{ current_date }}{% else %}{{ dispatcher_dashboard.current_date }}{% endif %}</span>
             <span class="dispatcher-command-time-range">{% if dispatcher_header_time_range %}{{ dispatcher_header_time_range }}{% elif dispatcher_header.dispatcher_header_time_range %}{{ dispatcher_header.dispatcher_header_time_range }}{% else %}07:00-19:00{% endif %}</span>
         </div>
-        {% include "includes/dispatcher_nav.html" %}
+        {% if deputy_dispatcher_viewer %}
+            <span>Диспетчерский пульт · Только просмотр</span>
+        {% else %}
+            {% include "includes/dispatcher_nav.html" %}
+        {% endif %}
         {% if dispatcher_nav_active == "control" and not mining_master_mobile_enabled %}
         {# Живой поиск техники: набранный номер подсвечивает машину везде, где она стоит на пульте. Только на пульте смены — на других экранах доски нет. #}
         <label class="dispatcher-equipment-search" data-dispatcher-equipment-search-box>
@@ -23,7 +27,7 @@
 
     <section class="dispatcher-command-actions" aria-label="{% if dispatcher_actions_label %}{{ dispatcher_actions_label }}{% else %}Действия смены{% endif %}">
         <span class="dispatcher-shift-slot">
-            {% include "includes/dispatcher_shift_action.html" %}
+            {% if not deputy_dispatcher_viewer %}{% include "includes/dispatcher_shift_action.html" %}{% endif %}
         </span>
         {% if not request.mining_master_tablet_control %}
         <div class="dispatcher-command-utility"{% if access.role.code == 'dispatcher' %} style="width: calc(100% + 88px); max-width: 388px; grid-template-columns: 38px 38px 38px repeat(2, minmax(0, 1fr)); column-gap: 8px;"{% endif %}>
@@ -57,7 +61,7 @@
                 </button>
             {% endif %}
             <button type="button" class="dispatcher-theme-button" data-dispatcher-theme-toggle title="День / Ночь">Д/Н</button>
-            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% url 'role_home' %}"><span aria-hidden="true"></span>Назад</a>
+            <a class="dispatcher-utility-link dispatcher-utility-back" href="{% if deputy_dispatcher_viewer %}{% url 'deputy_mining_manager_placement' %}{% else %}{% url 'role_home' %}{% endif %}"><span aria-hidden="true"></span>{% if deputy_dispatcher_viewer %}Расстановка{% else %}Назад{% endif %}</a>
             <a class="dispatcher-utility-link dispatcher-utility-exit" href="{% url 'logout' %}"><span aria-hidden="true"></span>Выйти</a>
         </div>
         {% endif %}

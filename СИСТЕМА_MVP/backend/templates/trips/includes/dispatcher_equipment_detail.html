@@ -49,6 +49,7 @@
                             <dt>Автозакрытие</dt><dd data-gd-detail-shift-autoclose></dd>
                             <dt hidden>Вид</dt><dd data-gd-detail-shift-type hidden></dd>
                         </dl>
+{% if not deputy_dispatcher_viewer %}
                         <form class="gd-detail-shift-close" data-gd-detail-service-close method="post" action="" hidden>
                             {% csrf_token %}
                             <input type="hidden" name="close_kind" value="neglected" data-gd-detail-service-close-kind>
@@ -83,6 +84,7 @@
                                 </div>
                             </div>
                         </form>
+{% endif %}
                     </section>
 
                     <section class="gd-detail-downtime" data-gd-detail-downtime hidden>
@@ -92,7 +94,9 @@
                             <small data-gd-detail-downtime-started></small>
                         </div>
                         <time data-gd-detail-downtime-timer data-gd-downtime-timer>00:00:00</time>
+{% if not deputy_dispatcher_viewer %}
                         <button type="button" data-gd-detail-downtime-close>Завершить простой</button>
+{% endif %}
                         <span class="gd-detail-downtime-result" data-gd-detail-downtime-result role="status" aria-live="polite"></span>
                     </section>
 
@@ -106,6 +110,7 @@
                 </div>
 
                 <div class="gd-detail-col gd-detail-col-work">
+{% if not deputy_dispatcher_viewer %}
                     <section class="gd-detail-settings" data-gd-detail-settings hidden>
                         <div class="gd-detail-settings-head">
                             <div>
@@ -142,6 +147,7 @@
                             <button type="button" class="gd-detail-settings-save" data-gd-setting-save>Сохранить настройки</button>
                         </div>
                     </section>
+{% endif %}
 
                     <section class="gd-detail-manual-trip" data-gd-detail-manual-trip hidden>
                         <div class="gd-detail-settings-head">
@@ -151,6 +157,7 @@
                             </div>
                         </div>
                         <p class="gd-detail-manual-trip-blocked" data-gd-detail-manual-trip-blocked hidden></p>
+{% if not deputy_dispatcher_viewer %}
                         <form class="gd-detail-shift-close gd-detail-manual-trip-form" data-gd-detail-manual-trip-form method="post" action="" hidden>
                             {% csrf_token %}
                             <input type="hidden" name="excavator_id" value="">
@@ -186,6 +193,7 @@
                                 </div>
                             </div>
                         </form>
+{% endif %}
                     </section>
 
                     <div class="gd-detail-load-state" data-gd-detail-load-state hidden>

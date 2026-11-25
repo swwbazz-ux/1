@@ -624,6 +624,34 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(categories['excavator_operator']['revision'], excavator_plan.revision)
         self.assertEqual(categories['excavator_operator']['published_at_label'], '')
 
+    def test_dispatcher_board_is_live_and_read_only_for_deputy(self):
+        board = reverse('deputy_dispatcher_control')
+        detail = reverse('deputy_dispatcher_equipment_detail', args=('equipment', self.truck_1.pk))
+        self.assertContains(self.client.get(reverse('deputy_mining_manager_placement')), board)
+        with patch('trips.views.reconcile_due_haul_assignments') as reconcile:
+            page = self.client.get(board)
+            fragment = self.client.get(board, {'_operational_fragment': 'dispatcher'})
+            version = page.context['operational_state_version']
+            card = self.client.get(detail, {'state_version': version})
+        reconcile.assert_not_called()
+        self.assertContains(page, 'data-dispatcher-view-only="true"')
+        self.assertContains(page, 'Только просмотр')
+        self.assertContains(page, 'data-dispatcher-equipment-search')
+        self.assertNotContains(page, 'data-dispatcher-move-url')
+        self.assertNotContains(page, 'draggable="true"')
+        self.assertNotContains(page, 'data-gd-setting-save')
+        self.assertEqual(fragment.status_code, 200)
+        self.assertIn('Только просмотр', fragment.json()['html'])
+        self.assertEqual(card.status_code, 200)
+        self.assertEqual(self.client.post(board).status_code, 405)
+        self.assertEqual(self.client.post(detail).status_code, 403)
+        for name in ('dispatcher_assign_truck', 'dispatcher_move_excavator'):
+            self.assertEqual(self.client.post(reverse(name), {}, content_type='application/json').status_code, 403)
+        self.assertEqual(Client().get(board).status_code, 403)
+        self.authenticate(self.client, self.driver_access)
+        self.assertEqual(self.client.get(board).status_code, 403)
+        self.assertEqual(self.client.get(detail, {'state_version': version}).status_code, 403)
+
     def test_category_data_uses_the_same_plan_and_permissions_as_page(self):
         endpoint = reverse('deputy_mining_manager_placement_data')
         for client in (Client(), self.client):
@@ -837,7 +865,7 @@ class DeputyPlanningViewTests(TestCase):
         self.assertEqual(response['X-Content-Type-Options'], 'nosniff')
         self.assertIn('deputy-mining-manager-desktop-shell-', script)
         self.assertIn(
-            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v25";',
+            'const CACHE_NAME = "deputy-mining-manager-desktop-shell-v26";',
             script,
         )
         self.assertIn('/static/js/role-readonly.js', script)

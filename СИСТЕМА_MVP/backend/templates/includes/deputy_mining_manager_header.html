@@ -23,6 +23,7 @@
             <a class="{% if active_section == 'reports' %}is-active{% endif %}"
                href="{% url 'deputy_mining_manager_reports' %}"
                {% if active_section == 'reports' %}aria-current="page"{% endif %}>Отчёты</a>
+            <a href="{% url 'deputy_dispatcher_control' %}">Диспетчерский пульт</a>
         </nav>
     </section>
 

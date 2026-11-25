@@ -1967,17 +1967,20 @@ button.deputy-avatar {
     }
 
     .deputy-shell .admin-console-nav {
-        flex: 1 1 auto;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         width: 100%;
-        justify-content: stretch;
+        gap: 4px;
     }
 
     .deputy-shell .admin-console-nav a {
-        flex: 1 1 0;
         min-width: 0;
         min-height: 44px;
-        padding: 0 8px;
+        padding: 0 4px;
         font-size: 11px;
+        line-height: 1.15;
+        text-align: center;
+        white-space: normal;
     }
 
     .deputy-shell .admin-console-actions {

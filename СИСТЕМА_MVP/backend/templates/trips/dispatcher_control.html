@@ -26,6 +26,8 @@
         <link rel="apple-touch-icon" href="{% static 'img/pwa/mining-master-180.png' %}">
         <script src="{% static 'js/role-app-install-v1.js' %}?v=4" defer></script>
         <script src="{% static 'js/mobile-shift-unified-v1.js' %}?v=mining-master-mobile-shell-v165" defer></script>
+    {% elif deputy_dispatcher_viewer %}
+        {% include "includes/deputy_mining_manager_pwa_head.html" %}
     {% else %}
         <link rel="manifest" href="{% url 'dispatcher_manifest' %}">
         <meta name="theme-color" content="#B33A4C">
@@ -46,10 +48,15 @@
     class="dispatcher-shell"
     data-dispatcher-theme
     data-static-prefix="{% static '' %}"
+    {% if deputy_dispatcher_viewer %}
+    data-dispatcher-view-only="true"
+    data-dispatcher-detail-url-template="{% url 'deputy_dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
+    {% else %}
     data-dispatcher-move-url="{{ dispatcher_move_excavator_url }}"
     data-dispatcher-assign-url="{{ dispatcher_assign_truck_url }}"
     data-dispatcher-detail-url-template="{% url 'dispatcher_equipment_detail' category='equipment' equipment_id=0 %}"
     data-dispatcher-downtime-close-url-template="{% url 'dispatcher_close_downtime' event_id=0 %}"
+    {% endif %}
     data-dispatcher-service-worker-scope="{% if role_app.role_code == 'dispatcher' %}/{% else %}/dispatcher/{% endif %}"
 >
     <h1 class="dispatcher-compat-title">{% if dispatcher_compat_title %}{{ dispatcher_compat_title }}{% else %}Диспетчерский пульт{% endif %}</h1>
@@ -568,12 +575,12 @@
     {% endif %}
     {% endif %}
 
-    {% include "trips/includes/dispatcher_service_lists.html" %}
+    {% if not deputy_dispatcher_viewer %}{% include "trips/includes/dispatcher_service_lists.html" %}{% endif %}
 
     {% include "trips/includes/dispatcher_equipment_detail.html" %}
 </main>
 </div>
-{% if not mining_master_mobile_enabled %}
+{% if not mining_master_mobile_enabled and not deputy_dispatcher_viewer %}
 {% include "trips/includes/dispatcher_push_invite.html" %}
 {% endif %}
 {% endspaceless %}
@@ -6821,7 +6828,7 @@ document.addEventListener("DOMContentLoaded", function () {
 </script>
 {% else %}
 <script src="{% static 'js/dispatcher-sounds-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-transport-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
+<script src="{% static 'js/dispatcher-transport-v1.js' %}?v={% if deputy_dispatcher_viewer %}20261125-deputy-view{% else %}dispatcher-desktop-shell-v167{% endif %}" defer></script>
 <script src="{% static 'js/dispatcher-detail-settings-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
 <script src="{% static 'js/dispatcher-detail-charts-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
 <script src="{% static 'js/dispatcher-detail-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
@@ -6836,6 +6843,6 @@ document.addEventListener("DOMContentLoaded", function () {
 <script src="{% static 'js/dispatcher-board-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
 <script src="{% static 'js/dispatcher-fragment-reconciler-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
 <script src="{% static 'js/dispatcher-realtime-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
-<script src="{% static 'js/dispatcher-control-v1.js' %}?v=dispatcher-desktop-shell-v167" defer></script>
+<script src="{% static 'js/dispatcher-control-v1.js' %}?v={% if deputy_dispatcher_viewer %}20261125-deputy-view{% else %}dispatcher-desktop-shell-v167{% endif %}" defer></script>
 {% endif %}
 {% endblock %}
