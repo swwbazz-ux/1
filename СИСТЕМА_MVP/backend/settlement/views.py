@@ -65,7 +65,9 @@ from .clerk_shifts import (
     handover_clerk_shift,
     open_clerk_shift,
 )
-from .cohort_readiness import build_arrival_roster_cohort_overview
+from rotations.models import ArrivalRosterRoutingBatch, ArrivalRosterVersion
+from .resolver import resolve_ready_arrivals
+from .cohort_readiness import build_arrival_roster_cohort_overview, build_arrival_roster_cohort_readiness
 from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
 from .current_housing_import import (
     MANUAL_BED_BLOCKERS,
@@ -726,6 +728,53 @@ def settlement_current_housing_import_view(request):
     elif form.errors and status == 200:
         status = 400
     return render(request, 'settlement/clerk_housing_import.html', context, status=status)
+
+
+@never_cache
+@require_GET
+def settlement_provisional_plan_view(request, period_id=None):
+    access = settlement_clerk_access_from_request(request)
+    if not access:
+        return redirect(f'{reverse("clerk_login")}?{urlencode({"next": request.path})}')
+    batches = ArrivalRosterRoutingBatch.objects.select_related(
+        'watch_period__watch_composition', 'arrival_roster_version',
+    ).filter(
+        arrival_roster_version__status=ArrivalRosterVersion.Status.CONFIRMED,
+        arrival_roster_version__superseded_at__isnull=True,
+    )
+    if period_id is None:
+        period_ids = list(batches.order_by('watch_period_id').values_list('watch_period_id', flat=True).distinct()[:2])
+        if len(period_ids) == 1:
+            return redirect('settlement_provisional_plan', period_id=period_ids[0])
+        return redirect('settlement_arrival_roster_routing')
+    context = {'access': access, 'clerk_active_section': 'routing'}
+    try:
+        batch = batches.get(watch_period_id=period_id)
+        readiness = build_arrival_roster_cohort_readiness(batch_id=batch.pk)
+        rows = batch.rows.select_related(
+            'employee', 'resident__employee__personnel_position', 'resident__employee__work_schedule',
+        ).in_bulk()
+        waiting = [
+            (rows[item.routing_row_id].resident.display_name if item.routing_row_id else 'Весь заезд', item.message)
+            for item in readiness.blockers
+        ]
+        proposed = []
+        exceptions = []
+        if readiness.ready_members:
+            result = resolve_ready_arrivals(batch=batch, readiness=readiness, rows=rows)
+            names = {row.resident_id: row.resident.display_name for row in rows.values()}
+            beds = PhysicalBed.objects.select_related('room__dormitory').in_bulk(
+                item.physical_bed_id for item in result.placements
+            )
+            proposed = [(names[item.resident_id], str(beds[item.physical_bed_id])) for item in result.placements]
+            exceptions = [(names[item.resident_id], ' '.join(_auto_settlement_reason_label(code)
+                          for code in item.reason_codes)) for item in result.unresolved]
+        context.update(period=batch.watch_period, waiting=waiting, proposed=proposed, exceptions=exceptions)
+    except (ArrivalRosterRoutingBatch.DoesNotExist, ArrivalRosterRoutingBatch.MultipleObjectsReturned):
+        context['error'] = 'Для этой вахты требуется один актуальный утверждённый список заезда.'
+    except ValidationError:
+        context['error'] = 'Данные заезда требуют проверки. Откройте раздел «Готово к расселению» и повторите расчёт.'
+    return render(request, 'settlement/provisional_plan.html', context)
 
 
 @require_GET

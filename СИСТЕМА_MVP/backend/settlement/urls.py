@@ -40,6 +40,7 @@ from .views import (
     settlement_auto_state_view,
     settlement_arrival_roster_create_cohort_view,
     settlement_arrival_roster_create_preview_view,
+    settlement_provisional_plan_view,
     settlement_arrival_roster_routing_view,
     settlement_login_view,
     settlement_manifest_view,
@@ -65,6 +66,8 @@ urlpatterns = [
         settlement_service_worker_view,
         name='clerk_service_worker',
     ),
+    path('clerk/arrival-roster-routing/plan/', settlement_provisional_plan_view, name='settlement_provisional_period'),
+    path('clerk/arrival-roster-routing/period/<int:period_id>/plan/', settlement_provisional_plan_view, name='settlement_provisional_plan'),
     path('clerk/login/', settlement_login_view, name='clerk_login'),
     path(
         'clerk/arrival-roster-routing/',

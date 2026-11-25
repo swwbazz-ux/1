@@ -31,7 +31,9 @@
                     <tbody>
                         {% for item, preview_cohort_id in cohort_preview_rows %}
                         <tr>
-                            <td>{{ item.watch_period_name }}<br><small>{{ item.watch_period_dates }}</small></td>
+                            <td>{{ item.watch_period_name }}<br><small>{{ item.watch_period_dates }}</small><br>
+                                <a href="{% url 'settlement_provisional_plan' item.watch_period_id %}">Рассчитать по готовым</a>
+                            </td>
                             {% if item.is_created %}
                             <td>Состав расселения сформирован</td>
                             <td>
