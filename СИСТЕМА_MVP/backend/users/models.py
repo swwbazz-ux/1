@@ -610,6 +610,7 @@ class PersonnelPosition(models.Model):
         blank=True,
         help_text='Для авторасселения рабочих и ИТР по разным комнатам.',
     )
+    requires_equipment = models.BooleanField('Требуется техника', default=False, db_default=False)
     requires_specialization = models.BooleanField(
         'Требует производственную специализацию',
         default=False,
@@ -637,6 +638,11 @@ class PersonnelPosition(models.Model):
 
     def __str__(self):
         return self.name
+
+    def clean(self):
+        super().clean()
+        if self.requires_equipment and self.settlement_category == self.SettlementCategory.ITR:
+            raise ValidationError({'requires_equipment': 'Для ИТР в расселении показывается должность.'})
 
     @property
     def settlement_category_label(self):

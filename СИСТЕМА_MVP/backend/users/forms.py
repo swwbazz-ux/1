@@ -931,6 +931,7 @@ class PersonnelPositionReferenceForm(forms.ModelForm):
             'name',
             'code',
             'settlement_category',
+            'requires_equipment',
             'requires_specialization',
             'allowed_specializations',
             'default_specialization',

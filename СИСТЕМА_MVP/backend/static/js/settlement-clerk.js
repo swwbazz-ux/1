@@ -864,7 +864,7 @@
                 addBedDetail(details, "Жилец", bed.dataset.occupantName);
                 addBedDetail(details, "День / ночь", bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel);
                 if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
-                addBedDetail(details, "Техника / должность", bed.dataset.workLabel);
+                addBedDetail(details, bed.dataset.workCaption || "Техника / должность", bed.dataset.workLabel);
                 if (bed.dataset.assignmentWarning) addBedDetail(details, "Требует внимания", bed.dataset.assignmentWarning);
                 addBedDetail(details, "Закрепление", bed.dataset.assignmentTypeLabel);
                 if (bed.dataset.stayStart) {
@@ -2185,6 +2185,7 @@
         destination.dataset.onExtension = occupancy.on_extension ? "true" : "false";
         destination.dataset.assignmentWarning = occupancy.assignment_warning || "";
         destination.dataset.workLabel = occupancy.work_label;
+        destination.dataset.workCaption = occupancy.work_caption || "";
         destination.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
         destination.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
         destination.dataset.assignmentType = occupancy.assignment_type || "";

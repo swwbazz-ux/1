@@ -113,7 +113,6 @@ from .personnel_categories import (
     MISSING_CATEGORY_MESSAGE,
     ROOM_CATEGORY_CONFLICT,
     ROOM_CATEGORY_CONFLICT_MESSAGE,
-    employee_settlement_category,
 )
 from .preview_corrections import (
     exclude_settlement_preview_resident,
@@ -955,9 +954,14 @@ def _employee_profiles(employees, *, settlement_date=None):
     for employee in employees:
         specialization = specializations.get(employee.pk)
         work_category = legacy_work_category_for_specialization(specialization) if specialization else employee.work_category
+        position = employee.personnel_position
+        if position:
+            needs_equipment = position.requires_equipment and position.settlement_category != PersonnelPosition.SettlementCategory.ITR
+        else:
+            needs_equipment = work_category in PRODUCTION_APP_ROLE_CODES and (not specialization or specialization.is_active)
         assignment = equipment_by_employee.get(employee.pk)
         slots = published_slots.get(employee.pk, [])
-        has_plan = work_category in published_roles or bool(slots)
+        has_plan = (needs_equipment and work_category in published_roles) or bool(slots)
         if settlement_date and not has_plan and assignment and (
             assignment.source_kind == EquipmentAssignment.SourceKind.DEPUTY_PUBLISHED_PLAN
             and assignment.source_crew_plan_slot.plan.work_date < settlement_date
@@ -985,13 +989,12 @@ def _employee_profiles(employees, *, settlement_date=None):
             'photo_url': _employee_photo_url(employee),
             'shift_label': DAY_NIGHT_LABELS.get(shift_type, UNKNOWN_LABEL),
             'position_label': position_label or UNKNOWN_LABEL,
-            'work_label': equipment_label or position_label or UNKNOWN_LABEL,
+            'work_label': (equipment_label if needs_equipment else position_label) or UNKNOWN_LABEL,
             'equipment_label': equipment_label,
             'equipment_by_shift': equipment_labels_by_shift.get(employee.pk, {}),
             'published_slots': slots,
             'has_published_assignment_data': has_plan,
-            'requires_equipment': work_category in PRODUCTION_APP_ROLE_CODES and (not specialization or specialization.is_active),
-            'personnel_category': employee_settlement_category(employee),
+            'requires_equipment': needs_equipment,
         }
     return profiles
 
@@ -1049,20 +1052,20 @@ def _bed_assignment_display(occupancy, profile, official, *, from_excel):
     work = profile['work_label'] if profile else occupancy.resident.organization or UNKNOWN_LABEL
     tooltip_work = occupancy.resident.organization
     missing_equipment = False
+    caption = 'Организация'
     if profile:
-        category = profile['personnel_category']
-        if category == PersonnelPosition.SettlementCategory.ITR:
-            tooltip_work = f"Должность: {profile['position_label']}"
-        elif profile['requires_equipment'] or category == PersonnelPosition.SettlementCategory.WORKER:
+        caption = 'Техника' if profile['requires_equipment'] else 'Должность'
+        if profile['requires_equipment']:
             equipment = str(official.equipment) if official else ''
             if not equipment and not from_excel and not published:
                 equipment = (profile['equipment_by_shift'].get(occupancy.work_shift)
                              if occupancy.work_shift else profile['equipment_label'])
-            missing_equipment = profile['requires_equipment'] and not equipment
-            work = equipment or (UNKNOWN_LABEL if from_excel or profile['requires_equipment'] else work)
+            missing_equipment = not equipment
+            work = equipment or UNKNOWN_LABEL
             tooltip_work = f"Техника: {equipment or ('проверьте расстановку' if from_excel else 'не назначена')}"
         else:
-            tooltip_work = 'Категория должности не указана'
+            work = profile['position_label']
+            tooltip_work = f'Должность: {work}'
     missing_shift = bool(profile) and shift == UNKNOWN_LABEL
     warning = ''
     if missing_equipment and missing_shift:
@@ -1074,7 +1077,7 @@ def _bed_assignment_display(occupancy, profile, official, *, from_excel):
 
     return {
         'shift_label': shift, 'tooltip_shift_label': tooltip_shift,
-        'work_label': work, 'tooltip_work_label': tooltip_work,
+        'work_label': work, 'work_caption': caption, 'tooltip_work_label': tooltip_work,
         'assignment_warning': warning,
     }
 
@@ -1413,7 +1416,7 @@ def settlement_map_assignments(request):
     response = JsonResponse({'beds': {
         str(bed.active_occupancy.pk): {
             'shiftLabel': bed.shift_label, 'tooltipShiftLabel': bed.tooltip_shift_label,
-            'workLabel': bed.work_label, 'tooltipWorkLabel': bed.tooltip_work_label,
+            'workCaption': bed.work_caption, 'workLabel': bed.work_label, 'tooltipWorkLabel': bed.tooltip_work_label,
             'assignmentWarning': bed.assignment_warning,
         }
         for room in rooms for bed in room.beds.all() if bed.active_occupancy

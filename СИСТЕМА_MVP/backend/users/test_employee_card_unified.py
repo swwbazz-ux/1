@@ -404,7 +404,28 @@ class UnifiedEmployeeCardTests(TestCase):
         self.assertContains(registry, 'Подразделения')
         self.assertContains(registry, 'Графики работы')
         self.assertContains(detail, 'Официальные должности из 1С')
+        self.assertContains(detail, 'Требуется техника')
+        self.assertTrue(PersonnelPosition.objects.get(name='Машинист экскаватора').requires_equipment)
+        self.assertFalse(PersonnelPosition.objects.get(name='Слесарь-ремонтник').requires_equipment)
+        self.assertFalse(PersonnelPosition.objects.get(name='Горный мастер').requires_equipment)
         self.assertContains(detail, 'Разрешенные производственные специализации')
+
+    def test_admin_can_toggle_equipment_requirement_in_position_reference(self):
+        self.login_as(self.admin_access)
+        position = PersonnelPosition.objects.create(code='qa-position-toggle', name='Рабочая должность')
+        url = reverse('system_admin_reference_detail', args=['personnel-positions'])
+        fields = {
+            'action': 'save', 'record_id': str(position.pk), 'name': position.name,
+            'code': position.code, 'settlement_category': 'worker', 'is_active': 'on',
+        }
+        for enabled in (True, False):
+            data = dict(fields)
+            if enabled:
+                data['requires_equipment'] = 'on'
+            response = self.client.post(url, data)
+            self.assertEqual(response.status_code, 302)
+            position.refresh_from_db()
+            self.assertEqual(position.requires_equipment, enabled)
 
     def test_personnel_position_reference_rejects_default_outside_allowed_list(self):
         excavator_specialization = ProductionSpecialization.objects.get(code='excavator_operator')

@@ -4950,7 +4950,7 @@ body.settlement-temporary-relocation-armed .settlement-bed.is-free:not(:disabled
 .settlement-room.has-shift-conflict {
     outline: 2px solid #be263b;
     outline-offset: -2px;
-    animation: settlement-conflict-contour 1.4s ease-in-out 3;
+    animation: settlement-conflict-contour 2.4s ease-in-out infinite;
 }
 .settlement-room.has-shift-conflict .settlement-room-number {
     text-decoration: underline wavy #be263b;

@@ -1,8 +1,11 @@
 СИСТЕМА_MVP/backend/settlement/views.py
-СИСТЕМА_MVP/backend/settlement/urls.py
 СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
 СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
 СИСТЕМА_MVP/backend/templates/clerk/base.html
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
-СИСТЕМА_MVP/backend/templates/settlement/_map_floor.html
 СИСТЕМА_MVP/backend/templates/settlement/_room_card.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/users/admin.py
+СИСТЕМА_MVP/backend/users/forms.py
+СИСТЕМА_MVP/backend/users/models.py
+СИСТЕМА_MVP/backend/users/views.py
+СИСТЕМА_MVP/backend/users/migrations/0031_personnel_position_requires_equipment.py

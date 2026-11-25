@@ -146,9 +146,9 @@ class ProductionSpecializationAdmin(admin.ModelAdmin):
 
 @admin.register(PersonnelPosition)
 class PersonnelPositionAdmin(admin.ModelAdmin):
-    list_display = ('name', 'code', 'settlement_category', 'requires_specialization', 'default_specialization', 'is_active')
+    list_display = ('name', 'code', 'settlement_category', 'requires_equipment', 'requires_specialization', 'default_specialization', 'is_active')
     search_fields = ('name', 'code')
-    list_filter = ('settlement_category', 'requires_specialization', 'is_active')
+    list_filter = ('settlement_category', 'requires_equipment', 'requires_specialization', 'is_active')
     filter_horizontal = ('allowed_specializations',)
 
 

@@ -425,6 +425,8 @@ class BedCheckinTests(TemporaryPlacementBase):
         employee = self.candidate_resident.employee
         employee.work_category = Employee.WorkCategory.DRIVER
         employee.save(update_fields=['work_category'])
+        employee.personnel_position.requires_equipment = True
+        employee.personnel_position.save(update_fields=['requires_equipment'])
         placement = self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0])
         equipment = Equipment.objects.create(
             equipment_type=EquipmentType.objects.create(name='Тестовая техника'),
@@ -460,15 +462,18 @@ class BedCheckinTests(TemporaryPlacementBase):
         employee = self.candidate_resident.employee
         employee.work_category = Employee.WorkCategory.DRIVER
         employee.save(update_fields=['work_category'])
-        for shift, category, expected in [
-            ('', self.worker_position.settlement_category, 'Не назначены техника и смена'),
-            ('night', self.worker_position.settlement_category, 'Не назначена техника'),
-            ('night', PersonnelPosition.SettlementCategory.ITR, ''),
-            ('', PersonnelPosition.SettlementCategory.ITR, 'Не указана смена'),
+        for shift, category, requires_equipment, expected in [
+            ('', 'worker', True, 'Не назначены техника и смена'),
+            ('night', 'worker', True, 'Не назначена техника'),
+            ('night', 'worker', False, ''),
+            ('', 'worker', False, 'Не указана смена'),
+            ('night', 'itr', False, ''),
+            ('', 'itr', False, 'Не указана смена'),
         ]:
-            with self.subTest(shift=shift, category=category), transaction.atomic():
+            with self.subTest(shift=shift, category=category, equipment=requires_equipment), transaction.atomic():
                 employee.personnel_position.settlement_category = category
-                employee.personnel_position.save(update_fields=['settlement_category'])
+                employee.personnel_position.requires_equipment = requires_equipment
+                employee.personnel_position.save(update_fields=['settlement_category', 'requires_equipment'])
                 occupancy = EmployeeBedOccupancy.objects.create(
                     resident=self.candidate_resident, physical_bed=self.beds[0],
                     assignment_type="permanent", settled_by=self.clerk,
@@ -481,6 +486,9 @@ class BedCheckinTests(TemporaryPlacementBase):
                 )
                 payload = _occupancy_response(occupancy)['occupancy']
                 self.assertEqual(payload['assignment_warning'], expected)
+                self.assertEqual(payload['work_caption'], 'Техника' if requires_equipment else 'Должность')
+                if not requires_equipment:
+                    self.assertEqual(payload['work_label'], employee.personnel_position.name)
                 page = self.client.get(reverse('settlement_map'))
                 self.assertContains(page, f'data-assignment-warning="{expected}"')
                 if not expected:

@@ -319,7 +319,7 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertContains(response, 'Смена: День', count=2)
         self.assertContains(response, f'<strong>{self.workers[0].full_name}</strong>')
         self.assertContains(response, f'<strong>{self.itr.full_name}</strong>')
-        self.assertContains(response, '<span>Техника: не назначена</span>')
+        self.assertContains(response, f'<span>Должность: {self.workers[0].personnel_position.name}</span>')
         self.assertContains(response, f'<span>Должность: {self.itr.personnel_position.name}</span>')
 
     def test_factual_import_uses_dated_duplicate_and_ignores_previous_resident_note(self):
