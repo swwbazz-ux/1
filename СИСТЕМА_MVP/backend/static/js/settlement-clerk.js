@@ -353,6 +353,8 @@
             hoverCard.appendChild(work);
         }
         hoverCard.appendChild(shift);
+        if (bed.dataset.shiftConflict) hoverCard.appendChild(element("strong", "", bed.dataset.shiftConflict));
+        if (bed.dataset.assignmentWarning) hoverCard.appendChild(element("strong", "", bed.dataset.assignmentWarning));
         if (bed.dataset.onExtension === "true") {
             var extension = document.createElement("span");
             extension.className = "settlement-bed-extension-label";
@@ -404,6 +406,8 @@
         ];
         if (occupied) {
             label.push("занято", bed.dataset.occupantName, "смена: " + (bed.dataset.shiftLabel || "Не указано"));
+            if (bed.dataset.shiftConflict) label.push(bed.dataset.shiftConflict);
+            if (bed.dataset.assignmentWarning) label.push(bed.dataset.assignmentWarning);
             if (bed.dataset.onExtension === "true") label.push("на продлении");
         } else {
             label.push(unavailable ? "недоступно" : "свободно");
@@ -858,8 +862,10 @@
             if (occupied) {
                 var details = document.createElement("dl");
                 addBedDetail(details, "Жилец", bed.dataset.occupantName);
-                addBedDetail(details, "День / ночь", bed.dataset.shiftLabel);
+                addBedDetail(details, "День / ночь", bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel);
+                if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
                 addBedDetail(details, "Техника / должность", bed.dataset.workLabel);
+                if (bed.dataset.assignmentWarning) addBedDetail(details, "Требует внимания", bed.dataset.assignmentWarning);
                 addBedDetail(details, "Закрепление", bed.dataset.assignmentTypeLabel);
                 if (bed.dataset.stayStart) {
                     addBedDetail(details, "Заселение на койку", bed.dataset.stayStart);
@@ -2159,6 +2165,7 @@
             delete source.dataset.onExtension;
             source.dataset.workLabel = "";
             source.dataset.tooltipWorkLabel = "";
+            source.dataset.assignmentWarning = "";
             source.dataset.assignmentTypeLabel = "";
             source.dataset.assignmentType = "";
             source.classList.remove("is-occupied");
@@ -2174,8 +2181,9 @@
         destination.dataset.occupantName = occupancy.occupant_name;
         destination.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         destination.dataset.shiftLabel = occupancy.shift_label;
-        destination.dataset.tooltipShiftLabel = occupancy.shift_label;
+        destination.dataset.tooltipShiftLabel = occupancy.tooltip_shift_label || occupancy.shift_label;
         destination.dataset.onExtension = occupancy.on_extension ? "true" : "false";
+        destination.dataset.assignmentWarning = occupancy.assignment_warning || "";
         destination.dataset.workLabel = occupancy.work_label;
         destination.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
         destination.dataset.assignmentTypeLabel = occupancy.assignment_type_label;
@@ -2183,6 +2191,7 @@
         destination.classList.remove("is-free");
         destination.classList.add("is-occupied");
         renderMapBed(destination);
+        updateShiftConflicts();
 
         refreshResidentSearch();
         updateSelectionSummary();
@@ -2431,6 +2440,87 @@
             bed.setAttribute("aria-pressed", "false");
         }
     });
+
+    function updateShiftConflicts(previousShifts) {
+        root.querySelectorAll("[data-room-card]").forEach(function (room) {
+            var messages = [];
+            room.querySelectorAll("[data-bed-block-size]").forEach(function (block) {
+                var beds = Array.from(block.querySelectorAll("[data-bed]"));
+                var occupied = beds.filter(bed => bed.dataset.occupied === "true");
+                var reasons = new Map();
+                ["День", "Ночь"].forEach(function (shift) {
+                    var group = occupied.filter(bed => bed.dataset.shiftLabel === shift);
+                    if (group.length < 3) return;
+                    var reason = "Блок " + group[0].dataset.blockLabel + ": " + group.length +
+                        (shift === "День" ? " в дневную смену" : " в ночную смену");
+                    messages.push(reason);
+                    group.forEach(bed => reasons.set(bed, reason));
+                });
+                beds.forEach(function (bed) {
+                    var reason = reasons.get(bed) || "";
+                    var before = previousShifts && previousShifts.get(bed.dataset.occupancyId);
+                    var changed = before && (before === "День" || before === "Ночь") && before !== bed.dataset.shiftLabel;
+                    if (!reason || bed.dataset.causeOccupancy !== bed.dataset.occupancyId) {
+                        delete bed.dataset.causeOccupancy;
+                        delete bed.dataset.shiftChange;
+                    }
+                    if (changed) {
+                        bed.classList.remove("shift-just-changed");
+                        void bed.offsetWidth;
+                        bed.classList.add("shift-just-changed");
+                    }
+                    if (changed && reason) {
+                        bed.dataset.causeOccupancy = bed.dataset.occupancyId;
+                        bed.dataset.shiftChange = before + " → " + bed.dataset.shiftLabel;
+                    }
+                    var explanation = reason;
+                    if (reason && bed.dataset.shiftChange) explanation += ". Смена изменилась: " + bed.dataset.shiftChange;
+                    if ((bed.dataset.shiftConflict || "") !== explanation) {
+                        bed.dataset.shiftConflict = explanation;
+                        renderMapBed(bed);
+                    }
+                });
+            });
+            room.classList.toggle("has-shift-conflict", messages.length > 0);
+            var header = room.querySelector("[data-room-open]");
+            if (header) header.title = messages.join(". ");
+        });
+    }
+
+    var assignmentsPending = false;
+    async function refreshPublishedAssignments() {
+        if (!root.dataset.assignmentsUrl || document.hidden || assignmentsPending || saving || dragSourceBed) return;
+        assignmentsPending = true;
+        try {
+            var response = await fetch(root.dataset.assignmentsUrl, {cache: "no-store"});
+            if (!response.ok) return;
+            var snapshot = await response.json();
+            if (!snapshot.beds || saving || dragSourceBed) return;
+            var previous = new Map();
+            var changedRooms = new Set();
+            root.querySelectorAll("[data-bed][data-occupied='true']").forEach(function (bed) {
+                var id = bed.dataset.occupancyId;
+                var fields = snapshot.beds[id];
+                if (!fields) return;
+                previous.set(id, bed.dataset.shiftLabel);
+                if (Object.keys(fields).some(key => bed.dataset[key] !== fields[key])) {
+                    changedRooms.add(bed.closest("[data-room-card]"));
+                    Object.assign(bed.dataset, fields);
+                    renderMapBed(bed);
+                }
+            });
+            updateShiftConflicts(previous);
+            if (changedRooms.has(activeRoom)) renderBedCards();
+        } catch {
+            // Retry on the next poll or on return to the tab.
+        } finally {
+            assignmentsPending = false;
+        }
+    }
+    updateShiftConflicts();
+    window.setInterval(refreshPublishedAssignments, 15000);
+    document.addEventListener("visibilitychange", refreshPublishedAssignments);
+    window.addEventListener("focus", refreshPublishedAssignments);
 
     var dragSourceBed = null;
     var dropTargetBed = null;

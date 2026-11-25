@@ -48,6 +48,7 @@
                                 data-tooltip-shift-label="{{ bed.tooltip_shift_label }}"
                                 {% if bed.on_extension %}data-on-extension="true"{% endif %}
                                 data-work-label="{{ bed.work_label }}"
+                                data-assignment-warning="{{ bed.assignment_warning }}"
                                 data-tooltip-work-label="{{ bed.tooltip_work_label }}"
                                 data-assignment-type-label="{{ bed.assignment_type_label }}"
                                 data-assignment-type="{% if bed.active_occupancy %}{{ bed.active_occupancy.assignment_type }}{% endif %}"
@@ -56,7 +57,7 @@
                                 data-room-label="комната {{ room.number }}"
                                 data-block-label="{{ block.label }}"
                                 data-position-label="место {{ bed.position }}"
-                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% if bed.on_extension %}, на продлении{% endif %}{% elif not room.is_transferred %}, недоступно{% else %}, свободно{% endif %}">
+                                aria-label="КИС-{{ room.dormitory.number }}, этаж {{ room.floor }}, комната {{ room.number }}, блок {{ block.label }}, место {{ bed.position }}{% if bed.active_occupancy %}, занято, {{ bed.occupant_name }}, смена: {{ bed.shift_label }}{% if bed.assignment_warning %}, {{ bed.assignment_warning }}{% endif %}{% if bed.on_extension %}, на продлении{% endif %}{% elif not room.is_transferred %}, недоступно{% else %}, свободно{% endif %}">
                             <span class="settlement-bed-visual"
                                   data-bed-photo-slot{% if bed.active_occupancy and not picker %}
                                   data-bed-drag-handle draggable="true"{% endif %}
@@ -79,6 +80,7 @@
                                   data-bed-person-label{% if not bed.active_occupancy %} hidden{% endif %}>{{ bed.occupant_name }}</span>
                             <span class="settlement-bed-status"
                                   data-bed-status{% if bed.active_occupancy %} hidden{% endif %}>{% if room.is_transferred %}Свободна{% else %}Недоступна{% endif %}</span>
+                            <span class="settlement-bed-warning" aria-hidden="true">!</span>
                             <span class="settlement-bed-shift"
                                   data-bed-shift-badge{% if not bed.active_occupancy %} hidden{% endif %}>{% if bed.shift_label == "День" %}Д{% elif bed.shift_label == "Ночь" %}Н{% else %}?{% endif %}</span>
                             {% if bed.active_occupancy %}
@@ -88,6 +90,7 @@
                                     <strong>{{ bed.occupant_name }}</strong>
                                     {% if bed.tooltip_work_label %}<span>{{ bed.tooltip_work_label }}</span>{% endif %}
                                     <strong>Смена: {{ bed.tooltip_shift_label }}</strong>
+                                    {% if bed.assignment_warning %}<strong>{{ bed.assignment_warning }}</strong>{% endif %}
                                     {% if bed.on_extension %}<span class="settlement-bed-extension-label">На продлении</span>{% endif %}
                                 </span>
                             {% endif %}

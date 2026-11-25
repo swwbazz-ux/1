@@ -417,6 +417,76 @@ class BedCheckinTests(TemporaryPlacementBase):
     def checkin(self, **changes):
         return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
 
+    def test_map_snapshot_tracks_published_shift_without_changing_occupancy(self):
+        from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus
+        from references.models import Equipment, EquipmentType
+        from .views import production_work_date
+
+        employee = self.candidate_resident.employee
+        employee.work_category = Employee.WorkCategory.DRIVER
+        employee.save(update_fields=['work_category'])
+        placement = self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0])
+        equipment = Equipment.objects.create(
+            equipment_type=EquipmentType.objects.create(name='Тестовая техника'),
+            garage_number='QA-82',
+        )
+        plan = CrewPlan.objects.create(
+            work_date=production_work_date(timezone.now()), role=self.driver_role,
+        )
+        slot = CrewPlanSlot.objects.create(plan=plan, equipment=equipment, employee=employee, shift_type='night')
+        url = reverse('settlement_map_assignments')
+
+        def snapshot():
+            return self.client.get(url).json()['beds'][str(placement.pk)]
+
+        self.assertNotEqual(snapshot()['shiftLabel'], 'Ночь')
+        plan.status = CrewPlanStatus.PUBLISHED
+        plan.save(update_fields=['status'])
+        self.assertEqual(snapshot()['shiftLabel'], 'Ночь')
+        slot.shift_type = 'day'
+        slot.save(update_fields=['shift_type'])
+        result = snapshot()
+        self.assertEqual(result['shiftLabel'], 'День')
+        self.assertEqual(result['workLabel'], str(equipment))
+        self.assertEqual(result['assignmentWarning'], '')
+        placement.refresh_from_db()
+        self.assertIsNone(placement.work_shift)
+        self.assertEqual(Client().get(url).status_code, 403)
+
+    def test_map_and_checkin_response_identify_missing_assignment(self):
+        from django.db import transaction
+        from .views import _occupancy_response
+
+        employee = self.candidate_resident.employee
+        employee.work_category = Employee.WorkCategory.DRIVER
+        employee.save(update_fields=['work_category'])
+        for shift, category, expected in [
+            ('', self.worker_position.settlement_category, 'Не назначены техника и смена'),
+            ('night', self.worker_position.settlement_category, 'Не назначена техника'),
+            ('night', PersonnelPosition.SettlementCategory.ITR, ''),
+            ('', PersonnelPosition.SettlementCategory.ITR, 'Не указана смена'),
+        ]:
+            with self.subTest(shift=shift, category=category), transaction.atomic():
+                employee.personnel_position.settlement_category = category
+                employee.personnel_position.save(update_fields=['settlement_category'])
+                occupancy = EmployeeBedOccupancy.objects.create(
+                    resident=self.candidate_resident, physical_bed=self.beds[0],
+                    assignment_type="permanent", settled_by=self.clerk,
+                    work_shift=shift or None,
+                    shift_source_kind='clerk_selected' if shift else 'unverified_legacy',
+                    shift_source_fingerprint='fixture' if shift else '',
+                    shift_selected_by_access=self.clerk_access if shift else None,
+                    shift_selected_at=timezone.now() if shift else None,
+                    shift_selection_basis='fixture' if shift else '',
+                )
+                payload = _occupancy_response(occupancy)['occupancy']
+                self.assertEqual(payload['assignment_warning'], expected)
+                page = self.client.get(reverse('settlement_map'))
+                self.assertContains(page, f'data-assignment-warning="{expected}"')
+                if not expected:
+                    self.assertNotContains(page, 'data-assignment-warning="Не назначена техника"')
+                transaction.set_rollback(True)
+
     def test_checkin_after_release_explains_each_missing_itr_confirmation(self):
         self.acquire()
         room, beds = self.create_special_room(anchor_type=AccommodationAnchor.AnchorType.PROTECTED, suffix='replace')

@@ -12,6 +12,7 @@
      data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
      data-room-transfer-url="{% url 'settlement_room_transfer' %}"
+     data-assignments-url="{% url 'settlement_map_assignments' %}"
      data-watch-extensions-url="{% url 'settlement_clerk_extensions' %}"
      data-external-resident-search-url="{% url 'settlement_external_resident_search' %}"
      data-external-resident-create-url="{% url 'settlement_external_resident_create' %}"
@@ -932,7 +933,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-keyboard-search-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-live-shifts-v2"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
