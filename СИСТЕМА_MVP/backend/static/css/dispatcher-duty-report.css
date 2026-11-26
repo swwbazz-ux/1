@@ -2,8 +2,16 @@
     --duty-green: #3ea278;
     --duty-red: #d76c65;
     --duty-amber: #cc973c;
+    --duty-link: #76d4ee;
+    --duty-live: #83dcb6;
+    --duty-secondary: #b5c3c9;
     color: var(--gd-ink);
     font-variant-numeric: tabular-nums;
+}
+.dispatcher-day .duty-report, .dispatcher-day .duty-dialog {
+    --duty-link: #125670;
+    --duty-live: #185c43;
+    --duty-secondary: #40545d;
 }
 .dispatcher-shell[data-duty-report] { width: 100%; transform: none; height: auto; min-height: 100dvh; }
 [data-duty-report] .management-linked-report-board { grid-template-rows: auto auto; align-content: start; }
@@ -11,28 +19,33 @@
 .duty-report { padding: clamp(12px, 2vw, 24px); display: grid; gap: 14px; min-width: 0; }
 .duty-report *, .duty-dialog * { box-sizing: border-box; }
 .duty-heading, .duty-slot-head, .duty-dialog-head { display: flex; gap: 8px 16px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
-.duty-heading h2, .duty-dialog h2, .duty-slot h3, .duty-dialog p { margin: 0; }
-.duty-report button, .duty-dialog button, .duty-report input, .duty-dialog select {
+.duty-heading h2, .duty-dialog h2, .duty-slot h4, .duty-dialog p { margin: 0; }
+.duty-report button, .duty-dialog button, .duty-dialog select {
     font: inherit; color: var(--gd-ink); background: var(--gd-panel); border: 1px solid var(--gd-line);
     border-radius: 5px; padding: 6px 10px; min-height: 36px;
 }
 .duty-report button, .duty-dialog button { cursor: pointer; }
-.duty-slot-head button, .duty-heading input, .duty-heading button, .duty-dialog-head button { width: auto; }
-.duty-heading .duty-date-form { display: grid; grid-template-columns: auto auto; align-items: end; gap: 4px 8px; margin: 0; padding: 0; }
-.duty-date-form label { grid-column: 1 / -1; margin: 0; font-size: 13px; }
+.duty-slot-head button, .duty-dialog-head button { width: auto; }
 .duty-slot-head .duty-journal-link { padding-inline: 0; }
 .duty-report :focus-visible, .duty-dialog :focus-visible { outline: 2px solid var(--gd-cyan); outline-offset: 2px; }
-.duty-date-form, .duty-legend, .duty-totals, .duty-staff { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; }
+.duty-legend, .duty-totals, .duty-staff { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; }
 .duty-legend span, .duty-filter { display: inline-flex; align-items: center; gap: 7px; }
 .duty-legend i { width: 17px; height: 9px; border-radius: 2px; }
 .duty-on { background: var(--duty-green); }
 .duty-out { background: var(--duty-red); }
 .duty-unknown { background: repeating-linear-gradient(130deg, var(--duty-amber) 0 3px, var(--gd-panel) 3px 6px); }
 .duty-future { background: var(--gd-line); }
-.duty-slot { margin: 0 0 10px; padding: 14px 16px; border: 1px solid var(--gd-line); background: var(--gd-panel); border-radius: 7px; min-width: 0; }
-.duty-slot-head h3 { font-size: 18px; }
-.duty-slot-head h3 span { white-space: nowrap; font-weight: 500; }
-.duty-report button.duty-journal-link { color: var(--gd-cyan); background: transparent; border: 0; }
+.duty-day { display: grid; gap: 8px; margin: 0 0 22px; }
+.duty-day-heading { margin: 0; font-size: 16px; color: var(--duty-secondary); }
+.duty-slot { padding: 14px 16px; border: 1px solid var(--gd-line); background: var(--gd-panel); border-radius: 7px; min-width: 0; }
+.duty-slot.is-current { box-shadow: inset 3px 0 var(--duty-live); }
+.duty-slot-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.duty-slot-head h4 { font-size: 18px; }
+.duty-slot-head h4 span { white-space: nowrap; font-weight: 500; }
+.duty-current { color: var(--duty-live); font-weight: 700; font-size: 13px; white-space: nowrap; }
+.duty-report button.duty-journal-link, .duty-report a { color: var(--duty-link); background: transparent; border: 0; }
+.duty-older, .duty-return { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
+.duty-paging { text-align: center; }
 .duty-staff { margin: 2px 0 10px; font-size: 14px; }
 .duty-report button.duty-plot { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: start; }
 .duty-strip, .duty-marks, .duty-axis, .duty-marker-row { display: block; position: relative; }
@@ -51,8 +64,8 @@
 .duty-totals { margin-top: 6px; font-size: 13px; }
 .duty-totals span, .duty-legend span { white-space: nowrap; }
 .duty-totals b { margin-left: 3px; }
-.duty-as-of, .duty-refresh-status { margin: 0; font-size: 13px; }
-.duty-archive-note { margin: 0 0 12px; color: var(--gd-muted); font-size: 14px; }
+.duty-as-of, .duty-refresh-status { margin: 0; font-size: 13px; color: var(--duty-secondary); }
+.duty-archive-note { margin: 0; color: var(--duty-secondary); font-size: 14px; }
 .duty-refresh-status:empty { display: none; }
 .duty-dialog { width: min(620px, calc(100% - 20px)); max-height: 85dvh; padding: 18px; box-sizing: border-box; border: 1px solid var(--gd-line); border-radius: 8px; background: var(--gd-panel); margin: auto; }
 .duty-dialog[open] { position: fixed; inset: 0; height: fit-content; overflow-y: auto; }
@@ -74,6 +87,9 @@
 }
 @media (max-width: 650px) {
     .duty-slot { padding: 10px; }
+    .duty-slot-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .duty-slot-title { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .duty-slot-head .duty-journal-link { justify-self: end; }
     .duty-axis span:nth-child(even) { visibility: hidden; }
     .duty-heading { align-items: flex-start; }
     .duty-dialog { padding: 12px; }
@@ -83,5 +99,5 @@
     [data-duty-report] .dispatcher-report-actions button:disabled { display: none; }
 }
 @media (pointer: coarse) {
-    .duty-report button, .duty-report input, .duty-dialog button, .duty-dialog select { min-height: 44px; }
+    .duty-report button, .duty-dialog button, .duty-dialog select { min-height: 44px; }
 }

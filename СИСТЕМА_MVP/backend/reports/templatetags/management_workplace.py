@@ -25,17 +25,20 @@ def management_workplace_header(context, active, export_url=''):
         or context.get('selected_date')
         or production_work_date()
     )
+    if active == 'dispatcher_duty':
+        date = context['selected_date']
     date_value = date.isoformat()
     shared_date = {'overview_date': date_value}
     summary_route = 'rotation_site_manager_home' if site_manager else 'management_dashboard'
 
     def item(key, label, route, params=None):
         query = urlencode(shared_date if params is None else params)
-        return {'label': label, 'href': f'{reverse(route)}?{query}', 'active': key == active}
+        url = reverse(route)
+        return {'label': label, 'href': f'{url}?{query}' if query else url, 'active': key == active}
 
     links = [item('summary', 'Сводка', summary_route, {'date': date_value})]
     if access.role.code == 'manager' and not getattr(request, 'observer_mode', False):
-        links.append(item('dispatcher_duty', 'Смены диспетчеров', 'management_dispatcher_duty', {'date': date_value}))
+        links.append(item('dispatcher_duty', 'Смены диспетчеров', 'management_dispatcher_duty', {}))
     if can_review_watch_extensions(request, access):
         queue_route = 'rotation_site_manager_queue' if site_manager else 'management_extensions'
         links.append(item('extensions', 'Продлёнка', queue_route))

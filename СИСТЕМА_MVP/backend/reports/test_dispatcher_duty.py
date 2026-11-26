@@ -21,7 +21,7 @@ from trips.models import DispatcherActionLog, DispatcherActionType, DispatcherDu
 from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
 from users.models import ActiveApplicationSession, Employee, EmployeeAccess, Role
 
-from .dispatcher_duty import duty_report, management_dispatcher_duty
+from .dispatcher_duty import FEED_DAYS, duty_feed, duty_report, management_dispatcher_duty
 
 
 class DispatcherDutyTests(TestCase):
@@ -56,6 +56,62 @@ class DispatcherDutyTests(TestCase):
 
     def report(self, elapsed):
         return duty_report(self.start.date(), self.start + elapsed)['slots']
+
+    def test_feed_orders_started_shifts_at_both_handovers_and_midnight(self):
+        self.shift(opened=self.start - timedelta(days=2), closed=self.start)
+        for delta, expected_date, expected_slots in (
+            (timedelta(seconds=-1), self.start.date() - timedelta(days=1), ['night', 'day']),
+            (timedelta(), self.start.date(), ['day']),
+            (timedelta(hours=12) - timedelta(seconds=1), self.start.date(), ['day']),
+            (timedelta(hours=12), self.start.date(), ['night', 'day']),
+            (timedelta(hours=17), self.start.date(), ['night', 'day']),
+            (timedelta(days=1), self.start.date() + timedelta(days=1), ['day']),
+        ):
+            with self.subTest(delta=delta):
+                days = duty_feed(now=self.start + delta)['days']
+                self.assertEqual(days[0]['date'], expected_date)
+                self.assertEqual([s['key'] for s in days[0]['slots']], expected_slots)
+                slots = [s for day in days for s in day['slots']]
+                self.assertTrue(slots[0]['live'])
+                self.assertEqual(sum(s['live'] for s in slots), 1)
+                self.assertEqual([s['key'] for s in days[1]['slots']], ['night', 'day'])
+
+    def test_feed_reaches_first_record_with_no_missing_or_duplicate_dates(self):
+        earliest = self.start - timedelta(days=2 * FEED_DAYS + 1)
+        self.shift(opened=earliest, closed=earliest + timedelta(hours=1))
+        now = self.start + timedelta(hours=1)
+        moments = []
+        before = None
+        for _ in range(4):
+            result = duty_feed(now=now, before=before)
+            moments.extend(day['date'] for day in result['days'])
+            if not result['next_before']:
+                break
+            before = result['days'][-1]['date']
+            self.assertEqual(result['next_before'], before.isoformat())
+        self.assertEqual(moments, [self.start.date() - timedelta(days=i)
+                                   for i in range((self.start - earliest).days + 1)])
+        self.assertEqual(duty_feed(now=now, since=self.start.date())['days'][0]['date'], moments[0])
+        self.assertFalse(duty_feed(now=now, before=earliest.date())['days'])
+
+    def test_dated_bookmark_and_navigation_open_the_feed_and_preserve_dated_json(self):
+        self.authorize(self.manager)
+        path = reverse('management_dispatcher_duty')
+        self.shift(closed=self.start + timedelta(hours=2))
+        today = self.start.date() + timedelta(days=1)
+        with patch('django.utils.timezone.now', return_value=self.start + timedelta(days=1, hours=2)):
+            page = self.client.get(path, {'date': self.start.date()})
+            self.assertEqual([d['date'] for d in page.context['report']['days']], [today, self.start.date()])
+            self.assertNotContains(page, 'type="date"')
+            self.assertContains(page, 'Идёт сейчас', count=1)
+            self.assertContains(page, f'href="{path}"')
+            history = self.client.get(path, {'before': today, 'partial': '1'})
+            self.assertEqual([d['date'] for d in history.context['report']['days']], [self.start.date()])
+            self.assertNotContains(history, 'Идёт сейчас')
+            fallback = self.client.get(path, {'before': today})
+            self.assertEqual(fallback.context['report']['days'][0]['date'], today)
+            archive = self.client.get(path, {'format': 'json', 'date': self.start.date()}).json()
+            self.assertEqual(archive['date'], self.start.date().isoformat())
 
     def test_report_only_for_active_management_in_all_representations(self):
         path = reverse('management_dispatcher_duty')

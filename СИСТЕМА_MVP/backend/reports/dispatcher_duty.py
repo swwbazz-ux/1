@@ -26,6 +26,7 @@ from .views import parse_filter_date
 
 
 STATE_LABELS = {'on': 'В пульте', 'out': 'Вне пульта', 'unknown': 'Нет данных', 'future': 'Предстоит'}
+FEED_DAYS = 7
 
 
 def clock(at):
@@ -245,19 +246,52 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
                         for k in STATE_LABELS if totals[k] > 0])
 
 
-def duty_report(selected_date, now=None):
-    now = now or timezone.now()
-    start, _ = production_shift_bounds(selected_date, ShiftType.DAY)
-    _, end = production_shift_bounds(selected_date, ShiftType.NIGHT)
+def period_records(start, end, now, tracking):
     shifts = list(dispatcher_shift_queryset(open_only=False).filter(opened_at__lt=end, opened_at__lte=now)
                   .filter(Q(closed_at__gt=start) | Q(closed_at__isnull=True))
                   .select_related('employee', 'opened_by', 'closed_by').prefetch_related('duty_windows').order_by('opened_at', 'pk'))
-    tracking = DispatcherDutyTracking.objects.filter(pk=1).values_list('started_at', flat=True).first()
     actions = operations(start, min(end, now + timedelta(microseconds=1)), tracking, shifts)
+    return shifts, actions
+
+
+def duty_report(selected_date, now=None):
+    """Single-day representation for existing JSON consumers."""
+    now = now or timezone.now()
+    start, _ = production_shift_bounds(selected_date, ShiftType.DAY)
+    _, end = production_shift_bounds(selected_date, ShiftType.NIGHT)
+    tracking = DispatcherDutyTracking.objects.filter(pk=1).values_list('started_at', flat=True).first()
+    shifts, actions = period_records(start, end, now, tracking)
     return dict(date=selected_date.isoformat(), as_of=business_localtime(now).strftime('%d.%m.%Y %H:%M'),
                 tracking_began=business_localtime(tracking).strftime('%d.%m.%Y %H:%M') if tracking and start < tracking else '',
                 now_clock=clock(now), live=start <= now < end,
                 slots=[build_slot(selected_date, kind, now, tracking, shifts, actions) for kind in (ShiftType.DAY, ShiftType.NIGHT)])
+
+
+def duty_feed(*, now, before=None, since=None):
+    today = production_work_date(now)
+    tracking = DispatcherDutyTracking.objects.filter(pk=1).values_list('started_at', flat=True).first()
+    first_shift = dispatcher_shift_queryset(open_only=False).order_by('opened_at').values_list('opened_at', flat=True).first()
+    first_action = (DispatcherActionLog.objects.filter(actor_role_code='dispatcher')
+                    .order_by('created_at').values_list('created_at', flat=True).first())
+    first_date = production_work_date(min(at for at in (now, tracking, first_shift, first_action) if at))
+    newest = min(today, before - timedelta(days=1)) if before else today
+    oldest = max(first_date, newest - timedelta(days=FEED_DAYS - 1))
+    if since:
+        oldest = max(oldest, min(since, newest))
+
+    days = []
+    if newest >= oldest:
+        start, _ = production_shift_bounds(oldest, ShiftType.DAY)
+        _, end = production_shift_bounds(newest, ShiftType.NIGHT)
+        shifts, actions = period_records(start, end, now, tracking)
+        for offset in range((newest - oldest).days + 1):
+            date = newest - timedelta(days=offset)
+            slots = [build_slot(date, kind, now, tracking, shifts, actions)
+                     for kind in (ShiftType.NIGHT, ShiftType.DAY) if production_shift_bounds(date, kind)[0] <= now]
+            days.append({'date': date, 'slots': slots})
+    return dict(days=days, date=today, now_clock=clock(now), as_of=business_localtime(now),
+                tracking_began=business_localtime(tracking) if tracking else None,
+                next_before=oldest.isoformat() if oldest > first_date and days else '')
 
 
 @never_cache
@@ -271,13 +305,24 @@ def management_dispatcher_duty(request):
     if (not auth['authenticated'] or not auth['is_active'] or auth['access'].role.code != 'manager'
             or (app and app.role_code != 'manager') or getattr(request, 'observer_mode', False)):
         return HttpResponseForbidden('Для просмотра требуется роль руководства.')
-    date_value = request.GET.get('date')
-    selected = parse_filter_date(date_value) if date_value else production_work_date()
-    if not selected or not 1 < selected.year < 9999:
-        return HttpResponseBadRequest('Неверная дата смены.')
-    report = duty_report(selected)
+    dates = {}
+    for key in ('date', 'before', 'since'):
+        value = request.GET.get(key)
+        if value:
+            parsed = parse_filter_date(value)
+            if not parsed or not 1 < parsed.year < 9999:
+                return HttpResponseBadRequest('Неверная дата смены.')
+            dates[key] = parsed
+    now = timezone.now()
     if request.GET.get('format') == 'json':
-        return JsonResponse(report)
-    context = {'access': auth['access'], 'selected_date': selected, 'report': report}
-    template = 'reports/includes/dispatcher_duty_slots.html' if request.GET.get('partial') == '1' else 'reports/dispatcher_duty.html'
+        return JsonResponse(duty_report(dates.get('date') or production_work_date(now), now))
+    partial = request.GET.get('partial') == '1'
+    before = dates.get('before')
+    report = duty_feed(now=now, before=before, since=dates.get('since') if partial and not before else None)
+    # A plain archive link also works without incremental loading.
+    if before and not partial and (not report['days'] or report['days'][0]['date'] < report['date']):
+        current = duty_feed(now=now, since=report['date'])
+        report['days'] = current['days'] + report['days']
+    context = {'access': auth['access'], 'selected_date': report['date'], 'report': report, 'archive_page': bool(before)}
+    template = 'reports/includes/dispatcher_duty_slots.html' if partial else 'reports/dispatcher_duty.html'
     return render(request, template, context)

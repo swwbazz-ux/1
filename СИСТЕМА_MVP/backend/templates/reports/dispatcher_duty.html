@@ -4,8 +4,8 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=1">
-<script src="{% static 'js/dispatcher-duty-report.js' %}?v=1" defer></script>
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=2">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=2" defer></script>
 {% endblock %}
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
@@ -14,17 +14,15 @@
     <section class="duty-report">
       <div class="duty-heading">
         <h2>Смены диспетчеров</h2>
-        <form method="get" class="duty-date-form">
-          <label for="duty-date">Дата начала смен</label>
-          <input id="duty-date" type="date" name="date" required value="{{ report.date }}">
-          <button type="submit">Показать</button>
-        </form>
+        <span class="duty-as-of">По Владивостоку · Обновлено <time data-duty-as-of>{{ report.as_of|date:"d.m.Y H:i" }}</time></span>
       </div>
       <div class="duty-legend" aria-label="Обозначения шкалы">
         <span><i class="duty-on"></i>В пульте</span><span><i class="duty-out"></i>Вне пульта</span>
         <span><i class="duty-unknown"></i>Нет данных</span><span><i class="duty-future"></i>Предстоит</span>
         <span><i class="duty-diamond"></i>Операция</span>
       </div>
+      {% if report.tracking_began %}<p class="duty-archive-note">Подробный учёт связи ведётся с {{ report.tracking_began|date:"d.m.Y H:i" }}.</p>{% endif %}
+      {% if archive_page %}<a class="duty-return" href="{% url 'management_dispatcher_duty' %}">К последним сменам</a>{% endif %}
       {% include "reports/includes/dispatcher_duty_slots.html" %}
       <span class="duty-refresh-status" role="status"></span>
     </section>

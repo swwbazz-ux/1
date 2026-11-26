@@ -1,17 +1,19 @@
 {% load l10n %}
-<div data-duty-slots data-live="{{ report.live|yesno:'true,false' }}" data-date="{{ report.date }}">
-{% if report.tracking_began %}<p class="duty-archive-note">Подробный учёт связи начался {{ report.tracking_began }}. За более раннее время журнал показывает сохранившиеся события.</p>{% endif %}
-{% for slot in report.slots %}
-  <article class="duty-slot" data-duty-slot="{{ slot.key }}">
+<div data-duty-slots data-date="{{ report.date|date:'Y-m-d' }}" data-as-of="{{ report.as_of|date:'d.m.Y H:i' }}">
+{% for day in report.days %}
+<section class="duty-day" data-duty-day="{{ day.date|date:'Y-m-d' }}" aria-labelledby="duty-day-{{ day.date|date:'Y-m-d' }}">
+  <h3 class="duty-day-heading" id="duty-day-{{ day.date|date:'Y-m-d' }}"><time datetime="{{ day.date|date:'Y-m-d' }}">{{ day.date|date:"j E Y" }}</time></h3>
+  {% for slot in day.slots %}
+  <article class="duty-slot{% if slot.live %} is-current{% endif %}" data-duty-slot="{{ slot.key }}">
     <div class="duty-slot-head">
-      <h3>{{ slot.label }} <span>{{ slot.start }}–{{ slot.end }}</span></h3>
+      <div class="duty-slot-title"><h4>{{ slot.label }} <span>{{ slot.start }}–{{ slot.end }}</span></h4>{% if slot.live %}<span class="duty-current">Идёт сейчас</span>{% endif %}</div>
       <button class="duty-journal-link" type="button" data-open-duty>Журнал смены <span aria-hidden="true">›</span></button>
     </div>
     <div class="duty-staff">
       {% for member in slot.staff %}<span><strong>{{ member.person }}</strong> · Вход {{ member.opened }}{% if member.closed %} · Завершение {{ member.closed }}{% else %} · Смена открыта{% endif %}{% if slot.staff|length > 1 %} · Операций {{ member.operations }}{% endif %}</span>
       {% empty %}<span>{% if slot.totals.0.state == 'future' %}Дежурство предстоит{% else %}Записей об открытии смены нет{% endif %}</span>{% endfor %}
     </div>
-    <button type="button" class="duty-plot" data-open-duty aria-label="{{ slot.label }} {{ slot.start }}–{{ slot.end }}. Открыть журнал">
+    <button type="button" class="duty-plot" data-open-duty aria-label="{{ day.date|date:'d.m.Y' }} · {{ slot.label }} {{ slot.start }}–{{ slot.end }}. Открыть журнал">
       {% if slot.live %}<span class="duty-marker-row"><span style="--left:{{ slot.marker|unlocalize }}%">{{ report.now_clock }}</span></span>{% endif %}
       <span class="duty-strip">{% for part in slot.parts %}<span class="duty-part duty-{{ part.state }}" style="width:{{ part.width|unlocalize }}%" data-duty-interval="{{ part.start }}–{{ part.end }} · {{ part.label }} · {{ part.duration }}. {{ part.reason }}{% if part.person %} · {{ part.person }}{% endif %}" title="{{ part.start }}–{{ part.end }} · {{ part.reason }}"></span>{% endfor %}{% if slot.live %}<i class="duty-marker" style="left:{{ slot.marker|unlocalize }}%"></i>{% endif %}</span>
       <span class="duty-marks">{% for mark in slot.marks %}<i class="duty-diamond" style="left:{{ mark.left|unlocalize }}%" data-duty-mark="{{ mark.at }}" title="{{ mark.time }} · {{ mark.title }}"></i>{% endfor %}</span>
@@ -31,6 +33,8 @@
       {% endfor %}
     </template>
   </article>
+  {% endfor %}
+</section>
 {% endfor %}
-  <p class="duty-as-of">Срез на {{ report.as_of }} · Время Владивостока</p>
+<div class="duty-paging" data-duty-paging>{% if report.next_before %}<a class="duty-older" href="{% url 'management_dispatcher_duty' %}?before={{ report.next_before }}" data-duty-older>Показать предыдущие смены</a>{% endif %}</div>
 </div>
