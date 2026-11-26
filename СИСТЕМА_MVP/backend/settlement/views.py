@@ -135,6 +135,7 @@ from .services import (
     relocate_resident_to_bed,
     release_resident_from_bed,
     settle_resident_on_bed,
+    swap_resident_beds,
     unsettled_current_roster_employees,
 )
 from .special_fund import room_anchor_types_by_room
@@ -2571,6 +2572,14 @@ def settlement_occupancy_create_view(request):
                 confirm_itr=payload.get('confirm_itr') is True,
                 placement_reason=payload.get('placement_reason', '') or '',
             )
+        elif action == 'swap':
+            replacements = swap_resident_beds(
+                first_occupancy_id=payload.get('first_occupancy_id'),
+                first_bed_id=payload.get('first_bed_id'),
+                second_occupancy_id=payload.get('second_occupancy_id'),
+                second_bed_id=payload.get('second_bed_id'),
+                control_context=control_context,
+            )
         elif action == 'release':
             occupancy = release_resident_from_bed(
                 occupancy_id=payload.get('occupancy_id'),
@@ -2598,6 +2607,9 @@ def settlement_occupancy_create_view(request):
             'settlement_bed_multiple_active_occupancies',
             'settlement_bed_already_free',
             'settlement_relocation_same_bed',
+            'settlement.swap.stale',
+            'settlement.swap.same_place',
+            ROOM_CATEGORY_CONFLICT,
             'settlement_relocation_same_moment',
             'settlement_release_same_moment',
             'settlement.manual.shift_not_applied',
@@ -2631,6 +2643,8 @@ def settlement_occupancy_create_view(request):
             status=status,
         )
 
+    if action == 'swap':
+        return JsonResponse({'ok': True, 'placements': [_occupancy_response(row) for row in replacements]})
     if action == 'release':
         return JsonResponse({
             'ok': True,

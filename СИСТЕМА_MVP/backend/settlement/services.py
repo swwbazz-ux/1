@@ -11,6 +11,7 @@ from shifts.models import WatchPeriod
 from users.models import Employee, PersonnelPosition
 from assignments.models import AssignmentStatus, EquipmentAssignment, WorkShiftType
 
+from .intervals import occupancy_interval
 from .models import (
     AccommodationAnchor,
     AccommodationAnchorBedAssignment,
@@ -1787,6 +1788,139 @@ def relocate_resident_to_bed(
             )
 
     return occupancy
+
+
+def _swap_shift_evidence(occupancy, resident):
+    kind = EmployeeBedOccupancy.ShiftSourceKind
+    if occupancy.shift_source_kind == kind.AUTO_PREVIEW:
+        if resident.is_external:
+            member = occupancy.cohort_member
+            if not member or not member.shift_selected_by_access_id:
+                raise _settlement_error(
+                    'Для обмена нужна подтверждённая смена внешнего жильца.',
+                    'settlement.cohort.shift_review_required',
+                )
+            return {
+                'work_shift': occupancy.work_shift,
+                'shift_source_kind': kind.CLERK_SELECTED,
+                'shift_source_fingerprint': occupancy.shift_source_fingerprint,
+                'shift_selected_by_access': member.shift_selected_by_access,
+                'shift_selected_at': member.shift_selected_at,
+                'shift_selection_basis': member.shift_selection_basis,
+            }
+        source = _official_manual_source_for_occupancy(occupancy=occupancy, resident=resident)
+        return {
+            'work_shift': source['work_shift'],
+            'shift_source_kind': kind.OFFICIAL_ASSIGNMENT,
+            'shift_source_fingerprint': source['shift_source_fingerprint'],
+            'shift_official_assignment': source['official_equipment_assignment'],
+        }
+    return {
+        'work_shift': occupancy.work_shift,
+        'shift_source_kind': occupancy.shift_source_kind,
+        'shift_source_fingerprint': occupancy.shift_source_fingerprint,
+        'shift_official_assignment': occupancy.shift_official_assignment,
+        'shift_selected_by_access': occupancy.shift_selected_by_access,
+        'shift_selected_at': occupancy.shift_selected_at,
+        'shift_selection_basis': occupancy.shift_selection_basis,
+    }
+
+
+def swap_resident_beds(
+    *, first_occupancy_id, first_bed_id, second_occupancy_id, second_bed_id, control_context,
+):
+    using = router.db_for_write(EmployeeBedOccupancy)
+    with transaction.atomic(using=using):
+        lease = lock_settlement_write_lease(control_context=control_context, using=using)
+        ids = (_normalized_occupancy_id(first_occupancy_id), _normalized_occupancy_id(second_occupancy_id))
+        snapshots = [_occupancy_snapshot_by_id(occupancy_id=pk, using=using) for pk in ids]
+        resident_ids = tuple(row[1] for row in snapshots)
+        bed_ids = tuple(row[2] for row in snapshots)
+        if len(set(resident_ids)) != 2 or len(set(bed_ids)) != 2:
+            raise _settlement_error('Выберите две разные занятые койки.', 'settlement.swap.same_place')
+
+        plan = build_settlement_resident_lock_plan(resident_ids=resident_ids, require_active=False, using=using)
+        access_rows = lock_settlement_write_access(
+            lease=lease, control_context=control_context, employee_ids=plan.employee_ids, using=using,
+        )
+        actor = access_rows.access_by_id(control_context.owner_access_id)
+        residents = lock_settlement_residents_after_access(plan, locked_employees=access_rows.employees)
+        for snapshot in sorted(snapshots, key=lambda row: (row[3] or 0, row[9] or 0)):
+            _lock_occupancy_context_rows(snapshot=snapshot, using=using)
+        beds = _locked_beds(*bed_ids, using=using)
+        rooms = _locked_rooms(*(bed.room_id for bed in beds.values()), using=using)
+        if tuple(beds[pk].stable_id for pk in bed_ids) != (first_bed_id, second_bed_id):
+            raise _settlement_error('Койки изменились. Обновите карту и выберите жильцов заново.', 'settlement.swap.stale')
+
+        moment = timezone.now()
+        related = list(
+            EmployeeBedOccupancy.objects.using(using).select_for_update(of=('self',))
+            .filter(Q(resident_id__in=resident_ids) | Q(physical_bed_id__in=bed_ids))
+            .select_related('physical_bed').order_by('pk')
+        )
+        by_id = {row.pk: row for row in related}
+        originals = [by_id.get(pk) for pk in ids]
+        for original, snapshot in zip(originals, snapshots):
+            if (original is None or not original.is_active_at(moment)
+                    or original.starts_at >= moment
+                    or _occupancy_snapshot_by_id(occupancy_id=original.pk, using=using) != snapshot):
+                raise _settlement_error('Расселение изменилось. Обновите карту и выберите жильцов заново.', 'settlement.swap.stale')
+            if original.assignment_type == EmployeeBedOccupancy.AssignmentType.PROPOSED:
+                raise _settlement_error(
+                    'Предложенное размещение нельзя обменять.',
+                    'settlement.proposed.relocation_disabled',
+                )
+
+        imports = _current_housing_import_sources(
+            {row.pk: (row.resident_id, row.physical_bed_id) for row in originals}, using=using,
+        )
+        other_placements = [row for row in related if row.pk not in ids]
+        end_times = [occupancy_interval(row)[1] for row in originals]
+        for original in originals:
+            original.terminated_at = moment
+            original.save(update_fields=['terminated_at'])
+
+        replacements = []
+        for original, target_id, end in zip(originals, reversed(bed_ids), end_times):
+            resident = residents.resident_by_id(original.resident_id)
+            target = beds[target_id]
+            start = moment
+            try:
+                _ensure_bed_has_no_active_preparation(
+                    bed=target, resident_id=resident.pk, moment=moment, access=actor, using=using,
+                )
+                _validate_resident_and_destination(
+                    resident=resident, room=rooms[target.room_id], starts_at=start, ends_at=end,
+                    confirm_itr=employee_settlement_category(resident.employee) == PersonnelPosition.SettlementCategory.ITR,
+                    placement_reason=original.placement_reason or 'Обмен койками с карты.',
+                    exclude_occupancy_ids=ids, using=using,
+                )
+                _validate_assignment_interval(assignment_type=original.assignment_type, starts_at=start, ends_at=end)
+                _validate_occupancy_conflicts(
+                    resident_id=resident.pk, bed=target, starts_at=start, ends_at=end,
+                    persisted_occupancies=other_placements,
+                )
+                shift_fields = _swap_shift_evidence(original, resident)
+            except ValidationError as error:
+                item = error.error_list[0]
+                raise _settlement_error(f'{resident.display_name}. {item.message}', item.code) from error
+            replacement = _create_occupancy(
+                resident=resident, bed=target, assignment_type=original.assignment_type,
+                starts_at=start, ends_at=end, settled_by=actor.employee, using=using,
+                placement_reason=original.placement_reason, watch_period=original.watch_period,
+                cohort_member=original.cohort_member, **shift_fields,
+            )
+            original.replaced_by_occupancy = replacement
+            original.save(update_fields=['replaced_by_occupancy'])
+            if original.pk in imports:
+                SettlementPlacementEvent.objects.using(using).create(
+                    event_type=SettlementPlacementEvent.EventType.TEMPORARY_RELOCATED,
+                    resident=resident, physical_bed=target, actor_access=actor,
+                    reason='Обмен койками с карты.',
+                    payload={**imports[original.pk], 'occupancy_id': replacement.pk, 'previous_occupancy_id': original.pk},
+                )
+            replacements.append(replacement)
+        return replacements
 
 
 def release_resident_from_bed(

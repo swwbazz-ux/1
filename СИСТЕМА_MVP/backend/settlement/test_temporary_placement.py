@@ -419,6 +419,57 @@ class BedCheckinTests(TemporaryPlacementBase):
     def checkin(self, **changes):
         return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
 
+    def test_swap_between_dormitories_moves_both_residents_and_rejects_stale_confirmation(self):
+        target = PhysicalBed.objects.filter(
+            room__dormitory__number='6', room__floor=2,
+            room__transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            room__room_type=PhysicalRoom.RoomType.STANDARD,
+        ).first()
+        first = self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0])
+        second = self.create_occupancy(
+            resident=self.second_candidate_resident, bed=target,
+            ends_at=timezone.now() + timedelta(days=3),
+        )
+        self.acquire()
+        payload = {
+            'action': 'swap',
+            'first_occupancy_id': first.pk, 'first_bed_id': self.beds[0].stable_id,
+            'second_occupancy_id': second.pk, 'second_bed_id': target.stable_id,
+        }
+        result = self.post_json('settlement_occupancy_create', payload)
+        self.assertEqual(result.status_code, 200, result.json())
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.replaced_by_occupancy.physical_bed, target)
+        self.assertEqual(second.replaced_by_occupancy.physical_bed, self.beds[0])
+        self.assertEqual(first.replaced_by_occupancy.resident_id, first.resident_id)
+        self.assertEqual(second.replaced_by_occupancy.ends_at, second.ends_at)
+        self.assertEqual(first.terminated_at, second.terminated_at)
+        repeat = self.post_json('settlement_occupancy_create', payload)
+        self.assertEqual(repeat.status_code, 409)
+        self.assertEqual(repeat.json()['code'], 'settlement.swap.stale')
+
+    def test_failed_second_move_rolls_back_the_entire_swap(self):
+        first = self.create_occupancy(resident=self.candidate_resident, bed=self.beds[0])
+        second = self.create_occupancy(resident=self.second_candidate_resident, bed=self.beds[1])
+        PhysicalRoom.objects.filter(pk=self.beds[0].room_id).update(
+            transfer_status=PhysicalRoom.TransferStatus.NOT_TRANSFERRED,
+        )
+        self.acquire()
+        result = self.post_json('settlement_occupancy_create', {
+            'action': 'swap',
+            'first_occupancy_id': first.pk, 'first_bed_id': self.beds[0].stable_id,
+            'second_occupancy_id': second.pk, 'second_bed_id': self.beds[1].stable_id,
+        })
+        self.assertEqual(result.status_code, 409, result.json())
+        self.assertEqual(result.json()['code'], 'settlement_room_not_transferred')
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNone(first.terminated_at)
+        self.assertIsNone(second.terminated_at)
+        self.assertIsNone(first.replaced_by_occupancy_id)
+        self.assertIsNone(second.replaced_by_occupancy_id)
+
     def test_backdated_checkin_reports_roommate_with_another_category(self):
         room = self.beds[0].room
         target = room.beds.exclude(pk=self.beds[0].pk).first()

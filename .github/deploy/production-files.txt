@@ -1,3 +1,5 @@
-СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
-СИСТЕМА_MVP/backend/static/js/deputy-people-search.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
+СИСТЕМА_MVP/backend/settlement/services.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
+СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html

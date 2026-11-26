@@ -4,7 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-bed-swap-v1">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -65,6 +65,11 @@
                 </div>
             </details>
         </div>
+        <div class="settlement-swap-selection" data-swap-selection hidden>
+            <span data-swap-selection-label></span>
+            <button type="button" class="settlement-relocation-cancel" data-swap-selection-cancel>Отмена</button>
+        </div>
+        <p class="settlement-swap-notice" data-swap-notice role="status" hidden></p>
         {{ watch_extensions|json_script:"settlement-watch-extension-state" }}
 
         <section class="settlement-control-panel"
@@ -788,6 +793,7 @@
                     <button type="button" class="settlement-place-button" data-relocate-button disabled>
                         Переселить сотрудника
                     </button>
+                    <button type="button" class="settlement-place-button" data-swap-start>Поменять местами</button>
                     <button type="button" class="settlement-release-button" data-release-button disabled>
                         Освободить койко-место
                     </button>
@@ -910,6 +916,16 @@
         <div class="settlement-employee-panel-body" data-employee-panel-body aria-live="polite"></div>
     </aside>
 
+    <dialog class="settlement-swap-dialog" data-swap-dialog aria-labelledby="settlement-swap-title">
+        <h2 id="settlement-swap-title">Поменять жильцов местами?</h2>
+        <ul class="settlement-swap-addresses" data-swap-addresses></ul>
+        <p data-swap-error role="alert" hidden></p>
+        <div class="settlement-swap-actions">
+            <button type="button" class="settlement-relocation-cancel" data-swap-cancel autofocus>Отмена</button>
+            <button type="button" class="settlement-place-button" data-swap-confirm>Поменять местами</button>
+        </div>
+    </dialog>
+
     <div class="settlement-relocation-modal-backdrop" data-relocation-modal-backdrop hidden></div>
     <section class="settlement-relocation-modal"
              data-relocation-modal
@@ -934,7 +950,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-position-equipment-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>

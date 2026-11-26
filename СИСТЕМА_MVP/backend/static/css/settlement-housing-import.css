@@ -886,3 +886,61 @@
         width: 100%;
     }
 }
+
+.settlement-swap-selection,
+.settlement-swap-notice {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+}
+
+.settlement-swap-selection:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.settlement-swap-dialog {
+    width: min(32rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+    margin: auto;
+    padding: 1rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.75rem;
+    background: var(--admin-panel);
+    color: inherit;
+}
+
+.settlement-swap-dialog::backdrop {
+    background: rgb(10 20 25 / 0.6);
+}
+
+.settlement-swap-dialog h2 {
+    margin: 0 0 0.75rem;
+    font-size: clamp(1.125rem, 4vw, 1.5rem);
+}
+
+.settlement-swap-addresses {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0;
+    list-style: none;
+}
+
+.settlement-swap-addresses li {
+    display: grid;
+    gap: 0.2rem;
+    padding: 0.625rem;
+    border-radius: 0.5rem;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-swap-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
