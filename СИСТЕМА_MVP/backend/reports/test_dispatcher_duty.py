@@ -209,6 +209,40 @@ class DispatcherDutyTests(TestCase):
             self.assertEqual(self.client.post(url, {'path': page}).status_code, 204)
         self.assertFalse(DispatcherDutyWindow.objects.exists())
 
+    def test_trailing_legacy_hidden_after_pagehide_does_not_mask_the_new_window(self):
+        shift = self.shift()
+        self.authorize(self.dispatcher)
+        old, new = uuid4(), uuid4()
+
+        def signal(at, window, sequence, state):
+            with patch('django.utils.timezone.now', return_value=self.start + timedelta(seconds=at)):
+                route = 'application_session_heartbeat' if state == 'visible' else 'dispatcher_duty_presence'
+                self.assertEqual(self.client.post(reverse(route), {
+                    'path': '/dispatcher/control/', 'duty_shift': shift.pk, 'duty_window': str(window),
+                    'duty_sequence': sequence, 'duty_state': state,
+                }).status_code, 204)
+
+        signal(0, old, 1, 'visible')
+        signal(5, old, 2, 'closed')
+        signal(6, old, 3, 'hidden')
+        closed = shift.duty_windows.get(window_id=old, state='closed')
+        self.assertEqual(closed.last_sequence, 3)
+        self.assertFalse(shift.duty_windows.filter(window_id=old, state='hidden').exists())
+        # The same pair of beacons may also have been stored before this release.
+        old_hidden_time = self.start + timedelta(seconds=7)
+        shift.duty_windows.create(window_id=old, session_digest=closed.session_digest, state='hidden',
+                                  started_at=old_hidden_time, last_seen_at=old_hidden_time, last_sequence=4)
+        signal(10, new, 1, 'visible')
+        for seq, at in enumerate((20, 120, 220), start=2):
+            signal(at, new, seq, 'hidden')
+        day, _ = self.report(timedelta(seconds=230))
+        self.assertEqual([(t['state'], t['seconds']) for t in day['totals']],
+                         [('on', 15), ('out', 215), ('future', 43200 - 230)])
+        self.assertEqual([mark['time'] for mark in day['window_marks']], ['07:00:20'])
+        signal(240, old, 5, 'visible')
+        day, _ = self.report(timedelta(seconds=245))
+        self.assertEqual(day['parts'][-2]['state'], 'on')
+
     def test_window_signals_are_scoped_to_own_active_shift(self):
         shift = self.shift()
         body = {'duty_shift': shift.pk, 'duty_window': str(uuid4()), 'duty_sequence': 1, 'duty_state': 'hidden'}

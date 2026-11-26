@@ -49,12 +49,22 @@ def duration(seconds, *, exact=False):
     return ' '.join(part for part in (f'{hours} ч' if hours else '', f'{mins} мин' if mins else '') if part)
 
 
+def ordered_window_observations(shift):
+    last_state = {}
+    for row in sorted(shift.duty_windows.all(), key=lambda item: (item.started_at, item.pk)):
+        key = (row.session_digest, row.window_id)
+        if row.state == WindowState.HIDDEN and last_state.get(key) == WindowState.CLOSED:
+            continue  # Legacy pages sent a final hidden beacon after closing.
+        last_state[key] = row.state
+        yield row
+
+
 def window_ranges(shift, stop):
     """Yield confirmed and missing observations per window; an explicit logout ends the entire session."""
     windows = defaultdict(list)
     logouts = {}
     detailed_since = {}
-    for row in shift.duty_windows.all():
+    for row in ordered_window_observations(shift):
         if row.state == WindowState.ARCHIVE_VISIBLE:
             continue
         if row.window_id == SESSION_LOGOUT:
@@ -68,7 +78,6 @@ def window_ranges(shift, stop):
         session_stop = min(logouts.get(key[0], stop), stop)
         if key[1] == FOREGROUND_HEARTBEAT:
             session_stop = min(session_stop, detailed_since.get(key[0], stop))
-        periods.sort(key=lambda row: (row.started_at, row.pk))
         for index, row in enumerate(periods):
             until = min(periods[index + 1].started_at, session_stop) if index + 1 < len(periods) else session_stop
             if until <= row.started_at:
@@ -235,7 +244,7 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
             events.append(journal_event(shift.closed_at, 'duty', 'Служебное закрытие' if shift.is_service_closed else 'Смена завершена',
                        closer or who, ' · '.join(filter(None, (who if closer and closer != who else '', shift.service_close_note)))))
         previous_states = {}
-        for point in sorted(shift.duty_windows.all(), key=lambda row: (row.started_at, row.pk)):
+        for point in ordered_window_observations(shift):
             if point.state == WindowState.ARCHIVE_VISIBLE and start <= point.started_at < end and point.started_at <= now:
                 events.append(journal_event(point.started_at, 'connection', 'Пульт был на экране', who,
                                             'Из архива связи сохранилась отдельная отметка.'))

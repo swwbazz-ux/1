@@ -103,6 +103,10 @@ def save_window(employee_id, shift_id, digest, window_id, sequence, state):
     if previous and (previous.last_sequence >= sequence or previous.state == WindowState.SIGNED_OUT):
         return 204
     now = timezone.now()
+    # The old recorder can emit visibilitychange(hidden) after pagehide(closed).
+    # A later foreground signal can still reopen a document restored from history.
+    if previous and previous.state == WindowState.CLOSED and state == WindowState.HIDDEN:
+        state = WindowState.CLOSED
     if (previous and previous.state == state and
             (state not in WINDOW_VALIDITY or now - previous.last_seen_at <= WINDOW_VALIDITY[state])):
         previous.last_seen_at = now
