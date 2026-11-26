@@ -27,7 +27,7 @@
     <template data-duty-entries>
       {% for event in slot.events %}
         {% ifchanged event.day %}<h3 class="duty-log-date">{{ event.day }}</h3>{% endifchanged %}
-        <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}"{% if event.window_mark %} data-window-event="{{ event.window_mark }}"{% endif %}>
+        <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}" tabindex="-1"{% if event.kind == 'operation' %} data-operation-band="{{ event.operation_band }}"{% endif %}{% if event.signal %} data-signal="{{ event.signal }}"{% endif %}{% if event.window_mark %} data-window-event="{{ event.window_mark }}"{% endif %}>
           <time datetime="{{ event.at }}">{{ event.time }}</time>
           <div>
             <strong>{{ event.title }}</strong>
@@ -47,6 +47,7 @@
         </div>
       {% endfor %}
     </template>
+    <template data-duty-overview>{% include "reports/includes/dispatcher_duty_overview.html" %}</template>
   </article>
   {% endfor %}
 </section>

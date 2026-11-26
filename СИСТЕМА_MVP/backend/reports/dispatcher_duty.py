@@ -31,6 +31,9 @@ from .views import parse_filter_date
 STATE_LABELS = {'on': 'В пульте', 'out': 'Вне пульта', 'unknown': 'Нет данных', 'future': 'Предстоит'}
 STRIP_STATES = {WindowState.VISIBLE: 'on', WindowState.HIDDEN: 'out', WindowState.CLOSED: 'out',
                 WindowState.SIGNED_OUT: 'out', 'vacant': 'out', 'unknown': 'unknown', 'future': 'future'}
+OVERVIEW_LABELS = {'on': 'На экране', 'background': 'В фоне', 'out': 'Вне пульта',
+                   'unknown': 'Нет данных', 'future': 'Предстоит'}
+OPERATION_BAND_HOURS = 2
 FEED_DAYS = 7
 
 
@@ -233,6 +236,7 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
         return round(100 * (at - start).total_seconds() / seconds, 5)
 
     totals = Counter()
+    overview_seconds = Counter()
     parts, events, marks, staff = [], [], [], []
     window_marks = []
     window_changes = set()
@@ -271,7 +275,8 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
             else:
                 continue
             event = journal_event(at, 'connection', title, who)
-            event.update(window_mark=point.pk, time=business_localtime(at).strftime('%H:%M:%S'))
+            event.update(window_mark=point.pk, signal='background' if point.state == WindowState.HIDDEN else 'on',
+                         time=business_localtime(at).strftime('%H:%M:%S'))
             events.append(event)
             window_marks.append(dict(id=point.pk, left=percent(at), state=point.state, title=title, time=event['time'],
                                      person=who))
@@ -281,13 +286,23 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
     for first, last, state, reason, who in timeline(start, end, now, tracking, shifts):
         code = STRIP_STATES[state]
         length = (last - first).total_seconds()
-        totals[code] += round((last - start).total_seconds()) - round((first - start).total_seconds())
+        rounded_seconds = round((last - start).total_seconds()) - round((first - start).total_seconds())
+        overview_state = 'background' if state == WindowState.HIDDEN else code
+        totals[code] += rounded_seconds
+        overview_seconds[overview_state] += rounded_seconds
         parts.append(dict(start=clock(first), end=clock(last), state=code, label=STATE_LABELS[code],
-                          width=round(100 * length / seconds, 6), duration=duration(length), reason=reason, person=who))
+                          width=round(100 * length / seconds, 6), duration=duration(length), reason=reason, person=who,
+                          overview_state=overview_state, overview_label=OVERVIEW_LABELS[overview_state],
+                          exact_start=business_localtime(first).strftime('%H:%M:%S'),
+                          exact_end=business_localtime(last).strftime('%H:%M:%S'),
+                          exact_duration=duration(rounded_seconds, exact=True)))
         if who and first not in shift_edges and start < first < end and (first, state, who) not in window_changes:
             events.append(journal_event(first, 'connection', reason, who, 'Состояние рабочего окна'))
+    band_counts = [0] * (12 // OPERATION_BAND_HOURS)
     for at, event, _ in slot_operations:
-        events.append(event)
+        band = int((at - start).total_seconds() // (OPERATION_BAND_HOURS * 3600))
+        band_counts[band] += 1
+        events.append(dict(event, operation_band=band))
         marks.append(dict(left=percent(at), time=clock(at), title=event['title'], at=event['at']))
     events.sort(key=lambda e: e['at'])
     live = start <= now < end
@@ -296,11 +311,18 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
     if live and marks:
         last_time = slot_operations[-1][0]
         last_op_age = duration((now - last_time).total_seconds())
-    ticks = [dict(label=clock(start + timedelta(hours=h)), left=100 * h / 12) for h in range(0, 13, 2)]
+    ticks = [dict(label=clock(start + timedelta(hours=h)), left=100 * h / 12)
+             for h in range(0, 13, OPERATION_BAND_HOURS)]
+    band_peak = max(1, max(band_counts))
+    bands = [dict(index=i, hours=f'{ticks[i]["label"]}–{ticks[i + 1]["label"]}', count=count,
+                  height=round(100 * count / band_peak))
+             for i, count in enumerate(band_counts)]
     return dict(key=shift_type, label='Дневная смена' if shift_type == ShiftType.DAY else 'Ночная смена',
                 start=clock(start), end=clock(end), staff=staff, parts=parts, events=events, marks=marks,
                 window_marks=sorted(window_marks, key=lambda mark: (mark['left'], mark['id'])),
-                ticks=ticks, count=len(marks), last_op=last_op, last_op_age=last_op_age, live=live,
+                ticks=ticks, count=len(marks), last_op=last_op, last_op_age=last_op_age, live=live, bands=bands,
+                overview_totals=[dict(state=key, label=label, duration=duration(value, exact=value < 60))
+                                 for key, label in OVERVIEW_LABELS.items() if (value := overview_seconds[key]) > 0],
                 marker=percent(now) if live else None,
                 totals=[dict(state=k, label=STATE_LABELS[k], seconds=totals[k], duration=duration(totals[k], exact=True))
                         for k in STATE_LABELS if totals[k] > 0])

@@ -4,8 +4,14 @@
     if (!root) return;
     const dialog = root.querySelector(".duty-dialog");
     const filter = dialog.querySelector("[data-duty-filter]");
+    const overview = dialog.querySelector("[data-duty-overview]");
+    const dialogContent = dialog.querySelector(".duty-dialog-content");
     const log = dialog.querySelector("[data-duty-log]");
     const selection = dialog.querySelector("[data-duty-selection]");
+    const selectionText = selection.querySelector("[data-duty-selection-text]");
+    const jump = selection.querySelector("[data-duty-jump]");
+    const bandSelection = dialog.querySelector("[data-duty-band-selection]");
+    const bandLabel = bandSelection.querySelector("[data-duty-band-label]");
     const status = root.querySelector(".duty-refresh-status");
     const history = root.querySelector(".duty-history");
     const feed = root.querySelector("[data-duty-slots]");
@@ -14,6 +20,17 @@
     let pointerDown = false;
     let autoLoad = true;
     let pagingInView = false;
+    let selectedBand = null;
+    let selectedEvent = null;
+
+    function setBand(button) {
+        selectedBand = button?.dataset.dutyBand ?? null;
+        for (const band of overview.querySelectorAll("[data-duty-band]")) {
+            band.setAttribute("aria-pressed", String(band === button));
+        }
+        bandSelection.hidden = !button;
+        bandLabel.textContent = button ? "Операции · " + button.dataset.bandHours : "";
+    }
 
     function applyFilter() {
         let visible = 0;
@@ -24,8 +41,10 @@
                 heading.hidden = true;
                 continue;
             }
-            item.hidden = filter.value !== "all" &&
-                (filter.value === "operation" ? item.dataset.kind !== "operation" : item.dataset.kind === "operation");
+            const isOperation = item.dataset.kind === "operation";
+            item.hidden = (filter.value === "operation" && !isOperation) ||
+                (filter.value === "duty" && isOperation) ||
+                (selectedBand !== null && item.dataset.operationBand !== selectedBand);
             if (!item.hidden) {
                 if (heading) heading.hidden = false;
                 visible++;
@@ -40,26 +59,55 @@
         const date = slot.closest("[data-duty-day]").querySelector("time").textContent;
         dialog.querySelector("[data-duty-period]").textContent = slot.querySelector("h4").textContent + " · " + date;
         dialog.querySelector("[data-duty-staff]").textContent = Array.from(slot.querySelector(".duty-staff").children, row => row.textContent).join(" / ");
-        dialog.querySelector("[data-duty-operation-summary]").textContent = slot.querySelector("[data-duty-operations]").textContent;
-        log.replaceChildren(slot.querySelector("template").content.cloneNode(true));
+        overview.replaceChildren(slot.querySelector("template[data-duty-overview]").content.cloneNode(true));
+        log.replaceChildren(slot.querySelector("template[data-duty-entries]").content.cloneNode(true));
         filter.value = "all";
+        setBand(null);
         applyFilter();
         const mark = event.target.closest("[data-duty-mark]");
         const windowMark = event.target.closest("[data-duty-window-mark]");
-        const selected = windowMark
+        selectedEvent = windowMark
             ? Array.from(log.querySelectorAll("[data-window-event]")).find(row => row.dataset.windowEvent === windowMark.dataset.dutyWindowMark)
             : mark && Array.from(log.querySelectorAll("[data-at]")).find(row =>
                 row.dataset.kind === "operation" && row.dataset.at === mark.dataset.dutyMark);
         const interval = event.target.closest("[data-duty-interval]");
-        selection.textContent = interval ? interval.dataset.dutyInterval : "";
-        selection.hidden = !interval;
-        if (selected) selected.classList.add("is-selected");
+        selectionText.textContent = selectedEvent
+            ? selectedEvent.querySelector("time").textContent + " · " + selectedEvent.querySelector("strong").textContent
+            : interval?.dataset.dutyInterval || "";
+        selection.hidden = !selectionText.textContent;
+        jump.hidden = !selectedEvent;
+        selectedEvent?.classList.add("is-selected");
         dialog.showModal();
-        dialog.scrollTop = 0;
-        if (selected) selected.scrollIntoView({block: "nearest"});
+        dialogContent.scrollTop = 0;
     });
     dialog.querySelector("[data-duty-close]").addEventListener("click", () => dialog.close());
-    filter.addEventListener("change", applyFilter);
+    filter.addEventListener("change", () => {
+        setBand(null);
+        applyFilter();
+    });
+    overview.addEventListener("click", event => {
+        const button = event.target.closest("[data-duty-band]");
+        if (!button) return;
+        setBand(button.dataset.dutyBand === selectedBand ? null : button);
+        filter.value = "operation";
+        applyFilter();
+        if (selectedBand !== null) bandSelection.scrollIntoView({block: "nearest"});
+    });
+    bandSelection.querySelector("[data-duty-clear-band]").addEventListener("click", () => {
+        setBand(null);
+        applyFilter();
+        filter.focus({preventScroll: true});
+    });
+    jump.addEventListener("click", () => {
+        if (!selectedEvent) return;
+        if (selectedEvent.hidden) {
+            filter.value = "all";
+            setBand(null);
+            applyFilter();
+        }
+        selectedEvent.focus({preventScroll: true});
+        selectedEvent.scrollIntoView({block: "nearest"});
+    });
     dialog.addEventListener("click", event => {
         if (event.target !== dialog) return;
         const rect = dialog.getBoundingClientRect();

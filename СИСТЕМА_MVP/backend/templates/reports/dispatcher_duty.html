@@ -4,8 +4,8 @@
 {% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=7">
-<script src="{% static 'js/dispatcher-duty-report.js' %}?v=5" defer></script>
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=8">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=6" defer></script>
 {% endblock %}
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
@@ -46,13 +46,20 @@
       <div><small data-duty-period></small><h2 id="duty-journal-title">Журнал смены</h2></div>
       <button type="button" data-duty-close autofocus>Закрыть</button>
     </div>
-    <p class="duty-selection" data-duty-selection hidden></p>
-    <div class="duty-journal-summary"><p data-duty-staff></p><p data-duty-operation-summary></p></div>
-    <label class="duty-filter">Показать
-      <select data-duty-filter><option value="all">Все события</option><option value="operation">Только операции</option><option value="duty">Смена и связь</option></select>
-    </label>
-    <p data-duty-none hidden>За этот период событий нет.</p>
-    <div data-duty-log></div>
+    <div class="duty-dialog-content">
+      <div data-duty-overview></div>
+      <div class="duty-journal-summary"><p data-duty-staff></p></div>
+      <div class="duty-log-heading">
+        <h3>Лента событий</h3>
+        <label class="duty-filter"><span class="duty-visually-hidden">Показать</span>
+          <select data-duty-filter><option value="all">Все события</option><option value="operation">Только операции</option><option value="duty">Смена и связь</option></select>
+        </label>
+      </div>
+      <div class="duty-selection" data-duty-selection hidden><p data-duty-selection-text></p><button type="button" data-duty-jump hidden>К записи</button></div>
+      <div class="duty-band-selection" data-duty-band-selection hidden><span data-duty-band-label></span><button type="button" data-duty-clear-band>Сбросить период</button></div>
+      <p data-duty-none hidden>За этот период событий нет.</p>
+      <div data-duty-log></div>
+    </div>
   </dialog>
 </main>
 {% include 'reports/includes/management_report_theme.html' %}

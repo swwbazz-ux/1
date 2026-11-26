@@ -213,6 +213,11 @@ class DispatcherDutyTests(TestCase):
         totals = {row['state']: row['seconds'] for row in day['totals']}
         self.assertEqual(totals, {'on': 40, 'out': 160, 'unknown': 20, 'future': 43200 - 220})
         self.assertEqual([p['state'] for p in day['parts']], ['on', 'out', 'unknown', 'out', 'on', 'out', 'future'])
+        self.assertEqual([p['overview_state'] for p in day['parts']],
+                         ['on', 'background', 'unknown', 'background', 'on', 'out', 'future'])
+        background = next(row for row in day['overview_totals'] if row['state'] == 'background')
+        self.assertEqual(background['duration'], '2 мин')
+        self.assertEqual(day['parts'][1]['exact_duration'], '2 мин 10 с')
         self.assertEqual(night['parts'][0]['state'], 'future')
         self.assertEqual(night['staff'], [])
         self.assertEqual(day['count'], 0)
@@ -359,6 +364,22 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual((auto['closure']['actor'], auto['closure']['reason']), ('Система', 'Автоматически через 13 часов'))
         self.assertEqual(len(night['staff']), 2)
         self.assertEqual([member['operations'] for member in night['staff']], [0, 1])
+
+    def test_operation_bands_are_aligned_at_night_midnight_and_shift_boundary(self):
+        start = self.start + timedelta(hours=12)
+        shift = self.shift(opened=start, kind='night')
+        for elapsed in (timedelta(minutes=1), timedelta(hours=2) - timedelta(seconds=1),
+                        timedelta(hours=2), timedelta(hours=5), timedelta(hours=12)):
+            row = DispatcherActionLog.objects.create(
+                actor=self.dispatcher.employee, actor_role_code='dispatcher', duty_shift=shift,
+                action_type=DispatcherActionType.CANCEL_ASSIGNMENT, target_summary='Проверка',
+            )
+            DispatcherActionLog.objects.filter(pk=row.pk).update(created_at=start + elapsed)
+        _, night = self.report(timedelta(days=1))
+        self.assertEqual([b['count'] for b in night['bands']], [2, 1, 1, 0, 0, 0])
+        self.assertEqual(night['bands'][2]['hours'], '23:00–01:00')
+        self.assertEqual([event['operation_band'] for event in night['events'] if event['kind'] == 'operation'],
+                         [0, 0, 1, 2])
 
     def test_coverage_starts_at_installation_and_unknown_archives_do_not_imply_absence(self):
         DispatcherDutyTracking.objects.filter(pk=1).update(started_at=self.start + timedelta(hours=4))
