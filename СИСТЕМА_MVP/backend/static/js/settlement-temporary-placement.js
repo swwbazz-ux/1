@@ -80,7 +80,6 @@
         draft: {resident: null, kind: "employee", arrivalDate: "", basis: "", query: ""},
         loading: false,
         saving: false,
-        pendingRelocation: null,
         searchTimer: null,
         searchSequence: 0
     };
@@ -814,7 +813,6 @@
                 reason: reason
             },
             function () {
-                disarmRelocation();
                 showFeedback("Временное размещение переселено. Обновляем карту…", false);
                 window.location.reload();
             }
@@ -827,7 +825,9 @@
             {
                 label: "Переселить",
                 handler: function () {
-                    armRelocation(row);
+                    root.dispatchEvent(new CustomEvent("settlement:choose-move-bed", {
+                        detail: {occupancyId: row.occupancy_id}
+                    }));
                 }
             },
             {
@@ -903,9 +903,6 @@
         if (temporarySummary) {
             if (!state.loaded) {
                 temporarySummary.textContent = "";
-            } else if (state.pendingRelocation) {
-                temporarySummary.textContent = "Выберите свободное койко-место на карте для переселения: "
-                    + (state.pendingRelocation.name || "");
             } else {
                 var parts = [
                     "Подготовлено: " + Number(state.counts.prepared || 0),
@@ -938,33 +935,6 @@
         }
     }
 
-    function startRelocationFromPanel() {
-        var bed = selectedBed();
-        if (!bed || bed.dataset.assignmentType !== "temporary_unapproved") return false;
-        if (!Number(bed.dataset.occupancyId)) return false;
-        armRelocation({
-            occupancy_id: Number(bed.dataset.occupancyId),
-            resident_name: bed.dataset.occupantName || ""
-        });
-        showFeedback("Выберите свободное койко-место для переселения.", false);
-        return true;
-    }
-
-    function armRelocation(row) {
-        state.pendingRelocation = {
-            occupancyId: Number(row.occupancy_id),
-            name: row.resident_name || ""
-        };
-        document.body.classList.add("settlement-temporary-relocation-armed");
-        if (state.scope === "temporary") renderTemporaryList();
-    }
-
-    function disarmRelocation() {
-        state.pendingRelocation = null;
-        document.body.classList.remove("settlement-temporary-relocation-armed");
-        if (state.scope === "temporary") renderTemporaryList();
-    }
-
     function focusBed(bedStableId) {
         var bed = findBed(bedStableId);
         if (!bed) return false;
@@ -975,11 +945,7 @@
             if (dormButton && !dormButton.classList.contains("is-active")) dormButton.click();
             if (floorButton && !floorButton.classList.contains("is-active")) floorButton.click();
         }
-        // Программный выбор койки не должен срабатывать как цель переселения.
-        var armed = state.pendingRelocation;
-        state.pendingRelocation = null;
         bed.click();
-        state.pendingRelocation = armed;
         return true;
     }
 
@@ -1010,26 +976,6 @@
             {occupancy_id: Number(occupancyId), reason: "Освобождение койки с карты"},
             function () {
                 showFeedback("Койко-место освобождено. Обновляем карту…", false);
-                window.location.reload();
-            }
-        );
-    }
-
-    function relocateTemporary(bed) {
-        var pending = state.pendingRelocation;
-        if (!pending || !bed) return;
-        var reason = askReason("Причина переселения");
-        if (!reason) return;
-        runAction(
-            root.dataset.temporaryRelocateUrl,
-            {
-                occupancy_id: pending.occupancyId,
-                bed_stable_id: bed.dataset.bedId,
-                reason: reason
-            },
-            function () {
-                disarmRelocation();
-                showFeedback("Временное размещение переселено. Обновляем карту…", false);
                 window.location.reload();
             }
         );
@@ -1411,20 +1357,6 @@
             event.stopImmediatePropagation();
             releaseTemporary(Number(releaseBed.dataset.occupancyId));
             return;
-        }
-        var relocate = event.target.closest("[data-relocate-button]");
-        if (relocate) {
-            if (!startRelocationFromPanel()) return;
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            return;
-        }
-        if (state.pendingRelocation) {
-            var bed = event.target.closest("[data-bed]");
-            if (!bed || bed.disabled || bed.dataset.occupied === "true" || !isTransferredBed(bed)) {
-                return;
-            }
-            relocateTemporary(bed);
         }
     }, true);
 

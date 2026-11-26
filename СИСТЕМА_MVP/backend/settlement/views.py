@@ -3318,7 +3318,10 @@ def settlement_temporary_relocate_view(request):
         return _temporary_placement_error_response(error)
     return _temporary_placement_json_response({
         'ok': True,
-        'occupancy': _temporary_occupancy_payload(occupancy),
+        'occupancy': {
+            **_temporary_occupancy_payload(occupancy),
+            **_occupancy_response(occupancy)['occupancy'],
+        },
     })
 
 

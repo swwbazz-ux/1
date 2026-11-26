@@ -128,6 +128,10 @@
     var selectedBed = null;
     var selectedEmployee = null;
     var relocationSourceBed = null;
+    var moveSource = null;
+    var movePicker = root.querySelector("[data-move-picker]");
+    var moveHint = root.querySelector("[data-move-hint]");
+    var moveReason = root.querySelector("[data-relocation-reason-input]");
     var searchTimer = null;
     var searchSequence = 0;
     var saving = false;
@@ -596,7 +600,7 @@
                 || room.dataset.floor !== state.floor
             );
         });
-        if (activeRoom && !selectedFloorRooms().includes(activeRoom)) closePanel();
+        if (activeRoom && !panel.hidden && !selectedFloorRooms().includes(activeRoom)) closePanel();
         updateSelectionSummary();
     }
 
@@ -928,6 +932,15 @@
 
     function resetRelocation() {
         relocationSourceBed = null;
+        if (moveReason) {
+            moveReason.required = false;
+            moveReason.value = "";
+            moveReason.closest("label").hidden = true;
+        }
+        if (assignmentType) {
+            assignmentType.disabled = false;
+            assignmentType.closest("label").hidden = false;
+        }
         if (panel) panel.classList.remove("is-relocating-with-target");
         resetEmployeeSelection();
     }
@@ -1332,7 +1345,7 @@
     }
 
     function closeRelocationModal(force) {
-        if (saving && !force) return;
+        if (saving && force !== true) return;
         if (!relocationModal || relocationModal.hidden) return;
         relocationModal.hidden = true;
         relocationModal.setAttribute("aria-hidden", "true");
@@ -1344,6 +1357,7 @@
         if (selectedBed) {
             selectedBed.classList.remove("is-selected");
             selectedBed.setAttribute("aria-pressed", "false");
+            selectedBed.focus({preventScroll: true});
             selectedBed = null;
         }
         resetRelocation();
@@ -1360,7 +1374,7 @@
         relocationModal.setAttribute("aria-hidden", "false");
         relocationModalBackdrop.hidden = false;
         document.body.classList.add("settlement-relocation-modal-open");
-        if (assignmentType) assignmentType.focus();
+        (moveReason && moveReason.required ? moveReason : relocationModalCancel).focus();
     }
 
     function setAutoPreviewModal(open) {
@@ -1471,6 +1485,7 @@
         clearDragState();
         clearPlanDragState();
         if (activeMapMode === "next") {
+            endMovePicker();
             cancelBedSwap();
             loadAutoState(autoCohort && autoCohort.value, 0);
         }
@@ -2037,7 +2052,8 @@
             || !selectedEmployee
             || !selectedBed
             || !assignmentType
-            || !assignmentType.value
+            || (!relocationSourceBed && !assignmentType.value)
+            || (moveReason && moveReason.required && !moveReason.value.trim())
             || temporaryNeedsEnd
         );
     }
@@ -2050,19 +2066,13 @@
             || sourceBed.dataset.occupied !== "true"
             || saving
         ) return;
-        if (destinationBed && !isTransferredBed(destinationBed)) return;
-        if (destinationBed) {
-            closeUnsettledPanel(false);
-            activeRoom = destinationBed.closest("[data-room-card]");
-            if (selectedBed) {
-                selectedBed.classList.remove("is-selected");
-                selectedBed.setAttribute("aria-pressed", "false");
-            }
-            selectedBed = destinationBed;
-            selectedBed.classList.add("is-selected");
-            selectedBed.setAttribute("aria-pressed", "true");
-        }
+        if (!destinationBed || destinationBed.disabled || !isTransferredBed(destinationBed)
+            || destinationBed.dataset.occupied === "true") return;
+        swapNotice.hidden = true;
+        closeUnsettledPanel(false);
+        activeRoom = destinationBed.closest("[data-room-card]");
         relocationSourceBed = sourceBed;
+        selectBed(destinationBed);
         selectedEmployee = {
             id: Number(sourceBed.dataset.residentId),
             resident_id: Number(sourceBed.dataset.residentId),
@@ -2082,28 +2092,49 @@
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = false;
         if (assignmentType) {
             assignmentType.value = sourceBed.dataset.assignmentType || "";
+            // Переселение сохраняет тип закрепления исходной записи.
+            assignmentType.disabled = true;
+            assignmentType.closest("label").hidden = true;
+        }
+        if (moveReason) {
+            moveReason.required = sourceBed.dataset.assignmentType === "temporary_unapproved";
+            moveReason.closest("label").hidden = !moveReason.required;
+            moveReason.value = "";
         }
         updateAssignmentEndVisibility();
-        if (!destinationBed) {
-            selectedBed.classList.remove("is-selected");
-            selectedBed.setAttribute("aria-pressed", "false");
-            selectedBed = null;
-        }
         renderBedCards();
         updatePlacementPanel();
         updateSettleButton();
-        if (destinationBed) {
-            openRelocationModal();
-        } else {
-            panel.hidden = true;
-            panel.setAttribute("aria-hidden", "true");
-            panelBackdrop.hidden = true;
-        }
+        openRelocationModal();
     }
 
-    function startRelocation() {
-        if (!controlHeld || !selectedBed || selectedBed.dataset.occupied !== "true" || saving) return;
-        configureRelocation(selectedBed, null);
+    function endMovePicker() {
+        if (!moveSource) return;
+        moveSource = null;
+        movePicker.hidden = true;
+        root.classList.remove("is-picking-move");
+    }
+
+    function startMovePicker(bed) {
+        if (!controlHeld || saving || !bed || !isTransferredBed(bed) || !Number(bed.dataset.occupancyId)) return;
+        closeUnsettledPanel(false);
+        closePanel();
+        moveSource = bed;
+        swapNotice.hidden = true;
+        root.classList.add("is-picking-move");
+        movePicker.querySelector("[data-move-person]").textContent = "Переселение · " + bed.dataset.occupantName;
+        moveHint.textContent = "Выберите общежитие, этаж и нажмите свободную койку.";
+        movePicker.hidden = false;
+        root.querySelector('.settlement-toolbar [data-dorm-filter][aria-pressed="true"]').focus();
+    }
+
+    function cancelMovePicker() {
+        var source = moveSource;
+        endMovePicker();
+        if (source) {
+            showMapFloor(source.closest("[data-room-card]"));
+            source.focus();
+        }
     }
 
     function csrfToken() {
@@ -2164,7 +2195,10 @@
         if (controlStatus) controlStatus.textContent = labels[controlState];
         if (controlMessage) controlMessage.textContent = message || "";
         if (previouslyHeld !== controlHeld) {
-            if (!controlHeld) clearDragState();
+            if (!controlHeld) {
+                clearDragState();
+                endMovePicker();
+            }
             root.querySelectorAll("[data-bed]").forEach(syncBedDragHandle);
             if (placementHint && settlementForm) updatePlacementPanel();
         }
@@ -2406,7 +2440,7 @@
     }
 
     function submitPlacement() {
-        if (!controlHeld || !selectedBed || !selectedEmployee || !assignmentType.value || saving) return;
+        if (!controlHeld || !selectedBed || !selectedEmployee || (!relocationSourceBed && !assignmentType.value) || saving) return;
         if (relocationSourceBed && !Number(relocationSourceBed.dataset.occupancyId)) {
             showFeedback("Не удалось определить точное текущее размещение.", true);
             return;
@@ -2417,7 +2451,8 @@
         updateSettleButton();
         showFeedback("Сохраняем заселение…", false);
 
-        fetch(root.dataset.occupancyCreateUrl, {
+        var temporaryMove = source && source.dataset.assignmentType === "temporary_unapproved";
+        fetch(temporaryMove ? root.dataset.temporaryRelocateUrl : root.dataset.occupancyCreateUrl, {
             method: "POST",
             credentials: "same-origin",
             headers: {
@@ -2425,7 +2460,11 @@
                 "X-CSRFToken": csrfToken(),
                 "X-Requested-With": "XMLHttpRequest"
             },
-            body: JSON.stringify(relocationSourceBed ? {
+            body: JSON.stringify(temporaryMove ? {
+                occupancy_id: Number(source.dataset.occupancyId),
+                bed_stable_id: destination.dataset.bedId,
+                reason: moveReason.value.trim()
+            } : relocationSourceBed ? {
                 action: "relocate",
                 occupancy_id: Number(relocationSourceBed.dataset.occupancyId),
                 bed_stable_id: selectedBed.dataset.bedId
@@ -2447,8 +2486,13 @@
             })
             .then(function (payload) {
                 updateMapAfterSettlement(payload, destination, source);
+                if (temporaryMove) root.dispatchEvent(new Event("settlement:checked-in"));
                 if (source && relocationSourceBed === source) {
                     closeRelocationModal(true);
+                    swapNotice.textContent = destination.dataset.occupantName + " · " + bedLocation(destination);
+                    swapNotice.hidden = false;
+                    destination.focus({preventScroll: true});
+                    destination.scrollIntoView({block: "nearest", inline: "nearest"});
                 } else if (selectedBed === destination) {
                     closePanel();
                 }
@@ -2569,7 +2613,7 @@
 
     document.addEventListener("keydown", function (event) {
         if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing
-            || activeMapMode !== "current" || dragSourceBed || relocationSourceBed
+            || activeMapMode !== "current" || dragSourceBed || relocationSourceBed || moveSource
             || !/^[0-9\p{L}]$/u.test(event.key)) return;
 
         var input = /^\d$/.test(event.key) ? searchInput : residentFinder;
@@ -2624,6 +2668,16 @@
     root.addEventListener("click", function (event) {
         clearTimeout(avatarClickTimer);
         var bed = event.target.closest("[data-bed]");
+        if (moveSource && (bed || event.target.closest("[data-room-open]"))) {
+            if (!bed || bed.disabled || !isTransferredBed(bed) || bed.dataset.occupied === "true") {
+                moveHint.textContent = "Для переселения нажмите свободную койку в переданной комнате.";
+            } else {
+                var source = moveSource;
+                endMovePicker();
+                configureRelocation(source, bed);
+            }
+            return;
+        }
         if (bed) {
             // Сохраняем двойной щелчок по фото для открытия личной карточки.
             if (event.detail && Number(bed.dataset.occupantId) && event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) {
@@ -2729,6 +2783,21 @@
 
     var dragSourceBed = null;
     var dropTargetBed = null;
+    var dragTab = null;
+    var dragTabTimer = null;
+
+    function setDragTab(button) {
+        if (button === dragTab) return;
+        clearTimeout(dragTabTimer);
+        if (dragTab) dragTab.classList.remove("is-drag-hover");
+        dragTab = button;
+        if (!button || button.getAttribute("aria-pressed") === "true") return;
+        button.classList.add("is-drag-hover");
+        dragTabTimer = setTimeout(function () {
+            if (dragSourceBed && controlHeld && activeMapMode === "current") button.click();
+            button.classList.remove("is-drag-hover");
+        }, 450);
+    }
 
     function setDropTarget(bed) {
         if (dropTargetBed === bed) return;
@@ -2738,6 +2807,8 @@
     }
 
     function clearDragState() {
+        setDragTab(null);
+        root.classList.remove("is-dragging-resident");
         if (dragSourceBed) dragSourceBed.classList.remove("is-drag-source");
         dragSourceBed = null;
         setDropTarget(null);
@@ -2748,11 +2819,12 @@
         if (event.target.closest("[data-plan-resident]")) return;
         var handle = event.target.closest("[data-bed-drag-handle]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!controlHeld || swapSource || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
+        if (!controlHeld || moveSource || swapSource || !bed || !isTransferredBed(bed) || bed.dataset.occupied !== "true" || saving) {
             event.preventDefault();
             return;
         }
         dragSourceBed = bed;
+        root.classList.add("is-dragging-resident");
         bed.classList.add("is-drag-source");
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", bed.dataset.bedId);
@@ -2761,6 +2833,14 @@
 
     root.addEventListener("dragover", function (event) {
         if (!dragSourceBed) return;
+        var tab = event.target.closest(".settlement-toolbar [data-dorm-filter], .settlement-toolbar [data-floor-filter]");
+        setDragTab(tab);
+        if (tab) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "none";
+            setDropTarget(null);
+            return;
+        }
         var bed = event.target.closest("[data-bed]");
         if (
             !controlHeld
@@ -2797,6 +2877,9 @@
     });
 
     root.addEventListener("dragend", clearDragState);
+    root.addEventListener("dragleave", function (event) {
+        if (dragTab && dragTab.contains(event.target) && !dragTab.contains(event.relatedTarget)) setDragTab(null);
+    });
 
     root.addEventListener("dragstart", function (event) {
         var card = event.target.closest("[data-plan-resident]");
@@ -2886,7 +2969,7 @@
     root.addEventListener("dblclick", function (event) {
         var handle = event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]");
         var bed = handle && handle.closest("[data-bed]");
-        if (!bed || !Number(bed.dataset.occupantId) || bed.dataset.occupied !== "true") return;
+        if (moveSource || !bed || !Number(bed.dataset.occupantId) || bed.dataset.occupied !== "true") return;
         clearTimeout(avatarClickTimer);
         event.preventDefault();
         event.stopPropagation();
@@ -2927,7 +3010,13 @@
     if (autoPreviewModalBackdrop) autoPreviewModalBackdrop.addEventListener("click", function () {
         setAutoPreviewModal(false);
     });
-    if (relocateButton) relocateButton.addEventListener("click", startRelocation);
+    if (relocateButton) relocateButton.addEventListener("click", function () { startMovePicker(selectedBed); });
+    if (movePicker) movePicker.querySelector("[data-move-cancel]").addEventListener("click", cancelMovePicker);
+    if (moveReason) moveReason.addEventListener("input", updateSettleButton);
+    root.addEventListener("settlement:choose-move-bed", function (event) {
+        var id = Number(event.detail.occupancyId);
+        if (id > 0) startMovePicker(root.querySelector('[data-bed][data-occupancy-id="' + id + '"]'));
+    });
     if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
     root.addEventListener("settlement:refresh-control", refreshControlState);
     if (controlAcquireButton) controlAcquireButton.addEventListener("click", acquireControl);
@@ -2967,6 +3056,8 @@
             closeEmployeePanel();
         } else if (!panel.hidden) {
             closePanel();
+        } else if (moveSource) {
+            cancelMovePicker();
         }
     });
     employeeSearch.addEventListener("input", function () {

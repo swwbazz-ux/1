@@ -1898,7 +1898,12 @@ class TemporaryPlacementHttpTests(TemporaryPlacementBase):
             },
         )
         self.assertEqual(relocated.status_code, 200)
-        relocated_id = relocated.json()['occupancy']['id']
+        moved = relocated.json()['occupancy']
+        self.assertEqual(moved['bed_stable_id'], self.beds[2].stable_id)
+        self.assertEqual(moved['occupant_name'], self.second_candidate_resident.display_name)
+        self.assertEqual(moved['assignment_type'], 'temporary_unapproved')
+        self.assertTrue(moved['stay_period']['start'])
+        relocated_id = moved['id']
         self.assertNotEqual(relocated_id, occupancy_id)
 
         released = self.post_json(

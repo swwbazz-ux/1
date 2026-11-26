@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1-relocate-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-floor-heading.css' %}?v={{ static_asset_release }}-floor-heading-v1">
 {% endblock %}
 
@@ -108,6 +108,13 @@
 
         <section class="settlement-map-mode-panel" data-map-mode-panel="current">
         <section class="settlement-toolbar" aria-label="Фильтры физической карты">
+            <div class="settlement-move-picker" data-move-picker hidden>
+                <div role="status">
+                    <strong data-move-person></strong>
+                    <span data-move-hint>Выберите общежитие, этаж и нажмите свободную койку.</span>
+                </div>
+                <button type="button" data-move-cancel>Отмена</button>
+            </div>
             <time class="settlement-current-date" datetime="{{ current_date|date:'Y-m-d' }}">
                 <span>Дата проверки</span>
                 <strong>{{ current_date|date:"d.m.Y" }}</strong>
@@ -799,6 +806,10 @@
                                type="datetime-local"
                                data-assignment-end-input>
                     </label>
+                    <label class="settlement-assignment-type" data-relocation-reason hidden>
+                        <span>Причина переселения</span>
+                        <input type="text" data-relocation-reason-input>
+                    </label>
                     <button type="submit" class="settlement-place-button" data-settle-button disabled>
                         Заселить
                     </button>
@@ -806,12 +817,13 @@
                 </details>
                 <div class="settlement-occupied-actions" data-occupied-actions hidden>
                     <button type="button" class="settlement-place-button" data-relocate-button disabled>
-                        Переселить сотрудника
+                        Переселить на другую койку
                     </button>
                     <button type="button" class="settlement-place-button" data-swap-start>Поменять местами</button>
                     <button type="button" class="settlement-release-button" data-release-button disabled>
                         Освободить койко-место
                     </button>
+                    <small class="settlement-move-help">Можно перетащить бейдж на свободную койку. Чтобы открыть другой этаж или КИС, задержите бейдж над его кнопкой.</small>
                 </div>
                 <div class="settlement-bed-prep" data-bed-preparation hidden>
                     <div class="settlement-bed-prep-status">
@@ -1002,8 +1014,8 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1"></script>
-<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1-relocate-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>

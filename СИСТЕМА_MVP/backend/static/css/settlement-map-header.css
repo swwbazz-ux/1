@@ -227,6 +227,32 @@
 }
 
 .settlement-toolbar .settlement-current-date { min-height: 0; }
+.settlement-toolbar .settlement-move-picker {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    border-inline-start: 4px solid var(--settlement-accent);
+    background: var(--admin-panel);
+}
+.settlement-move-picker [role="status"] { display: grid; gap: 2px; }
+.settlement-move-picker span, .settlement-move-help { font-size: 13px; }
+.settlement-move-picker button { width: auto; flex: none; }
+.settlement-toolbar .settlement-move-picker[hidden],
+[data-settlement-form] label[hidden] { display: none; }
+.is-picking-move .is-transferred .settlement-bed.is-free:not(:disabled) {
+    outline: 2px dashed var(--settlement-accent);
+    outline-offset: -3px;
+}
+.is-dragging-resident .settlement-toolbar .settlement-filter-buttons button:not(.is-active) {
+    border: 1px dashed var(--settlement-accent);
+}
+.is-dragging-resident .settlement-toolbar button.is-drag-hover {
+    outline: 3px solid var(--settlement-accent);
+    outline-offset: 1px;
+}
 .settlement-toolbar .settlement-filter-buttons button,
 .settlement-toolbar .settlement-search-field input { min-height: var(--bar-control-size); font-size: 13px; }
 .settlement-toolbar .settlement-filter-buttons button { padding-inline: 10px; font-weight: 600; }
