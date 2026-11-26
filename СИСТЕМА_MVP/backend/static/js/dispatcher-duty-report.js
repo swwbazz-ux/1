@@ -43,8 +43,11 @@
         filter.value = "all";
         applyFilter();
         const mark = event.target.closest("[data-duty-mark]");
-        const selected = mark && Array.from(log.querySelectorAll("[data-at]")).find(row =>
-            row.dataset.kind === "operation" && row.dataset.at === mark.dataset.dutyMark);
+        const windowMark = event.target.closest("[data-duty-window-mark]");
+        const selected = windowMark
+            ? Array.from(log.querySelectorAll("[data-window-event]")).find(row => row.dataset.windowEvent === windowMark.dataset.dutyWindowMark)
+            : mark && Array.from(log.querySelectorAll("[data-at]")).find(row =>
+                row.dataset.kind === "operation" && row.dataset.at === mark.dataset.dutyMark);
         const interval = event.target.closest("[data-duty-interval]");
         selection.textContent = interval ? interval.dataset.dutyInterval : "";
         selection.hidden = !interval;
@@ -108,7 +111,13 @@
         const first = feed.querySelector("[data-duty-day]");
         if (!first || fetching || !canUpdate()) return;
         const url = new URL(location.pathname, location.origin);
-        url.searchParams.set("since", first.dataset.dutyDay);
+        const visible = Array.from(feed.querySelectorAll("[data-duty-day]")).filter(day => {
+            const rect = day.getBoundingClientRect();
+            return rect.bottom > 0 && rect.top < window.innerHeight;
+        });
+        const before = visible[0]?.previousElementSibling?.dataset.dutyDay;
+        if (before) url.searchParams.set("before", before);
+        url.searchParams.set("since", (visible.at(-1) || first).dataset.dutyDay);
         fetching = true;
         try {
             const next = await readPage(url);
@@ -119,8 +128,13 @@
             const focusedSlot = focus.closest("[data-duty-slot]");
             const focusIndex = focusedSlot ? [...focusedSlot.querySelectorAll("[data-open-duty]")].indexOf(focus) : -1;
             const focusedDate = focusedSlot?.closest("[data-duty-day]").dataset.dutyDay;
-            if (days.some(day => day.dataset.dutyDay === first.dataset.dutyDay)) {
-                first.replaceWith(...days);
+            if (before || days.some(day => day.dataset.dutyDay === first.dataset.dutyDay)) {
+                const existing = new Map(Array.from(feed.querySelectorAll("[data-duty-day]"), day => [day.dataset.dutyDay, day]));
+                for (const day of days) {
+                    const old = existing.get(day.dataset.dutyDay);
+                    if (old) old.replaceWith(day);
+                    else if (!before) first.before(day);
+                }
             } else {
                 // After a long suspension, resume from a contiguous page with its own archive cursor.
                 feed.querySelectorAll("[data-duty-day]").forEach(day => day.remove());

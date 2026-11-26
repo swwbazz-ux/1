@@ -1671,8 +1671,8 @@
     </script>
     <script src="{% static 'js/role-readonly.js' %}?v=role-readonly-v7"></script>
     {% if observer_mode %}<script src="{% static 'js/observer-mode.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
-    {% if dispatcher_duty_shift_id %}<script src="{% static 'js/dispatcher-duty-recorder.js' %}?v=1" data-duty-shift="{{ dispatcher_duty_shift_id }}" data-presence-url="{% url 'dispatcher_duty_presence' %}" defer></script>{% endif %}
-    {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}{% if dispatcher_duty_shift_id %}-duty1{% endif %}" defer></script>{% endif %}
+    {% if dispatcher_duty_recorder %}<script src="{% static 'js/dispatcher-duty-offline.js' %}?v=1" data-owner="{{ dispatcher_duty_recorder.owner }}" data-ticket="{{ dispatcher_duty_recorder.ticket }}" data-server-ms="{{ dispatcher_duty_recorder.server_ms }}" data-endpoint="{% url 'dispatcher_duty_observations' %}" defer></script>{% endif %}
+    {% if role_session_authenticated and not observer_mode %}<script src="{% static 'js/application-session-heartbeat.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     {% if is_native_app and role_session_authenticated and not observer_mode %}<script src="{% static 'js/native-background-connection-v1.js' %}?v={{ static_asset_release }}" defer></script>{% endif %}
     <script src="{% static 'js/client-error-report.js' %}?v={{ static_asset_release }}" defer></script>
     <script src="{% static 'js/connection-indicators-v1.js' %}?v={{ static_asset_release }}" defer></script>

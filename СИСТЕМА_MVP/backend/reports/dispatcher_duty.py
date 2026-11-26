@@ -213,6 +213,8 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
 
     totals = Counter()
     parts, events, marks, staff = [], [], [], []
+    window_marks = []
+    window_changes = set()
     for shift in shifts:
         who = shift.employee.full_name
         staff.append(dict(person=who, opened=staff_time(shift.opened_at), operations=by_shift[shift.pk],
@@ -226,10 +228,29 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
             closer = 'Система' if automatic else shift.closed_by.full_name if shift.closed_by_id else ''
             events.append(journal_event(shift.closed_at, 'duty', 'Служебное закрытие' if shift.is_service_closed else 'Смена завершена',
                        closer or who, ' · '.join(filter(None, (who if closer and closer != who else '', shift.service_close_note)))))
-        for point in shift.duty_windows.all():
+        previous_states = {}
+        for point in sorted(shift.duty_windows.all(), key=lambda row: (row.started_at, row.pk)):
             if point.state == WindowState.ARCHIVE_VISIBLE and start <= point.started_at < end and point.started_at <= now:
                 events.append(journal_event(point.started_at, 'connection', 'Пульт был на экране', who,
                                             'Из архива связи сохранилась отдельная отметка.'))
+            key = (point.session_digest, point.window_id)
+            previous = previous_states.get(key)
+            previous_states[key] = point.state
+            at = point.started_at
+            if not (start <= at < end and shift.opened_at <= at <= now and (not shift.closed_at or at < shift.closed_at)):
+                continue
+            if point.state == WindowState.HIDDEN and previous != WindowState.HIDDEN:
+                title = 'Окно пульта в фоне'
+            elif point.state == WindowState.VISIBLE and previous == WindowState.HIDDEN:
+                title = 'Окно пульта вернулось на экран'
+            else:
+                continue
+            event = journal_event(at, 'connection', title, who)
+            event.update(window_mark=point.pk, time=business_localtime(at).strftime('%H:%M:%S'))
+            events.append(event)
+            window_marks.append(dict(id=point.pk, left=percent(at), state=point.state, title=title, time=event['time'],
+                                     person=who))
+            window_changes.add((at, point.state, who))
 
     shift_edges = {value for s in shifts for value in (s.opened_at, s.closed_at) if value}
     for first, last, state, reason, who in timeline(start, end, now, tracking, shifts):
@@ -238,7 +259,7 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
         totals[code] += round((last - start).total_seconds()) - round((first - start).total_seconds())
         parts.append(dict(start=clock(first), end=clock(last), state=code, label=STATE_LABELS[code],
                           width=round(100 * length / seconds, 6), duration=duration(length), reason=reason, person=who))
-        if who and first not in shift_edges and start < first < end:
+        if who and first not in shift_edges and start < first < end and (first, state, who) not in window_changes:
             events.append(journal_event(first, 'connection', reason, who, 'Состояние рабочего окна'))
     for at, event, _ in slot_operations:
         events.append(event)
@@ -253,6 +274,7 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
     ticks = [dict(label=clock(start + timedelta(hours=h)), left=100 * h / 12) for h in range(0, 13, 2)]
     return dict(key=shift_type, label='Дневная смена' if shift_type == ShiftType.DAY else 'Ночная смена',
                 start=clock(start), end=clock(end), staff=staff, parts=parts, events=events, marks=marks,
+                window_marks=sorted(window_marks, key=lambda mark: (mark['left'], mark['id'])),
                 ticks=ticks, count=len(marks), last_op=last_op, last_op_age=last_op_age, live=live,
                 marker=percent(now) if live else None,
                 totals=[dict(state=k, label=STATE_LABELS[k], seconds=totals[k], duration=duration(totals[k], exact=True))
@@ -339,7 +361,7 @@ def management_dispatcher_duty(request, access):
         return JsonResponse(duty_report(dates.get('date') or production_work_date(now), now))
     partial = request.GET.get('partial') == '1'
     before = dates.get('before')
-    report = duty_feed(now=now, before=before, since=dates.get('since') if partial and not before else None)
+    report = duty_feed(now=now, before=before, since=dates.get('since') if partial else None)
     # A plain archive link also works without incremental loading.
     if before and not partial and (not report['days'] or report['days'][0]['date'] < report['date']):
         current = duty_feed(now=now, since=report['date'])

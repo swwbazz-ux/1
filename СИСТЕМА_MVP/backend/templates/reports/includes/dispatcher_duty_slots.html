@@ -16,6 +16,7 @@
     <button type="button" class="duty-plot" data-open-duty aria-label="{{ day.date|date:'d.m.Y' }} · {{ slot.label }} {{ slot.start }}–{{ slot.end }}. Открыть журнал">
       {% if slot.live %}<span class="duty-marker-row"><span style="--left:{{ slot.marker|unlocalize }}%">{{ report.now_clock }}</span></span>{% endif %}
       <span class="duty-strip">{% for part in slot.parts %}<span class="duty-part duty-{{ part.state }}" style="width:{{ part.width|unlocalize }}%" data-duty-interval="{{ part.start }}–{{ part.end }} · {{ part.label }} · {{ part.duration }}. {{ part.reason }}{% if part.person %} · {{ part.person }}{% endif %}" title="{{ part.start }}–{{ part.end }} · {{ part.reason }}"></span>{% endfor %}{% if slot.live %}<i class="duty-marker" style="left:{{ slot.marker|unlocalize }}%"></i>{% endif %}</span>
+      {% if slot.window_marks %}<span class="duty-window-marks">{% for mark in slot.window_marks %}<i class="duty-window-{{ mark.state }}" style="left:{{ mark.left|unlocalize }}%" data-duty-window-mark="{{ mark.id }}" title="{{ mark.time }} · {{ mark.title }} · {{ mark.person }}"></i>{% endfor %}</span>{% endif %}
       <span class="duty-marks">{% for mark in slot.marks %}<i class="duty-diamond" style="left:{{ mark.left|unlocalize }}%" data-duty-mark="{{ mark.at }}" title="{{ mark.time }} · {{ mark.title }}"></i>{% endfor %}</span>
       <span class="duty-axis">{% for tick in slot.ticks %}<span style="left:{{ tick.left|unlocalize }}%">{{ tick.label }}</span>{% endfor %}</span>
     </button>
@@ -26,7 +27,7 @@
     <template data-duty-entries>
       {% for event in slot.events %}
         {% ifchanged event.day %}<h3 class="duty-log-date">{{ event.day }}</h3>{% endifchanged %}
-        <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}">
+        <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}"{% if event.window_mark %} data-window-event="{{ event.window_mark }}"{% endif %}>
           <time datetime="{{ event.at }}">{{ event.time }}</time>
           <div><strong>{{ event.title }}</strong>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}{% if event.person %}<small>{{ event.person }}</small>{% endif %}</div>
         </div>

@@ -54,6 +54,15 @@
 .duty-strip { display: flex; height: 22px; overflow: hidden; border-radius: 3px; }
 .duty-part { display: block; flex: none; }
 .duty-marks { height: 13px; margin: 0 1px; }
+.duty-window-marks { position: relative; display: block; height: 19px; }
+.duty-window-marks i { position: absolute; width: 12px; height: 9px; transform: translateX(-50%); }
+.duty-window-marks .duty-window-hidden { top: 1px; }
+.duty-window-marks .duty-window-visible { bottom: 0; }
+.duty-legend .duty-window-hidden, .duty-legend .duty-window-visible,
+.duty-window-marks i::after { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--gd-ink); box-sizing: border-box; }
+.duty-window-marks i::after { content: ""; display: block; margin: 0 auto; }
+.duty-legend .duty-window-hidden, .duty-window-marks .duty-window-hidden::after { background: var(--duty-red); }
+.duty-legend .duty-window-visible, .duty-window-marks .duty-window-visible::after { background: var(--duty-green); }
 .duty-marks i { position: absolute; top: 3px; translate: -50% 0; }
 .duty-legend i.duty-diamond, .duty-marks i { width: 7px; height: 7px; background: var(--gd-ink); transform: rotate(45deg); border-radius: 0; }
 .duty-marker-row { height: 19px; }

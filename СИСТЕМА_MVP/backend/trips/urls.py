@@ -10,6 +10,7 @@ from .achievement_views import (
 )
 from .dispatcher_pwa import dispatcher_manifest_view, dispatcher_service_worker_view
 from .dispatcher_duty import background_presence_view
+from .dispatcher_duty_offline import observations_view
 from .views import (
     dispatcher_cancel_assignment_view,
     dispatcher_cancel_trip_view,
@@ -50,6 +51,7 @@ urlpatterns = [
     ),
     path('dispatcher/control/', dispatcher_control_view, name='dispatcher_control'),
     path('dispatcher/duty-presence/', background_presence_view, name='dispatcher_duty_presence'),
+    path('dispatcher/duty-observations/', observations_view, name='dispatcher_duty_observations'),
     path(
         'dispatcher/control/downtime/<int:event_id>/close/',
         dispatcher_close_downtime_view,
