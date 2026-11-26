@@ -1,4 +1,8 @@
-СИСТЕМА_MVP/backend/settlement/views.py
-СИСТЕМА_MVP/backend/static/css/clerk-workplace.css
-СИСТЕМА_MVP/backend/templates/clerk/base.html
-СИСТЕМА_MVP/backend/templates/includes/clerk_workplace_header.html
+СИСТЕМА_MVP/backend/core/offline_sync.py
+СИСТЕМА_MVP/backend/static/js/excavator-haptics-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-hourly-report-v1.js
+СИСТЕМА_MVP/backend/static/js/excavator-work-runtime-v1.js
+СИСТЕМА_MVP/backend/templates/trips/excavator_work.html
+СИСТЕМА_MVP/backend/trips/free_bucket.py
+СИСТЕМА_MVP/backend/trips/views.py
+СИСТЕМА_MVP/backend/users/role_apps.py
