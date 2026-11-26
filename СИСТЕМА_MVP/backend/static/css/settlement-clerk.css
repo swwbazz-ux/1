@@ -3206,6 +3206,11 @@ body.settlement-auto-preview-modal-open {
     cursor: not-allowed;
 }
 
+.settlement-place-button.settlement-checkin-override:not(:disabled) {
+    border-color: #a62939;
+    background: #a62939;
+}
+
 .settlement-empty-state {
     display: grid;
     min-height: 240px;

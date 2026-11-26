@@ -563,16 +563,27 @@ class BedCheckinTests(TemporaryPlacementBase):
         )
         roommate.save(update_fields=['personnel_position'])
         occupied_bed = self.beds[0]
-        self.create_occupancy(resident=self.second_candidate_resident, bed=occupied_bed)
         target = occupied_bed.room.beds.exclude(pk=occupied_bed.pk).first()
         request = {
             'subject': f'employee:{employee.pk}', 'bed_stable_id': target.stable_id,
             'arrival': '', 'departure': '',
         }
 
+        ready = self.post_json('settlement_bed_checkin_preview', request)
+        self.assertEqual(ready.json(), {'ok': True})
+        self.assertFalse(SettlementResident.objects.filter(employee=employee).exists())
+        self.create_occupancy(resident=self.second_candidate_resident, bed=occupied_bed)
+
+        preview = self.post_json('settlement_bed_checkin_preview', request)
+        self.assertEqual(preview.json()['code'], 'settlement_room_personnel_category_conflict')
+        confirmation = preview.json()['category_exception']
+        self.assertFalse(SettlementResident.objects.filter(employee=employee).exists())
+        self.assertFalse(SettlementBedPreparation.objects.exists())
+        self.assertFalse(EmployeeBedOccupancy.objects.filter(physical_bed=target).exists())
+
         rejected = self.checkin(**request)
         self.assertEqual(rejected.json()['code'], 'settlement_room_personnel_category_conflict')
-        confirmation = rejected.json()['category_exception']
+        self.assertEqual(rejected.json()['category_exception'], confirmation)
         self.assertFalse(SettlementResident.objects.filter(employee=employee).exists())
 
         # SQLite can reuse the key of a rolled-back insert. Consume it so the

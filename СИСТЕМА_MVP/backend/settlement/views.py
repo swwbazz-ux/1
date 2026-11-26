@@ -149,6 +149,7 @@ from .temporary_placement import (
     cancel_bed_preparation,
     clear_bed_reserve,
     confirm_bed_preparation,
+    preview_bed_checkin,
     extend_bed_preparation,
     prepare_bed,
     relocate_temporary_occupancy,
@@ -3250,6 +3251,14 @@ def settlement_bed_checkin_people_view(request):
     return JsonResponse({'results': search_housing_subjects(request.GET.get('q', ''))})
 
 
+def _bed_checkin_subject_id(subject):
+    if isinstance(subject, str):
+        kind, _, key = subject.partition(':')
+        if key.isascii() and key.isdigit() and len(key) <= 19 and 0 < int(key) <= 2**63 - 1:
+            return kind, int(key)
+    return '', None
+
+
 def _bed_checkin_resident(payload, control):
     subject = payload.get('subject')
     if subject == 'new':
@@ -3257,17 +3266,14 @@ def _bed_checkin_resident(payload, control):
         if external_housing_card_exists(values):
             raise ValidationError('Такая карточка уже есть. Выберите жильца по ФИО. Если карточка в архиве, восстановите её.')
         return create_external_resident(**values, control_context=control, require_phone=False).pk
-    if isinstance(subject, str):
-        kind, _, key = subject.partition(':')
-        if key.isascii() and key.isdigit() and len(key) <= 19 and 0 < int(key) <= 2**63 - 1:
-            pk = int(key)
-            if kind == 'employee' and Employee.objects.filter(
-                pk=pk, is_active=True, status=Employee.Status.ACTIVE,
-            ).exists():
-                resident, _ = get_or_create_employee_resident(employee_id=pk)
-                return resident.pk
-            if kind == 'resident' and SettlementResident.objects.filter(pk=pk, employee__isnull=True).exists():
-                return pk
+    kind, pk = _bed_checkin_subject_id(subject)
+    if kind == 'employee' and Employee.objects.filter(
+        pk=pk, is_active=True, status=Employee.Status.ACTIVE,
+    ).exists():
+        resident, _ = get_or_create_employee_resident(employee_id=pk)
+        return resident.pk
+    if kind == 'resident' and SettlementResident.objects.filter(pk=pk, employee__isnull=True).exists():
+        return pk
     raise ValidationError('Выберите человека из списка или создайте нового жильца.')
 
 
@@ -3275,6 +3281,49 @@ class BedCheckinForm(forms.Form):
     arrival = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
     departure = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
     work_shift = forms.ChoiceField(choices=DAY_NIGHT_LABELS.items(), required=False)
+
+    def stay(self, *, now):
+        if not self.is_valid():
+            if 'work_shift' in self.errors:
+                raise ValidationError('Выберите дневную или ночную смену.')
+            raise ValidationError('Проверьте даты заселения и выезда.')
+        today = business_localtime(now).date()
+        arrival = self.cleaned_data['arrival'] or today
+        if arrival > today:
+            raise ValidationError('Для будущего заезда выберите «Подготовить место».')
+        start = now if arrival == today else datetime.combine(arrival, DAY_SHIFT_START, BUSINESS_TIME_ZONE)
+        departure = self.cleaned_data['departure']
+        end = datetime.combine(departure, DAY_SHIFT_START, BUSINESS_TIME_ZONE) if departure else None
+        if end is not None and end <= now:
+            raise ValidationError('Выезд должен быть позже текущего времени.')
+        return arrival, start, end
+
+
+@require_POST
+def settlement_bed_checkin_preview_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return _temporary_placement_json_response({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    try:
+        payload = _temporary_placement_payload(request)
+        _, start, end = BedCheckinForm(payload).stay(now=timezone.now())
+        kind, pk = _bed_checkin_subject_id(payload.get('subject'))
+        employee = (
+            Employee.objects.select_related('settlement_resident', 'personnel_position')
+            .filter(pk=pk, is_active=True, status=Employee.Status.ACTIVE).first()
+            if kind == 'employee' else None
+        )
+        if employee is None:
+            raise ValidationError('Выберите активного сотрудника из списка.')
+        resident = getattr(employee, 'settlement_resident', None)
+        if resident is None:
+            resident = SettlementResident(employee=employee, resident_type=SettlementResident.ResidentType.EMPLOYEE)
+        preview_bed_checkin(
+            resident=resident, bed_stable_id=payload.get('bed_stable_id'), starts_at=start, ends_at=end,
+            confirm_itr=payload.get('confirm_itr') is True, basis=payload.get('basis', ''),
+        )
+    except ValidationError as error:
+        return _temporary_placement_error_response(error, offer_category_exception=True)
+    return _temporary_placement_json_response({'ok': True})
 
 
 @require_POST
@@ -3285,22 +3334,10 @@ def settlement_bed_checkin_view(request):
         payload = _temporary_placement_payload(request)
         control = _temporary_placement_write_context(request)
         form = BedCheckinForm(payload)
-        if not form.is_valid():
-            if 'work_shift' in form.errors:
-                raise ValidationError('Выберите дневную или ночную смену.')
-            raise ValidationError('Проверьте даты заселения и выезда.')
-        departure = form.cleaned_data['departure']
         with transaction.atomic():
             lock_settlement_write_lease(control_context=control, using='default')
             now = timezone.now()
-            today = business_localtime(now).date()
-            arrival = form.cleaned_data['arrival'] or today
-            if arrival > today:
-                raise ValidationError('Для будущего заезда выберите «Подготовить место».')
-            start = now if arrival == today else datetime.combine(arrival, DAY_SHIFT_START, BUSINESS_TIME_ZONE)
-            end = datetime.combine(departure, DAY_SHIFT_START, BUSINESS_TIME_ZONE) if departure else None
-            if end is not None and end <= now:
-                raise ValidationError('Выезд должен быть позже текущего времени.')
+            arrival, start, end = form.stay(now=now)
             resident_id = _bed_checkin_resident(payload, control)
             confirm_itr = payload.get('confirm_itr') is True
             category_exception = payload.get('category_exception', '')

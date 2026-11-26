@@ -13,20 +13,69 @@ window.createSettlementBedCheckin = function (form, applied) {
     const dates = form.querySelector("[data-checkin-dates]");
     const period = form.querySelector("[data-checkin-period]");
     const submit = form.querySelector('[type="submit"]');
-    const exception = form.querySelector("[data-category-exception-confirmation]");
-    const approveException = exception.querySelector("[data-category-exception-checkbox]");
+    const override = form.querySelector("[data-checkin-override]");
     let target = null;
     let subject = "";
     let timer;
     let request = 0;
     let saving = false;
     let categoryException = "";
+    let checking = false;
+    let checkVersion = 0;
+    let checkTimer;
 
-    function setCategoryException(confirmation = "") {
-        categoryException = confirmation;
-        exception.hidden = !confirmation;
-        approveException.checked = false;
-        submit.textContent = "Заселить";
+    function updateActions() {
+        submit.hidden = Boolean(categoryException);
+        submit.disabled = saving || checking || Boolean(categoryException);
+        override.hidden = !categoryException;
+        override.disabled = saving || checking;
+    }
+
+    function resetCheck() {
+        clearTimeout(checkTimer);
+        checkVersion += 1;
+        checking = false;
+        categoryException = "";
+        updateActions();
+    }
+
+    function sendJson(url, payload) {
+        return fetch(url, {
+            method: "POST", credentials: "same-origin",
+            headers: {"Content-Type": "application/json", "X-CSRFToken": fields.csrfmiddlewaretoken.value},
+            body: JSON.stringify(payload)
+        });
+    }
+
+    function checkRoom(delay = 0) {
+        resetCheck();
+        if (!target || !subject.startsWith("employee:") || saving) return;
+        const version = checkVersion;
+        const payload = {
+            subject, bed_stable_id: target.dataset.bedId,
+            arrival: fields.arrival.value, departure: fields.departure.value,
+            basis: fields.basis.disabled ? "" : fields.basis.value,
+            confirm_itr: !fields.confirm_itr.disabled && fields.confirm_itr.checked
+        };
+        checking = true;
+        updateActions();
+        notify("Проверяем комнату…");
+        checkTimer = setTimeout(async function () {
+            try {
+                const response = await sendJson(form.dataset.previewUrl, payload);
+                const result = await response.json();
+                if (version !== checkVersion) return;
+                categoryException = result.category_exception || "";
+                notify(result.ok ? "" : (result.error || ""), !result.ok);
+            } catch {
+                if (version === checkVersion) notify("");
+            } finally {
+                if (version === checkVersion) {
+                    checking = false;
+                    updateActions();
+                }
+            }
+        }, delay);
     }
 
     function notify(text, isError = false) {
@@ -49,7 +98,7 @@ window.createSettlementBedCheckin = function (form, applied) {
         newButton.setAttribute("aria-pressed", String(open));
         name.placeholder = open ? "Фамилия Имя Отчество" : "Фамилия или табельный номер";
         subject = open ? "new" : "";
-        setCategoryException();
+        resetCheck();
         selection.hidden = true;
         name.setCustomValidity("");
         clearResults();
@@ -65,6 +114,7 @@ window.createSettlementBedCheckin = function (form, applied) {
 
     function search() {
         clearResults();
+        resetCheck();
         selection.hidden = true;
         name.setCustomValidity("");
         notify("");
@@ -100,7 +150,8 @@ window.createSettlementBedCheckin = function (form, applied) {
                         selection.replaceChildren(window.settlementPersonnelNumber(person.personnel_number));
                         if (person.category_label) selection.append(person.category_label);
                         selection.hidden = false;
-                        notify("");
+                        if (subject.startsWith("employee:")) checkRoom();
+                        else notify("");
                     });
                     results.append(button);
                 }
@@ -128,11 +179,13 @@ window.createSettlementBedCheckin = function (form, applied) {
         }
     }, true);
     form.addEventListener("input", function (event) {
-        if (event.target === approveException) {
-            submit.textContent = approveException.checked ? "Заселить с нарушением" : "Заселить";
-            return;
+        if (event.target === name) return;
+        if (dates.contains(event.target) || event.target === fields.basis || event.target === fields.confirm_itr) {
+            if (subject.startsWith("employee:")) {
+                checkRoom(150);
+                return;
+            }
         }
-        setCategoryException();
         if (message.classList.contains("is-error")) notify("");
     });
     dates.addEventListener("input", updatePeriod);
@@ -148,45 +201,50 @@ window.createSettlementBedCheckin = function (form, applied) {
         const type = card.querySelector('[name="resident_type"]:checked') || fields.resident_type[0];
         (name.value.trim() ? type : name).focus();
     });
-    form.addEventListener("submit", async function (event) {
-        event.preventDefault();
-        if (!target || saving || form.hidden) return;
+    async function save(confirmed = false) {
+        if (!target || saving || checking || form.hidden || (!confirmed && categoryException)) return;
         if (!subject) {
             notify("Нажмите на ФИО в результатах поиска. Если человека нет в справочнике, выберите «Новый жилец».", true);
             name.focus();
             return;
         }
         const bed = target;
+        const version = checkVersion;
         const payload = Object.fromEntries(new FormData(form));
         delete payload.csrfmiddlewaretoken;
         payload.subject = subject;
         payload.bed_stable_id = bed.dataset.bedId;
         payload.confirm_itr = fields.confirm_itr.checked && !fields.confirm_itr.disabled;
-        if (approveException.checked) payload.category_exception = categoryException;
-        saving = submit.disabled = true;
+        if (confirmed) payload.category_exception = categoryException;
+        saving = true;
+        updateActions();
         notify("Сохраняем заселение…");
         try {
-            const response = await fetch(form.action, {
-                method: "POST", credentials: "same-origin",
-                headers: {"Content-Type": "application/json", "X-CSRFToken": fields.csrfmiddlewaretoken.value},
-                body: JSON.stringify(payload)
-            });
+            const response = await sendJson(form.action, payload);
             const result = await response.json().catch(() => null);
             if (!result) throw new Error(response.redirected || response.status === 403
                 ? "Сеанс мог завершиться. Откройте карту и проверьте вход."
                 : "Сервер не подтвердил заселение. Проверьте койку на карте перед повторной попыткой.");
             if (!response.ok || !result.ok) {
-                if (target === bed) setCategoryException(result.category_exception);
+                if (target === bed && version === checkVersion) categoryException = result.category_exception || "";
                 throw new Error(result.error || "Сервер не подтвердил заселение. Проверьте койку на карте.");
             }
             applied(result, bed);
         } catch (error) {
-            if (target === bed) notify(error instanceof TypeError
+            if (target === bed && version === checkVersion) notify(error instanceof TypeError
                 ? "Нет подтверждения от сервера. Проверьте связь и состояние койки на карте."
                 : error.message, true);
         } finally {
-            saving = submit.disabled = false;
+            saving = false;
+            updateActions();
         }
+    }
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        save();
+    });
+    override.addEventListener("click", function () {
+        if (categoryException && form.reportValidity()) save(true);
     });
     return {
         select(bed) {

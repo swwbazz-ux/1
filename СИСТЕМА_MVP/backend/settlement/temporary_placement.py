@@ -345,6 +345,27 @@ def _raise_preparation_conflict(*, bed_id, resident_id, using):
     raise AssertionError('Подготовка не найдена после IntegrityError.')
 
 
+def preview_bed_checkin(*, resident, bed_stable_id, starts_at, ends_at, confirm_itr, basis):
+    """Read-only feedback for the check-in form. The write path checks again under locks."""
+    bed = (
+        PhysicalBed.objects.select_related('room__dormitory')
+        .filter(stable_id=_normalized_bed_stable_id(bed_stable_id)).first()
+    )
+    if bed is None:
+        raise _settlement_error('Койко-место не найдено.', 'settlement_bed_not_found')
+
+    resident_id = resident.pk or 0
+    related = Q(physical_bed_id=bed.pk) | Q(resident_id=resident_id)
+    _validate_occupancy_conflicts(
+        resident_id=resident_id, bed=bed, starts_at=starts_at, ends_at=ends_at,
+        persisted_occupancies=EmployeeBedOccupancy.objects.filter(related).select_related('physical_bed'),
+    )
+    _validate_resident_and_destination(
+        resident=resident, room=bed.room, starts_at=starts_at, ends_at=ends_at,
+        confirm_itr=confirm_itr, placement_reason=_normalized_text(basis, field_label='Основание'),
+    )
+
+
 def prepare_bed(
     *,
     resident_id,

@@ -1,5 +1,6 @@
 <form class="settlement-checkin settlement-placement-panel" data-bed-checkin
       action="{% url 'settlement_bed_checkin' %}" data-search-url="{% url 'settlement_bed_checkin_people' %}"
+      data-preview-url="{% url 'settlement_bed_checkin_preview' %}"
       aria-labelledby="bed-checkin-title" hidden>
     {% csrf_token %}
     <h3 id="bed-checkin-title">Заселение на койку <span data-checkin-place></span></h3>
@@ -55,7 +56,8 @@
         <label class="settlement-employee-search" data-checkin-basis hidden><span>Основание размещения</span><input name="basis" maxlength="512"></label>
         <label class="settlement-checkin-confirm" data-checkin-itr hidden><input type="checkbox" name="confirm_itr"> <span>Подтверждаю категорию ИТР</span></label>
     </div>
-    <p data-checkin-message role="status" class="settlement-placement-feedback" hidden></p>
-    {% include "settlement/_category_exception_confirmation.html" %}
+    <p id="bed-checkin-message" data-checkin-message role="status" class="settlement-placement-feedback" hidden></p>
     <button type="submit" class="settlement-place-button">Заселить</button>
+    <button type="button" class="settlement-place-button settlement-checkin-override" data-checkin-override
+            aria-describedby="bed-checkin-message" hidden>Заселить с нарушением</button>
 </form>
