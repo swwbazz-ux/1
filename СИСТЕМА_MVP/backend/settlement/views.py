@@ -129,11 +129,13 @@ from .saved_previews import (
     settlement_preview_is_stale,
 )
 from .services import (
+    MANUAL_CATEGORY_EXCEPTION_LABEL,
     current_housing_official_assignments,
     current_roster_resolution,
     build_auto_settlement_preview,
     can_edit_stay,
     effective_occupancy_at_q,
+    occupancies_with_manual_category_exception,
     relocate_resident_to_bed,
     release_resident_from_bed,
     resident_stay_version,
@@ -1114,6 +1116,7 @@ def _attach_occupancy_view(rooms, moment):
     extensions = approved_watch_extensions_on(production_work_date(moment), employee_ids=profiles)
 
     imported_ids, published = current_housing_official_assignments(occupancies, moment)
+    exception_ids = occupancies_with_manual_category_exception(occupancy.pk for occupancy in occupancies)
 
     for room in rooms:
         room.occupied_bed_count = 0
@@ -1137,6 +1140,7 @@ def _attach_occupancy_view(rooms, moment):
             bed.stay_period = _bed_stay_period(occupancy)
             bed.occupant_name = resident.display_name
             bed.personnel_number = resident.personnel_number
+            bed.category_exception = MANUAL_CATEGORY_EXCEPTION_LABEL if str(occupancy.pk) in exception_ids else ''
             bed.occupant_initials = _person_initials(bed.occupant_name)
             profile = profiles.get(resident.employee_id)
             bed.occupant_photo_url = profile['photo_url'] if profile else _resident_photo_url(resident)
@@ -1453,6 +1457,7 @@ def settlement_map_assignments(request):
             'shiftLabel': bed.shift_label, 'tooltipShiftLabel': bed.tooltip_shift_label,
             'workCaption': bed.work_caption, 'workLabel': bed.work_label, 'tooltipWorkLabel': bed.tooltip_work_label,
             'assignmentWarning': bed.assignment_warning,
+            'categoryException': bed.category_exception,
         }
         for room in rooms for bed in room.beds.all() if bed.active_occupancy
     }})
@@ -2659,6 +2664,10 @@ def _occupancy_response(occupancy):
             'assignment_type': occupancy.assignment_type,
             'assignment_type_label': occupancy.get_assignment_type_display(),
             'placement_reason': occupancy.placement_reason,
+            'category_exception': (
+                MANUAL_CATEGORY_EXCEPTION_LABEL
+                if str(occupancy.pk) in occupancies_with_manual_category_exception([occupancy.pk]) else ''
+            ),
         },
         'room': {
             'id': room.pk,
@@ -2728,6 +2737,7 @@ def settlement_occupancy_create_view(request):
                 control_context=control_context,
                 confirm_itr=payload.get('confirm_itr') is True,
                 placement_reason=payload.get('placement_reason', '') or '',
+                category_exception=payload.get('category_exception', ''),
             )
         elif action == 'relocate':
             occupancy = relocate_resident_to_bed(
@@ -2803,10 +2813,10 @@ def settlement_occupancy_create_view(request):
             'settlement.manual.occupancy_not_found',
         }:
             status = 404
-        return JsonResponse(
-            {'ok': False, 'error': message, 'code': code},
-            status=status,
-        )
+        result = {'ok': False, 'error': message, 'code': code}
+        if action == 'settle' and getattr(error, 'confirmable_category_conflict', None):
+            result['category_exception'] = error.confirmable_category_conflict
+        return JsonResponse(result, status=status)
 
     if action == 'swap':
         return JsonResponse({'ok': True, 'placements': [_occupancy_response(row) for row in replacements]})
@@ -3138,7 +3148,7 @@ def _temporary_placement_json_response(payload, *, status=200):
     return response
 
 
-def _temporary_placement_error_response(error):
+def _temporary_placement_error_response(error, *, offer_category_exception=False):
     message, code = _validation_error_details(error)
     if code in TEMPORARY_PLACEMENT_NOT_FOUND_CODES:
         status = 404
@@ -3146,10 +3156,10 @@ def _temporary_placement_error_response(error):
         status = 409
     else:
         status = 400
-    return _temporary_placement_json_response(
-        {'ok': False, 'error': message, 'code': code},
-        status=status,
-    )
+    result = {'ok': False, 'error': message, 'code': code}
+    if offer_category_exception and getattr(error, 'confirmable_category_conflict', None):
+        result['category_exception'] = error.confirmable_category_conflict
+    return _temporary_placement_json_response(result, status=status)
 
 
 def _temporary_placement_control_error(request, error):
@@ -3293,21 +3303,24 @@ def settlement_bed_checkin_view(request):
                 raise ValidationError('Выезд должен быть позже текущего времени.')
             resident_id = _bed_checkin_resident(payload, control)
             confirm_itr = payload.get('confirm_itr') is True
+            category_exception = payload.get('category_exception', '')
             prepared = prepare_bed(
                 resident_id=resident_id, bed_stable_id=payload.get('bed_stable_id'),
                 arrival_date=arrival, hold_until=end or now + timedelta(minutes=1),
-                basis=payload.get('basis', ''), control_context=control, confirm_itr=confirm_itr, current_arrival=True,
+                basis=payload.get('basis', ''), control_context=control, confirm_itr=confirm_itr,
+                current_stay=(start, end), category_exception=category_exception,
             )
             occupancy = confirm_bed_preparation(
                 preparation_id=prepared.pk, control_context=control,
                 starts_at=start, ends_at=end, confirm_itr=confirm_itr, placement_reason=payload.get('basis', ''),
                 work_shift=form.cleaned_data['work_shift'] or None,
+                category_exception=category_exception,
             )
             result = _occupancy_response(occupancy)
     except ValidationError as error:
         if (_validation_error_details(error)[1] or '').startswith('settlement.control.'):
             return _temporary_placement_control_error(request, error)
-        return _temporary_placement_error_response(error)
+        return _temporary_placement_error_response(error, offer_category_exception=True)
     return _temporary_placement_json_response(result, status=201)
 
 

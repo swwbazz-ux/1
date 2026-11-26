@@ -13,11 +13,21 @@ window.createSettlementBedCheckin = function (form, applied) {
     const dates = form.querySelector("[data-checkin-dates]");
     const period = form.querySelector("[data-checkin-period]");
     const submit = form.querySelector('[type="submit"]');
+    const exception = form.querySelector("[data-category-exception-confirmation]");
+    const approveException = exception.querySelector("[data-category-exception-checkbox]");
     let target = null;
     let subject = "";
     let timer;
     let request = 0;
     let saving = false;
+    let categoryException = "";
+
+    function setCategoryException(confirmation = "") {
+        categoryException = confirmation;
+        exception.hidden = !confirmation;
+        approveException.checked = false;
+        submit.textContent = "Заселить";
+    }
 
     function notify(text, isError = false) {
         message.textContent = text;
@@ -39,6 +49,7 @@ window.createSettlementBedCheckin = function (form, applied) {
         newButton.setAttribute("aria-pressed", String(open));
         name.placeholder = open ? "Фамилия Имя Отчество" : "Фамилия или табельный номер";
         subject = open ? "new" : "";
+        setCategoryException();
         selection.hidden = true;
         name.setCustomValidity("");
         clearResults();
@@ -116,7 +127,12 @@ window.createSettlementBedCheckin = function (form, applied) {
             notify(prefix + field.validationMessage, true);
         }
     }, true);
-    form.addEventListener("input", function () {
+    form.addEventListener("input", function (event) {
+        if (event.target === approveException) {
+            submit.textContent = approveException.checked ? "Заселить с нарушением" : "Заселить";
+            return;
+        }
+        setCategoryException();
         if (message.classList.contains("is-error")) notify("");
     });
     dates.addEventListener("input", updatePeriod);
@@ -146,6 +162,7 @@ window.createSettlementBedCheckin = function (form, applied) {
         payload.subject = subject;
         payload.bed_stable_id = bed.dataset.bedId;
         payload.confirm_itr = fields.confirm_itr.checked && !fields.confirm_itr.disabled;
+        if (approveException.checked) payload.category_exception = categoryException;
         saving = submit.disabled = true;
         notify("Сохраняем заселение…");
         try {
@@ -158,7 +175,10 @@ window.createSettlementBedCheckin = function (form, applied) {
             if (!result) throw new Error(response.redirected || response.status === 403
                 ? "Сеанс мог завершиться. Откройте карту и проверьте вход."
                 : "Сервер не подтвердил заселение. Проверьте койку на карте перед повторной попыткой.");
-            if (!response.ok || !result.ok) throw new Error(result.error || "Сервер не подтвердил заселение. Проверьте койку на карте.");
+            if (!response.ok || !result.ok) {
+                if (target === bed) setCategoryException(result.category_exception);
+                throw new Error(result.error || "Сервер не подтвердил заселение. Проверьте койку на карте.");
+            }
             applied(result, bed);
         } catch (error) {
             if (target === bed) notify(error instanceof TypeError

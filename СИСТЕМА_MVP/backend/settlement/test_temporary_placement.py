@@ -20,6 +20,7 @@ from core.production_time import business_localtime
 from references.models import Dormitory
 from shifts.models import WatchPeriod
 from users.models import (
+    AdminActionLog,
     Employee,
     EmployeeAccess,
     PersonnelPosition,
@@ -521,6 +522,29 @@ class BedCheckinTests(TemporaryPlacementBase):
         self.assertIn('таб. № 001182', result.json()['error'])
         self.assertIn('Выберите свободную койку в комнате для рабочих.', result.json()['error'])
         self.assertFalse(EmployeeBedOccupancy.objects.filter(physical_bed=target).exists())
+
+        subject = f'employee:{self.candidate.pk}'
+        confirmation = result.json()['category_exception']
+        rejected = self.checkin(bed_stable_id=target.stable_id, subject=subject, category_exception=True)
+        self.assertFalse(rejected.json()['ok'])
+        self.assertEqual(rejected.json()['category_exception'], confirmation)
+
+        occupied = self.checkin(bed_stable_id=self.beds[0].stable_id, subject=subject, category_exception=confirmation)
+        self.assertEqual(occupied.json()['code'], 'settlement.bed.interval_overlap')
+        self.assertNotIn('category_exception', occupied.json())
+
+        accepted = self.checkin(bed_stable_id=target.stable_id, subject=subject, category_exception=confirmation)
+        self.assertEqual(accepted.status_code, 201, accepted.json())
+        occupancy = EmployeeBedOccupancy.objects.get(physical_bed=target)
+        warning = accepted.json()['occupancy']['category_exception']
+        self.assertIn('Заселено с исключением', warning)
+        event = AdminActionLog.objects.get(action_code='settlement.manual.category_exception')
+        self.assertEqual(event.object_id, str(occupancy.pk))
+        self.assertEqual(event.actor_id, self.clerk.pk)
+        self.assertIn(roommate.full_name, event.new_value)
+        self.assertContains(self.client.get(reverse('settlement_map')), f'data-category-exception="{warning}"')
+        snapshot = self.client.get(reverse('settlement_map_assignments')).json()
+        self.assertEqual(snapshot['beds'][str(occupancy.pk)]['categoryException'], warning)
 
     def test_map_snapshot_tracks_published_shift_without_changing_occupancy(self):
         from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus

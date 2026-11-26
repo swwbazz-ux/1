@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
+from hashlib import sha256
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
@@ -1183,6 +1184,7 @@ def _validate_resident_and_destination(
     placement_reason='',
     exclude_occupancy_ids=(),
     exclude_resident_ids=(),
+    category_exception='',
     using=None,
 ):
     if room.transfer_status != PhysicalRoom.TransferStatus.TRANSFERRED:
@@ -1208,15 +1210,52 @@ def _validate_resident_and_destination(
         exclude_occupancy_ids=exclude_occupancy_ids,
         using=using,
     )
-    _validate_room_personnel_category(
-        resident=resident,
-        room=room,
-        starts_at=starts_at,
-        ends_at=ends_at,
-        exclude_occupancy_ids=exclude_occupancy_ids,
-        exclude_resident_ids=exclude_resident_ids,
-        using=using,
-    )
+    try:
+        _validate_room_personnel_category(
+            resident=resident,
+            room=room,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            exclude_occupancy_ids=exclude_occupancy_ids,
+            exclude_resident_ids=exclude_resident_ids,
+            using=using,
+        )
+    except ValidationError as error:
+        if error.code != ROOM_CATEGORY_CONFLICT or room.room_type != PhysicalRoom.RoomType.STANDARD:
+            raise
+        message = error.messages[0]
+        confirmation = sha256(f'{resident.pk}:{room.pk}:{message}'.encode()).hexdigest()
+        if category_exception == confirmation:
+            return message
+        error.confirmable_category_conflict = confirmation
+        raise
+    return ''
+
+
+MANUAL_CATEGORY_EXCEPTION_ACTION = 'settlement.manual.category_exception'
+MANUAL_CATEGORY_EXCEPTION_LABEL = 'Заселено с исключением. Рабочие и ИТР в одной комнате на даты заселения.'
+
+
+def record_manual_category_exception(occupancy, *, actor_access, conflict, using):
+    if conflict:
+        AdminActionLog.objects.using(using).create(
+            actor_id=actor_access.employee_id,
+            action='Заселение с исключением',
+            action_code=MANUAL_CATEGORY_EXCEPTION_ACTION,
+            object_type='EmployeeBedOccupancy',
+            object_id=str(occupancy.pk),
+            object_repr=occupancy.physical_bed.stable_id,
+            new_value=conflict,
+            comment=f'Подтверждено вручную. Доступ расселения №{actor_access.pk}.',
+        )
+
+
+def occupancies_with_manual_category_exception(occupancy_ids):
+    return set(AdminActionLog.objects.filter(
+        action_code=MANUAL_CATEGORY_EXCEPTION_ACTION,
+        object_type='EmployeeBedOccupancy',
+        object_id__in=[str(pk) for pk in occupancy_ids],
+    ).order_by().values_list('object_id', flat=True))
 
 
 def _ensure_bed_has_no_active_preparation(
@@ -1496,6 +1535,7 @@ def settle_resident_on_bed(
     ends_at=None,
     confirm_itr=False,
     placement_reason='',
+    category_exception='',
 ):
     using = router.db_for_write(EmployeeBedOccupancy)
     with transaction.atomic(using=using):
@@ -1580,13 +1620,14 @@ def settle_resident_on_bed(
                     'Ручное заселение внешнего жильца ещё не подключено.',
                     'settlement.manual.external_unavailable',
                 )
-        _validate_resident_and_destination(
+        accepted_conflict = _validate_resident_and_destination(
             resident=resident,
             room=room,
             starts_at=moment,
             ends_at=ends_at,
             confirm_itr=confirm_itr,
             placement_reason=placement_reason,
+            category_exception=category_exception,
             using=using,
         )
         if resident.employee_id:
@@ -1690,6 +1731,10 @@ def settle_resident_on_bed(
                     'settlement_employee_already_housed',
                 ) from error
             raise
+
+        record_manual_category_exception(
+            occupancy, actor_access=owner_access, conflict=accepted_conflict, using=using,
+        )
 
     return occupancy
 

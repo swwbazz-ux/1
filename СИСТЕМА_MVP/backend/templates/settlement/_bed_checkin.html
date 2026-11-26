@@ -56,5 +56,6 @@
         <label class="settlement-checkin-confirm" data-checkin-itr hidden><input type="checkbox" name="confirm_itr"> <span>Подтверждаю категорию ИТР</span></label>
     </div>
     <p data-checkin-message role="status" class="settlement-placement-feedback" hidden></p>
+    {% include "settlement/_category_exception_confirmation.html" %}
     <button type="submit" class="settlement-place-button">Заселить</button>
 </form>

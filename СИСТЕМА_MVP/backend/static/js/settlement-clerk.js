@@ -69,6 +69,9 @@
     var assignmentEnd = root.querySelector("[data-assignment-end]");
     var assignmentEndInput = root.querySelector("[data-assignment-end-input]");
     var settleButton = root.querySelector("[data-settle-button]");
+    var rosterException = settlementForm.querySelector("[data-category-exception-confirmation]");
+    var approveRosterException = rosterException.querySelector("[data-category-exception-checkbox]");
+    var rosterCategoryException = "";
     var placementTitle = root.querySelector("[data-placement-title]");
     var occupiedActions = root.querySelector("[data-occupied-actions]");
     var relocateButton = root.querySelector("[data-relocate-button]");
@@ -379,6 +382,7 @@
         hoverCard.appendChild(shift);
         if (bed.dataset.shiftConflict) hoverCard.appendChild(element("strong", "", bed.dataset.shiftConflict));
         if (bed.dataset.assignmentWarning) hoverCard.appendChild(element("strong", "", bed.dataset.assignmentWarning));
+        if (bed.dataset.categoryException) hoverCard.appendChild(element("strong", "", bed.dataset.categoryException));
         if (bed.dataset.onExtension === "true") {
             var extension = document.createElement("span");
             extension.className = "settlement-bed-extension-label";
@@ -429,6 +433,7 @@
             label.push("занято", bed.dataset.occupantName, "смена: " + (bed.dataset.shiftLabel || "Не указано"));
             if (bed.dataset.shiftConflict) label.push(bed.dataset.shiftConflict);
             if (bed.dataset.assignmentWarning) label.push(bed.dataset.assignmentWarning);
+            if (bed.dataset.categoryException) label.push(bed.dataset.categoryException);
             if (bed.dataset.onExtension === "true") label.push("на продлении");
         } else {
             label.push(unavailable ? "недоступно" : "свободно");
@@ -914,6 +919,7 @@
                 if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
                 addBedDetail(details, bed.dataset.workCaption || "Техника / должность", bed.dataset.workLabel);
                 if (bed.dataset.assignmentWarning) addBedDetail(details, "Требует внимания", bed.dataset.assignmentWarning);
+                if (bed.dataset.categoryException) addBedDetail(details, "Исключение при заселении", bed.dataset.categoryException);
                 addBedDetail(details, "Закрепление", bed.dataset.assignmentTypeLabel);
                 if (bed.dataset.stayStart) {
                     addBedDetail(details, "Заселение на койку", bed.dataset.stayStart);
@@ -926,6 +932,7 @@
     }
 
     function resetEmployeeSelection() {
+        setRosterCategoryException();
         selectedEmployee = null;
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = true;
         if (selectedEmployeeName) selectedEmployeeName.textContent = "";
@@ -1046,7 +1053,7 @@
         visual.removeAttribute("draggable");
         badge.append(visual, bed.querySelector("[data-bed-shift-badge]").cloneNode(true),
             bed.querySelector(".settlement-bed-warning").cloneNode(true));
-        ["shiftLabel", "onExtension", "assignmentWarning", "causeOccupancy", "occupantPhotoUrl"].forEach(function (key) {
+        ["shiftLabel", "onExtension", "assignmentWarning", "categoryException", "causeOccupancy", "occupantPhotoUrl"].forEach(function (key) {
             if (key in bed.dataset) badge.dataset[key] = bed.dataset[key];
         });
         renderBedPhoto(badge, true);
@@ -1183,6 +1190,13 @@
         placementFeedback.hidden = !message;
     }
 
+    function setRosterCategoryException(confirmation = "") {
+        rosterCategoryException = confirmation;
+        rosterException.hidden = !confirmation;
+        approveRosterException.checked = false;
+        settleButton.textContent = relocationSourceBed ? "Переселить" : "Заселить";
+    }
+
     function updatePlacementPanel() {
         if (!placementHint || !settlementForm) return;
         var freeBed = selectedBed && isTransferredBed(selectedBed) && selectedBed.dataset.occupied !== "true";
@@ -1231,7 +1245,7 @@
         }
         placementHint.hidden = true;
         settlementForm.hidden = false;
-        if (settleButton) {
+        if (settleButton && (relocationSourceBed || !approveRosterException.checked)) {
             settleButton.textContent = relocationSourceBed ? "Переселить" : "Заселить";
         }
         if (relocationSourceBed && selectedEmployeeCard) {
@@ -2588,6 +2602,7 @@
         destination.dataset.tooltipShiftLabel = occupancy.tooltip_shift_label || occupancy.shift_label;
         destination.dataset.onExtension = occupancy.on_extension ? "true" : "false";
         destination.dataset.assignmentWarning = occupancy.assignment_warning || "";
+        destination.dataset.categoryException = occupancy.category_exception || "";
         destination.dataset.workLabel = occupancy.work_label;
         destination.dataset.workCaption = occupancy.work_caption || "";
         destination.dataset.tooltipWorkLabel = occupancy.tooltip_work_label || "";
@@ -2616,6 +2631,7 @@
             source.dataset.workLabel = "";
             source.dataset.tooltipWorkLabel = "";
             source.dataset.assignmentWarning = "";
+            source.dataset.categoryException = "";
             source.dataset.assignmentTypeLabel = "";
             source.dataset.assignmentType = "";
             source.classList.remove("is-occupied");
@@ -2640,6 +2656,7 @@
         }
         var destination = selectedBed;
         var source = relocationSourceBed;
+        var employee = selectedEmployee;
         saving = true;
         updateSettleButton();
         showFeedback("Сохраняем заселение…", false);
@@ -2663,9 +2680,10 @@
                 bed_stable_id: selectedBed.dataset.bedId
             } : {
                 action: "settle",
-                resident_id: selectedEmployee.id,
+                resident_id: employee.id,
                 bed_stable_id: selectedBed.dataset.bedId,
                 assignment_type: assignmentType.value,
+                category_exception: approveRosterException.checked ? rosterCategoryException : "",
                 ends_at: assignmentEndInput && assignmentEndInput.value
                     ? new Date(assignmentEndInput.value).toISOString()
                     : null
@@ -2673,7 +2691,12 @@
         })
             .then(function (response) {
                 return response.json().then(function (payload) {
-                    if (!response.ok) throw new Error(payload.error || "Не удалось сохранить заселение.");
+                    if (!response.ok) {
+                        if (!source && selectedBed === destination && selectedEmployee === employee) {
+                            setRosterCategoryException(payload.category_exception);
+                        }
+                        throw new Error(payload.error || "Не удалось сохранить заселение.");
+                    }
                     return payload;
                 });
             })
@@ -2693,6 +2716,7 @@
             })
             .catch(function (error) {
                 showFeedback(error.message || "Не удалось сохранить заселение.", true);
+                if (!rosterException.hidden) rosterException.scrollIntoView({block: "nearest"});
             })
             .finally(function () {
                 saving = false;
@@ -2710,6 +2734,10 @@
             selectedBed.dataset.positionLabel
         ].join(", ");
         var relocating = Boolean(relocationSourceBed);
+        if (approveRosterException.checked) {
+            submitPlacement();
+            return;
+        }
         var message = (relocating ? "Переселить " : "Заселить ")
             + selectedEmployee.full_name + " в " + destination + "?";
         if (typeof window.openAppConfirmDialog === "function") {
@@ -2935,6 +2963,9 @@
                 });
             });
             room.classList.toggle("has-shift-conflict", messages.length > 0);
+            if (room.querySelector('[data-category-exception]:not([data-category-exception=""])')) {
+                messages.push("Заселение с исключением");
+            }
             var header = room.querySelector("[data-room-open]");
             if (header) header.title = messages.join(". ");
         });
@@ -3268,6 +3299,13 @@
     if (assignmentEndInput) {
         assignmentEndInput.addEventListener("input", updateSettleButton);
     }
+    settlementForm.addEventListener("input", function (event) {
+        if (event.target === approveRosterException) {
+            settleButton.textContent = approveRosterException.checked ? "Заселить с нарушением" : "Заселить";
+            return;
+        }
+        setRosterCategoryException();
+    });
     settlementForm.addEventListener("submit", function (event) {
         event.preventDefault();
         if (relocationSourceBed) {

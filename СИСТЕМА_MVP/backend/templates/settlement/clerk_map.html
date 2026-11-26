@@ -808,6 +808,7 @@
                         <span>Причина переселения</span>
                         <input type="text" data-relocation-reason-input>
                     </label>
+                    {% include "settlement/_category_exception_confirmation.html" %}
                     <button type="submit" class="settlement-place-button" data-settle-button disabled>
                         Заселить
                     </button>
@@ -1022,8 +1023,8 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v4-personnel"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v5-category-exception"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-category-exception-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>

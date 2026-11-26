@@ -5776,6 +5776,7 @@ class SettlementOccupancyWorkflowTests(TestCase):
         acquire_control=True,
         confirm_itr=False,
         placement_reason='',
+        category_exception='',
     ):
         if acquire_control:
             self.client.post(reverse('settlement_control_acquire'))
@@ -5791,6 +5792,8 @@ class SettlementOccupancyWorkflowTests(TestCase):
             payload['confirm_itr'] = True
         if placement_reason:
             payload['placement_reason'] = placement_reason
+        if category_exception:
+            payload['category_exception'] = category_exception
         resident = _resident_for_employee(employee or self.candidate)
         if action == 'settle':
             payload['resident_id'] = resident.pk
@@ -6626,6 +6629,32 @@ class SettlementOccupancyWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()['code'], 'settlement.control.not_held')
         self.assertFalse(EmployeeBedOccupancy.objects.exists())
+
+    def test_roster_checkin_can_confirm_a_room_category_exception(self):
+        self.authenticate(self.client, self.clerk_access)
+        target = self.transferred_beds[0]
+        other_bed = target.room.beds.exclude(pk=target.pk).first()
+        self.second_candidate.personnel_position = PersonnelPosition.objects.create(
+            code='roster-checkin-itr-exception', name='Руководитель QA',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        self.second_candidate.save(update_fields=['personnel_position'])
+        EmployeeBedOccupancy.objects.create(
+            resident=self.second_candidate_resident,
+            physical_bed=other_bed,
+            assignment_type=EmployeeBedOccupancy.AssignmentType.PERMANENT,
+            settled_by=self.clerk,
+        )
+
+        denied = self.post_settle(bed=target)
+        self.assertEqual(denied.status_code, 409)
+        self.assertFalse(EmployeeBedOccupancy.objects.filter(physical_bed=target).exists())
+        accepted = self.post_settle(
+            bed=target, acquire_control=False, category_exception=denied.json()['category_exception'],
+        )
+        self.assertEqual(accepted.status_code, 201, accepted.json())
+        self.assertIn('Заселено с исключением', accepted.json()['occupancy']['category_exception'])
+        self.assertEqual(EmployeeBedOccupancy.objects.get(physical_bed=target).resident, self.candidate_resident)
 
     def test_manual_settle_requires_applied_matching_shift(self):
         self.authenticate(self.client, self.clerk_access)

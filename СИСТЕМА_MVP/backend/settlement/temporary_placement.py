@@ -72,6 +72,7 @@ from .services import (
     _validate_resident_and_destination,
     _validate_resident_state,
     effective_occupancy_at_q,
+    record_manual_category_exception,
     release_resident_from_bed,
 )
 
@@ -353,9 +354,11 @@ def prepare_bed(
     hold_until=None,
     control_context=None,
     confirm_itr=False,
-    current_arrival=False,
+    current_stay=None,
+    category_exception='',
 ):
     """Подготовить койку за жильцом до приезда (не проживание)."""
+    current_arrival = current_stay is not None
     using = router.db_for_write(SettlementBedPreparation)
     with transaction.atomic(using=using):
         lease = lock_settlement_write_lease(
@@ -415,15 +418,17 @@ def prepare_bed(
                 'settlement_occupancy_changed',
             )
         room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
+        room_start, room_end = current_stay or (moment, hold_until_moment)
         _validate_resident_and_destination(
             resident=resident,
             room=room,
-            starts_at=moment,
-            ends_at=hold_until_moment,
+            starts_at=room_start,
+            ends_at=room_end,
             confirm_itr=confirm_itr,
             # T-036 backend-18: основание подготовки — основание размещения
             # для резервной комнаты (38); иначе правило её не пропустит.
             placement_reason=basis_text,
+            category_exception=category_exception if current_arrival else '',
             using=using,
         )
 
@@ -507,7 +512,7 @@ def prepare_bed(
 
 def confirm_bed_preparation(
     *, preparation_id, control_context=None, starts_at=None, ends_at=None, confirm_itr=False,
-    placement_reason=None, work_shift=None,
+    placement_reason=None, work_shift=None, category_exception='',
 ):
     """Зафиксировать приезд. При заданном выезде оформляется срочное проживание на указанный период."""
     using = router.db_for_write(EmployeeBedOccupancy)
@@ -561,7 +566,7 @@ def confirm_bed_preparation(
                 'settlement_occupancy_changed',
             )
         room = _locked_rooms(bed.room_id, using=using)[bed.room_id]
-        _validate_resident_and_destination(
+        accepted_conflict = _validate_resident_and_destination(
             resident=resident,
             room=room,
             starts_at=start,
@@ -570,6 +575,7 @@ def confirm_bed_preparation(
             # Основание подготовки уже проверено и сохранено; оно же служит
             # основанием размещения в спецфонде (резервная комната).
             placement_reason=snapshot['basis'] if placement_reason is None else placement_reason,
+            category_exception=category_exception,
             using=using,
         )
 
@@ -671,6 +677,9 @@ def confirm_bed_preparation(
             'confirmed_occupancy',
             'updated_at',
         ])
+        record_manual_category_exception(
+            occupancy, actor_access=owner_access, conflict=accepted_conflict, using=using,
+        )
         _placement_event(
             event_type=PLACEMENT_EVENT_TYPE.CONFIRMED,
             using=using,

@@ -2428,6 +2428,14 @@
     margin: 0;
     accent-color: var(--settlement-accent);
 }
+.settlement-category-exception {
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--admin-red) 55%, var(--admin-line));
+    border-radius: 7px;
+    background: var(--admin-red-soft);
+    color: var(--admin-ink);
+}
+.settlement-category-exception input { accent-color: var(--admin-red); }
 .settlement-room-panel-body > [data-placement-panel]:has([data-checkin-start]:not([hidden])) { order: -1; }
 .settlement-roster-placement:not(:has(> form:not([hidden]))) { display: none; }
 .settlement-roster-placement > summary { cursor: pointer; padding-block: 8px; }
@@ -4994,8 +5002,12 @@ body.settlement-temporary-relocation-armed .settlement-bed.is-free:not(:disabled
     color: #fff;
     font: bold 12px/1 sans-serif;
 }
-.settlement-bed[data-occupied="true"][data-assignment-warning]:not([data-assignment-warning=""]) .settlement-bed-warning {
+.settlement-bed[data-occupied="true"][data-assignment-warning]:not([data-assignment-warning=""]) .settlement-bed-warning,
+.settlement-bed[data-occupied="true"][data-category-exception]:not([data-category-exception=""]) .settlement-bed-warning {
     display: grid;
+}
+.settlement-bed[data-category-exception]:not([data-category-exception=""]) .settlement-bed-warning {
+    background: #be263b;
 }
 @media (prefers-reduced-motion: no-preference) {
     .settlement-bed[data-occupied="true"]:not([data-assignment-warning=""]) .settlement-bed-warning {
@@ -5007,12 +5019,14 @@ body.settlement-temporary-relocation-armed .settlement-bed.is-free:not(:disabled
     }
 }
 
-.settlement-room.has-shift-conflict {
+.settlement-room.has-shift-conflict,
+.settlement-room:has([data-category-exception]:not([data-category-exception=""])) {
     outline: 2px solid #be263b;
     outline-offset: -2px;
     animation: settlement-conflict-contour 2.4s ease-in-out infinite;
 }
-.settlement-room.has-shift-conflict .settlement-room-number {
+.settlement-room.has-shift-conflict .settlement-room-number,
+.settlement-room:has([data-category-exception]:not([data-category-exception=""])) .settlement-room-number {
     text-decoration: underline wavy #be263b;
 }
 .settlement-bed[data-cause-occupancy]::after {
@@ -5031,7 +5045,8 @@ body.settlement-temporary-relocation-armed .settlement-bed.is-free:not(:disabled
     50% { box-shadow: inset 0 0 0 4px #be263b; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .settlement-room.has-shift-conflict { animation: none; }
+    .settlement-room.has-shift-conflict,
+    .settlement-room:has([data-category-exception]:not([data-category-exception=""])) { animation: none; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
