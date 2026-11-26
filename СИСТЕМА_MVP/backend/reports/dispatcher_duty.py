@@ -11,13 +11,16 @@ from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
+from assignments.models import HaulAssignmentHandoff
 from core.production_time import business_localtime, production_shift_bounds, production_work_date
 from shifts.models import ShiftType
+from trips.dispatcher_dashboard_projection import dispatcher_complex_label
 from trips.dispatcher_duty import SESSION_LOGOUT, WINDOW_VALIDITY, WindowState
 from trips.dispatcher_header import dispatcher_shift_queryset
 from trips.models import DispatcherActionLog, DispatcherActionType, DispatcherDutyTracking
 from users.active_role import role_session_state
 from users.models import EmployeeAccess
+from users.role_apps import get_role_app_for_request
 
 from .views import parse_filter_date
 
@@ -47,6 +50,8 @@ def window_ranges(shift, stop):
     windows = defaultdict(list)
     logouts = {}
     for row in shift.duty_windows.all():
+        if row.state == WindowState.ARCHIVE_VISIBLE:
+            continue
         if row.window_id == SESSION_LOGOUT:
             logouts[row.session_digest] = row.started_at
         else:
@@ -147,8 +152,17 @@ def operations(start, end, tracking, shifts):
         other = EmployeeAccess.objects.filter(employee_id__in=legacy_staff,
             role__code__in=['admin', 'manager', 'mining_master']).values_list('employee_id', flat=True)
         eligible |= Q(actor_role_code='', created_at__lt=tracking, actor_id__in=legacy_staff.difference(other))
+    actions = list(rows.filter(eligible).select_related('actor').order_by('created_at', 'pk'))
+    previous_complexes = defaultdict(set)
+    historical_moves = {row.haul_assignment_id for row in actions if not row.actor_role_code and row.haul_assignment_id
+                        and ' назначен под ' in row.target_summary}
+    for handoff in (HaulAssignmentHandoff.objects.filter(target_assignment_id__in=historical_moves)
+                    .select_related('source_excavator', 'target_assignment__excavator')):
+        previous_complexes[handoff.target_assignment_id].add(
+            f'{dispatcher_complex_label(handoff.source_excavator)} → {dispatcher_complex_label(handoff.target_assignment.excavator)}'
+        )
     result = []
-    for row in rows.filter(eligible).select_related('actor').order_by('created_at', 'pk'):
+    for row in actions:
         duty_id = row.duty_shift_id
         if not row.actor_role_code:
             duty_id = next((s.pk for s in shifts if s.employee_id == row.actor_id
@@ -162,8 +176,9 @@ def operations(start, end, tracking, shifts):
         else:
             summary = row.target_summary
         change = row.duty_detail
-        if not row.actor_role_code and row.haul_assignment_id and not change:
-            change = 'Предыдущий комплекс не записан'
+        if row.haul_assignment_id in historical_moves and not row.actor_role_code and ' назначен под ' in row.target_summary:
+            routes = previous_complexes[row.haul_assignment_id]
+            change = next(iter(routes)) if len(routes) == 1 else 'Предыдущий комплекс не записан'
         detail = ' · '.join(filter(None, (summary, change, row.reason)))
         result.append((row.created_at, journal_event(row.created_at, 'operation', label, row.actor.full_name, detail), duty_id))
     return result
@@ -198,6 +213,10 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
             closer = 'Система' if automatic else shift.closed_by.full_name if shift.closed_by_id else ''
             events.append(journal_event(shift.closed_at, 'duty', 'Служебное закрытие' if shift.is_service_closed else 'Смена завершена',
                        closer or who, ' · '.join(filter(None, (who if closer and closer != who else '', shift.service_close_note)))))
+        for point in shift.duty_windows.all():
+            if point.state == WindowState.ARCHIVE_VISIBLE and start <= point.started_at < end and point.started_at <= now:
+                events.append(journal_event(point.started_at, 'connection', 'Пульт был на экране', who,
+                                            'Из архива связи сохранилась отдельная отметка.'))
 
     shift_edges = {value for s in shifts for value in (s.opened_at, s.closed_at) if value}
     for first, last, code, reason, who in timeline(start, end, now, tracking, shifts):
@@ -236,6 +255,7 @@ def duty_report(selected_date, now=None):
     tracking = DispatcherDutyTracking.objects.filter(pk=1).values_list('started_at', flat=True).first()
     actions = operations(start, min(end, now + timedelta(microseconds=1)), tracking, shifts)
     return dict(date=selected_date.isoformat(), as_of=business_localtime(now).strftime('%d.%m.%Y %H:%M'),
+                tracking_began=business_localtime(tracking).strftime('%d.%m.%Y %H:%M') if tracking and start < tracking else '',
                 now_clock=clock(now), live=start <= now < end,
                 slots=[build_slot(selected_date, kind, now, tracking, shifts, actions) for kind in (ShiftType.DAY, ShiftType.NIGHT)])
 
@@ -247,8 +267,9 @@ def management_dispatcher_duty(request):
         login_url = reverse('login', query={'form': '1', 'next': request.get_full_path()})
         return redirect(login_url)
     auth = role_session_state(request)
+    app = get_role_app_for_request(request)
     if (not auth['authenticated'] or not auth['is_active'] or auth['access'].role.code != 'manager'
-            or getattr(request, 'observer_mode', False)):
+            or (app and app.role_code != 'manager') or getattr(request, 'observer_mode', False)):
         return HttpResponseForbidden('Для просмотра требуется роль руководства.')
     date_value = request.GET.get('date')
     selected = parse_filter_date(date_value) if date_value else production_work_date()

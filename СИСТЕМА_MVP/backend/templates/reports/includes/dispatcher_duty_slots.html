@@ -1,5 +1,6 @@
 {% load l10n %}
 <div data-duty-slots data-live="{{ report.live|yesno:'true,false' }}" data-date="{{ report.date }}">
+{% if report.tracking_began %}<p class="duty-archive-note">Подробный учёт связи начался {{ report.tracking_began }}. За более раннее время журнал показывает сохранившиеся события.</p>{% endif %}
 {% for slot in report.slots %}
   <article class="duty-slot" data-duty-slot="{{ slot.key }}">
     <div class="duty-slot-head">

@@ -356,6 +356,7 @@ class DispatcherDutyWindow(models.Model):
         HIDDEN = 'hidden', 'Пульт свёрнут'
         CLOSED = 'closed', 'Окно закрыто'
         SIGNED_OUT = 'signed_out', 'Выход из приложения'
+        ARCHIVE_VISIBLE = 'archive_visible', 'Архивная отметка открытого пульта'
 
     shift = models.ForeignKey('shifts.EmployeeShift', on_delete=models.CASCADE, related_name='duty_windows')
     session_digest = models.CharField('Отпечаток сессии', max_length=64)

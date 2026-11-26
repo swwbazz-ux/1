@@ -52,6 +52,7 @@
 .duty-totals span, .duty-legend span { white-space: nowrap; }
 .duty-totals b { margin-left: 3px; }
 .duty-as-of, .duty-refresh-status { margin: 0; font-size: 13px; }
+.duty-archive-note { margin: 0 0 12px; color: var(--gd-muted); font-size: 14px; }
 .duty-refresh-status:empty { display: none; }
 .duty-dialog { width: min(620px, calc(100% - 20px)); max-height: 85dvh; padding: 18px; box-sizing: border-box; border: 1px solid var(--gd-line); border-radius: 8px; background: var(--gd-panel); margin: auto; }
 .duty-dialog[open] { position: fixed; inset: 0; height: fit-content; overflow-y: auto; }

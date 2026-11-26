@@ -1,19 +1,25 @@
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta
+from importlib import import_module
+from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-from django.test import RequestFactory, TestCase
+from django.apps import apps
+from django.db import connection
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from assignments.models import AssignmentStatus, HaulAssignment
+from assignments.models import AssignmentStatus, HaulAssignment, HaulAssignmentHandoff
 from core.production_time import BUSINESS_TIME_ZONE
 from references.models import Equipment, EquipmentType
 from shifts.models import EmployeeShift
 from trips.dispatcher_duty import SESSION_LOGOUT, WindowState, log_dispatcher_action
 from trips.models import DispatcherActionLog, DispatcherActionType, DispatcherDutyTracking, DispatcherDutyWindow
 from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
-from users.models import Employee, EmployeeAccess, Role
+from users.models import ActiveApplicationSession, Employee, EmployeeAccess, Role
 
 from .dispatcher_duty import duty_report, management_dispatcher_duty
 
@@ -60,6 +66,8 @@ class DispatcherDutyTests(TestCase):
             for query in ({}, {'partial': 1}, {'format': 'json'}):
                 self.assertEqual(self.client.get(path, query).status_code, 403)
         self.authorize(self.manager)
+        with override_settings(ALLOWED_HOSTS=['.localhost']):
+            self.assertEqual(self.client.get(path, {'format': 'json'}, HTTP_HOST='dispatcher.localhost').status_code, 403)
         url = reverse('management_dashboard')
         self.assertContains(self.client.get(url), path)
         for query in ({}, {'partial': 1}, {'format': 'json'}):
@@ -167,6 +175,60 @@ class DispatcherDutyTests(TestCase):
         EmployeeAccess.objects.create(employee=self.dispatcher.employee, role=self.admin.role, access_code='444444',
                                       status=EmployeeAccess.Status.ACTIVATED)
         self.assertEqual(self.report(timedelta(hours=5))[0]['count'], 0)
+
+    def test_archive_preserves_individual_observations_without_inventing_working_time(self):
+        migration = import_module('trips.migrations.0019_archive_dispatcher_shifts_20261125')
+        until = self.start + timedelta(hours=24)
+        DispatcherDutyTracking.objects.filter(pk=1).update(started_at=until)
+        self.shift(closed=self.start + timedelta(hours=12))
+        self.shift(self.relief, opened=self.start + timedelta(hours=12), closed=until, kind='night')
+        sessions = ActiveApplicationSession.objects
+        def snapshot(key, access, minute, *, last_offset=0, path='/dispatcher/control/'):
+            at = self.start + timedelta(minutes=minute)
+            sessions.create(session_key=key, access=access, role_code=access.role.code, app_code='dispatcher',
+                            path=path, foreground_seen_at=at, last_seen_at=at + timedelta(seconds=last_offset))
+        snapshot('day', self.dispatcher, 22)
+        snapshot('night', self.relief, 1025)
+        snapshot('prior-role', self.dispatcher, 26, last_offset=20)
+        snapshot('prior-page', self.dispatcher, 29, path='/home/')
+        snapshot('off-duty', self.relief, 32)
+        snapshot('other-role', self.manager, 22)
+        snapshot('outside', self.relief, 1440)
+        editor = SimpleNamespace(connection=connection)
+        with redirect_stdout(StringIO()) as log:
+            migration.archive_shifts(apps, editor)
+            migration.archive_shifts(apps, editor)
+        self.assertIn('day=available night=available', log.getvalue())
+        self.assertEqual(DispatcherDutyWindow.objects.filter(state=WindowState.ARCHIVE_VISIBLE).count(), 2)
+        sessions.update(last_seen_at=until, foreground_seen_at=until)
+        day, night = self.report(timedelta(days=1))
+        for slot, expected in [(day, '07:22'), (night, '00:05')]:
+            point, = [e for e in slot['events'] if e['title'] == 'Пульт был на экране']
+            self.assertEqual(point['time'], expected)
+            self.assertEqual(slot['count'], 0)
+            self.assertEqual([(r['state'], r['seconds']) for r in slot['totals']], [('unknown', 43200)])
+        migration.remove_archive_points(apps, editor)
+        self.assertFalse(DispatcherDutyWindow.objects.exists())
+
+    def test_archive_uses_the_recorded_handoff_for_a_historical_reassignment(self):
+        own = self.shift(closed=self.start + timedelta(hours=12))
+        DispatcherDutyTracking.objects.filter(pk=1).update(started_at=self.start + timedelta(days=1))
+        truck_type = EquipmentType.objects.create(name='Самосвал')
+        exc_type = EquipmentType.objects.create(name='Экскаватор')
+        truck = Equipment.objects.create(equipment_type=truck_type, garage_number='10')
+        old, new = [Equipment.objects.create(equipment_type=exc_type, garage_number=number) for number in ('99', '4')]
+        source = HaulAssignment.objects.create(truck=truck, excavator=old, status=AssignmentStatus.ACCEPTED,
+                                               ended_at=self.start + timedelta(hours=2))
+        target = HaulAssignment.objects.create(truck=truck, excavator=new)
+        row = DispatcherActionLog.objects.create(actor=self.dispatcher.employee, haul_assignment=target,
+                       action_type=DispatcherActionType.CANCEL_ASSIGNMENT, target_summary='10 назначен под 4')
+        DispatcherActionLog.objects.filter(pk=row.pk).update(created_at=self.start + timedelta(hours=2))
+        def detail():
+            return next(event['detail'] for event in self.report(timedelta(days=1))[0]['events'] if event['kind'] == 'operation')
+        self.assertIn('Предыдущий комплекс не записан', detail())
+        HaulAssignmentHandoff.objects.create(truck=truck, source_assignment=source, target_assignment=target,
+                                             source_excavator=old, source_shift=own)
+        self.assertIn('K-99 → K-4', detail())
 
     def test_real_reassignment_is_attributed_to_the_dispatcher_and_retries_count_once(self):
         own = self.shift(opened=timezone.now() - timedelta(minutes=10))
