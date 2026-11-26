@@ -4,7 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-residents-v1-bed-swap-v2">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -53,11 +53,19 @@
                 <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
             </nav>
             <div class="settlement-map-entry__excel" role="group" aria-label="Обмен с Excel">
-                <a href="{% url 'settlement_current_housing_import' %}" title="Загрузить Excel" aria-label="Загрузить Excel">
-                    <span aria-hidden="true">&#8593;</span>
+                <a href="{% url 'settlement_current_housing_import' %}" title="Выбрать файл для проверки и загрузки расселения">
+                    <svg viewBox="0 0 30 26" aria-hidden="true" focusable="false">
+                        <path d="M3 2h11l5 5v17H3z M14 2v5h5 M6 11h10v8H6z M6 15h10 M11 11v8"/>
+                        <path d="M21 14h7m-4-4 4 4-4 4"/>
+                    </svg>
+                    <span>Загрузить из Excel</span>
                 </a>
-                <a href="{% url 'settlement_current_housing_export' %}" title="Выгрузить Excel" aria-label="Выгрузить текущее расселение в Excel">
-                    <span aria-hidden="true">&#8595;</span>
+                <a href="{% url 'settlement_current_housing_export' %}" title="Скачать текущее расселение КИС-5 и КИС-6">
+                    <svg viewBox="0 0 30 26" aria-hidden="true" focusable="false">
+                        <path d="M3 2h11l5 5v17H3z M14 2v5h5 M6 11h10v8H6z M6 15h10 M11 11v8"/>
+                        <path d="M25 12v10m-4-4 4 4 4-4"/>
+                    </svg>
+                    <span>Скачать в Excel</span>
                 </a>
             </div>
             <details class="settlement-watch-extensions" data-watch-extensions>
