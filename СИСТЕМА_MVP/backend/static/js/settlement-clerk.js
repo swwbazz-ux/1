@@ -114,7 +114,16 @@
     var controlAcquireButton = root.querySelector("[data-control-acquire]");
     var controlReleaseButton = root.querySelector("[data-control-release]");
     var swapDialog = root.querySelector("[data-swap-dialog]");
-    var swapSelection = root.querySelector("[data-swap-selection]");
+    var swapPersonTemplate = swapDialog.querySelector("[data-swap-person-template]").content;
+    var swapTitle = swapDialog.querySelector("#settlement-swap-title");
+    var swapPicker = swapDialog.querySelector("[data-swap-picker]");
+    var swapSearch = swapDialog.querySelector("#settlement-swap-search");
+    var swapResults = swapDialog.querySelector("[data-swap-results]");
+    var swapEmpty = swapDialog.querySelector("[data-swap-empty]");
+    var swapPlan = swapDialog.querySelector("[data-swap-plan]");
+    var swapActions = swapDialog.querySelector("[data-swap-actions]");
+    var swapBack = swapDialog.querySelector("[data-swap-back]");
+    var swapCancel = swapDialog.querySelector("[data-swap-cancel]");
     var swapNotice = root.querySelector("[data-swap-notice]");
     var swapError = swapDialog.querySelector("[data-swap-error]");
     var swapConfirm = swapDialog.querySelector("[data-swap-confirm]");
@@ -730,9 +739,7 @@
         if (!residentFinder) return;
         var query = residentSearchName(residentFinder.value);
         residentMatches.forEach(function (match) { match.bed.classList.remove("is-resident-match"); });
-        residentMatches = rankedResidentMatches(query).filter(function (match) {
-            return !swapSource || canSwapWith(match.bed);
-        });
+        residentMatches = rankedResidentMatches(query);
         residentMatches.forEach(function (match) {
             var highlighted = chosenResidentId
                 ? match.bed.dataset.residentId === chosenResidentId
@@ -757,10 +764,6 @@
 
     function showResidentBed(match) {
         var bed = match.bed;
-        if (swapSource) {
-            openSwapConfirmation(bed);
-            return;
-        }
         showMapFloor(bed.closest("[data-room-card]"));
         chosenResidentId = bed.dataset.residentId;
         residentFinder.value = bed.dataset.occupantName;
@@ -951,21 +954,51 @@
     }
 
     function startBedSwap(bed, destination) {
-        if (!controlHeld || saving || !bed || !isTransferredBed(bed) || !Number(bed.dataset.occupancyId)) return;
+        if (!controlHeld || saving || swapDialog.open || !bed || !isTransferredBed(bed) || !Number(bed.dataset.occupancyId)) return;
         swapSource = swapParticipant(bed);
         swapNotice.hidden = true;
         closePanel();
         if (destination) {
-            openSwapConfirmation(destination);
+            if (canSwapWith(destination)) openSwapConfirmation(destination);
+            else swapSource = null;
             return;
         }
-        swapSelection.querySelector("[data-swap-selection-label]").textContent =
-            "Выберите, с кем поменять жильца " + swapSource.name;
-        swapSelection.hidden = false;
-        chosenResidentId = "";
-        residentFinder.value = "";
-        residentFinder.focus();
-        refreshResidentSearch();
+        var badge = swapPersonTemplate.querySelector("[data-swap-badge]").cloneNode(true);
+        showSwapBadge(badge, bed);
+        swapPicker.querySelector("[data-swap-picked-badge]").replaceChildren(badge);
+        swapPicker.querySelector("[data-swap-picked-name]").textContent = swapSource.name;
+        swapPicker.querySelector("[data-swap-picked-address]").textContent = bedLocation(bed);
+        swapSearch.value = "";
+        showSwapPicker();
+    }
+
+    function showSwapPicker() {
+        if (saving) return;
+        swapTarget = null;
+        swapTitle.textContent = "С кем поменять местами?";
+        swapPicker.hidden = false;
+        swapPlan.hidden = swapActions.hidden = swapError.hidden = true;
+        renderSwapMatches();
+        if (!swapDialog.open) swapDialog.showModal();
+        swapSearch.focus();
+    }
+
+    function renderSwapMatches() {
+        var query = residentSearchName(swapSearch.value);
+        var matches = rankedResidentMatches(query).filter(function (match) { return canSwapWith(match.bed); });
+        swapResults.replaceChildren(...matches.map(function (match) {
+            var item = element("li");
+            var button = element("button", "settlement-swap-match");
+            button.type = "button";
+            button.append(element("strong", "", match.bed.dataset.occupantName),
+                element("span", "", bedLocation(match.bed)));
+            button.addEventListener("click", function () { openSwapConfirmation(match.bed); });
+            item.append(button);
+            return item;
+        }));
+        swapResults.hidden = !matches.length;
+        swapEmpty.hidden = !query || Boolean(matches.length);
+        swapEmpty.textContent = swapEmpty.hidden ? "" : "Жильцы не найдены. Проверьте фамилию.";
     }
 
     function showSwapBadge(badge, bed) {
@@ -989,10 +1022,10 @@
     }
 
     function openSwapConfirmation(bed) {
-        if (saving || !controlHeld || swapDialog.open || !canSwapWith(bed)) return;
+        if (saving || !controlHeld || !canSwapWith(bed)) return;
         swapTarget = swapParticipant(bed);
         var entries = [[swapSource, swapTarget], [swapTarget, swapSource]].map(function (pair) {
-            var item = swapDialog.querySelector("[data-swap-person-template]").content.firstElementChild.cloneNode(true);
+            var item = swapPersonTemplate.firstElementChild.cloneNode(true);
             item.querySelector("[data-swap-name]").textContent = pair[0].name;
             showSwapBadge(item.querySelector("[data-swap-badge]"), pair[0].bed);
             showSwapAddress(item.querySelector("[data-swap-current]"), pair[0].bed);
@@ -1000,14 +1033,17 @@
             return item;
         });
         swapDialog.querySelector("[data-swap-addresses]").replaceChildren(...entries);
-        swapError.hidden = true;
-        swapDialog.showModal();
+        swapTitle.textContent = "Поменять жильцов местами?";
+        swapBack.hidden = !swapDialog.open;
+        swapPicker.hidden = swapError.hidden = true;
+        swapPlan.hidden = swapActions.hidden = false;
+        if (!swapDialog.open) swapDialog.showModal();
+        swapCancel.focus();
     }
 
     function cancelBedSwap() {
         if (saving) return;
         swapSource = swapTarget = null;
-        swapSelection.hidden = true;
         if (swapDialog.open) swapDialog.close();
         refreshResidentSearch();
     }
@@ -1044,7 +1080,6 @@
             swapNotice.hidden = false;
             swapDialog.close();
             swapSource = swapTarget = null;
-            swapSelection.hidden = true;
             refreshResidentSearch();
         } catch (error) {
             swapError.textContent = error.message || "Не удалось выполнить обмен.";
@@ -1055,8 +1090,9 @@
     }
 
     root.querySelector("[data-swap-start]").addEventListener("click", function () { startBedSwap(selectedBed); });
-    root.querySelector("[data-swap-selection-cancel]").addEventListener("click", cancelBedSwap);
-    swapDialog.querySelector("[data-swap-cancel]").addEventListener("click", cancelBedSwap);
+    swapSearch.addEventListener("input", renderSwapMatches);
+    swapBack.addEventListener("click", showSwapPicker);
+    swapCancel.addEventListener("click", cancelBedSwap);
     swapDialog.querySelector("[data-swap-close]").addEventListener("click", cancelBedSwap);
     swapDialog.addEventListener("cancel", function (event) {
         event.preventDefault();
@@ -2569,10 +2605,6 @@
         clearTimeout(avatarClickTimer);
         var bed = event.target.closest("[data-bed]");
         if (bed) {
-            if (swapSource) {
-                openSwapConfirmation(bed);
-                return;
-            }
             // Сохраняем двойной щелчок по фото для открытия личной карточки.
             if (event.detail && Number(bed.dataset.occupantId) && event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) {
                 if (event.detail === 1) avatarClickTimer = setTimeout(function () {

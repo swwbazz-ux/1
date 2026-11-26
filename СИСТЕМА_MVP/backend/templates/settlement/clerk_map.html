@@ -4,7 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -79,10 +79,6 @@
                     <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
                 </div>
             </details>
-        </div>
-        <div class="settlement-swap-selection" data-swap-selection hidden>
-            <span data-swap-selection-label></span>
-            <button type="button" class="settlement-relocation-cancel" data-swap-selection-cancel>Отмена</button>
         </div>
         <p class="settlement-swap-notice" data-swap-notice role="status" hidden></p>
         {{ watch_extensions|json_script:"settlement-watch-extension-state" }}
@@ -938,7 +934,22 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
             </button>
         </header>
-        <div class="settlement-swap-plan">
+        <div data-swap-picker hidden>
+            <div class="settlement-swap-picked">
+                <div data-swap-picked-badge></div>
+                <div>
+                    <span class="settlement-swap-caption">Первый жилец</span>
+                    <strong data-swap-picked-name></strong>
+                    <span data-swap-picked-address></span>
+                </div>
+            </div>
+            <label class="settlement-swap-search" for="settlement-swap-search">Найти второго жильца</label>
+            <input id="settlement-swap-search" type="search" placeholder="Фамилия или ФИО" autocomplete="off" aria-describedby="settlement-swap-search-hint">
+            <p id="settlement-swap-search-hint" class="settlement-swap-caption">Все этажи КИС-5 и КИС-6</p>
+            <p class="settlement-swap-caption" data-swap-empty role="status" hidden></p>
+            <ul class="settlement-swap-results" data-swap-results aria-label="Найденные жильцы" hidden></ul>
+        </div>
+        <div class="settlement-swap-plan" data-swap-plan hidden>
             <div class="settlement-swap-pair" data-swap-addresses></div>
             <svg class="settlement-swap-arrows" viewBox="0 0 60 48" aria-hidden="true">
                 <path d="M5 20C15 4 43 4 53 20m-1-10 2 11-11-2"/>
@@ -956,7 +967,8 @@
             </section>
         </template>
         <p data-swap-error role="alert" hidden></p>
-        <footer class="settlement-swap-actions">
+        <footer class="settlement-swap-actions" data-swap-actions hidden>
+            <button type="button" class="settlement-relocation-cancel settlement-swap-back" data-swap-back hidden>Выбрать другого</button>
             <button type="button" class="settlement-relocation-cancel" data-swap-cancel autofocus>Нет</button>
             <button type="button" class="settlement-place-button" data-swap-confirm>Да, поменять</button>
         </footer>
@@ -986,7 +998,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v2"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39"></script>

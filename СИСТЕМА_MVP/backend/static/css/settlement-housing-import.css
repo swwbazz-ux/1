@@ -916,20 +916,11 @@
     }
 }
 
-.settlement-swap-selection,
 .settlement-swap-notice {
     padding: 0.5rem 0.75rem;
     border: 1px solid var(--admin-line);
     border-radius: 0.5rem;
     background: var(--admin-panel);
-}
-
-.settlement-swap-selection:not([hidden]) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.5rem;
 }
 
 .settlement-swap-dialog {
@@ -994,6 +985,125 @@
 .settlement-swap-close svg {
     width: 18px;
     stroke-width: 2;
+}
+
+.settlement-swap-dialog [hidden] {
+    display: none;
+}
+
+.settlement-swap-picked {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.65rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.7rem;
+    background: var(--admin-panel-soft);
+}
+
+.settlement-swap-picked .settlement-swap-badge {
+    display: block;
+    width: 3.75rem;
+    height: 3.5rem;
+    min-height: 0;
+    pointer-events: none;
+}
+
+.settlement-swap-picked strong,
+.settlement-swap-picked [data-swap-picked-address] {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.settlement-swap-caption,
+.settlement-swap-picked [data-swap-picked-address],
+.settlement-swap-match span {
+    color: var(--admin-muted);
+    font-size: 0.85rem;
+}
+
+.settlement-swap-caption {
+    margin: 0.3rem 0;
+}
+
+.settlement-swap-search {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-weight: 700;
+}
+
+.settlement-swap-dialog #settlement-swap-search {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+}
+
+.settlement-swap-dialog #settlement-swap-search:focus-visible,
+.settlement-swap-dialog .settlement-swap-match:focus-visible {
+    outline: 2px solid var(--admin-green);
+    outline-offset: -2px;
+}
+
+.settlement-swap-results {
+    list-style: none;
+    max-height: min(42dvh, 18rem);
+    overflow: auto;
+    margin: 0.75rem 0 0;
+    padding: 0;
+    border: 1px solid var(--admin-line);
+    border-radius: 0.5rem;
+}
+
+.settlement-swap-results li + li {
+    border-top: 1px solid var(--admin-line);
+}
+
+.settlement-swap-dialog .settlement-swap-match {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-content: stretch;
+    gap: 0.15rem 0.75rem;
+    padding: 0.65rem 0.75rem;
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    text-align: start;
+    font: inherit;
+    overflow-wrap: anywhere;
+}
+
+.settlement-swap-match strong,
+.settlement-swap-match span {
+    grid-column: 1;
+}
+
+.settlement-swap-match::after {
+    content: "";
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    width: 0.5rem;
+    height: 0.5rem;
+    border: solid var(--admin-muted);
+    border-width: 1.5px 1.5px 0 0;
+    transform: rotate(45deg);
+}
+
+.settlement-swap-dialog .settlement-swap-match:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-swap-actions .settlement-swap-back {
+    margin-inline-end: auto;
 }
 
 .settlement-swap-plan {
@@ -1119,6 +1229,14 @@
 }
 
 @media (max-width: 480px) {
+    .settlement-swap-actions {
+        flex-wrap: wrap;
+    }
+
+    .settlement-swap-actions .settlement-swap-back {
+        flex-basis: 100%;
+    }
+
     .settlement-swap-actions button {
         flex: 1;
     }

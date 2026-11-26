@@ -1575,7 +1575,7 @@
     font-size: calc(10 * var(--settlement-density-unit));
 }
 
-:is(.settlement-room.is-transferred, .settlement-swap-person) .settlement-bed.is-occupied .settlement-bed-shift:not([hidden]) {
+:is(.settlement-room.is-transferred, .settlement-swap-dialog) .settlement-bed.is-occupied .settlement-bed-shift:not([hidden]) {
     display: grid !important;
     inset: auto calc(3 * var(--settlement-density-unit)) calc(3 * var(--settlement-density-unit)) auto;
     min-height: calc(14 * var(--settlement-density-unit));
