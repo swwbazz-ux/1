@@ -16,7 +16,7 @@ from assignments.models import HaulAssignmentHandoff
 from core.production_time import business_localtime, production_shift_bounds, production_work_date
 from shifts.models import ShiftType
 from trips.dispatcher_dashboard_projection import dispatcher_complex_label
-from trips.dispatcher_duty import SESSION_LOGOUT, WINDOW_VALIDITY, WindowState
+from trips.dispatcher_duty import FOREGROUND_HEARTBEAT, SESSION_LOGOUT, WINDOW_VALIDITY, WindowState
 from trips.dispatcher_header import dispatcher_shift_queryset
 from trips.models import DispatcherActionLog, DispatcherActionType, DispatcherDutyTracking
 from users.active_role import role_session_state
@@ -53,6 +53,7 @@ def window_ranges(shift, stop):
     """Yield confirmed and missing observations per window; an explicit logout ends the entire session."""
     windows = defaultdict(list)
     logouts = {}
+    detailed_since = {}
     for row in shift.duty_windows.all():
         if row.state == WindowState.ARCHIVE_VISIBLE:
             continue
@@ -60,8 +61,13 @@ def window_ranges(shift, stop):
             logouts[row.session_digest] = row.started_at
         else:
             windows[(row.session_digest, row.window_id)].append(row)
+            if row.window_id != FOREGROUND_HEARTBEAT:
+                first = detailed_since.get(row.session_digest, row.started_at)
+                detailed_since[row.session_digest] = min(first, row.started_at)
     for key, periods in windows.items():
         session_stop = min(logouts.get(key[0], stop), stop)
+        if key[1] == FOREGROUND_HEARTBEAT:
+            session_stop = min(session_stop, detailed_since.get(key[0], stop))
         periods.sort(key=lambda row: (row.started_at, row.pk))
         for index, row in enumerate(periods):
             until = min(periods[index + 1].started_at, session_stop) if index + 1 < len(periods) else session_stop
@@ -70,7 +76,7 @@ def window_ranges(shift, stop):
             expiry = row.last_seen_at + WINDOW_VALIDITY[row.state] if row.state in WINDOW_VALIDITY else until
             confirmed = min(until, expiry)
             yield key, row.started_at, confirmed, row.state
-            if confirmed < until:
+            if confirmed < until and key[1] != FOREGROUND_HEARTBEAT:
                 yield key, confirmed, until, 'unknown'
     for digest, at in logouts.items():
         yield (digest, SESSION_LOGOUT), at, stop, WindowState.SIGNED_OUT

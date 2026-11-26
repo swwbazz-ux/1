@@ -11,7 +11,7 @@ from django.views.decorators.http import require_POST
 
 from users.active_role import role_session_state
 
-from .dispatcher_duty import (SESSION_LOGOUT, WINDOW_VALIDITY, WindowState, duty_write_transaction,
+from .dispatcher_duty import (FOREGROUND_HEARTBEAT, SESSION_LOGOUT, WINDOW_VALIDITY, WindowState, duty_write_transaction,
                               recorder_shift_id, session_digest)
 from .dispatcher_header import dispatcher_shift_queryset
 from .models import DispatcherDutyWindow
@@ -128,7 +128,7 @@ def observations_view(request):
             return HttpResponse(status=403)
         window = UUID(request.POST['window'])
         raw = request.POST['events']
-        if window == SESSION_LOGOUT or len(raw) > 8192:
+        if window in (SESSION_LOGOUT, FOREGROUND_HEARTBEAT) or len(raw) > 8192:
             raise ValueError
         samples = parse_observations(raw, issued, now)
     except signing.BadSignature:

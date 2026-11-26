@@ -401,7 +401,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertContains(response, reverse('dispatcher_manifest'))
         self.assertContains(response, 'rel="manifest"')
         self.assertContains(response, '/dispatcher-sw.js')
-        self.assertContains(response, 'dispatcher-desktop-shell-v167')
+        self.assertContains(response, 'dispatcher-desktop-shell-v168')
         for stylesheet in (
             'dispatcher-control-v1.css',
             'dispatcher-workspace-v1.css',
@@ -412,36 +412,36 @@ class DispatcherSharedShiftStartTests(TestCase):
         ):
             self.assertContains(
                 response,
-                f'css/{stylesheet}?v=dispatcher-desktop-shell-v167',
+                f'css/{stylesheet}?v=dispatcher-desktop-shell-v168',
             )
         self.assertIn('dispatcherServiceWorkerScope || "/dispatcher/"', dispatcher_script)
         self.assertContains(
             response,
-            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-canvas-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-haul-assignment-state-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-equipment-card-trigger-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-board-layout-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-board-dnd-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-board-mutations-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertContains(
             response,
-            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v167',
+            'js/dispatcher-board-actions-v1.js?v=dispatcher-desktop-shell-v168',
         )
         self.assertIn('registration.update()', dispatcher_script)
         self.assertIn('SKIP_WAITING', dispatcher_script)
@@ -482,7 +482,7 @@ class DispatcherSharedShiftStartTests(TestCase):
         self.assertIn('initialVersion', script)
         self.assertIn('previousVersion', script)
         self.assertIn('buildOperationalStatePollUrl', script)
-        self.assertIn('include_events", "1"', script)
+        self.assertIn('url.searchParams.set("include_events", connectionOnly ? "0" : "1")', script)
         self.assertIn('operational-state-refresh-deferred', script)
         self.assertIn('pending_mobile_queue', script)
         self.assertNotIn('refreshMobileBoardFromServer', dispatcher_script)

@@ -20,13 +20,14 @@ from .models import DispatcherActionLog, DispatcherDutyTracking, DispatcherDutyW
 WindowState = DispatcherDutyWindow.State
 WINDOW_VALIDITY = {WindowState.VISIBLE: ONLINE_WINDOW, WindowState.HIDDEN: BACKGROUND_ONLINE_WINDOW}
 SESSION_LOGOUT = UUID(int=0)
+FOREGROUND_HEARTBEAT = UUID(int=1)
 DUTY_PAGE_PREFIXES = ('/dispatcher/', '/reports/')
 
 
-def recorder_shift_id(request, state):
+def recorder_shift_id(request, state, *, page_path=None):
     if (not state.get('authenticated') or not state.get('is_active')
             or state.get('active_role_code') != 'dispatcher' or getattr(request, 'observer_mode', False)
-            or not request.path.startswith(DUTY_PAGE_PREFIXES)):
+            or not (request.path if page_path is None else page_path).startswith(DUTY_PAGE_PREFIXES)):
         return None
     return dispatcher_shift_queryset().filter(employee_id=state['access'].employee_id).values_list('pk', flat=True).first()
 
@@ -59,9 +60,26 @@ def record_window(request, state):
     except (ValueError, TypeError, AttributeError):
         return 400
     digest = session_digest(request)
-    if not digest or window_id == SESSION_LOGOUT or not 0 < sequence < 2**53 or not 0 < shift_id < 2**63:
+    if not digest or window_id in (SESSION_LOGOUT, FOREGROUND_HEARTBEAT) or not 0 < sequence < 2**53 or not 0 < shift_id < 2**63:
         return 400
     return save_window(auth['access'].employee_id, shift_id, digest, window_id, sequence, state)
+
+
+def record_foreground_heartbeat(request):
+    path = request.POST.get('path', '')
+    if not path.startswith(DUTY_PAGE_PREFIXES):
+        return
+    if request.POST.get('duty_shift'):
+        return record_window(request, WindowState.VISIBLE)
+    # Older open pages already send this heartbeat only while visible. Use it
+    # until this session supplies its first detailed window observation.
+    auth = getattr(request, 'role_session_state', None) or role_session_state(request)
+    shift_id = recorder_shift_id(request, auth, page_path=path)
+    if not shift_id:
+        return
+    digest = session_digest(request)
+    if digest:
+        save_window(auth['access'].employee_id, shift_id, digest, FOREGROUND_HEARTBEAT, None, WindowState.VISIBLE)
 
 
 @duty_write_transaction()
@@ -73,10 +91,15 @@ def save_window(employee_id, shift_id, digest, window_id, sequence, state):
     # Serialize tabs and logout against the same duty. A late beacon cannot
     # reopen a retired session or overwrite a newer visibility transition.
     session_periods = DispatcherDutyWindow.objects.filter(shift=shift, session_digest=digest)
-    if session_periods.filter(window_id=SESSION_LOGOUT).exists():
+    if window_id == FOREGROUND_HEARTBEAT:
+        if session_periods.exclude(window_id=FOREGROUND_HEARTBEAT).exists():
+            return 204
+    elif session_periods.filter(window_id=SESSION_LOGOUT).exists():
         return 409
     periods = session_periods.filter(window_id=window_id)
     previous = periods.order_by('-pk').first()
+    if window_id == FOREGROUND_HEARTBEAT:
+        sequence = previous.last_sequence + 1 if previous else 1
     if previous and (previous.last_sequence >= sequence or previous.state == WindowState.SIGNED_OUT):
         return 204
     now = timezone.now()

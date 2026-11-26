@@ -131,7 +131,8 @@ class OfflineDutyTests(TestCase):
 
     def test_invalid_batch_scope_and_times_do_not_partially_commit(self):
         self.assertEqual(self.post([], ticket='invalid').status_code, 403)
-        self.assertEqual(self.post([self.sample(1, 0, 'visible')], window=str(UUID(int=0))).status_code, 400)
+        for reserved in (0, 1):
+            self.assertEqual(self.post([self.sample(1, 0, 'visible')], window=str(UUID(int=reserved))).status_code, 400)
         for bad in ([], [self.sample(1, -1, 'visible')], [self.sample(1, 120, 'visible')],
                     [self.sample(1, 1, 'visible'), self.sample(2, 2, 'signed_out')],
                     [self.sample(1, 5, 'visible'), self.sample(2, 3, 'hidden')],

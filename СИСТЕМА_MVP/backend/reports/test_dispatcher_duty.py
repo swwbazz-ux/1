@@ -16,7 +16,7 @@ from assignments.models import AssignmentStatus, HaulAssignment, HaulAssignmentH
 from core.production_time import BUSINESS_TIME_ZONE
 from references.models import Equipment, EquipmentType
 from shifts.models import EmployeeShift
-from trips.dispatcher_duty import SESSION_LOGOUT, WindowState, log_dispatcher_action
+from trips.dispatcher_duty import FOREGROUND_HEARTBEAT, SESSION_LOGOUT, WindowState, log_dispatcher_action
 from trips.models import DispatcherActionLog, DispatcherActionType, DispatcherDutyTracking, DispatcherDutyWindow
 from users.active_role import ACTIVE_ROLE_GENERATION_SESSION_KEY
 from users.models import ActiveApplicationSession, Employee, EmployeeAccess, Role
@@ -176,6 +176,39 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual(day['count'], 0)
         self.assertEqual(shift.duty_windows.filter(window_id=first).count(), 3)
 
+    def test_existing_page_foreground_signals_expire_and_yield_to_the_detailed_recorder(self):
+        shift = self.shift()
+        self.authorize(self.dispatcher)
+        heartbeat = reverse('application_session_heartbeat')
+        body = {'path': '/dispatcher/control/'}
+
+        def post(at, url=heartbeat, values=body):
+            with patch('django.utils.timezone.now', return_value=self.start + timedelta(seconds=at)):
+                self.assertEqual(self.client.post(url, values).status_code, 204)
+
+        for seconds in (10, 40, 170, 190):
+            post(seconds)
+        # A detailed hidden observation arrives after its original time. The
+        # fallback must neither overpaint it nor leave a phantom unknown window.
+        post(175, reverse('dispatcher_duty_presence'), {'duty_shift': shift.pk, 'duty_window': str(uuid4()),
+             'duty_sequence': 1, 'duty_state': 'hidden'})
+        post(200)
+        day, _ = self.report(timedelta(seconds=210))
+        self.assertEqual({t['state']: t['seconds'] for t in day['totals']},
+                         {'on': 125, 'out': 35, 'unknown': 50, 'future': 43200 - 210})
+        self.assertEqual(list(shift.duty_windows.filter(window_id=FOREGROUND_HEARTBEAT).order_by('pk')
+                              .values_list('last_sequence', flat=True)), [2, 4])
+        self.assertEqual(day['count'], 0)
+
+    def test_foreground_heartbeat_needs_own_open_duty_and_a_dispatcher_work_page(self):
+        self.shift()
+        url = reverse('application_session_heartbeat')
+        for access, page in ((self.manager, '/reports/'), (self.relief, '/dispatcher/control/'),
+                             (self.dispatcher, '/start/')):
+            self.authorize(access)
+            self.assertEqual(self.client.post(url, {'path': page}).status_code, 204)
+        self.assertFalse(DispatcherDutyWindow.objects.exists())
+
     def test_window_signals_are_scoped_to_own_active_shift(self):
         shift = self.shift()
         body = {'duty_shift': shift.pk, 'duty_window': str(uuid4()), 'duty_sequence': 1, 'duty_state': 'hidden'}
@@ -185,7 +218,8 @@ class DispatcherDutyTests(TestCase):
         self.authorize(self.relief)
         self.assertEqual(self.client.post(path, body).status_code, 409)
         self.authorize(self.dispatcher)
-        for extra in ({'duty_window': str(SESSION_LOGOUT)}, {'duty_sequence': '-1'}, {'duty_state': 'visible'}):
+        for extra in ({'duty_window': str(SESSION_LOGOUT)}, {'duty_window': str(FOREGROUND_HEARTBEAT)},
+                      {'duty_sequence': '-1'}, {'duty_state': 'visible'}):
             self.assertEqual(self.client.post(path, {**body, **extra}).status_code, 400)
         EmployeeShift.objects.filter(pk=shift.pk).update(closed_at=self.start + timedelta(hours=1))
         self.assertEqual(self.client.post(path, body).status_code, 409)
