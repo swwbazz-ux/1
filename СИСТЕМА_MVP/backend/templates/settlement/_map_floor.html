@@ -1,12 +1,17 @@
 <section class="settlement-floor"
          data-dormitory="{{ dormitory.model.number }}"
          data-floor-section="{{ floor.number }}"{% if picker or dormitory.model.number != "5" or floor.number != 1 %} hidden{% endif %}>
-    <header>
+    <header{% if not picker %} class="settlement-floor-heading"{% endif %}>
         <div>
-            <span>Выбранный план</span>
+            {% if picker %}<span>Выбранный план</span>{% endif %}
             <h2>{{ dormitory.label }} · {{ floor.number }} этаж</h2>
         </div>
-        <div class="settlement-shift-legend" aria-label="Обозначения на плане">
+        {% if not picker %}
+            {% include "settlement/_map_floor_summary.html" with inline=True only %}
+            <button type="button" class="settlement-floor-legend-toggle" data-floor-legend-toggle
+                    aria-controls="floor-legend-{{ dormitory.model.number }}-{{ floor.number }}" aria-expanded="false">Обозначения</button>
+        {% endif %}
+        <div class="settlement-shift-legend" aria-label="Обозначения на плане"{% if not picker %} id="floor-legend-{{ dormitory.model.number }}-{{ floor.number }}"{% endif %}>
             <span><b class="is-day">Д</b> День</span>
             <span><b class="is-night">Н</b> Ночь</span>
             <span><b class="is-unknown">?</b> Смена неизвестна</span>
@@ -14,7 +19,7 @@
             <span><b class="settlement-warning-key" aria-hidden="true">!</b> Уточнить расстановку</span>
             <span><b class="settlement-shift-conflict-key" aria-hidden="true">!</b> Трое в одну смену</span>
         </div>
-        <p><b data-floor-transferred-count>{{ floor.transferred_count }}</b> из {{ floor.room_count }} комнат передано</p>
+        {% if picker %}<p><b data-floor-transferred-count>{{ floor.transferred_count }}</b> из {{ floor.room_count }} комнат передано</p>{% endif %}
     </header>
     <div class="settlement-floor-scroll">
         <div class="settlement-floor-plan"

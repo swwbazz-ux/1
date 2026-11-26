@@ -17,11 +17,6 @@
     var watchExtensionList = root.querySelector("[data-watch-extension-list]");
     var watchExtensionCount = root.querySelector("[data-watch-extension-count]");
     var watchExtensionEmpty = root.querySelector("[data-watch-extension-empty]");
-    var selectedRoomCount = root.querySelector("[data-selected-room-count]");
-    var selectedTransferredRoomCount = root.querySelector("[data-selected-transferred-room-count]");
-    var globalFreeCount = root.querySelector("[data-free-bed-count]");
-    var globalOccupiedCount = root.querySelector("[data-occupied-bed-count]");
-    var selectedUnavailableBedCount = root.querySelector("[data-selected-unavailable-bed-count]");
     var searchInput = root.querySelector("[data-settlement-search]");
     var residentFinder = root.querySelector("#settlement-resident-finder");
     var quickSearchOrigin = null;
@@ -153,6 +148,7 @@
     var controlState = "free";
     var controlActionInFlight = false;
     var heartbeatInFlight = false;
+    var controlRefreshPending = false;
     var heartbeatTimer = null;
     var heartbeatRetryCount = 0;
     var heartbeatRecoveryPending = false;
@@ -533,6 +529,8 @@
     }
 
     function updateSelectionSummary() {
+        var floor = floorSections.find(function (section) { return !section.hidden; });
+        if (!floor) return;
         var selectedRooms = selectedFloorRooms();
         var transferredRooms = selectedRooms.filter(function (room) {
             return room.dataset.transferStatus === "transferred";
@@ -555,19 +553,25 @@
             }).length;
         });
 
-        if (selectedRoomCount) selectedRoomCount.textContent = String(selectedRooms.length);
-        if (selectedTransferredRoomCount) {
-            selectedTransferredRoomCount.textContent = String(transferredRooms.length);
-        }
-        var floor = floorSections.find(function (section) { return !section.hidden; });
-        var floorTransferredCount = floor && floor.querySelector("[data-floor-transferred-count]");
-        if (floorTransferredCount) floorTransferredCount.textContent = String(transferredRooms.length);
-        if (globalFreeCount) globalFreeCount.textContent = String(freeBeds);
-        if (globalOccupiedCount) globalOccupiedCount.textContent = String(occupiedBeds);
-        if (selectedUnavailableBedCount) {
-            selectedUnavailableBedCount.textContent = String(unavailableBeds);
-        }
+        var counts = {
+            "selected-room-count": selectedRooms.length,
+            "selected-transferred-room-count": transferredRooms.length,
+            "free-bed-count": freeBeds,
+            "occupied-bed-count": occupiedBeds,
+            "selected-unavailable-bed-count": unavailableBeds
+        };
+        Object.keys(counts).forEach(function (key) {
+            var node = floor.querySelector("[data-" + key + "]");
+            var value = String(counts[key]);
+            if (node && node.textContent !== value) node.textContent = value;
+        });
     }
+
+    root.querySelectorAll("[data-floor-legend-toggle]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
+        });
+    });
 
     function applyFilters() {
         dormitorySections.forEach(function (section) {
@@ -2249,6 +2253,22 @@
         }, delay);
     }
 
+    function refreshControlState() {
+        if (heartbeatInFlight || controlActionInFlight) {
+            controlRefreshPending = true;
+            return;
+        }
+        heartbeatControl();
+    }
+
+    function finishControlRequest() {
+        syncControlInteractivity();
+        if (controlRefreshPending) {
+            controlRefreshPending = false;
+            heartbeatControl();
+        }
+    }
+
     function heartbeatControl() {
         if (heartbeatInFlight || controlActionInFlight) return;
         stopHeartbeatTimer();
@@ -2269,7 +2289,7 @@
             })
             .finally(function () {
                 heartbeatInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -2294,7 +2314,7 @@
             })
             .finally(function () {
                 controlActionInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -2318,7 +2338,7 @@
             })
             .finally(function () {
                 controlActionInFlight = false;
-                syncControlInteractivity();
+                finishControlRequest();
             });
     }
 
@@ -2909,6 +2929,7 @@
     });
     if (relocateButton) relocateButton.addEventListener("click", startRelocation);
     if (releaseButton) releaseButton.addEventListener("click", confirmRelease);
+    root.addEventListener("settlement:refresh-control", refreshControlState);
     if (controlAcquireButton) controlAcquireButton.addEventListener("click", acquireControl);
     if (controlReleaseButton) controlReleaseButton.addEventListener("click", releaseControl);
     unsettledPanelToggles.forEach(function (toggle) {

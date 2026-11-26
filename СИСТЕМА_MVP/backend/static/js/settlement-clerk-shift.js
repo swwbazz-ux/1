@@ -11,6 +11,7 @@
 
     var shiftBlock = root.querySelector("[data-clerk-shift]");
     var shiftStatus = root.querySelector("[data-clerk-shift-status]");
+    var shiftLabel = root.querySelector("[data-clerk-shift-label]");
     var shiftWatch = root.querySelector("[data-clerk-shift-watch]");
     var openButton = root.querySelector("[data-clerk-shift-open]");
     var checkinStart = root.querySelector("[data-checkin-start]");
@@ -140,6 +141,9 @@
         var mode = state.saving ? "" : shiftMode(state.payload);
         if (checkinStart) checkinStart.textContent = needsShiftForCheckin() ? "Открыть смену и начать работу" : "Начать работу";
         if (openButton) {
+            var startsWork = needsShiftForCheckin() && root.dataset.controlState !== "held";
+            openButton.classList.toggle("is-start-action", startsWork);
+            openButton.textContent = startsWork ? "Открыть смену и начать работу" : "Открыть смену";
             setHidden(openButton, mode !== "open");
             openButton.disabled = mode !== "open";
         }
@@ -172,23 +176,29 @@
         }
 
         var text = "Смена не открыта";
+        var label = text;
         if (blockedByWatch(state.payload)) {
             text = watchError.message || "Смена недоступна.";
+            label = watchError.code === "settlement.shift.watch_not_active" ? "Нет активной вахты" : "Проверить смену";
         } else if (openShift && openShift.is_mine) {
+            label = "Ваша смена";
             text = "Смена открыта: " + (openShift.clerk_name || "")
                 + ", с " + formatMoment(openShift.opened_at);
         } else if (openShift) {
+            label = "Смена коллеги";
             text = "Смена открыта другим делопроизводителем: "
                 + (openShift.clerk_name || "");
         } else if (watchError && watchError.message) {
             text = watchError.message;
         }
+        if (shiftLabel) shiftLabel.textContent = label;
         if (shiftStatus) shiftStatus.textContent = text;
         setHidden(shiftBlock, false);
         syncButtons();
     }
 
     function showShiftError(message) {
+        if (shiftLabel) shiftLabel.textContent = "Проверить смену";
         if (shiftStatus) {
             shiftStatus.textContent = message || "Состояние смены недоступно.";
         }
@@ -249,7 +259,8 @@
             ? {shift_id: state.payload.open_shift.id}
             : {};
         runAction(root.dataset.clerkShiftCloseUrl, payload, function () {
-            showMessage("Смена закрыта. Для записи начните работу заново.", false);
+            showMessage("Смена закрыта.", false);
+            root.dispatchEvent(new Event("settlement:refresh-control"));
             return loadShiftState();
         });
     }

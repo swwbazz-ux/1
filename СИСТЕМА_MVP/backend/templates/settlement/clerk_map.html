@@ -5,6 +5,8 @@
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-toolbar-v2-swap-picker-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-map-header.css' %}?v={{ static_asset_release }}-map-header-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-floor-heading.css' %}?v={{ static_asset_release }}-floor-heading-v1">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -68,50 +70,41 @@
                     <span>Скачать в Excel</span>
                 </a>
             </div>
-            <details class="settlement-watch-extensions" data-watch-extensions>
-                <summary>На продлении <b data-watch-extension-count>{{ watch_extensions.entries|length }}</b></summary>
-                <div class="settlement-watch-extensions__content">
-                    <ul data-watch-extension-list aria-label="Жильцы на продлении">
-                        {% for entry in watch_extensions.entries %}
-                            <li><strong>{{ entry.name }}</strong><small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
-                        {% endfor %}
-                    </ul>
-                    <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
+            <section class="settlement-control-panel"
+                     data-control-panel
+                     data-control-state="free"
+                     aria-label="Управление расселением">
+                <i class="settlement-control-indicator" aria-hidden="true"></i>
+                <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
+                    <strong data-control-status>Управление не начато</strong>
+                    <small data-control-message>Проверяем состояние текущей сессии…</small>
+                    <small class="settlement-control-feedback" data-control-feedback hidden></small>
                 </div>
-            </details>
+                <div class="settlement-control-actions">
+                    <button type="button" data-control-acquire disabled>Начать работу</button>
+                    <button type="button" data-control-release disabled>Завершить работу</button>
+                    {% if access.role.code == 'admin' %}
+                        <button type="button" class="settlement-control-takeover" data-control-takeover>Забрать управление</button>
+                    {% endif %}
+                </div>
+                <div class="settlement-clerk-shift" data-clerk-shift aria-live="polite">
+                    <details class="settlement-shift-info">
+                        <summary data-clerk-shift-label>Смена</summary>
+                        <div class="settlement-clerk-shift-copy">
+                            <small data-clerk-shift-status>Смена делопроизводителя: проверяем…</small>
+                            <small data-clerk-shift-watch hidden></small>
+                        </div>
+                    </details>
+                    <div class="settlement-clerk-shift-actions">
+                        <button type="button" data-clerk-shift-open hidden disabled>Открыть смену</button>
+                        <button type="button" data-clerk-shift-close hidden disabled>Закрыть смену</button>
+                        <button type="button" data-clerk-shift-handover hidden disabled>Принять вахту</button>
+                    </div>
+                </div>
+            </section>
         </div>
         <p class="settlement-swap-notice" data-swap-notice role="status" hidden></p>
         {{ watch_extensions|json_script:"settlement-watch-extension-state" }}
-
-        <section class="settlement-control-panel"
-                 data-control-panel
-                 data-control-state="free"
-                 aria-label="Управление расселением">
-            <i class="settlement-control-indicator" aria-hidden="true"></i>
-            <div class="settlement-control-copy" role="status" aria-live="polite" aria-atomic="true">
-                <strong data-control-status>Управление не начато</strong>
-                <small data-control-message>Проверяем состояние текущей сессии…</small>
-                <small class="settlement-control-feedback" data-control-feedback hidden></small>
-            </div>
-            <div class="settlement-control-actions">
-                <button type="button" data-control-acquire disabled>Начать работу</button>
-                <button type="button" data-control-release disabled>Завершить работу</button>
-                {% if access.role.code == 'admin' %}
-                    <button type="button" class="settlement-control-takeover" data-control-takeover>Забрать управление</button>
-                {% endif %}
-            </div>
-            <div class="settlement-clerk-shift" data-clerk-shift aria-live="polite">
-                <div class="settlement-clerk-shift-copy">
-                    <small data-clerk-shift-status>Смена делопроизводителя: проверяем…</small>
-                    <small data-clerk-shift-watch hidden></small>
-                </div>
-                <div class="settlement-clerk-shift-actions">
-                    <button type="button" data-clerk-shift-open hidden disabled>Открыть смену</button>
-                    <button type="button" data-clerk-shift-close hidden disabled>Закрыть смену</button>
-                    <button type="button" data-clerk-shift-handover hidden disabled>Принять вахту</button>
-                </div>
-            </div>
-        </section>
 
         <section class="settlement-map-mode-panel" data-map-mode-panel="current">
         <section class="settlement-toolbar" aria-label="Фильтры физической карты">
@@ -159,28 +152,39 @@
                 </div>
             </div>
 
-            <button type="button"
-                    class="settlement-work-badge"
-                    data-unsettled-panel-toggle
-                    aria-controls="settlement-unsettled-panel"
-                    aria-label="Открыть панель нерасселённых сотрудников"
-                    aria-expanded="false">
-                <i aria-hidden="true"></i>
-                <span>Нерасселённые</span>
-                <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
-            </button>
+            <div class="settlement-resident-lists" role="group" aria-label="Списки жильцов">
+                <button type="button"
+                        class="settlement-work-badge"
+                        data-unsettled-panel-toggle
+                        aria-controls="settlement-unsettled-panel"
+                        aria-label="Открыть панель нерасселённых сотрудников"
+                        aria-expanded="false">
+                    <i aria-hidden="true"></i>
+                    <span>Нерасселённые</span>
+                    <b data-unsettled-toggle-count>{{ unsettled_employee_count }}</b>
+                </button>
 
-            <button type="button"
-                    class="settlement-external-residents-trigger"
-                    data-external-residents-toggle
-                    aria-controls="settlement-external-residents-modal"
-                    aria-haspopup="dialog"
-                    aria-expanded="false">
-                Внешние жильцы
-            </button>
+                <button type="button"
+                        class="settlement-external-residents-trigger"
+                        data-external-residents-toggle
+                        aria-controls="settlement-external-residents-modal"
+                        aria-haspopup="dialog"
+                        aria-expanded="false">
+                    Внешние жильцы
+                </button>
+                <details class="settlement-watch-extensions" data-watch-extensions>
+                    <summary>На продлении <b data-watch-extension-count>{{ watch_extensions.entries|length }}</b></summary>
+                    <div class="settlement-watch-extensions__content">
+                        <ul data-watch-extension-list aria-label="Жильцы на продлении">
+                            {% for entry in watch_extensions.entries %}
+                                <li><strong>{{ entry.name }}</strong><small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
+                            {% endfor %}
+                        </ul>
+                        <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
+                    </div>
+                </details>
+            </div>
         </section>
-
-        {% include "settlement/_map_floor_summary.html" %}
 
         {% if dormitories %}
             <section class="settlement-map-list" id="settlement-map-list" aria-label="Физическая карта общежитий">
@@ -998,9 +1002,9 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1"></script>
-<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
+<script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>

@@ -1,4 +1,4 @@
-<section class="settlement-summary" aria-label="Статистика выбранного этажа" aria-live="polite">
+<section class="{% if inline %}settlement-floor-totals{% else %}settlement-summary{% endif %}" aria-label="Статистика выбранного этажа" aria-live="polite">
     <article>
         <span>Комнаты</span>
         <strong data-selected-room-count>—</strong>
