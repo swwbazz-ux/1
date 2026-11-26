@@ -12,6 +12,7 @@
     let fetching = false;
     let pointerDown = false;
     let autoLoad = true;
+    let pagingInView = false;
 
     function applyFilter() {
         let visible = 0;
@@ -85,6 +86,9 @@
     }
     function updatePaging(next) {
         paging.replaceChildren(...next.querySelector("[data-duty-paging]").children);
+    }
+    function loadVisibleHistory() {
+        if (pagingInView) loadOlder();
     }
     async function loadOlder(manual = false) {
         const link = paging.querySelector("[data-duty-older]");
@@ -164,6 +168,7 @@
             status.textContent = "Не удалось обновить данные. На экране последний полученный срез.";
         } finally {
             fetching = false;
+            loadVisibleHistory();
         }
     }
     paging.addEventListener("click", event => {
@@ -173,14 +178,20 @@
     });
     if ("IntersectionObserver" in window) {
         const observer = new IntersectionObserver(entries => {
-            if (entries.some(entry => entry.isIntersecting)) loadOlder();
+            pagingInView = entries[entries.length - 1].isIntersecting;
+            loadVisibleHistory();
         }, {rootMargin: "0px 0px 180px"});
         observer.observe(paging);
     }
+    function endPointerInteraction() {
+        pointerDown = false;
+        loadVisibleHistory();
+    }
     root.addEventListener("pointerdown", () => { pointerDown = true; });
-    window.addEventListener("pointerup", () => { pointerDown = false; });
-    window.addEventListener("pointercancel", () => { pointerDown = false; });
+    window.addEventListener("pointerup", endPointerInteraction);
+    window.addEventListener("pointercancel", endPointerInteraction);
     window.addEventListener("blur", () => { pointerDown = false; });
+    dialog.addEventListener("close", loadVisibleHistory);
     window.setInterval(refresh, 30000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
     window.addEventListener("pageshow", event => { if (event.persisted) refresh(); });

@@ -1,11 +1,11 @@
 {% extends "reports/management_linked_base.html" %}
 {% load static management_workplace %}
 {% block title %}Смены диспетчеров{% endblock %}
-{% block body_class %}dispatcher-control-screen{% endblock %}
+{% block body_class %}dispatcher-control-screen dispatcher-duty-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=5">
-<script src="{% static 'js/dispatcher-duty-report.js' %}?v=3" defer></script>
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=6">
+<script src="{% static 'js/dispatcher-duty-report.js' %}?v=4" defer></script>
 {% endblock %}
 {% block body %}
 <main class="dispatcher-shell dispatcher-analytics-shell management-linked-report" data-dispatcher-theme data-duty-report>
