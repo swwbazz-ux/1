@@ -4,7 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-bed-swap-v1">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-bed-swap-v2">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -917,13 +917,34 @@
     </aside>
 
     <dialog class="settlement-swap-dialog" data-swap-dialog aria-labelledby="settlement-swap-title">
-        <h2 id="settlement-swap-title">Поменять жильцов местами?</h2>
-        <ul class="settlement-swap-addresses" data-swap-addresses></ul>
-        <p data-swap-error role="alert" hidden></p>
-        <div class="settlement-swap-actions">
-            <button type="button" class="settlement-relocation-cancel" data-swap-cancel autofocus>Отмена</button>
-            <button type="button" class="settlement-place-button" data-swap-confirm>Поменять местами</button>
+        <header class="settlement-swap-heading">
+            <h2 id="settlement-swap-title">Поменять жильцов местами?</h2>
+            <button type="button" class="settlement-swap-close" data-swap-close aria-label="Закрыть">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+            </button>
+        </header>
+        <div class="settlement-swap-plan">
+            <div class="settlement-swap-pair" data-swap-addresses></div>
+            <svg class="settlement-swap-arrows" viewBox="0 0 60 48" aria-hidden="true">
+                <path d="M5 20C15 4 43 4 53 20m-1-10 2 11-11-2"/>
+                <path d="M55 28C45 44 17 44 7 28m1 10-2-11 11 2"/>
+            </svg>
         </div>
+        <template data-swap-person-template>
+            <section class="settlement-swap-person">
+                <span class="settlement-bed is-occupied settlement-swap-badge" data-swap-badge data-occupied="true" aria-hidden="true" inert></span>
+                <h3 data-swap-name></h3>
+                <dl class="settlement-swap-route">
+                    <div><dt>Сейчас</dt><dd data-swap-current></dd></div>
+                    <div><dt>После обмена</dt><dd data-swap-next></dd></div>
+                </dl>
+            </section>
+        </template>
+        <p data-swap-error role="alert" hidden></p>
+        <footer class="settlement-swap-actions">
+            <button type="button" class="settlement-relocation-cancel" data-swap-cancel autofocus>Нет</button>
+            <button type="button" class="settlement-place-button" data-swap-confirm>Да, поменять</button>
+        </footer>
     </dialog>
 
     <div class="settlement-relocation-modal-backdrop" data-relocation-modal-backdrop hidden></div>
@@ -950,7 +971,7 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v2"></script>
 <script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
 <script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>

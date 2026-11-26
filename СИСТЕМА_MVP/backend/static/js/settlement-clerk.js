@@ -395,10 +395,7 @@
         var occupied = bed.dataset.occupied === "true";
         var unavailable = !isTransferredBed(bed) || Boolean(bed.disabled);
         var occupantName = shortPersonName(bed.dataset.occupantName);
-        var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
         var shiftLabel = compactShiftLabel(bed.dataset.shiftLabel);
-        var photo = bed.querySelector("[data-bed-photo-image]");
-        var photoFallback = bed.querySelector("[data-bed-photo-fallback]");
         var avatar = bed.querySelector("[data-bed-avatar-initial]");
         var emptyIcon = bed.querySelector("[data-bed-empty-icon]");
         var person = bed.querySelector("[data-bed-person-label]");
@@ -442,6 +439,14 @@
             shift.hidden = !occupied || !shiftLabel;
         }
         renderBedHoverCard(bed, occupied);
+
+        renderBedPhoto(bed, occupied);
+    }
+
+    function renderBedPhoto(bed, occupied) {
+        var photoUrl = occupied ? String(bed.dataset.occupantPhotoUrl || "").trim() : "";
+        var photo = bed.querySelector("[data-bed-photo-image]");
+        var photoFallback = bed.querySelector("[data-bed-photo-fallback]");
 
         function showPhotoFallback() {
             if (photo) {
@@ -936,8 +941,7 @@
             bed: bed,
             occupancyId: Number(bed.dataset.occupancyId),
             bedId: bed.dataset.bedId,
-            name: bed.dataset.occupantName,
-            address: bedLocation(bed)
+            name: bed.dataset.occupantName
         };
     }
 
@@ -964,16 +968,35 @@
         refreshResidentSearch();
     }
 
+    function showSwapBadge(badge, bed) {
+        var visual = bed.querySelector("[data-bed-photo-slot]").cloneNode(true);
+        visual.removeAttribute("data-bed-drag-handle");
+        visual.removeAttribute("draggable");
+        badge.append(visual, bed.querySelector("[data-bed-shift-badge]").cloneNode(true),
+            bed.querySelector(".settlement-bed-warning").cloneNode(true));
+        ["shiftLabel", "onExtension", "assignmentWarning", "causeOccupancy", "occupantPhotoUrl"].forEach(function (key) {
+            if (key in bed.dataset) badge.dataset[key] = bed.dataset[key];
+        });
+        renderBedPhoto(badge, true);
+    }
+
+    function showSwapAddress(container, bed) {
+        var labels = bed.dataset;
+        container.append(
+            element("span", "swap-floor", labels.dormitoryLabel + " · " + labels.floorLabel),
+            element("span", "swap-place", labels.roomLabel + " · койка " + labels.bedNumber)
+        );
+    }
+
     function openSwapConfirmation(bed) {
         if (saving || !controlHeld || swapDialog.open || !canSwapWith(bed)) return;
         swapTarget = swapParticipant(bed);
         var entries = [[swapSource, swapTarget], [swapTarget, swapSource]].map(function (pair) {
-            var item = element("li", "");
-            item.append(
-                element("strong", "", pair[0].name),
-                element("span", "", "Сейчас: " + pair[0].address),
-                element("span", "", "После обмена: " + pair[1].address)
-            );
+            var item = swapDialog.querySelector("[data-swap-person-template]").content.firstElementChild.cloneNode(true);
+            item.querySelector("[data-swap-name]").textContent = pair[0].name;
+            showSwapBadge(item.querySelector("[data-swap-badge]"), pair[0].bed);
+            showSwapAddress(item.querySelector("[data-swap-current]"), pair[0].bed);
+            showSwapAddress(item.querySelector("[data-swap-next]"), pair[1].bed);
             return item;
         });
         swapDialog.querySelector("[data-swap-addresses]").replaceChildren(...entries);
@@ -1034,6 +1057,7 @@
     root.querySelector("[data-swap-start]").addEventListener("click", function () { startBedSwap(selectedBed); });
     root.querySelector("[data-swap-selection-cancel]").addEventListener("click", cancelBedSwap);
     swapDialog.querySelector("[data-swap-cancel]").addEventListener("click", cancelBedSwap);
+    swapDialog.querySelector("[data-swap-close]").addEventListener("click", cancelBedSwap);
     swapDialog.addEventListener("cancel", function (event) {
         event.preventDefault();
         cancelBedSwap();
