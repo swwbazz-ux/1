@@ -1,1 +1,8 @@
-СИСТЕМА_MVP/backend/deploy/data_updates/add_site_manager_access_20261126.py
+СИСТЕМА_MVP/backend/settlement/temporary_placement.py
+СИСТЕМА_MVP/backend/settlement/urls.py
+СИСТЕМА_MVP/backend/settlement/views.py
+СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
+СИСТЕМА_MVP/backend/static/js/settlement-bed-checkin.js
+СИСТЕМА_MVP/backend/templates/clerk/base.html
+СИСТЕМА_MVP/backend/templates/settlement/_bed_checkin.html
+СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
