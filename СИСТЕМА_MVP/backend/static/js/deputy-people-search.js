@@ -13,6 +13,7 @@ window.deputyPeopleSearch = function (ui) {
     let choosing = false;
     let revealed = null;
     let alternatives = [];
+    let quickSearchOrigin = null;
 
     // The directory highlights a match at the start of a name or a hyphenated part.
     function nameMatch(name, query) {
@@ -59,6 +60,7 @@ window.deputyPeopleSearch = function (ui) {
         choosing = false;
         target = revealed = request = null;
         alternatives = [];
+        quickSearchOrigin = null;
         hidePanel();
         if (announcement) announcement.textContent = "";
         if (clearInput) input.value = "";
@@ -203,13 +205,42 @@ window.deputyPeopleSearch = function (ui) {
             show(alternatives, generation);
         }
     }
-    input.addEventListener("click", reopen);
+    input.addEventListener("click", () => {
+        quickSearchOrigin = null;
+        reopen();
+    });
+    document.addEventListener("focusin", event => {
+        if (event.target !== input && !choices.contains(event.target)) quickSearchOrigin = null;
+    });
+
+    document.addEventListener("keydown", event => {
+        const source = event.target;
+        if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.isComposing
+            || !/^[0-9\p{L}]$/u.test(event.key) || ui.quickSearchBlocked()
+            || !(source instanceof HTMLElement) || source.isContentEditable
+            || source.closest('input, textarea, select, [role="textbox"], [role="combobox"], [role="listbox"], [role="menu"]')
+            || (!ui.root.contains(source) && source !== document.body && source !== document.documentElement)
+            || document.querySelector("dialog[open]")) return;
+
+        event.preventDefault();
+        quickSearchOrigin = source;
+        input.focus();
+        input.value = event.key;
+        input.setSelectionRange(input.value.length, input.value.length);
+        input.dispatchEvent(new Event("input", {bubbles: true}));
+    });
+
     function handleKeys(event) {
-        if (event.key === "Escape" && input.value) {
+        if (event.isComposing) return;
+        if (event.key === "Escape" && (input.value || quickSearchOrigin)) {
+            const origin = quickSearchOrigin;
             event.preventDefault();
             clear(true);
             ui.render();
-            input.focus({preventScroll: true});
+            if (origin) {
+                input.blur();
+                if (origin.isConnected) origin.focus({preventScroll: true});
+            } else input.focus({preventScroll: true});
             return;
         }
         if (event.key === "ArrowDown" && event.target === input) reopen();

@@ -2039,7 +2039,9 @@
     if (searchInput && window.deputyPeopleSearch && searchInput.dataset.peopleUrl) {
         function categoryFor(code) { return state.categories.find(function (item) { return item.code === code; }); }
         peopleSearch = window.deputyPeopleSearch({
+            root: shell || root,
             input: searchInput, query: currentQuery, normalize: normalizeSearch, role: function () { return state.role.code; },
+            quickSearchBlocked: function () { return saving || Boolean(categoryRequest || dragPayload); },
             load: loadSearchPeople, render: renderSearch, findBadge: markSearchBadge, busy: function () { return saving; },
             isSnapshot: function () { return new URL(location.href).searchParams.has("plan"); },
             categoryLabel: function (code) { return categoryFor(code)?.label || code; },
