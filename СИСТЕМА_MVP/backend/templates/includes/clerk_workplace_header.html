@@ -1,9 +1,12 @@
 <header class="admin-console-header clerk-workplace-header" aria-label="Рабочая шапка делопроизводителя">
     <section class="admin-console-identity">
-        <span class="admin-console-avatar" aria-hidden="true">{{ access.employee.full_name|default:"Д"|first }}</span>
+        {% include "users/includes/system_admin_avatar.html" %}
         <span>
             <strong>{{ access.employee.full_name|default:"Делопроизводитель" }}</strong>
-            <em>Делопроизводитель</em>
+            <em>{% if access.role.code == "admin" %}Администратор{% else %}Делопроизводитель{% endif %}</em>
+            {% if clerk_admin_login_available %}
+                <a class="clerk-admin-login-link" href="{% url 'clerk_login' %}?role=admin">Войти как администратор</a>
+            {% endif %}
         </span>
     </section>
 

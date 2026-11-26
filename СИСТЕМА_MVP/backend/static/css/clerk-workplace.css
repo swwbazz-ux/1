@@ -61,3 +61,10 @@
         grid-template-columns: 1fr;
     }
 }
+.clerk-workplace-header .clerk-admin-login-link {
+    display: inline-block;
+    margin-top: 2px;
+    color: var(--admin-ink);
+    font-size: 12px;
+    text-underline-offset: 2px;
+}

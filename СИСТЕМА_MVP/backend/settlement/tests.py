@@ -4514,6 +4514,63 @@ class SettlementMapAccessTests(TestCase):
         self.assertRedirects(response, reverse('clerk_home'), fetch_redirect_response=False)
         self.assertEqual(self.client.session['employee_access_id'], admin.pk)
 
+    def test_switch_from_clerk_login_to_admin_while_clerk_is_working(self):
+        admin = EmployeeAccess.objects.create(
+            employee=self.switch_employee, role=self.admin_role, access_code='990009',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        clerk_client = Client()
+        self.authenticate(clerk_client, self.clerk_access)
+        self.assertEqual(clerk_client.post(reverse('settlement_control_acquire')).status_code, 200)
+        self.assertNotContains(clerk_client.get(reverse('settlement_map')), 'Войти как администратор')
+
+        self.authenticate(self.client, self.switch_clerk_access)
+        self.assertEqual(self.client.post(reverse('settlement_control_acquire')).status_code, 409)
+        admin_login = f'{reverse("clerk_login")}?role=admin'
+        self.assertContains(self.client.get(reverse('settlement_map')), f'href="{admin_login}"')
+        self.assertTemplateUsed(self.client.get(admin_login), 'users/login.html')
+        credentials = {'phone': self.switch_employee.phone, 'device_kind': 'personal'}
+        self.client.post(admin_login, {**credentials, 'access_code': self.switch_clerk_access.access_code})
+        self.assertEqual(self.client.session['employee_access_id'], self.switch_clerk_access.pk)
+
+        signed_in = self.client.post(admin_login, {**credentials, 'access_code': admin.access_code})
+        self.assertRedirects(signed_in, reverse('clerk_home'), fetch_redirect_response=False)
+        self.assertEqual(self.client.session['employee_access_id'], admin.pk)
+        with mock.patch.object(Employee, 'has_photo_file', new_callable=mock.PropertyMock, return_value=True):
+            admin.employee.photo = 'test-admin-avatar.png'
+            admin.employee.save(update_fields=['photo'])
+            page = self.client.get(reverse('settlement_map'))
+        self.assertContains(page, '<em>Администратор</em>', html=True)
+        self.assertContains(page, 'test-admin-avatar.png')
+        self.assertNotContains(page, 'Войти как администратор')
+
+        self.assertEqual(self.client.post(reverse('settlement_control_acquire')).status_code, 200)
+        self.assertEqual(clerk_client.post(reverse('settlement_control_heartbeat')).status_code, 200)
+        self.assertEqual(self.client.post(reverse('settlement_control_heartbeat')).status_code, 200)
+        self.assertEqual(self.client.post(reverse('settlement_control_release')).status_code, 200)
+        self.assertEqual(clerk_client.post(reverse('settlement_control_heartbeat')).status_code, 200)
+
+    def test_admin_sign_in_releases_only_previous_clerk_control(self):
+        previous = EmployeeAccess.objects.create(
+            employee=self.admin_employee, role=self.clerk_role, access_code='990099',
+            status=EmployeeAccess.Status.ACTIVATED, is_active=True,
+        )
+        self.authenticate(self.client, previous)
+        self.assertEqual(self.client.post(reverse('settlement_control_acquire')).status_code, 200)
+        admin_login = f'{reverse("clerk_login")}?role=admin'
+        credentials = {'phone': self.admin_employee.phone, 'device_kind': 'personal'}
+
+        self.client.post(admin_login, {**credentials, 'access_code': previous.access_code})
+        self.assertEqual(self.client.post(reverse('settlement_control_heartbeat')).status_code, 200)
+
+        signed_in = self.client.post(admin_login, {**credentials, 'access_code': self.admin_access.access_code})
+        self.assertRedirects(signed_in, reverse('clerk_home'), fetch_redirect_response=False)
+        self.assertIsNone(SettlementControlLease.objects.get(scope='settlement').owner_access_id)
+        self.assertEqual(self.client.post(reverse('settlement_control_acquire')).status_code, 200)
+        clerk_client = Client()
+        self.authenticate(clerk_client, self.clerk_access)
+        self.assertEqual(clerk_client.post(reverse('settlement_control_acquire')).status_code, 200)
+
     def test_chooser_preserves_admin_session_even_with_assigned_clerk_role(self):
         EmployeeAccess.objects.create(
             employee=self.admin_employee, role=self.clerk_role, access_code='990099',

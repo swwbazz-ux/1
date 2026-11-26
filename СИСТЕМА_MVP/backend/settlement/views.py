@@ -26,7 +26,7 @@ from core.production_time import (
 )
 from references.models import Dormitory
 from shifts.models import EmployeeShift
-from users.active_role import role_session_state
+from users.active_role import active_access_for_employee_role, role_session_state
 from users.work_profiles import (
     PRODUCTION_APP_ROLE_CODES, effective_specializations_by_employee_id,
     legacy_work_category_for_specialization,
@@ -1247,13 +1247,40 @@ def _dormitory_views(rooms):
 def settlement_login_view(request):
     from users.views import login_view
 
-    return login_view(
+    admin_login = request.GET.get('role') == 'admin'
+    previous_access = None
+    previous_control = None
+    if admin_login and request.method == 'POST':
+        previous_access = settlement_clerk_access_from_request(request, allow_admin=False)
+        if previous_access:
+            try:
+                previous_control = _settlement_write_control_context(request)
+            except ValidationError:
+                pass
+
+    response = login_view(
         request,
-        allowed_role_codes=('settlement_clerk', 'admin'),
+        allowed_role_codes=('admin',) if admin_login else ('settlement_clerk', 'admin'),
         target_role_app=get_role_app('settlement_clerk'),
         forced_next_url=reverse('clerk_home'),
         allow_same_employee_multiple_active_roles=True,
     )
+    if previous_control and response.status_code == 302:
+        access = settlement_clerk_access_from_request(request)
+        if access and access.role.code == 'admin' and access.employee_id == previous_access.employee_id:
+            try:
+                release_control_lease(
+                    owner_access_id=previous_control.owner_access_id,
+                    raw_session_key=previous_control.raw_session_key,
+                    lease_token=previous_control.lease_token,
+                    fencing_revision=previous_control.fencing_revision,
+                    source='admin_sign_in',
+                )
+            except ValidationError:
+                # Работа могла завершиться в другой вкладке до подтверждения PIN.
+                pass
+            clear_control_session_credentials(request.session)
+    return response
 
 
 def settlement_manifest_view(request):
@@ -1502,6 +1529,10 @@ def settlement_map_view(request):
         {
             'access': access,
             'dormitories': dormitories,
+            'clerk_admin_login_available': (
+                access.role.code == 'settlement_clerk'
+                and active_access_for_employee_role(access.employee, 'admin') is not None
+            ),
             'watch_extensions': _clerk_map_extension_state(rooms, moment, cases=extension_cases),
             'current_date': timezone.localdate(moment),
             'summary': {
