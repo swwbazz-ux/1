@@ -1,4 +1,1 @@
-СИСТЕМА_MVP/backend/reports/dispatcher_duty.py
-СИСТЕМА_MVP/backend/reports/dispatcher_duty_period.py
-СИСТЕМА_MVP/backend/reports/dispatcher_duty_export.py
-СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty_period.html
+СИСТЕМА_MVP/backend/settlement/services.py
