@@ -46,6 +46,8 @@
 .duty-report button.duty-journal-link, .duty-report a { color: var(--duty-link); background: transparent; border: 0; }
 .duty-older, .duty-return { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
 .duty-paging { text-align: center; }
+.duty-heading-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 16px; }
+.duty-report a.duty-period-link { display: inline-flex; align-items: center; min-height: 40px; padding: 6px 12px; border: 1px solid currentColor; border-radius: 5px; font-weight: 600; text-decoration: none; }
 .duty-staff { margin: 2px 0 10px; font-size: 14px; }
 .duty-report button.duty-plot { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: start; }
 .duty-strip, .duty-marks, .duty-axis, .duty-marker-row { display: block; position: relative; }

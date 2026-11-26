@@ -2,6 +2,7 @@
 
 from collections import Counter, defaultdict
 from datetime import timedelta
+from functools import wraps
 
 from django.db.models import Q
 from django.http import HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -26,6 +27,8 @@ from .views import parse_filter_date
 
 
 STATE_LABELS = {'on': 'В пульте', 'out': 'Вне пульта', 'unknown': 'Нет данных', 'future': 'Предстоит'}
+STRIP_STATES = {WindowState.VISIBLE: 'on', WindowState.HIDDEN: 'out', WindowState.CLOSED: 'out',
+                WindowState.SIGNED_OUT: 'out', 'vacant': 'out', 'unknown': 'unknown', 'future': 'future'}
 FEED_DAYS = 7
 
 
@@ -79,7 +82,7 @@ def classify(active, tracking, at, shifts):
         if not tracking or at < tracking:
             return 'unknown', 'За это время наблюдений нет', ''
         previously_open = any(s.closed_at and s.closed_at <= at for s in shifts)
-        return 'out', 'Смена завершена, пост свободен' if previously_open else 'Смена не открыта', ''
+        return 'vacant', 'Смена завершена, пост свободен' if previously_open else 'Смена не открыта', ''
     names = ', '.join(staff.values())
     observed = defaultdict(set)
     for key, state in active.items():
@@ -88,14 +91,14 @@ def classify(active, tracking, at, shifts):
     states = set().union(*observed.values())
     if WindowState.VISIBLE in states:
         visible_names = (name for pk, name in staff.items() if WindowState.VISIBLE in observed[pk])
-        return 'on', 'Пульт открыт на экране', ', '.join(visible_names)
+        return WindowState.VISIBLE, 'Пульт открыт на экране', ', '.join(visible_names)
     if 'unknown' in states or any(not observed.get(pk) for pk in staff):
         return 'unknown', 'Состояние пульта не подтверждено', names
     if WindowState.HIDDEN in states:
-        return 'out', 'Все открытые окна пульта свёрнуты', names
+        return WindowState.HIDDEN, 'Все открытые окна пульта в фоне', names
     if WindowState.SIGNED_OUT in states:
-        return 'out', 'Выход из приложения', names
-    return 'out', 'Окна пульта закрыты', names
+        return WindowState.SIGNED_OUT, 'Выход из приложения', names
+    return WindowState.CLOSED, 'Окна пульта закрыты', names
 
 
 def timeline(start, end, now, tracking, shifts):
@@ -148,11 +151,13 @@ def operations(start, end, tracking, shifts):
     eligible = Q(actor_role_code='dispatcher')
     # Old rows have no acting role. Only include a historical action if its
     # author held the post and has no alternative role that can issue the command.
-    legacy_staff = {s.employee_id for s in shifts}
-    if tracking and start < tracking and legacy_staff:
-        other = EmployeeAccess.objects.filter(employee_id__in=legacy_staff,
+    staff_shifts = defaultdict(list)
+    for shift in shifts:
+        staff_shifts[shift.employee_id].append(shift)
+    if tracking and start < tracking and staff_shifts:
+        other = EmployeeAccess.objects.filter(employee_id__in=staff_shifts.keys(),
             role__code__in=['admin', 'manager', 'mining_master']).values_list('employee_id', flat=True)
-        eligible |= Q(actor_role_code='', created_at__lt=tracking, actor_id__in=legacy_staff.difference(other))
+        eligible |= Q(actor_role_code='', created_at__lt=tracking, actor_id__in=set(staff_shifts).difference(other))
     actions = list(rows.filter(eligible).select_related('actor').order_by('created_at', 'pk'))
     previous_complexes = defaultdict(set)
     historical_moves = {row.haul_assignment_id for row in actions if not row.actor_role_code and row.haul_assignment_id
@@ -163,13 +168,20 @@ def operations(start, end, tracking, shifts):
             f'{dispatcher_complex_label(handoff.source_excavator)} → {dispatcher_complex_label(handoff.target_assignment.excavator)}'
         )
     result = []
+    by_id = {s.pk: s for s in shifts}
     for row in actions:
         duty_id = row.duty_shift_id
         if not row.actor_role_code:
-            duty_id = next((s.pk for s in shifts if s.employee_id == row.actor_id
-                            and s.opened_at <= row.created_at and (s.closed_at is None or row.created_at < s.closed_at)), None)
-            if duty_id is None:
+            matches = [s.pk for s in staff_shifts[row.actor_id] if s.opened_at <= row.created_at
+                       and (s.closed_at is None or row.created_at < s.closed_at)]
+            if len(matches) != 1:
                 continue
+            duty_id = matches[0]
+        elif duty_id:
+            own = by_id.get(duty_id)
+            if (own is None or own.employee_id != row.actor_id or row.created_at < own.opened_at
+                    or (own.closed_at is not None and row.created_at >= own.closed_at)):
+                duty_id = None
         label = ('Изменение расстановки' if row.action_type == DispatcherActionType.CANCEL_ASSIGNMENT
                  else row.get_action_type_display())
         if row.action_type == 'report_source_correction' and row.duty_detail:
@@ -220,7 +232,8 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
                                             'Из архива связи сохранилась отдельная отметка.'))
 
     shift_edges = {value for s in shifts for value in (s.opened_at, s.closed_at) if value}
-    for first, last, code, reason, who in timeline(start, end, now, tracking, shifts):
+    for first, last, state, reason, who in timeline(start, end, now, tracking, shifts):
+        code = STRIP_STATES[state]
         length = (last - first).total_seconds()
         totals[code] += round((last - start).total_seconds()) - round((first - start).total_seconds())
         parts.append(dict(start=clock(first), end=clock(last), state=code, label=STATE_LABELS[code],
@@ -294,17 +307,25 @@ def duty_feed(*, now, before=None, since=None):
                 next_before=oldest.isoformat() if oldest > first_date and days else '')
 
 
-@never_cache
-@require_GET
-def management_dispatcher_duty(request):
-    if not request.session.get('employee_access_id'):
-        login_url = reverse('login', query={'form': '1', 'next': request.get_full_path()})
-        return redirect(login_url)
-    auth = role_session_state(request)
-    app = get_role_app_for_request(request)
-    if (not auth['authenticated'] or not auth['is_active'] or auth['access'].role.code != 'manager'
-            or (app and app.role_code != 'manager') or getattr(request, 'observer_mode', False)):
-        return HttpResponseForbidden('Для просмотра требуется роль руководства.')
+def management_duty_view(view):
+    @never_cache
+    @require_GET
+    @wraps(view)
+    def protected(request):
+        if not request.session.get('employee_access_id'):
+            login_url = reverse('login', query={'form': '1', 'next': request.get_full_path()})
+            return redirect(login_url)
+        auth = role_session_state(request)
+        app = get_role_app_for_request(request)
+        if (not auth['authenticated'] or not auth['is_active'] or auth['access'].role.code != 'manager'
+                or (app and app.role_code != 'manager') or getattr(request, 'observer_mode', False)):
+            return HttpResponseForbidden('Для просмотра требуется роль руководства.')
+        return view(request, auth['access'])
+    return protected
+
+
+@management_duty_view
+def management_dispatcher_duty(request, access):
     dates = {}
     for key in ('date', 'before', 'since'):
         value = request.GET.get(key)
@@ -323,6 +344,6 @@ def management_dispatcher_duty(request):
     if before and not partial and (not report['days'] or report['days'][0]['date'] < report['date']):
         current = duty_feed(now=now, since=report['date'])
         report['days'] = current['days'] + report['days']
-    context = {'access': auth['access'], 'selected_date': report['date'], 'report': report, 'archive_page': bool(before)}
+    context = {'access': access, 'selected_date': report['date'], 'report': report, 'archive_page': bool(before)}
     template = 'reports/includes/dispatcher_duty_slots.html' if partial else 'reports/dispatcher_duty.html'
     return render(request, template, context)

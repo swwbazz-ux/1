@@ -4,7 +4,7 @@
 {% block body_class %}dispatcher-control-screen{% endblock %}
 {% block extra_head %}
 {{ block.super }}
-<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=2">
+<link rel="stylesheet" href="{% static 'css/dispatcher-duty-report.css' %}?v=3">
 <script src="{% static 'js/dispatcher-duty-report.js' %}?v=2" defer></script>
 {% endblock %}
 {% block body %}
@@ -14,7 +14,8 @@
     <section class="duty-report">
       <div class="duty-heading">
         <h2>Смены диспетчеров</h2>
-        <span class="duty-as-of">По Владивостоку · Обновлено <time data-duty-as-of>{{ report.as_of|date:"d.m.Y H:i" }}</time></span>
+        <div class="duty-heading-tools"><span class="duty-as-of">По Владивостоку · Обновлено <time data-duty-as-of>{{ report.as_of|date:"d.m.Y H:i" }}</time></span>
+          <a class="duty-period-link" href="{% url 'management_dispatcher_period' %}">Отчёт за период</a></div>
       </div>
       <div class="duty-legend" aria-label="Обозначения шкалы">
         <span><i class="duty-on"></i>В пульте</span><span><i class="duty-out"></i>Вне пульта</span>

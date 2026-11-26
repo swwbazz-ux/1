@@ -5,11 +5,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.production_time import production_work_date
+from reports.dispatcher_duty import duration
 from reports.views import parse_filter_date
 from users.access_auth import can_review_watch_extensions
 
 
 register = template.Library()
+register.filter('duty_duration', duration)
 
 
 @register.inclusion_tag('reports/includes/management_workplace_header.html', takes_context=True)
