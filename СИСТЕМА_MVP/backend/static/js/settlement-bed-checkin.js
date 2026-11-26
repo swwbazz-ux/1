@@ -46,7 +46,7 @@ window.createSettlementBedCheckin = function (form, applied) {
     function updatePeriod() {
         const arrival = fields.arrival.value;
         const departure = fields.departure.value;
-        const start = arrival === fields.arrival.max ? "Сегодня" : arrival.split("-").reverse().join(".");
+        const start = !arrival || arrival === fields.arrival.max ? "Сегодня" : arrival.split("-").reverse().join(".");
         period.textContent = [start, departure && "до " + departure.split("-").reverse().join(".")].filter(Boolean).join(" · ");
     }
 

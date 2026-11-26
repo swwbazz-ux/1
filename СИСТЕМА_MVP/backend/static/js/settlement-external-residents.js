@@ -47,7 +47,6 @@
         resident_type: "Укажите тип жильца.",
         full_name: "Укажите ФИО.",
         organization: "Укажите организацию.",
-        position_title: "Укажите должность или профессию.",
         phone: "Укажите телефон.",
         sex: "Укажите пол."
     };
@@ -55,7 +54,6 @@
         "resident_type",
         "full_name",
         "organization",
-        "position_title",
         "phone",
         "sex"
     ];

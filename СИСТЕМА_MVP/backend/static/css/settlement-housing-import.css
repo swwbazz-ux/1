@@ -653,20 +653,33 @@
     gap: 0.5rem;
 }
 
-.settlement-map-entry__upload {
+.settlement-map-entry__excel {
     display: inline-flex;
-    align-items: center;
-    min-height: 2.75rem;
-    padding-inline: 0.75rem;
-    border: 1px solid var(--admin-border, #839891);
+    gap: 0.25rem;
+}
+
+.settlement-map-entry__excel a {
+    display: inline-grid;
+    place-items: center;
+    inline-size: 2.75rem;
+    block-size: 2.75rem;
+    border: 1px solid var(--admin-line);
     border-radius: 0.375rem;
+    background: var(--admin-panel);
     color: inherit;
+    font-size: 1.35rem;
     font-weight: 700;
+    line-height: 1;
     text-decoration: none;
 }
 
-.settlement-map-entry__upload:hover {
-    text-decoration: underline;
+.settlement-map-entry__excel a:hover {
+    background: var(--admin-panel-soft);
+}
+
+.settlement-map-entry__excel a:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
 }
 
 .housing-map-picker[open] {

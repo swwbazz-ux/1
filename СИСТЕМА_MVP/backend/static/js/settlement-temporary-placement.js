@@ -996,8 +996,7 @@
     }
 
     function toggleReserve(bedStableId, mode) {
-        var reason = askReason(mode === "set" ? "Причина резерва" : "Причина снятия резерва");
-        if (!reason) return;
+        var reason = mode === "set" ? "Постановка койки в резерв с карты" : "Снятие резерва с карты";
         runAction(
             root.dataset.bedReserveUrl,
             {bed_stable_id: bedStableId, action: mode, reason: reason}
@@ -1006,11 +1005,9 @@
 
     function releaseTemporary(occupancyId) {
         if (!occupancyId) return;
-        var reason = askReason("Причина освобождения");
-        if (!reason) return;
         runAction(
             root.dataset.temporaryReleaseUrl,
-            {occupancy_id: Number(occupancyId), reason: reason},
+            {occupancy_id: Number(occupancyId), reason: "Освобождение койки с карты"},
             function () {
                 showFeedback("Койко-место освобождено. Обновляем карту…", false);
                 window.location.reload();
@@ -1404,9 +1401,7 @@
         takeoverButton.addEventListener("click", takeoverControl);
     }
 
-    /* Временный жилец: общий маршрут «Освободить» требует причину, а старое
-       переселение отклоняется сервером. Перехватываем оба действия до
-       обработчика карты и ведём их маршрутами T-029. */
+    /* Освобождение и переселение временного жильца обрабатывают маршруты T-029. */
     root.addEventListener("click", function (event) {
         var release = event.target.closest("[data-release-button]");
         if (release) {

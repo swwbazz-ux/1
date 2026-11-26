@@ -30,14 +30,22 @@
         </fieldset>
         <div class="settlement-checkin-fields">
             <label class="settlement-employee-search"><span>Организация</span><input name="organization" required maxlength="255"></label>
-            <label class="settlement-employee-search"><span>Должность или профессия</span><input name="position_title" required maxlength="255"></label>
+            <label class="settlement-employee-search"><span>Должность или профессия · необязательно</span><input name="position_title" maxlength="255"></label>
             <label class="settlement-employee-search"><span>Телефон · необязательно</span><input name="phone" type="tel" maxlength="32"></label>
         </div>
+        <fieldset class="settlement-checkin-choice">
+            <legend>Смена</legend>
+            <div class="settlement-checkin-options">
+                <label><input type="radio" name="work_shift" value="day"><span>День</span></label>
+                <label><input type="radio" name="work_shift" value="night"><span>Ночь</span></label>
+                <label><input type="radio" name="work_shift" value="" checked><span>Не указана</span></label>
+            </div>
+        </fieldset>
     </fieldset>
     <details class="settlement-checkin-dates" data-checkin-dates>
         <summary><span>Даты проживания</span><strong data-checkin-period></strong></summary>
         <div class="settlement-checkin-fields">
-            <label class="settlement-employee-search"><span>Дата заселения</span><input name="arrival" type="date" required></label>
+            <label class="settlement-employee-search"><span>Дата заселения · по умолчанию сегодня</span><input name="arrival" type="date"></label>
             <label class="settlement-employee-search"><span>Выезд в 07:00 · если известен</span><input name="departure" type="date"></label>
         </div>
     </details>

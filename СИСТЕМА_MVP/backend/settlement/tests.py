@@ -440,7 +440,7 @@ class SettlementResidentTests(TestCase):
                 self.assertEqual(EmployeeAccess.objects.count(), access_count)
 
     def test_external_required_fields_and_type_fail_closed(self):
-        for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+        for field_name in ('full_name', 'organization', 'phone'):
             with self.subTest(field=field_name):
                 before = SettlementResident.objects.count()
                 self.assert_validation_code(
@@ -8736,6 +8736,40 @@ class ClerkMapEffectiveOccupancyTests(TestCase):
             response.context['summary']['occupied_beds'],
             int(visible),
         )
+
+    def test_download_contains_all_current_beds_and_effective_dates(self):
+        from io import BytesIO
+        from openpyxl import load_workbook
+
+        start = self.moment - timedelta(hours=2)
+        end = self.moment + timedelta(hours=1)
+        self.create_occupancy(0, starts_at=start, ends_at=end)
+        self.create_occupancy(1, starts_at=start, ends_at=self.moment)
+        other = Dormitory.objects.create(number='6')
+        room = PhysicalRoom.objects.create(
+            dormitory=other, floor=2, number=17, capacity=1, side_position=1,
+            transfer_status=PhysicalRoom.TransferStatus.TRANSFERRED,
+            corridor_side=PhysicalRoom.CorridorSide.LEFT,
+        )
+        PhysicalBed.objects.create(room=room, stable_id='KIS6-QA-F2', block='A', position=1)
+        url = reverse('settlement_current_housing_export')
+        self.assertEqual(Client().get(url).status_code, 403)
+        with mock.patch('settlement.views.timezone.now', return_value=self.moment):
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('attachment', response['Content-Disposition'])
+        self.assertIn('no-store', response['Cache-Control'])
+        book = load_workbook(BytesIO(b''.join(response.streaming_content)), read_only=True)
+        try:
+            self.assertEqual(book.sheetnames, ['КИС-5', 'КИС-6'])
+            occupied, released, *_ = list(book['КИС-5'].iter_rows(min_row=3, values_only=True))
+            self.assertEqual(occupied[:5], (1, 101, 'А-1', 'Занято', self.employees[0].full_name))
+            self.assertEqual(occupied[7:9], (datetime(2026, 8, 5, 20), datetime(2026, 8, 5, 23)))
+            self.assertEqual(released[:5], (1, 102, 'А-1', 'Свободно', None))
+            self.assertEqual(next(book['КИС-6'].iter_rows(min_row=3, values_only=True))[:4],
+                             (2, 17, 'А-1', 'Свободно'))
+        finally:
+            book.close()
 
     def test_map_shows_open_occupancy_started_before_moment(self):
         self.create_occupancy(

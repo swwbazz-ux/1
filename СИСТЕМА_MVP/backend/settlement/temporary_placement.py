@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from hashlib import sha256
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, router, transaction
@@ -506,7 +507,7 @@ def prepare_bed(
 
 def confirm_bed_preparation(
     *, preparation_id, control_context=None, starts_at=None, ends_at=None, confirm_itr=False,
-    placement_reason=None,
+    placement_reason=None, work_shift=None,
 ):
     """Зафиксировать приезд. При заданном выезде оформляется срочное проживание на указанный период."""
     using = router.db_for_write(EmployeeBedOccupancy)
@@ -617,6 +618,18 @@ def confirm_bed_preparation(
             persisted_occupancies=persisted_occupancies,
         )
 
+        shift_fields = {}
+        if work_shift:
+            if not resident.is_external or work_shift not in SettlementCohortMember.WorkShift.values:
+                raise ValidationError('Выберите дневную или ночную смену для внешнего жильца.')
+            shift_fields = {
+                'work_shift': work_shift,
+                'shift_source_kind': EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED,
+                'shift_source_fingerprint': sha256(f'bed-checkin:{preparation.pk}:{work_shift}'.encode()).hexdigest(),
+                'shift_selected_by_access': owner_access,
+                'shift_selected_at': moment,
+                'shift_selection_basis': 'Выбор смены при заселении с карты.',
+            }
         try:
             with transaction.atomic(using=using):
                 occupancy = _create_occupancy(
@@ -628,6 +641,7 @@ def confirm_bed_preparation(
                     settled_by=settled_by,
                     using=using,
                     placement_reason=preparation.basis,
+                    **shift_fields,
                 )
         except IntegrityError as error:
             if EmployeeBedOccupancy.objects.using(using).filter(
@@ -954,6 +968,16 @@ def relocate_temporary_occupancy(
         current_bed = beds[current_bed_id]
         current_occupancy.terminated_at = moment
         current_occupancy.save(update_fields=['terminated_at'])
+        shift_fields = {}
+        if current_occupancy.shift_source_kind == EmployeeBedOccupancy.ShiftSourceKind.CLERK_SELECTED:
+            shift_fields = {
+                'work_shift': current_occupancy.work_shift,
+                'shift_source_kind': current_occupancy.shift_source_kind,
+                'shift_source_fingerprint': current_occupancy.shift_source_fingerprint,
+                'shift_selected_by_access': current_occupancy.shift_selected_by_access,
+                'shift_selected_at': current_occupancy.shift_selected_at,
+                'shift_selection_basis': current_occupancy.shift_selection_basis,
+            }
         occupancy = _create_occupancy(
             resident=resident,
             bed=target_bed,
@@ -963,6 +987,7 @@ def relocate_temporary_occupancy(
             settled_by=settled_by,
             using=using,
             placement_reason=current_occupancy.placement_reason,
+            **shift_fields,
         )
         current_occupancy.replaced_by_occupancy = occupancy
         current_occupancy.save(update_fields=['replaced_by_occupancy'])

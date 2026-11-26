@@ -2671,7 +2671,6 @@ class SettlementResident(StableIdentifierModel):
                             created_by_access__isnull=False,
                         )
                         & ~models.Q(full_name='')
-                        & ~models.Q(position_title='')
                         & ~models.Q(organization='')
                     )
                 ),
@@ -2762,7 +2761,7 @@ class SettlementResident(StableIdentifierModel):
                 self.ResidentType.EXTERNAL_OTHER,
             }:
                 errors['resident_type'] = 'Неизвестный тип внешнего жильца.'
-            for field_name in ('full_name', 'position_title', 'organization'):
+            for field_name in ('full_name', 'organization'):
                 if not getattr(self, field_name):
                     errors[field_name] = 'Поле обязательно для внешнего жильца.'
             if not self.created_by_access_id:

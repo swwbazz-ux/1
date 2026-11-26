@@ -439,7 +439,7 @@ def create_external_resident(
     resident = SettlementResident(
         resident_type=resident_type,
         full_name=_normalized_required(full_name, 'ФИО'),
-        position_title=_normalized_required(position_title, 'Должность или профессия'),
+        position_title=' '.join(str(position_title or '').split()),
         organization=_normalized_required(organization, 'Организация'),
         phone=_normalized_required(phone, 'Телефон') if require_phone else ' '.join(str(phone or '').split()),
         external_sex=_normalized_external_sex(sex),
@@ -488,6 +488,8 @@ def update_external_resident(
             continue
         if field_name == 'external_sex':
             value = _normalized_external_sex(value)
+        elif field_name == 'position_title':
+            value = ' '.join(str(value or '').split())
         elif field_name != 'photo':
             value = _normalized_required(value, resident._meta.get_field(field_name).verbose_name)
         if getattr(resident, field_name) != value:

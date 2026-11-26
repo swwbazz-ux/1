@@ -4,7 +4,7 @@
 {% block clerk_extra_head %}
 <link rel="stylesheet" href="{% static 'css/settlement-one-button-v1.css' %}?v={{ static_asset_release }}-settlement-one-button-v1">
 <link rel="stylesheet" href="{% static 'css/settlement-special-fund-v1.css' %}?v={{ static_asset_release }}-settlement-special-fund-v1">
-<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-bed-swap-v2">
+<link rel="stylesheet" href="{% static 'css/settlement-housing-import.css' %}?v={{ static_asset_release }}-excel-residents-v1-bed-swap-v2">
 {% endblock %}
 
 {% block clerk_shell_attributes %}data-settlement-root
@@ -52,7 +52,14 @@
                 <button type="button" class="is-active" data-map-mode="current" aria-pressed="true">Текущая вахта</button>
                 <button type="button" data-map-mode="next" aria-pressed="false">Следующий заезд</button>
             </nav>
-            <a class="settlement-map-entry__upload" href="{% url 'settlement_current_housing_import' %}">Загрузить Excel</a>
+            <div class="settlement-map-entry__excel" role="group" aria-label="Обмен с Excel">
+                <a href="{% url 'settlement_current_housing_import' %}" title="Загрузить Excel" aria-label="Загрузить Excel">
+                    <span aria-hidden="true">&#8593;</span>
+                </a>
+                <a href="{% url 'settlement_current_housing_export' %}" title="Выгрузить Excel" aria-label="Выгрузить текущее расселение в Excel">
+                    <span aria-hidden="true">&#8595;</span>
+                </a>
+            </div>
             <details class="settlement-watch-extensions" data-watch-extensions>
                 <summary>На продлении <b data-watch-extension-count>{{ watch_extensions.entries|length }}</b></summary>
                 <div class="settlement-watch-extensions__content">
@@ -970,11 +977,11 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v3"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
 <script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v2"></script>
-<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-checkin-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1"></script>
-<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39"></script>
+<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>
 {% endblock %}

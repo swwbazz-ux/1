@@ -419,6 +419,33 @@ class BedCheckinTests(TemporaryPlacementBase):
     def checkin(self, **changes):
         return self.post_json('settlement_bed_checkin', {**self.payload, **changes})
 
+    def test_new_resident_without_position_or_dates_keeps_selected_shift(self):
+        from core.production_time import business_localtime
+
+        self.acquire()
+        response = self.checkin(position_title='', arrival='', departure='', work_shift='night')
+        self.assertEqual(response.status_code, 201, response.json())
+        occupancy = EmployeeBedOccupancy.objects.get(physical_bed=self.beds[0])
+        self.assertEqual(occupancy.resident.position_title, '')
+        self.assertEqual(business_localtime(occupancy.starts_at).date(), business_localtime(timezone.now()).date())
+        self.assertIsNone(occupancy.ends_at)
+        self.assertEqual(occupancy.work_shift, 'night')
+        self.assertEqual(occupancy.shift_selected_by_access, self.clerk_access)
+        self.assertEqual(response.json()['occupancy']['shift_label'], 'Ночь')
+        moved = self.post_json('settlement_temporary_relocate', {
+            'occupancy_id': occupancy.pk, 'bed_stable_id': self.beds[1].stable_id,
+            'reason': 'Перенос на свободную койку',
+        })
+        self.assertEqual(moved.status_code, 200, moved.json())
+        occupancy.refresh_from_db()
+        self.assertEqual(occupancy.replaced_by_occupancy.work_shift, 'night')
+
+    def test_invalid_shift_does_not_create_resident(self):
+        self.acquire()
+        response = self.checkin(work_shift='invalid')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SettlementResident.objects.filter(full_name=self.payload['full_name']).exists())
+
     def test_swap_between_dormitories_moves_both_residents_and_rejects_stale_confirmation(self):
         target = PhysicalBed.objects.filter(
             room__dormitory__number='6', room__floor=2,

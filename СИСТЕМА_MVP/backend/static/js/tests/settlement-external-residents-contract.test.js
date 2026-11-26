@@ -73,7 +73,7 @@ test("search is POST with a JSON body, no query string, debounce and 2-char mini
     assert.match(JS, /setCount\("Найдено: " \+ residents\.length\)/);
 });
 
-test("create posts six required fields and handles duplicate confirmation", () => {
+test("create posts resident fields and handles duplicate confirmation", () => {
     assert.match(JS, /root\.dataset\.externalResidentCreateUrl/);
     ["resident_type", "full_name", "position_title", "organization", "phone", "sex"].forEach((field) => {
         assert.match(JS, new RegExp(`${field}: "`), `${field} is read from the form`);

@@ -11,7 +11,7 @@ from django.core import signing
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
-from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
+from django.http import FileResponse, HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -73,6 +73,7 @@ from rotations.models import ArrivalRosterRoutingBatch, ArrivalRosterVersion
 from .resolver import resolve_ready_arrivals
 from .cohort_readiness import build_arrival_roster_cohort_overview, build_arrival_roster_cohort_readiness
 from .current_housing_draft import CurrentHousingDraft, CurrentHousingDraftStorage
+from .current_housing_export import build_current_housing_export
 from .current_housing_import import (
     MANUAL_BED_BLOCKERS,
     MAX_FILE_SIZE,
@@ -1427,6 +1428,22 @@ def settlement_map_assignments(request):
 
 
 @require_GET
+@never_cache
+def settlement_current_housing_export_view(request):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    moment = timezone.now()
+    rooms = list(_clerk_map_rooms(moment))
+    _attach_occupancy_view(rooms, moment)
+    return FileResponse(
+        build_current_housing_export(rooms, moment),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        filename=f'Текущее расселение {business_localtime(moment):%Y-%m-%d}.xlsx',
+    )
+
+
+@require_GET
 def settlement_map_view(request):
     access = settlement_clerk_access_from_request(request)
     if not access:
@@ -2685,7 +2702,6 @@ def _external_resident_post_only(view):
 
 EXTERNAL_RESIDENT_REQUIRED_FIELDS = (
     ('full_name', 'ФИО'),
-    ('position_title', 'Должность или профессия'),
     ('organization', 'Организация'),
     ('phone', 'Телефон'),
 )
@@ -2703,7 +2719,10 @@ def _validated_external_resident_fields(payload, *, require_phone=True):
             'Для внешней карточки требуется внешний тип жильца.',
             code='settlement.resident.invalid_type',
         )
-    values = {'resident_type': resident_type}
+    values = {
+        'resident_type': resident_type,
+        'position_title': _normalized_external_required(payload.get('position_title')),
+    }
     for field_name, field_label in EXTERNAL_RESIDENT_REQUIRED_FIELDS:
         normalized = _normalized_external_required(payload.get(field_name))
         if not normalized and (field_name != 'phone' or require_phone):
@@ -3093,9 +3112,10 @@ def _bed_checkin_resident(payload, control):
     raise ValidationError('Выберите человека из списка или создайте нового жильца.')
 
 
-class BedCheckinDatesForm(forms.Form):
-    arrival = forms.DateField(input_formats=['%Y-%m-%d'])
+class BedCheckinForm(forms.Form):
+    arrival = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
     departure = forms.DateField(input_formats=['%Y-%m-%d'], required=False)
+    work_shift = forms.ChoiceField(choices=DAY_NIGHT_LABELS.items(), required=False)
 
 
 @require_POST
@@ -3105,14 +3125,17 @@ def settlement_bed_checkin_view(request):
     try:
         payload = _temporary_placement_payload(request)
         control = _temporary_placement_write_context(request)
-        period = BedCheckinDatesForm(payload)
-        if not period.is_valid():
+        form = BedCheckinForm(payload)
+        if not form.is_valid():
+            if 'work_shift' in form.errors:
+                raise ValidationError('Выберите дневную или ночную смену.')
             raise ValidationError('Проверьте даты заселения и выезда.')
-        arrival, departure = period.cleaned_data['arrival'], period.cleaned_data['departure']
+        departure = form.cleaned_data['departure']
         with transaction.atomic():
             lock_settlement_write_lease(control_context=control, using='default')
             now = timezone.now()
             today = business_localtime(now).date()
+            arrival = form.cleaned_data['arrival'] or today
             if arrival > today:
                 raise ValidationError('Для будущего заезда выберите «Подготовить место».')
             start = now if arrival == today else datetime.combine(arrival, DAY_SHIFT_START, BUSINESS_TIME_ZONE)
@@ -3129,6 +3152,7 @@ def settlement_bed_checkin_view(request):
             occupancy = confirm_bed_preparation(
                 preparation_id=prepared.pk, control_context=control,
                 starts_at=start, ends_at=end, confirm_itr=confirm_itr, placement_reason=payload.get('basis', ''),
+                work_shift=form.cleaned_data['work_shift'] or None,
             )
             result = _occupancy_response(occupancy)
     except ValidationError as error:

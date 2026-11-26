@@ -268,20 +268,20 @@ test("suggestion line style is added without touching the row geometry", () => {
     assert.match(JS, /index === 0 \? "is-suggestion" : ""/);
 });
 
-test("temporary release always carries a reason and never sends it empty", () => {
-    const releaseSource = JS.match(/function releaseTemporary\(occupancyId\) \{[\s\S]*?\n    \}/)[0];
-    assert.match(releaseSource, /var reason = askReason\("Причина освобождения"\);/);
-    assert.match(releaseSource, /if \(!reason\) return;/);
-    assert.match(releaseSource, /order: 0|occupancy_id: Number\(occupancyId\), reason: reason/);
-    assert.match(JS, /function askReason\(question\) \{[\s\S]*?if \(!value\) \{\s+showFeedback\("Причина обязательна\.", true\);\s+return null;/);
+test("temporary release sends the action reason without prompting", () => {
+    const release = JS.match(/function releaseTemporary\(occupancyId\) \{[\s\S]*?\n    \}/)[0];
+    assert.doesNotMatch(release, /askReason|window\.prompt/);
+    assert.match(release, /occupancy_id: Number\(occupancyId\), reason: "Освобождение койки с карты"/);
 });
 
-test("reserve toggle sends an explicit action and a reason", () => {
+test("reserve toggle sends the action reason without prompting", () => {
     assert.match(TEMPLATE, /data-bed-reserve-toggle/);
     assert.match(TEMPLATE, /В резерв/);
     assert.match(JS, /reserveButton\.textContent = reserve \? "Снять резерв" : "В резерв"/);
-    assert.match(JS, /action: mode, reason: reason/);
-    assert.match(JS, /mode === "set" \? "Причина резерва" : "Причина снятия резерва"/);
+    const reserve = JS.match(/function toggleReserve\(bedStableId, mode\) \{[\s\S]*?\n    \}/)[0];
+    assert.doesNotMatch(reserve, /askReason|window\.prompt/);
+    assert.match(reserve, /action: mode, reason: reason/);
+    assert.match(reserve, /mode === "set" \? "Постановка койки в резерв с карты" : "Снятие резерва с карты"/);
 });
 
 test("takeover is rendered for the admin role only", () => {
