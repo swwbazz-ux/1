@@ -1,1 +1,1 @@
-СИСТЕМА_MVP/backend/settlement/services.py
+СИСТЕМА_MVP/backend/deploy/data_updates/add_site_manager_access_20261126.py
