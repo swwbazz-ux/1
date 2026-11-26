@@ -546,6 +546,52 @@ class BedCheckinTests(TemporaryPlacementBase):
         snapshot = self.client.get(reverse('settlement_map_assignments')).json()
         self.assertEqual(snapshot['beds'][str(occupancy.pk)]['categoryException'], warning)
 
+    def test_category_exception_survives_recreating_a_new_employee_resident_card(self):
+        self.authenticate(self.admin_access)
+        self.assertEqual(self.acquire().status_code, 200)
+        employee = Employee.objects.create(
+            full_name='Тестовый сотрудник без карточки жильца',
+            personnel_position=self.worker_position,
+            sex=Employee.Sex.MALE,
+            status=Employee.Status.ACTIVE,
+            is_active=True,
+        )
+        roommate = self.second_candidate_resident.employee
+        roommate.personnel_position = PersonnelPosition.objects.create(
+            code='recreated-resident-itr', name='Руководитель QA',
+            settlement_category=PersonnelPosition.SettlementCategory.ITR,
+        )
+        roommate.save(update_fields=['personnel_position'])
+        occupied_bed = self.beds[0]
+        self.create_occupancy(resident=self.second_candidate_resident, bed=occupied_bed)
+        target = occupied_bed.room.beds.exclude(pk=occupied_bed.pk).first()
+        request = {
+            'subject': f'employee:{employee.pk}', 'bed_stable_id': target.stable_id,
+            'arrival': '', 'departure': '',
+        }
+
+        rejected = self.checkin(**request)
+        self.assertEqual(rejected.json()['code'], 'settlement_room_personnel_category_conflict')
+        confirmation = rejected.json()['category_exception']
+        self.assertFalse(SettlementResident.objects.filter(employee=employee).exists())
+
+        # SQLite can reuse the key of a rolled-back insert. Consume it so the
+        # second request creates a different card, as it does on PostgreSQL.
+        SettlementResident.objects.create(
+            resident_type=SettlementResident.ResidentType.BUSINESS_TRIP,
+            full_name='Тестовый командированный', organization='Организация QA',
+            external_sex=Employee.Sex.MALE, created_by_access=self.admin_access,
+        )
+        accepted = self.checkin(**request, category_exception=confirmation)
+        self.assertEqual(accepted.status_code, 201, accepted.json())
+        occupancy = EmployeeBedOccupancy.objects.get(physical_bed=target)
+        self.assertEqual(occupancy.resident.employee_id, employee.pk)
+        self.assertIn('Заселено с исключением', accepted.json()['occupancy']['category_exception'])
+        self.assertTrue(AdminActionLog.objects.filter(
+            action_code='settlement.manual.category_exception',
+            object_id=str(occupancy.pk), actor_id=self.admin.pk,
+        ).exists())
+
     def test_map_snapshot_tracks_published_shift_without_changing_occupancy(self):
         from assignments.models import CrewPlan, CrewPlanSlot, CrewPlanStatus
         from references.models import Equipment, EquipmentType

@@ -1224,7 +1224,8 @@ def _validate_resident_and_destination(
         if error.code != ROOM_CATEGORY_CONFLICT or room.room_type != PhysicalRoom.RoomType.STANDARD:
             raise
         message = error.messages[0]
-        confirmation = sha256(f'{resident.pk}:{room.pk}:{message}'.encode()).hexdigest()
+        # The first attempt may roll back a newly created resident card.
+        confirmation = sha256(f'{resident.employee_id}:{room.pk}:{message}'.encode()).hexdigest()
         if category_exception == confirmation:
             return message
         error.confirmable_category_conflict = confirmation
