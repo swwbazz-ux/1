@@ -880,8 +880,6 @@ def build_crew_plan_payload(plan, *, deputy=None):
                     reported_employee, eligible_employee_ids, other_role_assignment_employee_ids,
                     equipment=equipment,
                 )
-                if editable and not review_issue and not _in_deputy_roster(reported_employee, brigades, extensions):
-                    review_issue = 'Сотрудник другой вахты без действующей продлёнки'
                 specialization_review = {
                     'employee_id': reported_employee.pk,
                     'position': (
@@ -1528,9 +1526,14 @@ def deputy_mining_manager_slot_view(request):
         employee_id = payload.get('employee_id')
         employee = get_object_or_404(Employee, id=employee_id) if employee_id else None
         brigades = _deputy_brigades(access.employee)
-        if employee and brigades != ALL_BRIGADES and _employee_brigade_code(employee) not in brigades:
-            if employee.pk not in approved_watch_extensions_on(plan.work_date, employee_ids=[employee.pk]):
+
+        def validate_new_employee(candidate, work_date):
+            if _employee_brigade_code(candidate) in brigades:
+                return
+            extensions = approved_watch_extensions_on(work_date, employee_ids=[candidate.pk])
+            if not _in_deputy_roster(candidate, brigades, extensions):
                 raise ValidationError('У сотрудника другой бригады нет согласованного продления на эту дату.')
+
         plan = update_crew_draft_slot(
             plan=plan,
             equipment=equipment,
@@ -1540,6 +1543,10 @@ def deputy_mining_manager_slot_view(request):
             actor=access.employee,
             position=payload.get('position') or CREW_SLOT_POSITION_PRIMARY,
             allow_factual=payload.get('factual') is True,
+            validate_new_employee=validate_new_employee if brigades != ALL_BRIGADES else None,
+            reported_source=(
+                int(payload.get('source_equipment_id')), payload.get('source_shift_type')
+            ) if employee and payload.get('move_reported') is True else None,
         )
     except (TypeError, ValueError, ValidationError) as error:
         if isinstance(error, ValidationError):

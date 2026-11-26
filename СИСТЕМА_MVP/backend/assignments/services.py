@@ -527,6 +527,8 @@ def update_crew_draft_slot(
     actor=None,
     position=CREW_SLOT_POSITION_PRIMARY,
     allow_factual=False,
+    validate_new_employee=None,
+    reported_source=None,
 ):
     locked_plan = _crew_plan_instance(plan, for_update=True)
     role = _crew_plan_role(locked_plan.role)
@@ -567,16 +569,32 @@ def update_crew_draft_slot(
             .select_related('contractor_organization')
             .get(pk=employee.pk)
         )
-        record_fact = False
+        if validate_new_employee is not None and not locked_plan.slots.filter(
+            Q(employee=employee) | Q(secondary_employee=employee) | Q(reported_employee=employee),
+        ).exists():
+            validate_new_employee(employee, locked_plan.work_date)
+        record_fact = reported_source is not None
         try:
             _validate_crew_employee(employee, role, position=position)
         except ValidationError as error:
-            if not (allow_factual and position == CREW_SLOT_POSITION_PRIMARY and error.code == 'invalid_work_category'):
+            if not ((allow_factual or record_fact) and position == CREW_SLOT_POSITION_PRIMARY and error.code == 'invalid_work_category'):
                 raise
             record_fact = True
         validate_employee_equipment_organization(employee, equipment)
         validate_other_crew_bookings(locked_plan, [employee.pk])
         other_reports = locked_plan.slots.filter(reported_employee=employee)
+        if reported_source is not None:
+            reports = list(other_reports[:2])
+            if (position != CREW_SLOT_POSITION_PRIMARY or len(reports) != 1
+                    or (reports[0].equipment_id, reports[0].shift_type) != reported_source):
+                raise ValidationError('Исходное место фактического состава изменилось.', code='stale_version')
+            source_report = reports[0]
+            if source_report.pk == target_slot.pk:
+                return locked_plan
+            if target_slot.employee_id or target_slot.reported_employee_id:
+                raise ValidationError('Перенесите сотрудника с пометкой на свободное основное место.',
+                                      code='reported_target_occupied')
+            other_reports = other_reports.exclude(pk=source_report.pk)
         if position == CREW_SLOT_POSITION_PRIMARY:
             other_reports = other_reports.exclude(pk=target_slot.pk)
         if other_reports.exists():
@@ -589,6 +607,9 @@ def update_crew_draft_slot(
                 raise ValidationError('Сотрудник уже назначен в экипаж.', code='duplicate_employee')
             if target_slot.reported_employee_id == employee.pk:
                 return locked_plan
+            if reported_source is not None:
+                source_report.reported_employee = None
+                source_report.save(update_fields=['reported_employee'])
             target_slot.employee = None
             target_slot.reported_employee = employee
             target_slot.save(update_fields=['employee', 'reported_employee'])

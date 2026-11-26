@@ -659,6 +659,25 @@ test("unlocked deputy drag-and-drop persists exactly once", async () => {
     );
 });
 
+test("scoped deputy can drag an existing crew member from another watch", async () => {
+    const payload = planningPayload({assigned: true});
+    payload.brigades = ["3", "4"];
+    payload.rows[0].slots[0].employee.brigade_code = "2";
+    const runtime = createDeputyRuntime({payload, locked: false});
+    const [source, , target] = runtime.board.querySelectorAll(".deputy-crew-position");
+
+    assert.equal(source.draggable, true);
+    source.dispatchEvent(dragEvent("dragstart"));
+    target.dispatchEvent(dragEvent("drop"));
+    await flushPromises();
+
+    assert.equal(runtime.fetchCalls.length, 1);
+    const body = JSON.parse(runtime.fetchCalls[0].init.body);
+    assert.equal(body.employee_id, 101);
+    assert.equal(body.source_shift_type, "day");
+    assert.equal(body.shift_type, "night");
+});
+
 class CacheStub {
     constructor() {
         this.entries = new Map();

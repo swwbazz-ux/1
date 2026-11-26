@@ -1372,6 +1372,69 @@ class DeputyPlanningViewTests(TestCase):
             self.assertFalse(any(item['extension_until'] for item in board['employees']))
             self.assertEqual(board['summary']['assigned_count'], 2)
 
+    def test_deputy_can_move_current_crew_for_other_or_unclassified_brigade(self):
+        plan = self.create_draft()
+        identity = sha256(f'|{self.deputy.full_name.casefold()}'.encode()).hexdigest()
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', {identity: ('1', '2')}):
+            for index, (rotation, shift) in enumerate([
+                ('Бригада 3', WorkShiftType.SHIFT_1),
+                ('', WorkShiftType.SHIFT_2),
+            ]):
+                person, _ = self.create_employee_with_access(
+                    f'Машинист тестовый {index}', self.driver_role,
+                    phone=f'+7900010410{index}', access_code=f'62002{index}', rotation=rotation,
+                )
+                plan.slots.filter(equipment=self.truck_2, shift_type=shift).update(employee=person)
+                _, plan = self.autosave_slot(plan, equipment=self.truck_1, shift_type=shift, employee=person)
+                self.assertEqual(plan.slots.filter(employee=person).count(), 1)
+                self.assertTrue(plan.slots.filter(equipment=self.truck_1, shift_type=shift, employee=person).exists())
+
+            other, _ = self.create_employee_with_access(
+                'Свободный сотрудник другой вахты', self.driver_role,
+                phone='+79000104001', access_code='620012', rotation='Бригада 3',
+            )
+            denied = self.client.post(reverse('deputy_mining_manager_slot'), {
+                'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+                'shift_type': WorkShiftType.SHIFT_2, 'employee_id': other.pk,
+                'source_equipment_id': self.truck_1.pk, 'source_shift_type': WorkShiftType.SHIFT_1,
+            }, content_type='application/json')
+            self.assertEqual(denied.status_code, 400)
+            self.assertIn('нет согласованного продления', denied.json()['error'])
+            self.assertFalse(plan.slots.filter(employee=other).exists())
+
+    def test_move_reported_crew_keeps_warning_and_checks_source_and_target(self):
+        person, _ = self.create_employee_with_access(
+            'Фактический сотрудник другой вахты', self.excavator_role,
+            phone='+79000104002', access_code='620013', rotation='Бригада 3',
+        )
+        plan = self.create_draft()
+        source = plan.slots.get(equipment=self.truck_1, shift_type=WorkShiftType.SHIFT_2)
+        source.reported_employee = person
+        source.save(update_fields=['reported_employee'])
+        identity = sha256(f'|{self.deputy.full_name.casefold()}'.encode()).hexdigest()
+        body = {
+            'plan_id': plan.pk, 'expected_version': plan.version, 'equipment_id': self.truck_2.pk,
+            'shift_type': WorkShiftType.SHIFT_2, 'employee_id': person.pk,
+            'move_reported': True, 'source_equipment_id': self.truck_1.pk, 'source_shift_type': WorkShiftType.SHIFT_2,
+        }
+        url = reverse('deputy_mining_manager_slot')
+        with patch('assignments.deputy_views.DEPUTY_BRIGADES_BY_IDENTITY', {identity: ('1', '2')}):
+            occupied = self.client.post(url, {**body, 'equipment_id': self.truck_1.pk, 'shift_type': WorkShiftType.SHIFT_1},
+                                        content_type='application/json')
+            self.assertEqual(occupied.json()['code'], 'reported_target_occupied')
+            stale = self.client.post(url, {**body, 'source_shift_type': WorkShiftType.SHIFT_1}, content_type='application/json')
+            self.assertEqual(stale.status_code, 409)
+            moved = self.client.post(url, body, content_type='application/json')
+            self.assertEqual(moved.status_code, 200, moved.content)
+        source.refresh_from_db()
+        self.assertIsNone(source.reported_employee_id)
+        self.assertEqual(plan.slots.filter(reported_employee=person).count(), 1)
+        target = plan.slots.get(reported_employee=person)
+        self.assertEqual(target.equipment_id, self.truck_2.pk)
+        self.assertIsNone(target.employee_id)
+        row = next(r for r in moved.json()['payload']['rows'] if r['equipment']['id'] == self.truck_2.pk)
+        self.assertTrue(row['slots'][1]['specialization_review']['warning'])
+
     def test_board_payload_exposes_brigade_and_record_details_without_new_schema(self):
         second_driver, _second_access = self.create_employee_with_access(
             'Петров Алексей Иванович',

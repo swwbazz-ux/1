@@ -1075,14 +1075,16 @@
         return transparentDragImage;
     }
 
-    function bindDragSource(node, employee, visualNode) {
-        var canDrag = planEditable() && inDeputyRoster(employee) && !employee.disabled && !employee.busy;
-        var visual = visualNode || node;
-        node.draggable = canDrag;
-        visual.classList.toggle("is-disabled", !canDrag && Boolean(employee.disabled || employee.busy));
-        if (!canDrag) return;
+    function bindDragSource(node, employee) {
+        var assigned = Boolean(sourceForEmployee(employee).source_equipment_id);
+        function canDrag() {
+            return planEditable() && (assigned || inDeputyRoster(employee)) && !employee.disabled && !employee.busy;
+        }
+        node.draggable = canDrag();
+        node.classList.toggle("is-disabled", !node.draggable && Boolean(employee.disabled || employee.busy));
+        if (!node.draggable) return;
         node.addEventListener("dragstart", function (event) {
-            if (!planEditable() || saving) {
+            if (!canDrag() || saving) {
                 if (event.preventDefault) event.preventDefault();
                 finishDrag();
                 return;
@@ -1096,7 +1098,7 @@
             };
             dragSourceEquipmentId = textValue(source.source_equipment_id);
             syncEquipmentRowState(dragSourceEquipmentId);
-            visual.classList.add("is-dragging");
+            node.classList.add("is-dragging");
             if (event.dataTransfer) {
                 event.dataTransfer.effectAllowed = "move";
                 event.dataTransfer.setData("application/json", JSON.stringify(dragPayload));
@@ -1301,6 +1303,9 @@
         var showFactual = currentSlot.position === "primary" && factualCandidates && factualCandidates.checked;
         var candidatesForPosition = showFactual ? state.factual_candidates : candidateEmployees;
         var visibleEmployees = candidatesForPosition.filter(function (employee) {
+            if (employee.source_equipment_id) {
+                return currentBrigade === "all" || currentBrigade === "watch" || employee.brigade_code === currentBrigade;
+            }
             return inDeputyRoster(employee) && employeeMatchesBrigade(employee);
         });
         var candidates = rankedEmployeeMatches(visibleEmployees, query).map(function (match) {
@@ -1455,13 +1460,20 @@
         return matched;
     }
 
+    function reportedOccupant(slot) {
+        var review = slot.specialization_review || {};
+        if (!slot.reported_name || !review.employee_id) return null;
+        return {id: review.employee_id, full_name: slot.reported_name, position: review.position,
+            reported: true, eligible_positions: ["primary"]};
+    }
+
     function createCrewPosition(row, slot, position) {
         var isSecondary = position === "secondary";
         var employeeKey = isSecondary ? "secondary_employee" : "employee";
         var employee = slot[employeeKey];
         var reportedName = !employee && !isSecondary && slot.reported_name;
         var review = slot.specialization_review || {};
-        var occupant = employee || (reportedName && { full_name: reportedName, position: review.position });
+        var occupant = employee || (reportedName && (reportedOccupant(slot) || {full_name: reportedName, position: review.position}));
         var changed = isSecondary ? slot.secondary_changed : slot.changed;
         var conflict = isSecondary ? slot.secondary_conflict : slot.conflict;
         var issue = isSecondary ? slot.secondary_issue : slot.issue;
@@ -1510,12 +1522,14 @@
             if (conflict) flags.appendChild(createElement("span", "deputy-slot-flag is-conflict", "!"));
             person.appendChild(flags);
             button.appendChild(person);
-            if (employee) {
-                bindDragSource(person, Object.assign({}, employee, {
+            if (occupant.id) {
+                bindDragSource(button, Object.assign({}, occupant, {
                     source_equipment_id: row.equipment && row.equipment.id,
                     source_shift_type: slot.shift_type,
                     source_position: position
-                }), button);
+                }));
+            }
+            if (employee) {
                 button.title = person.title = "Двойной клик — открыть карточку сотрудника";
                 person.addEventListener("click", function (event) {
                     if (event.detail === 0) {
@@ -1576,18 +1590,19 @@
                 finishDrag();
                 return;
             }
-            var employee = state.allWatchEmployees.concat(
-                state.rows.reduce(function (items, candidateRow) {
-                    (candidateRow.slots || []).forEach(function (candidateSlot) {
-                        if (candidateSlot.employee) items.push(candidateSlot.employee);
-                        if (candidateSlot.secondary_employee) items.push(candidateSlot.secondary_employee);
-                    });
-                    return items;
-                }, [])
-            ).find(function (candidate) {
+            var source = findSlot(payload.sourceEquipmentId, payload.sourceShiftType, payload.sourcePosition);
+            var assignedEmployee = source && (source.position === "primary"
+                ? source.slot.employee || reportedOccupant(source.slot) : source.slot.secondary_employee);
+            var fromCrew = assignedEmployee && textValue(assignedEmployee.id) === textValue(payload.employeeId);
+            var employee = fromCrew ? assignedEmployee : state.employees.find(function (candidate) {
                 return textValue(candidate.id) === textValue(payload.employeeId);
             });
-            if (employee && (!inDeputyRoster(employee) || !employeeCanFillPosition(employee, position))) {
+            if (!employee || (!fromCrew && !inDeputyRoster(employee))) {
+                finishDrag();
+                return;
+            }
+            if (!employeeCanFillPosition(employee, position)) {
+                showNotice("Специализация сотрудника не подходит для этого места в экипаже.");
                 finishDrag();
                 return;
             }
@@ -1603,7 +1618,7 @@
             saveSlot(row, slot, payload.employeeId, {
                 source_equipment_id: payload.sourceEquipmentId,
                 source_shift_type: payload.sourceShiftType,
-                source_position: payload.sourcePosition
+                move_reported: Boolean(employee.reported)
             }, position);
         });
         return button;
@@ -1801,6 +1816,7 @@
             position: position === "secondary" ? "secondary" : "primary"
         };
         if (allowFactual) body.factual = true;
+        if (source && source.move_reported) body.move_reported = true;
         if (source && source.source_equipment_id) body.source_equipment_id = source.source_equipment_id;
         if (source && source.source_shift_type) body.source_shift_type = source.source_shift_type;
         try {
