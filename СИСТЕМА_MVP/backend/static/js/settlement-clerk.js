@@ -38,6 +38,13 @@
     var employeePanelClose = root.querySelector("[data-employee-panel-close]");
     var employeePanelTitle = root.querySelector("[data-employee-panel-title]");
     var employeePanelBody = root.querySelector("[data-employee-panel-body]");
+    var residentEditButton = root.querySelector("[data-resident-card-edit]");
+    var residentEditForm = root.querySelector("[data-resident-card-form]");
+    var residentCardStart = root.querySelector("[data-resident-card-start]");
+    var residentCardFeedback = root.querySelector("[data-resident-card-feedback]");
+    var openedResident = null;
+    var residentCardRequest = 0;
+    var residentCardSaving = false;
     var panelTitle = root.querySelector("[data-room-panel-title]");
     var panelLocation = root.querySelector("[data-room-panel-location]");
     var panelStatus = root.querySelector("[data-room-panel-status]");
@@ -891,6 +898,7 @@
             if (occupied) {
                 var details = document.createElement("dl");
                 addBedDetail(details, "Жилец", bed.dataset.occupantName);
+                addBedDetail(details, "Табельный номер", bed.dataset.personnelNumber || "Не указан");
                 addBedDetail(details, "День / ночь", bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel);
                 if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
                 addBedDetail(details, bed.dataset.workCaption || "Техника / должность", bed.dataset.workLabel);
@@ -1250,7 +1258,7 @@
         panelTitle.textContent = selectedBed ? bedLabel(selectedBed) : roomLabel;
         panelRoomLink.hidden = !selectedBed;
         panelRoomLink.textContent = roomLabel;
-        panelEmployeeLink.hidden = !selectedBed || !Number(selectedBed.dataset.occupantId);
+        panelEmployeeLink.hidden = !selectedBed || !Number(selectedBed.dataset.residentId);
         panelLocation.textContent = "КИС-" + room.dataset.dormitory + " · " + room.dataset.floor + " этаж";
         panelStatus.textContent = transferred ? "Передана" : "Не передана";
         if (roomTransferToggle) roomTransferToggle.setAttribute("aria-checked", String(transferred));
@@ -1903,66 +1911,170 @@
 
     function closeEmployeePanel() {
         if (!employeePanel || !employeePanelBackdrop) return;
+        residentCardRequest += 1;
+        openedResident = null;
         employeePanel.hidden = true;
         employeePanel.setAttribute("aria-hidden", "true");
         employeePanelBackdrop.hidden = true;
     }
 
-    function renderEmployeePanel(employee) {
+    function renderResidentPanel(resident) {
         if (!employeePanelBody || !employeePanelTitle) return;
-        employeePanelTitle.textContent = employee.full_name;
+        employeePanelTitle.textContent = resident.full_name;
         employeePanelBody.textContent = "";
         var details = element("dl", "settlement-employee-panel-details");
-        var fields = [
-            ["Табельный номер", employee.personnel_number],
-            ["Должность", employee.position],
-            ["Категория для расселения", employee.settlement_category_label || "Не указана"],
-            ["Подразделение", employee.department],
-            ["График", employee.work_schedule],
-            ["Бригада", employee.brigade],
-            ["Пол", employee.sex],
-            ["Телефон", employee.phone],
-            ["Фактическое место", employee.residence]
-        ];
-        if (employee.stay_period) {
+        var fields = [["Табельный номер", resident.personnel_number || "Не указан"]];
+        if (resident.is_external) {
             fields.push(
-                ["Заселение на койку", employee.stay_period.start],
-                ["Выезд с койки", employee.stay_period.end || "Дата не указана"]
+                ["Тип жильца", resident.resident_type_label],
+                ["Организация", resident.organization],
+                ["Должность", resident.position_title || "Не указана"],
+                ["Пол", resident.external_sex === "female" ? "Женский" : "Мужской"]
+            );
+        } else {
+            fields.push(
+                ["Должность", resident.position],
+                ["Категория для расселения", resident.settlement_category_label || "Не указана"],
+                ["Подразделение", resident.department],
+                ["График", resident.work_schedule],
+                ["Бригада", resident.brigade],
+                ["Пол", resident.sex]
+            );
+        }
+        fields.push(["Телефон", resident.phone || "Не указан"], ["Фактическое место", resident.residence]);
+        if (resident.stay_period) {
+            fields.push(
+                ["Заселение на койку", resident.stay_period.start],
+                ["Выезд с койки", resident.stay_period.end || "Дата не указана"]
             );
         }
         fields.forEach(function (row) {
             details.appendChild(element("dt", "", row[0]));
             details.appendChild(element("dd", "", row[1]));
         });
+        details.appendChild(element("dt", "", "Заметка по проживанию"));
+        details.appendChild(element("dd", "settlement-resident-card-note", resident.housing_note || "Нет заметки"));
         employeePanelBody.appendChild(details);
+        residentEditButton.hidden = !resident.editable;
     }
 
-    function openEmployeePanel(employeeId) {
-        if (!employeePanel || !employeePanelBackdrop || !employeeId) return;
-        var url = String(root.dataset.employeeDetailUrl || "").replace("/0/", "/" + employeeId + "/");
-        if (!url) return;
+    function residentCardUrl(id) {
+        return root.dataset.residentDetailUrl.replace("/0/", "/" + id + "/");
+    }
+
+    function showResidentCardFeedback(text, error) {
+        residentCardFeedback.textContent = text;
+        residentCardFeedback.hidden = !text;
+        residentCardFeedback.classList.toggle("is-error", Boolean(error));
+    }
+
+    async function fetchResidentCard(id, options) {
+        var response = await fetch(residentCardUrl(id), options);
+        var payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "Не удалось загрузить данные жильца.");
+        return payload.resident;
+    }
+
+    async function openResidentPanel(id) {
+        if (!employeePanel || !id) return;
+        var request = ++residentCardRequest;
+        openedResident = null;
         closePanel();
-        fetch(url, {
-            credentials: "same-origin",
-            headers: {"X-Requested-With": "XMLHttpRequest"}
-        })
-            .then(function (response) {
-                return response.json().then(function (payload) {
-                    if (!response.ok || !payload.ok) {
-                        throw new Error(payload.error || "Не удалось открыть карточку сотрудника.");
-                    }
-                    return payload.employee;
+        employeePanelBody.hidden = false;
+        employeePanelBody.replaceChildren();
+        employeePanelTitle.textContent = "Карточка жильца";
+        residentEditForm.hidden = residentEditButton.hidden = true;
+        employeePanel.hidden = employeePanelBackdrop.hidden = false;
+        employeePanel.setAttribute("aria-hidden", "false");
+        employeePanelClose.focus();
+        showResidentCardFeedback("Загружаем карточку…");
+        try {
+            var resident = await fetchResidentCard(id);
+            if (request !== residentCardRequest) return;
+            openedResident = resident;
+            renderResidentPanel(resident);
+            showResidentCardFeedback("");
+        } catch (error) {
+            if (request === residentCardRequest) showResidentCardFeedback("Не удалось открыть карточку жильца.", true);
+        }
+    }
+
+    function syncResidentCardControls() {
+        if (!residentEditForm || residentEditForm.hidden) return;
+        var submit = residentEditForm.querySelector("[type=submit]");
+        submit.hidden = !controlHeld;
+        submit.disabled = residentCardSaving;
+        residentCardStart.hidden = controlHeld;
+        residentCardStart.disabled = !controlAcquireButton || controlAcquireButton.disabled;
+    }
+
+    if (residentEditForm) {
+        var externalCardFields = residentEditForm.querySelector("[data-resident-external-fields]");
+        residentEditButton.addEventListener("click", function () {
+            var resident = openedResident;
+            externalCardFields.hidden = externalCardFields.disabled = !resident.is_external;
+            var fields = residentEditForm.elements;
+            fields.housing_note.value = resident.housing_note;
+            if (resident.is_external) {
+                fields.full_name.value = resident.full_name;
+                fields.organization.value = resident.organization;
+                fields.position_title.value = resident.position_title;
+                fields.external_personnel_number.value = resident.personnel_number;
+                fields.phone.value = resident.phone;
+                fields.sex.value = resident.external_sex;
+            }
+            showResidentCardFeedback("");
+            employeePanelBody.hidden = residentEditButton.hidden = true;
+            residentEditForm.hidden = false;
+            syncResidentCardControls();
+            (resident.is_external ? fields.full_name : fields.housing_note).focus();
+        });
+        residentCardStart.addEventListener("click", acquireControl);
+        residentEditForm.querySelector("[data-resident-card-cancel]").addEventListener("click", function () {
+            if (residentCardSaving) return;
+            residentEditForm.hidden = true;
+            employeePanelBody.hidden = residentEditButton.hidden = false;
+            showResidentCardFeedback("");
+            residentEditButton.focus();
+        });
+        residentEditForm.addEventListener("submit", async function (event) {
+            event.preventDefault();
+            if (!openedResident || residentCardSaving || !controlHeld) return;
+            var request = residentCardRequest;
+            var changes = Object.fromEntries(new FormData(residentEditForm));
+            changes.revision = openedResident.revision;
+            residentCardSaving = true;
+            syncResidentCardControls();
+            showResidentCardFeedback("Сохраняем…");
+            try {
+                var resident = await fetchResidentCard(openedResident.id, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json", "X-CSRFToken": csrfToken()},
+                    body: JSON.stringify(changes)
                 });
-            })
-            .then(function (employee) {
-                renderEmployeePanel(employee);
-                employeePanel.hidden = false;
-                employeePanel.setAttribute("aria-hidden", "false");
-                employeePanelBackdrop.hidden = false;
-            })
-            .catch(function (error) {
-                showFeedback(error.message || "Не удалось открыть карточку сотрудника.", true);
-            });
+                root.querySelectorAll('[data-bed][data-resident-id="' + resident.id + '"]').forEach(function (bed) {
+                    bed.dataset.occupantName = resident.full_name;
+                    bed.dataset.personnelNumber = resident.personnel_number || "";
+                    if (resident.is_external) {
+                        bed.dataset.workLabel = bed.dataset.tooltipWorkLabel = resident.organization;
+                    }
+                    renderMapBed(bed);
+                });
+                refreshResidentSearch();
+                if (request !== residentCardRequest) return;
+                openedResident = resident;
+                residentEditForm.hidden = true;
+                employeePanelBody.hidden = false;
+                renderResidentPanel(resident);
+                showResidentCardFeedback("Данные сохранены");
+                residentEditButton.focus();
+            } catch (error) {
+                if (request === residentCardRequest) showResidentCardFeedback(error.message, true);
+            } finally {
+                residentCardSaving = false;
+                syncResidentCardControls();
+            }
+        });
     }
 
     function employeeMeta(employee) {
@@ -2078,7 +2190,7 @@
             resident_id: Number(sourceBed.dataset.residentId),
             employee_id: Number(sourceBed.dataset.occupantId),
             full_name: sourceBed.dataset.occupantName,
-            personnel_number: "Не указано",
+            personnel_number: sourceBed.dataset.personnelNumber || "Не указан",
             shift_label: sourceBed.dataset.shiftLabel,
             work_label: sourceBed.dataset.workLabel
         };
@@ -2177,6 +2289,7 @@
         autoSyncButtons();
         updateSettleButton();
         syncCheckinStart();
+        syncResidentCardControls();
     }
 
     function setControlState(nextState, message) {
@@ -2391,6 +2504,7 @@
         destination.dataset.residentId = String(occupancy.resident_id || "");
         destination.dataset.occupantId = String(occupancy.employee_id || "");
         destination.dataset.occupantName = occupancy.occupant_name;
+        destination.dataset.personnelNumber = occupancy.personnel_number || "";
         destination.dataset.occupantPhotoUrl = occupancy.photo_url || "";
         destination.dataset.shiftLabel = occupancy.shift_label;
         destination.dataset.tooltipShiftLabel = occupancy.tooltip_shift_label || occupancy.shift_label;
@@ -2416,6 +2530,7 @@
             source.dataset.residentId = "";
             source.dataset.occupantId = "";
             source.dataset.occupantName = "";
+            source.dataset.personnelNumber = "";
             source.dataset.occupantPhotoUrl = "";
             source.dataset.shiftLabel = "";
             source.dataset.tooltipShiftLabel = "";
@@ -2680,7 +2795,7 @@
         }
         if (bed) {
             // Сохраняем двойной щелчок по фото для открытия личной карточки.
-            if (event.detail && Number(bed.dataset.occupantId) && event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) {
+            if (event.detail && Number(bed.dataset.residentId) && event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]")) {
                 if (event.detail === 1) avatarClickTimer = setTimeout(function () {
                     openRoom(bed.closest("[data-room-card]"), bed);
                 }, 320);
@@ -2969,16 +3084,19 @@
     root.addEventListener("dblclick", function (event) {
         var handle = event.target.closest("[data-bed-photo-slot], [data-bed-hover-card]");
         var bed = handle && handle.closest("[data-bed]");
-        if (moveSource || !bed || !Number(bed.dataset.occupantId) || bed.dataset.occupied !== "true") return;
+        if (moveSource || !bed || !Number(bed.dataset.residentId) || bed.dataset.occupied !== "true") return;
         clearTimeout(avatarClickTimer);
         event.preventDefault();
         event.stopPropagation();
-        openEmployeePanel(Number(bed.dataset.occupantId));
+        openResidentPanel(Number(bed.dataset.residentId));
     });
     panelClose.addEventListener("click", closePanel);
     panelRoomLink.addEventListener("click", function () { openRoom(activeRoom, null); });
     panelEmployeeLink.addEventListener("click", function () {
-        if (selectedBed) openEmployeePanel(Number(selectedBed.dataset.occupantId));
+        if (selectedBed) openResidentPanel(Number(selectedBed.dataset.residentId));
+    });
+    root.addEventListener("settlement:open-resident-card", function (event) {
+        openResidentPanel(Number(event.detail.residentId));
     });
     if (roomTransferToggle) roomTransferToggle.addEventListener("click", changeRoomTransfer);
     panelBackdrop.addEventListener("click", closePanel);

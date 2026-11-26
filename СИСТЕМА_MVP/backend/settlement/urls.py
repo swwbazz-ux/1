@@ -21,6 +21,7 @@ from .views import (
     settlement_current_housing_import_view,
     settlement_employee_search_view,
     settlement_employee_detail_view,
+    settlement_resident_detail_view,
     settlement_external_resident_create_view,
     settlement_external_resident_search_view,
     settlement_fund_view,
@@ -190,6 +191,11 @@ urlpatterns = [
         'clerk/settlement/residents/search/',
         settlement_resident_search_view,
         name='settlement_resident_search',
+    ),
+    path(
+        'clerk/settlement/residents/<int:resident_id>/',
+        settlement_resident_detail_view,
+        name='settlement_resident_detail',
     ),
     path(
         'clerk/settlement/residents/external/create/',

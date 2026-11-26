@@ -53,10 +53,12 @@ test("dialog never offers manual settlement of an external resident", () => {
     assert.doesNotMatch(JS, /settlement_occupancy_create|occupancyCreateUrl|data-settle-button/);
 });
 
-test("search results are read-only rows built without action handlers", () => {
+test("search results show the personnel number and open the resident card", () => {
     const rowBuilder = JS.match(/function buildResultRow\(resident\) \{[\s\S]*?\n    \}/)[0];
     assert.match(rowBuilder, /element\("article", "settlement-external-residents-result"\)/);
-    assert.doesNotMatch(rowBuilder, /createElement\("button"\)|addEventListener/);
+    assert.match(rowBuilder, /resident\.personnel_number/);
+    assert.match(rowBuilder, /settlement:open-resident-card/);
+    assert.doesNotMatch(rowBuilder, /fetch\(|occupancyCreateUrl/);
     assert.match(JS, /function residentMeta\(resident\)/);
     // Телефон показывается, фото и аудит — нет.
     assert.match(JS, /resident\.phone/);

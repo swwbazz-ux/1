@@ -743,6 +743,7 @@
             title: row.resident_name || "",
             meta: [
                 row.bed_label || "",
+                "Таб. № " + (row.personnel_number || "не указан"),
                 "До: " + formatMoment(row.hold_until),
                 "Основание: " + (row.basis || "не указано"),
                 row.is_expired ? "Срок истёк" : "",
@@ -851,6 +852,7 @@
             title: row.resident_name || "",
             meta: [
                 row.bed_label || "",
+                "Таб. № " + (row.personnel_number || "не указан"),
                 row.resident_kind || "",
                 "С " + formatMoment(row.starts_at),
                 row.is_reserve ? "Резерв" : ""

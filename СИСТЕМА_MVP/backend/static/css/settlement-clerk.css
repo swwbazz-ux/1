@@ -3253,6 +3253,51 @@ body.settlement-auto-preview-modal-open {
     overflow-wrap: break-word;
 }
 
+.settlement-employee-panel-body .settlement-resident-card-note {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-weight: 500;
+}
+
+.settlement-resident-card-form,
+.settlement-resident-card-form fieldset {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+.settlement-resident-card-form fieldset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.settlement-resident-card-form legend { margin-bottom: 8px; font-weight: 700; }
+.settlement-resident-card-form label { display: grid; gap: 4px; margin: 0; font-weight: 600; }
+.settlement-resident-card-form :is(input, select, textarea) {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-line);
+    border-radius: 7px;
+    background: var(--admin-panel);
+    color: var(--admin-ink);
+    font: inherit;
+}
+.settlement-resident-card-form :is(input, select) { min-height: 42px; }
+.settlement-resident-card-form textarea { resize: vertical; }
+.settlement-resident-card-actions { display: flex; gap: 8px; }
+.settlement-resident-card-actions button { flex: 1; }
+.settlement-employee-panel-body [hidden] { display: none; }
+.settlement-resident-card-feedback { margin: 0; }
+.settlement-resident-card-feedback.is-error { color: var(--admin-red); }
+
+@media (max-width: 480px) {
+    .settlement-resident-card-form fieldset { grid-template-columns: minmax(0, 1fr); }
+}
+
 .settlement-occupied-actions {
     display: grid;
     gap: 8px;

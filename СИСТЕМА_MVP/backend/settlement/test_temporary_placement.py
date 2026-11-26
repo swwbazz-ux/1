@@ -1688,6 +1688,61 @@ class BedReserveServiceTests(TemporaryPlacementBase):
 
 
 class TemporaryPlacementHttpTests(TemporaryPlacementBase):
+    def test_employee_resident_card_saves_note_and_reads_number_from_employee(self):
+        resident = self.candidate_resident
+        self.candidate.personnel_number = '0012'
+        self.candidate.save(update_fields=['personnel_number'])
+        url = reverse('settlement_resident_detail', args=[resident.pk])
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.authenticate()
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        card = response.json()['resident']
+        self.assertEqual(card['personnel_number'], '0012')
+        self.assertEqual(card['housing_note'], '')
+        payload = {'revision': card['revision'], 'housing_note': 'Первая строка\nВторая строка'}
+        self.assertIn(self.post_json('settlement_resident_detail', payload, args=[resident.pk]).status_code, (403, 409))
+        self.acquire()
+        rejected = self.post_json('settlement_resident_detail', {**payload, 'full_name': 'Другое ФИО'}, args=[resident.pk])
+        self.assertEqual(rejected.status_code, 400)
+        saved = self.post_json('settlement_resident_detail', payload, args=[resident.pk])
+        self.assertEqual(saved.status_code, 200, saved.json())
+        self.assertEqual(self.client.get(url).json()['resident']['housing_note'], payload['housing_note'])
+        self.assertEqual(self.post_json('settlement_resident_detail', payload, args=[resident.pk]).status_code, 409)
+        resident.refresh_from_db()
+        self.assertEqual(resident.updated_by_access_id, self.clerk_access.pk)
+        self.assertEqual(resident.employee.full_name, self.candidate.full_name)
+
+    def test_external_resident_card_can_edit_number_and_leave_phone_blank(self):
+        self.authenticate()
+        self.acquire()
+        created = self.post_json('settlement_external_resident_create', {
+            'full_name': 'Тестовый Внешний Жилец',
+            'resident_type': 'BUSINESS_TRIP',
+            'organization': 'Тестовая организация',
+            'phone': '+79000003868',
+            'sex': 'male',
+        })
+        self.assertEqual(created.status_code, 201, created.json())
+        resident_id = created.json()['resident']['id']
+        url = reverse('settlement_resident_detail', args=[resident_id])
+        card = self.client.get(url).json()['resident']
+        self.assertEqual(card['personnel_number'], '')
+        response = self.post_json('settlement_resident_detail', {
+            'revision': card['revision'],
+            'external_personnel_number': 'К-0007',
+            'phone': '',
+            'organization': 'Новая организация',
+            'housing_note': 'Командировка',
+        }, args=[resident_id])
+        self.assertEqual(response.status_code, 200, response.json())
+        card = self.client.get(url).json()['resident']
+        self.assertEqual(card['personnel_number'], 'К-0007')
+        self.assertEqual(card['organization'], 'Новая организация')
+        self.assertEqual(card['phone'], '')
+        self.assertEqual(card['housing_note'], 'Командировка')
+
     def test_other_role_gets_403_on_every_endpoint(self):
         self.authenticate(self.driver_access)
 

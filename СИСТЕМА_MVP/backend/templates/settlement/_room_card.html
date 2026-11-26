@@ -42,6 +42,7 @@
                                 {% if bed.active_occupancy and not picker %}data-stay-start="{{ bed.stay_period.start }}" data-stay-end="{{ bed.stay_period.end }}"{% endif %}
                                 data-resident-id="{% if bed.active_occupancy %}{{ bed.active_occupancy.resident_id }}{% endif %}"
                                 data-occupant-id="{% if bed.active_occupancy and bed.active_occupancy.resident.employee_id %}{{ bed.active_occupancy.resident.employee_id }}{% endif %}"
+                                data-personnel-number="{{ bed.personnel_number|default_if_none:'' }}"
                                 data-occupant-name="{{ bed.occupant_name }}"
                                 data-occupant-photo-url="{{ bed.occupant_photo_url }}"
                                 data-shift-label="{{ bed.shift_label }}"

@@ -2588,6 +2588,8 @@ class SettlementResident(StableIdentifierModel):
         blank=True,
     )
     phone = models.CharField('Телефон внешнего жильца', max_length=64, blank=True)
+    external_personnel_number = models.CharField('Табельный номер внешнего жильца', max_length=64, blank=True)
+    housing_note = models.TextField('Заметка по проживанию', max_length=3000, blank=True)
     external_sex = models.CharField(
         'Пол внешнего жильца',
         max_length=7,
@@ -2696,12 +2698,14 @@ class SettlementResident(StableIdentifierModel):
             ),
         ]
 
-    EXTERNAL_MUTABLE_FIELDS = (
+    CARD_MUTABLE_FIELDS = (
         'full_name',
         'photo',
         'position_title',
         'organization',
         'phone',
+        'external_personnel_number',
+        'housing_note',
         'external_sex',
         'status',
         'archived_at',
@@ -2718,6 +2722,12 @@ class SettlementResident(StableIdentifierModel):
         return self.full_name
 
     @property
+    def personnel_number(self):
+        if self.employee_id:
+            return self.employee.personnel_number
+        return self.external_personnel_number
+
+    @property
     def display_identity(self):
         return f'{self.stable_id} · {self.display_name}'
 
@@ -2730,7 +2740,7 @@ class SettlementResident(StableIdentifierModel):
 
     def clean(self):
         super().clean()
-        for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+        for field_name in ('full_name', 'position_title', 'organization', 'phone', 'external_personnel_number'):
             value = getattr(self, field_name)
             if isinstance(value, str):
                 setattr(self, field_name, ' '.join(value.split()))
@@ -2739,7 +2749,7 @@ class SettlementResident(StableIdentifierModel):
         if self.resident_type == self.ResidentType.EMPLOYEE:
             if not self.employee_id:
                 errors['employee'] = 'Внутренний resident требует Employee.'
-            for field_name in ('full_name', 'position_title', 'organization', 'phone'):
+            for field_name in ('full_name', 'position_title', 'organization', 'phone', 'external_personnel_number'):
                 if getattr(self, field_name):
                     errors[field_name] = (
                         'Карточные поля не являются кадровым источником внутреннего Employee.'
@@ -2794,6 +2804,8 @@ class SettlementResident(StableIdentifierModel):
             'position_title',
             'organization',
             'phone',
+            'external_personnel_number',
+            'housing_note',
             'external_sex',
             'status',
             'archived_at',
@@ -2812,7 +2824,7 @@ class SettlementResident(StableIdentifierModel):
 
         changed = any(
             original[field_name] != getattr(self, field_name)
-            for field_name in self.EXTERNAL_MUTABLE_FIELDS
+            for field_name in self.CARD_MUTABLE_FIELDS
         )
         if changed:
             if self.revision != original['revision'] + 1:

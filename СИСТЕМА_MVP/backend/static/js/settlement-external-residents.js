@@ -218,6 +218,16 @@
         var meta = residentMeta(resident);
         if (meta) row.appendChild(element("small", "", meta));
         if (resident.phone) row.appendChild(element("small", "", resident.phone));
+        row.appendChild(element("small", "", "Таб. № " + (resident.personnel_number || "не указан")));
+        var details = element("button", "settlement-bed-prep-secondary", "Открыть карточку");
+        details.type = "button";
+        details.addEventListener("click", function () {
+            closeModal();
+            root.dispatchEvent(new CustomEvent("settlement:open-resident-card", {
+                detail: {residentId: resident.id}
+            }));
+        });
+        row.appendChild(details);
         return row;
     }
 
@@ -573,6 +583,7 @@
         document.body.classList.add("settlement-external-residents-modal-open");
         if (trigger) trigger.setAttribute("aria-expanded", "true");
         syncCreateAvailability();
+        if (searchInput.value.trim().length >= 2) runSearch();
         searchInput.focus();
     }
 

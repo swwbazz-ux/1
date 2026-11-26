@@ -299,7 +299,7 @@ def _locked_control_access(*, control_context, using):
     return locked_rows.access_by_id(control_context.owner_access_id)
 
 
-def _locked_external_resident(*, resident_id, expected_revision, using):
+def _locked_resident_card(*, resident_id, expected_revision, using):
     if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
         raise _validation_error('invalid_revision', 'Ожидаемая ревизия должна быть целым числом.')
     resident = (
@@ -307,13 +307,20 @@ def _locked_external_resident(*, resident_id, expected_revision, using):
         .select_for_update(of=('self',))
         .get(pk=resident_id)
     )
+    if resident.revision != expected_revision:
+        raise _validation_error('stale_revision', 'Карточка уже изменена. Откройте её заново.')
+    return resident
+
+
+def _locked_external_resident(*, resident_id, expected_revision, using):
+    resident = _locked_resident_card(
+        resident_id=resident_id, expected_revision=expected_revision, using=using,
+    )
     if not resident.is_external:
         raise _validation_error(
             'internal_read_only',
             'Внутренний Employee нельзя редактировать через сервис внешних карточек.',
         )
-    if resident.revision != expected_revision:
-        raise _validation_error('stale_revision', 'Карточка жильца уже изменена.')
     authoritative_resident_sex(resident)
     return resident
 
@@ -452,7 +459,7 @@ def create_external_resident(
 
 
 @transaction.atomic
-def update_external_resident(
+def update_resident_card(
     *,
     resident_id,
     expected_revision,
@@ -463,10 +470,13 @@ def update_external_resident(
     phone=_UNSET,
     sex=_UNSET,
     photo=_UNSET,
+    external_personnel_number=_UNSET,
+    housing_note=_UNSET,
+    external_only=False,
     using=DEFAULT_DB_ALIAS,
 ):
     actor_access = _locked_control_access(control_context=control_context, using=using)
-    resident = _locked_external_resident(
+    resident = _locked_resident_card(
         resident_id=resident_id,
         expected_revision=expected_revision,
         using=using,
@@ -479,17 +489,28 @@ def update_external_resident(
         'position_title': position_title,
         'organization': organization,
         'phone': phone,
+        'external_personnel_number': external_personnel_number,
         'external_sex': sex,
         'photo': photo,
     }
+    if resident.is_external:
+        authoritative_resident_sex(resident)
+    elif external_only or any(value is not _UNSET for value in updates.values()):
+        raise _validation_error(
+            'internal_read_only',
+            'Кадровые данные сотрудника редактируются в справочнике сотрудников.',
+        )
+    updates['housing_note'] = housing_note
     changed_fields = []
     for field_name, value in updates.items():
         if value is _UNSET:
             continue
         if field_name == 'external_sex':
             value = _normalized_external_sex(value)
-        elif field_name == 'position_title':
+        elif field_name in {'position_title', 'phone', 'external_personnel_number'}:
             value = ' '.join(str(value or '').split())
+        elif field_name == 'housing_note':
+            value = value.strip()
         elif field_name != 'photo':
             value = _normalized_required(value, resident._meta.get_field(field_name).verbose_name)
         if getattr(resident, field_name) != value:
@@ -511,6 +532,10 @@ def update_external_resident(
         update_fields=[*changed_fields, 'revision', 'updated_by_access', 'updated_at'],
     )
     return resident
+
+
+def update_external_resident(**kwargs):
+    return update_resident_card(external_only=True, **kwargs)
 
 
 @transaction.atomic

@@ -122,7 +122,7 @@ from .preview_corrections import (
     restore_settlement_preview_resident,
 )
 from .resolver import _slot_candidates as _resolver_slot_candidates
-from .residents import create_external_resident, get_or_create_employee_resident
+from .residents import create_external_resident, get_or_create_employee_resident, update_resident_card
 from .saved_previews import (
     confirm_settlement_preview_run,
     create_settlement_preview_run,
@@ -1132,6 +1132,7 @@ def _attach_occupancy_view(rooms, moment):
             bed.on_extension = resident.employee_id in extensions
             bed.stay_period = _bed_stay_period(occupancy)
             bed.occupant_name = resident.display_name
+            bed.personnel_number = resident.personnel_number
             bed.occupant_initials = _person_initials(bed.occupant_name)
             profile = profiles.get(resident.employee_id)
             bed.occupant_photo_url = profile['photo_url'] if profile else _resident_photo_url(resident)
@@ -1609,6 +1610,7 @@ def settlement_employee_search_view(request):
 
 
 @require_GET
+@never_cache
 def settlement_employee_detail_view(request, employee_id):
     """Read-only operational card opened from an occupied bed on the map."""
     if not settlement_clerk_access_from_request(request):
@@ -1633,9 +1635,16 @@ def settlement_employee_detail_view(request, employee_id):
             status=404,
         )
 
+    return JsonResponse({
+        'ok': True,
+        'employee': {**_employee_card_fields(employee), **_resident_stay_fields(resident__employee=employee)},
+    })
+
+
+def _resident_stay_fields(**subject):
     occupancy = (
         EmployeeBedOccupancy.objects
-        .filter(effective_occupancy_at_q(timezone.now()), resident__employee=employee)
+        .filter(effective_occupancy_at_q(timezone.now()), **subject)
         .select_related('physical_bed__room__dormitory')
         .order_by('pk')
         .first()
@@ -1650,31 +1659,92 @@ def settlement_employee_detail_view(request, employee_id):
             f'койка {bed.position} ({bed.stable_id})'
         )
 
-    return JsonResponse({
-        'ok': True,
-        'employee': {
-            'id': employee.pk,
-            'full_name': employee.full_name,
-            'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
-            'position': (
-                employee.personnel_position.name
-                if employee.personnel_position_id
-                else employee.position or UNKNOWN_LABEL
-            ),
-            'settlement_category_label': (
-                employee.personnel_position.settlement_category_label
-                if employee.personnel_position_id
-                else PersonnelPosition.SettlementCategory.UNCLASSIFIED.label
-            ),
-            'department': employee.department_label or UNKNOWN_LABEL,
-            'work_schedule': employee.work_schedule_label or UNKNOWN_LABEL,
-            'brigade': employee.get_brigade_number_display() or UNKNOWN_LABEL,
-            'sex': employee.get_sex_display(),
-            'phone': employee.phone or UNKNOWN_LABEL,
-            'residence': residence,
-            'stay_period': _bed_stay_period(occupancy) if occupancy else None,
-        },
-    })
+    return {
+        'residence': residence,
+        'stay_period': _bed_stay_period(occupancy) if occupancy else None,
+    }
+
+
+def _employee_card_fields(employee):
+    return {
+        'id': employee.pk,
+        'full_name': employee.full_name,
+        'personnel_number': employee.personnel_number or UNKNOWN_LABEL,
+        'position': (
+            employee.personnel_position.name
+            if employee.personnel_position_id
+            else employee.position or UNKNOWN_LABEL
+        ),
+        'settlement_category_label': (
+            employee.personnel_position.settlement_category_label
+            if employee.personnel_position_id
+            else PersonnelPosition.SettlementCategory.UNCLASSIFIED.label
+        ),
+        'department': employee.department_label or UNKNOWN_LABEL,
+        'work_schedule': employee.work_schedule_label or UNKNOWN_LABEL,
+        'brigade': employee.get_brigade_number_display() or UNKNOWN_LABEL,
+        'sex': employee.get_sex_display(),
+        'phone': employee.phone or UNKNOWN_LABEL,
+    }
+
+
+def _resident_card_payload(resident):
+    fields = _external_resident_payload(resident) if resident.is_external else _employee_card_fields(resident.employee)
+    return {
+        **fields,
+        **_resident_stay_fields(resident=resident),
+        'id': resident.pk,
+        'personnel_number': resident.personnel_number,
+        'is_external': resident.is_external,
+        'editable': resident.status == SettlementResident.Status.ACTIVE,
+        'revision': resident.revision,
+        'housing_note': resident.housing_note,
+    }
+
+
+@require_http_methods(['GET', 'POST'])
+@never_cache
+def settlement_resident_detail_view(request, resident_id):
+    if not settlement_clerk_access_from_request(request):
+        return JsonResponse({'ok': False, 'error': 'Нет доступа к расселению.'}, status=403)
+    resident = SettlementResident.objects.select_related(
+        'employee__personnel_position', 'employee__personnel_department', 'employee__work_schedule',
+    ).filter(pk=resident_id).first()
+    if resident is None:
+        return JsonResponse({'ok': False, 'error': 'Карточка жильца не найдена.'}, status=404)
+    if request.method == 'POST':
+        try:
+            payload = _external_resident_request_payload(request)
+            revision = payload.pop('revision', None)
+            fields = {'housing_note': forms.CharField(label='Заметка', max_length=3000, required=False)}
+            if resident.is_external:
+                fields.update({
+                    'full_name': forms.CharField(label='ФИО', max_length=255),
+                    'organization': forms.CharField(label='Организация', max_length=255),
+                    'position_title': forms.CharField(label='Должность', max_length=255, required=False),
+                    'phone': forms.CharField(label='Телефон', max_length=64, required=False),
+                    'external_personnel_number': forms.CharField(label='Табельный номер', max_length=64, required=False),
+                    'sex': forms.ChoiceField(label='Пол', choices=[('male', 'Мужской'), ('female', 'Женский')]),
+                })
+            if any(key not in fields or not isinstance(value, str) for key, value in payload.items()):
+                raise ValidationError('Переданы недопустимые поля карточки.')
+            updates = {}
+            for key, value in payload.items():
+                try:
+                    updates[key] = fields[key].clean(value)
+                except ValidationError as error:
+                    raise ValidationError(f'{fields[key].label}. {error.messages[0]}') from error
+            resident = update_resident_card(
+                resident_id=resident.pk, expected_revision=revision,
+                control_context=_settlement_write_control_context(request), **updates,
+            )
+        except ValidationError as error:
+            code = getattr(error, 'code', None) or ''
+            if code.startswith('settlement.control.'):
+                return _control_error_response(request, error)
+            status = 409 if code in ('settlement.resident.stale_revision', 'settlement.resident.archived') else 400
+            return JsonResponse({'ok': False, 'error': ' '.join(error.messages)}, status=status)
+    return JsonResponse({'ok': True, 'resident': _resident_card_payload(resident)})
 
 
 def _validation_error_details(error):
@@ -2535,6 +2605,7 @@ def _occupancy_response(occupancy):
             'employee_id': resident.employee_id,
             'bed_stable_id': bed.stable_id,
             'occupant_name': resident.display_name,
+            'personnel_number': resident.personnel_number,
             'photo_url': photo_url,
             **_bed_assignment_display(occupancy, profile, official, from_excel=from_excel),
             'on_extension': on_extension,
@@ -2785,6 +2856,7 @@ def _external_resident_payload(resident):
         'position_title': resident.position_title,
         'organization': resident.organization,
         'phone': resident.phone,
+        'personnel_number': resident.personnel_number,
         'external_sex': resident.external_sex or '',
     }
 

@@ -12,7 +12,7 @@
 {% block clerk_shell_attributes %}data-settlement-root
      data-control-role="{{ access.role.code }}"
      data-employee-search-url="{% url 'settlement_employee_search' %}"
-     data-employee-detail-url="{% url 'settlement_employee_detail' 0 %}"
+     data-resident-detail-url="{% url 'settlement_resident_detail' 0 %}"
      data-occupancy-create-url="{% url 'settlement_occupancy_create' %}"
      data-room-transfer-url="{% url 'settlement_room_transfer' %}"
      data-assignments-url="{% url 'settlement_map_assignments' %}"
@@ -675,9 +675,7 @@
                                 <strong title="{{ employee.full_name }}">{{ employee.full_name }}</strong>
                                 <span>{{ employee.position_label }}</span>
                                 <div class="settlement-unsettled-employee-meta">
-                                    {% if employee.personnel_number %}
-                                        <small>Таб. № {{ employee.personnel_number }}</small>
-                                    {% endif %}
+                                    <small>Таб. № {{ employee.personnel_number|default:"не указан" }}</small>
                                     {% if employee.has_shift %}
                                         <small class="is-shift">{{ employee.shift_label }}</small>
                                     {% endif %}
@@ -757,7 +755,7 @@
                     <small>Выберите место</small>
                 </div>
                 <div class="settlement-room-bed-list" data-room-panel-beds></div>
-                <button type="button" class="settlement-bed-prep-secondary" data-panel-employee-link hidden>Карточка сотрудника</button>
+                <button type="button" class="settlement-bed-prep-secondary" data-panel-employee-link hidden>Карточка жильца</button>
             </section>
 
             <section class="settlement-placement-panel" data-placement-panel aria-live="polite">
@@ -934,13 +932,41 @@
            hidden>
         <header class="settlement-room-panel-header">
             <div>
-                <span>Сотрудник</span>
-                <h2 id="settlement-employee-panel-title" data-employee-panel-title>Карточка сотрудника</h2>
+                <span>Жилец</span>
+                <h2 id="settlement-employee-panel-title" data-employee-panel-title>Карточка жильца</h2>
                 <p>Фактическое место проживания</p>
             </div>
-            <button type="button" class="settlement-room-panel-close" data-employee-panel-close aria-label="Закрыть карточку сотрудника">×</button>
+            <button type="button" class="settlement-room-panel-close" data-employee-panel-close aria-label="Закрыть карточку жильца">×</button>
         </header>
-        <div class="settlement-employee-panel-body" data-employee-panel-body aria-live="polite"></div>
+        <div class="settlement-employee-panel-body">
+            <div data-employee-panel-body></div>
+            <p class="settlement-resident-card-feedback" data-resident-card-feedback role="status" hidden></p>
+            <button type="button" class="settlement-bed-prep-secondary" data-resident-card-edit hidden>Редактировать данные</button>
+            <form class="settlement-resident-card-form" data-resident-card-form hidden>
+                <fieldset data-resident-external-fields>
+                    <legend>Данные жильца</legend>
+                    <label>ФИО <input name="full_name" maxlength="255" required></label>
+                    <label>Организация <input name="organization" maxlength="255" required></label>
+                    <label>Должность <input name="position_title" maxlength="255"></label>
+                    <label>Табельный номер <input name="external_personnel_number" maxlength="64"></label>
+                    <label>Телефон <input name="phone" type="tel" maxlength="64"></label>
+                    <label>Пол
+                        <select name="sex" required>
+                            <option value="male">Мужской</option>
+                            <option value="female">Женский</option>
+                        </select>
+                    </label>
+                </fieldset>
+                <label>Заметка по проживанию
+                    <textarea name="housing_note" rows="4" maxlength="3000"></textarea>
+                </label>
+                <div class="settlement-resident-card-actions">
+                    <button type="submit" class="settlement-place-button">Сохранить</button>
+                    <button type="button" class="settlement-place-button" data-resident-card-start hidden>Начать работу</button>
+                    <button type="button" class="settlement-bed-prep-secondary" data-resident-card-cancel>Отмена</button>
+                </div>
+            </form>
+        </div>
     </aside>
 
     <dialog class="settlement-swap-dialog" data-swap-dialog aria-labelledby="settlement-swap-title">
@@ -1014,10 +1040,10 @@
 
 {% block clerk_scripts %}
 <script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1"></script>
-<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1-relocate-v1"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1-resident-card-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1-relocate-v1-resident-card-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
-<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39"></script>
+<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-resident-card-v1"></script>
 <script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>
 {% endblock %}

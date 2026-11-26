@@ -9531,8 +9531,8 @@ class SettlementFrontendContractTests(TestCase):
         self.assertIn('addEventListener("drop"', javascript)
         self.assertIn('function configureRelocation(sourceBed, destinationBed)', javascript)
         self.assertIn('addEventListener("dblclick"', javascript)
-        self.assertIn('function openEmployeePanel(employeeId)', javascript)
-        self.assertIn('openEmployeePanel(Number(bed.dataset.occupantId))', javascript)
+        self.assertIn('function openResidentPanel(id)', javascript)
+        self.assertIn('openResidentPanel(Number(bed.dataset.residentId))', javascript)
         self.assertIn(
             'occupancy_id: Number(relocationSourceBed.dataset.occupancyId)',
             javascript,

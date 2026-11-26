@@ -1390,7 +1390,7 @@ def _relocation_suggestions(*, temporary, moment):
 def temporary_placement_state(*, moment=None, limit=STATE_DEFAULT_LIMIT):
     """Read-only состояние подготовок, временных и резерва для UI.
 
-    Без ПДн сверх необходимого: ФИО, место, основание и служебные id;
+    ФИО, табельный номер, место, основание и служебные id;
     телефон/пол/фото не отдаются. Резервные койки идут первыми.
     """
     if moment is None:
@@ -1409,7 +1409,7 @@ def temporary_placement_state(*, moment=None, limit=STATE_DEFAULT_LIMIT):
         SettlementBedPreparation.objects
         .filter(status=PREPARATION_STATUS.PREPARED)
         .select_related(
-            'resident',
+            'resident__employee',
             'physical_bed__room__dormitory',
         )
         .order_by('hold_until', 'pk')[:limit]
@@ -1421,7 +1421,7 @@ def temporary_placement_state(*, moment=None, limit=STATE_DEFAULT_LIMIT):
             assignment_type=TEMPORARY_ASSIGNMENT_TYPE,
         )
         .select_related(
-            'resident',
+            'resident__employee',
             'physical_bed__room__dormitory',
         )
         .order_by('starts_at', 'pk')[:limit]
@@ -1438,6 +1438,7 @@ def temporary_placement_state(*, moment=None, limit=STATE_DEFAULT_LIMIT):
             'id': preparation.pk,
             'resident_id': preparation.resident_id,
             'resident_name': preparation.resident.display_name,
+            'personnel_number': preparation.resident.personnel_number,
             'resident_kind': _resident_kind_label(preparation.resident),
             'bed_stable_id': preparation.physical_bed.stable_id,
             'bed_label': _bed_label(preparation.physical_bed),
@@ -1457,6 +1458,7 @@ def temporary_placement_state(*, moment=None, limit=STATE_DEFAULT_LIMIT):
             'occupancy_id': occupancy.pk,
             'resident_id': occupancy.resident_id,
             'resident_name': occupancy.resident.display_name,
+            'personnel_number': occupancy.resident.personnel_number,
             'resident_kind': _resident_kind_label(occupancy.resident),
             'bed_stable_id': occupancy.physical_bed.stable_id,
             'bed_label': _bed_label(occupancy.physical_bed),
