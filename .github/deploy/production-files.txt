@@ -1,4 +1,9 @@
-СИСТЕМА_MVP/backend/assignments/deputy_views.py
-СИСТЕМА_MVP/backend/assignments/services.py
-СИСТЕМА_MVP/backend/static/js/deputy-mining-manager-v3.js
-СИСТЕМА_MVP/backend/templates/assignments/deputy_mining_manager_placement.html
+СИСТЕМА_MVP/backend/reports/dispatcher_duty.py
+СИСТЕМА_MVP/backend/reports/dispatcher_duty_export.py
+СИСТЕМА_MVP/backend/reports/dispatcher_duty_period.py
+СИСТЕМА_MVP/backend/reports/templatetags/management_workplace.py
+СИСТЕМА_MVP/backend/reports/urls.py
+СИСТЕМА_MVP/backend/static/css/dispatcher-duty-period.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-duty-report.css
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty.html
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty_period.html
