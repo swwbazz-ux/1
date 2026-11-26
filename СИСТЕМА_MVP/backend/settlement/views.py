@@ -685,6 +685,7 @@ def _housing_review_map_response(request, storage, source):
         plan = render_to_string('settlement/_housing_review_map.html', {'dormitories': _dormitory_views(rooms)})
         return JsonResponse({
             'resident': row.name, 'origin': row.place, 'date': draft.as_of.strftime('%d.%m.%Y'),
+            'personnel_number': row.personnel_number,
             'room_id': row.physical_room_id, 'rooms': catalog, 'plan': plan,
         })
     except (OSError, ValidationError):
@@ -763,19 +764,19 @@ def settlement_provisional_plan_view(request, period_id=None):
             'employee', 'resident__employee__personnel_position', 'resident__employee__work_schedule',
         ).in_bulk()
         waiting = [
-            (rows[item.routing_row_id].resident.display_name if item.routing_row_id else 'Весь заезд', item.message)
+            (rows[item.routing_row_id].resident if item.routing_row_id else None, item.message)
             for item in readiness.blockers
         ]
         proposed = []
         exceptions = []
         if readiness.ready_members:
             result = resolve_ready_arrivals(batch=batch, readiness=readiness, rows=rows)
-            names = {row.resident_id: row.resident.display_name for row in rows.values()}
+            residents = {row.resident_id: row.resident for row in rows.values()}
             beds = PhysicalBed.objects.select_related('room__dormitory').in_bulk(
                 item.physical_bed_id for item in result.placements
             )
-            proposed = [(names[item.resident_id], str(beds[item.physical_bed_id])) for item in result.placements]
-            exceptions = [(names[item.resident_id], ' '.join(_auto_settlement_reason_label(code)
+            proposed = [(residents[item.resident_id], str(beds[item.physical_bed_id])) for item in result.placements]
+            exceptions = [(residents[item.resident_id], ' '.join(_auto_settlement_reason_label(code)
                           for code in item.reason_codes)) for item in result.unresolved]
         context.update(period=batch.watch_period, waiting=waiting, proposed=proposed, exceptions=exceptions)
     except (ArrivalRosterRoutingBatch.DoesNotExist, ArrivalRosterRoutingBatch.MultipleObjectsReturned):
@@ -1419,6 +1420,7 @@ def _clerk_map_extension_state(rooms, moment, *, cases=None):
         entries.append({
             'occupancy_id': occupancy.pk,
             'name': occupancy.resident.display_name,
+            'personnel_number': occupancy.resident.personnel_number,
             'location': f'{bed.room} · {bed.get_block_display()}-{bed.position}',
             'ends_on': case.extension_end.strftime('%d.%m.%Y'),
             'expires_at': production_day_bounds(case.extension_end)[1].isoformat(),
@@ -1932,6 +1934,7 @@ def _auto_settlement_resident_payload(resident):
     return {
         'id': resident.pk,
         'name': resident.display_name,
+        'personnel_number': resident.personnel_number,
         'kind': 'internal' if resident.employee_id else 'external',
         'kind_label': 'Внутренний' if resident.employee_id else 'Внешний',
         'organization': '' if resident.employee_id else (resident.organization or ''),
@@ -1944,6 +1947,12 @@ def _auto_settlement_application_payload(application, unresolved_count):
     )
     snapshot = application.result_snapshot or {}
     skipped_rows = snapshot.get('skipped_rows', [])
+    skipped_numbers = {
+        row.pk: row.personnel_number
+        for row in SettlementResident.objects.filter(
+            pk__in={row.get('resident_id') for row in skipped_rows if row.get('resident_id')},
+        ).select_related('employee')
+    }
     return {
         'applied_at': application.applied_at.isoformat(),
         'actor': application.applied_by_access.employee.full_name,
@@ -1953,7 +1962,10 @@ def _auto_settlement_application_payload(application, unresolved_count):
         'replaced_manual': action_counts.get('replaced_manual', 0),
         'unresolved': unresolved_count,
         'skipped_count': snapshot.get('skipped_count', len(skipped_rows)),
-        'skipped': skipped_rows,
+        'skipped': [
+            {**row, 'personnel_number': skipped_numbers.get(row.get('resident_id'), '')}
+            for row in skipped_rows
+        ],
     }
 
 
@@ -2152,6 +2164,7 @@ def _auto_settlement_effective_plan_payload(run, *, stale, shift_apply):
                 SettlementPreviewCorrection.Action.RESTORE: 'Возврат исходного решения',
             }[correction.action],
             'resident': residents[correction.resident_id].display_name,
+            'personnel_number': residents[correction.resident_id].personnel_number,
             'work_shift': _auto_settlement_work_shift_label(correction.work_shift),
             'previous_place': previous_place,
             'new_place': new_place,
@@ -3741,7 +3754,7 @@ def _resident_search_external_row(resident):
         'meta': {
             'position': resident.position_title,
             'organization': resident.organization,
-            'personnel_number': '',
+            'personnel_number': resident.personnel_number or '',
         },
     }
 
@@ -3862,6 +3875,7 @@ def settlement_resident_search_view(request):
             .filter(
                 Q(full_name__icontains=query)
                 | Q(organization__icontains=query)
+                | Q(external_personnel_number__icontains=query)
                 | Q(position_title__icontains=query)
                 | Q(phone__icontains=query),
             )

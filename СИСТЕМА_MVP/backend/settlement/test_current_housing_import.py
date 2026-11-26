@@ -236,6 +236,7 @@ class CurrentHousingPreviewTests(TestCase):
         self.assertIn({
             'id': f'employee:{person.pk}', 'name': person.full_name,
             'details': 'Горный участок № 1 · Рабочая должность QA', 'kind': 'Сотрудник',
+            'personnel_number': '', 'category_label': 'Рабочий',
         }, matches)
         reply = self.submit(review_action='identify:КИС 5!J3', review_subject=f'employee:{person.pk}')
         self.assertEqual(reply.context['applicable_count'], 1)

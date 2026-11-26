@@ -66,6 +66,7 @@
                                             <div class="housing-review__facts">
                                                 {% if case.kind == 'bed' or case.kind == 'linked' %}
                                                     <strong>{{ row.name }}</strong>
+                                                    {% include "settlement/_personnel_number.html" with number=row.personnel_number only %}
                                                 {% endif %}
                                                 {% if case.kind != 'bed' %}<strong>{{ row.place }}</strong>{% endif %}
                                                 <p>
@@ -89,6 +90,7 @@
                                         {% for match in row.review_map_matches %}
                                             <div class="housing-review__evidence">
                                                 <strong>На карте: {{ match.name }}</strong>
+                                                {% include "settlement/_personnel_number.html" with number=match.personnel_number only %}
                                                 <p>{{ match.place }} · с {{ match.starts|date:"d.m.Y" }}{% if match.ends %} до {{ match.ends|date:"d.m.Y" }}{% endif %}{% if match.shift %} · {{ match.shift }}{% endif %}</p>
                                             </div>
                                         {% endfor %}

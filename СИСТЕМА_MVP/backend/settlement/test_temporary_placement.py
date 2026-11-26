@@ -507,7 +507,8 @@ class BedCheckinTests(TemporaryPlacementBase):
         )
         roommate = self.second_candidate_resident.employee
         roommate.personnel_position = itr_position
-        roommate.save(update_fields=['personnel_position'])
+        roommate.personnel_number = '001182'
+        roommate.save(update_fields=['personnel_position', 'personnel_number'])
         self.create_occupancy(resident=self.second_candidate_resident, bed=self.beds[0])
         self.acquire()
 
@@ -516,6 +517,9 @@ class BedCheckinTests(TemporaryPlacementBase):
         self.assertFalse(result.json()['ok'])
         self.assertEqual(result.json()['code'], 'settlement_room_personnel_category_conflict')
         self.assertIn(f'{roommate.full_name} — ИТР (проживание)', result.json()['error'])
+        self.assertIn(f'койка {self.beds[0].get_block_display()}{self.beds[0].position}', result.json()['error'])
+        self.assertIn('таб. № 001182', result.json()['error'])
+        self.assertIn('Выберите свободную койку в комнате для рабочих.', result.json()['error'])
         self.assertFalse(EmployeeBedOccupancy.objects.filter(physical_bed=target).exists())
 
     def test_map_snapshot_tracks_published_shift_without_changing_occupancy(self):
@@ -695,6 +699,26 @@ class BedCheckinTests(TemporaryPlacementBase):
             self.assertEqual(result.status_code, 201, result.content)
             self.assertEqual(result.json()['occupancy']['stay_period']['end'], '')
         self.assertEqual(SettlementResident.objects.filter(employee=person).count(), 1)
+
+    def test_people_search_distinguishes_namesakes_by_personnel_number(self):
+        name = 'Петров Евгений Александрович'
+        people = [
+            Employee.objects.create(
+                full_name=name, personnel_number=number, is_active=True, status=Employee.Status.ACTIVE,
+                personnel_position=self.worker_position, sex=Employee.Sex.MALE,
+            )
+            for number in ('00142', '00273')
+        ]
+        url = reverse('settlement_bed_checkin_people')
+        response = self.client.get(url, {'q': 'Петров'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row['id']: row['personnel_number'] for row in response.json()['results'] if row['name'] == name},
+            {f'employee:{person.pk}': person.personnel_number for person in people},
+        )
+        by_number = self.client.get(url, {'q': '00273'}).json()['results']
+        self.assertEqual([row['id'] for row in by_number], [f'employee:{people[1].pk}'])
+        self.assertEqual(by_number[0]['category_label'], 'Рабочий')
 
     def test_backdated_conflict_and_invalid_dates_rollback_preparation(self):
         self.acquire()

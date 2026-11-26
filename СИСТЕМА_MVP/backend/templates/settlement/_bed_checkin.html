@@ -9,9 +9,10 @@
     </div>
     <label class="settlement-employee-search">
         <span>ФИО жильца</span>
-        <input name="full_name" type="search" required maxlength="255" placeholder="Начните вводить фамилию" autocomplete="off">
+        <input name="full_name" type="search" required maxlength="255" placeholder="Фамилия или табельный номер" autocomplete="off">
     </label>
     <div class="settlement-employee-results" data-checkin-results aria-label="Найденные люди" hidden></div>
+    <div class="settlement-person-identity" data-checkin-selected aria-live="polite" hidden></div>
     <fieldset class="settlement-checkin-card" aria-label="Данные нового жильца" data-checkin-card hidden disabled>
         <fieldset class="settlement-checkin-choice">
             <legend>Тип жильца</legend>

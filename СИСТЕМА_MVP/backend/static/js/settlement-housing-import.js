@@ -121,7 +121,9 @@
         button.setAttribute('aria-pressed', 'true');
         const details = [element('strong', room.label + ' · койка ' + bed.label), element('span', bed.status_label)];
         for (const occupant of bed.residents) {
-            details.push(element('span', [occupant.name, occupant.shift,
+            const identity = element('span', occupant.name, 'settlement-person-identity');
+            identity.append(window.settlementPersonnelNumber(occupant.personnel_number));
+            details.push(identity, element('span', [occupant.shift,
                 occupant.starts + (occupant.ends ? ' — ' + occupant.ends : '')].filter(Boolean).join(' · ')));
         }
         for (const name of bed.draft) details.push(element('span', 'В Excel · ' + name));
@@ -236,7 +238,8 @@
                 button.dataset.reviewBedStatus = entry.bed.status;
                 button.setAttribute('aria-label', button.getAttribute('aria-label') + ', ' + entry.bed.status_label);
             }
-            map.resident.textContent = data.resident + ' · ' + data.date + ' · Место из сверки: ' + data.origin;
+            map.resident.replaceChildren(data.resident + ' ', window.settlementPersonnelNumber(data.personnel_number),
+                ' · ' + data.date + ' · Место из сверки: ' + data.origin);
             originRoomId = data.room_id;
             if (originRoomId) map.plan.querySelector('[data-room-id="' + originRoomId + '"]')?.setAttribute('data-origin-room', '');
             const origin = mapRooms.find(room => room.id === originRoomId);
@@ -322,6 +325,7 @@
                 button.setAttribute('form', form.id);
                 button.dataset.identitySubject = person.id;
                 button.append(element('strong', person.name));
+                button.append(window.settlementPersonnelNumber(person.personnel_number));
                 button.append(element('span', [person.kind, person.details].filter(Boolean).join(' · ')));
                 item.append(button);
                 results.append(item);

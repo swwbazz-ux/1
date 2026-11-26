@@ -477,7 +477,10 @@
         var resident = state.draft.resident;
         prepSelectedCard.hidden = !resident;
         if (!resident) return;
-        if (prepSelectedName) prepSelectedName.textContent = resident.full_name || "";
+        if (prepSelectedName) {
+            prepSelectedName.replaceChildren((resident.full_name || "") + " ",
+                window.settlementPersonnelNumber(resident.meta?.personnel_number));
+        }
         if (prepSelectedMeta) {
             prepSelectedMeta.textContent = [
                 resident.resident_type_label || "",
@@ -529,7 +532,8 @@
 
     function renderPreparationBlock(preparation) {
         if (prepResidentLabel) {
-            prepResidentLabel.textContent = "Подготовлено для: " + (preparation.resident_name || "");
+            prepResidentLabel.replaceChildren("Подготовлено для: " + (preparation.resident_name || "") + " ",
+                window.settlementPersonnelNumber(preparation.personnel_number));
         }
         if (prepHoldLabel) {
             prepHoldLabel.textContent = "До: " + formatMoment(preparation.hold_until);
@@ -710,6 +714,7 @@
         var row = element("article", "settlement-temporary-row" + (options.modifier || ""));
         var copy = element("div", "settlement-temporary-row-copy");
         copy.appendChild(element("strong", "", options.title));
+        if ("personnelNumber" in options) copy.appendChild(window.settlementPersonnelNumber(options.personnelNumber));
         (options.meta || []).forEach(function (line) {
             copy.appendChild(element("small", "", line));
         });
@@ -741,9 +746,9 @@
     function preparationRowNode(row) {
         return buildTemporaryRow({
             title: row.resident_name || "",
+            personnelNumber: row.personnel_number,
             meta: [
                 row.bed_label || "",
-                "Таб. № " + (row.personnel_number || "не указан"),
                 "До: " + formatMoment(row.hold_until),
                 "Основание: " + (row.basis || "не указано"),
                 row.is_expired ? "Срок истёк" : "",
@@ -850,9 +855,9 @@
         return buildTemporaryRow({
             modifier: " is-temporary",
             title: row.resident_name || "",
+            personnelNumber: row.personnel_number,
             meta: [
                 row.bed_label || "",
-                "Таб. № " + (row.personnel_number || "не указан"),
                 row.resident_kind || "",
                 "С " + formatMoment(row.starts_at),
                 row.is_reserve ? "Резерв" : ""
@@ -1039,7 +1044,6 @@
             if (meta.position) parts.push(meta.position);
         } else {
             if (meta.position) parts.push(meta.position);
-            if (meta.personnel_number) parts.push("Таб. № " + meta.personnel_number);
         }
         return parts.filter(Boolean).join(" · ");
     }
@@ -1064,6 +1068,7 @@
                 var button = element("button", "settlement-employee-result");
                 button.type = "button";
                 button.appendChild(element("strong", "", resident.full_name || ""));
+                button.appendChild(window.settlementPersonnelNumber(resident.meta?.personnel_number));
                 button.appendChild(element("small", "", residentMetaLine(resident)));
                 button.addEventListener("click", function () {
                     chooseResident(resident);

@@ -218,7 +218,7 @@
         var meta = residentMeta(resident);
         if (meta) row.appendChild(element("small", "", meta));
         if (resident.phone) row.appendChild(element("small", "", resident.phone));
-        row.appendChild(element("small", "", "Таб. № " + (resident.personnel_number || "не указан")));
+        row.appendChild(window.settlementPersonnelNumber(resident.personnel_number));
         var details = element("button", "settlement-bed-prep-secondary", "Открыть карточку");
         details.type = "button";
         details.addEventListener("click", function () {

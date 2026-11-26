@@ -9,11 +9,11 @@
     {% if error %}<p role="alert">{{ error }}</p>{% else %}
     <p>Расчёт показывает предложенные места. Фактическое заселение выполняется отдельно.</p>
     <h3>Предложено место · {{ proposed|length }}</h3>
-    {% for name, bed in proposed %}<p><strong>{{ name }}</strong> · {{ bed }}</p>{% empty %}<p>Пока нет предложенных мест.</p>{% endfor %}
+    {% for resident, bed in proposed %}<p><strong>{{ resident.display_name }}</strong> {% include "settlement/_personnel_number.html" with number=resident.personnel_number only %} · {{ bed }}</p>{% empty %}<p>Пока нет предложенных мест.</p>{% endfor %}
     {% if waiting %}<h3>Ожидают данных · {{ waiting|length }}</h3>
-    {% for name, reason in waiting %}<p><strong>{{ name }}</strong> · {{ reason }}</p>{% endfor %}{% endif %}
+    {% for resident, reason in waiting %}<p>{% if resident %}<strong>{{ resident.display_name }}</strong> {% include "settlement/_personnel_number.html" with number=resident.personnel_number only %}{% else %}<strong>Весь заезд</strong>{% endif %} · {{ reason }}</p>{% endfor %}{% endif %}
     {% if exceptions %}<h3>Требуется подбор места · {{ exceptions|length }}</h3>
-    {% for name, reason in exceptions %}<p><strong>{{ name }}</strong> · {{ reason }}</p>{% endfor %}{% endif %}
+    {% for resident, reason in exceptions %}<p><strong>{{ resident.display_name }}</strong> {% include "settlement/_personnel_number.html" with number=resident.personnel_number only %} · {{ reason }}</p>{% endfor %}{% endif %}
     {% endif %}
   </section>
 </main>

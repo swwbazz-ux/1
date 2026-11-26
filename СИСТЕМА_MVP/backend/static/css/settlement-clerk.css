@@ -3284,6 +3284,28 @@ body.settlement-auto-preview-modal-open {
 .settlement-resident-card-actions { display: flex; gap: 8px; }
 .settlement-resident-card-actions button { flex: 1; }
 .settlement-employee-panel-body [hidden] { display: none; }
+.settlement-shell input[name="external_personnel_number"],
+.settlement-shell .settlement-personnel-number {
+    color: color-mix(in srgb, var(--admin-red) 80%, var(--admin-ink));
+    font-variant-numeric: tabular-nums;
+}
+.settlement-shell .settlement-personnel-number {
+    display: inline-block;
+    max-width: 100%;
+    font-size: .9em;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+.settlement-shell .settlement-personnel-number.is-missing {
+    color: var(--admin-muted);
+}
+.settlement-person-identity {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: .5em;
+    min-width: 0;
+}
 .settlement-resident-card-feedback { margin: 0; }
 .settlement-resident-card-feedback.is-error { color: var(--admin-red); }
 

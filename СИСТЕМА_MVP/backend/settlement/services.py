@@ -1076,12 +1076,13 @@ def _validate_room_personnel_category(
             physical_bed__room_id=room.pk,
         )
         .exclude(resident_id=resident.pk)
-        .select_related('resident__employee__personnel_position')
+        .select_related('resident__employee__personnel_position', 'physical_bed')
     )
     if exclude_ids:
         occupancies = occupancies.exclude(pk__in=exclude_ids)
     roommates = [
-        (occupancy.resident, 'проживание') for occupancy in occupancies
+        (occupancy.resident, 'проживание', f'койка {occupancy.physical_bed.get_block_display()}{occupancy.physical_bed.position}')
+        for occupancy in occupancies
         if not occupancy.resident.is_external
     ]
     # T-036 D1 (QA-21): ручной путь обязан видеть и подтверждённые плановые
@@ -1134,12 +1135,12 @@ def _validate_room_personnel_category(
             continue
         if binding.resident.is_external:
             continue
-        roommates.append((binding.resident, 'закрепление'))
+        roommates.append((binding.resident, 'закрепление', ''))
     entries = [
-        (roommate.display_name, employee_settlement_category(roommate.employee), kind)
-        for roommate, kind in roommates
+        (roommate, employee_settlement_category(roommate.employee), kind, bed_label)
+        for roommate, kind, bed_label in roommates
     ]
-    roommate_categories = [other_category for _, other_category, _ in entries]
+    roommate_categories = [other_category for _, other_category, _, _ in entries]
     if not room_allows_personnel_category(
         room.room_type, category, roommate_categories,
     ):
@@ -1150,18 +1151,24 @@ def _validate_room_personnel_category(
                 MISSING_CATEGORY_MESSAGE,
                 MISSING_CATEGORY,
             )
+        room_label = f'КИС-{room.dormitory.number}, {room.floor} этаж, комната {room.number}'
         if room.room_type == PhysicalRoom.RoomType.ITR and category != PersonnelPosition.SettlementCategory.ITR:
-            message = f'Комната {room.number} предназначена для ИТР.'
+            message = f'{room_label} предназначена для ИТР. Выберите свободную койку в комнате для рабочих.'
         else:
             categories = PersonnelPosition.SettlementCategory
             conflicts = sorted({
-                f'{name} — {categories(other_category).label} ({kind})'
-                for name, other_category, kind in entries if other_category != category
+                ', '.join(filter(None, (
+                    f'{roommate.display_name} — {categories(other_category).label} ({kind})',
+                    bed_label,
+                    f'таб. № {roommate.personnel_number}' if roommate.personnel_number else '',
+                )))
+                for roommate, other_category, kind, bed_label in entries if other_category != category
             })
+            target_category = 'рабочих' if category == categories.WORKER else 'ИТР'
             message = (
-                f'{resident.display_name} — {categories(category).label}. '
-                f'В комнате {room.number} на эти даты есть жильцы другой категории. '
-                + '. '.join(conflicts) + '.'
+                f'{room_label}. Рабочих и ИТР размещают в разных комнатах. '
+                f'Выбранный жилец — {categories(category).label}. На эти даты в комнате указаны жильцы другой категории. '
+                + '. '.join(conflicts) + f'. Выберите свободную койку в комнате для {target_category}.'
             )
         raise _settlement_error(message, ROOM_CATEGORY_CONFLICT)
 

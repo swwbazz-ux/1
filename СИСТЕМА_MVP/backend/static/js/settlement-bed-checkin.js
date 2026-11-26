@@ -6,6 +6,7 @@ window.createSettlementBedCheckin = function (form, applied) {
     const name = fields.namedItem("full_name");
     const card = form.querySelector("[data-checkin-card]");
     const results = form.querySelector("[data-checkin-results]");
+    const selection = form.querySelector("[data-checkin-selected]");
     const message = form.querySelector("[data-checkin-message]");
     const findButton = form.querySelector("[data-checkin-find]");
     const newButton = form.querySelector("[data-checkin-new]");
@@ -36,8 +37,9 @@ window.createSettlementBedCheckin = function (form, applied) {
         card.hidden = card.disabled = !open;
         findButton.setAttribute("aria-pressed", String(!open));
         newButton.setAttribute("aria-pressed", String(open));
-        name.placeholder = open ? "Фамилия Имя Отчество" : "Начните вводить фамилию";
+        name.placeholder = open ? "Фамилия Имя Отчество" : "Фамилия или табельный номер";
         subject = open ? "new" : "";
+        selection.hidden = true;
         name.setCustomValidity("");
         clearResults();
         notify("");
@@ -52,6 +54,7 @@ window.createSettlementBedCheckin = function (form, applied) {
 
     function search() {
         clearResults();
+        selection.hidden = true;
         name.setCustomValidity("");
         notify("");
         if (!card.hidden) return;
@@ -72,16 +75,21 @@ window.createSettlementBedCheckin = function (form, applied) {
                     button.type = "button";
                     button.className = "settlement-employee-result";
                     const label = document.createElement("strong");
+                    label.className = "settlement-person-identity";
                     label.textContent = person.name;
+                    label.append(window.settlementPersonnelNumber(person.personnel_number));
                     const meta = document.createElement("small");
-                    meta.textContent = [person.kind, person.details].filter(Boolean).join(" · ");
+                    meta.textContent = [person.kind, person.category_label, person.details].filter(Boolean).join(" · ");
                     button.append(label, meta);
                     button.addEventListener("click", function () {
                         subject = person.id;
                         name.value = person.name;
                         name.setCustomValidity("");
                         clearResults();
-                        notify("Выбран: " + person.name);
+                        selection.replaceChildren(window.settlementPersonnelNumber(person.personnel_number));
+                        if (person.category_label) selection.append(person.category_label);
+                        selection.hidden = false;
+                        notify("");
                     });
                     results.append(button);
                 }

@@ -450,6 +450,7 @@
     function exceptionRow(row) {
         var item = el("article", "settlement-one-button-exception");
         item.appendChild(el("strong", "", residentLabel(row.resident)));
+        item.appendChild(window.settlementPersonnelNumber(row.resident?.personnel_number));
         item.appendChild(el("span", "settlement-one-button-exception-reason", row.reason || "Требуется уточнение данных."));
         var rules = ruleChips(row.rule_ids);
         if (rules) item.appendChild(rules);
@@ -461,6 +462,7 @@
         var title = residentLabel(row.resident);
         if (row.work_shift_label) title += " · " + row.work_shift_label;
         item.appendChild(el("strong", "", title));
+        item.appendChild(window.settlementPersonnelNumber(row.resident?.personnel_number));
         item.appendChild(el("span", "settlement-one-button-exception-reason", row.reason || "Исключён из плана вручную."));
         return item;
     }
@@ -618,6 +620,7 @@
             stateText = "Причина пропуска не классифицирована";
         }
         item.appendChild(el("strong", "", row.resident_name || ("Жилец № " + (row.resident_id || "?"))));
+        item.appendChild(window.settlementPersonnelNumber(row.personnel_number));
         item.appendChild(el("span", "settlement-one-button-skip-state", stateText));
         if (row.message) item.appendChild(el("p", "settlement-one-button-skip-reason", row.message));
         if (row.bed_stable_id) item.appendChild(el("small", "", "Койка: " + row.bed_stable_id));

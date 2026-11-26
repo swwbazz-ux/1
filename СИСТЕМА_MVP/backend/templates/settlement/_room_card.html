@@ -90,6 +90,7 @@
                                       data-bed-hover-card
                                       aria-hidden="true">
                                     <strong>{{ bed.occupant_name }}</strong>
+                                    {% include "settlement/_personnel_number.html" with number=bed.personnel_number only %}
                                     {% if bed.tooltip_work_label %}<span>{{ bed.tooltip_work_label }}</span>{% endif %}
                                     <strong>Смена: {{ bed.tooltip_shift_label }}</strong>
                                     {% if bed.assignment_warning %}<strong>{{ bed.assignment_warning }}</strong>{% endif %}

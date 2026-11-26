@@ -305,6 +305,7 @@ function mountOneButton(payload) {
             json: () => Promise.resolve(payload)
         })
     };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../settlement-personnel-number.js"), "utf8"), sandbox);
     vm.runInNewContext(JS, sandbox, { filename: "settlement-one-button-v1.js" });
     return nodes;
 }

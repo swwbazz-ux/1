@@ -370,7 +370,7 @@
         name.textContent = bed.dataset.occupantName || "";
         var shift = document.createElement("strong");
         shift.textContent = "Смена: " + (String(bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel || "").trim() || "Не указано");
-        hoverCard.replaceChildren(name);
+        hoverCard.replaceChildren(name, window.settlementPersonnelNumber(bed.dataset.personnelNumber));
         if (bed.dataset.tooltipWorkLabel) {
             var work = document.createElement("span");
             work.textContent = bed.dataset.tooltipWorkLabel;
@@ -687,7 +687,9 @@
                 option.setAttribute("role", "option");
                 option.setAttribute("aria-selected", "false");
                 var labels = describe(match);
-                option.append(element("strong", "", labels[0]), element("small", "", labels[1]));
+                var heading = element("strong", "settlement-person-identity", labels[0]);
+                if (labels.length > 2) heading.append(window.settlementPersonnelNumber(labels[2]));
+                option.append(heading, element("small", "", labels[1]));
                 list.appendChild(option);
             });
             empty.hidden = matches.length > 0;
@@ -738,16 +740,21 @@
         var matches = [];
         root.querySelectorAll('[data-room-card] [data-occupied="true"]').forEach(function (bed) {
             var name = residentSearchName(bed.dataset.occupantName);
-            if (!tokens.every(function (token) { return name.includes(token); })) return;
             var surname = name.split(" ", 1)[0];
+            var number = residentSearchName(bed.dataset.personnelNumber);
+            var numberMatch = Boolean(number && number.startsWith(query));
+            var nameMatch = tokens.length === 1
+                ? surname.startsWith(query)
+                : tokens.every(function (token) { return name.includes(token); });
+            if (!nameMatch && !numberMatch) return;
             var rank = 3;
-            if (name === query) rank = 0;
+            if (name === query || number === query) rank = 0;
             else if (surname === tokens[0]) rank = 1;
-            else if (surname.startsWith(tokens[0])) rank = 2;
-            matches.push({bed: bed, name: name, rank: rank});
+            else if (surname.startsWith(tokens[0]) || numberMatch) rank = 2;
+            matches.push({bed: bed, name: name, number: number, rank: rank});
         });
         return matches.sort(function (left, right) {
-            return left.rank - right.rank || left.name.localeCompare(right.name, "ru");
+            return left.rank - right.rank || left.name.localeCompare(right.name, "ru") || left.number.localeCompare(right.number, "ru");
         });
     }
 
@@ -766,7 +773,7 @@
             var bed = match.bed;
             var location = [bed.dataset.dormitoryLabel, bed.dataset.floorLabel, bed.dataset.roomLabel,
                 "блок " + bed.dataset.blockLabel, bed.dataset.positionLabel].join(" · ");
-            return [bed.dataset.occupantName, location];
+            return [bed.dataset.occupantName, location, bed.dataset.personnelNumber];
         });
     }
 
@@ -811,6 +818,7 @@
             var item = element("li");
             item.append(
                 element("strong", "", entry.name),
+                window.settlementPersonnelNumber(entry.personnel_number),
                 element("small", "", entry.location + " · по " + entry.ends_on)
             );
             return item;
@@ -864,10 +872,12 @@
         refreshWatchExtensions();
     }
 
-    function addBedDetail(list, label, value) {
+    function addBedDetail(list, label, value, badge) {
         var item = document.createElement("div");
         item.appendChild(element("dt", "", label));
-        item.appendChild(element("dd", "", value || "Не указано"));
+        var definition = element("dd", "", value || (badge ? "" : "Не указано"));
+        if (badge) definition.append(badge);
+        item.appendChild(definition);
         list.appendChild(item);
     }
 
@@ -899,7 +909,7 @@
             if (occupied) {
                 var details = document.createElement("dl");
                 addBedDetail(details, "Жилец", bed.dataset.occupantName);
-                addBedDetail(details, "Табельный номер", bed.dataset.personnelNumber || "Не указан");
+                addBedDetail(details, "Табельный номер", "", window.settlementPersonnelNumber(bed.dataset.personnelNumber, {label: false}));
                 addBedDetail(details, "День / ночь", bed.dataset.tooltipShiftLabel || bed.dataset.shiftLabel);
                 if (bed.dataset.shiftConflict) addBedDetail(details, "Конфликт смен", bed.dataset.shiftConflict);
                 addBedDetail(details, bed.dataset.workCaption || "Техника / должность", bed.dataset.workLabel);
@@ -992,7 +1002,9 @@
         var badge = swapPersonTemplate.querySelector("[data-swap-badge]").cloneNode(true);
         showSwapBadge(badge, bed);
         swapPicker.querySelector("[data-swap-picked-badge]").replaceChildren(badge);
-        swapPicker.querySelector("[data-swap-picked-name]").textContent = swapSource.name;
+        swapPicker.querySelector("[data-swap-picked-name]").replaceChildren(
+            swapSource.name, window.settlementPersonnelNumber(bed.dataset.personnelNumber)
+        );
         swapPicker.querySelector("[data-swap-picked-address]").textContent = bedLocation(bed);
         swapSearch.value = "";
         showSwapPicker();
@@ -1016,8 +1028,9 @@
             var item = element("li");
             var button = element("button", "settlement-swap-match");
             button.type = "button";
-            button.append(element("strong", "", match.bed.dataset.occupantName),
-                element("span", "", bedLocation(match.bed)));
+            var heading = element("strong", "settlement-person-identity", match.bed.dataset.occupantName);
+            heading.append(window.settlementPersonnelNumber(match.bed.dataset.personnelNumber));
+            button.append(heading, element("span", "", bedLocation(match.bed)));
             button.addEventListener("click", function () { openSwapConfirmation(match.bed); });
             item.append(button);
             return item;
@@ -1052,7 +1065,9 @@
         swapTarget = swapParticipant(bed);
         var entries = [[swapSource, swapTarget], [swapTarget, swapSource]].map(function (pair) {
             var item = swapPersonTemplate.firstElementChild.cloneNode(true);
-            item.querySelector("[data-swap-name]").textContent = pair[0].name;
+            item.querySelector("[data-swap-name]").replaceChildren(
+                pair[0].name, window.settlementPersonnelNumber(pair[0].bed.dataset.personnelNumber)
+            );
             showSwapBadge(item.querySelector("[data-swap-badge]"), pair[0].bed);
             showSwapAddress(item.querySelector("[data-swap-current]"), pair[0].bed);
             showSwapAddress(item.querySelector("[data-swap-next]"), pair[1].bed);
@@ -1509,6 +1524,7 @@
         card.dataset.planResidentName = row.resident.name;
         var heading = element("div", "settlement-plan-resident-heading");
         heading.appendChild(element("strong", "", row.resident.name));
+        heading.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
         heading.appendChild(element("span", "settlement-plan-shift", row.work_shift_label));
         card.appendChild(heading);
         if (row.manually_changed) {
@@ -1564,6 +1580,7 @@
         rows.forEach(function (row) {
             var item = element("article", "settlement-plan-history-item");
             item.appendChild(element("strong", "", row.action + " · " + row.resident));
+            item.appendChild(window.settlementPersonnelNumber(row.personnel_number));
             item.appendChild(element("span", "", row.work_shift));
             item.appendChild(element("span", "", row.previous_place + " → " + row.new_place));
             item.appendChild(element("small", "", row.actor + " · " + new Date(row.created_at).toLocaleString("ru-RU")));
@@ -1736,6 +1753,7 @@
                 var item = element("article", "settlement-auto-row");
                 var copy = element("div", "");
                 copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
                 copy.appendChild(element("span", "", row.room + " · койка " + row.bed));
                 copy.appendChild(element("small", "", row.arrival_at + " — " + row.departure_at));
                 item.appendChild(copy);
@@ -1751,6 +1769,7 @@
                 var item = element("article", "settlement-auto-row");
                 var copy = element("div", "");
                 copy.appendChild(element("strong", "", autoResidentLabel(row.resident)));
+                copy.appendChild(window.settlementPersonnelNumber(row.resident.personnel_number));
                 copy.appendChild(element("span", "", row.reason || "Требуется уточнение данных."));
                 item.appendChild(copy);
                 unresolved.appendChild(item);
@@ -2003,6 +2022,9 @@
                 labelElement.htmlFor = input.id;
                 term.appendChild(labelElement);
                 definition.appendChild(input);
+            } else if (label === "Табельный номер") {
+                term.textContent = label;
+                definition.append(window.settlementPersonnelNumber(resident.personnel_number, {label: false}));
             } else {
                 term.textContent = label;
                 definition.textContent = value;
@@ -2133,17 +2155,16 @@
     }
 
     function employeeMeta(employee) {
-        return [
-            "Таб. № " + employee.personnel_number,
-            employee.shift_label,
-            employee.work_label
-        ].join(" · ");
+        var meta = element("small", "settlement-person-identity");
+        meta.append(window.settlementPersonnelNumber(employee.personnel_number),
+            [employee.shift_label, employee.work_label].filter(Boolean).join(" · "));
+        return meta;
     }
 
     function chooseEmployee(employee) {
         selectedEmployee = employee;
         selectedEmployeeName.textContent = employee.full_name;
-        selectedEmployeeMeta.textContent = employeeMeta(employee);
+        selectedEmployeeMeta.replaceChildren(employeeMeta(employee));
         selectedEmployeeCard.hidden = false;
         employeeResults.hidden = true;
         employeeSearch.value = employee.full_name;
@@ -2163,7 +2184,7 @@
                 var button = element("button", "settlement-employee-result");
                 button.type = "button";
                 button.appendChild(element("strong", "", employee.full_name));
-                button.appendChild(element("small", "", employeeMeta(employee)));
+                button.appendChild(employeeMeta(employee));
                 button.addEventListener("click", function () {
                     chooseEmployee(employee);
                 });
@@ -2255,7 +2276,7 @@
             return;
         }
         if (selectedEmployeeName) selectedEmployeeName.textContent = selectedEmployee.full_name;
-        if (selectedEmployeeMeta) selectedEmployeeMeta.textContent = employeeMeta(selectedEmployee);
+        if (selectedEmployeeMeta) selectedEmployeeMeta.replaceChildren(employeeMeta(selectedEmployee));
         if (selectedEmployeeCard) selectedEmployeeCard.hidden = false;
         if (assignmentType) {
             assignmentType.value = sourceBed.dataset.assignmentType || "";
@@ -2289,7 +2310,9 @@
         moveSource = bed;
         swapNotice.hidden = true;
         root.classList.add("is-picking-move");
-        movePicker.querySelector("[data-move-person]").textContent = "Переселение · " + bed.dataset.occupantName;
+        movePicker.querySelector("[data-move-person]").replaceChildren(
+            "Переселение · " + bed.dataset.occupantName + " ", window.settlementPersonnelNumber(bed.dataset.personnelNumber)
+        );
         moveHint.textContent = "Выберите общежитие, этаж и нажмите свободную койку.";
         movePicker.hidden = false;
         root.querySelector('.settlement-toolbar [data-dorm-filter][aria-pressed="true"]').focus();
@@ -2659,7 +2682,8 @@
                 if (temporaryMove) root.dispatchEvent(new Event("settlement:checked-in"));
                 if (source && relocationSourceBed === source) {
                     closeRelocationModal(true);
-                    swapNotice.textContent = destination.dataset.occupantName + " · " + bedLocation(destination);
+                    swapNotice.replaceChildren(destination.dataset.occupantName + " · " + bedLocation(destination) + " ",
+                        window.settlementPersonnelNumber(destination.dataset.personnelNumber));
                     swapNotice.hidden = false;
                     destination.focus({preventScroll: true});
                     destination.scrollIntoView({block: "nearest", inline: "nearest"});

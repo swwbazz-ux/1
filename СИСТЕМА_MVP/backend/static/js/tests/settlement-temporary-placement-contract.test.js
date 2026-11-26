@@ -580,6 +580,7 @@ function mountPreparationSearch(searchResults, options) {
             });
         }
     };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../settlement-personnel-number.js"), "utf8"), sandbox);
     vm.runInNewContext(JS, sandbox, { filename: "settlement-temporary-placement.js" });
     return { root, search, results, label, kindButtons, searchBodies };
 }

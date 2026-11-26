@@ -148,14 +148,14 @@
                     <p role="status" hidden>Комнаты не найдены.</p>
                 </div>
                 <label class="settlement-search-field" for="settlement-resident-finder">
-                    <span>Фамилия жильца во всех общежитиях</span>
+                    <span>Фамилия жильца или табельный номер во всех общежитиях</span>
                     <input id="settlement-resident-finder" type="search" autocomplete="off"
-                           placeholder="Фамилия жильца" role="combobox" aria-autocomplete="list"
+                           placeholder="Фамилия жильца или таб. №" role="combobox" aria-autocomplete="list"
                            aria-expanded="false" aria-controls="settlement-resident-matches">
                 </label>
                 <div class="settlement-search-popup" data-resident-popup hidden>
                     <div id="settlement-resident-matches" role="listbox" aria-label="Найденные жильцы"></div>
-                    <p role="status" data-resident-search-empty hidden>Жильцы с таким именем не найдены.</p>
+                    <p role="status" data-resident-search-empty hidden>На карте совпадений нет. Для заселения выберите свободную койку.</p>
                 </div>
             </div>
 
@@ -184,7 +184,7 @@
                     <div class="settlement-watch-extensions__content">
                         <ul data-watch-extension-list aria-label="Жильцы на продлении">
                             {% for entry in watch_extensions.entries %}
-                                <li><strong>{{ entry.name }}</strong><small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
+                                <li><strong>{{ entry.name }}</strong>{% include "settlement/_personnel_number.html" with number=entry.personnel_number only %}<small>{{ entry.location }} · по {{ entry.ends_on }}</small></li>
                             {% endfor %}
                         </ul>
                         <p data-watch-extension-empty{% if watch_extensions.entries %} hidden{% endif %}>Сейчас жильцов на продлении нет.</p>
@@ -675,7 +675,7 @@
                                 <strong title="{{ employee.full_name }}">{{ employee.full_name }}</strong>
                                 <span>{{ employee.position_label }}</span>
                                 <div class="settlement-unsettled-employee-meta">
-                                    <small>Таб. № {{ employee.personnel_number|default:"не указан" }}</small>
+                                    {% include "settlement/_personnel_number.html" with number=employee.personnel_number only %}
                                     {% if employee.has_shift %}
                                         <small class="is-shift">{{ employee.shift_label }}</small>
                                     {% endif %}
@@ -964,12 +964,12 @@
                 <div data-swap-picked-badge></div>
                 <div>
                     <span class="settlement-swap-caption">Первый жилец</span>
-                    <strong data-swap-picked-name></strong>
+                    <strong class="settlement-person-identity" data-swap-picked-name></strong>
                     <span data-swap-picked-address></span>
                 </div>
             </div>
             <label class="settlement-swap-search" for="settlement-swap-search">Найти второго жильца</label>
-            <input id="settlement-swap-search" type="search" placeholder="Фамилия или ФИО" autocomplete="off" aria-describedby="settlement-swap-search-hint">
+            <input id="settlement-swap-search" type="search" placeholder="Фамилия или табельный номер" autocomplete="off" aria-describedby="settlement-swap-search-hint">
             <p id="settlement-swap-search-hint" class="settlement-swap-caption">Все этажи КИС-5 и КИС-6</p>
             <p class="settlement-swap-caption" data-swap-empty role="status" hidden></p>
             <ul class="settlement-swap-results" data-swap-results aria-label="Найденные жильцы" hidden></ul>
@@ -984,7 +984,7 @@
         <template data-swap-person-template>
             <section class="settlement-swap-person">
                 <span class="settlement-bed is-occupied settlement-swap-badge" data-swap-badge data-occupied="true" aria-hidden="true" inert></span>
-                <h3 data-swap-name></h3>
+                <h3 class="settlement-person-identity" data-swap-name></h3>
                 <dl class="settlement-swap-route">
                     <div><dt>Сейчас</dt><dd data-swap-current></dd></div>
                     <div><dt>После обмена</dt><dd data-swap-next></dd></div>
@@ -1022,11 +1022,11 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-excel-residents-v1-checkin-v3"></script>
-<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-bed-swap-v3-map-header-v1-relocate-v1-resident-card-v2"></script>
-<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-checkin-v1-relocate-v1-resident-card-v1"></script>
+<script src="{% static 'js/settlement-bed-checkin.js' %}?v={{ static_asset_release }}-checkin-v4-personnel"></script>
+<script src="{% static 'js/settlement-clerk.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
+<script src="{% static 'js/settlement-temporary-placement.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
 <script src="{% static 'js/settlement-clerk-shift.js' %}?v={{ static_asset_release }}-settlement-map-v39-parallel-admin-v1-header-v1"></script>
-<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-excel-residents-v1-settlement-map-v39-resident-card-v1"></script>
-<script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1"></script>
+<script src="{% static 'js/settlement-external-residents.js' %}?v={{ static_asset_release }}-settlement-map-v39-resident-personnel-v1"></script>
+<script src="{% static 'js/settlement-one-button-v1.js' %}?v={{ static_asset_release }}-settlement-one-button-v1-personnel"></script>
 <script src="{% static 'js/settlement-special-fund-v1.js' %}?v={{ static_asset_release }}-settlement-special-fund-v1"></script>
 {% endblock %}

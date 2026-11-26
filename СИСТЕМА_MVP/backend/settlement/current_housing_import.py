@@ -105,6 +105,7 @@ class HousingMapMatch:
     starts: datetime
     ends: datetime | None
     shift: str
+    personnel_number: str
 
 
 @dataclass
@@ -135,6 +136,7 @@ class HousingRow:
     reviewed_place: str = ''
     excel_place: str = ''
     employee_id: int | None = None
+    personnel_number: str = ''
     reviewed_employee: Employee | None = None
     reviewed_resident: SettlementResident | None = None
     external_draft: dict = field(default_factory=dict)
@@ -622,6 +624,7 @@ def housing_review_map(groups, row, as_of):
             'status': status, 'status_label': label,
             'residents': [
                 {'id': occupancy.pk, 'name': occupancy.resident.display_name,
+                 'personnel_number': occupancy.resident.personnel_number,
                  'starts': business_localtime(occupancy.starts_at).strftime('%d.%m.%Y'),
                  'ends': business_localtime(finishes).strftime('%d.%m.%Y') if finishes else '',
                  'shift': next((name for name, code in WORK_SHIFTS.items() if code == occupancy.work_shift), '')}
@@ -654,6 +657,7 @@ def _add_map_match(row, occupancy, begins, finishes):
         business_localtime(begins),
         business_localtime(finishes) if finishes else None,
         next((label for label, shift in WORK_SHIFTS.items() if shift == occupancy.work_shift), ''),
+        occupancy.resident.personnel_number,
     )
     if match not in row.review_map_matches:
         row.review_map_matches.append(match)
@@ -737,10 +741,11 @@ def search_housing_subjects(query):
     employees = Employee.objects.filter(is_active=True, status=Employee.Status.ACTIVE).order_by(
         'full_name', 'pk',
     ).values_list('pk', 'full_name', 'personnel_department__name', 'department',
-                  'personnel_position__name', 'position', 'personnel_number')
+                  'personnel_position__name', 'position', 'personnel_number',
+                  'personnel_position__settlement_category')
     cards = SettlementResident.objects.filter(employee_id__isnull=True, status='ACTIVE').order_by(
         'full_name', 'pk',
-    ).values_list('pk', 'full_name', 'organization', 'position_title', 'resident_type')
+    ).values_list('pk', 'full_name', 'organization', 'position_title', 'resident_type', 'external_personnel_number')
     def relevance(full_name):
         name = _name_key(full_name)
         surname = name.split(' ', 1)[0]
@@ -751,15 +756,20 @@ def search_housing_subjects(query):
         return 2 if surname.startswith(tokens[0]) else 3
 
     results = []
-    for pk, name, directory_department, department, directory_position, position, personnel_number in employees.iterator():
+    categories = dict(PersonnelPosition.SettlementCategory.choices)
+    for pk, name, directory_department, department, directory_position, position, number, category in employees.iterator():
         details = ' · '.join(filter(None, (directory_department or department, directory_position or position)))
-        if all(token in _name_key(f'{name} {details} {personnel_number or ""}') for token in tokens):
-            results.append({'id': f'employee:{pk}', 'name': name, 'details': details, 'kind': 'Сотрудник'})
-    for pk, name, organization, position, resident_type in cards.iterator():
+        if all(token in _name_key(f'{name} {details} {number or ""}') for token in tokens):
+            results.append({
+                'id': f'employee:{pk}', 'name': name, 'details': details, 'kind': 'Сотрудник',
+                'personnel_number': number or '', 'category_label': categories.get(category, ''),
+            })
+    for pk, name, organization, position, resident_type, number in cards.iterator():
         details = ' · '.join(filter(None, (organization, position)))
-        if all(token in _name_key(f'{name} {details}') for token in tokens):
+        if all(token in _name_key(f'{name} {details} {number or ""}') for token in tokens):
             results.append({
                 'id': f'resident:{pk}', 'name': name, 'details': details,
+                'personnel_number': number or '',
                 'kind': SettlementResident.ResidentType(resident_type).label,
             })
     return sorted(results, key=lambda item: relevance(item["name"]))[:24]
@@ -909,11 +919,12 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
         if row.external_label:
             people = []
             row.needs_resident = bool(row.external_draft)
+            row.personnel_number = row.reviewed_resident.personnel_number if row.reviewed_resident else ''
             row.sex = row.reviewed_resident.external_sex if row.reviewed_resident else row.external_draft['sex']
         employee = people[0] if len(people) == 1 else None
         if len(people) > 1:
             row.review_identity = True
-            row.issues.append('По ФИО найдено несколько карточек. Выберите человека по подразделению или должности.')
+            row.issues.append('По ФИО найдено несколько карточек. Сверьте табельный номер, подразделение и должность.')
         elif employee and not (employee.is_active and employee.status == Employee.Status.ACTIVE):
             row.issues.append('Карточка сотрудника неактивна.')
             employee = None
@@ -922,6 +933,7 @@ def build_current_housing_preview(rows, as_of, *, filename='', review=None):
             row.issues.append('По этому ФИО нет точного совпадения. Найдите человека или оформите карточку жильца.')
         if employee:
             row.employee_id = employee.pk
+            row.personnel_number = employee.personnel_number or ''
             row.sex = employee.sex
             resident = getattr(employee, 'settlement_resident', None)
             row.needs_resident = resident is None

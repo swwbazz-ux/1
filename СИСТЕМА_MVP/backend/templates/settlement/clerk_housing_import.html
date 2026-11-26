@@ -90,6 +90,7 @@
                                 <li id="housing-row-{{ row.source|slugify }}">
                                     <div class="housing-import__person">
                                         <strong>{{ row.name }}</strong>
+                                        {% include "settlement/_personnel_number.html" with number=row.personnel_number only %}
                                         {% if row.marked_interwatch %}
                                             <small>На межвахте · отмечено при сверке</small>
                                         {% endif %}
@@ -159,5 +160,5 @@
 {% endblock %}
 
 {% block clerk_scripts %}
-<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v11" defer></script>
+<script src="{% static 'js/settlement-housing-import.js' %}?v={{ static_asset_release }}-v12-personnel" defer></script>
 {% endblock %}
