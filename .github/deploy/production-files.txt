@@ -1,2 +1,9 @@
-СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/reports/dispatcher_duty.py
+СИСТЕМА_MVP/backend/reports/dispatcher_duty_export.py
+СИСТЕМА_MVP/backend/reports/dispatcher_duty_period.py
+СИСТЕМА_MVP/backend/reports/templatetags/management_workplace.py
+СИСТЕМА_MVP/backend/reports/urls.py
+СИСТЕМА_MVP/backend/static/css/dispatcher-duty-period.css
+СИСТЕМА_MVP/backend/static/css/dispatcher-duty-report.css
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty.html
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty_period.html
