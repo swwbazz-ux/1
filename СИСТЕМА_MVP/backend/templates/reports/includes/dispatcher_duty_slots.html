@@ -29,7 +29,21 @@
         {% ifchanged event.day %}<h3 class="duty-log-date">{{ event.day }}</h3>{% endifchanged %}
         <div class="duty-event" data-kind="{{ event.kind }}" data-at="{{ event.at }}"{% if event.window_mark %} data-window-event="{{ event.window_mark }}"{% endif %}>
           <time datetime="{{ event.at }}">{{ event.time }}</time>
-          <div><strong>{{ event.title }}</strong>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}{% if event.person %}<small>{{ event.person }}</small>{% endif %}</div>
+          <div>
+            <strong>{{ event.title }}</strong>
+            {% if event.closure %}
+              <dl class="duty-closure">
+                {% if event.closure.owner %}<dt>Чья смена</dt><dd>{{ event.closure.owner }}</dd>
+                {% else %}<dt>Какую смену закрыли</dt><dd>{{ event.closure.target|default:"Нет данных" }}</dd>{% endif %}
+                <dt>Кто закрыл</dt><dd>{{ event.closure.actor|default:"Нет данных" }}</dd>
+                {% if event.closure.show_reason %}<dt>Причина закрытия</dt><dd>{{ event.closure.reason|default:"Не указана" }}</dd>{% endif %}
+              </dl>
+              {% if event.closure.detail %}<p>{{ event.closure.detail }}</p>{% endif %}
+            {% else %}
+              {% if event.detail %}<p>{{ event.detail }}</p>{% endif %}
+              {% if event.person %}<small>{{ event.person }}</small>{% endif %}
+            {% endif %}
+          </div>
         </div>
       {% endfor %}
     </template>

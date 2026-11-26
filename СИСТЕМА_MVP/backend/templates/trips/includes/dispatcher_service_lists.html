@@ -178,7 +178,9 @@
                                             <form method="post" action="{% url 'dispatcher_service_close_shift' shift.id %}" class="dispatcher-inline-form">
                                                 {% csrf_token %}
                                                 {% for filter_name, filter_value in dispatcher_filter_items %}<input type="hidden" name="{{ filter_name }}" value="{{ filter_value }}">{% endfor %}
-                                                <input type="text" name="reason" placeholder="Причина">
+                                                <label>Причина закрытия смены
+                                                    <input type="text" name="reason">
+                                                </label>
                                                 {% if shift.equipment %}
                                                     <input type="number" name="end_fuel" min="0" step="0.01" required placeholder="Топливо на конец">
                                                     {% if shift.workplace_code == "driver" %}

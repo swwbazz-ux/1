@@ -1,3 +1,4 @@
+{% load static %}
 {% if dispatcher_header.can_toggle_shift %}
     <form class="dispatcher-shift-form" method="post" action="{% if dispatcher_header.shift_form_action %}{{ dispatcher_header.shift_form_action }}{% else %}{% url 'dispatcher_toggle_shift' %}{% endif %}">
         {% csrf_token %}
@@ -101,6 +102,7 @@
 {% endif %}
 {% if not dispatcher_header.can_toggle_shift %}
     {% if dispatcher_header.can_service_close_blocking_shift %}
+        <link rel="stylesheet" href="{% static 'css/dispatcher-blocking-shift.css' %}">
         <form
             method="post"
             action="{% url 'dispatcher_service_close_shift' dispatcher_header.blocking_shift.id %}"
@@ -108,13 +110,13 @@
             data-confirm="Закрыть предыдущую смену служебно?"
         >
             {% csrf_token %}
-            <span class="dispatcher-blocking-shift-summary">
-                Смену блокирует {{ dispatcher_header.blocking_shift.employee }}
-                с {{ dispatcher_header.blocking_shift.opened_at|date:"d.m.Y H:i" }}
+            <span class="dispatcher-blocking-shift-summary" title="{{ dispatcher_header.blocking_shift.employee }} · смена открыта {{ dispatcher_header.blocking_shift.opened_at|date:'d.m.Y H:i' }}">
+                <span class="dispatcher-blocking-owner">{{ dispatcher_header.blocking_shift.employee }}</span>
+                <time datetime="{{ dispatcher_header.blocking_shift.opened_at|date:'c' }}">с {{ dispatcher_header.blocking_shift.opened_at|date:"d.m H:i" }}</time>
             </span>
-            <label>
-                <span class="visually-hidden">Причина служебного закрытия</span>
-                <input type="text" name="reason" required maxlength="255" placeholder="Укажите причину">
+            <label class="dispatcher-close-reason">
+                <span>Причина закрытия</span>
+                <input type="text" name="reason" required maxlength="255">
             </label>
             {% if dispatcher_header.blocking_shift.equipment %}
                 <label>
@@ -135,8 +137,8 @@
             <button
                 type="submit"
                 title="Закрыть предыдущую смену служебно"
-                aria-label="Закрыть предыдущую смену служебно"
-            >Закрыть</button>
+                aria-label="Закрыть смену предыдущего диспетчера"
+            >Закрыть смену</button>
         </form>
     {% else %}
         <span class="dispatcher-shift-placeholder" aria-hidden="true"></span>

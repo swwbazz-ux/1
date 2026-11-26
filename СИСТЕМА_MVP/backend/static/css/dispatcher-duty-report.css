@@ -90,6 +90,14 @@
 .duty-event { padding: 8px 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 16px; border-top: 1px solid var(--gd-line); overflow-wrap: anywhere; }
 .duty-event time { white-space: nowrap; }
 .duty-event p, .duty-event small { display: block; margin: 2px 0 0; }
+.duty-closure { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; gap: 4px 14px; margin: 6px 0 0; }
+.duty-closure dt { color: var(--duty-secondary); }
+.duty-closure dd { margin: 0; }
+@media (max-width: 480px) {
+    .duty-closure { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .duty-closure dt { font-size: .875em; }
+    .duty-closure dd + dt { margin-top: 6px; }
+}
 .duty-event.is-selected { border-inline-start: 3px solid var(--gd-cyan); padding-inline-start: 7px; }
 @media (min-width: 751px) and (max-width: 1150px) {
     [data-duty-report] .management-dashboard-header { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }

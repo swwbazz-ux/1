@@ -208,7 +208,11 @@ def operations(start, end, tracking, shifts):
             routes = previous_complexes[row.haul_assignment_id]
             change = next(iter(routes)) if len(routes) == 1 else 'Предыдущий комплекс не записан'
         detail = ' · '.join(filter(None, (summary, change, row.reason)))
-        result.append((row.created_at, journal_event(row.created_at, 'operation', label, row.actor.full_name, detail), duty_id))
+        event = journal_event(row.created_at, 'operation', label, row.actor.full_name, detail)
+        if row.action_type == DispatcherActionType.SERVICE_CLOSE_SHIFT:
+            event['closure'] = dict(target=summary, actor=row.actor.full_name, reason=row.reason,
+                                    show_reason=True, detail=change)
+        result.append((row.created_at, event, duty_id))
     return result
 
 
@@ -241,8 +245,12 @@ def build_slot(selected_date, shift_type, now, tracking, all_shifts, day_operati
         if shift.closed_at and start < shift.closed_at <= min(end, now):
             automatic = shift.service_close_kind == 'auto_expired'
             closer = 'Система' if automatic else shift.closed_by.full_name if shift.closed_by_id else ''
-            events.append(journal_event(shift.closed_at, 'duty', 'Служебное закрытие' if shift.is_service_closed else 'Смена завершена',
-                       closer or who, ' · '.join(filter(None, (who if closer and closer != who else '', shift.service_close_note)))))
+            title = 'Служебное закрытие' if shift.is_service_closed else 'Смена завершена'
+            detail = ' · '.join(filter(None, (who if closer and closer != who else '', shift.service_close_note)))
+            event = journal_event(shift.closed_at, 'duty', title, closer or who, detail)
+            reason = shift.service_close_note or (shift.get_service_close_kind_display() if automatic else '')
+            event['closure'] = dict(owner=who, actor=closer, reason=reason, show_reason=shift.is_service_closed or bool(reason))
+            events.append(event)
         previous_states = {}
         for point in ordered_window_observations(shift):
             if point.state == WindowState.ARCHIVE_VISIBLE and start <= point.started_at < end and point.started_at <= now:

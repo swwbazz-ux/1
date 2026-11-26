@@ -1,0 +1,34 @@
+.dispatcher-command-actions .dispatcher-blocking-shift-recovery {
+    grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.dispatcher-blocking-shift-recovery .dispatcher-blocking-shift-summary {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.dispatcher-blocking-owner {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dispatcher-blocking-shift-summary time {
+    flex: none;
+}
+
+.dispatcher-blocking-shift-recovery .dispatcher-close-reason {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    color: var(--gd-ink);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.dispatcher-close-reason input {
+    min-width: 0;
+    font-size: 12px;
+}

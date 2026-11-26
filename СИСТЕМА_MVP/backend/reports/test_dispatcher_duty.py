@@ -259,6 +259,38 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual(self.client.post(path, body).status_code, 409)
         self.assertFalse(DispatcherDutyWindow.objects.exists())
 
+    def test_closure_labels_identify_owner_author_and_verbatim_reason_in_archive_and_feed(self):
+        at = self.start + timedelta(hours=1)
+        note = 'омрио · <уточнение>'
+        shift = self.shift(closed=at, closed_by=self.relief.employee, is_service_closed=True,
+                           service_close_kind='neglected', service_close_note=note)
+        row = DispatcherActionLog.objects.create(actor=self.relief.employee, actor_role_code='dispatcher',
+            action_type=DispatcherActionType.SERVICE_CLOSE_SHIFT, shift=shift, target_summary='Диспетчер А / Дневная', reason=note)
+        DispatcherActionLog.objects.filter(pk=row.pk).update(created_at=at)
+        path = reverse('management_dispatcher_duty')
+        self.authorize(self.manager)
+        with patch('django.utils.timezone.now', return_value=at + timedelta(minutes=2)):
+            for query in ({}, {'partial': 1}):
+                page = self.client.get(path, query)
+                self.assertContains(page, '<dt>Чья смена</dt><dd>Диспетчер А</dd>')
+                self.assertContains(page, '<dt>Какую смену закрыли</dt><dd>Диспетчер А / Дневная</dd>')
+                self.assertContains(page, '<dt>Кто закрыл</dt><dd>Диспетчер Б</dd>', count=2)
+                self.assertContains(page, '<dt>Причина закрытия</dt><dd>омрио · &lt;уточнение&gt;</dd>', count=2)
+            data = self.client.get(path, {'date': self.start.date(), 'format': 'json'}).json()
+            event, = [e for e in data['slots'][0]['events'] if e['title'] == 'Служебное закрытие']
+            self.assertEqual(event['closure']['reason'], note)
+
+    def test_old_closure_without_author_or_reason_and_ordinary_self_close(self):
+        self.shift(closed=self.start + timedelta(hours=1), is_service_closed=True, service_close_kind='neglected')
+        self.shift(self.relief, opened=self.start + timedelta(hours=1), closed=self.start + timedelta(hours=2),
+                   closed_by=self.relief.employee)
+        self.authorize(self.manager)
+        with patch('django.utils.timezone.now', return_value=self.start + timedelta(hours=3)):
+            page = self.client.get(reverse('management_dispatcher_duty'), {'partial': 1})
+            self.assertContains(page, '<dt>Кто закрыл</dt><dd>Нет данных</dd>')
+            self.assertContains(page, '<dt>Причина закрытия</dt><dd>Не указана</dd>')
+            self.assertContains(page, '<dt>Причина закрытия</dt>', count=1)
+
     def test_shift_handoff_and_midnight_have_real_authors_and_no_duplicate_edges(self):
         evening = self.start + timedelta(hours=12)
         close = evening + timedelta(minutes=4)
@@ -282,6 +314,7 @@ class DispatcherDutyTests(TestCase):
         self.assertEqual((operation['day'], operation['time'], operation['person']), ('26.11.2026', '00:00', self.relief.employee.full_name))
         auto, = [e for slot in (day, night) for e in slot['events'] if e['title'] == 'Служебное закрытие']
         self.assertEqual((auto['person'], auto['time']), ('Система', '19:04'))
+        self.assertEqual((auto['closure']['actor'], auto['closure']['reason']), ('Система', 'Автоматически через 13 часов'))
         self.assertEqual(len(night['staff']), 2)
         self.assertEqual([member['operations'] for member in night['staff']], [0, 1])
 
