@@ -1,5 +1,10 @@
-СИСТЕМА_MVP/backend/static/css/settlement-clerk.css
-СИСТЕМА_MVP/backend/static/css/settlement-housing-import.css
-СИСТЕМА_MVP/backend/static/js/settlement-clerk.js
-СИСТЕМА_MVP/backend/templates/clerk/base.html
-СИСТЕМА_MVP/backend/templates/settlement/clerk_map.html
+СИСТЕМА_MVP/backend/reports/dispatcher_duty.py
+СИСТЕМА_MVP/backend/static/css/dispatcher-duty-report.css
+СИСТЕМА_MVP/backend/static/js/dispatcher-duty-offline.js
+СИСТЕМА_MVP/backend/static/js/dispatcher-duty-report.js
+СИСТЕМА_MVP/backend/templates/base.html
+СИСТЕМА_MVP/backend/templates/reports/dispatcher_duty.html
+СИСТЕМА_MVP/backend/templates/reports/includes/dispatcher_duty_slots.html
+СИСТЕМА_MVP/backend/trips/dispatcher_duty_offline.py
+СИСТЕМА_MVP/backend/trips/urls.py
+СИСТЕМА_MVP/backend/users/context_processors.py
